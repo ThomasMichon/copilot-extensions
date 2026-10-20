@@ -151,6 +151,7 @@ def test_fresh_standalone_cli_publication_reuses_then_refuses(tmp_path):
     shutil.copyfile(SOURCE, standalone)
     for name in (
         "versioned_runtime_leases.py", "versioned_runtime_construction.py", "versioned_runtime_source.py",
+        "versioned_runtime_publication.py",
     ):
         shutil.copyfile(SOURCE.with_name(name), tmp_path / name)
     root = tmp_path / "runtime"

@@ -1580,8 +1580,9 @@ def main(argv: list[str] | None = None):
             import sys as _sys
 
             from . import __version__
+            from .source_build import effective_runtime_version
 
-            parser._print_message(f"agent-vault {__version__}\n", _sys.stdout)
+            parser._print_message(f"agent-vault {effective_runtime_version(__version__)}\n", _sys.stdout)
             parser.exit()
 
     parser = argparse.ArgumentParser(

@@ -20,6 +20,11 @@ SCENARIO = Path(__file__).resolve().parents[1] / "scenarios" / "merged-dev-runti
     ("agent-ssh", "install.sh", "provision"),
     ("agent-pull-requests", "install.sh", "provision"),
     ("budget-guidance", "install.sh", "provision"),
+    ("agent-worktrees", "install.sh", "provision"),
+    ("agent-dispatch", "install.sh", "install"),
+    ("agent-index", "install.sh", "install"),
+    ("agent-logger", "install.sh", "provision"),
+    ("agent-vault", "install.sh", "provision"),
 ])
 def test_fresh_installer_action_publishes_required_command(plugin, installer, action):
     bash = shutil.which("bash")
@@ -37,27 +42,52 @@ def test_fresh_installer_action_publishes_required_command(plugin, installer, ac
     assert result.stdout.splitlines() == [installer, action]
 
 
-@pytest.mark.skipif(os.name == "nt", reason="native POSIX scenario")
-@pytest.mark.parametrize(("reported", "accepted"), [
-    ("agent-codespaces {generation}", True),
-    ("agent-codespaces {generation} (abcdef01)", True),
-    ("agent-codespaces {generation}0 (abcdef01)", False),
-    ("agent-codespaces 1.2.3 (abcdef01)", False),
-])
-def test_source_version_witness_matches_the_exact_command_field(reported, accepted):
+def _version_witness(plugin, version_command, reported):
     bash = shutil.which("bash")
     if not bash:
         pytest.skip("Bash unavailable")
     generation = "1.2.3+source." + "a" * 40 + "." + "0" * 16
     source = SCENARIO.read_text(encoding="utf-8")
-    start = source.index("    _verify_codespaces_source_version() {")
+    start = source.index("    _verify_source_version() {")
     function = source[start:source.index("\n    }\n", start) + len("\n    }\n")]
-    result = subprocess.run(
+    return subprocess.run(
         [bash, "-c", 'set -eu\nGENERATION="$1"\nfixture_report="$2"\n'
-         'bash() { printf "%s" "$fixture_report"; }\n' + function
-         + "\n_verify_codespaces_source_version", "source-version", generation,
-         reported.format(generation=generation)],
+         'PLUGIN="$3"\nversion_command="$4"\n'
+         'bash() { [ "$1" = -lc ] && [ "$2" = "$version_command" ] || return 2; '
+         'printf "%s" "$fixture_report"; }\n' + function
+         + "\n_verify_source_version", "source-version", generation,
+         reported.format(plugin=plugin, generation=generation), plugin, version_command],
         capture_output=True, text=True, timeout=10,
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
+
+
+@pytest.mark.skipif(os.name == "nt", reason="native POSIX scenario")
+@pytest.mark.parametrize(("plugin", "version_command"), [
+    ("agent-codespaces", "agent-codespaces version"),
+    ("agent-dispatch", "agent-dispatch --version"),
+    ("agent-logger", "agent-logger version"),
+    ("agent-vault", "agent-vault --version"),
+    ("agent-worktrees", "agent-worktrees --version"),
+])
+@pytest.mark.parametrize(("reported", "accepted"), [
+    ("{plugin} {generation}", True),
+    ("{plugin} {generation} (abcdef01)", True),
+    ("{plugin} {generation}0 (abcdef01)", False),
+    ("{plugin} 1.2.3 (abcdef01)", False),
+])
+def test_source_version_witness_matches_the_exact_command_field(plugin, version_command, reported, accepted):
+    result = _version_witness(plugin, version_command, reported)
+    assert (result.returncode == 0) is accepted, result.stdout + result.stderr
+
+
+@pytest.mark.skipif(os.name == "nt", reason="native POSIX scenario")
+@pytest.mark.parametrize(("reported", "accepted"), [
+    ("{generation}", True),
+    ("{generation} unexpected", False),
+    ("agent-index {generation}", False),
+    ("1.2.3", False),
+])
+def test_index_source_version_witness_requires_the_exact_bare_generation(reported, accepted):
+    result = _version_witness("agent-index", "agent-index version", reported)
     assert (result.returncode == 0) is accepted, result.stdout + result.stderr

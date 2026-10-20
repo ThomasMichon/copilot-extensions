@@ -19,6 +19,7 @@ from types import ModuleType
 
 import tomllib
 import versioned_runtime as runtime
+import versioned_runtime_source as runtime_source
 from installer_dependency_policy import RetainedUVInstall, retain_uv_install
 from installer_engine_process import run_owned
 
@@ -390,12 +391,24 @@ def _refuse(decision: str, version: str) -> None:
         raise RuntimeError(f"Unrecognized runtime admission for {version}: {decision}")
 
 
+def _assert_source_pin(plugin: Path, expected: dict | None) -> None:
+    if expected is None:
+        return
+    package_version = tomllib.loads(
+        (plugin / "pyproject.toml").read_text(encoding="utf-8"),
+    )["project"]["version"]
+    observed = runtime_source.read_source_identity(plugin, package_version)
+    if runtime_source.manifest_fields(observed) != expected:
+        raise RuntimeError("Source identity changed during retained runtime construction")
+
+
 def numbered_candidate(
     root: Path, version: str, *, plugin: Path, uv: Path, base_python: Path,
     health_module: str, health_callable: str | None = None,
     construction_callable: str | None = None, construction_data: dict | None = None,
     process_retention: bool = False,
     reuse_generations: bool = False,
+    expected_source_identity: dict | None = None,
     wait_timeout: float = 180, child_timeout: float = 180,
 ):
     """Construct or reuse an immutable identity; lifecycle owns cutover/governance."""
@@ -406,6 +419,7 @@ def numbered_candidate(
         health_module=health_module, health_callable=health_callable,
         construction_callable=construction_callable, construction_data=construction_data,
         process_retention=process_retention, reuse_generations=reuse_generations,
+        expected_source_identity=expected_source_identity,
         wait_timeout=wait_timeout, child_timeout=child_timeout,
     )
 
@@ -429,9 +443,11 @@ def _candidate(
     construction_callable: str | None = None, construction_data: dict | None = None,
     process_retention: bool = False, dev_owner: str | None = None,
     reuse_generations: bool = False,
+    expected_source_identity: dict | None = None,
     wait_timeout: float = 180, child_timeout: float = 180,
 ):
     root = root.resolve()
+    _assert_source_pin(plugin, expected_source_identity)
     (root / ".installer-inputs").mkdir(parents=True, exist_ok=True)
     packages = _package_roots(plugin)
     inputs = FrozenInputs(
@@ -464,15 +480,18 @@ def _candidate(
             with runtime.retention_custody(
                 root, version, payload_hash=inputs.payload_hash, timeout=wait_timeout,
             ) as (slot, descriptor):
+                _assert_source_pin(plugin, expected_source_identity)
                 _verify_installed(
                     inputs, slot, runtime.slot_python(root, version), health_module,
                     descriptor, child_timeout, health_callable=health_callable,
                     require_frozen_origin=False,
                 )
+                _assert_source_pin(plugin, expected_source_identity)
                 yield ReadyCandidate(slot, inputs.payload_hash, True, descriptor, inputs.plugin)
             return
         with ExitStack() as construction:
             with runtime.construction_lease(root, version, timeout=wait_timeout) as descriptor:
+                _assert_source_pin(plugin, expected_source_identity)
                 if dev_owner is not None:
                     _check_dev_owner(root, dev_owner)
                 decision = (
@@ -507,6 +526,7 @@ def _candidate(
                             "runtime_launcher.py", "versioned_runtime.py",
                             "versioned_runtime_leases.py", "versioned_runtime_source.py",
                             "versioned_runtime_construction.py",
+                            "versioned_runtime_publication.py",
                         ):
                             source = inputs.plugin / "scripts" / name
                             shutil.copyfile(source, bootstrap / name)
@@ -519,6 +539,7 @@ def _candidate(
                         inputs, slot, python, health_module, descriptor, child_timeout,
                         health_callable=health_callable,
                     )
+                    _assert_source_pin(plugin, expected_source_identity)
                     if dev_owner is not None:
                         _check_dev_owner(root, dev_owner)
                     runtime.mark_complete(root, version, payload_hash=inputs.payload_hash)
@@ -535,4 +556,5 @@ def _candidate(
                     retention_descriptor, child_timeout, health_callable=health_callable,
                     require_frozen_origin=False,
                 )
+            _assert_source_pin(plugin, expected_source_identity)
             yield ReadyCandidate(slot, inputs.payload_hash, reused, retention_descriptor, inputs.plugin)

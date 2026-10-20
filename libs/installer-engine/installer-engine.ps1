@@ -459,7 +459,7 @@ function Write-DeployManifest {
         [hashtable]$AdditionalFields = @{}
     )
 
-    $manifestPath = Join-Path $InstallPath 'deploy-manifest.json'
+    $manifestPath = [IO.Path]::GetFullPath((Join-Path $InstallPath 'deploy-manifest.json'))
     $provenancePath = if ($SourcePathOverride) { $SourcePathOverride } else { $PluginPath }
     if ($SourcePathOverride) {
         $normalized = ($provenancePath -replace '\\', '/')
@@ -520,9 +520,21 @@ function Write-DeployManifest {
         $manifest[$key] = $AdditionalFields[$key]
     }
 
-    $tmp = "$manifestPath.tmp"
-    $manifest | ConvertTo-Json -Depth 6 | Set-Content -Path $tmp -Encoding UTF8
-    Move-Item -Force -Path $tmp -Destination $manifestPath
+    $tmp = $manifestPath + '.tmp-' + [Guid]::NewGuid().ToString('N')
+    try {
+        $manifest | ConvertTo-Json -Depth 6 -ErrorAction Stop |
+            Set-Content -LiteralPath $tmp -Encoding UTF8 -ErrorAction Stop
+        if ([IO.File]::Exists($manifestPath)) {
+            [IO.File]::Replace($tmp, $manifestPath, [NullString]::Value)
+        } else {
+            [IO.File]::Move($tmp, $manifestPath)
+        }
+    } catch {
+        [Console]::Error.WriteLine("Deploy manifest publication failed: $($_.Exception.Message)")
+        throw
+    } finally {
+        if ([IO.File]::Exists($tmp)) { [IO.File]::Delete($tmp) }
+    }
     Write-Ok "Deploy manifest written (source: $kind)"
 }
 
@@ -539,13 +551,42 @@ function Write-SimpleBinstub {
         [string]$ResolverShSource
     )
 
-    if (-not (Test-Path $LocalBin)) { New-Item -ItemType Directory -Path $LocalBin -Force | Out-Null }
-    if (-not (Test-Path $InstallBinDir)) { New-Item -ItemType Directory -Path $InstallBinDir -Force | Out-Null }
-    if ($ResolverPs1Source -and (Test-Path $ResolverPs1Source)) {
-        Copy-Item -LiteralPath $ResolverPs1Source -Destination (Join-Path $InstallBinDir 'resolve-runtime.ps1') -Force
+    function Publish-SimpleBinstubFile {
+        param([string]$Destination, [scriptblock]$Write)
+        $temporary = Join-Path (Split-Path -Parent $Destination) (
+            '.' + (Split-Path -Leaf $Destination) + '.' + [Guid]::NewGuid().ToString('N'))
+        try {
+            & $Write $temporary
+            if ([IO.File]::Exists($Destination)) {
+                [IO.File]::Replace($temporary, $Destination, [NullString]::Value)
+            } else {
+                [IO.File]::Move($temporary, $Destination)
+            }
+        } catch {
+            [Console]::Error.WriteLine("Binstub publication failed (${Destination}): $($_.Exception.Message)")
+            throw
+        } finally {
+            if ([IO.File]::Exists($temporary)) { [IO.File]::Delete($temporary) }
+        }
     }
-    if ($ResolverShSource -and (Test-Path $ResolverShSource)) {
-        Copy-Item -LiteralPath $ResolverShSource -Destination (Join-Path $InstallBinDir 'resolve-runtime.sh') -Force
+    foreach ($source in @($ResolverPs1Source, $ResolverShSource)) {
+        if ($source -and -not (Test-Path -LiteralPath $source -PathType Leaf)) {
+            throw "Binstub resolver source is unavailable: $source"
+        }
+    }
+    if (-not (Test-Path $LocalBin)) { New-Item -ItemType Directory -Path $LocalBin -Force -ErrorAction Stop | Out-Null }
+    if (-not (Test-Path $InstallBinDir)) { New-Item -ItemType Directory -Path $InstallBinDir -Force -ErrorAction Stop | Out-Null }
+    if ($ResolverPs1Source) {
+        Publish-SimpleBinstubFile (Join-Path $InstallBinDir 'resolve-runtime.ps1') {
+            param($temporary)
+            Copy-Item -LiteralPath $ResolverPs1Source -Destination $temporary -Force -ErrorAction Stop
+        }
+    }
+    if ($ResolverShSource) {
+        Publish-SimpleBinstubFile (Join-Path $InstallBinDir 'resolve-runtime.sh') {
+            param($temporary)
+            Copy-Item -LiteralPath $ResolverShSource -Destination $temporary -Force -ErrorAction Stop
+        }
     }
 
     $runtimeRootLiteral = $RuntimeRoot.Replace("'", "''")
@@ -613,7 +654,10 @@ if (`$_py) { & `$_py -m $moduleLiteral @args; exit `$LASTEXITCODE }
 [Console]::Error.WriteLine('[$commandLiteral] provisioning completed without a resolvable runtime.')
 exit 1
 "@
-    [System.IO.File]::WriteAllText($ps1Path, $ps1Content, (New-Object System.Text.UTF8Encoding $false))
+    Publish-SimpleBinstubFile $ps1Path {
+        param($temporary)
+        [System.IO.File]::WriteAllText($temporary, $ps1Content, (New-Object System.Text.UTF8Encoding $false))
+    }
 
     $cmdPath = Join-Path $LocalBin "$CommandName.cmd"
     $cmdContent = @"
@@ -628,6 +672,9 @@ if not defined _PSHOST set "_PSHOST=%SystemRoot%\System32\WindowsPowerShell\v1.0
 "%_PSHOST%" -NoProfile -ExecutionPolicy Bypass -File "%_PS1%" %*
 exit /b %ERRORLEVEL%
 "@
-    [System.IO.File]::WriteAllText($cmdPath, $cmdContent, (New-Object System.Text.UTF8Encoding $false))
+    Publish-SimpleBinstubFile $cmdPath {
+        param($temporary)
+        [System.IO.File]::WriteAllText($temporary, $cmdContent, (New-Object System.Text.UTF8Encoding $false))
+    }
     Write-Ok "Binstub: $ps1Path (+ .cmd fallback, self-provisioning)"
 }

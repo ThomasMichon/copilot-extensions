@@ -26,6 +26,7 @@ def test_normal_wheel_metadata_and_console_program(distribution_root):
     shutil.copy2(canonical, primitive)
     for name in (
         "versioned_runtime_leases.py", "versioned_runtime_construction.py", "versioned_runtime_source.py",
+        "versioned_runtime_publication.py",
     ):
         shutil.copy2(canonical.with_name(name), primitive.with_name(name))
     shutil.copy2(canonical.with_name("standalone_build.py"), primitive.with_name("standalone_build.py"))
@@ -78,3 +79,6 @@ def test_normal_wheel_metadata_and_console_program(distribution_root):
         )
         assert not any("plugin.json" in name or "agent_index_engine" in name for name in members)
         assert wheel.read("agent_index_service/_versioned_runtime.py") == canonical.read_bytes()
+        assert wheel.read("agent_index_service/versioned_runtime_publication.py") == (
+            canonical.with_name("versioned_runtime_publication.py").read_bytes()
+        )

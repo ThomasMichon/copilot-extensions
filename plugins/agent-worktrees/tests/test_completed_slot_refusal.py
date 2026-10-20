@@ -48,6 +48,9 @@ def test_real_installer_function_reuses_or_refuses_before_mutation(tmp_path, pla
         health.touch()
         script = (
             "$ErrorActionPreference='Stop'\n"
+            + f"$PluginDir='{str(tmp_path / 'absent').replace(chr(39), chr(39)*2)}'\n"
+            + "$SourceRuntimeIdentity=$null\n"
+            + f". '{str(SCRIPTS / 'source-runtime.ps1').replace(chr(39), chr(39)*2)}'\n"
             + body
             + "\n" + activate
             + "\n$VersionedRuntime=$true;$SrcVersion='1.2.3';$Force=$true\n"
@@ -90,7 +93,9 @@ def test_real_installer_function_reuses_or_refuses_before_mutation(tmp_path, pla
             path = "/" + path[0].lower() + path[2:]
             health_path = "/" + health_path[0].lower() + health_path[2:]
         script = (
-            body + "\n" + activate + "\nVERSIONED_RUNTIME=1; SRC_VERSION=1.2.3; FORCE=1\n"
+            f"PLUGIN_DIR='{path}/absent'\nSOURCE_RUNTIME_IDENTITY=''\n"
+            + f". '{(SCRIPTS / 'source-runtime.sh').as_posix()}'\n"
+            + body + "\n" + activate + "\nVERSIONED_RUNTIME=1; SRC_VERSION=1.2.3; FORCE=1\n"
             f"VENV_DIR='{path}'\n"
             "err() { :; }\n"
             "_wait_for_versioned_slot_lease() { return 0; }\n"

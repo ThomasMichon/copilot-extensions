@@ -1662,9 +1662,9 @@ function Write-DeployManifest {
     # the manifest records the same content the slot was admitted/built for.
     param([string]$PayloadHash = '')
     $fields = @{}
-    if ($SrcVersion -ne $PackageVersion -or (Test-Path -LiteralPath (Join-Path $PluginDir 'runtime-source.json'))) {
-        $json = Get-SourceRuntimeIdentity -ExpectedVersion $SrcVersion
-        $data = $json | ConvertFrom-Json
+    $selectedIdentity = Get-Variable -Name SourceRuntimeIdentity -Scope Script -ValueOnly -ErrorAction SilentlyContinue
+    if ($selectedIdentity) {
+        $data = $selectedIdentity | ConvertFrom-Json
         foreach ($property in $data.PSObject.Properties) { $fields[$property.Name] = $property.Value }
     }
     $sourcePathOverride = if ($env:COPILOT_PLUGIN_STAGED_FROM) { $env:COPILOT_PLUGIN_STAGED_FROM } else { '' }
@@ -2092,17 +2092,41 @@ function Write-Binstubs {
     # the PSF-signed venv python via -m, never the SAC-blocked trampoline .exe.
     # Co-deploy the canonical resolvers so the binstub resolves the interpreter
     # the ONE uniform way (uniform-runtime-resolution, #765).
+    function Publish-RuntimeHelperFile {
+        param([string]$Source, [string]$Destination)
+        $invalid = [IO.FileAttributes]::Directory -bor [IO.FileAttributes]::ReparsePoint
+        if (([IO.File]::GetAttributes($Source) -band $invalid) -ne 0) {
+            throw "Runtime helper source must be an ordinary file: $Source"
+        }
+        $temporary = Join-Path (Split-Path -Parent $Destination) (
+            '.' + (Split-Path -Leaf $Destination) + '.' + [Guid]::NewGuid().ToString('N'))
+        $copied = $false
+        try {
+            [IO.File]::Copy($Source, $temporary, $false)
+            $copied = $true
+            if (Test-Path -LiteralPath $Destination) {
+                if (([IO.File]::GetAttributes($Destination) -band $invalid) -ne 0) {
+                    throw "Runtime helper destination must be an ordinary file: $Destination"
+                }
+                [IO.File]::Replace($temporary, $Destination, [NullString]::Value)
+            } else {
+                [IO.File]::Move($temporary, $Destination)
+            }
+        } finally {
+            if ($copied -and [IO.File]::Exists($temporary)) { [IO.File]::Delete($temporary) }
+        }
+    }
     $binDir = Join-Path $InstallDir 'bin'
     if (-not (Test-Path $binDir)) { New-Item -ItemType Directory -Path $binDir -Force | Out-Null }
     foreach ($r in @('resolve-runtime.ps1', 'resolve-runtime.sh')) {
         $rSrc = Join-Path $PSScriptRoot $r
-        if (Test-Path $rSrc) { Copy-Item $rSrc (Join-Path $binDir $r) -Force }
+        if (Test-Path -LiteralPath $rSrc) { Publish-RuntimeHelperFile $rSrc (Join-Path $binDir $r) }
     }
     # Native service callers use the Python resolver without a payload or PATH.
     $scriptsDir = Join-Path $InstallDir 'scripts'
     New-Item -ItemType Directory -Path $scriptsDir -Force -ErrorAction Stop | Out-Null
-    foreach ($r in @('versioned_runtime.py', 'versioned_runtime_leases.py', 'versioned_runtime_construction.py', 'versioned_runtime_source.py')) {
-        Copy-Item -LiteralPath (Join-Path $PSScriptRoot $r) -Destination (Join-Path $scriptsDir $r) -Force -ErrorAction Stop
+    foreach ($r in @('versioned_runtime.py', 'versioned_runtime_leases.py', 'versioned_runtime_construction.py', 'versioned_runtime_source.py', 'versioned_runtime_publication.py')) {
+        Publish-RuntimeHelperFile (Join-Path $PSScriptRoot $r) (Join-Path $scriptsDir $r)
     }
     if (-not $publishGlobalBinstubs) {
         Write-Ok 'Scoped install keeps the global compatibility binstub unchanged'
@@ -2265,45 +2289,61 @@ function Invoke-Stamp {
     foreach ($dir in $dirs) {
         if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
     }
-    $snapDir = Join-Path (Join-Path $InstallDir 'snapshots') $SrcVersion
-    $snapTmp = "$snapDir.tmp-$PID"
-    if (Test-Path $snapTmp) { Remove-Item $snapTmp -Recurse -Force -ErrorAction SilentlyContinue }
-    New-Item -ItemType Directory -Path $snapTmp -Force | Out-Null
     $sourceQualified = [bool]$script:SourceRuntimeIdentity
-    $exclude = if ($sourceQualified) { @() } else {
-        @('.git', '__pycache__', '.venv', 'node_modules', 'build', 'dist', '.pytest_cache', '.mypy_cache', 'tests')
-    }
-    Get-ChildItem -LiteralPath $PluginDir -Force | Where-Object { $exclude -notcontains $_.Name } | ForEach-Object {
-        Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $snapTmp $_.Name) -Recurse -Force
-    }
     if ($sourceQualified) {
-        # Prepared payloads already contain their complete, hashed assembly.
-        # Rematerializing helpers or dependencies would change that identity.
-        $identity = Get-SourceRuntimeIdentity -Payload $snapTmp -ExpectedVersion $SrcVersion `
-            -FailureContext 'Stamped source snapshot failed identity validation; redirects were not published'
-        if ($identity -ne $script:SourceRuntimeIdentity) {
-            throw 'Stamped source snapshot failed identity validation; redirects were not published'
+        [void](Test-PayloadUnchangedSinceAdmission -SourceIdentityOnly)
+        $py = Get-BootstrapPython
+        if (-not $py) { throw 'Source snapshot publication requires a bootstrap Python interpreter' }
+        $nativeError = ''
+        $snapshot = Invoke-Hidden -FilePath $py -ArgList @(
+            '-I', '-B', (Join-Path $ScriptDir 'versioned_runtime_source.py'),
+            '--payload', $PluginDir, '--package-version', $PackageVersion, '--plugin', 'agent-bridge',
+            '--expected-runtime-version', $SrcVersion, '--expected-source-identity', $SourceRuntimeIdentity,
+            '--snapshot-root', $InstallDir
+        ) -ErrorOutput ([ref]$nativeError)
+        if ($LASTEXITCODE -ne 0) {
+            throw "Source snapshot publication failed (exit ${LASTEXITCODE}): $snapshot$nativeError"
+        }
+        if (-not $snapshot -or -not $snapshot.Trim()) {
+            throw 'Source snapshot publisher returned no path'
+        }
+        $snapDir = $snapshot.Trim()
+        [void](Test-PayloadUnchangedSinceAdmission -SourceIdentityOnly)
+        $nativeError = ''
+        [void](Invoke-Hidden -FilePath $py -ArgList @(
+            '-I', '-B', (Join-Path $ScriptDir 'versioned_runtime.py'), '--root', $InstallDir,
+            'publish-redirects', '--payload-dir', $snapDir, '--version', $SrcVersion,
+            '--expected-source-identity', $SourceRuntimeIdentity
+        ) -ErrorOutput ([ref]$nativeError))
+        if ($LASTEXITCODE -ne 0) {
+            throw "Source redirect publication failed (exit ${LASTEXITCODE}): $nativeError"
         }
     } else {
+        $snapDir = Join-Path (Join-Path $InstallDir 'snapshots') $SrcVersion
+        $snapTmp = "$snapDir.tmp-$PID"
+        if (Test-Path $snapTmp) { Remove-Item $snapTmp -Recurse -Force -ErrorAction SilentlyContinue }
+        New-Item -ItemType Directory -Path $snapTmp -Force | Out-Null
+        $exclude = @('.git', '__pycache__', '.venv', 'node_modules', 'build', 'dist', '.pytest_cache', '.mypy_cache', 'tests')
+        Get-ChildItem -LiteralPath $PluginDir -Force | Where-Object { $exclude -notcontains $_.Name } | ForEach-Object {
+            Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $snapTmp $_.Name) -Recurse -Force
+        }
         Materialize-SnapshotVendoredLibs -SnapshotDir $snapTmp
         Materialize-SnapshotInstallerEngine -SnapshotDir $snapTmp
-    }
-    if (Test-Path $snapDir) { Remove-Item $snapDir -Recurse -Force -ErrorAction SilentlyContinue }
-    # A just-copied tree can be briefly held open by an antivirus/indexer scan,
-    # failing the directory rename with "access denied"; retry a bounded few times.
-    $moveAttempt = 0
-    while ($true) {
-        try {
-            Move-Item -LiteralPath $snapTmp -Destination $snapDir -Force -ErrorAction Stop
-            break
-        } catch [System.IO.IOException], [System.UnauthorizedAccessException] {
-            $moveAttempt++
-            if ($moveAttempt -ge 5) { throw }
-            Start-Sleep -Milliseconds (200 * $moveAttempt)
+        if (Test-Path $snapDir) { Remove-Item $snapDir -Recurse -Force -ErrorAction SilentlyContinue }
+        $moveAttempt = 0
+        while ($true) {
+            try {
+                Move-Item -LiteralPath $snapTmp -Destination $snapDir -Force -ErrorAction Stop
+                break
+            } catch [System.IO.IOException], [System.UnauthorizedAccessException] {
+                $moveAttempt++
+                if ($moveAttempt -ge 5) { throw }
+                Start-Sleep -Milliseconds (200 * $moveAttempt)
+            }
         }
+        [System.IO.File]::WriteAllText((Join-Path $InstallDir 'payload-dir'), $snapDir, $utf8NoBom)
+        [System.IO.File]::WriteAllText((Join-Path $InstallDir 'stamped-version'), $SrcVersion, $utf8NoBom)
     }
-    [System.IO.File]::WriteAllText((Join-Path $InstallDir 'payload-dir'), $snapDir, $utf8NoBom)
-    [System.IO.File]::WriteAllText((Join-Path $InstallDir 'stamped-version'), $SrcVersion, $utf8NoBom)
     Write-Ok "Snapshot: $snapDir"
     Write-Binstubs
     if ($publishGlobalBinstubs) {

@@ -178,16 +178,23 @@ report shape (`cr-report.json`) keeps its historical top-level keys and adds an
 
 `merged-dev-runtime` is a credential-free Tier-P source scenario. It defaults to
 Agent Bridge and also accepts `CR_SOURCE_PLUGIN` selecting Agent Codespaces,
-Containers, MCP, SSH, Machines, Pull Requests or Budget Guidance. It pins a
+Containers, MCP, SSH, Machines, Pull Requests, Budget Guidance, Worktrees,
+Dispatch, Index, Logger or Vault. It pins a
 clean merged dev commit, prepares its canonical vendor
 closure outside the checkout, invokes the real installer, and checks the
 source-qualified completed generation and installed command. It then makes
 the checkout unavailable and verifies installed imports and command use.
 For Bridge, the final stage confirms the qualified build is actually serving
 through authenticated health, routed PID/start-time identity and its running
-marker. For CLI adopters it reruns the real installer, checks exact selection
+marker. For the other runtime adopters it reruns the real installer, checks exact selection
 and unchanged completion bytes, and invokes the installed command again.
 The selected commit must contain the source preparation/installer support.
+Dispatch and Vault use their no-service install modes; Dispatch also disables
+its supervisor. Index uses its explicit client-only role and a synthetic
+configuration, without installing or starting the heavy engine. Logger's
+`session-sync` and Dispatch's board command are exercised after source removal;
+Vault's askpass helper is checked without requesting credentials. These
+installation witnesses do not qualify daemon cutover or host-role engine use.
 
 ```bash
 CR_SOURCE_COMMIT=<full-merged-commit> ./run.sh --scenario merged-dev-runtime \

@@ -16,7 +16,7 @@ from pathlib import Path
 from packaging.version import Version
 
 _LIFECYCLE_FILES = (
-    "runtime_install.py", "runtime_install_modes.py", "installer_engine.py",
+    "runtime_install.py", "runtime_install_modes.py", "runtime_install_publication.py", "installer_engine.py",
     "installer_engine_process.py", "installer_dependency_policy.py",
     "installer_dependency_config.py", "registry_root.py",
 )
@@ -51,6 +51,7 @@ def prepare_runtime_candidate(provenance: dict[str, str]) -> None:
         **provenance,
         "deployment_source": json.dumps(source),
         "version": provenance["version"],
+        "runtime_version": slot.name,
         "build_timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "runtime_generation": uuid.uuid4().hex,
     }
@@ -86,6 +87,7 @@ def verify_runtime_candidate() -> None:
     for name in (
         "runtime_launcher.py", "versioned_runtime.py", "versioned_runtime_leases.py",
         "versioned_runtime_source.py", "versioned_runtime_construction.py", *_LIFECYCLE_FILES,
+        "versioned_runtime_publication.py",
     ):
         path = Path(sys.prefix) / ".runtime-bootstrap" / name
         if not path.is_file() or path.is_symlink():

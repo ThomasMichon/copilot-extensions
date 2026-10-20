@@ -859,16 +859,26 @@ def test_shipped_payload_hash_helpers_fail_closed(tmp_path, tools) -> None:
     for path in sorted(checker.PLUGINS_DIR.glob("*/scripts/*.sh")):
         text = path.read_text(encoding="utf-8").replace("\r\n", "\n")
         helper = _SH_PAYLOAD_HASH_DEF.search(text)
+        if helper is None:
+            continue
+        # Source validation may need Python, but this fixture has no source
+        # receipt and still exercises the original package-only hash for real.
+        package_hash = re.sub(
+            r'(?ms)^    if \[\[ -n "\$\{SOURCE_RUNTIME_IDENTITY:-\}" \]\]; then\n.*?^    fi\n',
+            "",
+            helper.group(0),
+            count=1,
+        )
         # Include streaming hashes as well as buffered hashes, but not helpers
         # needing another resolver or interpreter from their installer.
-        if helper is None or re.search(
+        if re.search(
             r"\b(?:_bootstrap_python|_compute_payload_hash)\b",
-            helper.group(0),
+            package_hash,
         ):
             continue
         checked.append(path)
         script = (
-            f"set -euo pipefail\nPLUGIN_DIR='{payload.as_posix()}'\n{stubs}{helper.group(0)}"
+            f"set -euo pipefail\nSOURCE_RUNTIME_IDENTITY=''\nPLUGIN_DIR='{payload.as_posix()}'\n{stubs}{helper.group(0)}"
             'if out="$(_payload_hash)"; then echo "RC=0 OUT=$out"; else echo "RC=$? OUT=$out"; fi\n'
         )
         result = subprocess.run(

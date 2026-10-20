@@ -603,9 +603,12 @@ if [[ "$ACTION" == "stamp" ]]; then
             --expected-source-version "$SRC_VERSION" \
             --expected-source-identity "$SOURCE_RUNTIME_IDENTITY")" || exit 1
         _assert_source_runtime_identity || exit 1
-        printf '%s\n' "$SRC_VERSION" > "$INSTALL_DIR/stamped-version"
+        "$source_python" -I -B "$SCRIPT_DIR/versioned_runtime.py" --root "$INSTALL_DIR" \
+            publish-redirects --payload-dir "$stamp_payload" --version "$SRC_VERSION" \
+            --expected-source-identity "$SOURCE_RUNTIME_IDENTITY" || exit 1
+    else
+        printf '%s\n' "$stamp_payload" > "$INSTALL_DIR/payload-dir"
     fi
-    printf '%s\n' "$stamp_payload" > "$INSTALL_DIR/payload-dir"
     deploy_binstub
     _ok "Stamped: binstub on PATH; runtime provisions on first use."
     exit 0
@@ -650,6 +653,15 @@ if _ensure_uv; then HAVE_UV=1; fi
 mkdir -p "$INSTALL_DIR" "$LOCAL_BIN"
 _ok "Directories: $INSTALL_DIR"
 
+_git_info() {
+    local path="$1" commit branch dirty
+    commit=$(git -C "$path" rev-parse --short HEAD 2>/dev/null || echo "unknown")
+    branch=$(git -C "$path" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
+    dirty="false"
+    [[ -n "$(git -C "$path" status --porcelain 2>/dev/null)" ]] && dirty="true"
+    echo "$commit $branch $dirty"
+}
+
 # -- 2. Provision the selected immutable profile (uv pip install or pip) --
 profile_args=(
     -I "$SCRIPT_DIR/runtime_profile.py" --root "$INSTALL_DIR"
@@ -659,11 +671,16 @@ profile_args=(
 )
 if [[ "$HAVE_UV" -eq 1 ]]; then profile_args+=(--uv "$(command -v uv)"); fi
 if [[ -n "$PROFILE" ]]; then profile_args+=(--profile "$PROFILE"); fi
+# Source manifest inputs are captured before activation.
+if [[ "$SOURCE_SELECTED" == 1 ]]; then
+    _assert_source_runtime_identity || exit 1
+    SOURCE_MANIFEST_GIT="$(_git_info "$(cd "$PLUGIN_DIR/../.." && pwd)")" || exit 1
+fi
 if ! profile_result="$("$PYTHON_CMD" "${profile_args[@]}")"; then
     _fail 'Failed to provision the selected agent-containers runtime profile'
     exit 1
 fi
-_assert_source_runtime_identity || exit 1
+if [[ "$SOURCE_SELECTED" != 1 ]]; then _assert_source_runtime_identity || exit 1; fi
 IFS=$'\t' read -r RUNTIME_PROFILE RUNTIME_VERSION VENV_DIR VENV_PYTHON <<< "$profile_result"
 _ok "Runtime profile: $RUNTIME_PROFILE ($RUNTIME_VERSION)"
 
@@ -686,30 +703,28 @@ _source_kind() {
     esac
 }
 # === end install-contract:v4 source-kind ===
-_git_info() {
-    local path="$1" commit branch dirty
-    commit=$(git -C "$path" rev-parse --short HEAD 2>/dev/null || echo "unknown")
-    branch=$(git -C "$path" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
-    dirty="false"
-    [[ -n "$(git -C "$path" status --porcelain 2>/dev/null)" ]] && dirty="true"
-    echo "$commit $branch $dirty"
-}
-
 # Unified schema_version 3 manifest (install-contract): records the source
 # footprint (marketplace vs local) so deploys are auditable like the siblings.
 MANIFEST_PATH="$INSTALL_DIR/deploy-manifest.json"
 KIND="$(_source_kind "$PLUGIN_DIR")"
-VER="$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' "$PLUGIN_DIR/pyproject.toml" 2>/dev/null || echo 0.0.0)"
+if [[ "$SOURCE_SELECTED" == 1 ]]; then
+    VER="$PACKAGE_VERSION"
+else
+    VER="$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' "$PLUGIN_DIR/pyproject.toml" 2>/dev/null || echo 0.0.0)"
+fi
 COMMIT="null"; BRANCH="null"; DIRTY="false"
 if [[ "$KIND" == "local" ]]; then
-    REPO_ROOT="$(cd "$PLUGIN_DIR/../.." && pwd)"
-    read -r _c _b _d <<< "$(_git_info "$REPO_ROOT")"
+    if [[ "$SOURCE_SELECTED" == 1 ]]; then
+        read -r _c _b _d <<< "$SOURCE_MANIFEST_GIT"
+    else
+        REPO_ROOT="$(cd "$PLUGIN_DIR/../.." && pwd)"
+        read -r _c _b _d <<< "$(_git_info "$REPO_ROOT")"
+    fi
     COMMIT="\"$_c\""; BRANCH="\"$_b\""; DIRTY="$_d"
 fi
 TMP="$MANIFEST_PATH.tmp"
 SOURCE_FIELDS=""
 if [[ "$SOURCE_SELECTED" == 1 ]]; then
-    _assert_source_runtime_identity || exit 1
     # The profile coordinator owns the profiled runtime_version; retain only source evidence here.
     SOURCE_FIELDS="$("$PYTHON_CMD" -I -c 'import json,sys; d=json.loads(sys.argv[1]); print(json.dumps({"runtime_source":d["runtime_source"]})[1:-1]+",")' "$SOURCE_RUNTIME_IDENTITY")" || exit 1
 fi

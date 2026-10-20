@@ -75,6 +75,7 @@ VERSIONED_RUNTIME_COMPONENTS = (
     "versioned_runtime_leases.py", "versioned_runtime_construction.py",
     "versioned_runtime_native.ps1",
     "versioned_runtime_source.py",
+    "versioned_runtime_publication.py",
 )
 # The one canonical source of the primitive. Every Python runtime plugin's
 # scripts/versioned_runtime.py is vendored byte-identically from here by

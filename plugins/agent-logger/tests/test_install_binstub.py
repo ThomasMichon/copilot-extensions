@@ -766,6 +766,7 @@ def test_stamp_supports_first_use_provision_from_snapshot_only(tmp_path: Path) -
         "versioned_runtime_leases.py",
         "versioned_runtime_construction.py",
         "versioned_runtime_source.py",
+        "versioned_runtime_publication.py",
         "installer_dependency_policy.py",
         "installer_dependency_config.py",
     ):

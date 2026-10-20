@@ -57,7 +57,9 @@ def test_runtime_is_reconciled_on_every_machine() -> None:
     assert "$script:SkipStamp" in install_ps1
     assert "Refusing stale agent-logger" in install_ps1
     assert "'stamped-version' = $SrcVersion" in install_ps1
-    assert "Move-Item -LiteralPath $tmp -Destination $path -Force" in install_ps1
+    assert "[IO.File]::Replace($tmp, $path, [NullString]::Value)" in install_ps1
+    assert "[IO.File]::Move($tmp, $path)" in install_ps1
+    assert "Move-Item -LiteralPath $tmp -Destination $path -Force" not in install_ps1
     assert (
         "$Action -in @('install', 'update', 'provision', 'stamp')" in install_ps1
     )
@@ -81,7 +83,7 @@ def test_runtime_is_reconciled_on_every_machine() -> None:
     )
     assert 'VENV="$INSTALL_DIR/versions/$__current"' in install_sh
     assert (
-        'if [[ "$SKIP_PACKAGE_INSTALL" = 0 ]]; then write_deploy_manifest "agent-logger" "agent-logger" "${INSTALL_DIR}" "${PLUGIN_DIR}" "${VENV}"; fi'
+        'if [[ "$SKIP_PACKAGE_INSTALL" = 0 ]]; then _write_runtime_manifest || exit 1; fi'
         in install_sh
     )
     assert ".install-complete.json" in install_sh

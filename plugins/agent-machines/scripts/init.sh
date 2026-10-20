@@ -159,6 +159,11 @@ _write_cell_manifest() {
         if [[ -n "$CELL_MANIFEST_SOURCE_BRANCH" ]]; then
             branch="\"$(_json_escape "$CELL_MANIFEST_SOURCE_BRANCH")\""
         fi
+    elif [[ "$source_kind" == "local" && -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
+        read -r _c _b _d <<< "$SOURCE_MANIFEST_GIT"
+        commit="\"$(_json_escape "$_c")\""
+        branch="\"$(_json_escape "$_b")\""
+        dirty="$_d"
     elif [[ "$source_kind" == "local" ]]; then
         repo_root="$(cd "$source_plugin_dir/../.." 2>/dev/null && pwd || true)"
         if [[ -n "$repo_root" ]]; then
@@ -169,7 +174,7 @@ _write_cell_manifest() {
         fi
     fi
     deployed_by="$(hostname)-$(uname -s | tr '[:upper:]' '[:lower:]')"
-    _assert_source_runtime_identity || return 1
+    if [[ -z "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then _assert_source_runtime_identity || return 1; fi
     local source_fields=""
     if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
         source_fields="${SOURCE_RUNTIME_IDENTITY#\{}"
@@ -717,6 +722,11 @@ if [[ -n "${AGENT_MACHINES_EXPECTED_SOURCE_IDENTITY:-}" &&
     exit 1
 fi
 export AGENT_MACHINES_EXPECTED_SOURCE_IDENTITY="$SELECTED_SOURCE_IDENTITY"
+# Source manifest inputs are captured before activation.
+if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
+    SOURCE_OWNER="${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}"
+    SOURCE_MANIFEST_GIT="$(_git_info "$(cd "$SOURCE_OWNER/../.." && pwd)")" || exit 1
+fi
 
 if [[ ( "$ACTION" == "cell-provision" || "$ACTION" == "slot-cutover" ) &&
       -z "${AGENT_MACHINES_CELL_PROVISION_LOCK_HELD:-}" ]]; then
@@ -1770,11 +1780,14 @@ if [[ "$ACTION" == "stamp" ]]; then
     if [[ -n "$SOURCE_RUNTIME_IDENTITY" ]]; then
         _assert_source_runtime_identity "$STAMP_PAYLOAD" || exit 1
     fi
-    printf '%s\n' "$STAMP_PAYLOAD" > "$_payload_dir_tmp"
-    mv -f "$_payload_dir_tmp" "$INSTALL_DIR/payload-dir"
     if [[ -n "$SOURCE_RUNTIME_IDENTITY" ]]; then
-        printf '%s\n' "$SRC_VERSION" > "$INSTALL_DIR/.stamped-version.tmp-$$"
-        mv -f "$INSTALL_DIR/.stamped-version.tmp-$$" "$INSTALL_DIR/stamped-version"
+        source_python="$(_source_python)" || exit 1
+        "$source_python" -I -B "$SCRIPT_DIR/versioned_runtime.py" --root "$INSTALL_DIR" \
+            publish-redirects --payload-dir "$STAMP_PAYLOAD" --version "$SRC_VERSION" \
+            --expected-source-identity "$SOURCE_RUNTIME_IDENTITY" || exit 1
+    else
+        printf '%s\n' "$STAMP_PAYLOAD" > "$_payload_dir_tmp"
+        mv -f "$_payload_dir_tmp" "$INSTALL_DIR/payload-dir"
     fi
     deploy_binstub
     _ok "Stamped: binstub on PATH; runtime provisions on first use."
@@ -2010,7 +2023,7 @@ fi
 
 # -- 4. Binstub --------------------------------------------------------
 if [[ "$CELL_MODE" == 0 ]]; then
-    _assert_source_runtime_identity || exit 1
+    if [[ -z "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then _assert_source_runtime_identity || exit 1; fi
     deploy_binstub
 fi
 
@@ -2020,7 +2033,11 @@ SOURCE_PLUGIN_DIR="$PLUGIN_DIR"
 if [[ "$CELL_MODE" == 1 ]]; then
     SOURCE_PLUGIN_DIR="$ORIGIN_PAYLOAD_ROOT"
 fi
-VER="$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' "$PLUGIN_DIR/pyproject.toml" 2>/dev/null || echo 0.0.0)"
+if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
+    VER="$PACKAGE_VERSION"
+else
+    VER="$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' "$PLUGIN_DIR/pyproject.toml" 2>/dev/null || echo 0.0.0)"
+fi
 if [[ "$CELL_MODE" == 1 ]]; then
     _write_cell_manifest \
         "$INSTALL_DIR" "$SOURCE_PLUGIN_DIR" "$VER" "$VENV_DIR" "$SRC_VERSION" \
@@ -2030,8 +2047,12 @@ else
     KIND="$(_source_kind "$SOURCE_PLUGIN_DIR")"
     COMMIT="null"; BRANCH="null"; DIRTY="false"
     if [[ "$KIND" == "local" ]]; then
-        REPO_ROOT="$(cd "$SOURCE_PLUGIN_DIR/../.." && pwd)"
-        read -r _c _b _d <<< "$(_git_info "$REPO_ROOT")"
+        if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
+            read -r _c _b _d <<< "$SOURCE_MANIFEST_GIT"
+        else
+            REPO_ROOT="$(cd "$SOURCE_PLUGIN_DIR/../.." && pwd)"
+            read -r _c _b _d <<< "$(_git_info "$REPO_ROOT")"
+        fi
         COMMIT="\"$_c\""; BRANCH="\"$_b\""; DIRTY="$_d"
     fi
     TMP="$INSTALL_DIR/deploy-manifest.json.tmp"
@@ -2040,7 +2061,7 @@ else
         SOURCE_FIELDS="${SOURCE_RUNTIME_IDENTITY#\{}"
         SOURCE_FIELDS=", ${SOURCE_FIELDS%\}}"
     fi
-    _assert_source_runtime_identity || exit 1
+    if [[ -z "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then _assert_source_runtime_identity || exit 1; fi
     cat > "$TMP" << EOF
 {
   "schema_version": 3,

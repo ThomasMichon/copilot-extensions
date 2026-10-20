@@ -105,6 +105,7 @@ def test_actual_session_hook_stamps_only_metadata(
     for name in ("session-stamp.py", "stamp_paths.py", "stamp_repair.py", "versioned_runtime.py",
                  "versioned_runtime_leases.py", "versioned_runtime_construction.py",
                  "versioned_runtime_source.py",
+                 "versioned_runtime_publication.py",
                  "bootstrap-killswitch-guard.sh", "bootstrap-killswitch-guard.ps1"):
         shutil.copy2(PLUGIN / "scripts" / name, scripts / name)
     (payload / "plugin.json").write_text('{"name":"agent-index","version":"9.9.9"}')
@@ -169,7 +170,10 @@ def _shell_command(shell: str, script: Path) -> list[str]:
         if executable is None:
             pytest.skip("bash is unavailable")
         return [executable, str(script)]
-    executable = shutil.which("powershell.exe") or shutil.which("pwsh")
+    executable = (
+        (shutil.which("powershell.exe") or shutil.which("pwsh"))
+        if os.name == "nt" else shutil.which("pwsh")
+    )
     if executable is None:
         pytest.skip("PowerShell is unavailable")
     return [

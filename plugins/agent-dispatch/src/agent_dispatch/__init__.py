@@ -9,6 +9,7 @@ daemon and CLI land in a subsequent slice.
 from __future__ import annotations
 
 from agent_dispatch.queue import Status, Task, TaskError, TaskQueue, worker_id_for
+from .source_build import effective_runtime_version
 
 __all__ = ["Status", "Task", "TaskError", "TaskQueue", "worker_id_for"]
 
@@ -47,4 +48,4 @@ def _resolve_version() -> str:
         return "0.0.0+dev"
 
 
-__version__ = _resolve_version()
+__version__ = effective_runtime_version(_resolve_version())

@@ -119,6 +119,79 @@ def _previous(tmp_path: Path) -> dict[str, bytes]:
     return previous
 
 
+@pytest.mark.parametrize("host", HOSTS)
+def test_native_manifest_uses_selected_source_after_origin_changes(tmp_path: Path, host: str) -> None:
+    payload = _payload(tmp_path)
+    selected = identity_module.read_source_identity(payload, VERSION)
+    fields = identity_module.manifest_fields(selected)
+    install = tmp_path / "install"
+    install.mkdir()
+    script = tmp_path / "manifest.ps1"
+    script.write_text(f"""
+Set-StrictMode -Version 2.0
+$ErrorActionPreference = 'Stop'
+. {_ps(ROOT / 'libs' / 'installer-engine' / 'installer-engine.ps1')}
+Set-Item -Path Function:Write-DeployManifestShared -Value ${{function:Write-DeployManifest}}
+$PluginDir = {_ps(payload)}
+$InstallDir = {_ps(install)}
+$LinkDir = {_ps(install / 'runtime')}
+$PackageVersion = '{VERSION}'
+$SrcVersion = {_ps(fields['runtime_version'])}
+$SourceRuntimeIdentity = {_ps(json.dumps(fields, sort_keys=True))}
+$env:COPILOT_PLUGIN_STAGED_FROM = $null
+$env:COMPUTERNAME = 'fixture-host'
+function Get-SourceKind {{ param($PluginPath) return 'marketplace' }}
+function Get-GitInfo {{ throw 'Marketplace source has no Git query' }}
+function Get-SourceRuntimeIdentity {{ throw 'Mutable origin must not be revalidated after commit' }}
+function Write-Ok {{ }}
+{_function('Write-DeployManifest', 'ps1')}
+[IO.File]::WriteAllText((Join-Path $PluginDir 'runtime-source.json'), 'invalid origin')
+Write-DeployManifest -PayloadHash 'admitted-payload-hash'
+""", encoding="utf-8")
+    result = _run([host, "-NoProfile", "-File", str(script)], tmp_path)
+    assert result.returncode == 0, result.stdout + result.stderr
+    manifest = json.loads((install / "deploy-manifest.json").read_text(encoding="utf-8-sig"))
+    assert manifest["runtime_source"] == fields["runtime_source"]
+    assert manifest["runtime_version"] == fields["runtime_version"]
+    assert manifest["source"]["content_hash"] == "admitted-payload-hash"
+
+
+@pytest.mark.skipif(not _bash(), reason="Bash unavailable")
+def test_bash_manifest_uses_selected_source_after_origin_changes(tmp_path: Path) -> None:
+    payload = _payload(tmp_path)
+    fields = identity_module.manifest_fields(identity_module.read_source_identity(payload, VERSION))
+    install = tmp_path / "install"
+    install.mkdir()
+    script = tmp_path / "manifest.sh"
+    script.write_text(f"""
+set -euo pipefail
+source {_sh(ROOT / 'libs' / 'installer-engine' / 'installer-engine.sh')}
+PLUGIN_DIR={_sh(payload)}
+INSTALL_DIR={_sh(install)}
+VENV_DIR={_sh(install / 'runtime')}
+PACKAGE_VERSION={VERSION}
+SRC_VERSION={_sh(fields['runtime_version'])}
+SOURCE_RUNTIME_IDENTITY={_sh(json.dumps(fields, sort_keys=True))}
+PAYLOAD_HASH_FIXED=1
+PAYLOAD_HASH=admitted-payload-hash
+unset COPILOT_PLUGIN_STAGED_FROM
+_source_kind() {{ printf marketplace; }}
+_fail() {{ printf '%s\\n' "$*" >&2; }}
+_ok() {{ :; }}
+{_function('_git_info', 'sh')}
+{_function('_payload_hash', 'sh')}
+{_function('_write_deploy_manifest', 'sh')}
+printf 'invalid origin' > "$PLUGIN_DIR/runtime-source.json"
+_write_deploy_manifest
+""", encoding="utf-8")
+    result = _run([_bash(), str(script)], tmp_path)
+    assert result.returncode == 0, result.stdout + result.stderr
+    manifest = json.loads((install / "deploy-manifest.json").read_text(encoding="utf-8"))
+    assert manifest["runtime_source"] == fields["runtime_source"]
+    assert manifest["runtime_version"] == fields["runtime_version"]
+    assert manifest["source"]["content_hash"] == "admitted-payload-hash"
+
+
 def _assert_previous(tmp_path: Path, previous: dict[str, bytes]) -> None:
     for name, content in previous.items():
         assert (tmp_path / "install" / name).read_bytes() == content, name
@@ -274,13 +347,13 @@ def test_source_stamp_preserves_assembly_for_first_use(
 $Action = 'Invoke-Install'
 $Boundary = ''
 function Get-BootstrapPython {{
-    if ({'$true' if corrupt_snapshot else '$false'} -and (Get-Variable snapTmp -ErrorAction SilentlyContinue)) {{
-        Add-Content -LiteralPath (Join-Path $snapTmp 'tests\\hashed.txt') 'corrupted copy'
+    if ({'$true' if corrupt_snapshot else '$false'} -and (Get-Variable snapDir -ErrorAction SilentlyContinue)) {{
+        Add-Content -LiteralPath (Join-Path $snapDir 'tests\\hashed.txt') 'corrupted copy'
     }}
     return $RealPython
 }}
-Invoke-Stamp
-$PluginDir = [IO.File]::ReadAllText((Join-Path $InstallDir 'payload-dir'))
+try {{ Invoke-Stamp }} catch {{ [Console]::Error.WriteLine($_.Exception.Message); exit 1 }}
+$PluginDir = ([IO.File]::ReadAllText((Join-Path $InstallDir 'payload-dir'))).Trim()
 $ScriptDir = Join-Path $PluginDir 'scripts'
 Initialize-SourceRuntime
 Invoke-Install
@@ -291,15 +364,80 @@ Invoke-Install
     detail = result.stdout + result.stderr
     if corrupt_snapshot:
         assert result.returncode == 1, detail
-        assert "snapshot failed identity validation" in detail, detail
+        assert "payload bytes do not match the source identity" in detail, detail
         _assert_previous(tmp_path, previous)
     else:
         assert result.returncode == 51, detail
-        snapshot = Path((tmp_path / "install" / "payload-dir").read_text())
+        snapshot = Path((tmp_path / "install" / "payload-dir").read_text().strip())
         assert (snapshot / "tests" / "hashed.txt").read_bytes() == (payload / "tests" / "hashed.txt").read_bytes()
         assert identity_module.read_source_identity(snapshot, VERSION, plugin="agent-bridge")
         events = (tmp_path / "events").read_text().split()
         assert all(event in events for event in ("LOCK", "ADMIT", "BUILD", "COMPLETE", "ACTIVATE"))
+
+
+@pytest.mark.parametrize("host", HOSTS)
+def test_bridge_source_stamp_reuses_the_exact_snapshot_files(tmp_path: Path, host: str) -> None:
+    payload = _payload(tmp_path)
+    _previous(tmp_path)
+    harness = tmp_path / "stamp-reuse.ps1"
+    harness.write_text(
+        _ps_setup(tmp_path, payload) + "\n$Boundary = ''\nInvoke-Stamp\n", encoding="utf-8",
+    )
+    command = [host, "-NoProfile", "-NonInteractive", "-File", str(harness)]
+    first = _run(command, tmp_path)
+    assert first.returncode == 0, first.stdout + first.stderr
+    snapshot = Path((tmp_path / "install" / "payload-dir").read_text().strip())
+    before = {
+        path.relative_to(snapshot): (path.stat().st_ino, path.stat().st_mtime_ns, path.read_bytes())
+        for path in snapshot.rglob("*") if path.is_file()
+    }
+    second = _run(command, tmp_path)
+    assert second.returncode == 0, second.stdout + second.stderr
+    assert {
+        path.relative_to(snapshot): (path.stat().st_ino, path.stat().st_mtime_ns, path.read_bytes())
+        for path in snapshot.rglob("*") if path.is_file()
+    } == before
+
+
+def test_bridge_bash_source_stamp_reuses_its_complete_snapshot(tmp_path: Path) -> None:
+    bash = _bash()
+    if not bash:
+        pytest.skip("Bash unavailable")
+    payload = _payload(tmp_path)
+    _previous(tmp_path)
+    harness = tmp_path / "stamp-reuse.sh"
+    harness.write_text(f"""
+set -euo pipefail
+PLUGIN_DIR={_sh(payload)}
+SCRIPT_DIR="$PLUGIN_DIR/scripts"
+INSTALL_DIR={_sh(tmp_path / 'install')}
+LOCAL_BIN={_sh(tmp_path / 'bin')}
+PACKAGE_VERSION='{VERSION}'
+SRC_VERSION="$PACKAGE_VERSION"
+PUBLISH_GLOBAL_BINSTUBS=false
+_bootstrap_python() {{ printf '%s' {_sh(sys.executable)}; }}
+_fail() {{ printf '%s\\n' "$*" >&2; }}
+_ok() {{ :; }}
+deploy_binstub() {{ :; }}
+{_function('_initialize_source_runtime', 'sh')}
+{_function('_payload_unchanged_since_admission', 'sh')}
+{_function('do_stamp', 'sh')}
+_initialize_source_runtime
+do_stamp
+""", encoding="utf-8")
+    command = [bash, _sh(harness).strip("'")]
+    first = _run(command, tmp_path)
+    assert first.returncode == 0, first.stdout + first.stderr
+    snapshot = tmp_path / "install" / "snapshots" / (
+        json.loads((payload / "runtime-source.json").read_text())["runtime_version"]
+    )
+    before = {path.relative_to(snapshot): (path.stat().st_ino, path.read_bytes())
+              for path in snapshot.rglob("*") if path.is_file()}
+    second = _run(command, tmp_path)
+    assert second.returncode == 0, second.stdout + second.stderr
+    assert {path.relative_to(snapshot): (path.stat().st_ino, path.read_bytes())
+            for path in snapshot.rglob("*") if path.is_file()} == before
+    assert (snapshot / "tests" / "hashed.txt").read_bytes() == (payload / "tests" / "hashed.txt").read_bytes()
 
 
 @pytest.mark.parametrize(("action", "boundary", "stopped_predecessor"), [

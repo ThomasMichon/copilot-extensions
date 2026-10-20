@@ -57,10 +57,18 @@ for ((__aw_i = 1; __aw_i < ${#__aw_args[@]}; __aw_i++)); do
     fi
 done
 set -- "${__aw_args[@]}"
+if [[ "$__aw_action" == publish-runtime-helpers ]]; then
+    if [[ -z "${COPILOT_PLUGIN_STAGED_FROM:-}" ||
+          -z "${COPILOT_PLUGIN_INSTALL_STAGED:-}" ||
+          ( -z "${COPILOT_EXTENSIONS_CONTEXT:-}" && -z "${COPILOT_EXTENSIONS_COMMAND_LIFECYCLE:-}" ) ]]; then
+        printf '%s\n' "ERROR: helper publication requires its existing admitted lifecycle" >&2
+        exit 1
+    fi
+fi
 # === command-lifecycle: admission before staging ===
 if [[ -z "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
     case "$__aw_action" in
-        install|update|provision|stamp|uninstall)
+        install|update|provision|stamp|uninstall|repair|dev|dev-release|publish-runtime-helpers)
             __aw_admission_root="${__aw_install_dir_arg:-$HOME/.agent-worktrees}"
             [[ "$__aw_admission_root" == /* ]] || {
                 printf '%s\n' "ERROR: --install-dir must be absolute" >&2
@@ -117,6 +125,40 @@ if [[ -z "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
 fi
 # === end command-lifecycle: admission before staging ===
 if [[ -n "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
+    __aw_shell_path() {
+        case "${OSTYPE:-}" in
+            msys*|cygwin*) cygpath -u "$1" ;;
+            *) printf '%s\n' "$1" ;;
+        esac
+    }
+    __aw_shell_context="$(__aw_shell_path "$COPILOT_EXTENSIONS_CONTEXT")" || exit 1
+    __aw_context_python=""
+    case "${OSTYPE:-}" in
+        msys*|cygwin*)
+            for ((__aw_i=0; __aw_i<${#__aw_args[@]}; __aw_i++)); do
+                if [[ "${__aw_args[$__aw_i]}" == --runtime-publication-python ]]; then
+                    __aw_context_python="$(__aw_shell_path "${__aw_args[$((__aw_i+1))]}")" || exit 1
+                fi
+            done
+            if [[ -z "$__aw_context_python" ]]; then
+                while IFS= read -r __aw_candidate_path; do
+                    if "$__aw_candidate_path" -I -B -c 'import sys; assert sys.version_info >= (3,11)' >/dev/null 2>&1; then
+                        __aw_context_python="$__aw_candidate_path"; break
+                    fi
+                done < <(type -ap python3 python)
+            fi
+            [[ -n "$__aw_context_python" ]] || {
+                printf '%s\n' "ERROR: native Windows context validation requires Python 3.11+" >&2
+                exit 1
+            } ;;
+    esac
+    __aw_context_query() {
+        if [[ -n "$__aw_context_python" ]]; then
+            "$__aw_context_python" -I -B "$SCRIPT_DIR/installation-context/installation_context.py" "$@"
+        else
+            bash "$__aw_context_helper" "$@"
+        fi
+    }
     __aw_runtime_inputs="${AGENT_WORKTREES_RUNTIME_INPUTS:-$PLUGIN_DIR}"
     if [[ "${COPILOT_PLUGIN_INSTALL_STAGED:-}" != context-install ]]; then
         __aw_runtime_inputs="$PLUGIN_DIR"
@@ -135,7 +177,7 @@ if [[ -n "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
         __aw_origin_payload="$COPILOT_PLUGIN_STAGED_FROM"
     fi
     case "$__aw_action" in
-        install|update|status|repair|dev|dev-release) ;;
+        install|update|status|repair|dev|dev-release|publish-runtime-helpers) ;;
         *)
             printf '%s\n' \
                 "ERROR: structured installation context does not support action '$__aw_action'" >&2
@@ -147,7 +189,7 @@ if [[ -n "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
             "ERROR: structured installation context requires an absolute --install-dir" >&2
         exit 1
     }
-    [[ -f "$COPILOT_EXTENSIONS_CONTEXT" ]] || {
+    [[ -f "$__aw_shell_context" ]] || {
         printf '%s\n' "ERROR: structured installation context is unavailable" >&2
         exit 1
     }
@@ -157,13 +199,13 @@ if [[ -n "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
         printf '%s\n' "ERROR: installation-context validator is unavailable" >&2
         exit 1
     }
-    __aw_durable_home="$COPILOT_EXTENSIONS_CONTEXT"
+    __aw_durable_home="$__aw_shell_context"
     for _ in 1 2 3 4 5; do
         __aw_durable_home="$(dirname -- "$__aw_durable_home")"
     done
     __aw_validated_context="$(
-        bash "$__aw_context_helper" validate \
-            --context "$COPILOT_EXTENSIONS_CONTEXT" \
+        __aw_context_query validate \
+            --context "$__aw_shell_context" \
             --durable-home "$__aw_durable_home" \
             --expected-plugin-id agent-worktrees \
             --expected-payload-root "$__aw_origin_payload"
@@ -176,6 +218,7 @@ if [[ -n "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
         printf '%s\n' "ERROR: validated context omitted pluginRoot" >&2
         exit 1
     }
+    __aw_context_root="$(__aw_shell_path "$__aw_context_root")" || exit 1
     __aw_context_root="$(cd -P -- "$__aw_context_root" && pwd)"
     __aw_install_root="$(cd -P -- "$__aw_install_dir_arg" && pwd)"
     [[ "$__aw_install_root" == "$__aw_context_root" ]] || {
@@ -191,20 +234,22 @@ if [[ -n "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
         --payload-root "$__aw_origin_payload"
         --plugin-id agent-worktrees
         --legacy-root "$HOME/.agent-worktrees"
-        --context "$COPILOT_EXTENSIONS_CONTEXT"
+        --context "$__aw_shell_context"
         --durable-home "$__aw_durable_home"
     )
     __aw_context_status="$(
-        bash "$__aw_context_helper" "${__aw_status_args[@]}"
+        __aw_context_query "${__aw_status_args[@]}"
     )" || exit $?
     __aw_status="$(__aw_context_value "$__aw_context_status" status)"
     __aw_reason="$(__aw_context_value "$__aw_context_status" reason)"
     __aw_actual_mode="$(__aw_context_value "$__aw_context_status" actualMode)"
     __aw_status_root="$(__aw_context_value "$__aw_context_status" runtimeRoot)"
     __aw_status_context="$(__aw_context_value "$__aw_context_status" context)"
+    __aw_status_root="$(__aw_shell_path "$__aw_status_root")" || exit 1
+    __aw_status_context="$(__aw_shell_path "$__aw_status_context")" || exit 1
     if [[ "$__aw_actual_mode" != namespaced ||
           "$__aw_status_root" != "$__aw_install_root" ||
-          "$__aw_status_context" != "$COPILOT_EXTENSIONS_CONTEXT" ]] ||
+          "$__aw_status_context" != "$__aw_shell_context" ]] ||
        { [[ "$__aw_status" != ready || "$__aw_reason" != namespaced-active ]] &&
          [[ "$__aw_status" != deactivation-required ]]; }; then
         printf '%s\n' \
@@ -231,19 +276,21 @@ if [[ -n "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
         local current current_status current_reason current_mode current_root
         local current_context current_activation current_namespace current_install
         local current_validated current_validated_install
-        current="$(bash "$__aw_context_helper" "${__aw_status_args[@]}")" ||
+        current="$(__aw_context_query "${__aw_status_args[@]}")" ||
             return 1
         current_status="$(__aw_context_value "$current" status)"
         current_reason="$(__aw_context_value "$current" reason)"
         current_mode="$(__aw_context_value "$current" actualMode)"
         current_root="$(__aw_context_value "$current" runtimeRoot)"
         current_context="$(__aw_context_value "$current" context)"
+        current_root="$(__aw_shell_path "$current_root")" || return 1
+        current_context="$(__aw_shell_path "$current_context")" || return 1
         current_activation="$(__aw_context_value "$current" activationGeneration)"
         current_namespace="$(__aw_context_value "$current" namespaceGeneration)"
         current_install="$(__aw_context_value "$current" installGeneration)"
         current_validated="$(
-            bash "$__aw_context_helper" validate \
-                --context "$COPILOT_EXTENSIONS_CONTEXT" \
+            __aw_context_query validate \
+                --context "$__aw_shell_context" \
                 --durable-home "$__aw_durable_home" \
                 --expected-plugin-id agent-worktrees \
                 --expected-payload-root "$__aw_origin_payload"
@@ -258,7 +305,7 @@ if [[ -n "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
            "$current_reason" == "$__aw_reason" &&
            "$current_mode" == namespaced &&
            "$current_root" == "$__aw_install_root" &&
-           "$current_context" == "$COPILOT_EXTENSIONS_CONTEXT" &&
+           "$current_context" == "$__aw_shell_context" &&
            "$current_activation" == "$__aw_activation_generation" &&
            "$current_namespace" == "$__aw_namespace_generation" &&
            "$current_install" == "$__aw_install_generation" &&
@@ -576,6 +623,9 @@ MACHINE=""
 PROJECT_NAME_ARG=""
 INSTALL_DIR_ARG=""
 OWNER_ARG=""
+RUNTIME_PUBLICATION_PLAN=""
+RUNTIME_PUBLICATION_DIGEST=""
+RUNTIME_PUBLICATION_PYTHON=""
 ZERO_DOWNTIME=false
 
 while [[ $# -gt 0 ]]; do
@@ -586,6 +636,9 @@ while [[ $# -gt 0 ]]; do
         --project-name)  PROJECT_NAME_ARG="$2"; shift 2 ;;
         --install-dir)   INSTALL_DIR_ARG="$2"; shift 2 ;;
         --owner)         OWNER_ARG="$2"; shift 2 ;;
+        --runtime-publication-plan) RUNTIME_PUBLICATION_PLAN="$2"; shift 2 ;;
+        --runtime-publication-digest) RUNTIME_PUBLICATION_DIGEST="$2"; shift 2 ;;
+        --runtime-publication-python) RUNTIME_PUBLICATION_PYTHON="$2"; shift 2 ;;
         --zero-downtime) ZERO_DOWNTIME=true; shift ;;
         *)               echo "Unknown option: $1" >&2; exit 1 ;;
     esac
@@ -750,6 +803,12 @@ print((entry.local_path() if entry else "") or "")
 fi
 
 _versioned_activate_inner() {
+    local publish="${1:-none}"
+    case "$publish" in
+        none|resolvers|wrappers) ;;
+        *) err "Invalid runtime publication mode: $publish"; return 1 ;;
+    esac
+    _assert_source_runtime || return 1
     # CLI (no daemon): health-gate the freshly-built slot, publish the
     # `current-version` marker (junction-free, `--no-link`: no `.venv` symlink is
     # laid; the marker is the SINGLE source of truth and any stale legacy link is
@@ -876,6 +935,18 @@ raise SystemExit(0 if monitor_live_now() else 1)
 PY
         monitor_was_live=1
     fi
+    _assert_source_runtime || return 1
+    # Publication can fail; do not commit selectors until helpers are usable.
+    # No selector rollback is needed, so a competing activation is preserved.
+    case "$publish" in
+        wrappers) deploy_wrappers || return 1 ;;
+        resolvers) deploy_runtime_resolvers || return 1 ;;
+        none) ;;
+    esac
+    if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
+        SOURCE_RUNTIME_MANIFEST="$(_build_deploy_manifest_json)" || return 1
+    fi
+    _assert_source_runtime || return 1
     if ! "$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" activate "$SRC_VERSION" --no-link; then
         err "Failed to activate runtime version (marker -> versions/$SRC_VERSION)"
         return 1
@@ -930,7 +1001,7 @@ _versioned_activate() {
     # the failure path this wrapper exists to cover. `&& rc=0 || rc=$?` is
     # itself a compound command, exempt from errexit.
     local rc
-    _versioned_activate_inner && rc=0 || rc=$?
+    _versioned_activate_inner "${1:-none}" && rc=0 || rc=$?
     _release_versioned_slot_lease
     return "$rc"
 }
@@ -972,9 +1043,13 @@ _bootstrap_python() {
         if [[ -d "$INSTALL_DIR" ]]; then
             venv_real="$(cd "$INSTALL_DIR" 2>/dev/null && pwd -P)" || return 1
         else
-            local runtime_parent
-            runtime_parent="$(cd "$(dirname "$INSTALL_DIR")" 2>/dev/null && pwd -P)" || return 1
-            venv_real="$runtime_parent/$(basename "$INSTALL_DIR")"
+            local runtime_parent="$INSTALL_DIR" runtime_suffix=""
+            while [[ ! -d "$runtime_parent" ]]; do
+                runtime_suffix="/$(basename "$runtime_parent")$runtime_suffix"
+                runtime_parent="$(dirname "$runtime_parent")"
+            done
+            runtime_parent="$(cd "$runtime_parent" 2>/dev/null && pwd -P)" || return 1
+            venv_real="$runtime_parent$runtime_suffix"
         fi
     elif [[ "$exclude_venv_dir" == "exclude-venv-dir" ]] && [[ -d "$VENV_DIR" ]]; then
         venv_real="$(cd "$VENV_DIR" 2>/dev/null && pwd -P)"
@@ -1046,10 +1121,26 @@ _deploy_python_runtime() {
     mkdir -p "$result_dir"
     result_path="$(mktemp "$result_dir/result-$$-XXXXXX")" || return 1
     local runtime_rc=0
+    _assert_source_runtime || return 1
+    local source_pin="${SOURCE_RUNTIME_IDENTITY:-}"
+    [[ -n "$source_pin" ]] || source_pin='{}'
+    if [[ "$ACTION" != dev-release ]]; then
+        local publisher scope=resolvers
+        [[ "$ACTION" != install && "$ACTION" != update ]] || scope=wrappers
+        publisher="$(type -P bash)" || return 1
+        case "${OSTYPE:-}" in
+            msys*|cygwin*) [[ "$publisher" == *.exe || ! -f "$publisher.exe" ]] || publisher+=".exe" ;;
+        esac
+        publisher="$("$base" -I -c 'import pathlib,sys; print(pathlib.Path(sys.argv[1]).resolve())' "$publisher")" || return 1
+        local frontend
+        frontend="$("$base" -I -c 'import json,sys; print(json.dumps({"shell":"sh","executable":sys.argv[1],"scope":sys.argv[2]}))' "$publisher" "$scope")" || return 1
+        mode_args+=(--frontend "$frontend")
+    fi
     "$base" -I -B "$SCRIPT_DIR/runtime_install.py" \
         --root "$INSTALL_DIR" --plugin "$runtime_inputs" \
         --payload "$origin_payload" --uv "$uv_path" --base-python "$base" \
-        --result "$result_path" "${mode_args[@]}" || runtime_rc=$?
+        --result "$result_path" --expected-source-identity "$source_pin" \
+        "${mode_args[@]}" || runtime_rc=$?
     if [[ "$runtime_rc" != 0 ]]; then
         rm -f -- "$result_path"
         err "Python runtime lifecycle failed"
@@ -1062,6 +1153,7 @@ assert result.get("deployment_manifest_published") is True, \
     "Python runtime lifecycle did not publish its installed deployment evidence"
 print(result["runtime_version"])
 print(result["runtime_python"])
+print(1 if result.get("helpers_published") is True else 0)
 ' "$result_path")" || {
         rm -f -- "$result_path"
         return 1
@@ -1071,6 +1163,7 @@ print(result["runtime_python"])
     esac
     rm -f -- "$result_path"
     PYTHON_RUNTIME_MANIFEST_PUBLISHED=1
+    PYTHON_RUNTIME_HELPERS_PUBLISHED="$(printf '%s\n' "$parsed" | sed -n '3p')"
     SRC_VERSION="$(printf '%s\n' "$parsed" | sed -n '1p')"
     VENV_PYTHON="$(printf '%s\n' "$parsed" | sed -n '2p')"
     case "${OSTYPE:-}" in
@@ -1083,6 +1176,13 @@ print(result["runtime_python"])
 }
 
 _payload_hash() {
+    if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
+        _assert_source_runtime || return 1
+        local source_py
+        source_py="$(_bootstrap_python exclude-runtime-root)" || return 1
+        "$source_py" -I -c 'import json,sys; print(json.loads(sys.argv[1])["runtime_source"]["assembly_hash"])' "$SOURCE_RUNTIME_IDENTITY"
+        return
+    fi
     # Payload fingerprint for the completion marker (#935, hardened #2609,
     # #5472): sha256 of pyproject.toml + the vendored-lib manifests + every
     # actual source file under src/ (this plugin's own package), libs/*/src/
@@ -1691,6 +1791,7 @@ _wait_for_versioned_slot_lease() {
 }
 
 _versioned_slot_clean() {
+    _assert_source_runtime || return 1
     [[ "$VERSIONED_RUNTIME" == 1 ]] || {
         printf '%s\n' 'Construction requires a versioned runtime candidate' >&2; return 1;
     }
@@ -1702,10 +1803,12 @@ _versioned_slot_clean() {
         eval "$helpers"
     fi
     _runtime_construction_begin "$py" "$vr" "$INSTALL_DIR" "$SRC_VERSION" \
-        "$(_payload_hash)" "$(basename "$LINK_DIR")"
+        "$(_payload_hash)" "$(basename "$LINK_DIR")" || return 1
+    _assert_source_runtime
 }
 
 _versioned_mark_complete() {
+    _assert_source_runtime || return 1
     local actual_hash
     actual_hash="$(_payload_hash)" || return 1
     if [[ -z "$actual_hash" ]]; then
@@ -1816,6 +1919,7 @@ register_project() {
 # ── Helpers ──────────────────────────────────────────────────────────────
 
 deploy_package() {
+    _assert_source_runtime || return 1
     if [[ ! -f "$PLUGIN_DIR/pyproject.toml" ]]; then
         err "Plugin source not found: $PLUGIN_DIR"
         return 1
@@ -1944,6 +2048,11 @@ deploy_package() {
         _ts="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
         _src_norm="$(echo "$PLUGIN_DIR" | tr '\\' '/')"
         _ver="$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' "$PLUGIN_DIR/pyproject.toml" 2>/dev/null || echo 0.0.0)"
+        if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
+            _ver="$SRC_VERSION"
+            _commit="$("$VENV_PYTHON" -I -c 'import json,sys; print(json.loads(sys.argv[1])["runtime_source"]["source_commit"])' "$SOURCE_RUNTIME_IDENTITY")" || return 1
+            _branch="source"
+        fi
         cat > "$pkg_dir/_build_info.py" <<PYEOF
 """Build provenance -- auto-generated at deploy time. Do not edit."""
 
@@ -1961,6 +2070,7 @@ PYEOF
         warn "Could not locate installed agent_worktrees -- build info not stamped"
     fi
 
+    _assert_source_runtime || return 1
     ok "Package installed into venv"
 }
 
@@ -2145,38 +2255,107 @@ _ensure_uv_index() {
 # adopt concern). This is what makes the tools callable standalone: the full
 # install only deploys this under $HAS_PROJECT, so a runtime-only / confined host
 # would otherwise have no `agent-worktrees` on PATH.
+_runtime_file_id() {
+        [[ ! -L "$1" && -O "$1" ]] || return 1
+        stat -c '%d:%i' "$1" 2>/dev/null || stat -f '%d:%i' "$1" 2>/dev/null
+}
+
+_runtime_file_state() {
+        local before after digest
+        [[ ! -L "$1" && -f "$1" && -O "$1" ]] || return 1
+        before="$(stat -c '%d:%i:%f:%u:%g:%h:%s:%y' "$1" 2>/dev/null)" ||
+            before="$(stat -f '%d:%i:%p:%u:%g:%l:%z:%m' "$1" 2>/dev/null)" || return 1
+        if command -v sha256sum >/dev/null 2>&1; then
+            digest="$(sha256sum < "$1")" || return 1
+        elif command -v shasum >/dev/null 2>&1; then
+            digest="$(shasum -a 256 < "$1")" || return 1
+        else
+            digest="$(openssl dgst -sha256 -r < "$1")" || return 1
+        fi
+        after="$(stat -c '%d:%i:%f:%u:%g:%h:%s:%y' "$1" 2>/dev/null)" ||
+            after="$(stat -f '%d:%i:%p:%u:%g:%l:%z:%m' "$1" 2>/dev/null)" || return 1
+        [[ "$before" == "$after" && "${digest%% *}" =~ ^[0-9a-f]{64}$ ]] || return 1
+        printf '%s:%s' "$after" "${digest%% *}"
+}
+
+_publish_runtime_file() {
+            local source="$1" destination="$2" executable="${3:-1}"
+            local parent="${2%/*}" name="${2##*/}" tmp directory directory_id created_id planned mode
+            if [[ "${ACTION:-}" == publish-runtime-helpers && -n "${RUNTIME_PUBLICATION_COPIES:-}" ]]; then
+                case "${OSTYPE:-}" in
+                    msys*|cygwin*)
+                        source="$(cygpath -m "$source")" || return 1
+                        destination="$(cygpath -m "$destination")" || return 1 ;;
+                esac
+                printf '%s\0%s\0%s\0%s\0' "$source" "$destination" "$executable" 0 >> "$RUNTIME_PUBLICATION_COPIES"
+                return $?
+            fi
+            [[ ! -d "$destination" ]] || {
+                err "Runtime file target is a directory: $destination"; return 1;
+            }
+            directory="$(mktemp -d "$parent/.$name.publication.XXXXXXXX")" || return 1
+            directory_id="$(_runtime_file_id "$directory")" || return 1
+            tmp="$directory/$name"
+            (umask 077; set -C; : > "$tmp") || return 1
+            created_id="$(_runtime_file_id "$tmp")" || return 1
+            cp "$source" "$tmp" || {
+                err "Runtime file staging failed; retained $directory"; return 1;
+            }
+            if [[ "$executable" == 1 ]]; then
+                chmod +x "$tmp" || return 1
+            else
+                mode="$(stat -c '%a' "$source" 2>/dev/null)" ||
+                    mode="$(stat -f '%Lp' "$source" 2>/dev/null)" || return 1
+                [[ "$mode" =~ ^[0-7]+$ ]] || return 1
+                chmod "$mode" "$tmp" || return 1
+            fi
+            [[ "$(_runtime_file_id "$tmp")" == "$created_id" &&
+               "$(_runtime_file_id "$directory")" == "$directory_id" ]] || return 1
+            planned="$(_runtime_file_state "$tmp")" || return 1
+            if ! mv -f "$tmp" "$parent/"; then
+                err "Runtime file publication failed; retained $directory"; return 1
+            fi
+            if [[ "$(_runtime_file_state "$destination")" != "$planned" ||
+                  -e "$tmp" || -L "$tmp" ]]; then
+                err "Runtime file lost its created physical state; retained $directory"
+                return 1
+            fi
+            [[ "$(_runtime_file_id "$directory")" == "$directory_id" ]] || return 1
+            rmdir "$directory" || { err "Runtime file staging directory retained: $directory"; return 1; }
+}
+
 deploy_tool_binstub() {
-    mkdir -p "$LOCAL_BIN"
-    local stub tmp
+    [[ "${PYTHON_RUNTIME_HELPERS_PUBLISHED:-0}" != 1 ]] || return 0
+    _assert_source_runtime || return 1
+    mkdir -p "$LOCAL_BIN" || return 1
+    local stub stub_src
     for stub in agent-worktrees agent-worktrees.cmd agent-worktrees.ps1; do
-        local stub_src="$PLUGIN_DIR/bin/$stub"
+        stub_src="$PLUGIN_DIR/bin/$stub"
         if [[ -f "$stub_src" ]]; then
-            tmp="$(mktemp "$LOCAL_BIN/$stub.XXXXXX")"
-            cp "$stub_src" "$tmp"
-            chmod +x "$tmp"
-            mv -f "$tmp" "$LOCAL_BIN/$stub"
+            _publish_runtime_file "$stub_src" "$LOCAL_BIN/$stub" || return 1
             ok "Tool binstub: $LOCAL_BIN/$stub"
         fi
     done
 }
 
 deploy_runtime_resolvers() {
+    _assert_source_runtime || return 1
     # Payload-local shims resolve only through these runtime-owned helpers.
     # Install them in the lean provision path as well as the full wrapper path,
     # using create-as-caller + atomic rename so ownership and mode are correct
     # even when replacing a stale helper.
-    mkdir -p "$BIN_DIR"
-    local resolver src tmp
+    mkdir -p "$BIN_DIR" || return 1
+    local resolver src
     for resolver in resolve-runtime.ps1 resolve-runtime.sh; do
         src="$SCRIPT_DIR/$resolver"
         if [[ ! -f "$src" ]]; then
             err "Runtime resolver source not found: $src"
             return 1
         fi
-        tmp="$(mktemp "$BIN_DIR/$resolver.XXXXXX")"
-        cp "$src" "$tmp"
-        chmod +x "$tmp"
-        mv -f "$tmp" "$BIN_DIR/$resolver"
+    done
+    for resolver in resolve-runtime.ps1 resolve-runtime.sh; do
+        src="$SCRIPT_DIR/$resolver"
+        _publish_runtime_file "$src" "$BIN_DIR/$resolver" || return 1
         ok "Runtime resolver: $resolver"
     done
 }
@@ -2188,7 +2367,7 @@ deploy_wrappers() {
     # to the relocated Worktree Manager copy as the one true implementation;
     # agent-worktrees' own cmd_launch resolves that install live (or the
     # direct, non-mux fallback) instead of an in-plugin copy.
-    mkdir -p "$BIN_DIR"
+    mkdir -p "$BIN_DIR" || return 1
 
     deploy_runtime_resolvers || return 1
 
@@ -2199,10 +2378,7 @@ deploy_wrappers() {
             script_src="$SCRIPT_DIR/../src/agent_worktrees/$script"
         fi
         if [[ -f "$script_src" ]]; then
-            tmp="$(mktemp "$BIN_DIR/$script.XXXXXX")"
-            cp "$script_src" "$tmp"
-            chmod +x "$tmp"
-            mv -f "$tmp" "$BIN_DIR/$script"
+            _publish_runtime_file "$script_src" "$BIN_DIR/$script" || return 1
             ok "Hook: $script"
         fi
     done
@@ -2212,17 +2388,17 @@ deploy_wrappers() {
     # Replaces the per-project *.instructions.md deploy for these generic
     # fragments (dotfiles#1053 / effort instructions-to-hooks).
     if [[ -d "$SCRIPT_DIR/conduct" ]]; then
-        mkdir -p "$BIN_DIR/conduct"
+        mkdir -p "$BIN_DIR/conduct" || return 1
         for frag in "$SCRIPT_DIR/conduct"/*.md; do
             [[ -f "$frag" ]] || continue
-            cp -f "$frag" "$BIN_DIR/conduct/$(basename "$frag")"
+            _publish_runtime_file "$frag" "$BIN_DIR/conduct/$(basename "$frag")" 0 || return 1
             ok "Conduct: $(basename "$frag")"
         done
     fi
 
     # Deploy normalized setup and optional machine-settings reconciliation.
     # Mirrors installer.py deploy_wrappers().
-    mkdir -p "$INSTALL_DIR/scripts"
+    mkdir -p "$INSTALL_DIR/scripts" || return 1
     for setup in \
         default-setup.ps1 \
         default-setup.sh \
@@ -2232,10 +2408,7 @@ deploy_wrappers() {
         reconcile-machine-settings.sh; do
         local setup_src="$SCRIPT_DIR/$setup"
         if [[ -f "$setup_src" ]]; then
-            tmp="$(mktemp "$INSTALL_DIR/scripts/$setup.XXXXXX")"
-            cp "$setup_src" "$tmp"
-            chmod +x "$tmp"
-            mv -f "$tmp" "$INSTALL_DIR/scripts/$setup"
+            _publish_runtime_file "$setup_src" "$INSTALL_DIR/scripts/$setup" || return 1
             ok "Session script: $setup"
         fi
     done
@@ -2400,21 +2573,19 @@ EOF
     return 0
 }
 
-write_deploy_manifest() {
-    if [[ "${PYTHON_RUNTIME_MANIFEST_PUBLISHED:-}" == 1 ]]; then
-        ok "Deploy manifest published by the retained Python lifecycle"
-        return 0
-    fi
-    local manifest_path="$INSTALL_DIR/deploy-manifest.json"
+_build_deploy_manifest_json() {
+    _assert_source_runtime || return 1
     local machine platform kind ver commit branch dirty stable_plugin
+    local manifest_venv="$LINK_DIR"
+    if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then manifest_venv="$VENV_DIR"; fi
     machine="$(resolve_machine)"
     platform="$(detect_platform)"
     stable_plugin="${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}"
-    local manifest_plugin="$stable_plugin" manifest_venv="$LINK_DIR"
+    local manifest_plugin="$stable_plugin"
     case "${OSTYPE:-}" in
         msys*|cygwin*)
             manifest_plugin="$(cygpath -m "$stable_plugin")" || return 1
-            manifest_venv="$(cygpath -m "$LINK_DIR")" || return 1 ;;
+            manifest_venv="$(cygpath -m "$manifest_venv")" || return 1 ;;
     esac
     kind="$(_source_kind "$stable_plugin")"
     ver="$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' "$PLUGIN_DIR/pyproject.toml" 2>/dev/null || echo 0.0.0)"
@@ -2476,6 +2647,33 @@ print(fingerprint(Path('$manifest_plugin')))
 }
 EOF
     )"
+    if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
+        manifest_json="$(printf '%s\n' "$manifest_json" | "$VENV_PYTHON" -I -c '
+import json,sys
+manifest = json.load(sys.stdin)
+manifest.update(json.loads(sys.argv[1]))
+print(json.dumps(manifest))
+' "$SOURCE_RUNTIME_IDENTITY")" || return 1
+    fi
+    printf '%s\n' "$manifest_json"
+}
+
+write_deploy_manifest() {
+    if [[ "${PYTHON_RUNTIME_MANIFEST_PUBLISHED:-}" == 1 ]]; then
+        ok "Deploy manifest published by the retained Python lifecycle"
+        return 0
+    fi
+    local manifest_path="$INSTALL_DIR/deploy-manifest.json" manifest_json
+    local stable_plugin="${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}"
+    if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
+        [[ -n "${SOURCE_RUNTIME_MANIFEST:-}" ]] || {
+            err "Source manifest was not prepared before activation"
+            return 1
+        }
+        manifest_json="$SOURCE_RUNTIME_MANIFEST"
+    else
+        manifest_json="$(_build_deploy_manifest_json)" || return 1
+    fi
     if $CONTEXTUAL_INSTALL; then
         printf '%s\n' "$manifest_json" > "$manifest_path.tmp.$$"
         mv -f "$manifest_path.tmp.$$" "$manifest_path"
@@ -2489,7 +2687,7 @@ EOF
         err "Command ownership validation refused deploy-manifest publication."
         return 1
     fi
-    ok "Deploy manifest written (source: $kind)"
+    ok "Deploy manifest written (source: $(_source_kind "$stable_plugin"))"
 }
 
 show_deploy_status() {
@@ -3004,15 +3202,58 @@ except Exception as e:
 
 # ── Actions ──────────────────────────────────────────────────────────────
 
+. "$SCRIPT_DIR/source-runtime.sh"
+if [[ "$ACTION" == publish-runtime-helpers ]]; then
+    [[ -n "$RUNTIME_PUBLICATION_PYTHON" && -n "$RUNTIME_PUBLICATION_PLAN" &&
+       -n "$RUNTIME_PUBLICATION_DIGEST" ]] || exit 1
+    case "${OSTYPE:-}" in
+        msys*|cygwin*) RUNTIME_PUBLICATION_PYTHON="$(cygpath -u "$RUNTIME_PUBLICATION_PYTHON")" || exit 1 ;;
+    esac
+    _bootstrap_python() { printf '%s\n' "$RUNTIME_PUBLICATION_PYTHON"; }
+fi
+_initialize_source_runtime || exit 1
+_assert_source_runtime || exit 1
+
 if ! $CONTEXTUAL_INSTALL; then
     case "$ACTION" in
-        install|update|provision|stamp|uninstall)
+        install|update|provision|stamp|uninstall|repair|dev|dev-release|publish-runtime-helpers)
             "$__aw_admission_python" "${__aw_admission_args[@]}" --check-lifecycle || exit $?
             ;;
     esac
 fi
 
 case "$ACTION" in
+    publish-runtime-helpers)
+        publication="$("$RUNTIME_PUBLICATION_PYTHON" -I -B "$SCRIPT_DIR/runtime_install.py" \
+            --root "$INSTALL_DIR" --plugin "$PLUGIN_DIR" \
+            --inspect-helper-publication "$RUNTIME_PUBLICATION_PLAN" \
+            --publication-digest "$RUNTIME_PUBLICATION_DIGEST")" || exit 1
+        fields="$("$RUNTIME_PUBLICATION_PYTHON" -I -c \
+            'import json,sys; d=json.loads(sys.argv[1]); print(d["scope"]); print(d["python"]); print(d["copies"])' "$publication")" || exit 1
+        fields="${fields//$'\r'/}"
+        scope="${fields%%$'\n'*}"; fields="${fields#*$'\n'}"
+        VENV_PYTHON="${fields%%$'\n'*}"; RUNTIME_PUBLICATION_COPIES="${fields#*$'\n'}"
+        case "${OSTYPE:-}" in
+            msys*|cygwin*)
+                VENV_PYTHON="$(cygpath -u "$VENV_PYTHON")" || exit 1
+                RUNTIME_PUBLICATION_COPIES="$(cygpath -u "$RUNTIME_PUBLICATION_COPIES")" || exit 1 ;;
+        esac
+        case "$scope" in
+            resolvers) deploy_runtime_resolvers || exit 1 ;;
+            wrappers) deploy_wrappers || exit 1 ;;
+            *) exit 1 ;;
+        esac
+        if ! $CONTEXTUAL_INSTALL; then
+            for stub in agent-worktrees agent-worktrees.cmd agent-worktrees.ps1; do
+                [[ -f "$PLUGIN_DIR/bin/$stub" ]] || { err "Required tool binstub missing: $stub"; exit 1; }
+            done
+            deploy_tool_binstub || exit 1
+        fi
+        "$RUNTIME_PUBLICATION_PYTHON" -I -B "$SCRIPT_DIR/runtime_install.py" \
+            --root "$INSTALL_DIR" --plugin "$PLUGIN_DIR" \
+            --complete-helper-publication "$RUNTIME_PUBLICATION_PLAN" \
+            --publication-digest "$RUNTIME_PUBLICATION_DIGEST" || exit 1
+        ;;
     dev|dev-release)
         header "Explicit $SERVICE_NAME runtime mode: $ACTION"
         _deploy_python_runtime || exit $?
@@ -3030,7 +3271,11 @@ case "$ACTION" in
         # sessionStart hook's grace window. Only the TOOLS half; no launcher.
         header "Stamping $SERVICE_NAME (defer runtime to first use)"
         mkdir -p "$INSTALL_DIR" "$LOCAL_BIN"
-        printf '%s\n' "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" > "$INSTALL_DIR/payload-dir"
+        if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
+            _stamp_source_snapshot || exit 1
+        else
+            printf '%s\n' "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" > "$INSTALL_DIR/payload-dir"
+        fi
         deploy_tool_binstub
         ok "Stamped: agent-worktrees tool binstub on PATH; runtime provisions on first use."
         ;;
@@ -3047,7 +3292,6 @@ case "$ACTION" in
         header "Provisioning $SERVICE_NAME runtime (lean; tools only, no launcher/hooks)"
         command -v git >/dev/null 2>&1 || { err "Missing prerequisite: git"; exit 1; }
         mkdir -p "$INSTALL_DIR" "$BIN_DIR" "$LOCAL_BIN"
-        deploy_runtime_resolvers || exit 1
         _deploy_python_runtime || exit 1
         deploy_tool_binstub
         write_deploy_manifest
@@ -3090,7 +3334,6 @@ case "$ACTION" in
 
         # -- Shared runtime (venv first: package install targets the venv) --
         _deploy_python_runtime || exit 1
-        deploy_wrappers || exit 1
         if $CONTEXTUAL_INSTALL; then
             remove_legacy_scripts
             write_deploy_manifest
@@ -3344,7 +3587,6 @@ case "$ACTION" in
         if $CONTEXTUAL_INSTALL; then
             mkdir -p "$INSTALL_DIR" "$BIN_DIR"
             _deploy_python_runtime || exit 1
-            deploy_wrappers || exit 1
             remove_legacy_scripts
             write_deploy_manifest
             ok "Context runtime updated at $INSTALL_DIR"
@@ -3358,7 +3600,6 @@ case "$ACTION" in
 
         # -- Shared runtime (venv first: package install targets the venv) --
         _deploy_python_runtime || exit 1
-        deploy_wrappers || exit 1
         remove_legacy_scripts
         remove_legacy_binstubs
         # Deploy the tool binstub unconditionally (see the install action) so a

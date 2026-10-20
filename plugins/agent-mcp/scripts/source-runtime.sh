@@ -36,6 +36,7 @@ _stamp_source_snapshot() {
         --expected-source-identity "$SOURCE_RUNTIME_IDENTITY" \
         --snapshot-root "$INSTALL_DIR")" || return 1
     _assert_source_runtime || return 1
-    printf '%s\n' "$snap" > "$INSTALL_DIR/payload-dir" || return 1
-    printf '%s\n' "$SRC_VERSION" > "$INSTALL_DIR/stamped-version" || return 1
+    "$py" -I -B "$SCRIPT_DIR/versioned_runtime.py" --root "$INSTALL_DIR" \
+        publish-redirects --payload-dir "$snap" --version "$SRC_VERSION" \
+        --expected-source-identity "$SOURCE_RUNTIME_IDENTITY" || return 1
 }

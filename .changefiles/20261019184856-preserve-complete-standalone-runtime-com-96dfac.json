@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve complete standalone runtime companion resources in distribution fixtures.",
+  "changes": [
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    }
+  ]
+}

@@ -47,13 +47,15 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('install', 'uninstall', 'start', 'stop', 'status', 'update-config', 'update', 'refresh-profiles', 'stamp', 'provision', 'repair', 'dev', 'dev-release')]
+    [ValidateSet('install', 'uninstall', 'start', 'stop', 'status', 'update-config', 'update', 'refresh-profiles', 'stamp', 'provision', 'repair', 'dev', 'dev-release', 'publish-runtime-helpers')]
     [string]$Action = 'status',
 
     [string]$ProjectName,
 
     [string]$InstallDir,
     [string]$BootstrapPython,
+    [Parameter(DontShow)][string]$RuntimePublicationPlan,
+    [Parameter(DontShow)][string]$RuntimePublicationDigest,
     [string]$Owner,
     [switch]$RemoveConfig,
     [switch]$Force,
@@ -71,6 +73,8 @@ if ($env:COPILOT_EXTENSIONS_HUMAN_UTF8 -eq '1') {
 }
 
 $script:PythonRuntimeManifestPublished = $false
+. (Join-Path $PSScriptRoot 'versioned_runtime_native.ps1')
+. (Join-Path $PSScriptRoot 'source-runtime.ps1')
 
 if ($BootstrapPython) {
     [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
@@ -141,8 +145,14 @@ if ($InstallDir) {
     $InstallDir = Join-Path $env:USERPROFILE '.agent-worktrees'
 }
 $ContextualInstall = [bool]$env:COPILOT_EXTENSIONS_CONTEXT
+if ($Action -eq 'publish-runtime-helpers' -and (
+    -not $env:COPILOT_PLUGIN_STAGED_FROM -or -not $env:COPILOT_PLUGIN_INSTALL_STAGED -or
+    (-not $ContextualInstall -and -not $env:COPILOT_EXTENSIONS_COMMAND_LIFECYCLE)
+)) {
+    throw 'Helper publication requires its existing admitted lifecycle.'
+}
 # === command-lifecycle: admission before staging ===
-if (-not $ContextualInstall -and $Action -in @('install', 'update', 'provision', 'stamp', 'uninstall')) {
+if (-not $ContextualInstall -and $Action -in @('install', 'update', 'provision', 'stamp', 'uninstall', 'repair', 'dev', 'dev-release', 'publish-runtime-helpers')) {
     $admissionPayload = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
     $admissionSource = if ($env:COPILOT_EXTENSIONS_COMMAND_LIFECYCLE -and
         $env:COPILOT_PLUGIN_STAGED_FROM -and
@@ -233,7 +243,7 @@ $RuntimeInputPlugin = if (
 if ($ContextualInstall) {
     Set-Location -LiteralPath $env:USERPROFILE
     [IO.Directory]::SetCurrentDirectory($env:USERPROFILE)
-    if ($Action -notin @('install', 'update', 'status', 'repair', 'dev', 'dev-release')) {
+    if ($Action -notin @('install', 'update', 'status', 'repair', 'dev', 'dev-release', 'publish-runtime-helpers')) {
         Write-Error "Structured installation context does not support action '$Action'."
         exit 1
     }
@@ -804,6 +814,8 @@ $LinkDir          = $VenvDir
 $LinkPython       = $VenvPython
 $VersionedRuntime = $false
 $SrcVersion       = $null
+$SourceRuntimeIdentity = $null
+$PackageVersion = $null
 if ($true) {  # always versioned (junction-free marker model; COPILOT_EXT_NO_VERSIONED retired)
     $pyprojForVer = if ($PluginDir) { Join-Path $PluginDir 'pyproject.toml' } else { $null }
     if ($pyprojForVer -and (Test-Path $pyprojForVer)) {
@@ -820,10 +832,12 @@ if ($true) {  # always versioned (junction-free marker model; COPILOT_EXT_NO_VER
 }
 
 function Invoke-VersionedActivateInner {
+    param([ValidateSet('none', 'resolvers', 'wrappers')][string]$Publish = 'none')
     <# CLI (no daemon): health-gate the freshly-built slot, swap the stable `.venv`
        junction onto it (first migration moves a legacy real `.venv` aside), then
        gc old slots keeping current + the previous-good. Returns $false on failure
        so the caller can abort. No-op ($true) in legacy mode. #>
+    Assert-SourceRuntime
     if (-not $VersionedRuntime) { return $true }
     $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
     $py = if (Test-Path -LiteralPath $VenvPython -PathType Leaf) { $VenvPython } else { $LinkPython }
@@ -950,6 +964,15 @@ function Invoke-VersionedActivateInner {
         $monitorWasLive = ($LASTEXITCODE -eq 0)
         $env:PYTHONPATH = $prevHealthPP
     }
+    Assert-SourceRuntime
+    # Commit selectors only after publication; failure never rolls back a peer.
+    if ($Publish -eq 'wrappers') {
+        if (-not (Deploy-Wrappers)) { return $false }
+    } elseif ($Publish -eq 'resolvers') {
+        if (-not (Deploy-RuntimeResolvers)) { return $false }
+    }
+    if ($SourceRuntimeIdentity) { $script:SourceRuntimeManifest = New-V3Manifest }
+    Assert-SourceRuntime
     & $py $vr --root $InstallDir --link-name '.venv' activate $SrcVersion --no-link 2>&1 |
         ForEach-Object { Write-ServiceChanged $_ }
     if ($LASTEXITCODE -ne 0) {
@@ -1001,6 +1024,7 @@ function Invoke-VersionedActivateInner {
 }
 
 function Invoke-VersionedActivate {
+    param([ValidateSet('none', 'resolvers', 'wrappers')][string]$Publish = 'none')
     <# Thin wrapper: releases the exclusive build lease (if one is held --
        harmless no-op otherwise, e.g. when Test-SlotAlreadyComplete skipped
        the build entirely) regardless of how Invoke-VersionedActivateInner
@@ -1008,7 +1032,7 @@ function Invoke-VersionedActivate {
        deployment and completion-marker publication and ALWAYS released
        afterward -- never leaked past this run (#5439). #>
     try {
-        Invoke-VersionedActivateInner
+        Invoke-VersionedActivateInner -Publish $Publish
     } finally {
         Exit-VersionedSlotLease
     }
@@ -1438,9 +1462,11 @@ function Get-BootstrapPython {
         return $candidateFull.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)
     }
     if (Get-Command py -ErrorAction SilentlyContinue) {
-        $result = Invoke-NativeCapture { & py -3 -c 'import sys; print(sys.executable)' }
-        if ($result.ExitCode -eq 0 -and $result.Output -and (Test-Path $result.Output) -and -not (& $isExcluded $result.Output)) {
-            return $result.Output
+        $launcher = (Get-Command py -CommandType Application -ErrorAction Stop |
+            Select-Object -First 1).Source
+        $output = Invoke-Hidden -FilePath $launcher -ArgList @('-3', '-c', 'import sys; print(sys.executable)')
+        if ($LASTEXITCODE -eq 0 -and $output -and (Test-Path $output.Trim()) -and -not (& $isExcluded $output.Trim())) {
+            return $output.Trim()
         }
     }
     $fallback = Get-ApplicationPath -Name @('python3', 'python')
@@ -1467,6 +1493,10 @@ function Get-PayloadHash {
        checkout/clone can rewrite without changing bytes). Never throws -> ''
        on error, which Test-SlotAlreadyComplete already treats as "unknown,
        force a rebuild" -- so a hashing failure fails toward correctness. #>
+    if ($SourceRuntimeIdentity) {
+        Assert-SourceRuntime
+        return ($SourceRuntimeIdentity | ConvertFrom-Json).runtime_source.assembly_hash
+    }
     try {
         $parts = @()
         $pp = Join-Path $PluginDir 'pyproject.toml'
@@ -1673,6 +1703,7 @@ function Wait-ForVersionedSlotLease {
 }
 
 function Invoke-VersionedSlotClean {
+    Assert-SourceRuntime
     if (-not $VersionedRuntime) { throw 'Construction requires a versioned runtime candidate' }
     $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
     $py = Get-BootstrapPython -ExcludeVenvDir
@@ -1685,11 +1716,13 @@ function Invoke-VersionedSlotClean {
     $script:RuntimeConstructionReuse = Start-RuntimeConstruction `
         -Python $py -Helper $vr -Root $InstallDir -Version $SrcVersion `
         -PayloadHash (Get-PayloadHash) -LinkName (Split-Path -Leaf $LinkDir)
+    Assert-SourceRuntime
     return $true
 }
 
 function Invoke-VersionedMarkComplete {
     param([string]$PayloadHash = '')
+    Assert-SourceRuntime
     $actualHash = Get-PayloadHash
     if (-not $actualHash) {
         throw 'Runtime input fingerprint unavailable -- refusing completion publication'
@@ -1785,14 +1818,10 @@ function Get-GitInfo {
     }
 }
 
-function Write-V3Manifest {
+function New-V3Manifest {
     <# Unified schema_version 3 manifest -- self-contained per plugin. Records
        the source footprint (local vs marketplace); written atomically. #>
-    if ($script:PythonRuntimeManifestPublished) {
-        Write-ServiceOk 'Deploy manifest published by the retained Python lifecycle'
-        return
-    }
-    $manifestPath = Join-Path $InstallDir 'deploy-manifest.json'
+    Assert-SourceRuntime
     $pluginPath = if ($env:COPILOT_PLUGIN_STAGED_FROM) {
         $env:COPILOT_PLUGIN_STAGED_FROM
     } else {
@@ -1831,6 +1860,7 @@ function Write-V3Manifest {
             }
         } catch {}
     }
+    $manifestVenv = if ($SourceRuntimeIdentity) { $VenvDir } else { $LinkDir }
     $manifest = [ordered]@{
         schema_version = 3
         service        = 'agent-worktrees'
@@ -1847,9 +1877,33 @@ function Write-V3Manifest {
             dirty               = $dirty
             payload_fingerprint = $payloadFingerprint
         }
-        venv           = ($LinkDir -replace '\\', '/')
+        venv           = ($manifestVenv -replace '\\', '/')
         runtime        = 'python'
     }
+    if ($SourceRuntimeIdentity) {
+        $fields = $SourceRuntimeIdentity | ConvertFrom-Json
+        $manifest.runtime_version = $fields.runtime_version
+        $manifest.runtime_source = $fields.runtime_source
+    }
+    return $manifest
+}
+
+function Write-V3Manifest {
+    if ((Get-Variable PythonRuntimeManifestPublished -Scope Script -ValueOnly -ErrorAction SilentlyContinue) -eq $true) {
+        Write-ServiceOk 'Deploy manifest published by the retained Python lifecycle'
+        return
+    }
+    $manifestPath = Join-Path $InstallDir 'deploy-manifest.json'
+    $pluginPath = if ($env:COPILOT_PLUGIN_STAGED_FROM) {
+        $env:COPILOT_PLUGIN_STAGED_FROM
+    } else { $PluginDir.ToString() }
+    if ($SourceRuntimeIdentity) {
+        if (-not $script:SourceRuntimeManifest) { throw 'Source manifest was not prepared before activation' }
+        $manifest = $script:SourceRuntimeManifest
+    } else {
+        $manifest = New-V3Manifest
+    }
+    $kind = $manifest.source.kind
     if ($ContextualInstall) {
         $temporaryManifest = "$manifestPath.tmp-$PID"
         [System.IO.File]::WriteAllText(
@@ -2085,6 +2139,7 @@ function Deploy-Package {
     <# Install the agent_worktrees package into the venv via uv (non-editable),
        then stamp build info into the INSTALLED site-packages copy. Replaces the
        old file-copy-to-lib + PYTHONPATH model. Requires the venv to exist. #>
+    Assert-SourceRuntime
     $pyproj = Join-Path $PluginDir 'pyproject.toml'
     if (-not (Test-Path $pyproj)) {
         Write-ServiceErr "Plugin source not found: $PluginDir"
@@ -2326,6 +2381,11 @@ function Deploy-Package {
             $verLine = Select-String -Path $pyproj -Pattern '^\s*version\s*=' | Select-Object -First 1
             if ($verLine) { $ver = ($verLine.Line -replace '.*=\s*"([^"]+)".*','$1') }
         }
+        if ($SourceRuntimeIdentity) {
+            $ver = $SrcVersion
+            $commit = ($SourceRuntimeIdentity | ConvertFrom-Json).runtime_source.source_commit
+            $branch = 'source'
+        }
         $buildContent = @"
 `"`"`"Build provenance -- auto-generated at deploy time. Do not edit.`"`"`"
 
@@ -2345,6 +2405,7 @@ BUILD_INFO: dict[str, str] = {
         Write-ServiceWarn "Could not locate installed agent_worktrees -- build info not stamped"
     }
 
+    Assert-SourceRuntime
     Write-ServiceOk "Package installed into venv"
     return $true
 }
@@ -2655,11 +2716,23 @@ function Deploy-PythonRuntime {
     if ($Action -in @('repair', 'dev', 'dev-release')) { $modeArgs = @('--mode', $Action) }
     $runtimeInputs = if ($modeArgs.Count) { $RuntimeInputPlugin } else { $PluginDir.ToString() }
     if ($Owner) { $modeArgs += @('--owner', $Owner) }
+    if ($Action -ne 'dev-release') {
+        $scope = if ($Action -in @('install', 'update')) { 'wrappers' } else { 'resolvers' }
+        $frontend = @{shell='ps1'; executable=(Get-Process -Id $PID).Path; scope=$scope} |
+            ConvertTo-Json -Compress
+        $modeArgs += @('--frontend', $frontend)
+    }
     try {
-        & $base -I -B (Join-Path $ScriptDir 'runtime_install.py') `
-            --root $InstallDir --plugin $runtimeInputs `
-            --payload $originPayload --uv $uvPath --base-python $base `
-            --result $resultPath @modeArgs
+        Assert-SourceRuntime
+        $sourcePin = if ($SourceRuntimeIdentity) { $SourceRuntimeIdentity } else { '{}' }
+        $arguments = @('-I', '-B', (Join-Path $ScriptDir 'runtime_install.py'),
+            '--root', $InstallDir, '--plugin', $runtimeInputs,
+            '--payload', $originPayload, '--uv', $uvPath, '--base-python', $base,
+            '--result', $resultPath, '--expected-source-identity', $sourcePin) + $modeArgs
+        $nativeError = ''
+        $detail = Invoke-Hidden -FilePath $base -ArgList $arguments -ErrorOutput ([ref]$nativeError)
+        if ($detail) { Write-Host $detail }
+        if ($nativeError) { [Console]::Error.Write($nativeError) }
         if ($LASTEXITCODE -eq 2) { exit 2 }
         if ($LASTEXITCODE -ne 0) { throw "Python runtime lifecycle failed (exit $LASTEXITCODE)." }
         $result = Get-Content -LiteralPath $resultPath -Raw | ConvertFrom-Json
@@ -2671,6 +2744,9 @@ function Deploy-PythonRuntime {
             throw 'Python runtime lifecycle did not publish its installed deployment evidence.'
         }
         $script:PythonRuntimeManifestPublished = $true
+        $script:PythonRuntimeHelpersPublished = (
+            $result.PSObject.Properties['helpers_published'] -and $result.helpers_published -eq $true
+        )
         $script:VenvPython = [string]$result.runtime_python
         $script:VenvDir = Split-Path -Parent (Split-Path -Parent $VenvPython)
         $script:LinkDir = $VenvDir
@@ -2678,6 +2754,36 @@ function Deploy-PythonRuntime {
         Write-ServiceOk "Python runtime $SrcVersion ready and transition settled (reused: $($result.reused))"
     } finally {
         Remove-Item -LiteralPath $resultPath -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Publish-RuntimeFile {
+    param([string]$Source, [string]$Destination, [switch]$NormalizedSameContent)
+    if ((Get-Variable Action -ValueOnly -ErrorAction SilentlyContinue) -eq 'publish-runtime-helpers' -and
+        $script:RuntimePublicationCopies) {
+        $noop = if ($NormalizedSameContent) { '1' } else { '0' }
+        $record = $Source + [char]0 + $Destination + [char]0 + '0' + [char]0 + $noop + [char]0
+        [IO.File]::AppendAllText($script:RuntimePublicationCopies, $record, [Text.UTF8Encoding]::new($false))
+        return
+    }
+    $tmp = Join-Path (Split-Path -Parent $Destination) (
+        '.' + (Split-Path -Leaf $Destination) + '.' + [Guid]::NewGuid().ToString('N') + '.tmp')
+    $copied = $false
+    try {
+        [IO.File]::Copy($Source, $tmp, $false)
+        $copied = $true
+        if ([IO.File]::Exists($Destination)) {
+            [IO.File]::Replace($tmp, $Destination, [NullString]::Value)
+        } else {
+            [IO.File]::Move($tmp, $Destination)
+        }
+        if (-not [IO.File]::Exists($Destination) -or [IO.File]::Exists($tmp)) {
+            throw "Runtime file did not replace its exact target: $Destination"
+        }
+    } catch {
+        throw "Runtime file publication failed (${Destination}): $($_.Exception.Message)"
+    } finally {
+        if ($copied -and [IO.File]::Exists($tmp)) { [IO.File]::Delete($tmp) }
     }
 }
 
@@ -2701,7 +2807,7 @@ function Deploy-Wrappers {
         }
         $dst = Join-Path $BinDir $script
         if (Test-Path $src) {
-            Copy-Item $src $dst -Force
+            Publish-RuntimeFile $src $dst
             Write-ServiceOk "Hook: $script"
         }
     }
@@ -2715,7 +2821,7 @@ function Deploy-Wrappers {
         $ConductDst = Join-Path $BinDir 'conduct'
         Ensure-InstallDir $ConductDst
         foreach ($frag in (Get-ChildItem -Path $ConductSrc -Filter '*.md' -File)) {
-            Copy-Item $frag.FullName (Join-Path $ConductDst $frag.Name) -Force
+            Publish-RuntimeFile $frag.FullName (Join-Path $ConductDst $frag.Name)
             Write-ServiceOk "Conduct: $($frag.Name)"
         }
     }
@@ -2735,7 +2841,7 @@ function Deploy-Wrappers {
         $src = Join-Path $ScriptDir $setup
         $dst = Join-Path $ScriptsDir $setup
         if (Test-Path $src) {
-            Copy-Item $src $dst -Force
+            Publish-RuntimeFile $src $dst
             Write-ServiceOk "Session script: $setup"
         }
     }
@@ -2745,6 +2851,7 @@ function Deploy-Wrappers {
 
 function Deploy-RuntimeResolvers {
     <# Atomically install the runtime-owned helpers used by payload-local shims. #>
+    Assert-SourceRuntime
     Ensure-InstallDir $BinDir
     foreach ($resolver in @('resolve-runtime.ps1', 'resolve-runtime.sh')) {
         $src = Join-Path $ScriptDir $resolver
@@ -2752,14 +2859,11 @@ function Deploy-RuntimeResolvers {
             Write-ServiceErr "Runtime resolver source not found: $src"
             return $false
         }
+    }
+    foreach ($resolver in @('resolve-runtime.ps1', 'resolve-runtime.sh')) {
+        $src = Join-Path $ScriptDir $resolver
         $dst = Join-Path $BinDir $resolver
-        $tmp = Join-Path $BinDir ".$resolver.$PID.tmp"
-        try {
-            Copy-Item $src $tmp -Force
-            Move-Item $tmp $dst -Force
-        } finally {
-            Remove-Item $tmp -Force -ErrorAction SilentlyContinue
-        }
+        Publish-RuntimeFile $src $dst
         Write-ServiceOk "Runtime resolver: $resolver"
     }
     return $true
@@ -2824,15 +2928,23 @@ function Deploy-GlobalBinstub {
        Skip the copy when on-disk content already matches (newline-normalized):
        running the global stub while overwriting it with a different-length
        file corrupts cmd.exe's byte-offset read (issue #13). #>
+    if ((Get-Variable PythonRuntimeHelpersPublished -Scope Script -ValueOnly -ErrorAction SilentlyContinue) -eq $true) { return }
+    Assert-SourceRuntime
     Ensure-InstallDir $LocalBin
     foreach ($name in @('agent-worktrees.ps1', 'agent-worktrees.cmd', 'agent-worktrees')) {
         $src = Join-Path $PluginDir "bin\$name"
         $dst = Join-Path $LocalBin $name
         if (Test-Path $src) {
+            if ((Get-Variable Action -ValueOnly -ErrorAction SilentlyContinue) -eq 'publish-runtime-helpers' -and
+                $script:RuntimePublicationCopies) {
+                Publish-RuntimeFile $src $dst -NormalizedSameContent
+                continue
+            }
+            if (Test-Path -LiteralPath $dst -PathType Container) { throw "Global binstub target is a directory: $dst" }
             $srcNorm = ([System.IO.File]::ReadAllText($src)) -replace "`r`n", "`n" -replace "`r", "`n"
             $dstNorm = if (Test-Path $dst) { ([System.IO.File]::ReadAllText($dst)) -replace "`r`n", "`n" -replace "`r", "`n" } else { $null }
             if ($srcNorm -cne $dstNorm) {
-                Copy-Item $src $dst -Force
+                Publish-RuntimeFile $src $dst
                 Write-ServiceOk "Global binstub: $dst"
             } else {
                 Write-ServiceSkipped "Global binstub up to date: $dst"
@@ -3817,8 +3929,11 @@ function Invoke-Stamp {
     if (-not $SrcVersion) { Write-ServiceErr 'Cannot stamp: no version in pyproject.toml'; exit 1 }
     $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
     foreach ($dir in @($InstallDir, $LocalBin)) { Ensure-InstallDir $dir }
+    Assert-SourceRuntime
     $snapDir = Join-Path (Join-Path $InstallDir 'snapshots') $SrcVersion
-    if (-not (Test-Path $snapDir)) {
+    if ($SourceRuntimeIdentity) {
+        $snapDir = Publish-SourceSnapshot
+    } elseif (-not (Test-Path $snapDir)) {
         $snapTmp = "$snapDir.tmp-$PID"
         if (Test-Path $snapTmp) { Remove-Item $snapTmp -Recurse -Force -ErrorAction SilentlyContinue }
         New-Item -ItemType Directory -Path $snapTmp -Force | Out-Null
@@ -3836,19 +3951,62 @@ function Invoke-Stamp {
     } else {
         Write-ServiceSkipped "Snapshot already stamped: $snapDir"
     }
-    [System.IO.File]::WriteAllText((Join-Path $InstallDir 'payload-dir'), "$snapDir", $utf8NoBom)
-    [System.IO.File]::WriteAllText((Join-Path $InstallDir 'stamped-version'), $SrcVersion, $utf8NoBom)
+    Assert-SourceRuntime
+    if ($SourceRuntimeIdentity) { Assert-SourceRuntime -Payload $snapDir }
+    if ($SourceRuntimeIdentity) {
+        Publish-SourceRedirects -Snapshot $snapDir
+    } else {
+        [System.IO.File]::WriteAllText((Join-Path $InstallDir 'payload-dir'), "$snapDir", $utf8NoBom)
+        [System.IO.File]::WriteAllText((Join-Path $InstallDir 'stamped-version'), $SrcVersion, $utf8NoBom)
+    }
     Deploy-GlobalBinstub
     Write-ServiceOk 'Stamped: agent-worktrees tool binstub on PATH; runtime provisions on first use.'
 }
 
-if (-not $ContextualInstall -and $Action -in @('install', 'update', 'provision', 'stamp', 'uninstall')) {
+Initialize-SourceRuntime
+Assert-SourceRuntime
+
+if (-not $ContextualInstall -and $Action -in @('install', 'update', 'provision', 'stamp', 'uninstall', 'repair', 'dev', 'dev-release', 'publish-runtime-helpers')) {
     & $admissionPython @admissionArgs --check-lifecycle
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }
 
 try {
 switch ($Action) {
+    'publish-runtime-helpers' {
+        if (-not $RuntimePublicationPlan -or -not $RuntimePublicationDigest -or -not $BootstrapPython) {
+            throw 'Helper publication requires its admitted plan, digest and base interpreter.'
+        }
+        $nativeError = ''
+        $arguments = @('-I', '-B', (Join-Path $ScriptDir 'runtime_install.py'),
+            '--root', $InstallDir, '--plugin', $PluginDir.ToString(),
+            '--inspect-helper-publication', $RuntimePublicationPlan,
+            '--publication-digest', $RuntimePublicationDigest)
+        $document = Invoke-Hidden -FilePath $BootstrapPython -ArgList $arguments -ErrorOutput ([ref]$nativeError)
+        if ($LASTEXITCODE -ne 0) { throw "Helper publication admission failed: $document$nativeError" }
+        $publication = $document | ConvertFrom-Json
+        $script:VenvPython = [string]$publication.python
+        $script:RuntimePublicationCopies = [string]$publication.copies
+        if ($publication.scope -eq 'wrappers') {
+            if (-not (Deploy-Wrappers)) { throw 'Required wrappers were not published.' }
+        } elseif ($publication.scope -eq 'resolvers') {
+            if (-not (Deploy-RuntimeResolvers)) { throw 'Required resolvers were not published.' }
+        } else { throw 'Invalid helper publication scope.' }
+        if (-not $ContextualInstall) {
+            foreach ($stub in @('agent-worktrees', 'agent-worktrees.ps1', 'agent-worktrees.cmd')) {
+                if (-not (Test-Path -LiteralPath (Join-Path $PluginDir "bin\$stub") -PathType Leaf)) {
+                    throw "Required global binstub is missing: $stub"
+                }
+            }
+            Deploy-GlobalBinstub
+        }
+        $arguments = @('-I', '-B', (Join-Path $ScriptDir 'runtime_install.py'),
+            '--root', $InstallDir, '--plugin', $PluginDir.ToString(),
+            '--complete-helper-publication', $RuntimePublicationPlan,
+            '--publication-digest', $RuntimePublicationDigest)
+        [void](Invoke-Hidden -FilePath $BootstrapPython -ArgList $arguments -ErrorOutput ([ref]$nativeError))
+        if ($LASTEXITCODE -ne 0) { throw "Helper publication acknowledgement failed: $nativeError" }
+    }
     'dev' {
         Write-ServiceHeader "Building explicitly claimed $ServiceName dev runtime"
         Deploy-PythonRuntime
@@ -3879,7 +4037,6 @@ switch ($Action) {
             exit 1
         }
         foreach ($dir in @($InstallDir, $BinDir, $LocalBin)) { Ensure-InstallDir $dir }
-        if (-not (Deploy-RuntimeResolvers)) { exit 1 }
         Deploy-PythonRuntime
         Deploy-GlobalBinstub
         Write-V3Manifest
@@ -3927,7 +4084,6 @@ switch ($Action) {
 
         # -- Shared runtime (venv first: package install targets the venv) --
         Deploy-PythonRuntime
-        if (-not (Deploy-Wrappers)) { exit 1 }
         if ($ContextualInstall) {
             Write-V3Manifest
             Write-ServiceOk "Context runtime installed at $InstallDir"
@@ -4260,7 +4416,6 @@ switch ($Action) {
                 Ensure-InstallDir $dir
             }
             Deploy-PythonRuntime
-            if (-not (Deploy-Wrappers)) { exit 1 }
             Write-V3Manifest
             Write-ServiceOk "Context runtime updated at $InstallDir"
             exit 0
@@ -4273,7 +4428,6 @@ switch ($Action) {
 
         # -- Shared runtime (venv first: package install targets the venv) --
         Deploy-PythonRuntime
-        if (-not (Deploy-Wrappers)) { exit 1 }
         Deploy-CopilotPlugin
         Deploy-GlobalBinstub
         Ensure-CopilotExperimental

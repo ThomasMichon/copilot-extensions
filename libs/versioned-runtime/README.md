@@ -1,8 +1,8 @@
 # versioned-runtime
 
 The **canonical source** of `versioned_runtime.py` — the stdlib-only,
-cross-platform primitive that owns the immutable per-version runtime layout
-(dotfiles #581). Each version installs into its own immutable
+cross-platform primitive that owns the immutable per-version runtime layout.
+Each version installs into its own immutable
 `<root>/versions/<version>/` directory and the active one is published by a
 `<root>/current-version` **plain-text marker file**. Switching versions rewrites
 that marker (atomic temp+rename) and re-points the **version-pinned binstubs**
@@ -43,7 +43,8 @@ stays out of runtime dependency resolution and ships as plain stdlib files:
 `versioned_runtime_leases.py` owns kernel construction/retention/publication
 ownership; `versioned_runtime_construction.py` owns the finite attached protocol
 and shell adapters; `versioned_runtime_source.py` owns source receipts and exact
-source-qualified recovery. The protocol receives explicit typed runtime operations,
+source-qualified recovery; `versioned_runtime_publication.py` owns created-file
+proofs and caught-failure recovery. The protocol receives explicit typed runtime operations,
 never reverse-imports a compatibility root. Each marketplace payload carries the
 complete adjacent family and is independently usable before any venv exists.
 
@@ -220,6 +221,33 @@ The independently shipped shell installers enroll the same attached construction
 lifetime and skip dependency writes on exact completed reuse. Existing
 installation-cell adapters retain receipt/governance validation in addition to
 kernel ownership; a copied helper alone never grants receipt authority.
+
+## Created-file publication custody (Python API)
+
+The publication companion's `CopyBinding(source, target, digest,
+executable=False, normalized_noop=False)` declares one exact copy.
+`CopyPublication(root, workspace, bindings, validate_inputs=None).publish()`
+uses a caller-owned private workspace, captures every previous target before
+replacement, and fsyncs each created-stage descriptor's proof before rename.
+Explicit targets may include outside-root global commands; the lifecycle caller
+still owns scope, source admission and installation authority.
+
+Matching target-writer leases remain held until `keep()` or `rollback()`.
+`verify()` checks the produced target states. A normalized no-op preserves the
+existing file's physical identity and grants no created-object ownership.
+The owner chooses the terminal operation from the actual runtime outcome:
+keep candidate helpers after committed settlement, including an exception
+re-raised after commit-forward; recover them only when the previous runtime
+actually remains selected/serving.
+
+Rollback restores proven uncontested outputs, preserves foreign replacements
+and reports incomplete recovery with evidence retained. The separate
+`recover_owned` API keeps its strict whole-set refusal semantics.
+`keep()` verifies and removes owned backups before deleting proof metadata;
+postcommit cleanup warnings never introduce a mutable-source recheck or undo a
+live runtime. This Python API adds no bulk-copy CLI. It provides serialized
+caught-failure recovery, not simultaneous multi-file visibility, process-crash
+journaling or service-state rollback.
 
 ## Claim-owned development generations
 

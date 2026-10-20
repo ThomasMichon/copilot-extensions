@@ -430,7 +430,9 @@ _source_runtime_unchanged() {
 }
 
 _source_manifest_fields() {
-    _source_runtime_unchanged || return 1
+    if [[ -z "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
+        _source_runtime_unchanged || return 1
+    fi
     [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]] || return 0
     printf '%s' "${SOURCE_RUNTIME_IDENTITY:1:${#SOURCE_RUNTIME_IDENTITY}-2}"
 }
@@ -631,8 +633,15 @@ if [[ "$ACTION" == "stamp" ]]; then
     fi
     fi
     _source_runtime_unchanged || exit 1
-    printf '%s\n' "$snap_dir" > "$INSTALL_DIR/payload-dir"
-    printf '%s\n' "$SRC_VERSION" > "$INSTALL_DIR/stamped-version"
+    if [[ -n "$SOURCE_RUNTIME_IDENTITY" ]]; then
+        source_python="$(_bootstrap_python)" || exit 1
+        "$source_python" -I -B "$SCRIPT_DIR/versioned_runtime.py" --root "$INSTALL_DIR" \
+            publish-redirects --payload-dir "$snap_dir" --version "$SRC_VERSION" \
+            --expected-source-identity "$SOURCE_RUNTIME_IDENTITY" || exit 1
+    else
+        printf '%s\n' "$snap_dir" > "$INSTALL_DIR/payload-dir"
+        printf '%s\n' "$SRC_VERSION" > "$INSTALL_DIR/stamped-version"
+    fi
     _ok "Snapshot: $snap_dir"
     write_simple_binstub \
         "agent-pull-requests" "agent_pull_requests" "$INSTALL_DIR" "$LOCAL_BIN" "$INSTALL_DIR/bin" "scripts/install.sh" "AGENT_PULL_REQUESTS_NO_SELFPROVISION" \
@@ -715,12 +724,25 @@ if [[ "$SLOT_ALREADY_COMPLETE" -eq 0 ]]; then
     _ok 'Package installed: agent-pull-requests'
 fi
 
+# Source manifest inputs are captured before activation.
+if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
+    _source_runtime_unchanged || exit 1
+    SOURCE_MANIFEST_GIT="$(_git_info "$(dirname "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}")")" || exit 1
+fi
 _versioned_activate || exit 1
 write_simple_binstub \
     "agent-pull-requests" "agent_pull_requests" "$INSTALL_DIR" "$LOCAL_BIN" "$INSTALL_DIR/bin" "scripts/install.sh" "AGENT_PULL_REQUESTS_NO_SELFPROVISION" \
     "$SCRIPT_DIR/resolve-runtime.ps1" "$SCRIPT_DIR/resolve-runtime.sh"
 source_fields="$(_source_manifest_fields)" || exit 1
-write_deploy_manifest "agent-pull-requests" "agent-pull-requests" "$INSTALL_DIR" "$PLUGIN_DIR" "$VENV_DIR" "$source_fields" "${COPILOT_PLUGIN_STAGED_FROM:-}" "$PACKAGE_VERSION"
+if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
+    (
+        _payload_hash() { printf '%s\n' "$PAYLOAD_HASH"; }
+        _git_info() { printf '%s\n' "$SOURCE_MANIFEST_GIT"; }
+        write_deploy_manifest "agent-pull-requests" "agent-pull-requests" "$INSTALL_DIR" "$PLUGIN_DIR" "$VENV_DIR" "$source_fields" "${COPILOT_PLUGIN_STAGED_FROM:-}" "$PACKAGE_VERSION"
+    )
+else
+    write_deploy_manifest "agent-pull-requests" "agent-pull-requests" "$INSTALL_DIR" "$PLUGIN_DIR" "$VENV_DIR" "$source_fields" "${COPILOT_PLUGIN_STAGED_FROM:-}" "$PACKAGE_VERSION"
+fi
 
 echo ""
 if "$LINK_PYTHON" -c 'import agent_pull_requests' 2>/dev/null; then

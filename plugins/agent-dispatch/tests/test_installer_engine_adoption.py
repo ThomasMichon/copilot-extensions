@@ -88,7 +88,8 @@ def _function(ext: str, name: str) -> str:
     )
     match = re.search(pattern, text)
     assert match, name
-    return match.group(0) + "\n"
+    source = (PLUGIN / "scripts" / f"source-runtime.{ext}").as_posix()
+    return f". '{source}'\n" + match.group(0) + "\n"
 
 
 def _env(tmp_path: Path) -> dict[str, str]:
@@ -128,6 +129,7 @@ def _env(tmp_path: Path) -> dict[str, str]:
             "uname",
             "tr",
             "mv",
+            "mktemp",
             "cat",
             "git",
         ):
@@ -805,6 +807,7 @@ if (@(Get-ChildItem (Join-Path $InstallDir 'snapshots') -Directory).Count -ne {1
         "versioned_runtime_leases.py",
         "versioned_runtime_construction.py",
         "versioned_runtime_source.py",
+        "versioned_runtime_publication.py",
     ):
         source = ENGINE if name in (
             "installer_dependency_policy.py", "installer_dependency_config.py",

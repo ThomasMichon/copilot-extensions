@@ -7,6 +7,7 @@ import re
 import shutil
 import subprocess
 import sys
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -40,7 +41,7 @@ def test_real_wheels_verify_and_reject_frozen_pre_seam_core(distribution_root):
             shutil.copy2(repo / "libs" / "versioned-runtime" / "versioned_runtime.py", primitive)
             for name in (
                 "versioned_runtime_leases.py", "versioned_runtime_construction.py",
-                "versioned_runtime_source.py",
+                "versioned_runtime_source.py", "versioned_runtime_publication.py",
             ):
                 shutil.copy2(repo / "libs/versioned-runtime" / name, primitive.with_name(name))
             shutil.copy2(
@@ -66,6 +67,11 @@ def test_real_wheels_verify_and_reject_frozen_pre_seam_core(distribution_root):
             cwd=build, capture_output=True, text=True, timeout=60, **no_window_kwargs(),
         )
         assert result.returncode == 0, result.stdout + result.stderr
+        if source.name == "index":
+            with zipfile.ZipFile(next(bundle.glob("agent_index_service-*.whl"))) as wheel:
+                assert wheel.read("agent_index_service/versioned_runtime_publication.py") == (
+                    repo / "libs" / "versioned-runtime" / "versioned_runtime_publication.py"
+                ).read_bytes()
     commit = "a" * 40
     with pytest.raises(ReleaseError, match="incompatible bundled requirement: agent-index"):
         build_descriptor(bundle, source_commit=commit)

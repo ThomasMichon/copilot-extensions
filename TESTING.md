@@ -149,6 +149,24 @@ only pinned Git helper files in an isolated child, verifies materialized bytes
 and rewritten paths, and retains the obsolete-helper refusal as a negative.
 It does not build, install, publish or qualify an artifact.
 
+Source-installer smoke contracts cover receipt changes, canonical snapshot
+publication and generation selection with small assembled payloads. Logger and
+Vault additionally share an explicit full-install lane in Logger's
+`tests/test_source_runtime_install.py`: it stamps the complete assembly, makes
+the publisher unavailable, provisions and reuses the immutable runtime, then
+checks installed commands and failed-candidate preservation in separate bounded
+tests sharing one healthy installation. Run each plugin parameter separately
+through the bounded supervisor with
+`COPILOT_EXTENSIONS_SOURCE_INSTALL_FULL=1` in the runner's environment:
+
+```text
+python tools/run-plugin-tests.py agent-logger --allow-explicit-tiers --test-file tests/test_source_runtime_install.py -k "(stamp_provision_reuse or failed_source_candidate) and agent-logger"
+python tools/run-plugin-tests.py agent-logger --allow-explicit-tiers --test-file tests/test_source_runtime_install.py -k "(stamp_provision_reuse or failed_source_candidate) and agent-vault"
+```
+
+These expensive full-install cases are not unconditional required smoke tests.
+They do not start a deployed service or request credentials.
+
 Native tmux pane targeting and seeded New/Resume handoff have a focused lane:
 
 ```text

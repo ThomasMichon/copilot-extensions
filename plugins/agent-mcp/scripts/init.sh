@@ -722,6 +722,15 @@ _ok 'Package installed: agent-mcp'
 
 fi
 
+_git_info() {
+    local path="$1" commit branch dirty
+    commit=$(git -C "$path" rev-parse --short HEAD 2>/dev/null || echo "unknown")
+    branch=$(git -C "$path" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
+    dirty="false"
+    [[ -n "$(git -C "$path" status --porcelain 2>/dev/null)" ]] && dirty="true"
+    echo "$commit $branch $dirty"
+}
+
 # === install-contract:v3 versioned-venv activate -- keep byte-identical across plugins ===
 if [[ "$VERSIONED_RUNTIME" -eq 1 ]]; then
     # Point the stable .venv link at this version's freshly-built slot, moving a
@@ -736,6 +745,10 @@ if [[ "$VERSIONED_RUNTIME" -eq 1 ]]; then
         exit 1
     fi
     _versioned_mark_complete || exit 1
+    # Source manifest inputs are captured before activation.
+    if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
+        SOURCE_MANIFEST_GIT="$(_git_info "$(cd "$PLUGIN_DIR/../.." && pwd)")" || exit 1
+    fi
     _assert_source_runtime || exit 1
     if ! "$VENV_PYTHON" "$VR_SCRIPT" --root "$INSTALL_DIR" --link-name '.venv' \
             activate "$SRC_VERSION" --replace-nonlink --no-link >/dev/null 2>&1; then
@@ -837,32 +850,28 @@ _source_kind() {
     esac
 }
 # === end install-contract:v4 source-kind ===
-_git_info() {
-    local path="$1" commit branch dirty
-    commit=$(git -C "$path" rev-parse --short HEAD 2>/dev/null || echo "unknown")
-    branch=$(git -C "$path" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
-    dirty="false"
-    [[ -n "$(git -C "$path" status --porcelain 2>/dev/null)" ]] && dirty="true"
-    echo "$commit $branch $dirty"
-}
-
 # Unified schema_version 3 manifest (install-contract): records the source
 # footprint (marketplace vs local) so deploys are auditable like the siblings.
 MANIFEST_PATH="$INSTALL_DIR/deploy-manifest.json"
-_assert_source_runtime || exit 1
+if [[ -z "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then _assert_source_runtime || exit 1; fi
 SOURCE_FIELDS=""
 if [[ -n "$SOURCE_RUNTIME_IDENTITY" ]]; then
-    SOURCE_FIELDS="$("$(_bootstrap_python)" -I -B "$SCRIPT_DIR/versioned_runtime_source.py" \
-        --payload "$PLUGIN_DIR" --package-version "$PACKAGE_VERSION" --plugin agent-mcp \
-        --expected-runtime-version "$SRC_VERSION" --format shell-fields)" || exit 1
-    SOURCE_FIELDS="$SOURCE_FIELDS,"
+    SOURCE_FIELDS="${SOURCE_RUNTIME_IDENTITY:1:${#SOURCE_RUNTIME_IDENTITY}-2},"
 fi
 KIND="$(_source_kind "$PLUGIN_DIR")"
-VER="$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' "$PLUGIN_DIR/pyproject.toml" 2>/dev/null || echo 0.0.0)"
+if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
+    VER="$PACKAGE_VERSION"
+else
+    VER="$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' "$PLUGIN_DIR/pyproject.toml" 2>/dev/null || echo 0.0.0)"
+fi
 COMMIT="null"; BRANCH="null"; DIRTY="false"
 if [[ "$KIND" == "local" ]]; then
-    REPO_ROOT="$(cd "$PLUGIN_DIR/../.." && pwd)"
-    read -r _c _b _d <<< "$(_git_info "$REPO_ROOT")"
+    if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
+        read -r _c _b _d <<< "$SOURCE_MANIFEST_GIT"
+    else
+        REPO_ROOT="$(cd "$PLUGIN_DIR/../.." && pwd)"
+        read -r _c _b _d <<< "$(_git_info "$REPO_ROOT")"
+    fi
     COMMIT="\"$_c\""; BRANCH="\"$_b\""; DIRTY="$_d"
 fi
 TMP="$MANIFEST_PATH.tmp"

@@ -29,6 +29,7 @@ def _project(tmp_path):
     shutil.copy2(source.parent.parent / "libs" / "versioned-runtime" / "versioned_runtime.py", primitive)
     for name in (
         "versioned_runtime_leases.py", "versioned_runtime_construction.py", "versioned_runtime_source.py",
+        "versioned_runtime_publication.py",
     ):
         shutil.copy2(source.parent.parent / "libs/versioned-runtime" / name, primitive.with_name(name))
     shutil.copy2(
@@ -66,6 +67,13 @@ def test_sdist_to_wheel_preserves_canonical_primitive_outside_repository(distrib
         stream = archive.extractfile(names[0])
         assert stream is not None
         assert stream.read() == expected
+        publication = next(
+            name for name in archive.getnames()
+            if name.endswith("/src/agent_index_service/versioned_runtime_publication.py")
+        )
+        assert archive.extractfile(publication).read() == (
+            primitive.with_name("versioned_runtime_publication.py").read_bytes()
+        )
         if "filter" in inspect.signature(archive.extractall).parameters:
             archive.extractall(extracted, filter="data")
         else:
@@ -93,7 +101,7 @@ def test_sdist_to_wheel_preserves_canonical_primitive_outside_repository(distrib
         assert member in wheel.read(record).decode()
         for name in (
             "versioned_runtime_leases.py", "versioned_runtime_construction.py",
-            "versioned_runtime_source.py",
+            "versioned_runtime_source.py", "versioned_runtime_publication.py",
         ):
             member = f"agent_index_service/{name}"
             assert wheel.read(member) == primitive.with_name(name).read_bytes()
@@ -101,14 +109,18 @@ def test_sdist_to_wheel_preserves_canonical_primitive_outside_repository(distrib
 
 
 @pytest.mark.parametrize("included_copy", [False, True])
-def test_missing_canonical_and_sdist_resource_fails_build(distribution_root, included_copy):
+@pytest.mark.parametrize("resource", ["versioned_runtime.py", "versioned_runtime_publication.py"])
+def test_missing_canonical_and_sdist_resource_fails_build(distribution_root, included_copy, resource):
     project, primitive = _project(distribution_root)
+    source = primitive.with_name(resource)
     if included_copy:
-        shutil.copy2(primitive, project / "src" / "agent_index_service" / "_versioned_runtime.py")
-    primitive.unlink()
+        name = "_versioned_runtime.py" if resource == "versioned_runtime.py" else resource
+        shutil.copy2(source, project / "src" / "agent_index_service" / name)
+    source.unlink()
     result = _build(project, distribution_root / "artifacts", "build_wheel")
     assert result.returncode != 0
-    assert "runtime primitive is missing" in result.stderr
+    label = "runtime primitive" if resource == "versioned_runtime.py" else resource
+    assert f"{label} is missing" in result.stderr
 
 
 def test_missing_canonical_helper_cannot_fall_back_to_included_copy(distribution_root):

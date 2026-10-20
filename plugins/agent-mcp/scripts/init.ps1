@@ -523,8 +523,21 @@ function Invoke-Stamp {
         Move-Item -LiteralPath $snapTmp -Destination $snapDir -Force
     }
     Assert-SourceSnapshot -Snapshot $snapDir
-    [System.IO.File]::WriteAllText((Join-Path $InstallDir 'payload-dir'), $snapDir, $utf8NoBom)
-    [System.IO.File]::WriteAllText((Join-Path $InstallDir 'stamped-version'), $SrcVersion, $utf8NoBom)
+    if ($script:SourceRuntimeIdentity) {
+        $py = Get-BootstrapPython
+        if (-not $py) { throw 'Source redirect publication requires a bootstrap Python interpreter' }
+        $nativeError = ''
+        $result = Invoke-Hidden -FilePath $py -ArgList @(
+            '-I', '-B', (Join-Path $ScriptDir 'versioned_runtime.py'),
+            '--root', $InstallDir, 'publish-redirects', '--payload-dir', $snapDir,
+            '--version', $SrcVersion, '--expected-source-identity', $script:SourceRuntimeIdentity
+        ) -ErrorOutput ([ref]$nativeError)
+        $code = $LASTEXITCODE
+        if ($code -ne 0) { throw "Source redirect publication failed (exit ${code}): $result$nativeError" }
+    } else {
+        [System.IO.File]::WriteAllText((Join-Path $InstallDir 'payload-dir'), $snapDir, $utf8NoBom)
+        [System.IO.File]::WriteAllText((Join-Path $InstallDir 'stamped-version'), $SrcVersion, $utf8NoBom)
+    }
     Write-Ok "Snapshot: $snapDir"
     Deploy-SelfProvisioningBinstub
     Write-Ok 'Stamped: agent-mcp binstub on PATH; runtime provisions on first use.'
@@ -795,6 +808,10 @@ if ($VersionedRuntime) {
         throw "Fresh runtime slot failed its health gate (versions/$SrcVersion)"
     }
     if (-not (Invoke-VersionedMarkComplete)) { throw 'Runtime construction completion failed' }
+    # Source manifest inputs are captured before activation.
+    if ($script:SourceRuntimeIdentity) {
+        $sourceManifestGit = Get-GitInfo -Path (Split-Path -Parent (Split-Path -Parent $PluginDir))
+    }
     Assert-SourceRuntime
     Invoke-Hidden -FilePath $VenvPython -ArgList @($VrScript, '--root', $InstallDir, '--link-name', '.venv', 'activate', $SrcVersion, '--no-link') | Out-Null
     if ($LASTEXITCODE -ne 0) {
@@ -887,21 +904,21 @@ Deploy-SelfProvisioningBinstub
 
 # -- 5. Write deploy manifest ------------------------------------------
 
-Assert-SourceRuntime
+if (-not $script:SourceRuntimeIdentity) { Assert-SourceRuntime }
 # Unified schema_version 3 manifest (install-contract): records the source
 # footprint (marketplace vs local) so deploys are auditable like the siblings.
 $manifestPath = Join-Path $InstallDir 'deploy-manifest.json'
 $kind = Get-SourceKind -PluginPath $PluginDir
-$ver = '0.0.0'
+$ver = if ($script:SourceRuntimeIdentity) { $PackageVersion } else { '0.0.0' }
 $pyproj = Join-Path $PluginDir 'pyproject.toml'
-if (Test-Path $pyproj) {
+if (-not $script:SourceRuntimeIdentity -and (Test-Path $pyproj)) {
     $verLine = Select-String -Path $pyproj -Pattern '^\s*version\s*=' | Select-Object -First 1
     if ($verLine) { $ver = ($verLine.Line -replace '.*=\s*"([^"]+)".*', '$1') }
 }
 $commit = $null; $branch = $null; $dirty = $false
 if ($kind -eq 'local') {
     $repoRoot = Split-Path -Parent (Split-Path -Parent $PluginDir)
-    $git = Get-GitInfo -Path $repoRoot
+    $git = if ($script:SourceRuntimeIdentity) { $sourceManifestGit } else { Get-GitInfo -Path $repoRoot }
     $commit = $git.commit; $branch = $git.branch; $dirty = $git.dirty
 }
 $manifest = [ordered]@{

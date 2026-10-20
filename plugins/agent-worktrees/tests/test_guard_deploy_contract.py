@@ -105,16 +105,17 @@ def test_all_installers_deploy_every_py_hook():
 def test_wrappers_deploy_before_monitor_activation():
     ps1 = _INSTALL_PS1.read_text("utf-8")
     sh = _INSTALL_SH.read_text("utf-8")
-    assert not re.search(
-        r"Invoke-VersionedActivate\)\s*\{ exit 1 \}.{0,200}Deploy-Wrappers",
-        ps1,
-        re.DOTALL,
+    lifecycle = (_PLUGIN / "scripts" / "runtime_install.py").read_text("utf-8")
+    settle = lifecycle.split("def settle_candidate(", 1)[1].split("\ndef main(", 1)[0]
+    assert (
+        settle.index("_load_installed(") < settle.index("_publish_helpers(")
+        < settle.index("runtime.activate(root, version")
+        < settle.index("cutover.activate_after_update(")
     )
-    assert not re.search(
-        r"_versioned_activate \|\| exit 1.{0,200}deploy_wrappers",
-        sh,
-        re.DOTALL,
-    )
+    assert "Invoke-VersionedActivate" not in ps1.rsplit("switch ($Action) {", 1)[1]
+    assert "_versioned_activate" not in sh.rsplit('case "$ACTION" in', 1)[1]
+    assert "$scope = if ($Action -in @('install', 'update')) { 'wrappers' } else { 'resolvers' }" in ps1
+    assert '[[ "$ACTION" != install && "$ACTION" != update ]] || scope=wrappers' in sh
 
 
 def test_all_installers_deploy_platform_pane_wrapper():

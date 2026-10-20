@@ -89,7 +89,8 @@ def test_versioned_slot_clean_propagates_real_exit_code():
     assert 'construction-shell --shell sh)" || return 1' in body
     assert '_runtime_construction_begin "$py" "$vr" "$INSTALL_DIR" "$SRC_VERSION"' in body
     assert '"$(_payload_hash)" "$(basename "$LINK_DIR")"' in body
-    assert body.rstrip().endswith('"$(_payload_hash)" "$(basename "$LINK_DIR")"')
+    assert '"$(_payload_hash)" "$(basename "$LINK_DIR")" || return 1' in body
+    assert body.rstrip().endswith("_assert_source_runtime")
     assert "|| true" not in body
     assert "return 0" not in body
 
@@ -314,7 +315,7 @@ def test_versioned_activate_releases_the_lease_even_on_set_e():
     text = _INSTALL_SH.read_text(encoding="utf-8")
     body = _function_body(text, "_versioned_activate")
 
-    assert "_versioned_activate_inner && rc=0 || rc=$?" in body
+    assert '_versioned_activate_inner "${1:-none}" && rc=0 || rc=$?' in body
     assert re.search(r"(?<!&& )(?<!\|\| )^\s*_versioned_activate_inner\s*$", body, re.MULTILINE) is None, (
         "_versioned_activate_inner must never appear as a bare statement "
         "on its own line -- set -e would trip on a genuine health-gate "

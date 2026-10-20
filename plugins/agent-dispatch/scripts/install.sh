@@ -483,10 +483,14 @@ _versioned_activate() {
     local vr="$SCRIPT_DIR/versioned_runtime.py"
     local py="$VENV_DIR/bin/python"
     [[ -x "$py" ]] || py="$LINK_DIR/bin/python"
-    mkdir -p "$INSTALL_DIR"
+    mkdir -p "$INSTALL_DIR" || return 1
+    local borrowed_publication=0
+    [[ "${__dispatch_publication_root:-}" != "$INSTALL_DIR" ]] || borrowed_publication=1
     local _activate_lock_link=""
     _unlock_activate() {
-        if [[ -n "$_activate_lock_link" ]]; then
+        if [[ "$borrowed_publication" == 1 ]]; then
+            return 0
+        elif [[ -n "$_activate_lock_link" ]]; then
             local owner
             owner="$(readlink "$_activate_lock_link" 2>/dev/null || true)"
             [[ "$owner" != "$$" ]] || rm -f "$_activate_lock_link"
@@ -495,9 +499,11 @@ _versioned_activate() {
             { exec 8>&-; } 2>/dev/null || true
         fi
     }
-    if command -v flock >/dev/null 2>&1 && [[ "${COPILOT_EXT_NO_FLOCK:-}" != 1 ]]; then
-        exec 8>"$INSTALL_DIR/.activate.lock"
-        flock 8
+    if [[ "$borrowed_publication" == 1 ]]; then
+        :
+    elif command -v flock >/dev/null 2>&1 && [[ "${COPILOT_EXT_NO_FLOCK:-}" != 1 ]]; then
+        exec 8>"$INSTALL_DIR/.activate.lock" || return 1
+        if ! flock 8; then exec 8>&-; return 1; fi
     else
         _activate_lock_link="$INSTALL_DIR/.activate.lock.pid"
         local owner owner_now
@@ -555,6 +561,7 @@ _versioned_activate() {
         done
     fi
     local current_active
+    if ! _assert_source_runtime; then _unlock_activate; return 1; fi
     current_active="$(_versioned_current)"
     # Dual-authority comparison baseline, mirroring do_stamp's own guard:
     # stamped-version is a SEPARATE authority a concurrent `stamp` action
@@ -578,7 +585,13 @@ _versioned_activate() {
         _unlock_activate
         return 0
     fi
-    if ! "$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" activate "$SRC_VERSION" --replace-nonlink --no-link; then
+    local receipt_file
+    local receipt_args=()
+    if [[ -n "${_RUNTIME_PUBLICATION_EVIDENCE:-}" ]]; then
+        _runtime_publication_native_begin receipt_file || { _unlock_activate; return 1; }
+        receipt_args=(--ownership-receipt "$receipt_file")
+    fi
+    if ! "$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" activate "$SRC_VERSION" --replace-nonlink --no-link "${receipt_args[@]}"; then
         _fail "Failed to activate versioned runtime slot (versions/$SRC_VERSION; marker-only, no .venv link)"
         _unlock_activate
         return 1
@@ -645,6 +658,13 @@ _bootstrap_python() {
 }
 
 _payload_hash() {
+    if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
+        _assert_source_runtime || return 1
+        local py
+        py="$(_bootstrap_python)" || return 1
+        "$py" -I -c 'import hashlib,sys; print(hashlib.sha256(sys.argv[1].encode()).hexdigest())' "$SOURCE_RUNTIME_IDENTITY"
+        return $?
+    fi
     # Cheap payload fingerprint for the completion marker (#935): sha256 of
     # pyproject.toml + the vendored-lib version set. Detects a dev-checkout that
     # changed the payload WITHOUT bumping the version. Fails on any error.
@@ -674,6 +694,7 @@ _payload_hash() {
 }
 
 _versioned_slot_clean() {
+    _assert_source_runtime || return 1
     [[ "$VERSIONED_RUNTIME" == 1 ]] || {
         printf '%s\n' 'Construction requires a versioned runtime candidate' >&2; return 1;
     }
@@ -685,10 +706,12 @@ _versioned_slot_clean() {
         eval "$helpers"
     fi
     _runtime_construction_begin "$py" "$vr" "$INSTALL_DIR" "$SRC_VERSION" \
-        "$(_payload_hash)" "$(basename "$LINK_DIR")"
+        "$(_payload_hash)" "$(basename "$LINK_DIR")" || return 1
+    _assert_source_runtime
 }
 
 _versioned_mark_complete() {
+    _assert_source_runtime || return 1
     local actual_hash
     actual_hash="$(_payload_hash)" || return 1
     if [[ -n "${1:-}" && "$1" != "$actual_hash" ]]; then
@@ -766,6 +789,7 @@ _source_version() {
 # every platform.
 _version_lt() {
     local a="${1//-/.}" b="${2//-/.}"
+    a="${a%%[+.]source.*}"; b="${b%%[+.]source.*}"
     [[ "$a" == "$b" ]] && return 1
     local -a pa pb
     IFS='.' read -r -a pa <<< "$a"
@@ -898,7 +922,13 @@ _adopted_projects() {
 # (AGENT_DISPATCH_PROVISION_OFFLINE=1 skips straight to it) and is expected
 # to be dropped once the on-demand fetch path is validated.
 deploy_binstub() {
-    mkdir -p "$LOCAL_BIN" "$INSTALL_DIR/bin"
+    _assert_source_runtime || return 1
+    if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
+        local snapshot
+        snapshot="$(_source_snapshot)" || return 1
+        _publish_source_redirects "$snapshot" || return 1
+    fi
+    mkdir -p "$LOCAL_BIN" "$INSTALL_DIR/bin" || return 1
     local machine="${AGENT_DISPATCH_SUPERVISE_MACHINE:-}"
     if [[ -z "$machine" ]] && command -v agent-worktrees >/dev/null 2>&1; then # marketplace-isolation: allow installer-management
         machine="$(agent-worktrees get machine 2>/dev/null | head -n1 || true)"
@@ -920,14 +950,22 @@ deploy_binstub() {
         fi
     fi
     [[ -n "$machine" ]] || machine="$(hostname 2>/dev/null || true)"
-    [[ -n "$machine" ]] &&
+    if [[ -n "$machine" ]]; then
+        local MACHINE_STAGE
+        _runtime_publication_stage "$INSTALL_DIR/machine" MACHINE_STAGE || return 1
         printf '%s' "$(printf '%s' "$machine" | tr '[:upper:]' '[:lower:]')" \
-            > "$INSTALL_DIR/machine"
+            > "$MACHINE_STAGE" || return 1
+        _runtime_publication_commit_file "$INSTALL_DIR/machine" "$MACHINE_STAGE" || return 1
+    fi
     # Co-deploy the canonical marker-only resolver (uniform-runtime-resolution, #765).
     for r in resolve-runtime.sh resolve-runtime.ps1; do
-        [ -f "$SCRIPT_DIR/$r" ] && cp -f "$SCRIPT_DIR/$r" "$INSTALL_DIR/bin/$r"
+        if [[ -f "$SCRIPT_DIR/$r" ]]; then
+            _runtime_publication_copy "$SCRIPT_DIR/$r" "$INSTALL_DIR/bin/$r" || return 1
+        fi
     done
-    cat > "$STUB" << 'STUBEOF'
+    local STUB_STAGE BOARD_STAGE
+    _runtime_publication_stage "$STUB" STUB_STAGE || return 1
+    cat > "$STUB_STAGE" << 'STUBEOF' || return 1
 #!/usr/bin/env bash
 # agent-dispatch binstub -- self-provisioning (install-on-first-use).
 # Resolves the interpreter SOLELY via the junction-free versioned-runtime marker
@@ -970,8 +1008,35 @@ printf 'provisioning %s\n' "$(date -u +%FT%TZ 2>/dev/null)" > "$_status" 2>/dev/
 # AGENT_DISPATCH_PROVISION_OFFLINE=1 skips straight to the fallback (e.g. an
 # air-gapped host).
 _rc=1
+_source_pinned=0
+_source_version=""
+_source_marker_present=0
+_source_payload="$(cat "$_root/payload-dir" 2>/dev/null)"
+for _marker in stamped-version current-version last-known-good; do
+    _selected="$(cat "$_root/$_marker" 2>/dev/null)"
+    case "$_selected" in
+        *+source.*|*.source.*)
+            _source_marker_present=1
+            if [ "$_source_payload" = "$_root/snapshots/$_selected" ]; then
+                _source_pinned=1; _source_version="$_selected"; break
+            fi
+            ;;
+    esac
+done
+if [ "$_source_marker_present" -eq 1 ] && [ "$_source_pinned" -eq 0 ]; then
+    printf '%s\n' 'Selected source snapshot is unavailable; refusing a different provisioning source.' >&2
+    exit 126
+fi
+if [ "$_source_pinned" -eq 0 ]; then
+    for _slot in "$_root"/versions/*+source.* "$_root"/versions/*.source.*; do
+        if [ -d "$_slot" ]; then
+            printf '%s\n' 'Source runtime recovery requires an exact source selector; refusing upstream provisioning.' >&2
+            exit 126
+        fi
+    done
+fi
 _boot_url="https://raw.githubusercontent.com/ThomasMichon/copilot-extensions/main/install/dispatch/bootstrap.sh"
-if [ -z "${AGENT_DISPATCH_PROVISION_OFFLINE:-}" ]; then
+if [ "$_source_pinned" -eq 0 ] && [ -z "${AGENT_DISPATCH_PROVISION_OFFLINE:-}" ]; then
     _boot_file="$(mktemp "${TMPDIR:-/tmp}/agent-dispatch-bootstrap.XXXXXX")"
     printf '%s\n' "[$_name] fetching upstream installer (install/dispatch/bootstrap.sh, main)..." >&2
     if (command -v curl >/dev/null 2>&1 && curl -fsSL "$_boot_url" -o "$_boot_file") || \
@@ -985,7 +1050,13 @@ if [ -z "${AGENT_DISPATCH_PROVISION_OFFLINE:-}" ]; then
 fi
 if [ "$_rc" -ne 0 ]; then
     _install="$(cat "$_root/payload-dir" 2>/dev/null)/scripts/install.sh"
-    [ -f "$_install" ] || _install="$(ls "$HOME"/.copilot/installed-plugins/*/"$_name"/scripts/install.sh 2>/dev/null | head -n1)"
+    if [ "$_source_pinned" -eq 1 ] && [ "$_install" != "$_root/snapshots/$_source_version/scripts/install.sh" ]; then
+        printf '%s\n' 'Selected source snapshot is unavailable; refusing a different provisioning source.' >&2
+        exit 126
+    fi
+    if [ ! -f "$_install" ] && [ "$_source_pinned" -eq 0 ]; then
+        _install="$(ls "$HOME"/.copilot/installed-plugins/*/"$_name"/scripts/install.sh 2>/dev/null | head -n1)"
+    fi
     if [ -f "$_install" ]; then
         bash "$_install" provision >&2
         _rc=$?
@@ -1007,14 +1078,21 @@ else
 fi
 exit "$_rc"
 STUBEOF
-    chmod +x "$STUB"
-    sed 's/-m agent_dispatch /-m agent_dispatch.board_cli /g' "$STUB" > "$BOARD_STUB"
-    chmod +x "$BOARD_STUB"
+    chmod +x "$STUB_STAGE" || return 1
+    _runtime_publication_commit_file "$STUB" "$STUB_STAGE" || return 1
+    _runtime_publication_stage "$BOARD_STUB" BOARD_STAGE || return 1
+    sed 's/-m agent_dispatch /-m agent_dispatch.board_cli /g' "$STUB" > "$BOARD_STAGE" || return 1
+    chmod +x "$BOARD_STAGE" || return 1
+    _runtime_publication_commit_file "$BOARD_STUB" "$BOARD_STAGE" || return 1
     _ok "Binstub: $STUB (self-provisioning)"
     _ok "Fast board binstub: $BOARD_STUB"
 }
 
 _ensure_runtime() {
+    _assert_source_runtime || return 1
+    if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
+        _source_snapshot >/dev/null || return 1
+    fi
     if [[ ! -d "$PKG_SRC_DIR" ]]; then
         _fail "Package source not found at $PKG_SRC_DIR"
         exit 1
@@ -1029,7 +1107,7 @@ _ensure_runtime() {
     local have_uv=0
     command -v uv >/dev/null 2>&1 && have_uv=1
 
-    mkdir -p "$INSTALL_DIR" "$LOCAL_BIN"
+    mkdir -p "$INSTALL_DIR" "$LOCAL_BIN" || return 1
     _ok "Directories: $INSTALL_DIR"
 
     _versioned_slot_clean || return 1
@@ -1037,7 +1115,7 @@ _ensure_runtime() {
     if [[ ! -x "$VENV_PYTHON" || ! -f "$VENV_DIR/pyvenv.cfg" ]]; then
         if [[ "$have_uv" -eq 1 ]]; then
             _step 'Creating venv via uv...'
-            _versioned_slot_clean
+            _versioned_slot_clean || return 1
             invoke_uv_venv_resilient "$UV_CMD" "$VENV_DIR" --allow-existing >/dev/null 2>&1 \
                 || "$py" -m venv "$VENV_DIR" >/dev/null 2>&1
         else
@@ -1178,7 +1256,7 @@ _ensure_runtime() {
     # truth -- plus git commit/branch) into the deployed package, so the runtime
     # reports its version without importlib.metadata. Best-effort; mirrors
     # agent-worktrees' stamp_build_info. --
-    if pkg_dir="$("$VENV_PYTHON" -c 'import agent_dispatch, os; print(os.path.dirname(agent_dispatch.__file__))' 2>/dev/null)" && [[ -n "$pkg_dir" ]]; then
+    if pkg_dir="$("$VENV_PYTHON" -I -c 'import agent_dispatch, os; print(os.path.dirname(agent_dispatch.__file__))' 2>/dev/null)" && [[ -n "$pkg_dir" ]]; then
         repo_root="$(cd "$PLUGIN_DIR/../.." && pwd)"
         "$VENV_PYTHON" "$SCRIPT_DIR/stamp_build_info.py" \
             --package-dir "$pkg_dir" --plugin-dir "$PLUGIN_DIR" --git-dir "$repo_root" >/dev/null 2>&1 || true
@@ -1216,24 +1294,15 @@ _ensure_runtime() {
     # ever activated.
     if [[ "$VERSIONED_RUNTIME" == 1 ]]; then
         prev_version="$(_versioned_current)"
-        if ! "$VENV_PYTHON" -c 'import agent_dispatch, agent_dispatch.embody, agent_dispatch.__main__' 2>/dev/null; then
+        if ! "$VENV_PYTHON" -I -c 'import agent_dispatch, agent_dispatch.embody, agent_dispatch.__main__' 2>/dev/null; then
             _fail "Fresh runtime slot failed its health gate (versions/$SRC_VERSION) -- not activating"
             exit 1
         fi
         _versioned_mark_complete || exit 1
         _supervisor_audit runtime-ready import-health-gate "" "" ok
-        _versioned_activate || exit 1
-        # The supersession check and the shared publication it protects
-        # (the binstub + deploy-manifest, both readable/overwritable by any
-        # OTHER concurrent invocation) are NOT atomic unless the SAME global
-        # lock spans both: checking, then releasing, then publishing still
-        # leaves a gap where a newer installer (or stamp) could activate and
-        # publish in between, and this older invocation would still
-        # overwrite that newer content with its own stale one. Hold the
-        # same global (.activate.lock) lock _versioned_activate itself uses
-        # through the check AND deploy_binstub AND _write_manifest -- the
-        # two steps that actually publish shared, version-sensitive content
-        # another invocation could race.
+        # Hold one publication lock across activation and required file writes.
+        # Restore the previous selectors/readers if any publication fails;
+        # the immutable candidate and its completion evidence remain reusable.
         local _publish_lock_link=""
         _unlock_publish() {
             if [[ -n "$_publish_lock_link" ]]; then
@@ -1246,8 +1315,8 @@ _ensure_runtime() {
             fi
         }
         if command -v flock >/dev/null 2>&1 && [[ "${COPILOT_EXT_NO_FLOCK:-}" != 1 ]]; then
-            exec 8>"$INSTALL_DIR/.activate.lock"
-            flock 8
+            exec 8>"$INSTALL_DIR/.activate.lock" || return 1
+            if ! flock 8; then exec 8>&-; return 1; fi
         else
             _publish_lock_link="$INSTALL_DIR/.activate.lock.pid"
             local owner owner_now
@@ -1290,6 +1359,13 @@ _ensure_runtime() {
                 fi
             done
         fi
+        local __dispatch_publication_root="$INSTALL_DIR"
+        _runtime_publication_begin_install || { _unlock_publish; return 1; }
+        if ! _runtime_publication_activate _versioned_activate; then
+            _runtime_publication_restore || _fail 'Activation publication rollback failed'
+            _unlock_publish
+            return 1
+        fi
         if _activation_superseded_now; then
             # This invocation's own build lost the cross-version activation
             # race -- either caught immediately by _versioned_activate
@@ -1305,6 +1381,7 @@ _ensure_runtime() {
             # stale one. Stop here; the already-active newer slot remains
             # fully installed and untouched.
             _skip "Build $SRC_VERSION superseded by a newer concurrent build -- skipping remaining publication (manifest, verification, PATH, pivot) for this invocation"
+            _runtime_publication_discard || { _unlock_publish; return 1; }
             _unlock_publish
             return 0
         fi
@@ -1325,23 +1402,32 @@ _ensure_runtime() {
         fi
         if [[ -n "$publish_stamped_version" ]] && _version_lt "$SRC_VERSION" "$publish_stamped_version" && [[ "$FORCE" -ne 1 ]]; then
             _skip "Not publishing: source $SRC_VERSION is older than already-stamped $publish_stamped_version (a newer stamp published first; --force to override)"
+            if ! _runtime_publication_restore; then
+                _fail 'Superseded publication rollback failed'
+                _unlock_publish
+                return 1
+            fi
             _unlock_publish
             return 0
         fi
-        deploy_binstub
-        _write_manifest
+        if ! deploy_binstub || ! _write_manifest; then
+            _runtime_publication_restore || _fail 'Runtime publication rollback failed'
+            _unlock_publish
+            return 1
+        fi
+        _runtime_publication_discard || { _unlock_publish; return 1; }
         # The Picker materializes templates only from its verified active
         # payload roots; this installer does not publish shared pivot data.
         _register_pivot
         _unlock_publish
     else
         # Legacy (non-versioned) mode: no supersession concept, no lock.
-        deploy_binstub
-        _write_manifest
+        deploy_binstub || return 1
+        _write_manifest || return 1
         _register_pivot
     fi
 
-    if "$LINK_PYTHON" -c 'import agent_dispatch, agent_dispatch.embody, agent_dispatch.__main__' 2>/dev/null; then
+    if "$LINK_PYTHON" -I -c 'import agent_dispatch, agent_dispatch.embody, agent_dispatch.__main__' 2>/dev/null; then
         _ok 'Verification: module imports successfully'
     else
         _fail 'Verification: module import failed'
@@ -1360,7 +1446,18 @@ _ensure_runtime() {
 }
 
 _write_manifest() {
+    local manifest_origin="${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}"
+    local manifest_commit=""
+    if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
+        local PLUGIN_DIR="$INSTALL_DIR/snapshots/$SRC_VERSION"
+        local SCRIPT_DIR="$PLUGIN_DIR/scripts"
+    fi
+    _assert_source_runtime || return 1
     _git_info() {
+        if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
+            printf '%s unknown false\n' "$manifest_commit"
+            return 0
+        fi
         local path="$1" commit branch dirty
         commit=$(git -C "$path" rev-parse --short HEAD 2>/dev/null || echo "unknown")
         branch=$(git -C "$path" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
@@ -1368,8 +1465,16 @@ _write_manifest() {
         [[ -n "$(git -C "$path" status --porcelain 2>/dev/null)" ]] && dirty="true"
         echo "$commit $branch $dirty"
     }
+    local fields="" py
+    if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
+        py="$(_bootstrap_python)" || return 1
+        manifest_commit="$("$py" -I -c 'import json,sys; print(json.loads(sys.argv[1])["runtime_source"]["source_commit"])' "$SOURCE_RUNTIME_IDENTITY")" || return 1
+        fields="$("$py" -I -B "$SCRIPT_DIR/versioned_runtime_source.py" \
+            --payload "$PLUGIN_DIR" --package-version "$PACKAGE_VERSION" --plugin agent-dispatch \
+            --expected-runtime-version "$SRC_VERSION" --format shell-fields)" || return 1
+    fi
     write_deploy_manifest "agent-dispatch" "agent-dispatch" "$INSTALL_DIR" \
-        "$PLUGIN_DIR" "$VENV_DIR" "" "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" "$SRC_VERSION"
+        "$PLUGIN_DIR" "$VENV_DIR" "$fields" "$manifest_origin" "${PACKAGE_VERSION:-$SRC_VERSION}"
 }
 
 # The optional Picker owns activation-aware v3 pointer materialization.
@@ -2090,7 +2195,7 @@ _install_supervisor_service() {
 # use (fits a sessionStart hook's grace window). No venv, no uv.
 do_stamp() {
     echo ''; echo '=== agent-dispatch stamp (defer runtime to first use) ==='; echo ''
-    mkdir -p "$INSTALL_DIR" "$LOCAL_BIN"
+    mkdir -p "$INSTALL_DIR" "$LOCAL_BIN" || return 1
     # Serialized under the SAME global activation lock _versioned_activate/
     # _ensure_runtime's own post-supersession-check deploy_binstub use: this
     # fast path's deploy_binstub call still writes the identical shared
@@ -2109,8 +2214,8 @@ do_stamp() {
         fi
     }
     if command -v flock >/dev/null 2>&1 && [[ "${COPILOT_EXT_NO_FLOCK:-}" != 1 ]]; then
-        exec 8>"$INSTALL_DIR/.activate.lock"
-        flock 8
+        exec 8>"$INSTALL_DIR/.activate.lock" || return 1
+        if ! flock 8; then exec 8>&-; return 1; fi
     else
         _stamp_lock_link="$INSTALL_DIR/.activate.lock.pid"
         local owner owner_now
@@ -2190,16 +2295,35 @@ do_stamp() {
         _unlock_stamp_binstub
         return 0
     fi
-    printf '%s\n' "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" > "$INSTALL_DIR/payload-dir"
-    printf '%s' "$SRC_VERSION" > "$stamped_version_marker"
-    deploy_binstub
+    if ! _assert_source_runtime; then _unlock_stamp_binstub; return 1; fi
+    local payload="${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}"
+    if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
+        payload="$(_source_snapshot)" || { _unlock_stamp_binstub; return 1; }
+    fi
+    _runtime_publication_begin_install || { _unlock_stamp_binstub; return 1; }
+    if ! {
+        if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
+            _publish_source_redirects "$payload"
+        else
+            _runtime_publication_write_value "$INSTALL_DIR/payload-dir" "$payload"$'\n'
+        fi
+    } || ! deploy_binstub || ! {
+        if [[ -z "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
+            _runtime_publication_write_value "$stamped_version_marker" "$SRC_VERSION"
+        fi
+    }; then
+        _runtime_publication_restore || _fail 'Stamp publication rollback failed'
+        _unlock_stamp_binstub
+        return 1
+    fi
+    _runtime_publication_discard || { _unlock_stamp_binstub; return 1; }
     _unlock_stamp_binstub
     _ok "Stamped: binstub on PATH; runtime provisions on first use."
 }
 
 do_install() {
     echo ''; echo '=== agent-dispatch install ==='; echo ''
-    _ensure_runtime
+    _ensure_runtime || return 1
     if _activation_superseded_now; then
         # A concurrent, newer install already activated -- either caught at
         # _ensure_runtime's own return, or only now via the LIVE re-check
@@ -2229,7 +2353,7 @@ do_update() {
     _write_update_marker
     trap _clear_update_marker EXIT
     _downgrade_guard
-    _ensure_runtime
+    _ensure_runtime || return 1
     if _activation_superseded_now; then
         # This invocation's own build lost the cross-version activation race
         # -- either caught immediately inside _ensure_runtime, or only
@@ -2496,6 +2620,15 @@ do_uninstall() {
     [[ "$DRY_RUN" -eq 1 ]] && echo "agent-dispatch uninstall dry run complete -- nothing was changed"
 }
 
+source "$SCRIPT_DIR/source-runtime.sh"
+PACKAGE_VERSION="$SRC_VERSION"
+SOURCE_RUNTIME_IDENTITY=""
+case "$ACTION" in
+    install|update|provision|stamp)
+        _initialize_source_runtime || exit 1
+        _assert_source_runtime || exit 1
+        ;;
+esac
 case "$ACTION" in
     install)   do_install ;;
     stamp)     do_stamp ;;

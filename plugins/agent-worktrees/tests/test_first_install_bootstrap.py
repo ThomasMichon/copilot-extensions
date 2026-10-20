@@ -361,10 +361,23 @@ def test_lean_provision_deploys_runtime_resolvers() -> None:
     sh_deploy = sh.split("deploy_runtime_resolvers() {", 1)[1].split(
         "deploy_wrappers() {", 1
     )[0]
-    assert "deploy_runtime_resolvers || exit 1" in sh_provision
-    assert 'mktemp "$BIN_DIR/$resolver.XXXXXX"' in sh_deploy
-    assert 'chmod +x "$tmp"' in sh_deploy
-    assert 'mv -f "$tmp" "$BIN_DIR/$resolver"' in sh_deploy
+    assert sh_provision.index("_deploy_python_runtime || exit 1") < sh_provision.index(
+        "deploy_tool_binstub"
+    )
+    assert "deploy_wrappers" not in sh_provision
+    sh_owner = sh.split("_deploy_python_runtime() {", 1)[1].split(
+        "write_deploy_manifest() {", 1
+    )[0]
+    assert "local publisher scope=resolvers" in sh_owner
+    assert '[[ "$ACTION" != install && "$ACTION" != update ]] || scope=wrappers' in sh_owner
+    assert 'mode_args+=(--frontend "$frontend")' in sh_owner
+    sh_publication = sh.split("    publish-runtime-helpers)", 1)[1].split(
+        "    dev|dev-release)", 1
+    )[0]
+    assert sh_publication.index("resolvers) deploy_runtime_resolvers || exit 1") < (
+        sh_publication.index("--complete-helper-publication")
+    )
+    assert "resolve-runtime.ps1 resolve-runtime.sh" in sh_deploy
 
     ps1 = (PLUGIN / "scripts" / "install.ps1").read_text(encoding="utf-8")
     ps1_provision = ps1.split("    'provision' {", 1)[1].split(
@@ -373,9 +386,22 @@ def test_lean_provision_deploys_runtime_resolvers() -> None:
     ps1_deploy = ps1.split("function Deploy-RuntimeResolvers {", 1)[1].split(
         "function Deploy-Binstub {", 1
     )[0]
-    assert "Deploy-RuntimeResolvers" in ps1_provision
-    assert "Copy-Item $src $tmp -Force" in ps1_deploy
-    assert "Move-Item $tmp $dst -Force" in ps1_deploy
+    assert ps1_provision.index("Deploy-PythonRuntime") < ps1_provision.index(
+        "Deploy-GlobalBinstub"
+    )
+    assert "Deploy-Wrappers" not in ps1_provision
+    ps1_owner = ps1.split("function Deploy-PythonRuntime {", 1)[1].split(
+        "function Deploy-Wrappers {", 1
+    )[0]
+    assert "$scope = if ($Action -in @('install', 'update')) { 'wrappers' } else { 'resolvers' }" in ps1_owner
+    assert "$modeArgs += @('--frontend', $frontend)" in ps1_owner
+    ps1_publication = ps1.split("    'publish-runtime-helpers' {", 1)[1].split(
+        "    'dev' {", 1
+    )[0]
+    assert ps1_publication.index("if (-not (Deploy-RuntimeResolvers))") < (
+        ps1_publication.index("--complete-helper-publication")
+    )
+    assert "@('resolve-runtime.ps1', 'resolve-runtime.sh')" in ps1_deploy
 
 
 def test_posix_context_install_bootstraps_uv_before_runtime_build() -> None:
@@ -398,8 +424,10 @@ def test_posix_context_install_bootstraps_uv_before_runtime_build() -> None:
         "function Deploy-Wrappers {", 1
     )[0]
     assert "Deploy-PythonRuntime" in ps1_update
-    assert ps1_owner.index("Ensure-Uv") < ps1_owner.index("& $base -I -B")
-    assert ps1_owner.index("Ensure-UvIndex") < ps1_owner.index("& $base -I -B")
+    invoke = ps1_owner.index("Invoke-Hidden -FilePath $base -ArgList $arguments")
+    assert ps1_owner.index("Ensure-Uv") < invoke
+    assert ps1_owner.index("Ensure-UvIndex") < invoke
+    assert "@('-I', '-B', (Join-Path $ScriptDir 'runtime_install.py')" in ps1_owner
 
 
 def test_context_install_revalidates_generations_before_cutover() -> None:

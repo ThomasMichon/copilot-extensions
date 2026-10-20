@@ -330,13 +330,21 @@ write_deploy_manifest() {
     local additional_json="${6:-}" source_path_override="${7:-}" version_override="${8:-}"
     local manifest="$install_path/deploy-manifest.json"
     local kind ver commit branch dirty content_hash tmp provenance_path provenance_json_path
+    if [[ -d "$manifest" ]]; then
+        _fail "Deploy manifest destination must be a file: $manifest"
+        return 1
+    fi
     provenance_path="${source_path_override:-$plugin_path}"
     provenance_json_path="${provenance_path//\\//}"
     provenance_json_path="${provenance_json_path//\"/\\\"}"
     if [[ -n "$source_path_override" ]]; then
-        kind="$(source_kind_for_path "$provenance_path")"
+        kind="$(source_kind_for_path "$provenance_path")" || {
+            _fail "Deploy manifest source classification failed"; return 1;
+        }
     else
-        kind="$(_source_kind "$provenance_path")"
+        kind="$(_source_kind "$provenance_path")" || {
+            _fail "Deploy manifest source classification failed"; return 1;
+        }
     fi
     ver="$version_override"
     if [[ -z "$ver" ]]; then
@@ -348,17 +356,33 @@ write_deploy_manifest() {
         local repo_root _c _b _d
         repo_root="$(dirname "$provenance_path")"
         if [[ -d "$repo_root" ]]; then
-            repo_root="$(cd "$repo_root" && pwd)"
-            read -r _c _b _d <<< "$(_git_info "$repo_root")"
+            repo_root="$(cd "$repo_root" && pwd)" || {
+                _fail "Deploy manifest repository path cannot be resolved"; return 1;
+            }
+            local git_info
+            git_info="$(_git_info "$repo_root")" || {
+                _fail "Deploy manifest repository metadata failed"; return 1;
+            }
+            read -r _c _b _d <<< "$git_info" || {
+                _fail "Deploy manifest repository metadata is unavailable"; return 1;
+            }
             commit="\"$_c\""; branch="\"$_b\""; dirty="$_d"
         fi
     fi
     content_hash=""
     if declare -F _payload_hash >/dev/null 2>&1; then
-        content_hash="$(_payload_hash)"
+        content_hash="$(_payload_hash)" || {
+            _fail "Deploy manifest payload hash failed"; return 1;
+        }
     fi
-    tmp="$manifest.tmp"
-    cat > "$tmp" <<EOF
+    if [[ -n "${_RUNTIME_PUBLICATION_EVIDENCE:-}" ]]; then
+        _runtime_publication_stage "$manifest" tmp || return 1
+    else
+        tmp="$(mktemp "$manifest.tmp.XXXXXX")" || {
+            _fail "Deploy manifest staging failed: $manifest"; return 1;
+        }
+    fi
+    if ! cat > "$tmp" <<EOF
 {
   "schema_version": 3,
   "service": "$service",
@@ -378,7 +402,24 @@ write_deploy_manifest() {
   "runtime": "python"$( [[ -n "$additional_json" ]] && printf ',\n%s' "$additional_json" )
 }
 EOF
-    mv -f "$tmp" "$manifest"
+    then
+        rm -f "$tmp"
+        _fail "Deploy manifest write failed: $manifest"
+        return 1
+    fi
+    if [[ -n "${_RUNTIME_PUBLICATION_EVIDENCE:-}" ]]; then
+        _runtime_publication_commit_file "$manifest" "$tmp" || {
+            _fail "Deploy manifest publication failed; staging and evidence retained: $manifest"
+            return 1
+        }
+        _ok "Deploy manifest written (source: $kind)"
+        return 0
+    fi
+    mv -f "$tmp" "$manifest" || {
+        rm -f "$tmp"
+        _fail "Deploy manifest publication failed: $manifest"
+        return 1
+    }
     _ok "Deploy manifest written (source: $kind)"
 }
 
@@ -386,13 +427,45 @@ write_simple_binstub() {
     local command_name="$1" module_name="$2" runtime_root="$3" local_bin="$4" install_bin_dir="$5" snapshot_installer_rel="$6" no_self_provision_env="$7"
     local resolver_ps1_source="${8:-}" resolver_sh_source="${9:-}"
     local runtime_root_literal snapshot_installer_literal
-    printf -v runtime_root_literal '%q' "$runtime_root"
-    printf -v snapshot_installer_literal '%q' "$snapshot_installer_rel"
-    mkdir -p "$local_bin" "$install_bin_dir"
-    [[ -n "$resolver_ps1_source" && -f "$resolver_ps1_source" ]] && cp -f "$resolver_ps1_source" "$install_bin_dir/resolve-runtime.ps1"
-    [[ -n "$resolver_sh_source" && -f "$resolver_sh_source" ]] && cp -f "$resolver_sh_source" "$install_bin_dir/resolve-runtime.sh"
+    printf -v runtime_root_literal '%q' "$runtime_root" || return 1
+    printf -v snapshot_installer_literal '%q' "$snapshot_installer_rel" || return 1
+    local resolver source destination temporary
+    for source in "$resolver_ps1_source" "$resolver_sh_source"; do
+        if [[ -n "$source" && ! -f "$source" ]]; then
+            _fail "Binstub resolver source is unavailable: $source"
+            return 1
+        fi
+    done
+    mkdir -p "$local_bin" "$install_bin_dir" || {
+        _fail "Binstub directories cannot be prepared: $local_bin"; return 1;
+    }
+    for destination in "${resolver_ps1_source:+$install_bin_dir/resolve-runtime.ps1}" "${resolver_sh_source:+$install_bin_dir/resolve-runtime.sh}" "$local_bin/$command_name"; do
+        if [[ -d "$destination" ]]; then
+            _fail "Binstub destination must be a file: $destination"
+            return 1
+        fi
+    done
+    for resolver in ps1 sh; do
+        if [[ "$resolver" == ps1 ]]; then source="$resolver_ps1_source"; else source="$resolver_sh_source"; fi
+        [[ -n "$source" ]] || continue
+        destination="$install_bin_dir/resolve-runtime.$resolver"
+        temporary="$(mktemp "$install_bin_dir/.resolve-runtime.$resolver.XXXXXX")" || {
+            _fail "Binstub resolver staging failed: $destination"; return 1;
+        }
+        cp -f "$source" "$temporary" && [[ ! -d "$destination" ]] &&
+            mv -f "$temporary" "$destination" &&
+            [[ ! -e "$temporary" && ! -L "$temporary" && -f "$destination" ]] || {
+            rm -f "$temporary"
+            _fail "Binstub resolver publication failed: $destination"
+            return 1
+        }
+    done
     local stub="$local_bin/$command_name"
-    cat > "$stub" <<EOF
+    local stub_tmp
+    stub_tmp="$(mktemp "$local_bin/.$command_name.XXXXXX")" || {
+        _fail "Binstub staging failed: $stub"; return 1;
+    }
+    if ! cat > "$stub_tmp" <<EOF
 #!/usr/bin/env bash
 export PYTHONUTF8=1
 _name="$command_name"
@@ -473,6 +546,533 @@ if [ "\${_rc:-1}" -eq 0 ]; then
 fi
 exit "\${_rc:-1}"
 EOF
-    chmod +x "$stub"
+    then
+        rm -f "$stub_tmp"
+        _fail "Binstub write failed: $stub"
+        return 1
+    fi
+    chmod +x "$stub_tmp" && [[ ! -d "$stub" ]] && mv -f "$stub_tmp" "$stub" &&
+        [[ ! -e "$stub_tmp" && ! -L "$stub_tmp" && -f "$stub" ]] || {
+        rm -f "$stub_tmp"
+        _fail "Binstub publication failed: $stub"
+        return 1
+    }
     _ok "Binstub: $stub (self-provisioning)"
+}
+
+# The caller holds the installation publication lock through commit or restore.
+_runtime_publication_state() {
+    local path="$1" before after digest
+    [[ ! -L "$path" ]] || return 1
+    if [[ ! -e "$path" ]]; then printf '%s' absent; return 0; fi
+    [[ -f "$path" && -O "$path" ]] || return 1
+    before="$(stat -c '%d:%i:%f:%u:%g:%h:%s:%y' "$path" 2>/dev/null)" ||
+        before="$(stat -f '%d:%i:%p:%u:%g:%l:%z:%m' "$path" 2>/dev/null)" || return 1
+    if command -v sha256sum >/dev/null 2>&1; then
+        digest="$(sha256sum < "$path")" || return 1
+    elif command -v shasum >/dev/null 2>&1; then
+        digest="$(shasum -a 256 < "$path")" || return 1
+    else
+        digest="$(openssl dgst -sha256 -r < "$path")" || return 1
+    fi
+    digest="${digest%% *}"
+    [[ "$digest" =~ ^[0-9a-f]{64}$ && ! -L "$path" && -f "$path" ]] || return 1
+    after="$(stat -c '%d:%i:%f:%u:%g:%h:%s:%y' "$path" 2>/dev/null)" ||
+        after="$(stat -f '%d:%i:%p:%u:%g:%l:%z:%m' "$path" 2>/dev/null)" || return 1
+    [[ "$before" == "$after" ]] || return 1
+    printf '%s:%s' "$before" "$digest"
+}
+
+_runtime_publication_index() {
+    local i
+    for ((i=0; i<${#_RUNTIME_PUBLICATION_PATHS[@]}; i++)); do
+        if [[ "${_RUNTIME_PUBLICATION_PATHS[i]}" == "$1" ]]; then
+            printf '%s' "$i"; return 0
+        fi
+    done
+    return 1
+}
+
+_runtime_publication_journal() {
+    local i native_receipt
+    if [[ -e "$_RUNTIME_PUBLICATION_EVIDENCE/journal" || -L "$_RUNTIME_PUBLICATION_EVIDENCE/journal" ]]; then
+        [[ -n "${_RUNTIME_PUBLICATION_JOURNAL_STATE:-}" &&
+            "$(_runtime_publication_state "$_RUNTIME_PUBLICATION_EVIDENCE/journal")" == "$_RUNTIME_PUBLICATION_JOURNAL_STATE" ]] || return 1
+    fi
+    {
+        printf '# path\\tbaseline-state\\towned-states\\tbackup\\tintent\\tintent-state\n'
+        for ((i=0; i<${#_RUNTIME_PUBLICATION_PATHS[@]}; i++)); do
+            printf '%q\t%q\t%q\t%q\t%q\t%q\n' "${_RUNTIME_PUBLICATION_PATHS[i]}" \
+                "${_RUNTIME_PUBLICATION_BASELINE[i]}" "${_RUNTIME_PUBLICATION_OWNED[i]}" \
+                "${_RUNTIME_PUBLICATION_BACKUPS[i]}" "${_RUNTIME_PUBLICATION_INTENTS[i]}" \
+                "${_RUNTIME_PUBLICATION_INTENT_STATES[i]}"
+        done
+        for ((i=0; i<${#_RUNTIME_PUBLICATION_TEMPS[@]}; i++)); do
+            printf '# stage\t%q\t%q\n' "${_RUNTIME_PUBLICATION_TEMPS[i]}" "${_RUNTIME_PUBLICATION_TEMP_IDS[i]}"
+        done
+        printf '# native-context\t%q\n' "${_RUNTIME_PUBLICATION_NATIVE_CONTEXT:-}"
+        for native_receipt in "${_RUNTIME_PUBLICATION_NATIVE_RECEIPTS[@]:-}"; do
+            printf '# required-native-proof\t%q\n' "$native_receipt"
+        done
+    } > "$_RUNTIME_PUBLICATION_EVIDENCE/journal" || return 1
+    _RUNTIME_PUBLICATION_JOURNAL_STATE="$(_runtime_publication_state "$_RUNTIME_PUBLICATION_EVIDENCE/journal")"
+}
+
+_runtime_publication_file_id() {
+    [[ ! -L "$1" && -f "$1" && -O "$1" ]] || return 1
+    stat -c '%d:%i' "$1" 2>/dev/null || stat -f '%d:%i' "$1" 2>/dev/null
+}
+
+_runtime_publication_dir_id() {
+    [[ ! -L "$1" && -d "$1" && -O "$1" ]] || return 1
+    stat -c '%d:%i' "$1" 2>/dev/null || stat -f '%d:%i' "$1" 2>/dev/null
+}
+
+_runtime_publication_begin() {
+    _RUNTIME_PUBLICATION_PATHS=("$@")
+    _RUNTIME_PUBLICATION_BACKUPS=()
+    _RUNTIME_PUBLICATION_BASELINE=()
+    _RUNTIME_PUBLICATION_BACKUP_STATES=()
+    _RUNTIME_PUBLICATION_OWNED=()
+    _RUNTIME_PUBLICATION_INTENTS=()
+    _RUNTIME_PUBLICATION_INTENT_STATES=()
+    _RUNTIME_PUBLICATION_TEMPS=()
+    _RUNTIME_PUBLICATION_TEMP_IDS=()
+    _RUNTIME_PUBLICATION_STAGE_DIRS=()
+    _RUNTIME_PUBLICATION_STAGE_DIR_IDS=()
+    _RUNTIME_PUBLICATION_STAGE_FILES=()
+    _RUNTIME_PUBLICATION_EVIDENCE_FILES=()
+    _RUNTIME_PUBLICATION_EVIDENCE_STATES=()
+    _RUNTIME_PUBLICATION_JOURNAL_STATE=""
+    _RUNTIME_PUBLICATION_NATIVE_CONTEXT=""
+    _RUNTIME_PUBLICATION_NATIVE_RECEIPTS=()
+    _RUNTIME_PUBLICATION_NATIVE_HASHES=()
+    _RUNTIME_PUBLICATION_EVIDENCE="$(mktemp -d "$INSTALL_DIR/.publication.XXXXXXXX")" || return 1
+    local path parent backup state i=0
+    for path in "$@"; do
+        if ! state="$(_runtime_publication_state "$path")"; then
+            _fail "Publication destination must be an ordinary file: $path"
+            _runtime_publication_discard
+            return 1
+        fi
+        _RUNTIME_PUBLICATION_BASELINE+=("$state")
+        _RUNTIME_PUBLICATION_OWNED+=("")
+        _RUNTIME_PUBLICATION_INTENTS+=("")
+        _RUNTIME_PUBLICATION_INTENT_STATES+=("")
+        _RUNTIME_PUBLICATION_NATIVE_HASHES+=("")
+        parent="$(dirname "$path")" || { _runtime_publication_discard; return 1; }
+        mkdir -p "$parent" || { _runtime_publication_discard; return 1; }
+        backup=""
+        if [[ "$state" != absent ]]; then
+            backup="$_RUNTIME_PUBLICATION_EVIDENCE/before.$i"
+            cp -p "$path" "$backup" || { _runtime_publication_discard; return 1; }
+            [[ "$(_runtime_publication_state "$path")" == "$state" ]] || return 1
+            local backup_state
+            backup_state="$(_runtime_publication_state "$backup")" || return 1
+            [[ "${backup_state##*:}" == "${state##*:}" ]] || return 1
+            _RUNTIME_PUBLICATION_BACKUP_STATES+=("$backup_state")
+            _RUNTIME_PUBLICATION_EVIDENCE_FILES+=("$backup")
+            _RUNTIME_PUBLICATION_EVIDENCE_STATES+=("$backup_state")
+        else
+            _RUNTIME_PUBLICATION_BACKUP_STATES+=("")
+        fi
+        _RUNTIME_PUBLICATION_BACKUPS+=("$backup")
+        ((i+=1))
+    done
+    _runtime_publication_journal
+}
+
+_runtime_publication_expect_value() {
+    [[ -n "${_RUNTIME_PUBLICATION_EVIDENCE:-}" ]] || return 0
+    local i file
+    i="$(_runtime_publication_index "$1")" || return 0
+    _runtime_publication_check "$1" || return 1
+    file="$(mktemp "$_RUNTIME_PUBLICATION_EVIDENCE/intent.$i.XXXXXXXX")" || return 1
+    printf '%s' "$2" > "$file" || return 1
+    _RUNTIME_PUBLICATION_INTENTS[i]="$file"
+    _RUNTIME_PUBLICATION_INTENT_STATES[i]="$(_runtime_publication_state "$file")" || return 1
+    _RUNTIME_PUBLICATION_EVIDENCE_FILES+=("$file")
+    _RUNTIME_PUBLICATION_EVIDENCE_STATES+=("${_RUNTIME_PUBLICATION_INTENT_STATES[i]}")
+    _RUNTIME_PUBLICATION_NATIVE_HASHES[i]+=" ${_RUNTIME_PUBLICATION_INTENT_STATES[i]##*:}"
+    _runtime_publication_journal
+}
+
+_runtime_publication_check() {
+    [[ -n "${_RUNTIME_PUBLICATION_EVIDENCE:-}" ]] || return 0
+    local i state
+    i="$(_runtime_publication_index "$1")" || return 0
+    state="$(_runtime_publication_state "$1")" || state=unsafe
+    if [[ "$state" != "${_RUNTIME_PUBLICATION_BASELINE[i]}" &&
+          "|${_RUNTIME_PUBLICATION_OWNED[i]}|" != *"|$state|"* ]]; then
+        if ! _runtime_publication_native_check "$1"; then
+            _fail "Unowned publication state: $1; recovery evidence retained: $_RUNTIME_PUBLICATION_EVIDENCE"
+            return 1
+        fi
+    fi
+}
+
+_runtime_publication_expect_file() {
+    [[ -n "${_RUNTIME_PUBLICATION_EVIDENCE:-}" ]] || return 0
+    local i file
+    i="$(_runtime_publication_index "$1")" || return 0
+    _runtime_publication_check "$1" || return 1
+    file="$(mktemp "$_RUNTIME_PUBLICATION_EVIDENCE/intent.$i.XXXXXXXX")" || return 1
+    cp -p "$2" "$file" || return 1
+    _RUNTIME_PUBLICATION_INTENTS[i]="$file"
+    _RUNTIME_PUBLICATION_INTENT_STATES[i]="$(_runtime_publication_state "$file")" || return 1
+    _RUNTIME_PUBLICATION_EVIDENCE_FILES+=("$file")
+    _RUNTIME_PUBLICATION_EVIDENCE_STATES+=("${_RUNTIME_PUBLICATION_INTENT_STATES[i]}")
+    _RUNTIME_PUBLICATION_NATIVE_HASHES[i]+=" ${_RUNTIME_PUBLICATION_INTENT_STATES[i]##*:}"
+    _runtime_publication_journal
+}
+
+_runtime_publication_accept() {
+    [[ -n "${_RUNTIME_PUBLICATION_EVIDENCE:-}" ]] || return 0
+    _runtime_publication_native_check "$1"
+}
+
+_runtime_publication_native_cli() {
+    local python
+    python="$(_bootstrap_python)" || return 1
+    "$python" -I -B "$SCRIPT_DIR/versioned_runtime.py" --root "$INSTALL_DIR" "$@"
+}
+
+_runtime_publication_native_begin() {
+    local output="$1" receipt_path i backup
+    printf -v "$output" '%s' ""
+    [[ -n "${_RUNTIME_PUBLICATION_EVIDENCE:-}" ]] || return 0
+    if [[ -z "$_RUNTIME_PUBLICATION_NATIVE_CONTEXT" ]]; then
+        local context_path="$_RUNTIME_PUBLICATION_EVIDENCE/native-context.json"
+        local arguments=(publication-context --output "$context_path")
+        for ((i=0; i<${#_RUNTIME_PUBLICATION_PATHS[@]}; i++)); do
+            backup="${_RUNTIME_PUBLICATION_BACKUPS[i]}"
+            if [[ -n "$backup" ]]; then
+                [[ "$(_runtime_publication_state "$backup")" == "${_RUNTIME_PUBLICATION_BACKUP_STATES[i]}" ]] || return 1
+            fi
+            arguments+=(--binding "${_RUNTIME_PUBLICATION_PATHS[i]}" "$backup" "${_RUNTIME_PUBLICATION_BASELINE[i]##*:}")
+        done
+        _runtime_publication_native_cli "${arguments[@]}" || return 1
+        for ((i=0; i<${#_RUNTIME_PUBLICATION_BACKUPS[@]}; i++)); do
+            backup="${_RUNTIME_PUBLICATION_BACKUPS[i]}"
+            [[ -z "$backup" || "$(_runtime_publication_state "$backup")" == "${_RUNTIME_PUBLICATION_BACKUP_STATES[i]}" ]] || return 1
+        done
+        _RUNTIME_PUBLICATION_NATIVE_CONTEXT="$context_path"
+    fi
+    receipt_path="$_RUNTIME_PUBLICATION_EVIDENCE/producer.${#_RUNTIME_PUBLICATION_NATIVE_RECEIPTS[@]}.jsonl"
+    _RUNTIME_PUBLICATION_NATIVE_RECEIPTS+=("$receipt_path")
+    _runtime_publication_journal || return 1
+    printf -v "$output" '%s' "$receipt_path"
+}
+
+_runtime_publication_native_arguments() {
+    local receipt i digest
+    _RUNTIME_PUBLICATION_NATIVE_ARGUMENTS=(--context "$_RUNTIME_PUBLICATION_NATIVE_CONTEXT")
+    for receipt in "${_RUNTIME_PUBLICATION_NATIVE_RECEIPTS[@]}"; do
+        _RUNTIME_PUBLICATION_NATIVE_ARGUMENTS+=(--receipt "$receipt")
+    done
+    for ((i=0; i<${#_RUNTIME_PUBLICATION_PATHS[@]}; i++)); do
+        for digest in ${_RUNTIME_PUBLICATION_NATIVE_HASHES[i]}; do
+            _RUNTIME_PUBLICATION_NATIVE_ARGUMENTS+=(--expected "${_RUNTIME_PUBLICATION_PATHS[i]}" "$digest")
+        done
+    done
+}
+
+_runtime_publication_native_check() {
+    [[ ${#_RUNTIME_PUBLICATION_NATIVE_RECEIPTS[@]} != 0 ]] || return 1
+    local target
+    _runtime_publication_native_arguments
+    for target in "$@"; do _RUNTIME_PUBLICATION_NATIVE_ARGUMENTS+=(--path "$target"); done
+    _runtime_publication_native_cli publication-check "${_RUNTIME_PUBLICATION_NATIVE_ARGUMENTS[@]}"
+}
+
+_runtime_publication_prepare() {
+    [[ -n "${_RUNTIME_PUBLICATION_EVIDENCE:-}" ]] || return 0
+    local i state
+    i="$(_runtime_publication_index "$1")" || return 0
+    _runtime_publication_check "$1" || return 1
+    state="$(_runtime_publication_state "$2")" || return 1
+    [[ "$state" != absent ]] || return 1
+    _RUNTIME_PUBLICATION_OWNED[i]+="|$state"
+    _runtime_publication_journal
+}
+
+_runtime_publication_stage() {
+    local path="$1" output="$2" created mask mode parent name directory
+    _runtime_publication_check "$path" || return 1
+    parent="${path%/*}"; name="${path##*/}"
+    directory="$(mktemp -d "$parent/.${name}.publication-stage.XXXXXXXX")" || return 1
+    _RUNTIME_PUBLICATION_STAGE_DIRS+=("$directory")
+    _RUNTIME_PUBLICATION_STAGE_DIR_IDS+=("$(_runtime_publication_dir_id "$directory")")
+    created="$directory/$name"
+    _RUNTIME_PUBLICATION_STAGE_FILES+=("$created")
+    (umask 077; : > "$created") || return 1
+    _RUNTIME_PUBLICATION_TEMPS+=("$created")
+    _RUNTIME_PUBLICATION_TEMP_IDS+=("$(_runtime_publication_file_id "$created")")
+    if [[ -f "$path" ]]; then
+        cp -p "$path" "$created" || return 1
+    else
+        mask="$(umask)" || return 1
+        printf -v mode '%04o' "$((0666 & ~(8#$mask)))"
+        chmod "$mode" "$created" || return 1
+    fi
+    printf -v "$output" '%s' "$created"
+}
+
+_runtime_publication_commit_file() {
+    local planned result=0 parent="${1%/*}"
+    [[ "${1##*/}" == "${2##*/}" ]] || {
+        _fail "Publication stage basename does not bind its exact target: $1"; return 1;
+    }
+    planned="$(_runtime_publication_state "$2")" || return 1
+    _runtime_publication_prepare "$1" "$2" || return 1
+    [[ "$(_runtime_publication_state "$2")" == "$planned" ]] || return 1
+    _runtime_publication_check "$1" || return 1
+    mv -f "$2" "$parent/" || result=$?
+    if [[ "$(_runtime_publication_state "$1")" != "$planned" || -e "$2" || -L "$2" ]]; then
+        _fail "Publication did not replace its exact named target; staging and evidence retained: $1"
+        return 1
+    fi
+    if [[ -z "${_RUNTIME_PUBLICATION_EVIDENCE:-}" ]]; then
+        _runtime_publication_drop_directory "${2%/*}"
+    fi
+    return "$result"
+}
+
+_runtime_publication_drop_directory() {
+    local i
+    for ((i=0; i<${#_RUNTIME_PUBLICATION_STAGE_DIRS[@]}; i++)); do
+        if [[ "${_RUNTIME_PUBLICATION_STAGE_DIRS[i]}" == "$1" ]]; then
+            if [[ "$(_runtime_publication_dir_id "$1")" != "${_RUNTIME_PUBLICATION_STAGE_DIR_IDS[i]}" ]] ||
+                ! rmdir "$1"; then
+                _warn "Private publication staging directory retained: $1"
+            fi
+            return 0
+        fi
+    done
+}
+
+_runtime_publication_drop_stage() {
+    [[ "$(_runtime_publication_state "$1")" == "$2" ]] || return 1
+    rm -f "$1" || return 1
+    if [[ -z "${_RUNTIME_PUBLICATION_EVIDENCE:-}" ]]; then
+        _runtime_publication_drop_directory "${1%/*}"
+    fi
+}
+
+_runtime_publication_copy() {
+    local source="$1" destination="$2" temporary mode mask
+    _runtime_publication_stage "$destination" temporary || return 1
+    cp -f "$source" "$temporary" || return 1
+    if [[ ! -e "$destination" ]]; then
+        mode="$(stat -c '%a' "$source" 2>/dev/null)" ||
+            mode="$(stat -f '%Lp' "$source" 2>/dev/null)" || return 1
+        [[ "$mode" =~ ^[0-7]+$ ]] || return 1
+        mask="$(umask)" || return 1
+        printf -v mode '%04o' "$((8#$mode & ~(8#$mask)))"
+        chmod "$mode" "$temporary" || return 1
+    fi
+    _runtime_publication_commit_file "$destination" "$temporary"
+}
+
+_runtime_publication_write_value() {
+    local temporary
+    _runtime_publication_stage "$1" temporary || return 1
+    printf '%s' "$2" > "$temporary" || return 1
+    _runtime_publication_commit_file "$1" "$temporary"
+}
+
+_runtime_publication_activate() {
+    local current_index good_index
+    _runtime_publication_expect_value "$INSTALL_DIR/current-version" "$SRC_VERSION"$'\n' || return 1
+    _runtime_publication_expect_value "$INSTALL_DIR/last-known-good" "$SRC_VERSION"$'\n' || return 1
+    "$@" || return $?
+    [[ "${ACTIVATION_SUPERSEDED:-0}" != 1 ]] || return 0
+    if [[ -n "${_RUNTIME_PUBLICATION_EVIDENCE:-}" ]]; then
+        current_index="$(_runtime_publication_index "$INSTALL_DIR/current-version")" || return 1
+        good_index="$(_runtime_publication_index "$INSTALL_DIR/last-known-good")" || return 1
+        if [[ "$(_runtime_publication_state "$INSTALL_DIR/current-version")" == "${_RUNTIME_PUBLICATION_BASELINE[current_index]}" &&
+              "$(_runtime_publication_state "$INSTALL_DIR/last-known-good")" == "${_RUNTIME_PUBLICATION_BASELINE[good_index]}" ]]; then
+            return 0
+        fi
+    fi
+    _runtime_publication_accept "$INSTALL_DIR/current-version" || return 1
+    _runtime_publication_accept "$INSTALL_DIR/last-known-good"
+}
+
+_runtime_publication_reclaim() {
+    local backup i entry
+    if [[ -n "${_RUNTIME_PUBLICATION_EVIDENCE:-}" ]]; then
+        for ((i=0; i<${#_RUNTIME_PUBLICATION_EVIDENCE_FILES[@]}; i++)); do
+            backup="${_RUNTIME_PUBLICATION_EVIDENCE_FILES[i]}"
+            [[ "$(_runtime_publication_state "$backup")" == "${_RUNTIME_PUBLICATION_EVIDENCE_STATES[i]}" ]] || {
+                _warn "Recovery evidence changed; retained: $_RUNTIME_PUBLICATION_EVIDENCE"; return 0;
+            }
+        done
+        if [[ -n "${_RUNTIME_PUBLICATION_JOURNAL_STATE:-}" ]]; then
+            [[ "$(_runtime_publication_state "$_RUNTIME_PUBLICATION_EVIDENCE/journal")" == "$_RUNTIME_PUBLICATION_JOURNAL_STATE" ]] || {
+                _warn "Publication journal changed; retained: $_RUNTIME_PUBLICATION_EVIDENCE"; return 0;
+            }
+        fi
+        for ((i=0; i<${#_RUNTIME_PUBLICATION_TEMPS[@]}; i++)); do
+            backup="${_RUNTIME_PUBLICATION_TEMPS[i]}"
+            [[ -e "$backup" || -L "$backup" ]] || continue
+            [[ "$(_runtime_publication_file_id "$backup")" == "${_RUNTIME_PUBLICATION_TEMP_IDS[i]}" ]] || {
+                _warn "Unowned publication staging file; retained: $backup"; return 0;
+            }
+        done
+        for ((i=0; i<${#_RUNTIME_PUBLICATION_STAGE_DIRS[@]}; i++)); do
+            backup="${_RUNTIME_PUBLICATION_STAGE_DIRS[i]}"
+            [[ -e "$backup" || -L "$backup" ]] || continue
+            if [[ "$(_runtime_publication_dir_id "$backup")" != "${_RUNTIME_PUBLICATION_STAGE_DIR_IDS[i]}" ]]; then
+                _warn "Private publication staging directory retained: $backup"; return 0;
+            fi
+            for entry in "$backup"/* "$backup"/.[!.]* "$backup"/..?*; do
+                [[ -e "$entry" || -L "$entry" ]] || continue
+                if [[ "$entry" != "${_RUNTIME_PUBLICATION_STAGE_FILES[i]}" ]]; then
+                    _warn "Unknown publication staging artifact retained: $entry"; return 0;
+                fi
+            done
+        done
+        for ((i=0; i<${#_RUNTIME_PUBLICATION_EVIDENCE_FILES[@]}; i++)); do
+            backup="${_RUNTIME_PUBLICATION_EVIDENCE_FILES[i]}"
+            if [[ "$(_runtime_publication_state "$backup")" != "${_RUNTIME_PUBLICATION_EVIDENCE_STATES[i]}" ]] ||
+                ! rm -f "$backup"; then
+                _warn "Could not reclaim owned recovery evidence; retained: $_RUNTIME_PUBLICATION_EVIDENCE"
+                return 0
+            fi
+        done
+        for ((i=0; i<${#_RUNTIME_PUBLICATION_TEMPS[@]}; i++)); do
+            backup="${_RUNTIME_PUBLICATION_TEMPS[i]}"
+            [[ -e "$backup" || -L "$backup" ]] || continue
+            if [[ "$(_runtime_publication_file_id "$backup")" != "${_RUNTIME_PUBLICATION_TEMP_IDS[i]}" ]] ||
+                ! rm -f "$backup"; then
+                _warn "Could not reclaim owned staging file; retained: $backup"; return 0;
+            fi
+        done
+        for ((i=0; i<${#_RUNTIME_PUBLICATION_STAGE_DIRS[@]}; i++)); do
+            backup="${_RUNTIME_PUBLICATION_STAGE_DIRS[i]}"
+            [[ -e "$backup" || -L "$backup" ]] || continue
+            if [[ "$(_runtime_publication_dir_id "$backup")" != "${_RUNTIME_PUBLICATION_STAGE_DIR_IDS[i]}" ]] ||
+                ! rmdir "$backup"; then
+                _warn "Private publication staging directory retained: $backup"; return 0;
+            fi
+        done
+        if [[ -n "${_RUNTIME_PUBLICATION_JOURNAL_STATE:-}" ]]; then
+            if [[ "$(_runtime_publication_state "$_RUNTIME_PUBLICATION_EVIDENCE/journal")" != "$_RUNTIME_PUBLICATION_JOURNAL_STATE" ]] ||
+                ! rm -f "$_RUNTIME_PUBLICATION_EVIDENCE/journal"; then
+                _warn "Could not reclaim owned journal; retained: $_RUNTIME_PUBLICATION_EVIDENCE"; return 0;
+            fi
+        fi
+        if ! rmdir "$_RUNTIME_PUBLICATION_EVIDENCE"; then
+            _warn "Publication evidence directory retained: $_RUNTIME_PUBLICATION_EVIDENCE"; return 0;
+        fi
+        _RUNTIME_PUBLICATION_EVIDENCE=""
+    fi
+}
+
+_runtime_publication_discard() {
+    if [[ ${#_RUNTIME_PUBLICATION_NATIVE_RECEIPTS[@]} != 0 ]]; then
+        if ! _runtime_publication_native_check; then
+            _fail "Required publication proof is invalid; whole set and evidence retained: $_RUNTIME_PUBLICATION_EVIDENCE"
+            return 1
+        fi
+        _runtime_publication_native_arguments
+        _runtime_publication_native_cli publication-cleanup "${_RUNTIME_PUBLICATION_NATIVE_ARGUMENTS[@]}" || return 1
+    fi
+    _runtime_publication_reclaim || _warn "Publication cleanup incomplete; evidence retained: ${_RUNTIME_PUBLICATION_EVIDENCE:-}"
+    _RUNTIME_PUBLICATION_EVIDENCE=""
+    _RUNTIME_PUBLICATION_PATHS=()
+    _RUNTIME_PUBLICATION_BACKUPS=()
+    _RUNTIME_PUBLICATION_BASELINE=()
+    _RUNTIME_PUBLICATION_BACKUP_STATES=()
+    _RUNTIME_PUBLICATION_OWNED=()
+    _RUNTIME_PUBLICATION_INTENTS=()
+    _RUNTIME_PUBLICATION_INTENT_STATES=()
+    _RUNTIME_PUBLICATION_TEMPS=()
+    _RUNTIME_PUBLICATION_TEMP_IDS=()
+    _RUNTIME_PUBLICATION_STAGE_DIRS=()
+    _RUNTIME_PUBLICATION_STAGE_DIR_IDS=()
+    _RUNTIME_PUBLICATION_STAGE_FILES=()
+    _RUNTIME_PUBLICATION_EVIDENCE_FILES=()
+    _RUNTIME_PUBLICATION_EVIDENCE_STATES=()
+    _RUNTIME_PUBLICATION_JOURNAL_STATE=""
+    _RUNTIME_PUBLICATION_NATIVE_CONTEXT=""
+    _RUNTIME_PUBLICATION_NATIVE_RECEIPTS=()
+    _RUNTIME_PUBLICATION_NATIVE_HASHES=()
+}
+
+_runtime_publication_restore() {
+    local path backup i state stage staged_state backup_state stage_data backup_data
+    local native_paths=() native_indexes=() output_receipt index
+    if [[ ${#_RUNTIME_PUBLICATION_NATIVE_RECEIPTS[@]} != 0 ]] && ! _runtime_publication_native_check; then
+        _fail "Required publication proof is invalid; whole set and evidence retained: $_RUNTIME_PUBLICATION_EVIDENCE"
+        return 1
+    fi
+    # Check the whole set before mutating any destination, not just the selector.
+    for ((i=0; i<${#_RUNTIME_PUBLICATION_PATHS[@]}; i++)); do
+        path="${_RUNTIME_PUBLICATION_PATHS[i]}"
+        state="$(_runtime_publication_state "$path")" || state=unsafe
+        if [[ "$state" != "${_RUNTIME_PUBLICATION_BASELINE[i]}" &&
+              "|${_RUNTIME_PUBLICATION_OWNED[i]}|" != *"|$state|"* ]]; then
+            if ! _runtime_publication_native_check "$path"; then
+                _fail "Unowned publication state: $path; recovery evidence retained: $_RUNTIME_PUBLICATION_EVIDENCE"
+                return 1
+            fi
+            native_paths+=("$path"); native_indexes+=("$i")
+        fi
+        backup="${_RUNTIME_PUBLICATION_BACKUPS[i]}"
+        if [[ -n "$backup" && "$(_runtime_publication_state "$backup")" != "${_RUNTIME_PUBLICATION_BACKUP_STATES[i]}" ]]; then
+            _fail "Publication backup changed: $backup; recovery evidence retained: $_RUNTIME_PUBLICATION_EVIDENCE"
+            return 1
+        fi
+    done
+    if [[ ${#native_paths[@]} != 0 ]]; then
+        _runtime_publication_native_arguments
+        for path in "${native_paths[@]}"; do _RUNTIME_PUBLICATION_NATIVE_ARGUMENTS+=(--path "$path"); done
+        _runtime_publication_native_begin output_receipt || return 1
+        if ! _runtime_publication_native_cli publication-restore "${_RUNTIME_PUBLICATION_NATIVE_ARGUMENTS[@]}" --output-receipt "$output_receipt"; then
+            _fail "Native recovery incomplete; whole set and evidence retained: $_RUNTIME_PUBLICATION_EVIDENCE"
+            return 1
+        fi
+    fi
+    for ((i=0; i<${#_RUNTIME_PUBLICATION_PATHS[@]}; i++)); do
+        index=0
+        for native_index in "${native_indexes[@]}"; do [[ "$native_index" != "$i" ]] || index=1; done
+        [[ "$index" == 0 ]] || continue
+        path="${_RUNTIME_PUBLICATION_PATHS[i]}"
+        backup="${_RUNTIME_PUBLICATION_BACKUPS[i]}"
+        state="$(_runtime_publication_state "$path")" || state=unsafe
+        [[ "$state" != "${_RUNTIME_PUBLICATION_BASELINE[i]}" ]] || continue
+        if [[ "|${_RUNTIME_PUBLICATION_OWNED[i]}|" != *"|$state|"* ]]; then
+            _fail "Publication changed during recovery: $path; recovery evidence retained: $_RUNTIME_PUBLICATION_EVIDENCE"
+            return 1
+        fi
+        if [[ -n "$backup" ]]; then
+            backup_state="$(_runtime_publication_state "$backup")" || return 1
+            [[ "$backup_state" == "${_RUNTIME_PUBLICATION_BACKUP_STATES[i]}" ]] || return 1
+            _runtime_publication_stage "$path" stage || return 1
+            cp -p "$backup" "$stage" || return 1
+            staged_state="$(_runtime_publication_state "$stage")" || return 1
+            stage_data="${staged_state#*:}"; stage_data="${stage_data#*:}"
+            backup_data="${backup_state#*:}"; backup_data="${backup_data#*:}"
+            if [[ "$stage_data" != "$backup_data" ||
+                "$(_runtime_publication_state "$backup")" != "$backup_state" ]]; then
+                _fail "Publication backup changed during staging; evidence retained: $_RUNTIME_PUBLICATION_EVIDENCE"
+                return 1
+            fi
+            [[ "$(_runtime_publication_state "$path")" == "$state" ]] || {
+                _fail "Publication changed before recovery replacement: $path; evidence retained: $_RUNTIME_PUBLICATION_EVIDENCE"
+                return 1
+            }
+            if ! _runtime_publication_commit_file "$path" "$stage" &&
+                [[ "$(_runtime_publication_state "$path")" != "$staged_state" ]]; then
+                _fail "Publication restore failed: $path; recovery evidence retained: $_RUNTIME_PUBLICATION_EVIDENCE"
+                return 1
+            fi
+        elif [[ -e "$path" ]] && ! rm -f "$path"; then
+            _fail "Could not remove owned publication: $path; recovery evidence retained: $_RUNTIME_PUBLICATION_EVIDENCE"
+            return 1
+        fi
+    done
+    _runtime_publication_discard
 }

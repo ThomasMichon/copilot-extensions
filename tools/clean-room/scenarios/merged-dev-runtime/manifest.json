@@ -16,7 +16,7 @@
   "config": {
     "CR_SOURCE_REPO": "https://github.com/ThomasMichon/copilot-extensions.git",
     "CR_SOURCE_COMMIT": "optional exact commit reachable from fetched dev; defaults to its captured tip",
-    "CR_SOURCE_PLUGIN": "agent-bridge (default), agent-codespaces, agent-containers, agent-mcp, agent-ssh, agent-machines, agent-pull-requests or budget-guidance"
+    "CR_SOURCE_PLUGIN": "agent-bridge (default), agent-codespaces, agent-containers, agent-mcp, agent-ssh, agent-machines, agent-pull-requests, budget-guidance, agent-worktrees, agent-dispatch, agent-index, agent-logger or agent-vault"
   },
   "expected_artifacts": [
     "~/.<selected-plugin>/current-version",

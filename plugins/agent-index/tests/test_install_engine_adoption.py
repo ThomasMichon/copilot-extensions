@@ -52,7 +52,8 @@ def fake_uv(tmp_path: Path, body: str) -> Path:
 def construction_bundle(scripts: Path) -> None:
     scripts.mkdir(parents=True, exist_ok=True)
     for name in ("versioned_runtime.py", "versioned_runtime_leases.py",
-                 "versioned_runtime_construction.py", "versioned_runtime_source.py"):
+                 "versioned_runtime_construction.py", "versioned_runtime_source.py",
+                 "versioned_runtime_publication.py"):
         shutil.copy2(REPO / "libs/versioned-runtime" / name, scripts / name)
 
 
@@ -76,6 +77,8 @@ def stage_index_installer(payload: Path, *, materialized: bool) -> Path:
     )
     scripts = payload / "scripts"
     scripts.mkdir(parents=True)
+    for name in ("source-runtime.sh", "source-runtime.ps1", "versioned_runtime_native.ps1"):
+        shutil.copy2(PLUGIN / "scripts" / name, scripts / name)
     for extension in ("sh", "ps1"):
         source = PLUGIN / "scripts" / f"install.{extension}"
         ref = refs.find_engine_ref(source, extension)
@@ -184,7 +187,13 @@ def function(name: str, ext: str) -> str:
         start = f"{name}() ("
     tail = text.split(start, 1)[1]
     next_function = r"\nfunction \w" if ext == "ps1" else r"\n[a-z_]+\(\) [\{(]"
-    return start + re.split(next_function, tail, maxsplit=1)[0]
+    source = (PLUGIN / "scripts" / f"source-runtime.{ext}").as_posix()
+    health = ""
+    if ext == "ps1" and name in ("Install-ServerVenv", "Install-Runtime"):
+        health = function("Test-IndexServerVenv", ext) + "\n"
+    elif ext == "sh" and name in ("_install_server_venv", "_ensure_runtime"):
+        health = function("_test_index_server_venv", ext) + "\n"
+    return f". '{source}'\n" + health + start + re.split(next_function, tail, maxsplit=1)[0]
 
 
 def environment(tmp_path: Path) -> dict[str, str]:
@@ -213,6 +222,7 @@ def run_ps(tmp_path: Path, script: str) -> subprocess.CompletedProcess[str]:
     harness.write_text(
         "$ErrorActionPreference = 'Stop'\n"
         "$SrcVersion = '1.0.0'; $Force = $false\n"
+        "$script:SourceRuntimeIdentity = $null\n"
         "function Write-Ok { param($Msg) }\n"
         "function Write-Warn { param($Msg) }\n"
         + formatter + "\n"
@@ -316,6 +326,7 @@ def test_native_engine_failed_upgrade_preserves_selection_and_retries(tmp_path, 
     for name in (
         "versioned_runtime_leases.py", "versioned_runtime_construction.py",
         "versioned_runtime_source.py", "versioned_runtime.py",
+        "versioned_runtime_publication.py",
     ):
         shutil.copyfile(REPO / "libs/versioned-runtime" / name, tmp_path / name)
     base = str(Path(sys._base_executable)).replace("'", "''")
@@ -482,7 +493,7 @@ UV_COMMAND='{uv}'
 _uv_pip_install --python fixture package
 exit $?
 """
-        result = subprocess.run([bash, "-c", script], env=environment(tmp_path),
+        result = subprocess.run([bash, "-c", script], cwd=tmp_path, env=environment(tmp_path),
                                 capture_output=True, text=True, timeout=20)
     else:
         result = run_ps(tmp_path, f"""
@@ -519,7 +530,7 @@ UV_COMMAND='{uv}'
 _uv_pip_install --python fixture package
 exit $?
 """
-        result = subprocess.run([bash, "-c", script], env=environment(tmp_path),
+        result = subprocess.run([bash, "-c", script], cwd=tmp_path, env=environment(tmp_path),
                                 capture_output=True, text=True, timeout=20)
     else:
         result = run_ps(tmp_path, f"""

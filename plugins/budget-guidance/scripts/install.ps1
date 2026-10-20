@@ -824,8 +824,21 @@ function Invoke-Stamp {
     Move-Item -LiteralPath $snapTmp -Destination $snapDir -Force
     }
     Test-SourceRuntimeUnchanged
-    [System.IO.File]::WriteAllText((Join-Path $InstallDir 'payload-dir'), $snapDir, $utf8NoBom)
-    [System.IO.File]::WriteAllText((Join-Path $InstallDir 'stamped-version'), $SrcVersion, $utf8NoBom)
+    if ($SourceRuntimeIdentity) {
+        $py = Get-BootstrapPython
+        if (-not $py) { throw 'Source redirect publication requires a bootstrap Python interpreter' }
+        $nativeError = ''
+        $result = Invoke-Hidden -FilePath $py -ArgList @(
+            '-I', '-B', (Join-Path $PSScriptRoot 'versioned_runtime.py'),
+            '--root', $InstallDir, 'publish-redirects', '--payload-dir', $snapDir,
+            '--version', $SrcVersion, '--expected-source-identity', $SourceRuntimeIdentity
+        ) -ErrorOutput ([ref]$nativeError)
+        $code = $LASTEXITCODE
+        if ($code -ne 0) { throw "Source redirect publication failed (exit ${code}): $result$nativeError" }
+    } else {
+        [System.IO.File]::WriteAllText((Join-Path $InstallDir 'payload-dir'), $snapDir, $utf8NoBom)
+        [System.IO.File]::WriteAllText((Join-Path $InstallDir 'stamped-version'), $SrcVersion, $utf8NoBom)
+    }
     Write-Ok "Snapshot: $snapDir"
     Deploy-SelfProvisioningBinstub
     Write-Ok 'Stamped: budget-guidance binstub on PATH; runtime provisions on first use.'
@@ -1050,21 +1063,26 @@ Write-Ok 'Package installed: budget-guidance'
 }
 
 # Versioned layout (#581): health-gate the slot + swap the `.venv` junction.
+# Source manifest inputs are captured before activation.
+if ($SourceRuntimeIdentity) {
+    Test-SourceRuntimeUnchanged
+    $sourceManifestGit = Get-GitInfo -Path (Split-Path -Parent (Split-Path -Parent $PluginDir))
+}
 if (-not (Invoke-VersionedActivate)) { exit 1 }
 
 Deploy-SelfProvisioningBinstub
 
 $kind = Get-SourceKind -PluginPath $PluginDir
-$ver = '0.0.0'
+$ver = if ($SourceRuntimeIdentity) { $PackageVersion } else { '0.0.0' }
 $pyproj = Join-Path $PluginDir 'pyproject.toml'
-if (Test-Path $pyproj) {
+if (-not $SourceRuntimeIdentity -and (Test-Path $pyproj)) {
     $verLine = Select-String -Path $pyproj -Pattern '^\s*version\s*=' | Select-Object -First 1
     if ($verLine) { $ver = ($verLine.Line -replace '.*=\s*"([^"]+)".*', '$1') }
 }
 $commit = $null; $branch = $null; $dirty = $false
 if ($kind -eq 'local') {
     $repoRoot = Split-Path -Parent (Split-Path -Parent $PluginDir)
-    $git = Get-GitInfo -Path $repoRoot
+    $git = if ($SourceRuntimeIdentity) { $sourceManifestGit } else { Get-GitInfo -Path $repoRoot }
     $commit = $git.commit; $branch = $git.branch; $dirty = $git.dirty
 }
 $manifest = [ordered]@{
@@ -1085,7 +1103,7 @@ $manifest = [ordered]@{
     venv           = ($LinkDir -replace '\\', '/')
     runtime        = 'python'
 }
-Test-SourceRuntimeUnchanged
+if (-not $SourceRuntimeIdentity) { Test-SourceRuntimeUnchanged }
 if ($SourceRuntimeIdentity) {
     foreach ($property in ($SourceRuntimeIdentity | ConvertFrom-Json).PSObject.Properties) {
         $manifest[$property.Name] = $property.Value

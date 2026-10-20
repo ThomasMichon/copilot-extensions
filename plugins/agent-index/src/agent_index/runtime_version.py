@@ -18,6 +18,8 @@ def current_runtime_version() -> str:
     """Return the immutable slot identity, falling back to the package version."""
     from . import __version__
 
+    if "+source." in __version__ or ".source." in __version__:
+        return __version__
     return os.environ.get(RUNTIME_VERSION_ENV, "").strip() or __version__
 
 

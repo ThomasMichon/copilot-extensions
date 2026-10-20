@@ -9,7 +9,7 @@ from pathlib import Path
 from ._build_info import BUILD_INFO
 
 PROCESS_GENERATION = BUILD_INFO.get("runtime_generation")
-PROCESS_VERSION = BUILD_INFO.get("version")
+PROCESS_VERSION = BUILD_INFO.get("runtime_version", BUILD_INFO.get("version"))
 
 
 def drift_description(entry: dict) -> str:

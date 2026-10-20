@@ -370,7 +370,7 @@ def _remove_link(link: Path) -> None:
 
 def activate(root: Path, version: str, *, link_name: str = CURRENT_LINK,
              replace_nonlink: bool = False, link_free: bool = False,
-             dev_owner: str | None = None) -> Path:
+             dev_owner: str | None = None, ownership_receipt: Path | None = None) -> Path:
     """Publish selectors while the target is pinned against concurrent cleanup."""
     with retention_lease(root, version), _publication_lease(root):
         if is_dev_generation(version):
@@ -381,12 +381,12 @@ def activate(root: Path, version: str, *, link_name: str = CURRENT_LINK,
             _write_dev_claim(root, claim)
         return _activate(
             root, version, link_name=link_name,
-            replace_nonlink=replace_nonlink, link_free=link_free,
+            replace_nonlink=replace_nonlink, link_free=link_free, ownership_receipt=ownership_receipt,
         )
 
 
 def _activate(root: Path, version: str, *, link_name: str = CURRENT_LINK,
-              replace_nonlink: bool = False, link_free: bool = False) -> Path:
+              replace_nonlink: bool = False, link_free: bool = False, ownership_receipt: Path | None = None) -> Path:
     """Mark ``versions/<version>`` as the active runtime.
 
     Always writes the ``current-version`` marker file atomically (temp +
@@ -415,14 +415,7 @@ def _activate(root: Path, version: str, *, link_name: str = CURRENT_LINK,
         raise FileNotFoundError(f"version not installed: {vdir}")
     root.mkdir(parents=True, exist_ok=True)
 
-    # Publish the active version atomically (source of truth on every OS).
-    dest = root / CURRENT_VERSION_FILE
-    tmp = dest.with_name(dest.name + f".tmp-{os.getpid()}")
-    tmp.write_text(version + "\n", encoding="utf-8")
-    os.replace(tmp, dest)
-    # Stamp last-known-good alongside the marker so a resolver can recover the
-    # last-active version if the marker is ever torn/absent (resolve_python tier 2).
-    _write_last_known_good(root, version)
+    _runtime_component("versioned_runtime_publication").publish_selectors(root, version, ownership_receipt, _write_last_known_good)
 
     link = current_link(root, link_name)
 
@@ -2175,6 +2168,7 @@ def main(argv: list[str] | None = None) -> int:
                          "(the runtime is selected by version-pinned binstubs). "
                          "Windows is always junction-free regardless.")
     sub.add_parser("current", help="print the active version")
+    _runtime_component("versioned_runtime_source").add_runtime_cli_commands(sub)
     rp = sub.add_parser("resolve", help="print current/<subpath>")
     rp.add_argument("--subpath", default="")
     sub.add_parser("resolve-python",
@@ -2213,10 +2207,6 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("toss-incomplete",
                    help="remove non-current slots lacking a completion marker")
 
-    fp = sub.add_parser("fingerprint",
-                        help="print a stable sha256 fingerprint over the given "
-                             "source paths (files and/or directories)")
-    fp.add_argument("paths", nargs="+", help="source file(s)/directory(ies)")
     cap = sub.add_parser("check-admission",
                         help="decide reuse/content-conflict/construct/"
                              "health-repair-required for <version> without "
@@ -2262,7 +2252,7 @@ def main(argv: list[str] | None = None) -> int:
         elif args.cmd == "activate":
             vdir = activate(root, args.version, link_name=link_name,
                             replace_nonlink=args.replace_nonlink,
-                            link_free=args.no_link, dev_owner=args.dev_owner)
+                            link_free=args.no_link, dev_owner=args.dev_owner, ownership_receipt=args.ownership_receipt)
             _emit({"activated": args.version, "path": str(vdir)}
                   if args.json else str(vdir), args.json)
         elif args.cmd == "current":
@@ -2271,6 +2261,11 @@ def main(argv: list[str] | None = None) -> int:
                 print("", end="")
                 return 1
             _emit({"current": cur} if args.json else (cur or ""), args.json)
+        elif args.cmd == "fingerprint":
+            value = fingerprint_source(args.paths)
+            print(json.dumps({"fingerprint": value}) if args.json else value)
+        elif args.cmd == "publish-redirects" or args.cmd.startswith("publication-"):
+            _runtime_component("versioned_runtime_source").run_runtime_cli_command(args)
         elif args.cmd == "resolve":
             cur = current_version(root, link_name)
             if cur is None:
@@ -2313,9 +2308,6 @@ def main(argv: list[str] | None = None) -> int:
         elif args.cmd == "toss-incomplete":
             tossed = toss_incomplete(root, link_name)
             _emit({"tossed": tossed} if args.json else tossed, args.json)
-        elif args.cmd == "fingerprint":
-            fp_hash = fingerprint_source(args.paths)
-            _emit({"fingerprint": fp_hash} if args.json else fp_hash, args.json)
         elif args.cmd == "check-admission":
             decision = check_admission(root, args.version,
                                        payload_hash=args.payload_hash)

@@ -8,6 +8,8 @@ import shutil
 import subprocess
 import sys
 import threading
+from concurrent.futures import ThreadPoolExecutor
+from collections.abc import Iterator
 from contextlib import contextmanager, nullcontext
 from pathlib import Path
 
@@ -29,6 +31,56 @@ def driver(monkeypatch):
                        "runtime_generation": "test-generation"},
     })
     return module
+
+
+@pytest.fixture(scope="module")
+def native_runtime_source(tmp_path_factory: pytest.TempPathFactory) -> Iterator[tuple[Path, str]]:
+    repository = Path(__file__).resolve().parents[3]
+    plugin = repository / "plugins" / "agent-worktrees"
+    owned = tmp_path_factory.mktemp("native-runtime-source")
+    with pytest.MonkeyPatch.context() as patch:
+        patch.syspath_prepend(str(plugin / "scripts"))
+        spec = importlib.util.spec_from_file_location(
+            "backend_fixture_engine", repository / "libs/installer-engine/installer_engine.py",
+        )
+        assert spec and spec.loader
+        engine = importlib.util.module_from_spec(spec)
+        patch.setitem(sys.modules, spec.name, engine)
+        spec.loader.exec_module(engine)
+        frozen = engine.freeze_inputs(plugin, owned / "repository")
+    root = owned / "repository"
+    hooks = owned / "empty-hooks"
+    hooks.mkdir()
+    git = shutil.which("git")
+    assert git is not None, "real provenance qualification requires native Git"
+    environment = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+    environment.update(GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull)
+    options = [
+        git, "-C", str(root), "-c", f"core.hooksPath={hooks}",
+        "-c", "core.autocrlf=false", "-c", "commit.gpgsign=false",
+        "-c", "user.name=Runtime test", "-c", "user.email=runtime-test@example.invalid",
+    ]
+
+    def run(*arguments: str) -> str:
+        return subprocess.check_output(
+            [*options, *arguments], env=environment, text=True, **no_window_kwargs(),
+        ).strip()
+
+    run("init", "-q", "--template", str(hooks))
+    # Preserve literal copied inputs even if a package carries text/filter attributes.
+    (root / ".git/info").mkdir(exist_ok=True)
+    (root / ".git/info/attributes").write_text(
+        "* -text -filter -ident -working-tree-encoding\n", encoding="utf-8",
+    )
+    run("add", "--all", "--force", ".")
+    run("commit", "-qm", "Frozen runtime dependency fixture")
+    head = run("rev-parse", "HEAD")
+    assert run("status", "--porcelain") == ""
+    assert engine.runtime.fingerprint_source(engine._source_files(frozen.packages)) == frozen.payload_hash
+    yield frozen.plugin, head
+    assert engine.runtime.fingerprint_source(engine._source_files(frozen.packages)) == frozen.payload_hash
+    assert run("rev-parse", "HEAD") == head
+    assert run("status", "--porcelain", "--untracked-files=no") == ""
 
 
 def _slot(driver, root, version):
@@ -119,6 +171,7 @@ def test_one_owner_retains_candidate_and_rollback_until_actual_cutover(
     for name in (
         "runtime_launcher.py", "versioned_runtime.py", "versioned_runtime_leases.py",
         "versioned_runtime_source.py", "versioned_runtime_construction.py",
+        "versioned_runtime_publication.py",
     ):
         shutil.copyfile(driver.SCRIPTS / name, plugin / "scripts" / name)
     (plugin / "pyproject.toml").write_text(
@@ -440,7 +493,9 @@ def test_native_exit_signal_preserves_ambiguous_process_liveness(
 
 
 @pytest.mark.timeout(900)
-def test_real_installer_retains_the_serving_slot_until_monitor_drain(driver, tmp_path):
+def test_real_installer_retains_the_serving_slot_until_monitor_drain(
+    driver, tmp_path, native_runtime_source,
+):
     from agent_worktrees import classify_daemon, locks
     from agent_worktrees.status_monitor_cutover import ControlClient
     from agent_worktrees.status_monitor_python import direct_monitor_python
@@ -450,7 +505,7 @@ def test_real_installer_retains_the_serving_slot_until_monitor_drain(driver, tmp
     uv = shutil.which("uv")
     if uv is None:
         pytest.skip("real construction requires the configured uv executable")
-    plugin = Path(__file__).resolve().parents[1]
+    plugin, expected_commit = native_runtime_source
     home = tmp_path / "home"
     root = home / ".agent-worktrees"
     home.mkdir()
@@ -479,6 +534,13 @@ def test_real_installer_retains_the_serving_slot_until_monitor_drain(driver, tmp
     assert built.returncode == 0, log.read_text(encoding="utf-8", errors="replace")
     installed = json.loads(result.read_text(encoding="utf-8"))
     candidate = root / "versions" / installed["runtime_version"]
+    info = json.loads(subprocess.check_output(
+        [str(driver.runtime.slot_python(root, candidate.name)), "-I", "-B", "-c",
+         "import json; from agent_worktrees._build_info import BUILD_INFO; print(json.dumps(BUILD_INFO))"],
+        env=environment, text=True, timeout=30, **no_window_kwargs(),
+    ))
+    assert info["commit"] == expected_commit
+    assert info["source"] == plugin.as_posix()
     old = root / "versions" / "serving-baseline"
     shutil.copytree(candidate, old)
     driver.runtime.marker_path(root, old.name).unlink()
@@ -491,6 +553,8 @@ def test_real_installer_retains_the_serving_slot_until_monitor_drain(driver, tmp
     token = root / "status-monitor-control.token"
     processes = []
     identities = {}
+    monitor_waiter = None
+    monitor_exit = None
     hook_thread = None
     demand_thread = None
     demand_stop = threading.Event()
@@ -527,6 +591,8 @@ runpy.run_module("agent_worktrees", run_name="__main__", alter_sys=True)
                 stdout=monitor_log, stderr=subprocess.STDOUT, **no_window_kwargs(),
             )
             processes.append(monitor)
+            monitor_waiter = ThreadPoolExecutor(max_workers=1, thread_name_prefix="baseline-reaper")
+            monitor_exit = monitor_waiter.submit(monitor.wait)
             try:
                 old_record = _wait_for(
                     lambda: (
@@ -618,6 +684,8 @@ runpy.run_module("agent_worktrees", run_name="__main__", alter_sys=True)
             hook_thread.join(timeout=15)
             assert not hook_thread.is_alive()
             assert hook_result.get("delayed") is True
+            assert monitor.returncode is not None, "installer returned before its predecessor was reaped"
+            assert monitor_exit.result() == 0
             assert not diagnostics._pid_alive(old_pid), "installer returned before actual predecessor exit"
             new_lock = json.loads(lock_path.read_text(encoding="utf-8"))
             assert new_lock["pid"] == successor.pid
@@ -633,21 +701,30 @@ runpy.run_module("agent_worktrees", run_name="__main__", alter_sys=True)
             f"\nInstaller-process={processes[-1].poll()} request={hook_result}"
         )
     finally:
-        request_release.touch()
-        demand_stop.set()
-        if demand_thread is not None:
-            demand_thread.join(timeout=5)
-        if demand_endpoint is not None:
-            classify_daemon.wcs_client.release(*demand_endpoint, "retained-cutover-demand")
-        for pid, identity in identities.items():
-            if identity is not None:
-                diagnostics.terminate_pid_if_identity(pid, identity, exit_timeout=10)
-        for process in processes:
-            if process.poll() is None:
-                process.terminate()
-            process.wait(timeout=15)
-        if hook_thread is not None:
-            hook_thread.join(timeout=15)
+        try:
+            request_release.touch()
+            demand_stop.set()
+            if demand_thread is not None:
+                demand_thread.join(timeout=5)
+            if demand_endpoint is not None:
+                classify_daemon.wcs_client.release(*demand_endpoint, "retained-cutover-demand")
+            for pid, identity in identities.items():
+                if identity is not None:
+                    diagnostics.terminate_pid_if_identity(pid, identity, exit_timeout=10)
+        finally:
+            try:
+                for process in processes:
+                    if process.poll() is None:
+                        process.terminate()
+                    process.wait(timeout=15)
+                if hook_thread is not None:
+                    hook_thread.join(timeout=15)
+            finally:
+                if monitor_waiter is not None:
+                    monitor_waiter.shutdown(wait=True)
+                    assert monitor_exit.done(), "baseline reaper did not join"
+                    assert monitor_exit.result() == monitor.returncode
+                    assert monitor.returncode is not None, "baseline child was not reaped"
 
 
 def test_preparation_stamps_installed_metadata_and_preserves_native_scripts(tmp_path, monkeypatch):
@@ -736,11 +813,13 @@ def test_bash_bootstrap_skips_unusable_alias_and_searches_all_candidates(tmp_pat
 
 
 @pytest.mark.timeout(900)
-def test_real_python_lifecycle_constructs_then_reuses_without_uv(driver, tmp_path):
+def test_real_python_lifecycle_constructs_then_reuses_without_uv(
+    driver, tmp_path, native_runtime_source,
+):
     uv = shutil.which("uv")
     if uv is None:
         pytest.skip("real construction requires the configured uv executable")
-    plugin = Path(__file__).resolve().parents[1]
+    plugin, expected_commit = native_runtime_source
     root, result = tmp_path / "runtime", tmp_path / "result.json"
     home = tmp_path / "home"
     home.mkdir()
@@ -795,7 +874,7 @@ def test_real_python_lifecycle_constructs_then_reuses_without_uv(driver, tmp_pat
     assert info["version"] == installed["package_version"]
     assert info["source"] == plugin.as_posix()
     assert len(info["runtime_generation"]) == 32
-    assert info["commit"] != "unknown"
+    assert info["commit"] == expected_commit
     if os.name == "nt":
         assert not list(python.parent.glob("agent-*.exe"))
     argv[-1] = str(tmp_path / "uv-must-not-run")

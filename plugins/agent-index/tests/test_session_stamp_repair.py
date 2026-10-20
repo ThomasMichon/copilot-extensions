@@ -10,7 +10,7 @@ import sys
 import pytest
 
 from stamp_fixture import no_shared_write_umask  # noqa: F401
-from test_install_engine_adoption import function
+from test_install_engine_adoption import ENGINE, function
 from test_session_stamp_security import _hook, _run, _stamp_module
 
 pytestmark = pytest.mark.skipif(os.name == "nt", reason="POSIX mode migration")
@@ -55,6 +55,7 @@ def test_actual_installer_stamp_then_hook_under_inherited_mask(tmp_path, shell, 
     result = subprocess.run(
         ["bash", "-c", f"""
 set -euo pipefail
+. '{ENGINE / "installer-engine.sh"}'
 {definitions}
 INSTALL_DIR='{root}'; LOCAL_BIN='{home / ".local/bin"}'; STUB="$LOCAL_BIN/agent-index"
 PLUGIN_DIR='{payload}'; SCRIPT_DIR="$PLUGIN_DIR/scripts"; SRC_VERSION=9.9.9; FORCE=0

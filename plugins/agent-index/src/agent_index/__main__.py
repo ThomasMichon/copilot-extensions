@@ -728,6 +728,9 @@ def cmd_installer_readiness(_args: argparse.Namespace) -> int:
 def cmd_version(_args: argparse.Namespace) -> int:
     from . import __version__
 
+    if "+source." in __version__ or ".source." in __version__:
+        print(__version__)
+        return 0
     payload = _status_payload()
     print(payload.get("version") or __version__)
     return 0

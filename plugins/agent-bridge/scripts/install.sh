@@ -1321,15 +1321,9 @@ _source_kind() {
 
 _write_deploy_manifest() {
     local source_path="${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}"
-    local fields="" py
-    if [[ "$SRC_VERSION" != "$PACKAGE_VERSION" ||
-        -e "$PLUGIN_DIR/runtime-source.json" || -L "$PLUGIN_DIR/runtime-source.json" ]]; then
-        py="$(_bootstrap_python)" || return 1
-        fields="$("$py" -I -B "$SCRIPT_DIR/versioned_runtime_source.py" \
-            --payload "$PLUGIN_DIR" --package-version "$PACKAGE_VERSION" \
-            --plugin agent-bridge \
-            --expected-runtime-version "$SRC_VERSION" --format shell-fields)" || return 1
-    fi
+    local fields="${SOURCE_RUNTIME_IDENTITY:-}"
+    fields="${fields#\{}"
+    fields="${fields%\}}"
     write_deploy_manifest "agent-bridge" "agent-bridge" "$INSTALL_DIR" "$PLUGIN_DIR" "$VENV_DIR" "$fields" "$source_path" "$PACKAGE_VERSION"
 }
 
@@ -1446,19 +1440,21 @@ _ensure_uv_index() {
 # line + a machine-readable ::agent-provisioning:: signal so a caller can extend
 # its timeout), lock-serialized, fail-fast. Replaces the old thin exec stub.
 deploy_binstub() {
-    mkdir -p "$INSTALL_DIR/bin"
+    mkdir -p "$INSTALL_DIR/bin" || return 1
     if $PUBLISH_GLOBAL_BINSTUBS; then
-        mkdir -p "$LOCAL_BIN"
+        mkdir -p "$LOCAL_BIN" || return 1
     fi
     # Co-deploy the canonical marker-only resolver so the binstub resolves the
     # interpreter the ONE uniform way (uniform-runtime-resolution, #765).
     for r in resolve-runtime.sh resolve-runtime.ps1; do
-        [ -f "$SCRIPT_DIR/$r" ] && cp -f "$SCRIPT_DIR/$r" "$INSTALL_DIR/bin/$r"
+        if [[ -f "$SCRIPT_DIR/$r" ]]; then
+            _runtime_publication_copy "$SCRIPT_DIR/$r" "$INSTALL_DIR/bin/$r" || return 1
+        fi
     done
     # Native service callers use the Python resolver without a payload or PATH.
-    mkdir -p "$INSTALL_DIR/scripts"
-    for r in versioned_runtime.py versioned_runtime_leases.py versioned_runtime_construction.py versioned_runtime_source.py; do
-        cp -f "$SCRIPT_DIR/$r" "$INSTALL_DIR/scripts/$r" || return 1
+    mkdir -p "$INSTALL_DIR/scripts" || return 1
+    for r in versioned_runtime.py versioned_runtime_leases.py versioned_runtime_construction.py versioned_runtime_source.py versioned_runtime_publication.py; do
+        _runtime_publication_copy "$SCRIPT_DIR/$r" "$INSTALL_DIR/scripts/$r" || return 1
     done
     if ! $PUBLISH_GLOBAL_BINSTUBS; then
         _ok "Scoped install keeps the global compatibility binstub unchanged"
@@ -1531,7 +1527,25 @@ do_stamp() {
     if $PUBLISH_GLOBAL_BINSTUBS; then
         mkdir -p "$LOCAL_BIN"
     fi
-    printf '%s\n' "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" > "$INSTALL_DIR/payload-dir"
+    if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
+        _payload_unchanged_since_admission source-only || return 1
+        local py snapshot
+        py="$(_bootstrap_python)" || return 1
+        snapshot="$("$py" -I -B "$SCRIPT_DIR/versioned_runtime_source.py" \
+            --payload "$PLUGIN_DIR" --package-version "$PACKAGE_VERSION" --plugin agent-bridge \
+            --expected-runtime-version "$SRC_VERSION" \
+            --expected-source-identity "$SOURCE_RUNTIME_IDENTITY" \
+            --snapshot-root "$INSTALL_DIR")" || return 1
+        [[ -n "$snapshot" ]] || {
+            _fail "Source snapshot publisher returned no path"; return 1;
+        }
+        _payload_unchanged_since_admission source-only || return 1
+        "$py" -I -B "$SCRIPT_DIR/versioned_runtime.py" --root "$INSTALL_DIR" \
+            publish-redirects --payload-dir "$snapshot" --version "$SRC_VERSION" \
+            --expected-source-identity "$SOURCE_RUNTIME_IDENTITY" || return 1
+    else
+        printf '%s\n' "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" > "$INSTALL_DIR/payload-dir"
+    fi
     deploy_binstub
     if $PUBLISH_GLOBAL_BINSTUBS; then
         _ok "Stamped: binstub on PATH; runtime provisions on first use."

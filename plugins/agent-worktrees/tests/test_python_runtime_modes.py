@@ -42,7 +42,8 @@ def test_dev_bootstrap_attributes_worktree_inputs_not_authority_payload(
     authority = tmp_path / "authorized-payload"
     authority.mkdir()
     root = tmp_path / "runtime"
-    provenance = {"version": "1.0.0", "source": str(plugin)}
+    provenance = {"version": "1.0.0", "source": str(plugin),
+                  "deployment_source": json.dumps({"path": plugin.as_posix()})}
 
     @contextmanager
     def held(**_kwargs):
@@ -62,8 +63,11 @@ def test_dev_bootstrap_attributes_worktree_inputs_not_authority_payload(
 
     @contextmanager
     def candidate(control_root, version, **kwargs):
-        assert version == "control" and kwargs["plugin"] == plugin
+        assert version == "control" and kwargs["plugin"].is_relative_to(control_root)
+        assert (kwargs["plugin"] / "pyproject.toml").read_bytes() == (plugin / "pyproject.toml").read_bytes()
         assert kwargs["construction_data"] == provenance
+        assert kwargs["construction_data"]["source"] == str(plugin)
+        assert json.loads(kwargs["construction_data"]["deployment_source"])["path"] == authority.as_posix()
         yield SimpleNamespace(frozen_plugin=control_root / "frozen")
 
     class OwnerProcess:
@@ -279,7 +283,7 @@ def test_dev_candidate_refreshes_only_claimed_slot_and_retains_it(modes, tmp_pat
     (plugin / "scripts").mkdir()
     for name in (
         "runtime_launcher.py", "versioned_runtime.py", "versioned_runtime_leases.py",
-        "versioned_runtime_source.py", "versioned_runtime_construction.py",
+        "versioned_runtime_source.py", "versioned_runtime_construction.py", "versioned_runtime_publication.py",
     ):
         shutil.copyfile(lifecycle.SCRIPTS / name, plugin / "scripts" / name)
     (plugin / "pyproject.toml").write_text(
@@ -438,12 +442,16 @@ def test_dev_release_keeps_original_claim_until_restoration_settles(
 @pytest.mark.timeout(650)
 @pytest.mark.parametrize("entrypoint", ["powershell.exe", "pwsh.exe", "bash"])
 def test_real_native_repair_preserves_broken_slot_and_allocates_distinct_generations(
-    tmp_path, entrypoint
+    tmp_path, entrypoint, modes
 ):
     uv = shutil.which("uv")
     if uv is None:
         pytest.skip("real repair requires the configured uv executable")
     plugin = Path(__file__).resolve().parents[1]
+    engine = modes.lifecycle.engine
+    original_hash = modes.lifecycle.runtime.fingerprint_source(
+        engine._source_files(engine._package_roots(plugin)),
+    )
     version = tomllib.loads((plugin / "pyproject.toml").read_text(encoding="utf-8"))["project"][
         "version"
     ]
@@ -536,6 +544,13 @@ def test_real_native_repair_preserves_broken_slot_and_allocates_distinct_generat
         completed[selected] = (
             root / "versions" / selected / ".install-complete.json"
         ).read_bytes()
+        current_hash = modes.lifecycle.runtime.fingerprint_source(
+            engine._source_files(engine._package_roots(plugin)),
+        )
+        assert current_hash == original_hash, "The admitted original source changed during native repair"
+        assert json.loads(completed[selected])["payload_hash"] == original_hash, (
+            "Repair completion describes another input graph instead of the admitted original source"
+        )
         assert (broken / ".install-complete.json").read_text() == "broken completion evidence"
         assert (broken / "do-not-rewrite").read_bytes() == b"original published runtime"
         reuse_command = [("provision" if argument == "repair" else argument) for argument in argv]

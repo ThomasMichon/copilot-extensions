@@ -80,7 +80,12 @@ elif args[:2] == ["pip", "install"]:
     snapshot = Path(os.environ["FIXTURE_SNAPSHOT_ROOT"]).resolve()
     parse = runpy.run_path(str(snapshot / "scripts" / "installer_dependency_policy.py"))["_toml"]
     project = parse(source / "pyproject.toml")["project"]
-    original = snapshot if project["name"] == "agent-vault" else snapshot / "libs" / source.name
+    candidates = [snapshot, *(path for path in (snapshot / "libs").iterdir()
+                             if (path / "pyproject.toml").is_file())]
+    matches = [path for path in candidates
+               if parse(path / "pyproject.toml")["project"]["name"] == project["name"]]
+    assert len(matches) == 1, "Retained project must match exactly one snapshot identity"
+    original = matches[0]
     assert source != original and original.is_relative_to(snapshot)
     assert project == parse(original / "pyproject.toml")["project"]
     for member in original.rglob("*.py"):
@@ -574,6 +579,7 @@ def stamped_snapshot(tmp_path_factory):
         "versioned_runtime.py", "versioned_runtime_leases.py",
         "versioned_runtime_construction.py", "installer_dependency_policy.py",
         "versioned_runtime_source.py",
+        "versioned_runtime_publication.py",
         "installer_dependency_config.py",
     ):
         assert (snapshot / "scripts" / helper).is_file()

@@ -867,9 +867,23 @@ function Invoke-Stamp {
         }
         if (Test-SnapshotReusable -SnapshotDir $currentSnapshot -SourceKind $sourceKind -SourcePath $sourcePath -SourceVersion $SrcVersion) {
             Assert-SourceRuntimeIdentity -Payload $currentSnapshot
-            $payloadTmp = Join-Path $InstallDir ("payload-dir.$PID.tmp")
-            [System.IO.File]::WriteAllText($payloadTmp, $currentSnapshot, $utf8NoBom)
-            Move-Item -LiteralPath $payloadTmp -Destination (Join-Path $InstallDir 'payload-dir') -Force
+            if ($SourceRuntimeIdentity) {
+                $py = Get-BootstrapPython
+                if (-not $py) { throw 'Source redirect publication requires a bootstrap Python interpreter' }
+                Assert-SourceRuntimeIdentity
+                $nativeError = ''
+                $result = Invoke-Hidden -FilePath $py -ArgList @(
+                    '-I', '-B', (Join-Path $PSScriptRoot 'versioned_runtime.py'),
+                    '--root', $InstallDir, 'publish-redirects', '--payload-dir', $currentSnapshot,
+                    '--version', $SrcVersion, '--expected-source-identity', $SourceRuntimeIdentity
+                ) -ErrorOutput ([ref]$nativeError)
+                $code = $LASTEXITCODE
+                if ($code -ne 0) { throw "Source redirect publication failed (exit ${code}): $result$nativeError" }
+            } else {
+                $payloadTmp = Join-Path $InstallDir ("payload-dir.$PID.tmp")
+                [System.IO.File]::WriteAllText($payloadTmp, $currentSnapshot, $utf8NoBom)
+                Move-Item -LiteralPath $payloadTmp -Destination (Join-Path $InstallDir 'payload-dir') -Force
+            }
             Write-Binstubs
             Write-Ok "Stamped: reused snapshot $currentSnapshot"
             return
@@ -911,12 +925,25 @@ function Invoke-Stamp {
         }
         Assert-SourceRuntimeIdentity -Payload $snapDir
         Assert-SourceRuntimeIdentity
-        $payloadTmp = Join-Path $InstallDir ("payload-dir.$PID.tmp")
-        [System.IO.File]::WriteAllText($payloadTmp, $snapDir, $utf8NoBom)
-        Move-Item -LiteralPath $payloadTmp -Destination (Join-Path $InstallDir 'payload-dir') -Force
-        $versionTmp = Join-Path $InstallDir ("stamped-version.$PID.tmp")
-        [System.IO.File]::WriteAllText($versionTmp, $SrcVersion, $utf8NoBom)
-        Move-Item -LiteralPath $versionTmp -Destination (Join-Path $InstallDir 'stamped-version') -Force
+        if ($SourceRuntimeIdentity) {
+            $py = Get-BootstrapPython
+            if (-not $py) { throw 'Source redirect publication requires a bootstrap Python interpreter' }
+            $nativeError = ''
+            $result = Invoke-Hidden -FilePath $py -ArgList @(
+                '-I', '-B', (Join-Path $PSScriptRoot 'versioned_runtime.py'),
+                '--root', $InstallDir, 'publish-redirects', '--payload-dir', $snapDir,
+                '--version', $SrcVersion, '--expected-source-identity', $SourceRuntimeIdentity
+            ) -ErrorOutput ([ref]$nativeError)
+            $code = $LASTEXITCODE
+            if ($code -ne 0) { throw "Source redirect publication failed (exit ${code}): $result$nativeError" }
+        } else {
+            $payloadTmp = Join-Path $InstallDir ("payload-dir.$PID.tmp")
+            [System.IO.File]::WriteAllText($payloadTmp, $snapDir, $utf8NoBom)
+            Move-Item -LiteralPath $payloadTmp -Destination (Join-Path $InstallDir 'payload-dir') -Force
+            $versionTmp = Join-Path $InstallDir ("stamped-version.$PID.tmp")
+            [System.IO.File]::WriteAllText($versionTmp, $SrcVersion, $utf8NoBom)
+            Move-Item -LiteralPath $versionTmp -Destination (Join-Path $InstallDir 'stamped-version') -Force
+        }
         Write-Ok "Snapshot: $snapDir"
         Write-Binstubs
         Write-Ok 'Stamped: agent-ssh binstub on PATH; runtime provisions on first use.'
@@ -1166,14 +1193,25 @@ Write-Ok 'Package installed: agent-ssh'
 }
 
 # Versioned layout (#581): health-gate the slot + swap the `.venv` junction.
+# Source manifest inputs are captured before activation.
+if ($SourceRuntimeIdentity) {
+    Assert-SourceRuntimeIdentity
+    $sourceManifestHash = Get-PayloadHash
+    $sourceManifestPath = if ($env:COPILOT_PLUGIN_STAGED_FROM) { $env:COPILOT_PLUGIN_STAGED_FROM } else { $PluginDir }
+    $sourceMarker = Get-SnapshotSourceMarkerPath -SnapshotDir $PluginDir
+    if (Test-Path $sourceMarker) { $sourceManifestPath = (Get-Content -LiteralPath $sourceMarker -Raw).Trim() }
+    $sourceManifestGit = Get-GitInfo -Path (Split-Path $sourceManifestPath)
+}
 if (-not (Invoke-VersionedActivate)) { exit 1 }
 
-Assert-SourceRuntimeIdentity
+if (-not $SourceRuntimeIdentity) { Assert-SourceRuntimeIdentity }
 Write-Binstubs
 
 $sourcePath = if ($env:COPILOT_PLUGIN_STAGED_FROM) { $env:COPILOT_PLUGIN_STAGED_FROM } else { $PluginDir }
 $snapshotSourceMarker = Get-SnapshotSourceMarkerPath -SnapshotDir $PluginDir
-if (Test-Path $snapshotSourceMarker) {
+if ($SourceRuntimeIdentity) {
+    $sourcePath = $sourceManifestPath
+} elseif (Test-Path $snapshotSourceMarker) {
     $sourcePath = (Get-Content -LiteralPath $snapshotSourceMarker -Raw).Trim()
 }
 Write-DeployManifest `
@@ -1183,7 +1221,11 @@ Write-DeployManifest `
     -PluginPath $PluginDir `
     -VenvPath $LinkDir `
     -GetSourceKind ${function:Get-SourceKind} `
-    -GetGitInfo ${function:Get-GitInfo} `
+    -GetGitInfo {
+        param($path)
+        if ($SourceRuntimeIdentity) { $sourceManifestGit }
+        else { Get-GitInfo -Path $path }
+    } `
     -SourcePathOverride $sourcePath `
     -VersionOverride $PackageVersion `
     -AdditionalFields $(if ($SourceRuntimeIdentity) {
@@ -1191,7 +1233,7 @@ Write-DeployManifest `
         ($SourceRuntimeIdentity | ConvertFrom-Json).PSObject.Properties | ForEach-Object { $fields[$_.Name] = $_.Value }
         $fields
     } else { @{} }) `
-    -PayloadHash (Get-PayloadHash)
+    -PayloadHash $(if ($SourceRuntimeIdentity) { $sourceManifestHash } else { Get-PayloadHash })
 
 Write-Host ''
 $prevEAP = $ErrorActionPreference

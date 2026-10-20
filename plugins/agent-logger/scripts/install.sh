@@ -275,7 +275,17 @@ if [[ -z "$SRC_VERSION" ]]; then
 fi
 VENV="$INSTALL_DIR/versions/$SRC_VERSION"
 
+_test_runtime_healthy() {
+    local output
+    if ! output="$("$VENV/bin/python" -I -m agent_logger --help 2>&1)"; then  # runtime-resolution: allow install-time slot health-gate
+        _fail "Isolated agent_logger CLI health probe failed: $output"
+        return 1
+    fi
+    return 0
+}
+
 _versioned_activate() {
+    _assert_source_runtime || return 1
     # Health-gate the slot, swap the `.venv` symlink onto it (first migration moves
     # a legacy real `.venv` aside), gc keeping current + previous-good. POSIX rename
     # tolerates the timer's open files, and systemd restarts on the new slot.
@@ -284,12 +294,20 @@ _versioned_activate() {
     local vr="$SCRIPT_DIR/versioned_runtime.py"
     local py="$VENV/bin/python"  # runtime-resolution: allow install-time slot health-gate (VENV is the versioned slot)
     [[ -x "$py" ]] || py="$LINK_DIR/bin/python"
-    [[ -x "$py" ]] || return 0
-    if ! "$VENV/bin/python" -c 'import agent_logger' 2>/dev/null; then  # runtime-resolution: allow install-time slot health-gate
+    [[ -x "$py" ]] || {
+        _fail "Runtime slot interpreter is unavailable: $py"; return 1;
+    }
+    if ! _test_runtime_healthy; then
         warn "Fresh runtime slot failed its health gate (versions/$SRC_VERSION) -- not activating"
         return 1
     fi
+    deploy_runtime_helpers || return 1
+    _assert_source_runtime || return 1
     _versioned_mark_complete || return 1
+    if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
+        _publish_source_snapshot >/dev/null || return 1
+    fi
+    _assert_source_runtime || return 1
     local prev
     prev="$("$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" current 2>/dev/null || echo "")"
     if ! "$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" activate "$SRC_VERSION" --replace-nonlink --no-link; then
@@ -323,11 +341,7 @@ _rt_python() {
 }
 
 _bootstrap_python() {
-    # A python to run the stdlib-only versioned_runtime.py helper BEFORE the slot
-    # venv exists (e.g. the pre-build toss). Prefers the current `venv` link's
-    # python, then python3/python on PATH. Prints nothing + returns 1 if none
-    # found (#935).
-    if [[ -x "$LINK_DIR/bin/python" ]]; then echo "$LINK_DIR/bin/python"; return 0; fi
+    # Keep construction supervision outside the candidate being built.
     local __c
     for __c in python3 python; do
         if command -v "$__c" >/dev/null 2>&1; then command -v "$__c"; return 0; fi
@@ -365,6 +379,7 @@ _payload_hash() {
 }
 
 _versioned_slot_clean() {
+    _assert_source_runtime || return 1
     [[ "$VERSIONED_RUNTIME" == 1 ]] || {
         printf '%s\n' 'Construction requires a versioned runtime candidate' >&2; return 1;
     }
@@ -376,10 +391,12 @@ _versioned_slot_clean() {
         eval "$helpers"
     fi
     _runtime_construction_begin "$py" "$vr" "$INSTALL_DIR" "$SRC_VERSION" \
-        "$(_payload_hash)" "$(basename "$LINK_DIR")"
+        "$(_payload_hash)" "$(basename "$LINK_DIR")" || return 1
+    _assert_source_runtime
 }
 
 _versioned_mark_complete() {
+    _assert_source_runtime || return 1
     local actual_hash
     actual_hash="$(_payload_hash)" || return 1
     if [[ -n "${1:-}" && "$1" != "$actual_hash" ]]; then
@@ -387,6 +404,32 @@ _versioned_mark_complete() {
         return 1
     fi
     _runtime_construction_complete "$actual_hash"
+}
+
+_write_runtime_manifest() {
+    if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
+        [[ -n "${SOURCE_RUNTIME_SNAPSHOT:-}" ]] || {
+            _fail "Source manifest requires a committed immutable snapshot"; return 1;
+        }
+        (
+            PLUGIN_DIR="$SOURCE_RUNTIME_SNAPSHOT"
+            SCRIPT_DIR="$PLUGIN_DIR/scripts"
+            _git_info() { printf '%s\n' "$SOURCE_MANIFEST_GIT_INFO"; }
+            _assert_source_runtime || return 1
+            local fields py
+            py="$(_bootstrap_python)" || return 1
+            fields="$("$py" -I -B "$SCRIPT_DIR/versioned_runtime_source.py" \
+                --payload "$PLUGIN_DIR" --package-version "$PACKAGE_VERSION" --plugin agent-logger \
+                --expected-runtime-version "$SRC_VERSION" \
+                --expected-source-identity "$SOURCE_RUNTIME_IDENTITY" --format shell-fields)" || return 1
+            write_deploy_manifest agent-logger agent-logger "$INSTALL_DIR" "$PLUGIN_DIR" "$VENV" \
+                "$fields" "$SOURCE_MANIFEST_ORIGIN" "$PACKAGE_VERSION"
+        ) || return 1
+        return 0
+    fi
+    _assert_source_runtime || return 1
+    write_deploy_manifest agent-logger agent-logger "$INSTALL_DIR" "$PLUGIN_DIR" "$VENV" \
+        "" "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" "$PACKAGE_VERSION"
 }
 
 # === install-contract:v4 source-kind -- keep byte-identical across plugins ===
@@ -419,6 +462,12 @@ _git_info() {
 # Serialize the complete mutating installer. The session-start reconciler and
 # agent-worktrees universal reconciler may discover the same version drift at
 # once; flock is process-held and released automatically on every exit path.
+. "$SCRIPT_DIR/source-runtime.sh"
+PACKAGE_VERSION="$SRC_VERSION"
+SOURCE_RUNTIME_IDENTITY=""
+case "$ACTION" in
+    install|update|provision|stamp) _initialize_source_runtime || exit 1 ;;
+esac
 if [[ "$ACTION" != "status" ]]; then
     mkdir -p "$INSTALL_DIR"
     if ! command -v flock >/dev/null 2>&1; then
@@ -437,7 +486,10 @@ if [[ "$ACTION" != "status" ]]; then
     # Reject stale payloads after every lock acquisition. A delayed older
     # process may acquire an uncontended lock after the newer install exits.
     if [[ "$ACTION" =~ ^(install|update|provision|stamp)$ ]]; then
-        __desired="$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$PLUGIN_DIR/plugin.json" | head -1)"
+        _assert_source_runtime || exit 1
+    fi
+    if [[ "$ACTION" =~ ^(install|update|provision|stamp)$ && -z "$SOURCE_RUNTIME_IDENTITY" ]]; then
+        __desired="$SRC_VERSION"
         __current=""
         if [[ -f "$INSTALL_DIR/current-version" ]]; then
             __current="$(tr -d '[:space:]' < "$INSTALL_DIR/current-version")"
@@ -451,6 +503,8 @@ if [[ "$ACTION" != "status" ]]; then
         fi
         __version_cmp() {
             local left="$1" right="$2"
+            # Source hashes are opaque, never an ordering dimension.
+            left="${left%%+*}"; right="${right%%+*}"
             if [[ -z "$__lock_py" ]]; then
                 local left_major left_minor left_patch left_dev
                 local right_major right_minor right_patch right_dev
@@ -563,12 +617,16 @@ _ensure_uv_index() {
 # auxiliary console-script binstubs (session-sync, collate-session, ...) are plain
 # symlinks created only by a full provision.
 deploy_binstub() {
-    mkdir -p "${LOCAL_BIN}"
-    # A pre-versioned install may leave this as a symlink into the retired
-    # .venv tree. Remove the path itself so the redirect creates a regular file
-    # instead of following a dangling legacy target.
-    rm -f "${LOCAL_BIN}/agent-logger"
-    cat > "${LOCAL_BIN}/agent-logger" << 'STUBEOF'
+    local temporary
+    mkdir -p "${LOCAL_BIN}" || return 1
+    [[ ! -d "$LOCAL_BIN/agent-logger" ]] || {
+        _fail "Logger binstub destination is a directory: $LOCAL_BIN/agent-logger"; return 1;
+    }
+    temporary="$(mktemp "$LOCAL_BIN/.agent-logger.XXXXXX")" || return 1
+    [[ -f "$temporary" && ! -L "$temporary" ]] || {
+        _fail "Logger binstub staging is not a regular file: $temporary"; return 1;
+    }
+    if ! cat > "$temporary" << 'STUBEOF'
 #!/usr/bin/env bash
 # agent-logger binstub -- self-provisioning (install-on-first-use).
 # Resolves the interpreter SOLELY via the junction-free versioned-runtime marker
@@ -621,14 +679,38 @@ else
 fi
 exit "$_rc"
 STUBEOF
-    chmod +x "${LOCAL_BIN}/agent-logger"
+    then
+        rm -f "$temporary"
+        _fail "Logger binstub write failed: $LOCAL_BIN/agent-logger"
+        return 1
+    fi
+    chmod +x "$temporary" && [[ ! -d "$LOCAL_BIN/agent-logger" ]] &&
+        mv -f "$temporary" "$LOCAL_BIN/agent-logger" &&
+        [[ ! -e "$temporary" && ! -L "$temporary" && -f "$LOCAL_BIN/agent-logger" ]] || {
+        rm -f "$temporary"
+        _fail "Logger binstub publication failed: $LOCAL_BIN/agent-logger"
+        return 1
+    }
     ok "binstub: ${LOCAL_BIN}/agent-logger (self-provisioning)"
 }
 
 deploy_runtime_helpers() {
-    mkdir -p "${INSTALL_DIR}/bin"
-    for r in resolve-runtime.sh resolve-runtime.ps1; do
-        [ -f "${SCRIPT_DIR}/$r" ] && cp -f "${SCRIPT_DIR}/$r" "${INSTALL_DIR}/bin/$r"
+    local r
+    local required=(resolve-runtime.ps1 resolve-runtime.sh versioned_runtime.py versioned_runtime_source.py versioned_runtime_publication.py versioned_runtime_leases.py versioned_runtime_construction.py)
+    for r in "${required[@]}"; do
+        [[ -f "$SCRIPT_DIR/$r" ]] || {
+            _fail "Required Logger runtime helper is unavailable: $r"; return 1;
+        }
+        [[ ! -d "$INSTALL_DIR/bin/$r" ]] || {
+            _fail "Logger runtime helper destination is a directory: $r"; return 1;
+        }
+    done
+    mkdir -p "${INSTALL_DIR}/bin" || return 1
+    for r in "${required[@]}"; do
+        _runtime_publication_copy "$SCRIPT_DIR/$r" "$INSTALL_DIR/bin/$r" || {
+            _fail "Logger runtime helper publication failed: $r"
+            return 1
+        }
     done
 }
 
@@ -638,15 +720,26 @@ _resolve_snapshot_engine_source() {
     local canonical_engine="$SCRIPT_DIR/../../../libs/installer-engine/installer-engine.${ext}"
     if [[ -f "$local_engine" ]]; then
         printf '%s' "$local_engine"
-    else
+    elif [[ -f "$canonical_engine" ]]; then
         printf '%s' "$canonical_engine"
+    else
+        _fail "Snapshot installer engine source is unavailable: $canonical_engine"
+        return 1
     fi
 }
 
 _rewrite_snapshot_engine_ref() {
     local path="$1" canonical_ref="$2" local_ref="$3"
     local tmp="$path.tmp.$$"
-    : > "$tmp"
+    [[ -f "$path" && -r "$path" ]] || {
+        _fail "Snapshot installer cannot be read: $path"; return 1;
+    }
+    [[ ! -d "$tmp" && ! -L "$tmp" ]] || {
+        _fail "Snapshot installer rewrite staging is not a regular file path: $tmp"; return 1;
+    }
+    : > "$tmp" || {
+        _fail "Snapshot installer rewrite cannot be prepared: $tmp"; return 1;
+    }
     while IFS= read -r line || [[ -n "$line" ]]; do
         local cr=""
         if [[ "$line" == *$'\r' ]]; then
@@ -654,45 +747,70 @@ _rewrite_snapshot_engine_ref() {
             line=${line%$'\r'}
         fi
         if [[ "$line" == "$canonical_ref" ]]; then
-            printf '%s%s\n' "$local_ref" "$cr" >> "$tmp"
+            printf '%s%s\n' "$local_ref" "$cr" >> "$tmp" || {
+                _fail "Snapshot installer rewrite failed: $path"; return 1;
+            }
         else
-            printf '%s%s\n' "$line" "$cr" >> "$tmp"
+            printf '%s%s\n' "$line" "$cr" >> "$tmp" || {
+                _fail "Snapshot installer rewrite failed: $path"; return 1;
+            }
         fi
-    done < "$path"
-    mv -f "$tmp" "$path"
+    done < "$path" || {
+        _fail "Snapshot installer read failed: $path"; return 1;
+    }
+    [[ ! -d "$path" ]] && mv -f "$tmp" "$path" && [[ ! -e "$tmp" && -f "$path" ]] || {
+        _fail "Snapshot installer rewrite cannot be published: $path"; return 1;
+    }
 }
 
 _materialize_snapshot_engine() {
     local snapshot_dir="$1"
     local scripts_dir="$snapshot_dir/scripts"
     local sh_src ps1_src sh_dest ps1_dest
-    mkdir -p "$scripts_dir"
-    sh_src="$(_resolve_snapshot_engine_source sh)"
-    ps1_src="$(_resolve_snapshot_engine_source ps1)"
+    mkdir -p "$scripts_dir" || {
+        _fail "Snapshot scripts directory cannot be prepared: $scripts_dir"; return 1;
+    }
+    sh_src="$(_resolve_snapshot_engine_source sh)" || return 1
+    ps1_src="$(_resolve_snapshot_engine_source ps1)" || return 1
     sh_dest="$scripts_dir/installer-engine.sh"
     ps1_dest="$scripts_dir/installer-engine.ps1"
     if [[ "$sh_src" != "$sh_dest" ]]; then
-        cp -f "$sh_src" "$sh_dest"
+        cp -f "$sh_src" "$sh_dest" || {
+            _fail "Snapshot installer engine copy failed: $sh_src"; return 1;
+        }
     fi
     if [[ "$ps1_src" != "$ps1_dest" ]]; then
-        cp -f "$ps1_src" "$ps1_dest"
+        cp -f "$ps1_src" "$ps1_dest" || {
+            _fail "Snapshot installer engine copy failed: $ps1_src"; return 1;
+        }
     fi
     _rewrite_snapshot_engine_ref \
         "$scripts_dir/install.sh" \
         '. "$SCRIPT_DIR/../../../libs/installer-engine/installer-engine.sh"' \
-        '. "$SCRIPT_DIR/installer-engine.sh"'
+        '. "$SCRIPT_DIR/installer-engine.sh"' || return 1
     _rewrite_snapshot_engine_ref \
         "$scripts_dir/install.ps1" \
         ". (Join-Path \$PSScriptRoot '..\\..\\..\\libs\\installer-engine\\installer-engine.ps1')" \
-        ". (Join-Path \$PSScriptRoot 'installer-engine.ps1')"
+        ". (Join-Path \$PSScriptRoot 'installer-engine.ps1')" || return 1
 }
 
 deploy_auxiliary_compatibility_binstubs() {
-    mkdir -p "${LOCAL_BIN}"
-    local name
+    mkdir -p "${LOCAL_BIN}" || return 1
+    local name temporary
     for name in session-sync collate-session read-session-digest prepare-session-log ramp-up-session; do
-        rm -f "${LOCAL_BIN}/${name}"
-        cat > "${LOCAL_BIN}/${name}" << 'STUBEOF'
+        [[ ! -d "$LOCAL_BIN/$name" ]] || {
+            _fail "Logger auxiliary binstub destination is a directory: $LOCAL_BIN/$name"; return 1;
+        }
+    done
+    for name in session-sync collate-session read-session-digest prepare-session-log ramp-up-session; do
+        [[ ! -d "$LOCAL_BIN/$name" ]] || {
+            _fail "Logger auxiliary binstub destination is a directory: $LOCAL_BIN/$name"; return 1;
+        }
+        temporary="$(mktemp "$LOCAL_BIN/.$name.XXXXXX")" || return 1
+        [[ -f "$temporary" && ! -L "$temporary" ]] || {
+            _fail "Logger auxiliary binstub staging is not a regular file: $temporary"; return 1;
+        }
+        if ! cat > "$temporary" << 'STUBEOF'
 #!/usr/bin/env sh
 # Legacy/global compatibility wrapper. The owning payload shim selects and
 # self-provisions its own runtime; this file never resolves a same-named command
@@ -711,7 +829,18 @@ COPILOT_PLUGIN_ROOT="$_payload"
 export COPILOT_PLUGIN_ROOT
 exec "$_shim" "$@"
 STUBEOF
-        chmod +x "${LOCAL_BIN}/${name}"
+        then
+            rm -f "$temporary"
+            _fail "Logger auxiliary binstub write failed: $LOCAL_BIN/$name"
+            return 1
+        fi
+        chmod +x "$temporary" && [[ ! -d "$LOCAL_BIN/$name" ]] &&
+            mv -f "$temporary" "$LOCAL_BIN/$name" &&
+            [[ ! -e "$temporary" && ! -L "$temporary" && -f "$LOCAL_BIN/$name" ]] || {
+            rm -f "$temporary"
+            _fail "Logger auxiliary binstub publication failed: $LOCAL_BIN/$name"
+            return 1
+        }
     done
     ok "auxiliary compatibility binstubs: 5 commands on PATH"
 }
@@ -739,24 +868,47 @@ _materialize_snapshot_libs() {
     local snapshot_dir="$1"
     local libs_dir="$snapshot_dir/libs"
     local lib src
-    mkdir -p "$libs_dir"
+    mkdir -p "$libs_dir" || {
+        _fail "Snapshot libraries directory cannot be prepared: $libs_dir"; return 1;
+    }
     for lib in config-migrate agent-procutil dropin-registry plugin-resolve plugin-activation; do
         src="$PLUGIN_DIR/libs/$lib"
         if [[ ! -f "$src/pyproject.toml" ]]; then
-            src="$(cd "${PLUGIN_DIR}/../.." && pwd)/libs/$lib"
+            src="$(cd "${PLUGIN_DIR}/../.." && pwd)/libs/$lib" || {
+                _fail "Snapshot library source cannot be resolved: $lib"; return 1;
+            }
         fi
         [[ -f "$src/pyproject.toml" ]] || continue
         if [[ "$src" != "$libs_dir/$lib" ]]; then
-            rm -rf "$libs_dir/$lib"
-            cp -a "$src" "$libs_dir/$lib"
+            rm -rf "$libs_dir/$lib" || {
+                _fail "Snapshot library staging cannot be prepared: $lib"; return 1;
+            }
+            cp -a "$src" "$libs_dir/$lib" || {
+                _fail "Snapshot library copy failed: $lib"; return 1;
+            }
         fi
     done
 }
 
 publish_payload_snapshot() {
-    mkdir -p "${INSTALL_DIR}/snapshots"
+    _assert_source_runtime || return 1
+    mkdir -p "${INSTALL_DIR}/snapshots" || {
+        _fail "Snapshot directory cannot be prepared: $INSTALL_DIR/snapshots"; return 1;
+    }
     local snapshot_dir="${INSTALL_DIR}/snapshots/${SRC_VERSION}"
-    if [ -d "$snapshot_dir" ]; then
+    if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
+        snapshot_dir="$(_publish_source_snapshot)" || return 1
+        local py
+        py="$(_bootstrap_python)" || return 1
+        _prepare_source_manifest_context || return 1
+        _assert_source_runtime || return 1
+        "$py" -I -B "$SCRIPT_DIR/versioned_runtime.py" --root "$INSTALL_DIR" \
+            publish-redirects --payload-dir "$snapshot_dir" --version "$SRC_VERSION" \
+            --expected-source-identity "$SOURCE_RUNTIME_IDENTITY" || return 1
+        SOURCE_RUNTIME_SNAPSHOT="$snapshot_dir"
+        ok "snapshot: ${snapshot_dir}"
+        return 0
+    elif [ -d "$snapshot_dir" ]; then
         if [ ! -f "$snapshot_dir/plugin.json" ] || \
            [ ! -x "$snapshot_dir/bin/agent-logger" ]; then
             printf 'ERROR: existing agent-logger snapshot is incomplete; refusing replacement: %s\n' \
@@ -772,12 +924,18 @@ publish_payload_snapshot() {
         fi
     else
         local snapshot_tmp="${snapshot_dir}.tmp.$$"
-        rm -rf "$snapshot_tmp"
-        mkdir -p "$snapshot_tmp"
+        rm -rf "$snapshot_tmp" || {
+            _fail "Snapshot staging cannot be reset: $snapshot_tmp"; return 1;
+        }
+        mkdir -p "$snapshot_tmp" || {
+            _fail "Snapshot staging cannot be prepared: $snapshot_tmp"; return 1;
+        }
         # PLUGIN_DIR is the invocation's self-staged copy. The original
         # marketplace singleton is provenance only and may be replaced while
         # this installer runs.
-        cp -a "${PLUGIN_DIR}/." "$snapshot_tmp/"
+        cp -a "${PLUGIN_DIR}/." "$snapshot_tmp/" || {
+            _fail "Snapshot payload copy failed: $PLUGIN_DIR"; return 1;
+        }
         rm -rf \
             "$snapshot_tmp/.git" \
             "$snapshot_tmp/__pycache__" \
@@ -787,38 +945,82 @@ publish_payload_snapshot() {
             "$snapshot_tmp/dist" \
             "$snapshot_tmp/.pytest_cache" \
             "$snapshot_tmp/.mypy_cache" \
-            "$snapshot_tmp/tests"
-        _materialize_snapshot_libs "$snapshot_tmp"
-        _materialize_snapshot_engine "$snapshot_tmp"
-        mv "$snapshot_tmp" "$snapshot_dir"
+            "$snapshot_tmp/tests" || {
+                _fail "Snapshot generated-input pruning failed: $snapshot_tmp"; return 1;
+            }
+        _materialize_snapshot_libs "$snapshot_tmp" || return 1
+        _materialize_snapshot_engine "$snapshot_tmp" || return 1
+        mv "$snapshot_tmp" "$snapshot_dir" || {
+            _fail "Snapshot publication failed: $snapshot_dir"; return 1;
+        }
     fi
 
     local payload_tmp="${INSTALL_DIR}/payload-dir.tmp.$$"
     local version_tmp="${INSTALL_DIR}/stamped-version.tmp.$$"
-    printf '%s\n' "$snapshot_dir" > "$payload_tmp"
-    printf '%s\n' "$SRC_VERSION" > "$version_tmp"
-    mv -f "$payload_tmp" "${INSTALL_DIR}/payload-dir"
-    mv -f "$version_tmp" "${INSTALL_DIR}/stamped-version"
+    _assert_source_runtime || return 1
+    local marker
+    for marker in payload-dir stamped-version; do
+        if [[ -d "$INSTALL_DIR/$marker" || -L "$INSTALL_DIR/$marker" ]]; then
+            _fail "Source redirect must be an ordinary file: $INSTALL_DIR/$marker"
+            return 1
+        fi
+    done
+    for marker in "$payload_tmp" "$version_tmp"; do
+        [[ ! -d "$marker" && ! -L "$marker" ]] || {
+            _fail "Snapshot redirect staging is not a regular file path: $marker"; return 1;
+        }
+    done
+    printf '%s\n' "$snapshot_dir" > "$payload_tmp" || return 1
+    printf '%s\n' "$SRC_VERSION" > "$version_tmp" || return 1
+    [[ ! -d "$INSTALL_DIR/payload-dir" ]] &&
+        mv -f "$payload_tmp" "${INSTALL_DIR}/payload-dir" &&
+        [[ ! -e "$payload_tmp" && -f "$INSTALL_DIR/payload-dir" ]] || return 1
+    [[ ! -d "$INSTALL_DIR/stamped-version" ]] &&
+        mv -f "$version_tmp" "${INSTALL_DIR}/stamped-version" &&
+        [[ ! -e "$version_tmp" && -f "$INSTALL_DIR/stamped-version" ]] || return 1
     ok "snapshot: ${snapshot_dir}"
 }
 
 # Cheap 'stamp': splat the agent-logger binstub + payload marker, defer the venv
 # build to first use (fits a sessionStart hook's grace window). No venv, no uv.
 do_stamp() {
-    mkdir -p "${INSTALL_DIR}" "${LOCAL_BIN}"
-    publish_payload_snapshot
-    deploy_runtime_helpers
+    mkdir -p "${INSTALL_DIR}" "${LOCAL_BIN}" || {
+        _fail "Stamp directories cannot be prepared: $INSTALL_DIR"; return 1;
+    }
     if [[ "$PUBLISH_GLOBAL_BINSTUBS" == 1 ]]; then
-        deploy_binstub
-        deploy_auxiliary_compatibility_binstubs
+        local command_name
+        for command_name in agent-logger session-sync collate-session read-session-digest prepare-session-log ramp-up-session; do
+            [[ ! -d "$LOCAL_BIN/$command_name" ]] || {
+                _fail "Logger command destination is a directory: $command_name"; return 1;
+            }
+        done
+    fi
+    _assert_source_runtime || return 1
+    deploy_runtime_helpers || return 1
+    if [[ "$PUBLISH_GLOBAL_BINSTUBS" == 1 ]]; then
+        deploy_binstub || return 1
+        deploy_auxiliary_compatibility_binstubs || return 1
+        publish_payload_snapshot || return 1
         ok "stamped: agent-logger command family on PATH; runtime provisions on first use."
     else
+        publish_payload_snapshot || return 1
         ok "stamped: installation-scoped payload snapshot published without global PATH wrappers."
     fi
 }
 
 install_package() {
-  mkdir -p "${INSTALL_DIR}" "${LOCAL_BIN}"
+  _assert_source_runtime || return 1
+  mkdir -p "${INSTALL_DIR}" "${LOCAL_BIN}" || {
+      _fail "Logger runtime directories cannot be prepared: $INSTALL_DIR"; return 1;
+  }
+  if [[ "$PUBLISH_GLOBAL_BINSTUBS" == 1 ]]; then
+      local command_name
+      for command_name in agent-logger session-sync collate-session read-session-digest prepare-session-log ramp-up-session; do
+          [[ ! -d "$LOCAL_BIN/$command_name" ]] || {
+              _fail "Logger command destination is a directory: $command_name"; return 1;
+          }
+      done
+  fi
 
   # Prerequisite: uv (venv + package management per the install contract).
   # Self-acquire uv (vendored if absent) + mirror the governed pip index to uv so
@@ -831,10 +1033,26 @@ install_package() {
   fi
 
     _versioned_slot_clean || return 1
-    [[ "$_RUNTIME_CONSTRUCTION_REUSE" == 1 ]] && return 0
+    if [[ "$_RUNTIME_CONSTRUCTION_REUSE" == 1 ]]; then
+        if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
+            if [[ ! -f "$INSTALL_DIR/current-version" || "$(cat "$INSTALL_DIR/current-version")" != "$SRC_VERSION" ]]; then
+                _versioned_activate || return 1
+            else
+                _test_runtime_healthy || return 1
+                deploy_runtime_helpers || return 1
+                _assert_source_runtime || return 1
+            fi
+            publish_payload_snapshot || return 1
+            if [[ "$PUBLISH_GLOBAL_BINSTUBS" == 1 ]]; then
+                deploy_auxiliary_compatibility_binstubs || return 1
+                deploy_binstub || return 1
+            fi
+        fi
+        return 0
+    fi
 
   if [[ ! -x "${VENV}/bin/python" || ! -f "${VENV}/pyvenv.cfg" ]]; then
-    _versioned_slot_clean
+    _versioned_slot_clean || return 1
     if ! new_signed_venv "${UV_CMD}" "${VENV}" "3.10"; then
       printf 'ERROR: Failed to create venv at %s\n' "${VENV}" >&2
       exit 1
@@ -922,27 +1140,26 @@ install_package() {
   unset INSTALLER_ENGINE_PAYLOAD_DIR_TO_SCRUB
   ok "installed agent-logger package"
 
-  deploy_runtime_helpers
-
   # Versioned layout (#581): health-gate the slot + swap the `.venv` symlink.
   _versioned_activate || exit 1
 
-  publish_payload_snapshot
+  _assert_source_runtime || return 1
+  publish_payload_snapshot || return 1
   if [[ "$PUBLISH_GLOBAL_BINSTUBS" == 1 ]]; then
     # Keep auxiliary PATH fallbacks payload-attributed after provisioning. The
     # scheduled service uses the runtime directly; interactive compatibility
     # commands continue through their owning payload shims.
-    deploy_auxiliary_compatibility_binstubs
+    deploy_auxiliary_compatibility_binstubs || return 1
     # The primary `agent-logger` entrypoint is a self-provisioning binstub (not a
     # plain symlink) so it can rebuild the runtime on first use in a confined host.
-    deploy_binstub
+    deploy_binstub || return 1
     ok "published compatibility binstubs into ${LOCAL_BIN}"
   else
     ok "scoped install keeps runtime helpers inside ${INSTALL_DIR}"
   fi
 
   # Machine-local config schema migration (idempotent + atomic). Non-fatal.
-  if PYTHONUTF8=1 "${VENV}/bin/agent-logger" config-migrate 2>/dev/null; then
+  if PYTHONUTF8=1 "${VENV}/bin/python" -I -m agent_logger config-migrate 2>/dev/null; then
     :
   else
     warn "config migration skipped"
@@ -950,7 +1167,23 @@ install_package() {
 }
 
 write_units() {
-  mkdir -p "${UNIT_DIR}"
+  mkdir -p "${UNIT_DIR}" || {
+    _fail "Logger unit directory cannot be prepared: $UNIT_DIR"; return 1;
+  }
+  local service_path="$UNIT_DIR/$TIMER_NAME.service" timer_path="$UNIT_DIR/$TIMER_NAME.timer"
+  local service_tmp timer_tmp
+  if [[ -d "$service_path" || -d "$timer_path" ]]; then
+    _fail "Logger unit destination is a directory: $UNIT_DIR/$TIMER_NAME"
+    return 1
+  fi
+  service_tmp="$(mktemp "$UNIT_DIR/.$TIMER_NAME.service.XXXXXX")" || return 1
+  timer_tmp="$(mktemp "$UNIT_DIR/.$TIMER_NAME.timer.XXXXXX")" || {
+    rm -f "$service_tmp"; return 1;
+  }
+  if [[ ! -f "$service_tmp" || -L "$service_tmp" || ! -f "$timer_tmp" || -L "$timer_tmp" ]]; then
+    _fail "Logger unit staging is not a regular file"
+    return 1
+  fi
   # Optionally discover a facility-designated multi-machine config repo via
   # the agent-worktrees registry, if this machine has one adopted -- so the
   # scheduled sync (invoked with no useful working directory of its own)
@@ -1141,7 +1374,7 @@ Environment=\"${repos_yaml_value}\""
       done
     fi
   fi
-  cat > "${UNIT_DIR}/${TIMER_NAME}.service" <<EOF
+  if ! cat > "$service_tmp" <<EOF
 [Unit]
 Description=Agent Logger session-sync -- push Copilot session data to the configured target
 After=network-online.target
@@ -1160,8 +1393,12 @@ ExecStart=${VENV}/bin/session-sync run --prune
 TimeoutStartSec=1800
 SyslogIdentifier=${TIMER_NAME}
 EOF
-
-  cat > "${UNIT_DIR}/${TIMER_NAME}.timer" <<EOF
+  then
+    rm -f "$service_tmp" "$timer_tmp"
+    _fail "Logger service unit write failed: $service_path"
+    return 1
+  fi
+  if ! cat > "$timer_tmp" <<EOF
 [Unit]
 Description=Agent Logger session-sync catch-up (periodic)
 
@@ -1174,31 +1411,48 @@ Persistent=true
 [Install]
 WantedBy=timers.target
 EOF
+  then
+    rm -f "$service_tmp" "$timer_tmp"
+    _fail "Logger timer unit write failed: $timer_path"
+    return 1
+  fi
+  if [[ -d "$service_path" ]] || ! mv -f "$service_tmp" "$service_path" ||
+      [[ -e "$service_tmp" || ! -f "$service_path" ]]; then
+    rm -f "$service_tmp" "$timer_tmp"
+    _fail "Logger service unit publication failed: $service_path"
+    return 1
+  fi
+  if [[ -d "$timer_path" ]] || ! mv -f "$timer_tmp" "$timer_path" ||
+      [[ -e "$timer_tmp" || ! -f "$timer_path" ]]; then
+    rm -f "$timer_tmp"
+    _fail "Logger timer unit publication failed: $timer_path"
+    return 1
+  fi
   chg "wrote systemd user units to ${UNIT_DIR}"
 }
 
 case "${ACTION}" in
   install)
-    if [[ "$SKIP_PACKAGE_INSTALL" = 0 ]]; then install_package; fi
-    write_units
-    systemctl --user daemon-reload
-    systemctl --user enable --now "${TIMER_NAME}.timer"
-    if [[ "$SKIP_PACKAGE_INSTALL" = 0 ]]; then write_deploy_manifest "agent-logger" "agent-logger" "${INSTALL_DIR}" "${PLUGIN_DIR}" "${VENV}"; fi
+    if [[ "$SKIP_PACKAGE_INSTALL" = 0 ]]; then install_package || exit 1; fi
+    write_units || exit 1
+    systemctl --user daemon-reload || exit 1
+    systemctl --user enable --now "${TIMER_NAME}.timer" || exit 1
+    if [[ "$SKIP_PACKAGE_INSTALL" = 0 ]]; then _write_runtime_manifest || exit 1; fi
     ok "timer enabled (every 4h)"
     ;;
   stamp)
-    if [[ "$SKIP_STAMP" = 0 ]]; then do_stamp; fi
+    if [[ "$SKIP_STAMP" = 0 ]]; then do_stamp || exit 1; fi
     ;;
   provision)
-    if [[ "$SKIP_PACKAGE_INSTALL" = 0 ]]; then install_package; fi
-    if [[ "$SKIP_PACKAGE_INSTALL" = 0 ]]; then write_deploy_manifest "agent-logger" "agent-logger" "${INSTALL_DIR}" "${PLUGIN_DIR}" "${VENV}"; fi
+    if [[ "$SKIP_PACKAGE_INSTALL" = 0 ]]; then install_package || exit 1; fi
+    if [[ "$SKIP_PACKAGE_INSTALL" = 0 ]]; then _write_runtime_manifest || exit 1; fi
     ok "runtime provisioned"
     ;;
   update)
-    if [[ "$SKIP_PACKAGE_INSTALL" = 0 ]]; then install_package; fi
-    write_units
+    if [[ "$SKIP_PACKAGE_INSTALL" = 0 ]]; then install_package || exit 1; fi
+    write_units || exit 1
     systemctl --user daemon-reload || true
-    if [[ "$SKIP_PACKAGE_INSTALL" = 0 ]]; then write_deploy_manifest "agent-logger" "agent-logger" "${INSTALL_DIR}" "${PLUGIN_DIR}" "${VENV}"; fi
+    if [[ "$SKIP_PACKAGE_INSTALL" = 0 ]]; then _write_runtime_manifest || exit 1; fi
     ok "package + units updated"
     ;;
   uninstall)

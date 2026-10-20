@@ -64,6 +64,62 @@ session-to-log pipeline out of any single bespoke service:
 - **Three deployment topologies** from one plugin — see
   [`docs/deployment-topologies.md`](docs/deployment-topologies.md).
 
+## Source-qualified runtimes
+
+Both native installers accept a canonically prepared `runtime-source.json`
+payload. They pin its full identity before the installation lock and revalidate
+it before construction, completion and activation. Source generations are
+non-editable, keyed by package version, full source commit and assembly hash;
+ordinary package-only installs retain their existing version identity.
+
+Deferred stamps retain the complete verified payload and vendor closure in an
+immutable source snapshot, so first-use provisioning and the `session-sync`
+command family remain usable after the publisher checkout is unavailable.
+Identical inputs reuse snapshots and completion evidence. Recovery requires an
+exact current or last-known-good selector rather than ordering source hashes.
+`agent-logger version` reports the selected source generation without changing
+package metadata or its commit/build fields.
+Reselecting a retained source generation refreshes its deployment manifest
+without replacing immutable completion evidence.
+Fresh activation publishes its required resolver bundle only after the target's
+isolated CLI `--help` health probe succeeds, and before committing selectors.
+The probe exercises the real entrypoint rather than only the package initializer.
+Healthy retained source retries also reconcile that bundle, including an
+already-selected generation whose deployed resolver files are missing.
+Package-only snapshot construction explicitly propagates preparation, copying
+and materialization failures even under conditional Bash callers. A failed
+candidate is not published and does not replace prior payload/stamp redirects.
+Custom POSIX compatibility writers and unit-file publication also propagate
+required I/O errors through conditional callers; warnings from optional config
+discovery and the update path's best-effort manager reload retain their existing
+semantics. Native Windows resolver replacement uses `File.Replace` with a true
+null backup argument, preserving an old resolver on a real sharing violation.
+Custom file publishers refuse directory and symlink-to-directory destinations
+before writing peers, recheck before rename, and reject unexpected staging-file
+types. A directory collision is an error, never an implicit move into that
+directory.
+
+Native source-adoption smoke and boundary contracts live in
+`tests/test_source_runtime_install.py`. Their default lane uses small assembled
+payloads with the real native installers and canonical source/construction
+helpers; it checks deferred command publication, immutable snapshot reuse,
+distinct source commits and refusal boundaries without repeatedly building the
+complete dependency graph.
+
+The full release-materialization, non-editable installation, source-removal and
+command/reuse proof is an explicit T3 lane: set
+`COPILOT_EXTENSIONS_SOURCE_INSTALL_FULL=1` and pass `--allow-explicit-tiers` to
+the repository test runner. Source isolation/reuse and failed-candidate
+preservation are separate tests sharing one real healthy installation per
+plugin. Select both contracts for one plugin per bounded invocation with
+`-k "(stamp_provision_reuse or failed_source_candidate) and agent-logger"` or
+`-k "(stamp_provision_reuse or failed_source_candidate) and agent-vault"`;
+the 240-second item and normal runner group budgets are unchanged.
+Its isolated HOME is a sibling of the synthetic publisher marketplace, not a
+descendant, and the entire original publisher is moved out of reach before
+commands run. This preserves marketplace provenance checks instead of asking a
+runtime snapshot to impersonate a declared marketplace payload.
+
 ## Status
 
 **0.1.1-dev series — alpha.** Shipped and usable: the segmenter, session-sync

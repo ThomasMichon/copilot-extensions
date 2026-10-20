@@ -24,6 +24,7 @@ def test_staged_profile_loads_only_its_owned_runtime_with_safe_path(tmp_path, is
         "runtime_profile.py", "versioned_runtime.py", "versioned_runtime_leases.py",
         "versioned_runtime_construction.py",
         "versioned_runtime_source.py",
+        "versioned_runtime_publication.py",
     ):
         shutil.copyfile(SCRIPTS / name, staged / name)
     foreign = tmp_path / "foreign"
@@ -199,6 +200,7 @@ def test_native_profile_policy_refusal_retains_selected_runtime(
         "versioned_runtime_construction.py", "installer_dependency_policy.py",
         "installer_dependency_config.py",
         "versioned_runtime_source.py",
+        "versioned_runtime_publication.py",
     ):
         shutil.copyfile(SCRIPTS / name, scripts / name)
     (payload / "plugin.json").write_text(

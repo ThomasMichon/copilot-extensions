@@ -55,6 +55,7 @@ def _stage_engine_resolver(home):
     for name in (
         "versioned_runtime_leases.py", "versioned_runtime_construction.py",
         "versioned_runtime_source.py", "versioned_runtime.py",
+        "versioned_runtime_publication.py",
     ):
         shutil.copyfile(source.with_name(name), home / name)
 

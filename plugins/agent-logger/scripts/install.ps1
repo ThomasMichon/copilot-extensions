@@ -224,7 +224,7 @@ $script:SkipPackageInstall = $false
 $script:SkipStamp = $false
 function ConvertTo-AgentLoggerVersionKey {
     param([string]$Value)
-    if ($Value -notmatch '^(\d+)\.(\d+)\.(\d+)(?:-dev(\d+))?$') { return $null }
+    if ($Value -notmatch '^(\d+)\.(\d+)\.(\d+)(?:[.-]dev(\d+))?(?:\+[A-Za-z0-9][A-Za-z0-9._-]*)?$') { return $null }
     $build = if ($Matches[4]) { [int]$Matches[4] } else { [int]::MaxValue }
     return [Version]::new(
         [int]$Matches[1],
@@ -233,8 +233,8 @@ function ConvertTo-AgentLoggerVersionKey {
         $build
     )
 }
-if ($Action -ne 'status') {
-    $lockRoot = Join-Path $env:USERPROFILE '.agent-logger'
+function Enter-LoggerInstallLock {
+    $lockRoot = $InstallDir
     New-Item -ItemType Directory -Force -Path $lockRoot | Out-Null
     $lockPath = Join-Path $lockRoot '.install.lock'
     $lockContended = $false
@@ -259,8 +259,9 @@ if ($Action -ne 'status') {
     # active generation. Contention is only needed to collapse equal-version
     # duplicate work; a delayed older process may never observe contention.
     if ($Action -in @('install', 'update', 'provision', 'stamp')) {
-        $lockPluginDir = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-        $desired = '' + (Get-Content (Join-Path $lockPluginDir 'plugin.json') -Raw | ConvertFrom-Json).version
+        Assert-SourceRuntime
+        if ($script:SourceRuntimeIdentity) { return }
+        $desired = $SrcVersion
         $desiredKey = ConvertTo-AgentLoggerVersionKey $desired
         if (-not $desiredKey) { throw "Invalid agent-logger payload version: $desired" }
         $manifestPath = Join-Path $lockRoot 'deploy-manifest.json'
@@ -501,28 +502,44 @@ if ($true) {  # always versioned (junction-free marker model; COPILOT_EXT_NO_VER
     }
 }
 
+function Test-LoggerRuntimeHealthy {
+    $nativeError = ''
+    [void](Invoke-Hidden -FilePath $VenvPython -ArgList @('-I', '-m', 'agent_logger', '--help') -ErrorOutput ([ref]$nativeError))
+    if ($LASTEXITCODE -ne 0) {
+        Write-Fail "Isolated agent_logger CLI health probe failed: $nativeError"
+        return $false
+    }
+    return $true
+}
+
 function Invoke-VersionedActivate {
     <# Health-gate the freshly-built slot, swap the stable `.venv` junction onto it,
        then gc old slots keeping current + previous-good. First migration: the
        periodic sync task's pythonw may briefly hold a legacy real `.venv`, so stop
        the task before the rename-aside (best-effort). Returns $false on failure.
        No-op ($true) in legacy mode. #>
+    Assert-SourceRuntime
+    if ($script:SourceRuntimeIdentity) { Publish-SourceSnapshot | Out-Null }
+    Assert-SourceRuntime
     if (-not $VersionedRuntime) { return $true }
-    if ((Test-Path $LinkDir) -and -not ((Get-Item $LinkDir -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) {
-        try { Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue | Out-Null } catch {}
-    }
     $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
     $py = if (Test-Path $VenvPython) { $VenvPython } else { $LinkPython }
-    if (-not (Test-Path $py)) { return $true }
-    $prevEAP = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
-    & $VenvPython -c 'import agent_logger' 2>$null
-    $slotOk = ($LASTEXITCODE -eq 0)
-    $ErrorActionPreference = $prevEAP
-    if (-not $slotOk) {
+    if (-not (Test-Path $py)) {
+        Write-Fail "Runtime slot interpreter is unavailable: $VenvPython"
+        return $false
+    }
+    if (-not (Test-LoggerRuntimeHealthy)) {
         Write-Fail "Fresh runtime slot failed its health gate (versions/$SrcVersion) -- not activating"
         return $false
     }
+    Assert-SourceRuntime
+    Deploy-ResolverHelpers
+    Assert-SourceRuntime
     if (-not (Invoke-VersionedMarkComplete)) { return $false }
+    Assert-SourceRuntime
+    if ((Test-Path $LinkDir) -and -not ((Get-Item $LinkDir -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+        try { Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue | Out-Null } catch {}
+    }
     $prev = (& $py $vr --root $InstallDir --link-name '.venv' current 2>$null); $prev = ("$prev").Trim()
     & $py $vr --root $InstallDir --link-name '.venv' activate $SrcVersion --no-link 2>&1 |
         ForEach-Object { Write-Step $_ }
@@ -612,21 +629,15 @@ function Get-GitInfo {
 # same place.
 # === install-contract:v4 marker/toss helpers (#935) ===
 function Get-BootstrapPython {
-    <# A python to run the stdlib-only versioned_runtime.py helper (#935).
-       Prefers the freshly-built slot venv python ($VenvDir, present at
-       mark-complete before the link is swapped), then the active link's
-       python, then a real base python via the `py` launcher -- avoiding the
-       Windows Store 'python' alias stub. Returns $null if none. #>
-    foreach ($d in @($VenvDir, $LinkDir)) {
-        # Windows venv layout first; `bin/python` is the POSIX layout pwsh sees off Windows.
-        if ($d) { foreach ($rel in 'Scripts\python.exe', 'bin/python') { $p = Join-Path $d $rel; if (Test-Path $p) { return $p } } }
-    }
-    if (Get-Command py -ErrorAction SilentlyContinue) {
-        $exe = (& py -3 -c 'import sys; print(sys.executable)' 2>$null | Out-String).Trim()
+    <# Construction supervision must run outside the candidate being built.
+       Probe a native launcher, then real PATH interpreters (not Store aliases). #>
+    $launcher = Get-Command py -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($launcher -and $launcher.Source -notmatch '\.(cmd|bat)$') {
+        $exe = (Invoke-Hidden -FilePath $launcher.Source -ArgList @('-3', '-c', 'import sys; print(sys.executable)') | Out-String).Trim()
         if ($LASTEXITCODE -eq 0 -and $exe -and (Test-Path $exe)) { return $exe }
     }
     foreach ($cand in 'python3', 'python') {
-        $c = Get-Command $cand -ErrorAction SilentlyContinue
+        $c = Get-Command $cand -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
         if ($c -and $c.Source -notmatch 'WindowsApps') { return $c.Source }
     }
     return $null
@@ -652,23 +663,25 @@ function Get-PayloadHash {
 }
 
 function Invoke-VersionedSlotClean {
+    Assert-SourceRuntime
     if (-not $VersionedRuntime) { throw 'Construction requires a versioned runtime candidate' }
     $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
     $py = Get-BootstrapPython
     if (-not $py) { throw 'Construction requires a bootstrap Python interpreter' }
     if (-not (Get-Command Start-RuntimeConstruction -ErrorAction SilentlyContinue)) {
-        $helpers = (& $py -I $vr --root $InstallDir construction-shell --shell ps1 | Out-String)
+        $helpers = (Invoke-Hidden -FilePath $py -ArgList @('-I', $vr, '--root', $InstallDir, 'construction-shell', '--shell', 'ps1') | Out-String)
         if ($LASTEXITCODE -ne 0) { throw 'Canonical construction adapter is unavailable' }
         Invoke-Expression $helpers
     }
     $script:RuntimeConstructionReuse = Start-RuntimeConstruction `
         -Python $py -Helper $vr -Root $InstallDir -Version $SrcVersion `
         -PayloadHash (Get-PayloadHash) -LinkName (Split-Path -Leaf $LinkDir)
-
+    Assert-SourceRuntime
 }
 
 function Invoke-VersionedMarkComplete {
     param([string]$PayloadHash = '')
+    Assert-SourceRuntime
     $actualHash = Get-PayloadHash
     if ($PayloadHash -and $PayloadHash -ne $actualHash) {
         throw 'Payload changed during construction; completion refused'
@@ -773,13 +786,33 @@ function Publish-PayloadSnapshot {
     <# Publish one immutable payload snapshot and atomically point payload-dir
        and stamped-version at it. Existing complete same-version snapshots are
        reused, never removed beneath a running compatibility wrapper. #>
+    Assert-SourceRuntime
     foreach ($dir in @($InstallDir, (Join-Path $InstallDir 'snapshots'))) {
         if (-not (Test-Path $dir)) {
             New-Item -ItemType Directory -Path $dir -Force | Out-Null
         }
     }
     $snapDir = Join-Path (Join-Path $InstallDir 'snapshots') $SrcVersion
-    if (Test-Path $snapDir) {
+    if ($script:SourceRuntimeIdentity) {
+        $snapDir = Publish-SourceSnapshot
+        $py = Get-BootstrapPython
+        if (-not $py) { throw 'Source redirect publication requires a bootstrap Python interpreter' }
+        Prepare-SourceManifestContext
+        Assert-SourceRuntime
+        $nativeError = ''
+        $result = Invoke-Hidden -FilePath $py -ArgList @(
+            '-I', '-B', (Join-Path $ScriptDir 'versioned_runtime.py'),
+            '--root', $InstallDir, 'publish-redirects',
+            '--payload-dir', $snapDir, '--version', $SrcVersion,
+            '--expected-source-identity', $script:SourceRuntimeIdentity
+        ) -ErrorOutput ([ref]$nativeError)
+        if ($LASTEXITCODE -ne 0) {
+            throw "Source redirect publication failed (exit ${LASTEXITCODE}): $result$nativeError"
+        }
+        $script:SourceRuntimeSnapshot = $snapDir
+        Write-Ok "Snapshot: $snapDir"
+        return $snapDir
+    } elseif (Test-Path $snapDir) {
         $complete = (Test-Path (Join-Path $snapDir 'plugin.json')) -and
             (Test-Path (Join-Path $snapDir 'bin\agent-logger.ps1'))
         if ($complete -and (Test-SnapshotRequiresMaterializedEngine -SnapshotDir $snapDir)) {
@@ -810,7 +843,24 @@ function Publish-PayloadSnapshot {
         Move-Item -LiteralPath $snapTmp -Destination $snapDir
     }
 
+    Assert-SourceRuntime
     $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    foreach ($name in @('payload-dir', 'stamped-version')) {
+        $path = Join-Path $InstallDir $name
+        if (Test-Path -LiteralPath $path) {
+            $item = Get-Item -LiteralPath $path -Force
+            if ($item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+                throw "Source redirect must be an ordinary file: $path"
+            }
+        }
+        $staging = "$path.tmp-$PID"
+        if (Test-Path -LiteralPath $staging) {
+            $item = Get-Item -LiteralPath $staging -Force
+            if ($item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+                throw "Snapshot redirect staging is not a regular file path: $staging"
+            }
+        }
+    }
     foreach ($marker in @{
         'payload-dir'     = $snapDir
         'stamped-version' = $SrcVersion
@@ -818,7 +868,11 @@ function Publish-PayloadSnapshot {
         $path = Join-Path $InstallDir $marker.Key
         $tmp = "$path.tmp-$PID"
         [System.IO.File]::WriteAllText($tmp, [string]$marker.Value, $utf8NoBom)
-        Move-Item -LiteralPath $tmp -Destination $path -Force
+        if ([IO.File]::Exists($path)) {
+            [IO.File]::Replace($tmp, $path, [NullString]::Value)
+        } else {
+            [IO.File]::Move($tmp, $path)
+        }
     }
     Write-Ok "Snapshot: $snapDir"
     return $snapDir
@@ -834,10 +888,38 @@ function Write-Binstubs {
 
 function Deploy-ResolverHelpers {
     $binDir = Join-Path $InstallDir 'bin'
-    if (-not (Test-Path $binDir)) { New-Item -ItemType Directory -Path $binDir -Force | Out-Null }
-    foreach ($r in @('resolve-runtime.ps1', 'resolve-runtime.sh')) {
+    $required = @('resolve-runtime.ps1', 'resolve-runtime.sh', 'versioned_runtime.py', 'versioned_runtime_source.py', 'versioned_runtime_publication.py', 'versioned_runtime_leases.py', 'versioned_runtime_construction.py')
+    foreach ($r in $required) {
+        if (-not (Test-Path -LiteralPath (Join-Path $PSScriptRoot $r) -PathType Leaf)) {
+            throw "Required Logger runtime helper is unavailable: $r"
+        }
+        if ([IO.Directory]::Exists((Join-Path $binDir $r))) {
+            throw "Logger runtime helper destination is a directory: $r"
+        }
+    }
+    if (-not (Test-Path $binDir)) { New-Item -ItemType Directory -Path $binDir -Force -ErrorAction Stop | Out-Null }
+    foreach ($r in $required) {
         $rSrc = Join-Path $PSScriptRoot $r
-        if (Test-Path $rSrc) { Copy-Item $rSrc (Join-Path $binDir $r) -Force }
+        $temporary = Join-Path $binDir ('.' + $r + '.' + [Guid]::NewGuid().ToString('N'))
+        try {
+            Copy-Item -LiteralPath $rSrc -Destination $temporary -Force -ErrorAction Stop
+            if ([IO.Directory]::Exists($temporary) -or -not [IO.File]::Exists($temporary)) {
+                throw "Logger runtime helper staging is not a regular file: $temporary"
+            }
+            $destination = Join-Path $binDir $r
+            if ([IO.File]::Exists($destination)) {
+                [IO.File]::Replace($temporary, $destination, [NullString]::Value)
+            } else {
+                [IO.File]::Move($temporary, $destination)
+            }
+        } catch {
+            [Console]::Error.WriteLine("Logger runtime helper publication failed (${r}): $($_.Exception.Message)")
+            throw
+        } finally {
+            if ([IO.File]::Exists($temporary) -and -not [IO.Directory]::Exists($temporary)) {
+                Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue
+            }
+        }
     }
 }
 
@@ -1031,7 +1113,22 @@ exit $LASTEXITCODE
     [System.IO.File]::WriteAllText($TaskLauncher, $launcherContent, $utf8NoBom)
 }
 
+function Write-LoggerDeployManifest {
+    $manifestSource = ''
+    $gitInfo = ${function:Get-GitInfo}
+    if ($script:SourceRuntimeIdentity) {
+        if (-not $script:SourceRuntimeSnapshot) { throw 'Source manifest requires a committed immutable snapshot' }
+        $PluginDir = $script:SourceRuntimeSnapshot
+        $ScriptDir = Join-Path $PluginDir 'scripts'
+        $manifestSource = $script:SourceManifestOrigin
+        $gitInfo = { param($Path) $script:SourceManifestGitInfo }
+    }
+    Assert-SourceRuntime
+    Write-DeployManifest -Service 'agent-logger' -Plugin 'agent-logger' -InstallPath $InstallDir -PluginPath $PluginDir -VenvPath $LinkDir -GetSourceKind ${function:Get-SourceKind} -GetGitInfo $gitInfo -SourcePathOverride $manifestSource -PayloadHash (Get-PayloadHash) -VersionOverride $PackageVersion -AdditionalFields (Get-SourceRuntimeFields)
+}
+
 function Install-Package {
+    Assert-SourceRuntime
     if (-not (Test-Path $InstallDir)) { New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null }
     if (-not (Test-Path $LocalBin))   { New-Item -ItemType Directory -Path $LocalBin -Force | Out-Null }
 
@@ -1044,7 +1141,28 @@ function Install-Package {
     }
 
     [void](Invoke-VersionedSlotClean)
-    if ($script:RuntimeConstructionReuse) { return }
+    if ($script:RuntimeConstructionReuse) {
+        if ($script:SourceRuntimeIdentity) {
+            $selected = Join-Path $InstallDir 'current-version'
+            if (-not (Test-Path -LiteralPath $selected) -or
+                ([IO.File]::ReadAllText($selected)).Trim() -ne $SrcVersion) {
+                if (-not (Invoke-VersionedActivate)) { throw 'Source runtime activation failed' }
+            } else {
+                if (-not (Test-LoggerRuntimeHealthy)) { throw 'Retained runtime slot failed its health gate; not activating' }
+                Assert-SourceRuntime
+                Deploy-ResolverHelpers
+                Assert-SourceRuntime
+            }
+            Publish-PayloadSnapshot | Out-Null
+            Write-SyncTaskLauncher
+            if ($publishGlobalBinstubs) {
+                Write-Binstubs -PythonExe $LinkPython
+                Deploy-SelfProvisioningBinstub
+            }
+            Write-LoggerDeployManifest
+        }
+        return
+    }
 
     # SAC-safe venv: prefer a signed base Python via --copies; rebuild unsigned.
     Invoke-VersionedSlotClean
@@ -1140,12 +1258,11 @@ function Install-Package {
     # Strip the uv-regenerated console-script trampolines (SAC-blocked, unused).
     Remove-ConsoleTrampolines -VenvDir $VenvDir
     Remove-LoggerTrampolines -VenvDir $VenvDir
-    Deploy-ResolverHelpers
-
     # Versioned layout (#581): health-gate the slot + swap the `.venv` junction.
     # Everything below (binstubs, task, manifest) resolves through the link.
     if (-not (Invoke-VersionedActivate)) { exit 1 }
 
+    Assert-SourceRuntime
     Publish-PayloadSnapshot | Out-Null
     Write-SyncTaskLauncher
     if ($publishGlobalBinstubs) {
@@ -1165,13 +1282,13 @@ function Install-Package {
     # Machine-local config schema migration (idempotent + atomic). Non-fatal.
     try {
         $env:PYTHONUTF8 = '1'
-        & $VenvPython -m agent_logger config-migrate 2>&1 | ForEach-Object { Write-Host "  $_" }
+        & $VenvPython -I -m agent_logger config-migrate 2>&1 | ForEach-Object { Write-Host "  $_" }
     } catch {
         Write-Warn "config migration skipped: $_"
     }
 
     # Record the deploy footprint (source: local vs marketplace).
-    Write-DeployManifest -Service 'agent-logger' -Plugin 'agent-logger' -InstallPath $InstallDir -PluginPath $PluginDir -VenvPath $LinkDir -GetSourceKind ${function:Get-SourceKind} -GetGitInfo ${function:Get-GitInfo} -PayloadHash (Get-PayloadHash)
+    Write-LoggerDeployManifest
 }
 
 function New-SyncTaskAction {
@@ -1319,7 +1436,6 @@ function Deploy-SelfProvisioningBinstub {
     # this very binstub never rewrites the .cmd it is mid-execution.
     if (-not (Test-Path $LocalBin)) { New-Item -ItemType Directory -Path $LocalBin -Force | Out-Null }
     $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-    Deploy-ResolverHelpers
     if ($env:OS -ne 'Windows_NT') {
         $stubPath = Join-Path $LocalBin 'agent-logger'
         $stubContent = @'
@@ -1447,8 +1563,9 @@ function Invoke-Stamp {
     foreach ($dir in @($InstallDir, $LocalBin)) {
         if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
     }
-    Publish-PayloadSnapshot | Out-Null
+    Assert-SourceRuntime
     Deploy-ResolverHelpers
+    Publish-PayloadSnapshot | Out-Null
     if ($publishGlobalBinstubs) {
         Deploy-SelfProvisioningBinstub
         Deploy-AuxiliaryCompatibilityBinstubs
@@ -1459,6 +1576,13 @@ function Invoke-Stamp {
 }
 
 try {
+    . (Join-Path $ScriptDir 'versioned_runtime_native.ps1')
+    . (Join-Path $ScriptDir 'source-runtime.ps1')
+    $PackageVersion = $SrcVersion
+    $SourceRuntimeIdentity = $null
+    if ($Action -in @('install', 'update', 'provision', 'stamp')) { Initialize-SourceRuntime }
+    if ($Action -ne 'status') { Enter-LoggerInstallLock }
+    if ($Action -in @('install', 'update', 'provision', 'stamp')) { Assert-SourceRuntime }
 switch ($Action) {
     'stamp' {
         if (-not $script:SkipStamp) { Invoke-Stamp }
@@ -1534,7 +1658,11 @@ switch ($Action) {
 }
 
 } finally {
-    if (Test-Path -LiteralPath 'Function:\Stop-RuntimeConstruction') {
-        Stop-RuntimeConstruction
+    try {
+        if (Test-Path -LiteralPath 'Function:\Stop-RuntimeConstruction') {
+            Stop-RuntimeConstruction
+        }
+    } finally {
+        if ($script:InstallLockStream) { $script:InstallLockStream.Dispose() }
     }
 }

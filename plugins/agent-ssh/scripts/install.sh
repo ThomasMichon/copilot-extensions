@@ -1003,9 +1003,17 @@ if [[ "$ACTION" == "stamp" ]]; then
     fi
     if _snapshot_is_reusable "$CURRENT_SNAPSHOT" "$SOURCE_KIND" "$SOURCE_PATH" "$SRC_VERSION"; then
         _assert_source_runtime_identity "$CURRENT_SNAPSHOT" || exit 1
-        printf '%s\n' "$CURRENT_SNAPSHOT" > "$INSTALL_DIR/payload-dir.$$.tmp"
-        mv -f "$INSTALL_DIR/payload-dir.$$.tmp" "$INSTALL_DIR/payload-dir"
-        _write_stamped_version_marker
+        if [[ -n "$SOURCE_RUNTIME_IDENTITY" ]]; then
+            source_python="$(_source_python)" || exit 1
+            _assert_source_runtime_identity || exit 1
+            "$source_python" -I -B "$SCRIPT_DIR/versioned_runtime.py" --root "$INSTALL_DIR" \
+                publish-redirects --payload-dir "$CURRENT_SNAPSHOT" --version "$SRC_VERSION" \
+                --expected-source-identity "$SOURCE_RUNTIME_IDENTITY" || exit 1
+        else
+            printf '%s\n' "$CURRENT_SNAPSHOT" > "$INSTALL_DIR/payload-dir.$$.tmp"
+            mv -f "$INSTALL_DIR/payload-dir.$$.tmp" "$INSTALL_DIR/payload-dir"
+            _write_stamped_version_marker
+        fi
         _deploy_binstub
         _ok "Stamped: reused snapshot $CURRENT_SNAPSHOT"
         exit 0
@@ -1051,9 +1059,16 @@ if [[ "$ACTION" == "stamp" ]]; then
     mv -f "$SNAPSHOT_TMP" "$SNAPSHOT_DIR"
     _assert_source_runtime_identity "$SNAPSHOT_DIR" || exit 1
     _assert_source_runtime_identity || exit 1
-    printf '%s\n' "$SNAPSHOT_DIR" > "$INSTALL_DIR/payload-dir.$$.tmp"
-    mv -f "$INSTALL_DIR/payload-dir.$$.tmp" "$INSTALL_DIR/payload-dir"
-    _write_stamped_version_marker
+    if [[ -n "$SOURCE_RUNTIME_IDENTITY" ]]; then
+        source_python="$(_source_python)" || exit 1
+        "$source_python" -I -B "$SCRIPT_DIR/versioned_runtime.py" --root "$INSTALL_DIR" \
+            publish-redirects --payload-dir "$SNAPSHOT_DIR" --version "$SRC_VERSION" \
+            --expected-source-identity "$SOURCE_RUNTIME_IDENTITY" || exit 1
+    else
+        printf '%s\n' "$SNAPSHOT_DIR" > "$INSTALL_DIR/payload-dir.$$.tmp"
+        mv -f "$INSTALL_DIR/payload-dir.$$.tmp" "$INSTALL_DIR/payload-dir"
+        _write_stamped_version_marker
+    fi
     _deploy_binstub
     _ok "Stamped: binstub on PATH; runtime provisions on first use."
     exit 0
@@ -1158,13 +1173,25 @@ _ok 'Package installed: agent-ssh'
 fi
 
 # Versioned layout (#581): health-gate the slot + swap the `.venv` symlink.
+# Source manifest inputs are captured before activation.
+if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
+    _assert_source_runtime_identity || exit 1
+    SOURCE_MANIFEST_HASH="$(_payload_hash)" || exit 1
+    SOURCE_MANIFEST_PATH="${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}"
+    if [[ -f "$(_snapshot_source_marker "$PLUGIN_DIR")" ]]; then
+        SOURCE_MANIFEST_PATH="$(cat "$(_snapshot_source_marker "$PLUGIN_DIR")")" || exit 1
+    fi
+    SOURCE_MANIFEST_GIT="$(_git_info "$(dirname "$SOURCE_MANIFEST_PATH")")" || exit 1
+fi
 _versioned_activate || exit 1
 
-_assert_source_runtime_identity || exit 1
+if [[ -z "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then _assert_source_runtime_identity || exit 1; fi
 _deploy_binstub
 
 SOURCE_PATH="${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}"
-if [[ -f "$(_snapshot_source_marker "$PLUGIN_DIR")" ]]; then
+if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
+    SOURCE_PATH="$SOURCE_MANIFEST_PATH"
+elif [[ -f "$(_snapshot_source_marker "$PLUGIN_DIR")" ]]; then
     SOURCE_PATH="$(cat "$(_snapshot_source_marker "$PLUGIN_DIR")" 2>/dev/null || printf '%s\n' "$SOURCE_PATH")"
 fi
 SOURCE_FIELDS=""
@@ -1172,8 +1199,16 @@ if [[ -n "$SOURCE_RUNTIME_IDENTITY" ]]; then
     SOURCE_FIELDS="${SOURCE_RUNTIME_IDENTITY#\{}"
     SOURCE_FIELDS="${SOURCE_FIELDS%\}}"
 fi
-_assert_source_runtime_identity || exit 1
-write_deploy_manifest "agent-ssh" "agent-ssh" "$INSTALL_DIR" "$PLUGIN_DIR" "$VENV_DIR" "$SOURCE_FIELDS" "$SOURCE_PATH" "$PACKAGE_VERSION"
+if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
+    (
+        _payload_hash() { printf '%s\n' "$SOURCE_MANIFEST_HASH"; }
+        _git_info() { printf '%s\n' "$SOURCE_MANIFEST_GIT"; }
+        write_deploy_manifest "agent-ssh" "agent-ssh" "$INSTALL_DIR" "$PLUGIN_DIR" "$VENV_DIR" "$SOURCE_FIELDS" "$SOURCE_PATH" "$PACKAGE_VERSION"
+    )
+else
+    _assert_source_runtime_identity || exit 1
+    write_deploy_manifest "agent-ssh" "agent-ssh" "$INSTALL_DIR" "$PLUGIN_DIR" "$VENV_DIR" "$SOURCE_FIELDS" "$SOURCE_PATH" "$PACKAGE_VERSION"
+fi
 
 echo ''
 if "$LINK_PYTHON" -c 'import agent_ssh' 2>/dev/null; then

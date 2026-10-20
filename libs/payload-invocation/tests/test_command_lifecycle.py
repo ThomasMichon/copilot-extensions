@@ -264,10 +264,18 @@ Invoke-Expression $function.Extent.Text
 $InstallDir=$env:TEST_RUNTIME
 $VenvDir=Join-Path $InstallDir 'versions/next'
 $LinkDir=Join-Path $InstallDir 'active'
-function Get-Command { $true }
-function Invoke-NativeCapture { @{ExitCode=0;Output=$env:TEST_CANDIDATE} }
+$script:ProbeCount=0
+function Get-Command { @{Source='fixture-launcher'} }
+function Invoke-Hidden {
+    param($FilePath,$ArgList)
+    if ($FilePath -ne 'fixture-launcher') { throw 'Unexpected bootstrap launcher' }
+    $script:ProbeCount++
+    $global:LASTEXITCODE=0
+    $env:TEST_CANDIDATE
+}
 function Get-ApplicationPath { $env:TEST_CANDIDATE }
 $selected=Get-BootstrapPython -ExcludeRuntimeRoot
+if ($ProbeCount -ne 1) { throw 'Bootstrap launcher was not probed exactly once' }
 if ($selected) { Write-Output $selected }
 """
     completed = subprocess.run(
@@ -422,8 +430,8 @@ def _native_fixture(fixture: dict, shell: str, action: str = "provision") -> lis
     _prepare_catalog(fixture)
     if shell == "bash":
         source = (ROOT / "plugins/agent-worktrees/scripts/install.sh").read_text()
-        writer = "write_deploy_manifest() {" + source.split(
-            "write_deploy_manifest() {", 1
+        writer = "_build_deploy_manifest_json() {" + source.split(
+            "_build_deploy_manifest_json() {", 1
         )[1].split("show_deploy_status() {", 1)[0]
         admission = source.split(
             "# === command-lifecycle: admission before staging ===\n", 1
@@ -456,6 +464,7 @@ def _native_fixture(fixture: dict, shell: str, action: str = "provision") -> lis
             "  printf '%s' \"$TEST_OWNER\" > \"$INSTALL_DIR/runtime-slot\"\n"
             "  sleep 0.3\n"
             "  cp \"$INSTALL_DIR/runtime-slot\" \"$INSTALL_DIR/current-version\"\n}\n"
+            '. "$SCRIPT_DIR/source-runtime.sh"\n_initialize_source_runtime\n'
             + writer + "\n" + admission + "\n" + dispatch
         )
         if action == "uninstall":
@@ -465,8 +474,8 @@ def _native_fixture(fixture: dict, shell: str, action: str = "provision") -> lis
         script.write_text(program, encoding="utf-8")
         return [str(Path(subprocess.check_output(["which", "bash"], text=True).strip())), str(script), action]
     source = (ROOT / "plugins/agent-worktrees/scripts/install.ps1").read_text()
-    writer = "function Write-V3Manifest {" + source.split(
-        "function Write-V3Manifest {", 1
+    writer = "function New-V3Manifest {" + source.split(
+        "function New-V3Manifest {", 1
     )[1].split("function Test-UvConfiguredIndex {", 1)[0]
     admission = source.split(
         "# === command-lifecycle: admission before staging ===\n", 1
@@ -499,6 +508,7 @@ def _native_fixture(fixture: dict, shell: str, action: str = "provision") -> lis
         "  Start-Sleep -Milliseconds 300\n"
         "  Copy-Item (Join-Path $InstallDir 'runtime-slot') (Join-Path $InstallDir 'current-version')\n"
         "}\n"
+        ". (Join-Path $PSScriptRoot 'source-runtime.ps1')\nInitialize-SourceRuntime\n"
         + writer + "\n" + stamp + "\n" + admission + "\n" + dispatch
     )
     if action == "uninstall":
@@ -520,16 +530,9 @@ def _native_fixture(fixture: dict, shell: str, action: str = "provision") -> lis
     return [POWERSHELL, "-NoLogo", "-NoProfile", "-File", str(script), "-Action", action]
 
 
-@pytest.mark.parametrize("shell", [
-    pytest.param("bash", marks=pytest.mark.skipif(os.name == "nt", reason="POSIX installer")),
-    pytest.param("powershell", marks=pytest.mark.skipif(POWERSHELL is None, reason="PowerShell unavailable")),
-])
-@pytest.mark.parametrize("location", ["installed", "local-copy"])
-def test_command_binding_real_installer_refuses_before_self_staging(
-    binding_fixture: dict, shell: str, location: str, powershell_host,
-) -> None:
-    _prepare_catalog(binding_fixture)
-    payload = binding_fixture["payload"]
+def _real_installer(fixture: dict, shell: str, location: str) -> tuple[Path, dict[str, str]]:
+    _prepare_catalog(fixture)
+    payload = fixture["payload"]
     suffix = "sh" if shell == "bash" else "ps1"
     installer = payload / f"scripts/install.{suffix}"
     shutil.copyfile(ROOT / f"plugins/agent-worktrees/scripts/install.{suffix}", installer)
@@ -538,19 +541,31 @@ def test_command_binding_real_installer_refuses_before_self_staging(
             shutil.copyfile(ROOT / "plugins/agent-worktrees/scripts" / name, installer.parent / name)
     _write(payload / "plugin.json", {"name": PLUGIN_ID})
     if location == "local-copy":
-        copied_payload = binding_fixture["home"] / "local-payload"
+        copied_payload = fixture["home"] / "local-payload"
         shutil.copytree(payload, copied_payload)
         installer = copied_payload / f"scripts/install.{suffix}"
-    _publish(binding_fixture)
-    stage = binding_fixture["legacy"] / ".install-stage/retained-0"
-    stage.mkdir(parents=True)
-    (stage / "retained").write_text("must not be reaped by foreign source", encoding="utf-8")
     environment = {
-        **_catalog_environment(binding_fixture),
+        **_catalog_environment(fixture),
         "COPILOT_PLUGIN_INSTALL_SMOKE": "1", "COPILOT_PLUGIN_INSTALL_SMOKE_SLEEP": "0",
         "COPILOT_PLUGIN_INSTALL_STAGED": "1",
         "COPILOT_PLUGIN_STAGED_FROM": str(payload),
     }
+    return installer, environment
+
+
+@pytest.mark.parametrize("shell", [
+    pytest.param("bash", marks=pytest.mark.skipif(os.name == "nt", reason="POSIX installer")),
+    pytest.param("powershell", marks=pytest.mark.skipif(POWERSHELL is None, reason="PowerShell unavailable")),
+])
+@pytest.mark.parametrize("location", ["installed", "local-copy"])
+def test_command_binding_real_installer_refuses_before_self_staging(
+    binding_fixture: dict, shell: str, location: str, powershell_host,
+) -> None:
+    installer, environment = _real_installer(binding_fixture, shell, location)
+    _publish(binding_fixture)
+    stage = binding_fixture["legacy"] / ".install-stage/retained-0"
+    stage.mkdir(parents=True)
+    (stage / "retained").write_text("must not be reaped by foreign source", encoding="utf-8")
     host = powershell_host(binding_fixture, environment) if shell == "powershell" else None
     settings = binding_fixture["home"] / ".copilot/settings.json"
     original = settings.read_bytes()
@@ -569,12 +584,29 @@ def test_command_binding_real_installer_refuses_before_self_staging(
             capture_output=True, text=True, timeout=30,
         )
         assert refused.returncode != 0, refused.stdout + refused.stderr
-        assert "Command ownership" in refused.stdout + refused.stderr
+        assert "Command ownership" in refused.stdout + refused.stderr, refused.stdout + refused.stderr
         assert _snapshot(binding_fixture["home"]) == before
     if host:
         host.close()
         assert _snapshot(binding_fixture["home"]) == before
     settings.write_bytes(original)
+
+
+@pytest.mark.parametrize("shell", [
+    pytest.param("bash", marks=pytest.mark.skipif(os.name == "nt", reason="POSIX installer")),
+    pytest.param("powershell", marks=pytest.mark.skipif(POWERSHELL is None, reason="PowerShell unavailable")),
+])
+@pytest.mark.parametrize("location", ["installed", "local-copy"])
+def test_command_binding_real_installer_reenters_under_admitted_lease(
+    binding_fixture: dict, shell: str, location: str,
+) -> None:
+    installer, environment = _real_installer(binding_fixture, shell, location)
+    payload = binding_fixture["payload"]
+    _publish(binding_fixture)
+    command = (
+        ["bash", str(installer), "stamp"] if shell == "bash" else
+        [POWERSHELL, "-NoLogo", "-NoProfile", "-File", str(installer), "stamp"]
+    )
     if location == "local-copy":
         binding = binding_fixture["binding"]
         with binding._load_lifecycle().legacy_lifecycle(
@@ -597,6 +629,21 @@ def test_command_binding_real_installer_refuses_before_self_staging(
             assert Path(smoke["ran_from"]) == installer.parent
             assert Path(smoke["staged_from"]) == payload
             lease.lock.assert_owned()
+        assert not _lifecycle_lock_path(binding_fixture["legacy"]).exists()
+        return
+    # The unchanged self-stage block still runs under the admitted parent lease.
+    completed = subprocess.run(
+        command, env=environment, cwd=binding_fixture["home"], capture_output=True,
+        text=True, timeout=30, creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    smoke = json.loads((binding_fixture["legacy"] / "smoke.json").read_text())
+    assert smoke["staged"] is True
+    assert Path(smoke["staged_from"]) == payload
+    assert ".install-stage" in smoke["ran_from"]
+    assert not _lifecycle_lock_path(binding_fixture["legacy"]).exists()
+
+
 @pytest.mark.parametrize("shell", [
     pytest.param("bash", marks=pytest.mark.skipif(os.name == "nt", reason="POSIX installer")),
     pytest.param("powershell", marks=pytest.mark.skipif(POWERSHELL is None, reason="PowerShell unavailable")),

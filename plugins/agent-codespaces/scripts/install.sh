@@ -286,6 +286,11 @@ _versioned_activate() {
     _versioned_mark_complete || return 1
     local prev
     prev="$("$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" current 2>/dev/null || echo "")"
+    # Source manifest inputs are captured before activation.
+    if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
+        SOURCE_MANIFEST_HASH="$(_payload_hash)" || return 1
+        SOURCE_MANIFEST_GIT="$(_git_info "$(dirname "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}")")" || return 1
+    fi
     _assert_source_runtime || return 1
     if ! "$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" activate "$SRC_VERSION" --replace-nonlink --no-link; then
         _fail "Failed to activate versioned runtime slot (versions/$SRC_VERSION; marker-only, no .venv link)"
@@ -656,12 +661,9 @@ deploy_package() {
 # shell out to it even when the operator is not standing in a source checkout
 # (docs/patterns/mutable-dev-slot.md Runtime accessibility, option 1).
 _deploy_versioned_runtime_helper() {
-    local temporary name
-    for name in versioned_runtime_leases.py versioned_runtime_construction.py versioned_runtime_source.py versioned_runtime.py; do
-        temporary="$(mktemp "$INSTALL_DIR/$name.tmp.XXXXXX")" || return 1
-        if ! cp "$SCRIPT_DIR/$name" "$temporary" \
-            || ! mv -f "$temporary" "$INSTALL_DIR/$name"; then
-            rm -f -- "$temporary"
+    local name
+    for name in versioned_runtime_leases.py versioned_runtime_construction.py versioned_runtime_source.py versioned_runtime_publication.py versioned_runtime.py; do
+        if ! _runtime_publication_copy "$SCRIPT_DIR/$name" "$INSTALL_DIR/$name"; then
             _fail "Could not stage $name into $INSTALL_DIR"
             return 1
         fi
@@ -896,6 +898,17 @@ STUB
 }
 
 _write_codespaces_deploy_manifest() {
+    if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
+        (
+            _payload_hash() { printf '%s\n' "$SOURCE_MANIFEST_HASH"; }
+            _git_info() { printf '%s\n' "$SOURCE_MANIFEST_GIT"; }
+            write_deploy_manifest "agent-codespaces" "agent-codespaces" \
+                "$INSTALL_DIR" "$PLUGIN_DIR" "$VENV_DIR" \
+                "${SOURCE_RUNTIME_IDENTITY:1:${#SOURCE_RUNTIME_IDENTITY}-2}" \
+                "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" "$PACKAGE_VERSION"
+        )
+        return $?
+    fi
     _assert_source_runtime || return 1
     local fields="" py
     if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then

@@ -290,6 +290,11 @@ LINK_PYTHON="$VENV_PYTHON"
 
 # === install-contract:v3 versioned-venv helpers (agent-vault) ===
 _versioned_activate() {
+    _assert_source_runtime || return 1
+    if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
+        _publish_source_snapshot >/dev/null || return 1
+    fi
+    _assert_source_runtime || return 1
     # Swap the stable `.venv` symlink to this version's freshly-built slot, moving
     # a legacy real `.venv` aside on first migration (--replace-nonlink). No-op in
     # legacy mode. On POSIX a rename tolerates a daemon's open files, and
@@ -330,11 +335,7 @@ _versioned_gc() {
 # === end install-contract:v3 versioned-venv helpers ===
 
 _bootstrap_python() {
-    # A python to run the stdlib-only versioned_runtime.py helper BEFORE the slot
-    # venv exists (e.g. the pre-build toss). Prefers the current `venv` link's
-    # python, then python3/python on PATH. Prints nothing + returns 1 if none
-    # found (#935).
-    if [[ -x "$LINK_DIR/bin/python" ]]; then echo "$LINK_DIR/bin/python"; return 0; fi
+    # Keep construction supervision outside the candidate being built.
     local __c
     for __c in python3 python; do
         if command -v "$__c" >/dev/null 2>&1; then command -v "$__c"; return 0; fi
@@ -372,6 +373,7 @@ _payload_hash() {
 }
 
 _versioned_slot_clean() {
+    _assert_source_runtime || return 1
     [[ "$VERSIONED_RUNTIME" == 1 ]] || {
         printf '%s\n' 'Construction requires a versioned runtime candidate' >&2; return 1;
     }
@@ -383,10 +385,12 @@ _versioned_slot_clean() {
         eval "$helpers"
     fi
     _runtime_construction_begin "$py" "$vr" "$INSTALL_DIR" "$SRC_VERSION" \
-        "$(_payload_hash)" "$(basename "$LINK_DIR")"
+        "$(_payload_hash)" "$(basename "$LINK_DIR")" || return 1
+    _assert_source_runtime
 }
 
 _versioned_mark_complete() {
+    _assert_source_runtime || return 1
     local actual_hash
     actual_hash="$(_payload_hash)" || return 1
     if [[ -n "${1:-}" && "$1" != "$actual_hash" ]]; then
@@ -394,6 +398,32 @@ _versioned_mark_complete() {
         return 1
     fi
     _runtime_construction_complete "$actual_hash"
+}
+
+_write_runtime_manifest() {
+    if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
+        [[ -n "${SOURCE_RUNTIME_SNAPSHOT:-}" ]] || {
+            _fail "Source manifest requires a committed immutable snapshot"; return 1;
+        }
+        (
+            PLUGIN_DIR="$SOURCE_RUNTIME_SNAPSHOT"
+            SCRIPT_DIR="$PLUGIN_DIR/scripts"
+            _git_info() { printf '%s\n' "$SOURCE_MANIFEST_GIT_INFO"; }
+            _assert_source_runtime || return 1
+            local fields py
+            py="$(_bootstrap_python)" || return 1
+            fields="$("$py" -I -B "$SCRIPT_DIR/versioned_runtime_source.py" \
+                --payload "$PLUGIN_DIR" --package-version "$PACKAGE_VERSION" --plugin agent-vault \
+                --expected-runtime-version "$SRC_VERSION" \
+                --expected-source-identity "$SOURCE_RUNTIME_IDENTITY" --format shell-fields)" || return 1
+            write_deploy_manifest agent-vault agent-vault "$INSTALL_DIR" "$PLUGIN_DIR" "$VENV_DIR" \
+                "$fields" "$SOURCE_MANIFEST_ORIGIN" "$PACKAGE_VERSION"
+        ) || return 1
+        return 0
+    fi
+    _assert_source_runtime || return 1
+    write_deploy_manifest agent-vault agent-vault "$INSTALL_DIR" "$PLUGIN_DIR" "$VENV_DIR" \
+        "" "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" "$PACKAGE_VERSION"
 }
 
 # === install-contract:v4 source-kind -- keep byte-identical across plugins ===
@@ -528,26 +558,61 @@ _ensure_uv_index() {
 # Cheap 'stamp': splat the binstub + payload marker, defer the venv build to first
 # use (fits a sessionStart hook's grace window). No venv, no uv.
 do_stamp() {
+    _assert_source_runtime || return 1
     echo ''; echo '=== agent-vault stamp (defer runtime to first use) ==='; echo ''
-    mkdir -p "$INSTALL_DIR" "$LOCAL_BIN"
-    printf '%s\n' "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" > "$INSTALL_DIR/payload-dir"
-    _deploy_binstub
+    mkdir -p "$INSTALL_DIR" "$LOCAL_BIN" || {
+        _fail "Stamp directories cannot be prepared: $INSTALL_DIR"; return 1;
+    }
+    _deploy_binstub || return 1
+    if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
+        _stamp_source_payload || return 1
+    else
+        printf '%s\n' "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" > "$INSTALL_DIR/payload-dir" || return 1
+    fi
     _ok "Stamped: binstub on PATH; runtime provisions on first use."
 }
 
 _write_askpass() {
-    mkdir -p "$LOCAL_BIN"
-    cat > "$ASKPASS" << 'EOF'
+    local temporary
+    mkdir -p "$LOCAL_BIN" || return 1
+    [[ ! -d "$ASKPASS" ]] || {
+        _fail "SUDO_ASKPASS helper destination is a directory: $ASKPASS"; return 1;
+    }
+    temporary="$(mktemp "$LOCAL_BIN/.vault-askpass.XXXXXX")" || return 1
+    [[ -f "$temporary" && ! -L "$temporary" ]] || {
+        _fail "SUDO_ASKPASS helper staging is not a regular file: $temporary"; return 1;
+    }
+    if ! cat > "$temporary" << 'EOF'
 #!/usr/bin/env bash
 export VAULT_NONINTERACTIVE=1
 exec "$HOME/.local/bin/agent-vault" get "${VAULT_SUDO_ENTRY:?set VAULT_SUDO_ENTRY to your sudo KeePass entry path}" password
 EOF
-    chmod +x "$ASKPASS"
+    then
+        rm -f "$temporary"
+        _fail "SUDO_ASKPASS helper write failed: $ASKPASS"
+        return 1
+    fi
+    chmod +x "$temporary" && [[ ! -d "$ASKPASS" ]] && mv -f "$temporary" "$ASKPASS" &&
+        [[ ! -e "$temporary" && ! -L "$temporary" && -f "$ASKPASS" ]] || {
+        rm -f "$temporary"
+        _fail "SUDO_ASKPASS helper publication failed: $ASKPASS"
+        return 1
+    }
     _ok "SUDO_ASKPASS helper: $ASKPASS"
     _step 'To enable sudo askpass, export SUDO_ASKPASS="$HOME/.local/bin/vault-askpass" and export VAULT_SUDO_ENTRY="<their entry>"'
 }
 
+_test_runtime_healthy() {
+    local output
+    if ! output="$("$VENV_PYTHON" -I -m agent_vault --help 2>&1)"; then
+        _fail "Isolated agent_vault CLI health probe failed: $output"
+        return 1
+    fi
+    return 0
+}
+
 _ensure_runtime() {
+    _assert_source_runtime || return 1
     if [[ ! -d "$PKG_SRC_DIR" ]]; then
         _fail "Package source not found at $PKG_SRC_DIR"
         exit 1
@@ -566,14 +631,29 @@ _ensure_runtime() {
     fi
     have_uv=1
 
-    mkdir -p "$INSTALL_DIR" "$LOCAL_BIN"
+    mkdir -p "$INSTALL_DIR" "$LOCAL_BIN" || {
+        _fail "Vault runtime directories cannot be prepared: $INSTALL_DIR"; return 1;
+    }
     _ok "Directories: $INSTALL_DIR"
 
     _versioned_slot_clean || return 1
-    [[ "$_RUNTIME_CONSTRUCTION_REUSE" == 1 ]] && return 0
+    if [[ "$_RUNTIME_CONSTRUCTION_REUSE" == 1 ]]; then
+        if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
+            _test_runtime_healthy || return 1
+            _deploy_binstub || return 1
+            _write_askpass || return 1
+            _assert_source_runtime || return 1
+            if [[ ! -f "$INSTALL_DIR/current-version" || "$(cat "$INSTALL_DIR/current-version")" != "$SRC_VERSION" ]]; then
+                _versioned_activate || return 1
+            fi
+            _stamp_source_payload || return 1
+            _write_runtime_manifest || return 1
+        fi
+        return 0
+    fi
 
     if [[ ! -x "$VENV_PYTHON" ]]; then
-        _versioned_slot_clean
+        _versioned_slot_clean || return 1
         if ! new_signed_venv "$uv_cmd" "$VENV_DIR" "3.10"; then
             _fail "Failed to create venv at $VENV_DIR"
             exit 1
@@ -633,20 +713,28 @@ _ensure_runtime() {
     local prev_version=""
     if [[ "$VERSIONED_RUNTIME" == 1 ]]; then
         prev_version="$(_versioned_current)"
-        if ! "$VENV_PYTHON" -c 'import agent_vault' 2>/dev/null; then
+        if ! _test_runtime_healthy; then
             _fail "Fresh runtime slot failed its health gate (versions/$SRC_VERSION) -- not activating"
             exit 1
         fi
+    fi
+
+    _deploy_binstub || return 1
+    _write_askpass || return 1
+    _assert_source_runtime || return 1
+    if [[ "$VERSIONED_RUNTIME" == 1 ]]; then
         _versioned_mark_complete || exit 1
         _versioned_activate || exit 1
     fi
-
-    _deploy_binstub
-    _write_askpass
-    write_deploy_manifest "agent-vault" "agent-vault" "$INSTALL_DIR" "$PLUGIN_DIR" "$VENV_DIR"
+    if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
+        _stamp_source_payload || return 1
+    else
+        _assert_source_runtime || return 1
+    fi
+    _write_runtime_manifest || return 1
     _check_keepassxc
 
-    if "$LINK_PYTHON" -c 'import agent_vault' 2>/dev/null; then
+    if "$LINK_PYTHON" -I -c 'import agent_vault' 2>/dev/null; then
         _ok 'Verification: module imports successfully'
     else
         _fail 'Verification: module import failed'
@@ -677,7 +765,20 @@ _install_service() {
     # bind fails outright with a bare FileNotFoundError if $RUN_DIR is
     # missing, and the log file open warns-and-continues without $INSTALL_DIR/
     # logs) -- neither was created here before.
-    mkdir -p "$UNIT_DIR" "$RUN_DIR" "$INSTALL_DIR/logs"
+    mkdir -p "$UNIT_DIR" "$RUN_DIR" "$INSTALL_DIR/logs" || {
+        _fail "Vault service directories cannot be prepared: $UNIT_DIR"; return 1;
+    }
+    local unit_path="$UNIT_DIR/$SYSTEMD_UNIT" unit_tmp
+    if [[ -d "$unit_path" ]]; then
+        _fail "Vault service unit destination is a directory: $unit_path"
+        return 1
+    fi
+    unit_tmp="$(mktemp "$UNIT_DIR/.$SYSTEMD_UNIT.XXXXXX")" || {
+        _fail "Vault service unit staging failed: $unit_path"; return 1;
+    }
+    [[ -f "$unit_tmp" && ! -L "$unit_tmp" ]] || {
+        _fail "Vault service unit staging is not a regular file: $unit_tmp"; return 1;
+    }
 
     # Drain-safe cutover (#743): if a generation is already active, capture its
     # unlocked state BEFORE we touch the unit -- `--export-handoff` dials the
@@ -702,7 +803,7 @@ _install_service() {
         )" || handoff_json=""
     fi
 
-    cat > "$UNIT_DIR/$SYSTEMD_UNIT" << EOF
+    if ! cat > "$unit_tmp" << EOF
 [Unit]
 Description=agent-vault -- local KeePassXC-backed secret store
 After=default.target
@@ -730,6 +831,17 @@ WorkingDirectory=$INSTALL_DIR
 [Install]
 WantedBy=default.target
 EOF
+    then
+        rm -f "$unit_tmp"
+        _fail "Vault service unit write failed: $unit_path"
+        return 1
+    fi
+    if [[ -d "$unit_path" ]] || ! mv -f "$unit_tmp" "$unit_path" ||
+        [[ -e "$unit_tmp" || ! -f "$unit_path" ]]; then
+        rm -f "$unit_tmp"
+        _fail "Vault service unit publication failed: $unit_path"
+        return 1
+    fi
     systemctl --user daemon-reload 2>/dev/null || true
     systemctl --user enable "$SYSTEMD_UNIT" 2>/dev/null || true
     # Drain-safe cutover (#743), continued: hand the captured payload to the
@@ -759,16 +871,16 @@ EOF
 
 do_install() {
     echo ''; echo '=== agent-vault install ==='; echo ''
-    _ensure_runtime
-    _install_service
+    _ensure_runtime || return 1
+    _install_service || return 1
     echo ''; echo '=== agent-vault install complete ==='
 }
 
 do_update() {
     echo ''; echo '=== agent-vault update ==='; echo ''
     _downgrade_guard
-    _ensure_runtime
-    _install_service
+    _ensure_runtime || return 1
+    _install_service || return 1
     echo ''; echo '=== agent-vault update complete ==='
 }
 
@@ -1039,6 +1151,12 @@ _enter_install_lock() {
 }
 # === end install-transaction lock ===
 
+. "$SCRIPT_DIR/source-runtime.sh"
+PACKAGE_VERSION="$SRC_VERSION"
+SOURCE_RUNTIME_IDENTITY=""
+case "$ACTION" in
+    install|update|provision|stamp) _initialize_source_runtime || exit 1 ;;
+esac
 case "$ACTION:${DRY_RUN:-0}" in
     uninstall:1) ;;
     install:*|update:*|stamp:*|provision:*|uninstall:*)
@@ -1053,10 +1171,13 @@ case "$ACTION:${DRY_RUN:-0}" in
 esac
 
 case "$ACTION" in
-    install)   do_install ;;
-    stamp)     do_stamp ;;
-    provision) do_install ;;
-    update)    do_update ;;
+    install|update|provision|stamp) _assert_source_runtime || exit 1 ;;
+esac
+case "$ACTION" in
+    install)   do_install || exit 1 ;;
+    stamp)     do_stamp || exit 1 ;;
+    provision) do_install || exit 1 ;;
+    update)    do_update || exit 1 ;;
     start)     do_start ;;
     stop)      do_stop ;;
     status)    do_status ;;

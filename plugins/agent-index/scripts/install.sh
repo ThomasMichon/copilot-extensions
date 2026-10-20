@@ -472,7 +472,9 @@ if [[ "$ACTION" == "slot-provision" ||
 fi
 
 _versioned_activate() {
+    _assert_source_runtime || return 1
     _activate_index_runtime() {
+    _assert_source_runtime || return 1
     [[ "$VERSIONED_RUNTIME" == 1 ]] || return 0
     _index_publication_fresh || { _skip 'Newer runtime or stamp superseded activation'; return 0; }
     # Monotonic activation (dotfiles #1508): never flip the active runtime BACKWARD.
@@ -502,7 +504,13 @@ _versioned_activate() {
         _fail "Refusing to activate runtime slot versions/$SRC_VERSION because agent_index is not importable"
         return 1
     fi
-    if ! "$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" activate "$SRC_VERSION" --replace-nonlink --no-link; then
+    local receipt_file
+    local receipt_args=()
+    if [[ -n "${_RUNTIME_PUBLICATION_EVIDENCE:-}" ]]; then
+        _runtime_publication_native_begin receipt_file || return 1
+        receipt_args=(--ownership-receipt "$receipt_file")
+    fi
+    if ! "$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" activate "$SRC_VERSION" --replace-nonlink --no-link "${receipt_args[@]}"; then
         _fail "Failed to activate versioned runtime slot (versions/$SRC_VERSION; marker-only, no .venv link)"
         return 1
     fi
@@ -549,6 +557,13 @@ _bootstrap_python() {
 }
 
 _payload_hash() {
+    if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
+        _assert_source_runtime || return 1
+        local py
+        py="$(_bootstrap_python)" || return 1
+        "$py" -I -c 'import hashlib,sys; print(hashlib.sha256(sys.argv[1].encode()).hexdigest())' "$SOURCE_RUNTIME_IDENTITY"
+        return $?
+    fi
     (
         # All non-root entries, including root snapshot-provenance.json, count
         # toward these limits. The provenance file is omitted only from records.
@@ -857,6 +872,7 @@ print(f"{kind}|{st.st_dev}|{st.st_ino}|{st.st_size}|{int(st.st_mtime)}|{int(st.s
 }
 
 _versioned_slot_clean() {
+    _assert_source_runtime || return 1
     [[ "$VERSIONED_RUNTIME" == 1 ]] || {
         printf '%s\n' 'Construction requires a versioned runtime candidate' >&2; return 1;
     }
@@ -868,10 +884,12 @@ _versioned_slot_clean() {
         eval "$helpers"
     fi
     _runtime_construction_begin "$py" "$vr" "$INSTALL_DIR" "$SRC_VERSION" \
-        "$(_payload_hash)" "$(basename "$LINK_DIR")"
+        "$(_payload_hash)" "$(basename "$LINK_DIR")" || return 1
+    _assert_source_runtime
 }
 
 _versioned_mark_complete() {
+    _assert_source_runtime || return 1
     local actual_hash
     actual_hash="$(_payload_hash)" || return 1
     if [[ -n "${1:-}" && "$1" != "$actual_hash" ]]; then
@@ -908,6 +926,10 @@ _resolve_vendored_lib() {
     if [[ -f "$candidate/pyproject.toml" ]]; then
         cd "$candidate" && pwd
         return 0
+    fi
+    if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
+        _fail "Source-qualified payload is missing a required vendored dependency: $lib_name"
+        return 1
     fi
 
     # 2. Relative path (git checkout layout: plugins/agent-index/../../libs/<name>)
@@ -984,6 +1006,7 @@ _source_version() {
 
 _version_lt() {
     local a="${1//-/.}" b="${2//-/.}"
+    a="${a%%[+.]source.*}"; b="${b%%[+.]source.*}"
     [[ "$a" == "$b" ]] && return 1
     local lower
     lower="$(printf '%s\n%s\n' "$a" "$b" | sort -V | head -n1)"
@@ -1072,22 +1095,45 @@ _ensure_uv_index() {
 # Deploy a stable machine-global redirector to the payload-owned lifecycle gate.
 # The gate owns setup consent, runtime readiness, and provisioning.
 _write_index_stamp_file() {
-    local python
+    local python stamp_stage stamp_state receipt_file
+    local receipt_args=()
     python="$(_bootstrap_python)" || python="$(_find_python)" || return 1
-    "$python" -I "$SCRIPT_DIR/session-stamp.py" publish "$1" "${2:-metadata}"
+    _runtime_publication_stage "$1" stamp_stage || return 1
+    cat > "$stamp_stage" || return 1
+    stamp_state="$(_runtime_publication_state "$stamp_stage")" || return 1
+    _runtime_publication_expect_file "$1" "$stamp_stage" || return 1
+    if [[ -n "${_RUNTIME_PUBLICATION_EVIDENCE:-}" ]]; then
+        _runtime_publication_native_begin receipt_file || return 1
+        receipt_args=(--ownership-receipt "$receipt_file" --publication-root "$INSTALL_DIR")
+    fi
+    "$python" -I "$SCRIPT_DIR/session-stamp.py" publish "$1" "${2:-metadata}" "${receipt_args[@]}" < "$stamp_stage" || return 1
+    _runtime_publication_accept "$1" || return 1
+    _runtime_publication_drop_stage "$stamp_stage" "$stamp_state"
 }
 
 deploy_binstub() {
     _deploy_index_binstub() {
+    _assert_source_runtime || return 1
     _index_publication_fresh || { _skip 'Newer runtime or stamp superseded launcher publication'; return 0; }
-    printf '%s\n' "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" |
-        _write_index_stamp_file "$INSTALL_DIR/payload-dir" || return 1
+    local payload="${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}"
+    if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
+        payload="$(_source_snapshot)" || return 1
+    fi
+    if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
+        _publish_source_redirects "$payload" || return 1
+    else
+        _write_index_stamp_file "$INSTALL_DIR/payload-dir" <<< "$payload" || return 1
+    fi
     (umask 022; mkdir -p "$INSTALL_DIR/bin") || return 1
     # Co-deploy the canonical marker-only resolver (uniform-runtime-resolution, #765).
     for r in resolve-runtime.sh resolve-runtime.ps1; do
-        [ -f "$SCRIPT_DIR/$r" ] && cp -f "$SCRIPT_DIR/$r" "$INSTALL_DIR/bin/$r"
+        if [[ -f "$SCRIPT_DIR/$r" ]]; then
+            _runtime_publication_copy "$SCRIPT_DIR/$r" "$INSTALL_DIR/bin/$r" || return 1
+        fi
     done
-    _write_index_stamp_file "$STUB" executable << 'STUBEOF'
+    local STUB_STAGE stub_stage_state
+    _runtime_publication_stage "$STUB" STUB_STAGE || return 1
+    cat > "$STUB_STAGE" << 'STUBEOF'
 #!/usr/bin/env bash
 _name="agent-index"
 _root="$HOME/.$_name"
@@ -1100,6 +1146,10 @@ fi
 exec "$_gate" "$@"
 STUBEOF
     [[ $? == 0 ]] || return 1
+    chmod 755 "$STUB_STAGE" || return 1
+    stub_stage_state="$(_runtime_publication_state "$STUB_STAGE")" || return 1
+    _write_index_stamp_file "$STUB" executable < "$STUB_STAGE" || return 1
+    _runtime_publication_drop_stage "$STUB_STAGE" "$stub_stage_state" || return 1
     _ok "Binstub: $STUB (setup-gated)"
     }
     _with_index_publication_lock _deploy_index_binstub
@@ -1111,9 +1161,22 @@ do_stamp() {
     _stamp_index_payload() {
     _index_publication_fresh || { _skip 'Newer runtime or stamp superseded stamp'; return 0; }
     echo ''; echo '=== agent-index stamp (defer runtime to explicit setup) ==='; echo ''
-    deploy_binstub || return 1
-    printf '%s\n' "$SRC_VERSION" |
-        _write_index_stamp_file "$INSTALL_DIR/stamped-version" || return 1
+    local source_payload=""
+    if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
+        source_payload="$(_source_snapshot)" || return 1
+    fi
+    _runtime_publication_begin_install || return 1
+    if ! { [[ -z "${SOURCE_RUNTIME_IDENTITY:-}" ]] || _publish_source_redirects "$source_payload"; } ||
+        ! deploy_binstub ||
+        ! {
+            if [[ -z "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
+                _write_index_stamp_file "$INSTALL_DIR/stamped-version" <<< "$SRC_VERSION"
+            fi
+        }; then
+        _runtime_publication_restore || _fail 'Stamp publication rollback failed'
+        return 1
+    fi
+    _runtime_publication_discard || return 1
     _ok "Stamped: binstub on PATH; runtime provisions after explicit setup."
     }
     _with_index_publication_lock _stamp_index_payload
@@ -1151,6 +1214,14 @@ _new_index_venv() {
         _warn "Created venv failed interpreter/prefix health validation: $dir"
         return 1
     fi
+}
+
+_test_index_server_venv() {
+    local dir="$1" python="$2"
+    _test_index_venv "$dir" "$python" &&
+        "$python" -I -c 'import fastapi, uvicorn, numpy, pyarrow, lancedb; import agent_index.server' &&
+        "$python" -I -m agent_index --help >/dev/null &&
+        _runtime_origin_under "$python" "$dir"
 }
 
 _install_server_venv() {
@@ -1199,13 +1270,8 @@ _install_server_venv() {
         printf '%s\n' "$srv_out" >&2
         return 1
     fi
-    if ! _test_index_venv "$server_venv_dir" "$server_venv_python"; then
-        _warn 'Server venv failed final interpreter/prefix health validation'
-        return 1
-    fi
-    if ! "$server_venv_python" -I -c 'import fastapi, uvicorn, numpy, pyarrow, lancedb; import agent_index.server' ||
-        ! _runtime_origin_under "$server_venv_python" "$server_venv_dir"; then
-        _warn 'Server venv failed host dependency/package-origin health validation'
+    if ! _test_index_server_venv "$server_venv_dir" "$server_venv_python"; then
+        _warn 'Server venv failed complete host health validation'
         return 1
     fi
     _ok "Server venv provisioned: $server_venv_dir"
@@ -1345,6 +1411,10 @@ _index_publication_fresh() {
 
 _ensure_runtime() {
     _ensure_runtime_build() {
+    _assert_source_runtime || return 1
+    if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
+        _source_snapshot >/dev/null || return 1
+    fi
     if [[ ! -d "$PKG_SRC_DIR" ]]; then
         _fail "Package source not found at $PKG_SRC_DIR"
         exit 1
@@ -1358,7 +1428,7 @@ _ensure_runtime() {
     local have_uv=0
     command -v uv >/dev/null 2>&1 && have_uv=1
 
-    mkdir -p "$INSTALL_DIR" "$LOCAL_BIN"
+    mkdir -p "$INSTALL_DIR" "$LOCAL_BIN" || return 1
     _ok "Directories: $INSTALL_DIR"
 
     _versioned_slot_clean || return 1
@@ -1393,7 +1463,7 @@ _ensure_runtime() {
     _with_index_publication_lock _prepare_index_runtime || preparation_rc=$?
     if [[ "$preparation_rc" == 3 ]]; then _skip 'Runtime preparation superseded'; return 0; fi
     [[ "$preparation_rc" == 0 ]] || return "$preparation_rc"
-    if ! _test_index_venv "$VENV_DIR" "$VENV_PYTHON"; then _versioned_slot_clean; fi
+    if ! _test_index_venv "$VENV_DIR" "$VENV_PYTHON"; then _versioned_slot_clean || return 1; fi
     if ! _new_index_venv "$VENV_DIR" "$VENV_PYTHON" "$py" "$have_uv"; then
         _fail "Runtime venv failed interpreter/prefix health validation: $VENV_DIR"
         exit 1
@@ -1472,10 +1542,22 @@ _ensure_runtime() {
 
     fi
 
+    if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" && "$_RUNTIME_CONSTRUCTION_REUSE" == 1 ]]; then
+        local reuse_role
+        reuse_role="$(_activation_role)"
+        [[ "$reuse_role" != unconfigured ]] || reuse_role="$(_machine_role)"
+        if [[ "$reuse_role" == host ]] &&
+            ! _test_index_server_venv "$VENV_DIR/server" "$VENV_DIR/server/bin/python3"; then
+            _fail 'Immutable source generation lacks its host service closure; select a distinct complete generation'
+            return 1
+        fi
+    fi
     local prev_version=""
     if [[ "$VERSIONED_RUNTIME" == 1 ]]; then
         prev_version="$(_versioned_current)"
-        if ! _test_index_venv "$VENV_DIR" "$VENV_PYTHON" || ! _runtime_origin_under "$VENV_PYTHON" "$VENV_DIR"; then
+        if ! _test_index_venv "$VENV_DIR" "$VENV_PYTHON" ||
+            ! _runtime_origin_under "$VENV_PYTHON" "$VENV_DIR" ||
+            ! "$VENV_PYTHON" -I -m agent_index --help >/dev/null; then
             _fail "Fresh runtime slot failed its health gate (versions/$SRC_VERSION) -- not activating"
             exit 1
         fi
@@ -1487,10 +1569,14 @@ _ensure_runtime() {
     fi
 
     _publish_index_runtime() {
+        _assert_source_runtime || return 1
         _index_publication_fresh || return 3
-        _versioned_activate || return $?
-        deploy_binstub || return $?
-        _write_manifest
+        _runtime_publication_begin_install || return 1
+        if ! _runtime_publication_activate _versioned_activate || ! deploy_binstub || ! _write_manifest; then
+            _runtime_publication_restore || _fail 'Runtime publication rollback failed'
+            return 1
+        fi
+        _runtime_publication_discard
     }
     local publication_rc=0
     _with_index_publication_lock _publish_index_runtime || publication_rc=$?
@@ -1519,9 +1605,21 @@ _ensure_runtime() {
 }
 
 _write_manifest() {
+    local manifest_origin="${COPILOT_PLUGIN_STAGED_FROM:-}"
+    local manifest_commit=""
+    if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
+        manifest_origin="${manifest_origin:-$PLUGIN_DIR}"
+        local PLUGIN_DIR="$INSTALL_DIR/snapshots/$SRC_VERSION"
+        local SCRIPT_DIR="$PLUGIN_DIR/scripts"
+    fi
+    _assert_source_runtime || return 1
     _write_index_manifest() {
     _index_publication_fresh || return 0
     _git_info() {
+        if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
+            printf '%s unknown false\n' "$manifest_commit"
+            return 0
+        fi
         local path="$1" commit branch dirty
         commit=$(git -C "$path" rev-parse --short HEAD 2>/dev/null || echo "unknown")
         branch=$(git -C "$path" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
@@ -1529,7 +1627,15 @@ _write_manifest() {
         [[ -n "$(git -C "$path" status --porcelain 2>/dev/null)" ]] && dirty="true"
         echo "$commit $branch $dirty"
     }
-    write_deploy_manifest agent-index agent-index "$INSTALL_DIR" "$PLUGIN_DIR" "$VENV_DIR" "" "${COPILOT_PLUGIN_STAGED_FROM:-}"
+    local fields="" py
+    if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
+        py="$(_bootstrap_python)" || return 1
+        manifest_commit="$("$py" -I -c 'import json,sys; print(json.loads(sys.argv[1])["runtime_source"]["source_commit"])' "$SOURCE_RUNTIME_IDENTITY")" || return 1
+        fields="$("$py" -I -B "$SCRIPT_DIR/versioned_runtime_source.py" \
+            --payload "$PLUGIN_DIR" --package-version "$PACKAGE_VERSION" --plugin agent-index \
+            --expected-runtime-version "$SRC_VERSION" --format shell-fields)" || return 1
+    fi
+    write_deploy_manifest agent-index agent-index "$INSTALL_DIR" "$PLUGIN_DIR" "$VENV_DIR" "$fields" "$manifest_origin" "${PACKAGE_VERSION:-$SRC_VERSION}"
     }
     _with_index_publication_lock _write_index_manifest
 }
@@ -1688,13 +1794,9 @@ _install_engine() {
     [[ "$(_payload_hash)" == "$payload_hash" ]] || { _fail 'Engine payload changed during construction'; return 1; }
     _runtime_construction_complete "$payload_hash" || return 1
     fi
-    local resolver_tmp name
-    for name in versioned_runtime_leases.py versioned_runtime_construction.py versioned_runtime_source.py versioned_runtime.py; do
-        resolver_tmp="$(mktemp "$ENGINE_HOME/$name.tmp.XXXXXX")" || return 1
-        if ! cp "$SCRIPT_DIR/$name" "$resolver_tmp" || ! mv -f "$resolver_tmp" "$ENGINE_HOME/$name"; then
-            rm -f -- "$resolver_tmp"
-            return 1
-        fi
+    local name
+    for name in versioned_runtime_leases.py versioned_runtime_construction.py versioned_runtime_source.py versioned_runtime_publication.py versioned_runtime.py; do
+        _runtime_publication_copy "$SCRIPT_DIR/$name" "$ENGINE_HOME/$name" || return 1
     done
     "$py" -I "$vr" --root "$ENGINE_HOME" --link-name '.venv' activate "$engine_version" --no-link || return 1
     _runtime_construction_finish || return 1
@@ -2114,6 +2216,15 @@ _service_cutover() {
     return 1
 }
 
+source "$SCRIPT_DIR/source-runtime.sh"
+PACKAGE_VERSION="$SRC_VERSION"
+SOURCE_RUNTIME_IDENTITY=""
+case "$ACTION" in
+    install|update|provision|stamp)
+        _initialize_source_runtime || exit 1
+        _assert_source_runtime || exit 1
+        ;;
+esac
 if [[ "$ACTION" != uninstall && "$ACTION" != stamp && "$ACTION" != engine && "$ACTION" != engine-update ]] \
     && [[ -e "$ENGINE_HOME/current-version" || -e "$ENGINE_HOME/last-known-good" ]]; then
     bootstrap="$(_bootstrap_python)" || exit 1
@@ -2124,14 +2235,14 @@ fi
 
 case "$ACTION" in
     install)
-        _ensure_runtime
+        _ensure_runtime || exit 1
         _service_cutover || _ensure_running
         _install_logon_autostart
         _skip 'Durable engine runtime unchanged; use engine / engine-update for the heavy stack'
         ;;
     update)                                                         # Thread B: installer-driven graceful zdd cutover (a version update must never kill in-flight work)
         _downgrade_guard
-        _ensure_runtime
+        _ensure_runtime || exit 1
         _service_cutover || _ensure_running
         _install_logon_autostart
         _skip 'Durable engine runtime unchanged; use engine / engine-update for the heavy stack'
@@ -2146,7 +2257,7 @@ case "$ACTION" in
         ;;
     stamp) do_stamp ;;
     provision)
-        _ensure_runtime
+        _ensure_runtime || exit 1
         _service_cutover || _ensure_running
         _skip 'Durable engine runtime unchanged; use engine / engine-update for the heavy stack'
         ;;

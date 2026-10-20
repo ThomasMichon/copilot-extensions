@@ -481,8 +481,14 @@ function Invoke-Stamp {
         }
         Assert-SourceRuntimeIdentity
         $snapDir = $snapshot.Trim()
-        [IO.File]::WriteAllText((Join-Path $InstallDir 'payload-dir'), $snapDir, $utf8NoBom)
-        [IO.File]::WriteAllText((Join-Path $InstallDir 'stamped-version'), $SrcVersion, $utf8NoBom)
+        $nativeError = ''
+        $result = Invoke-Hidden -FilePath $py -ArgList @(
+            '-I', '-B', (Join-Path $PSScriptRoot 'versioned_runtime.py'),
+            '--root', $InstallDir, 'publish-redirects', '--payload-dir', $snapDir,
+            '--version', $SrcVersion, '--expected-source-identity', $SourceRuntimeIdentity
+        ) -ErrorOutput ([ref]$nativeError)
+        $code = $LASTEXITCODE
+        if ($code -ne 0) { throw "Source redirect publication failed (exit ${code}): $result$nativeError" }
         Deploy-SelfProvisioningBinstub
         return
     }
@@ -699,12 +705,17 @@ if ($uv) { $profileArgs += @('--uv', $uv.Source) }
 if ($Profile) { $profileArgs += @('--profile', $Profile) }
 $profileArgs += @('--expected-source-version', $SrcVersion)
 $profileArgs += @('--expected-source-identity', $SourceRuntimeIdentity)
+# Source manifest inputs are captured before activation.
+if ($SourceSelected) {
+    Assert-SourceRuntimeIdentity
+    $sourceManifestGit = Get-GitInfo -Path (Split-Path -Parent (Split-Path -Parent $PluginDir))
+}
 $profileJson = Invoke-Hidden -FilePath $pythonCmd -ArgList $profileArgs
 if ($LASTEXITCODE -ne 0) {
     Write-Fail 'Failed to provision the selected agent-containers runtime profile'
     exit 1
 }
-Assert-SourceRuntimeIdentity
+if (-not $SourceSelected) { Assert-SourceRuntimeIdentity }
 $profileResult = ($profileJson -join "`n") | ConvertFrom-Json
 $VenvDir = [string]$profileResult.venv
 $LinkDir = $VenvDir
@@ -730,7 +741,7 @@ if (-not $SourceSelected -and (Test-Path $pyproj)) {
 $commit = $null; $branch = $null; $dirty = $false
 if ($kind -eq 'local') {
     $repoRoot = Split-Path -Parent (Split-Path -Parent $PluginDir)
-    $git = Get-GitInfo -Path $repoRoot
+    $git = if ($SourceSelected) { $sourceManifestGit } else { Get-GitInfo -Path $repoRoot }
     $commit = $git.commit; $branch = $git.branch; $dirty = $git.dirty
 }
 $manifest = [ordered]@{

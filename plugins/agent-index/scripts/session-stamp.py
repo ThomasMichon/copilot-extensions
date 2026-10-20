@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import argparse
 import json
 import os
 from pathlib import Path
@@ -32,9 +33,11 @@ def repair_known(directory: Directory, name: str, expected: tuple[bytes, ...],
     directory.publish(name, data, executable=executable, repair=True)
 
 
-def publish(path: Path, data: bytes, *, executable: bool = False) -> None:
+def publish(path: Path, data: bytes, *, executable: bool = False,
+            ownership_receipt: Path | None = None, publication_root: Path | None = None) -> None:
     with Directory(path.parent, repair_paths=destinations(path.parent)) as directory:
-        directory.publish(path.name, data, executable=executable, repair=True)
+        directory.publish(path.name, data, executable=executable, repair=True,
+                          ownership_receipt=ownership_receipt, publication_root=publication_root)
 
 
 def prepare_lock(root: Path, *, inherited: bool = False) -> None:
@@ -127,7 +130,12 @@ def _stamp(root: Directory, payload: Path, mode: str) -> None:
 if __name__ == "__main__":
     try:
         if sys.argv[1] == "publish":
-            publish(Path(sys.argv[2]), sys.stdin.buffer.read(), executable=sys.argv[3] == "executable")
+            parser = argparse.ArgumentParser()
+            parser.add_argument("--ownership-receipt", type=Path)
+            parser.add_argument("--publication-root", type=Path)
+            options = parser.parse_args(sys.argv[4:])
+            publish(Path(sys.argv[2]), sys.stdin.buffer.read(), executable=sys.argv[3] == "executable",
+                    ownership_receipt=options.ownership_receipt, publication_root=options.publication_root)
         elif sys.argv[1] in ("prepare-lock", "verify-lock"):
             prepare_lock(Path(sys.argv[2]), inherited=sys.argv[1] == "verify-lock")
         else:

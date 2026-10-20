@@ -726,6 +726,7 @@ def _sh_runtime_scripts(tmp_path: Path) -> Path:
     for name in (
         "versioned_runtime.py", "versioned_runtime_leases.py", "versioned_runtime_construction.py",
         "versioned_runtime_source.py",
+        "versioned_runtime_publication.py",
     ):
         shutil.copyfile(_SCRIPTS / name, scripts / name)
     core = scripts / "versioned_runtime.py"

@@ -19,7 +19,7 @@ CHECKOUT="$HOME/merged-source"
 RUNTIME="$HOME/.$PLUGIN"
 
 case "$PLUGIN" in
-    agent-bridge|agent-codespaces|agent-containers|agent-mcp|agent-ssh|agent-machines|agent-pull-requests|budget-guidance) ;;
+    agent-bridge|agent-codespaces|agent-containers|agent-mcp|agent-ssh|agent-machines|agent-pull-requests|budget-guidance|agent-worktrees|agent-dispatch|agent-index|agent-logger|agent-vault) ;;
     *)
         jam "repo-config" "Selected plugin is not a declared source-install adopter" \
             "Use one of this scenario's explicitly supported runtime plugins."
@@ -31,7 +31,40 @@ case "$PLUGIN" in
     *) INSTALLER="install.sh" ;;
 esac
 INSTALL_ACTION=provision
-if [ "$PLUGIN" = agent-bridge ] || [ "$PLUGIN" = agent-codespaces ]; then INSTALL_ACTION=install; fi
+INSTALL_ARGS=()
+EXTRA_COMMANDS=()
+VERSION_COMMANDS=()
+case "$PLUGIN" in
+    agent-bridge|agent-codespaces) INSTALL_ACTION=install ;;
+    agent-dispatch)
+        INSTALL_ACTION=install
+        INSTALL_ARGS=(--no-service --no-supervisor)
+        EXTRA_COMMANDS=('agent-dispatch-board --help')
+        VERSION_COMMANDS=('agent-dispatch --version')
+        ;;
+    agent-index)
+        INSTALL_ACTION=install
+        INSTALL_ARGS=(--no-service)
+        export AGENT_INDEX_ROLE=client
+        AGENT_INDEX_CONFIG_DATA_B64="$(python3 -c \
+            'import base64; print(base64.b64encode(b"{\"indexer\":{\"machine\":\"fixture-indexer\"}}").decode())')" || {
+            jam "repo-config" "Cannot encode the declared client-only Index fixture"
+            cr_finalize
+        }
+        export AGENT_INDEX_CONFIG_DATA_B64
+        VERSION_COMMANDS=('agent-index version' 'agent-index --version')
+        ;;
+    agent-logger)
+        EXTRA_COMMANDS=('session-sync --help')
+        VERSION_COMMANDS=('agent-logger version')
+        ;;
+    agent-vault)
+        INSTALL_ARGS=(--no-service)
+        VERSION_COMMANDS=('agent-vault --version')
+        ;;
+    agent-worktrees) VERSION_COMMANDS=('agent-worktrees --version') ;;
+esac
+if [ "$PLUGIN" = agent-codespaces ]; then VERSION_COMMANDS=('agent-codespaces version'); fi
 
 phase 0 "fresh machine without installed runtime"
 envdump
@@ -90,7 +123,7 @@ if ! PAYLOAD="$(python3 -c \
     cr_finalize
 fi
 if ! capture "source-install" -- timeout 600 \
-    bash "$PAYLOAD/scripts/$INSTALLER" "$INSTALL_ACTION"; then
+    bash "$PAYLOAD/scripts/$INSTALLER" "$INSTALL_ACTION" "${INSTALL_ARGS[@]}"; then
     jam "runtime-install" "Non-editable source installer failed; see source-install.log" \
         "Fix source assembly in the owning installer; do not hand-install missing libraries."
     cr_finalize
@@ -135,19 +168,23 @@ if ! capture "installed-version" -- bash -lc "$PLUGIN --help"; then
     jam "path-binstub" "Installed command is not usable on a fresh login-shell PATH"
     cr_finalize
 fi
-if [ "$PLUGIN" = agent-codespaces ]; then
-    _verify_codespaces_source_version() {
+for version_command in "${VERSION_COMMANDS[@]}"; do
+    _verify_source_version() {
         local reported command version remainder
-        reported="$(bash -lc 'agent-codespaces version')" || return 1
+        reported="$(bash -lc "$version_command")" || return 1
         printf '%s\n' "$reported"
         read -r command version remainder <<< "$reported"
-        [[ "$command" = agent-codespaces && "$version" = "$GENERATION" ]]
+        if [ "$PLUGIN" = agent-index ]; then
+            [[ "$command" = "$GENERATION" && -z "${version:-}" && -z "${remainder:-}" ]]
+            return
+        fi
+        [[ "$command" = "$PLUGIN" && "$version" = "$GENERATION" ]]
     }
-    if ! capture "installed-source-version" -- _verify_codespaces_source_version; then
-        jam "path-binstub" "Codespaces command does not report the selected source generation"
+    if ! capture "installed-source-version-${version_command##* }" -- _verify_source_version; then
+        jam "path-binstub" "$version_command does not report the selected source generation"
         cr_finalize
     fi
-fi
+done
 pass "Installed command resolves a completed source-qualified generation"
 
 phase 4 "invoke the runtime with the source checkout unavailable"
@@ -198,13 +235,23 @@ if ! capture "independent-command" -- bash -lc "$PLUGIN --help"; then
     jam "path-binstub" "Installed command failed after the source checkout became unavailable"
     cr_finalize
 fi
+for extra_command in "${EXTRA_COMMANDS[@]}"; do
+    if ! capture "independent-${extra_command%% *}" -- bash -lc "$extra_command"; then
+        jam "path-binstub" "$extra_command failed without the source checkout"
+        cr_finalize
+    fi
+done
+if [ "$PLUGIN" = agent-vault ] && [ ! -s "$HOME/.local/bin/vault-askpass" ]; then
+    jam "path-binstub" "Vault source installation did not publish its askpass helper"
+    cr_finalize
+fi
 pass "Non-editable installed code and vendor imports work without the source checkout"
 
 phase 5 "verify immutable reuse and actual runtime use"
 if [ "$PLUGIN" != agent-bridge ]; then
     COMPLETION="$RUNTIME/versions/$GENERATION/.install-complete.json"
     BEFORE="$(sha256sum "$COMPLETION")"
-    if ! capture "source-reuse" -- timeout 600 bash "$PAYLOAD/scripts/$INSTALLER" provision; then
+    if ! capture "source-reuse" -- timeout 600 bash "$PAYLOAD/scripts/$INSTALLER" provision "${INSTALL_ARGS[@]}"; then
         jam "runtime-install" "Identical source reuse failed; see source-reuse.log"
         cr_finalize
     fi

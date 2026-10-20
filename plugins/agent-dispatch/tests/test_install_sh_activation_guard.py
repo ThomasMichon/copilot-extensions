@@ -62,7 +62,9 @@ def _extract_function_block(name: str) -> str:
     text = _INSTALL_SH.read_text(encoding="utf-8")
     start = text.index(f"{name}() {{")
     end = text.index("\n}\n", start) + len("\n}")
-    return text[start:end]
+    source = (_PLUGIN_ROOT / "scripts" / "source-runtime.sh").as_posix()
+    engine = (_PLUGIN_ROOT.parents[1] / "libs" / "installer-engine" / "installer-engine.sh").as_posix()
+    return f". '{engine}'\n. '{source}'\n" + text[start:end]
 
 
 def _run_activate_harness(

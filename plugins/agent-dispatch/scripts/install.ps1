@@ -585,6 +585,7 @@ function Invoke-VersionedActivate {
     if (-not $VersionedRuntime) { return $true }
     $activateMutex = Enter-PluginSnapshotLock -InstallDir $InstallDir -TimeoutSeconds $script:GlobalActivationLockTimeoutSeconds
     try {
+        Assert-SourceRuntime
         $currentActive = Get-VersionedCurrent
         # Dual-authority comparison baseline, mirroring Invoke-Stamp's own
         # guard: stamped-version is a SEPARATE authority a concurrent
@@ -705,26 +706,38 @@ function Remove-ConsoleTrampolines {
 # === install-contract:v4 marker/toss helpers (#935) ===
 function Get-BootstrapPython {
     <# A python to run the stdlib-only versioned_runtime.py helper (#935).
-       Prefers the freshly-built slot venv python ($VenvDir, present at
-       mark-complete before the link is swapped), then the active link's
-       python, then a real base python via the `py` launcher -- avoiding the
-       Windows Store 'python' alias stub. Returns $null if none. #>
-    foreach ($d in @($VenvDir, $LinkDir)) {
-        # Windows venv layout first; `bin/python` is the POSIX layout pwsh sees off Windows.
-        if ($d) { foreach ($rel in 'Scripts\python.exe', 'bin/python') { $p = Join-Path $d $rel; if (Test-Path $p) { return $p } } }
-    }
-    if (Get-Command py -ErrorAction SilentlyContinue) {
-        $exe = (& py -3 -c 'import sys; print(sys.executable)' 2>$null | Out-String).Trim()
+       Prefers a base Python via the launcher or PATH, avoiding Windows
+       Store aliases, then considers an existing slot interpreter.
+       Returns $null if none. #>
+    $launcher = Get-Command py -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($launcher) {
+        $exe = (Invoke-Hidden -FilePath $launcher.Source -ArgList @('-3', '-c', 'import sys; print(sys.executable)') | Out-String).Trim()
         if ($LASTEXITCODE -eq 0 -and $exe -and (Test-Path $exe)) { return $exe }
     }
     foreach ($cand in 'python3', 'python') {
-        $c = Get-Command $cand -ErrorAction SilentlyContinue
+        $c = Get-Command $cand -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
         if ($c -and $c.Source -notmatch 'WindowsApps') { return $c.Source }
+    }
+    foreach ($d in @($VenvDir, $LinkDir)) {
+        if ($d) {
+            foreach ($rel in 'Scripts\python.exe', 'bin/python') {
+                $p = Join-Path $d $rel
+                if (Test-Path -LiteralPath $p -PathType Leaf) { return $p }
+            }
+        }
     }
     return $null
 }
 
 function Get-PayloadHash {
+    if (Get-Variable -Name SourceRuntimeIdentity -Scope Script -ValueOnly -ErrorAction SilentlyContinue) {
+        Assert-SourceRuntime
+        $sha = [Security.Cryptography.SHA256]::Create()
+        try {
+            return (-join ($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($script:SourceRuntimeIdentity)) |
+                ForEach-Object { $_.ToString('x2') }))
+        } finally { $sha.Dispose() }
+    }
     <# Cheap payload fingerprint for the completion marker (#935): sha256 of
        pyproject.toml + the vendored-lib version set. Never throws -> '' on error. #>
     try {
@@ -744,6 +757,7 @@ function Get-PayloadHash {
 }
 
 function Invoke-VersionedSlotClean {
+    Assert-SourceRuntime
     if (-not $VersionedRuntime) { throw 'Construction requires a versioned runtime candidate' }
     $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
     $py = Get-BootstrapPython
@@ -756,11 +770,12 @@ function Invoke-VersionedSlotClean {
     $script:RuntimeConstructionReuse = Start-RuntimeConstruction `
         -Python $py -Helper $vr -Root $InstallDir -Version $SrcVersion `
         -PayloadHash (Get-PayloadHash) -LinkName (Split-Path -Leaf $LinkDir)
-
+    Assert-SourceRuntime
 }
 
 function Invoke-VersionedMarkComplete {
     param([string]$PayloadHash = '')
+    Assert-SourceRuntime
     $actualHash = Get-PayloadHash
     if ($PayloadHash -and $PayloadHash -ne $actualHash) {
         throw 'Payload changed during construction; completion refused'
@@ -829,6 +844,8 @@ function Get-VerTuple {
 
 function Test-VersionLt {
     param([string]$A, [string]$B)
+    $A = $A -replace '[+.]source\..*$', ''
+    $B = $B -replace '[+.]source\..*$', ''
     if ($A -eq $B) { return $false }
     $ta = Get-VerTuple $A; $tb = Get-VerTuple $B
     $n = [Math]::Max($ta.Count, $tb.Count)
@@ -889,6 +906,9 @@ function Resolve-VendoredLib {
     $candidate = Join-Path $LibRoot "libs\$LibName"
     if (Test-Path (Join-Path $candidate 'pyproject.toml')) {
         return (Resolve-Path $candidate).Path
+    }
+    if (Get-Variable -Name SourceRuntimeIdentity -Scope Script -ValueOnly -ErrorAction SilentlyContinue) {
+        throw "Source-qualified payload is missing a required vendored dependency: $LibName"
     }
     # 2. Relative path (git checkout layout) -- always against the REAL
     # $PluginDir (not $LibRoot): a snapshot is a flat copy with no `../../libs`
@@ -1244,6 +1264,9 @@ function New-PluginBuildSnapshot {
         [switch]$BestEffort,
         [switch]$ForStamp
     )
+    if (Test-Path -LiteralPath (Join-Path $PluginDir 'runtime-source.json')) {
+        return (Publish-SourceSnapshot)
+    }
     $localStamp = $ForStamp -and ((Get-SourceKind -PluginPath $PluginDir) -ne 'marketplace')
     if (-not $ForStamp -and (Get-SourceKind -PluginPath $PluginDir) -ne 'marketplace') {
         return $PluginDir
@@ -1439,6 +1462,11 @@ function Deploy-SelfProvisioningBinstub {
        the same dir; forwards argv verbatim via @args) + agent-dispatch.cmd
        fallback for non-PowerShell callers. Both launch the signed venv python via
        -m, never the SAC-blocked console-script trampoline .exe. #>
+    Assert-SourceRuntime
+    if (Get-Variable -Name SourceRuntimeIdentity -Scope Script -ValueOnly -ErrorAction SilentlyContinue) {
+        $snapshot = Publish-SourceSnapshot
+        Publish-SourceRedirects -Snapshot $snapshot
+    }
     if (-not (Test-Path $LocalBin)) {
         New-Item -ItemType Directory -Path $LocalBin -Force | Out-Null
     }
@@ -1496,7 +1524,7 @@ if ($_py) { & $_py -m agent_dispatch @args; exit $LASTEXITCODE }
 if ($env:AGENT_DISPATCH_NO_SELFPROVISION) { [Console]::Error.WriteLine('[agent-dispatch] runtime not provisioned (AGENT_DISPATCH_NO_SELFPROVISION set).'); exit 1 }
 [Console]::Error.WriteLine('[agent-dispatch] runtime not provisioned -- provisioning on first use (acquires uv + builds a venv; ~30-120s). Do not kill; extend your timeout.')
 [Console]::Error.WriteLine('::agent-provisioning:: plugin=agent-dispatch eta_seconds=120 reason=first-use')
-$_pwsh = Get-Command pwsh -ErrorAction SilentlyContinue
+$_pwsh = Get-Command pwsh -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
 $_exe = if ($_pwsh) { $_pwsh.Source } else { 'powershell.exe' }
 # Primary path (agent-dispatch-standalone-container Phase 4): fetch and run the
 # UPSTREAM installer via the STABLE public-install-surface proxy
@@ -1510,7 +1538,36 @@ $_exe = if ($_pwsh) { $_pwsh.Source } else { 'powershell.exe' }
 # AGENT_DISPATCH_PROVISION_OFFLINE=1 skips straight to the fallback (e.g. an
 # air-gapped host).
 $_provisioned = $false
-if (-not $env:AGENT_DISPATCH_PROVISION_OFFLINE) {
+$_sourcePinned = $false
+$_sourceVersion = ''
+$_sourceMarkerPresent = $false
+$_sourcePayload = ''
+try { $_sourcePayload = [IO.File]::ReadAllText((Join-Path $_root 'payload-dir')).Trim() } catch [IO.FileNotFoundException] {}
+foreach ($_marker in @('stamped-version', 'current-version', 'last-known-good')) {
+    try {
+        $_selected = [IO.File]::ReadAllText((Join-Path $_root $_marker)).Trim()
+        if ($_selected -match '[+.]source\.') {
+            $_sourceMarkerPresent = $true
+            $_expectedSnapshot = Join-Path (Join-Path $_root 'snapshots') $_selected
+            if ([string]::Equals($_sourcePayload, $_expectedSnapshot, [StringComparison]::OrdinalIgnoreCase)) {
+                $_sourcePinned = $true; $_sourceVersion = $_selected; break
+            }
+        }
+    } catch [IO.FileNotFoundException] {}
+}
+if ($_sourceMarkerPresent -and -not $_sourcePinned) {
+    [Console]::Error.WriteLine('Selected source snapshot is unavailable; refusing a different provisioning source.')
+    exit 126
+}
+if (-not $_sourcePinned) {
+    $_sourceSlots = @(Get-ChildItem -LiteralPath (Join-Path $_root 'versions') -Directory -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -match '[+.]source\.' })
+    if ($_sourceSlots.Count -gt 0) {
+        [Console]::Error.WriteLine('Source runtime recovery requires an exact source selector; refusing upstream provisioning.')
+        exit 126
+    }
+}
+if (-not $_sourcePinned -and -not $env:AGENT_DISPATCH_PROVISION_OFFLINE) {
     $_bootUrl = 'https://raw.githubusercontent.com/ThomasMichon/copilot-extensions/main/install/dispatch/bootstrap.ps1'
     $_bootFile = Join-Path ([IO.Path]::GetTempPath()) "agent-dispatch-bootstrap-$PID.ps1"
     try {
@@ -1527,6 +1584,13 @@ if (-not $env:AGENT_DISPATCH_PROVISION_OFFLINE) {
 if (-not $_provisioned) {
     $_snap = ''
     try { $_snap = ([IO.File]::ReadAllText((Join-Path $_root 'payload-dir'))).Trim() } catch {}
+    if ($_sourcePinned) {
+        $_expectedSnapshot = Join-Path (Join-Path $_root 'snapshots') $_sourceVersion
+        if (-not [string]::Equals($_snap, $_expectedSnapshot, [StringComparison]::OrdinalIgnoreCase)) {
+            [Console]::Error.WriteLine('Selected source snapshot is unavailable; refusing a different provisioning source.')
+            exit 126
+        }
+    }
     $_inst = if ($_snap) { Join-Path $_snap 'scripts\install.ps1' } else { '' }
     if (-not ($_inst -and (Test-Path -LiteralPath $_inst))) { [Console]::Error.WriteLine('[agent-dispatch] cannot self-provision: no upstream installer reachable (set AGENT_DISPATCH_PROVISION_OFFLINE=1 to skip that attempt) and no local snapshot installer found. Re-enable the plugin, then retry.'); exit 127 }
     & $_exe -NoProfile -ExecutionPolicy Bypass -File $_inst provision 2>&1 | ForEach-Object { [Console]::Error.WriteLine($_) }
@@ -1591,6 +1655,7 @@ function Test-DispatchVenv {
 }
 
 function Install-Runtime {
+    Assert-SourceRuntime
     if (-not (Test-Path $PkgSrcDir)) {
         Write-Fail "Package source not found at $PkgSrcDir"
         exit 1
@@ -1621,6 +1686,7 @@ function Install-Runtime {
     $buildMutex = Enter-PluginSnapshotLock -InstallDir $InstallDir -Version $SrcVersion -TimeoutSeconds 180
     $originalDependencyPolicy = $script:InstallerDependencyPolicy
     try {
+    Assert-SourceRuntime
     $BuildSrcDir = New-PluginBuildSnapshot -PluginDir $PluginDir -InstallDir $InstallDir -Version $SrcVersion -BestEffort
     if ($BuildSrcDir -ne $PluginDir) {
         # Attribute the copied sources through their own standalone helper,
@@ -1634,7 +1700,7 @@ function Install-Runtime {
     # Find a Python interpreter (skip Windows Store aliases that aren't real)
     $pythonCmd = $null
     foreach ($candidate in @('python', 'python3', 'py')) {
-        $found = Get-Command $candidate -ErrorAction SilentlyContinue
+        $found = Get-Command $candidate -ErrorAction SilentlyContinue | Select-Object -First 1
         if ($found) {
             $probe = Invoke-NativeCapture { & $found.Source --version }
             if ($probe.ExitCode -eq 0 -and $probe.Output -match 'Python') { $pythonCmd = $found.Source }
@@ -1892,7 +1958,7 @@ function Install-Runtime {
     # reports its version without importlib.metadata. Best-effort; mirrors
     # agent-worktrees' stamp_build_info. --
     try {
-        $pkgDir = & $VenvPython -c "import agent_dispatch, os; print(os.path.dirname(agent_dispatch.__file__))" 2>$null
+        $pkgDir = & $VenvPython -I -c "import agent_dispatch, os; print(os.path.dirname(agent_dispatch.__file__))" 2>$null
         if ($pkgDir -and (Test-Path $pkgDir)) {
             $repoRoot = (Resolve-Path (Join-Path $PluginDir '..\..')).Path
             & $VenvPython (Join-Path $PSScriptRoot 'stamp_build_info.py') `
@@ -1934,11 +2000,12 @@ function Install-Runtime {
     # coordinator's own service, which then crash-loops. Import both
     # explicitly here so each class of defect is caught before a slot is
     # ever activated.
+    if ($script:SourceRuntimeIdentity) { Assert-SourceSnapshot -Snapshot $BuildSrcDir }
     if ($VersionedRuntime) {
         $prevVersion = Get-VersionedCurrent
         $prevEAP = $ErrorActionPreference
         $ErrorActionPreference = 'Continue'
-        & $VenvPython -c 'import agent_dispatch, agent_dispatch.embody, agent_dispatch.__main__' 2>$null
+        & $VenvPython -I -c 'import agent_dispatch, agent_dispatch.embody, agent_dispatch.__main__' 2>$null
         $slotOk = ($LASTEXITCODE -eq 0)
         $ErrorActionPreference = $prevEAP
         if (-not $slotOk) {
@@ -2040,7 +2107,7 @@ function Install-Runtime {
     $ErrorActionPreference = 'Continue'
     $importOk = $false
     for ($i = 0; $i -lt 3; $i++) {
-        & $LinkPython -c 'import agent_dispatch, agent_dispatch.embody, agent_dispatch.__main__' 2>$null
+        & $LinkPython -I -c 'import agent_dispatch, agent_dispatch.embody, agent_dispatch.__main__' 2>$null
         if ($LASTEXITCODE -eq 0) { $importOk = $true; break }
         Start-Sleep -Seconds 1
     }
@@ -2069,11 +2136,23 @@ function Install-Runtime {
 
 function Write-Manifest {
     $sourcePath = if ($env:COPILOT_PLUGIN_STAGED_FROM) { $env:COPILOT_PLUGIN_STAGED_FROM } else { $PluginDir }
+    $gitInfo = { param($Path) Get-GitInfo -Path (Split-Path -Parent $Path) }
+    $extra = @{}
+    if (Get-Variable -Name SourceRuntimeIdentity -Scope Script -ValueOnly -ErrorAction SilentlyContinue) {
+        $PluginDir = Join-Path (Join-Path $InstallDir 'snapshots') $SrcVersion
+        $ScriptDir = Join-Path $PluginDir 'scripts'
+        Assert-SourceRuntime
+        $identity = $script:SourceRuntimeIdentity | ConvertFrom-Json
+        $extra = @{ runtime_version = $identity.runtime_version; runtime_source = $identity.runtime_source }
+        $gitInfo = { param($Path) @{commit=$identity.runtime_source.source_commit; branch=$null; dirty=$false} }
+    } else { Assert-SourceRuntime }
+    $package = Get-Variable -Name PackageVersion -ValueOnly -ErrorAction SilentlyContinue
+    if (-not $package) { $package = $SrcVersion }
     Write-DeployManifest -Service 'agent-dispatch' -Plugin 'agent-dispatch' `
         -InstallPath $InstallDir -PluginPath $PluginDir -VenvPath $LinkDir `
         -GetSourceKind { param($Path) Get-SourceKind -PluginPath $Path } `
-        -GetGitInfo { param($Path) Get-GitInfo -Path (Split-Path -Parent $Path) } `
-        -SourcePathOverride $sourcePath -VersionOverride $SrcVersion
+        -GetGitInfo $gitInfo `
+        -SourcePathOverride $sourcePath -VersionOverride $package -AdditionalFields $extra
 }
 
 function Register-PickerPivot {
@@ -3742,6 +3821,7 @@ function Invoke-Stamp {
     # markers naming different versions.
     $stampMutex = Enter-PluginSnapshotLock -InstallDir $InstallDir -TimeoutSeconds $script:GlobalActivationLockTimeoutSeconds
     try {
+        Assert-SourceRuntime
         # Version-ordering guard, UNDER this same lock: the mutex only
         # serializes overlapping writes, it does not guarantee ARRIVAL
         # order. A delayed/preempted older-version invocation could still
@@ -3801,8 +3881,12 @@ function Invoke-Stamp {
         # Publish-FileAtomically guards the binstub's self-provisioning read
         # (which never takes this mutex) against observing a torn,
         # partially-written marker file.
-        Publish-FileAtomically -Path (Join-Path $InstallDir 'payload-dir') -Content $snapDir -Encoding $utf8NoBom
-        Publish-FileAtomically -Path $stampedVersionMarker -Content $SrcVersion -Encoding $utf8NoBom
+        if ($script:SourceRuntimeIdentity) {
+            Publish-SourceRedirects -Snapshot $snapDir
+        } else {
+            Publish-FileAtomically -Path (Join-Path $InstallDir 'payload-dir') -Content $snapDir -Encoding $utf8NoBom
+            Publish-FileAtomically -Path $stampedVersionMarker -Content $SrcVersion -Encoding $utf8NoBom
+        }
         Write-Ok "Snapshot: $snapDir"
         # Deployed INSIDE the lock (mirrors agent-machines' own stamp,
         # plugins/agent-machines/scripts/init.ps1:2061-2065): otherwise an
@@ -4175,6 +4259,15 @@ function Invoke-Uninstall {
     if ($DryRun) { Write-Host 'agent-dispatch uninstall dry run complete -- nothing was changed' -ForegroundColor Yellow }
 }
 
+$ScriptDir = $PSScriptRoot
+. (Join-Path $PSScriptRoot 'versioned_runtime_native.ps1')
+. (Join-Path $PSScriptRoot 'source-runtime.ps1')
+$PackageVersion = $SrcVersion
+$script:SourceRuntimeIdentity = $null
+if ($Action -in @('install', 'update', 'provision', 'stamp')) {
+    Initialize-SourceRuntime
+    Assert-SourceRuntime
+}
 try {
 switch ($Action) {
     'install'   { Invoke-Install }

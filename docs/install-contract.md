@@ -11,6 +11,13 @@ it needs. This document is the reference, and
 `tools/check-install-contract.py` enforces conformance (run it
 manually or wire it as a git `pre-push` hook).
 
+Standalone wheel/sdist resources name the same primitive `_versioned_runtime.py`
+instead of the plugin script's `versioned_runtime.py`. The source companion loads
+exactly one ordinary, co-located primitive in either layout, never an ambient import.
+Missing resources, both names present, linked files and non-file aliases are
+refused rather than selecting a fallback. Fingerprinting, source snapshots and
+publication/recovery commands retain the same behavior in both layouts.
+
 Agent Containers qualifies immutable runtime slots by its durable dependency
 profile (`<package-version>+base` or `<package-version>+provider-exec`).
 Its installation-owned `runtime-profile.json` preserves explicit desired state
@@ -2409,12 +2416,14 @@ takes over. Switching is an explicit act: invoke the installer from the other
 location. `status` always reports the current `source.kind`.
 
 An explicitly prepared merged-source payload may additionally carry
-`runtime-source.json`. Agent Bridge's native installers consume this optional
+`runtime-source.json`. Native Python-runtime installers consume this optional
 identity to select a distinct immutable generation while retaining the
 original package version in `source.version`; `runtime_version` and
 `runtime_source` identify its deployed source assembly. Source-kind inference
-and installation ownership are unchanged. Other installers retain their
-ordinary package-version behavior until they adopt this boundary.
+and installation ownership are unchanged; payloads without a source receipt
+retain their ordinary package-version behavior. Source readers pin the complete
+receipt across construction and publication, and deferred source stamps use the
+canonical leased snapshot publisher rather than copying a checkout reference.
 See the [source preparation tool](../tools/prepare_runtime_source.md) for the
 single owner of preparation syntax and metadata semantics. Preparing this
 payload does not change Copilot's plugin-content source or disable hooks.
@@ -2505,6 +2514,98 @@ may share freely. Secondary entry points (e.g. `init.ps1`/`init.sh`) should
 delegate to the canonical `install.*` rather than duplicate the deploy logic.
 
 ## Shared installer-engine helpers (`libs/installer-engine/`)
+
+### Binstub publication failures
+
+The simple binstub writers reject unavailable supplied resolver sources and
+propagate directory, copy, write, permission and rename failures. Bash writers
+reject directory destinations, including links to directories, before publishing
+any member of the requested resolver/command family; a successful move into a
+directory is not publication.
+Bash callers must not depend on `errexit` surviving a conditional invocation;
+PowerShell publication operations terminate on error even when the caller normally
+continues. Each resolver or generated command is staged beside its destination
+and published only after its complete write succeeds. Windows replacement uses
+`File.Replace` for an existing file and a non-overwriting move for first
+publication, not `Move-Item -Force`. Temporary cleanup is attempted on failure;
+sharing or permission failures remain errors rather than a successful install.
+Success is reported only after all required files are published.
+This contract includes independently deployed Python companion and resolver
+bundles, not only generated command files.
+This is per-file atomicity, not a multi-file transaction or selector rollback;
+the lifecycle caller still owns candidate health and activation ordering.
+
+Dispatch and Index's POSIX callers use the shared ordinary-file publication
+backup/restore helpers while holding their existing installation publication
+lock. Required late-write failures restore prior selectors, manifests and
+command files only while each target still belongs to that attempt; completed
+candidate generations remain reusable. An unchanged selector or matching file
+bytes alone is not ownership evidence. An unexpected selector, foreign target,
+unsafe destination or restoration I/O failure is reported, with unrecovered
+backups retained. Shell writes stage the exact destination basename in a private
+sibling directory, move it to the destination parent and verify the resulting
+file identity. A directory-target race must fail rather than move the staged
+file inside that directory and report success. Cleanup removes only identified
+owned stages and empty private directories; unknown artifacts retain recovery
+evidence. This mechanism does not roll back service state or broaden the
+caller's supervision authority.
+
+### Source-stamp redirect transactions
+
+Source-qualified installers use the canonical `versioned_runtime.py` command
+`--root <installation> publish-redirects --payload-dir <snapshot> --version
+<generation> --expected-source-identity <selected-json>`. When a caller also
+publishes `payload-origin`, it supplies that value in the same transaction.
+Source-only fast stamping may omit `--version` to preserve its existing
+no-version-update contract.
+
+The helper stages every requested UTF-8/LF marker and recovery copy before
+replacing a live file. Its kernel publication lease has a different key from
+selector/outer installer locks. It revalidates the complete selected source
+receipt inside that lease, before each replacement and before commit, rather
+than trusting only the generation string. Replacement failures restore the
+previous requested marker set, including prior absence. Observed concurrent
+changes, unsafe temporary/recovery files or restoration failures are explicit
+errors with recovery files retained; they never authorize overwriting a peer.
+Temporary cleanup failures are reported separately from an already-committed
+publication. Default stdout is empty; `--json` names the exact published markers.
+
+Outer installer recovery can request `--ownership-receipt <file>` from redirect
+publication, activation and Index session-stamp publication. The canonical
+`versioned_runtime_publication.py` companion records a versioned, root- and
+target-bound JSONL receipt using the actual created stage descriptor before
+rename. It persists and fsyncs physical identity, mode, size, modification time
+and content hash before mutation, including recovery-stage writes. Reading the
+destination after a producer returns never confers ownership: a peer's new file
+with identical bytes remains foreign.
+
+Native Python validates opaque producer receipts and performs their recovery;
+shell `stat` output is not interchangeable with native Python file identity.
+Required missing, corrupt or insufficient proof refuses the whole restoration
+set and retains recovery evidence. Failed producers can still supply complete
+proof of their own partial writes or recovery. Redirect and Index publications
+share the redirect lease; selector activation retains its selector lease.
+Default calls without a requested receipt participate in the same relevant
+serialization. Recovery acquires those publication leases in a consistent order
+without reacquiring the caller's installation lock. The optional receipt does
+not change ordinary stdout or JSON output.
+
+This is serialized publication with recovery on caught failures, not simultaneous
+multi-file visibility, process-crash journaling, or rollback of service state.
+Callers retain source admission, their outer lifecycle locks and subsequent
+activation duties. Machines' source fast-stamp keep/replace decision shares the
+full stamp lock; it cannot decide against an unlocked stale marker view.
+Python-free legacy stamps remain unchanged; their native failure-preserving
+publication counterpart is tracked in #7250 rather than gaining a new Python
+prerequisite.
+
+Source deployment manifests retain the full identity selected and validated
+before commitment. Prepare mutable-input metadata and content hashes before
+activation, or obtain them from the already-pinned receipt and validated
+immutable payload afterward. Re-reading the mutable origin after selectors or
+redirects commit must not turn a valid installation into a reported source
+validation failure. Runtime-source provenance does not replace the separate
+marketplace payload's command-binding ownership.
 
 ### Captured native human output
 
@@ -2824,6 +2925,17 @@ ABI-incompatible bootstrap interpreter. The parent keeps candidate/rollback
 custody while awaiting that receiver. Receiver diagnostics stream to the caller
 even while settlement is pending. A custom root that is not the resolved
 Worktrees runtime root never cuts over the host's monitor.
+
+Required native helper callbacks render a complete owner-declared copy inventory
+under the existing borrowed installation authority; their prepared
+acknowledgement does not claim publication success. The retained Python owner
+validates that inventory and publishes it after candidate health, before
+selection, using the canonical
+[created-file publication custody API](../libs/versioned-runtime/README.md#created-file-publication-custody-python-api).
+Helper custody follows actual runtime settlement through monitor and manifest
+publication: keep candidate helpers after a real commit, or recover uncontested
+outputs when the previous runtime wins. Scoped/global behavior and normalized
+PowerShell no-ops remain distinct from deployment-policy opt-in.
 
 The caller-owned monitor seam can return actual passive **and restart**
 process handles without releasing its cutover guard. Supplying both guard and

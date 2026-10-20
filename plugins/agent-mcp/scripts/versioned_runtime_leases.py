@@ -14,6 +14,104 @@ from pathlib import Path
 _construction_owners = threading.local()
 
 
+def windows_owned_file(fd: int) -> bool:
+    """Admit the current user/enabled owner groups and a non-public write DACL."""
+    import ctypes
+    from ctypes import wintypes
+    import msvcrt
+
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    security = ctypes.WinDLL("advapi32", use_last_error=True)
+    kernel.GetCurrentProcess.restype = wintypes.HANDLE
+    kernel.CloseHandle.argtypes = (wintypes.HANDLE,)
+    kernel.LocalFree.argtypes = (wintypes.LPVOID,)
+    kernel.LocalFree.restype = wintypes.LPVOID
+    security.OpenProcessToken.argtypes = (wintypes.HANDLE, wintypes.DWORD, ctypes.POINTER(wintypes.HANDLE))
+    security.OpenProcessToken.restype = wintypes.BOOL
+    security.GetTokenInformation.argtypes = (wintypes.HANDLE, ctypes.c_int, wintypes.LPVOID,
+                                             wintypes.DWORD, ctypes.POINTER(wintypes.DWORD))
+    security.GetTokenInformation.restype = wintypes.BOOL
+    security.GetSecurityInfo.argtypes = (wintypes.HANDLE, ctypes.c_int, wintypes.DWORD,
+        ctypes.POINTER(wintypes.LPVOID), wintypes.LPVOID, ctypes.POINTER(wintypes.LPVOID),
+        wintypes.LPVOID, ctypes.POINTER(wintypes.LPVOID))
+    security.GetSecurityInfo.restype = wintypes.DWORD
+    security.ConvertSidToStringSidW.argtypes = (wintypes.LPVOID, ctypes.POINTER(wintypes.LPWSTR))
+    security.ConvertSidToStringSidW.restype = wintypes.BOOL
+    security.GetAclInformation.argtypes = (wintypes.LPVOID, wintypes.LPVOID, wintypes.DWORD, ctypes.c_int)
+    security.GetAclInformation.restype = wintypes.BOOL
+    security.GetAce.argtypes = (wintypes.LPVOID, wintypes.DWORD, ctypes.POINTER(wintypes.LPVOID))
+    security.GetAce.restype = wintypes.BOOL
+
+    class SidAttributes(ctypes.Structure):
+        _fields_ = [("sid", wintypes.LPVOID), ("attributes", wintypes.DWORD)]
+
+    class Groups(ctypes.Structure):
+        _fields_ = [("count", wintypes.DWORD), ("entries", SidAttributes * 1)]
+
+    class AclSize(ctypes.Structure):
+        _fields_ = [("count", wintypes.DWORD), ("used", wintypes.DWORD), ("free", wintypes.DWORD)]
+
+    class Ace(ctypes.Structure):
+        _fields_ = [("kind", ctypes.c_ubyte), ("flags", ctypes.c_ubyte),
+                    ("size", wintypes.WORD), ("mask", wintypes.DWORD), ("sid", wintypes.DWORD)]
+
+    def sid_string(sid: int) -> str:
+        value = wintypes.LPWSTR()
+        if not security.ConvertSidToStringSidW(sid, ctypes.byref(value)):
+            raise ctypes.WinError(ctypes.get_last_error())
+        try:
+            return value.value
+        finally:
+            kernel.LocalFree(ctypes.cast(value, wintypes.LPVOID))
+
+    token, descriptor = wintypes.HANDLE(), wintypes.LPVOID()
+    if not security.OpenProcessToken(kernel.GetCurrentProcess(), 8, ctypes.byref(token)):
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        def token_info(kind: int) -> ctypes.Array:
+            size = wintypes.DWORD()
+            security.GetTokenInformation(token, kind, None, 0, ctypes.byref(size))
+            if ctypes.get_last_error() != 122:
+                raise ctypes.WinError(ctypes.get_last_error())
+            value = ctypes.create_string_buffer(size.value)
+            if not security.GetTokenInformation(token, kind, value, size, ctypes.byref(size)):
+                raise ctypes.WinError(ctypes.get_last_error())
+            return value
+
+        user, groups = token_info(1), token_info(2)
+        owners = {sid_string(ctypes.cast(user, ctypes.POINTER(SidAttributes)).contents.sid)}
+        count = ctypes.cast(groups, ctypes.POINTER(Groups)).contents.count
+        entries = (SidAttributes * count).from_buffer(groups, Groups.entries.offset)
+        owners.update(sid_string(entry.sid) for entry in entries
+                      if entry.attributes & 0xC == 0xC and not entry.attributes & 0x10)
+        owner, dacl = wintypes.LPVOID(), wintypes.LPVOID()
+        code = security.GetSecurityInfo(msvcrt.get_osfhandle(fd), 1, 5,
+                                       ctypes.byref(owner), None, ctypes.byref(dacl), None,
+                                       ctypes.byref(descriptor))
+        if code:
+            raise ctypes.WinError(code)
+        if not owner or sid_string(owner) not in owners or not dacl:
+            return False
+        size = AclSize()
+        if not security.GetAclInformation(dacl, ctypes.byref(size), ctypes.sizeof(size), 2):
+            raise ctypes.WinError(ctypes.get_last_error())
+        trusted = owners | {"S-1-5-18", "S-1-5-32-544", "S-1-3-4"}
+        for index in range(size.count):
+            pointer = wintypes.LPVOID()
+            if not security.GetAce(dacl, index, ctypes.byref(pointer)):
+                raise ctypes.WinError(ctypes.get_last_error())
+            ace = ctypes.cast(pointer, ctypes.POINTER(Ace)).contents
+            if ace.flags & 8 or ace.kind == 1:
+                continue
+            if ace.kind != 0 or (ace.mask & 0x500D0156 and sid_string(pointer.value + Ace.sid.offset) not in trusted):
+                return False
+        return True
+    finally:
+        if descriptor:
+            kernel.LocalFree(descriptor)
+        kernel.CloseHandle(token)
+
+
 class ConstructionTimeout(TimeoutError):
     """The construction owner did not release its kernel lease in budget."""
 

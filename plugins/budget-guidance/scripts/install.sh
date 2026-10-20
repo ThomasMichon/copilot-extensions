@@ -731,8 +731,15 @@ if [[ "$ACTION" == "stamp" ]]; then
     fi
     fi
     _source_runtime_unchanged || exit 1
-    printf '%s\n' "$snap_dir" > "$INSTALL_DIR/payload-dir"
-    printf '%s\n' "$SRC_VERSION" > "$INSTALL_DIR/stamped-version"
+    if [[ -n "$SOURCE_RUNTIME_IDENTITY" ]]; then
+        source_python="$(_bootstrap_python)" || exit 1
+        "$source_python" -I -B "$SCRIPT_DIR/versioned_runtime.py" --root "$INSTALL_DIR" \
+            publish-redirects --payload-dir "$snap_dir" --version "$SRC_VERSION" \
+            --expected-source-identity "$SOURCE_RUNTIME_IDENTITY" || exit 1
+    else
+        printf '%s\n' "$snap_dir" > "$INSTALL_DIR/payload-dir"
+        printf '%s\n' "$SRC_VERSION" > "$INSTALL_DIR/stamped-version"
+    fi
     _ok "Snapshot: $snap_dir"
     deploy_binstub
     _ok "Stamped: binstub on PATH; runtime provisions on first use."
@@ -838,20 +845,33 @@ _ok 'Package installed: budget-guidance'
 fi
 
 # Versioned layout (#581): health-gate the slot + swap the `.venv` symlink.
+# Source manifest inputs are captured before activation.
+if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
+    _source_runtime_unchanged || exit 1
+    SOURCE_MANIFEST_GIT="$(_git_info "$(cd "$PLUGIN_DIR/../.." && pwd)")" || exit 1
+fi
 _versioned_activate || exit 1
 
 deploy_binstub
 
 KIND="$(_source_kind "$PLUGIN_DIR")"
-VER="$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' "$PLUGIN_DIR/pyproject.toml" 2>/dev/null || echo 0.0.0)"
+if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
+    VER="$PACKAGE_VERSION"
+else
+    VER="$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' "$PLUGIN_DIR/pyproject.toml" 2>/dev/null || echo 0.0.0)"
+fi
 COMMIT="null"; BRANCH="null"; DIRTY="false"
 if [[ "$KIND" == "local" ]]; then
-    REPO_ROOT="$(cd "$PLUGIN_DIR/../.." && pwd)"
-    read -r _c _b _d <<< "$(_git_info "$REPO_ROOT")"
+    if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
+        read -r _c _b _d <<< "$SOURCE_MANIFEST_GIT"
+    else
+        REPO_ROOT="$(cd "$PLUGIN_DIR/../.." && pwd)"
+        read -r _c _b _d <<< "$(_git_info "$REPO_ROOT")"
+    fi
     COMMIT="\"$_c\""; BRANCH="\"$_b\""; DIRTY="$_d"
 fi
 TMP="$MANIFEST_PATH.tmp"
-_source_runtime_unchanged || exit 1
+if [[ -z "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then _source_runtime_unchanged || exit 1; fi
 SOURCE_FIELDS=""
 if [[ -n "$SOURCE_RUNTIME_IDENTITY" ]]; then
     SOURCE_FIELDS=",${SOURCE_RUNTIME_IDENTITY:1:${#SOURCE_RUNTIME_IDENTITY}-2}"

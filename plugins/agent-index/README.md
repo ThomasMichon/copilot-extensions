@@ -57,8 +57,10 @@ explicit lifecycle and is never rebuilt by a routine service update.
 Both canonical installers use the shared installer engine for uv acquisition,
 venv/package retries and deploy manifests. Native installs keep the versioned
 primary CLI base-only for both roles. A host installs `[store,server]` once,
-in its required slot-owned server sibling; server provisioning and dependency
-health must pass before candidate activation. Host search, indexing, workers
+in its required slot-owned server sibling. Both the primary CLI and any required
+server sibling must pass isolated CLI `--help` probes before fresh or retained
+activation, in addition to host dependency/server-import checks.
+Host search, indexing, workers
 and service starts execute in that complete runtime, preserving original
 arguments and exit codes. A missing host runtime is reported explicitly rather
 than falling back to a client environment.

@@ -38,6 +38,7 @@ def deploy_installed_layout(own: Path, shell: str) -> None:
         command = [
             shutil.which("bash"), "-c",
             "set -eu\n"
+            f". {shlex.quote(str(PLUGIN.parents[1] / 'libs/installer-engine/installer-engine.sh'))}\n"
             f"SCRIPT_DIR={shlex.quote(str(scripts))}\n"
             f"INSTALL_DIR={shlex.quote(str(own))}\n"
             "PUBLISH_GLOBAL_BINSTUBS=false\n_ok() { :; }\n"
@@ -107,6 +108,7 @@ def test_installer_deploys_complete_canonical_resolver(tmp_path, shell):
         "versioned_runtime.py", "versioned_runtime_leases.py",
         "versioned_runtime_construction.py",
         "versioned_runtime_source.py",
+        "versioned_runtime_publication.py",
     ):
         assert (own / "scripts" / name).read_bytes() == (PLUGIN / "scripts" / name).read_bytes()
     result = subprocess.run(

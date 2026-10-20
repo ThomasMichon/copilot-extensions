@@ -46,6 +46,7 @@ def _copy_helper(tmp_path: Path, shell: str = "bash", *, missing_core: bool = Fa
         "versioned_runtime_leases.py",
         "versioned_runtime_construction.py",
         "versioned_runtime_source.py",
+        "versioned_runtime_publication.py",
     ):
         if missing_core and name == "versioned_runtime.py":
             continue
@@ -134,6 +135,20 @@ function Get-PayloadHash {{ return $script:Fingerprint }}
 
 
 def _run(shell: str, executable: str, script: str, tmp_path: Path):
+    if shell == "bash":
+        script = (
+            f"PLUGIN_DIR={shlex.quote(_bash_path(tmp_path / 'absent-payload'))}\n"
+            "SOURCE_RUNTIME_IDENTITY=''\n"
+            f". {shlex.quote(_bash_path(SCRIPTS / 'source-runtime.sh'))}\n"
+            + script
+        )
+    else:
+        script = (
+            f"$PluginDir = {_ps_quote(tmp_path / 'absent-payload')}\n"
+            "$SourceRuntimeIdentity = $null\n"
+            f". {_ps_quote(SCRIPTS / 'source-runtime.ps1')}\n"
+            + script
+        )
     path = tmp_path / ("probe.sh" if shell == "bash" else "probe.ps1")
     path.write_text(script, encoding="utf-8")
     args = (

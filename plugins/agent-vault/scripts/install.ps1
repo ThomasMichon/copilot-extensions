@@ -373,6 +373,9 @@ function Invoke-VersionedActivate {
        task re-registers + restarts on the new slot). A later version-bump swaps
        only the link (the daemon runs from its own immutable slot), so no stop is
        needed and the in-memory unlock survives. #>
+    Assert-SourceRuntime
+    if ($script:SourceRuntimeIdentity) { Publish-SourceSnapshot | Out-Null }
+    Assert-SourceRuntime
     if (-not $VersionedRuntime) { return $true }
     if ((Test-Path $LinkDir) -and -not (Test-VenvIsLink $LinkDir)) {
         Write-Step 'Releasing legacy .venv for versioned migration (stopping daemon)...'
@@ -508,21 +511,15 @@ function Ensure-UvIndex {
 # same place.
 # === install-contract:v4 marker/toss helpers (#935) ===
 function Get-BootstrapPython {
-    <# A python to run the stdlib-only versioned_runtime.py helper (#935).
-       Prefers the freshly-built slot venv python ($VenvDir, present at
-       mark-complete before the link is swapped), then the active link's
-       python, then a real base python via the `py` launcher -- avoiding the
-       Windows Store 'python' alias stub. Returns $null if none. #>
-    foreach ($d in @($VenvDir, $LinkDir)) {
-        # Windows venv layout first; `bin/python` is the POSIX layout pwsh sees off Windows.
-        if ($d) { foreach ($rel in 'Scripts\python.exe', 'bin/python') { $p = Join-Path $d $rel; if (Test-Path $p) { return $p } } }
-    }
-    if (Get-Command py -ErrorAction SilentlyContinue) {
-        $exe = (& py -3 -c 'import sys; print(sys.executable)' 2>$null | Out-String).Trim()
+    <# Construction supervision must run outside the candidate being built.
+       Probe a native launcher, then real PATH interpreters (not Store aliases). #>
+    $launcher = Get-Command py -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($launcher -and $launcher.Source -notmatch '\.(cmd|bat)$') {
+        $exe = (Invoke-Hidden -FilePath $launcher.Source -ArgList @('-3', '-c', 'import sys; print(sys.executable)') | Out-String).Trim()
         if ($LASTEXITCODE -eq 0 -and $exe -and (Test-Path $exe)) { return $exe }
     }
     foreach ($cand in 'python3', 'python') {
-        $c = Get-Command $cand -ErrorAction SilentlyContinue
+        $c = Get-Command $cand -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
         if ($c -and $c.Source -notmatch 'WindowsApps') { return $c.Source }
     }
     return $null
@@ -548,23 +545,25 @@ function Get-PayloadHash {
 }
 
 function Invoke-VersionedSlotClean {
+    Assert-SourceRuntime
     if (-not $VersionedRuntime) { throw 'Construction requires a versioned runtime candidate' }
     $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
     $py = Get-BootstrapPython
     if (-not $py) { throw 'Construction requires a bootstrap Python interpreter' }
     if (-not (Get-Command Start-RuntimeConstruction -ErrorAction SilentlyContinue)) {
-        $helpers = (& $py -I $vr --root $InstallDir construction-shell --shell ps1 | Out-String)
+        $helpers = (Invoke-Hidden -FilePath $py -ArgList @('-I', $vr, '--root', $InstallDir, 'construction-shell', '--shell', 'ps1') | Out-String)
         if ($LASTEXITCODE -ne 0) { throw 'Canonical construction adapter is unavailable' }
         Invoke-Expression $helpers
     }
     $script:RuntimeConstructionReuse = Start-RuntimeConstruction `
         -Python $py -Helper $vr -Root $InstallDir -Version $SrcVersion `
         -PayloadHash (Get-PayloadHash) -LinkName (Split-Path -Leaf $LinkDir)
-
+    Assert-SourceRuntime
 }
 
 function Invoke-VersionedMarkComplete {
     param([string]$PayloadHash = '')
+    Assert-SourceRuntime
     $actualHash = Get-PayloadHash
     if ($PayloadHash -and $PayloadHash -ne $actualHash) {
         throw 'Payload changed during construction; completion refused'
@@ -685,7 +684,15 @@ function Test-KeePassXCCli {
 }
 
 function Write-Binstubs {
-    Write-SimpleBinstub `
+    foreach ($name in @('resolve-runtime.ps1', 'resolve-runtime.sh')) {
+        if (-not (Test-Path -LiteralPath (Join-Path $PSScriptRoot $name) -PathType Leaf)) {
+            throw "Required Vault runtime helper is unavailable: $name"
+        }
+    }
+    $previousErrorAction = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Stop'
+        Write-SimpleBinstub `
         -CommandName 'agent-vault' `
         -ModuleName 'agent_vault' `
         -RuntimeRoot $InstallDir `
@@ -695,6 +702,12 @@ function Write-Binstubs {
         -NoSelfProvisionEnv 'AGENT_VAULT_NO_SELFPROVISION' `
         -ResolverPs1Source (Join-Path $PSScriptRoot 'resolve-runtime.ps1') `
         -ResolverShSource (Join-Path $PSScriptRoot 'resolve-runtime.sh')
+    } catch {
+        [Console]::Error.WriteLine("Vault binstub publication failed: $($_.Exception.Message)")
+        throw
+    } finally {
+        $ErrorActionPreference = $previousErrorAction
+    }
 }
 
 function Resolve-SnapshotInstallerEngineSource {
@@ -749,7 +762,32 @@ function Materialize-SnapshotInstallerEngine {
     }
 }
 
+function Test-RuntimeHealthy {
+    $nativeError = ''
+    [void](Invoke-Hidden -FilePath $VenvPython -ArgList @('-I', '-m', 'agent_vault', '--help') -ErrorOutput ([ref]$nativeError))
+    if ($LASTEXITCODE -ne 0) {
+        Write-Fail "Isolated agent_vault CLI health probe failed: $nativeError"
+        return $false
+    }
+    return $true
+}
+
+function Write-VaultDeployManifest {
+    $manifestSource = ''
+    $gitInfo = ${function:Get-GitInfo}
+    if ($script:SourceRuntimeIdentity) {
+        if (-not $script:SourceRuntimeSnapshot) { throw 'Source manifest requires a committed immutable snapshot' }
+        $PluginDir = $script:SourceRuntimeSnapshot
+        $ScriptDir = Join-Path $PluginDir 'scripts'
+        $manifestSource = $script:SourceManifestOrigin
+        $gitInfo = { param($Path) $script:SourceManifestGitInfo }
+    }
+    Assert-SourceRuntime
+    Write-DeployManifest -Service 'agent-vault' -Plugin 'agent-vault' -InstallPath $InstallDir -PluginPath $PluginDir -VenvPath $LinkDir -GetSourceKind ${function:Get-SourceKind} -GetGitInfo $gitInfo -SourcePathOverride $manifestSource -PayloadHash (Get-PayloadHash) -VersionOverride $PackageVersion -AdditionalFields (Get-SourceRuntimeFields)
+}
+
 function Install-Runtime {
+    Assert-SourceRuntime
     if (-not (Test-Path $PkgSrcDir)) {
         Write-Fail "Package source not found at $PkgSrcDir"
         exit 1
@@ -775,7 +813,22 @@ function Install-Runtime {
     Write-Ok "Directories: $InstallDir"
 
     [void](Invoke-VersionedSlotClean)
-    if ($script:RuntimeConstructionReuse) { return }
+    if ($script:RuntimeConstructionReuse) {
+        if ($script:SourceRuntimeIdentity) {
+            if (-not (Test-RuntimeHealthy)) { throw 'Retained runtime slot failed its health gate; not activating' }
+            Assert-SourceRuntime
+            Write-Binstubs
+            Assert-SourceRuntime
+            $selected = Join-Path $InstallDir 'current-version'
+            if (-not (Test-Path -LiteralPath $selected) -or
+                ([IO.File]::ReadAllText($selected)).Trim() -ne $SrcVersion) {
+                if (-not (Invoke-VersionedActivate)) { throw 'Source runtime activation failed' }
+            }
+            Publish-SourcePayload
+            Write-VaultDeployManifest
+        }
+        return
+    }
 
     Invoke-VersionedSlotClean
     if (-not (New-SignedVenv -VenvDir $VenvDir -VenvPython $VenvPython -PythonVersion '3.10' -UvCommand $uvPath -RequireSignedBase ($env:OS -eq 'Windows_NT') -AllowExisting $true)) {
@@ -846,27 +899,28 @@ function Install-Runtime {
     $prevVersion = ''
     if ($VersionedRuntime) {
         $prevVersion = Get-VersionedCurrent
-        $prevEAP = $ErrorActionPreference
-        $ErrorActionPreference = 'Continue'
-        & $VenvPython -c 'import agent_vault' 2>$null
-        $slotOk = ($LASTEXITCODE -eq 0)
-        $ErrorActionPreference = $prevEAP
-        if (-not $slotOk) {
+        if (-not (Test-RuntimeHealthy)) {
             Write-Fail "Fresh runtime slot failed its health gate (versions/$SrcVersion) -- not activating"
             exit 1
         }
+    }
+
+    Assert-SourceRuntime
+    Write-Binstubs
+    Assert-SourceRuntime
+    if ($VersionedRuntime) {
         if (-not (Invoke-VersionedMarkComplete)) { exit 1 }
         if (-not (Invoke-VersionedActivate)) { exit 1 }
     }
-
     # Binstub + manifest resolve through the stable `.venv` link ($LinkPython /
     # $LinkDir), never a versions/<v> absolute a later `gc` could remove.
-    Write-Binstubs
-    Write-DeployManifest -Service 'agent-vault' -Plugin 'agent-vault' -InstallPath $InstallDir -PluginPath $PluginDir -VenvPath $LinkDir -GetSourceKind ${function:Get-SourceKind} -GetGitInfo ${function:Get-GitInfo} -PayloadHash (Get-PayloadHash)
+    if ($script:SourceRuntimeIdentity) { Publish-SourcePayload }
+    else { Assert-SourceRuntime }
+    Write-VaultDeployManifest
 
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
-    & $LinkPython -c 'import agent_vault' 2>$null
+    & $LinkPython -I -c 'import agent_vault' 2>$null
     $importOk = ($LASTEXITCODE -eq 0)
     $ErrorActionPreference = $prevEAP
     if ($importOk) { Write-Ok 'Verification: module imports successfully' }
@@ -1023,6 +1077,13 @@ function Invoke-Stamp {
         if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
     }
     $snapDir = Join-Path (Join-Path $InstallDir 'snapshots') $SrcVersion
+    Assert-SourceRuntime
+    Write-Binstubs
+    if ($script:SourceRuntimeIdentity) {
+        Publish-SourcePayload
+        Write-Ok 'Stamped: agent-vault binstub on PATH; runtime provisions on first use.'
+        return
+    }
     $snapTmp = "$snapDir.tmp-$PID"
     if (Test-Path $snapTmp) { Remove-Item $snapTmp -Recurse -Force -ErrorAction SilentlyContinue }
     New-Item -ItemType Directory -Path $snapTmp -Force | Out-Null
@@ -1037,7 +1098,6 @@ function Invoke-Stamp {
     [System.IO.File]::WriteAllText((Join-Path $InstallDir 'payload-dir'), $snapDir, $utf8NoBom)
     [System.IO.File]::WriteAllText((Join-Path $InstallDir 'stamped-version'), $SrcVersion, $utf8NoBom)
     Write-Ok "Snapshot: $snapDir"
-    Write-Binstubs
     Write-Ok 'Stamped: agent-vault binstub on PATH; runtime provisions on first use.'
 }
 
@@ -1321,6 +1381,12 @@ function Exit-InstallLock {
 }
 # === end install-transaction lock ===
 
+$ScriptDir = $PSScriptRoot
+. (Join-Path $ScriptDir 'versioned_runtime_native.ps1')
+. (Join-Path $ScriptDir 'source-runtime.ps1')
+$PackageVersion = $SrcVersion
+$SourceRuntimeIdentity = $null
+if ($Action -in @('install', 'update', 'provision', 'stamp')) { Initialize-SourceRuntime }
 $needsInstallLock = ($Action -in @('install', 'update', 'stamp', 'provision')) -or
     ($Action -eq 'uninstall' -and -not $DryRun)
 if ($needsInstallLock -and -not (Enter-InstallLock)) {
@@ -1329,6 +1395,7 @@ if ($needsInstallLock -and -not (Enter-InstallLock)) {
 }
 
 try {
+    if ($Action -in @('install', 'update', 'provision', 'stamp')) { Assert-SourceRuntime }
     switch ($Action) {
         'install'   { Invoke-Install }
         'update'    { Invoke-Update }

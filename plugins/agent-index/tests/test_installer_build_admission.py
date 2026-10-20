@@ -12,7 +12,7 @@ import pytest
 if os.name != "nt":
     import fcntl
 
-from test_install_engine_adoption import environment, function, run_ps
+from test_install_engine_adoption import ENGINE, environment, function, run_ps
 from test_installer_publication_and_health import publication_fixture
 
 
@@ -69,6 +69,7 @@ def test_direct_same_version_installs_serialize_cleanup_build_and_publication(tm
     if not pwsh:
         pytest.skip("PowerShell is unavailable")
     definitions, root = publication_fixture(tmp_path)
+    definitions = f". '{ENGINE / 'installer-engine.ps1'}'\n" + definitions
     started = tmp_path / "started"
     ready = tmp_path / "worker-ready"
     blocked = tmp_path / "blocked"
@@ -207,6 +208,11 @@ if ($expectedFailure) {{ exit 1 }}
         assert events.index("repair-first") < events.index("repair-second")
         if outcome == "published":
             assert events.index("health-first") < events.index("repair-second")
+        assert (root / "current-version").is_file(), (
+            f"first process:\n{result.stdout}\n{result.stderr}\n"
+            f"second process ({child.returncode}):\n{stdout}\n{stderr}\n"
+            f"events: {events}"
+        )
         assert (root / "current-version").read_text() == "2.0.0"
     # A return, failed build, or superseded admission must not leak the guard.
     result = run_ps(tmp_path, definitions + """

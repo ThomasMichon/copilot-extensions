@@ -6,9 +6,8 @@ checkout. It prepares first-party code; it does not install a runtime, update
 Copilot, select a marketplace, or change service supervision.
 
 Native consumers on Windows and POSIX are Agent Bridge, Codespaces,
-Containers, MCP, SSH, Machines, Pull Requests and Budget Guidance. Other
-runtime plugins receive the shared identity helper but do not yet consume
-source-qualified payloads. Manager source selection and the local
+Containers, MCP, SSH, Machines, Pull Requests, Budget Guidance, Worktrees,
+Dispatch, Index, Logger and Vault. Manager source selection and the local
 plugin-deployment gate are separate effort slices.
 
 ## Inputs and invocation
@@ -106,8 +105,11 @@ The credential-free `merged-dev-runtime` clean-room scenario exercises the
 actual installer from a merged source commit, then checks the installed
 command and vendor imports with the source checkout unavailable. For Bridge it
 also checks live authenticated health, routed process identity and the running
-marker against the selected source generation. For CLI adopters it repeats the
-real installer and requires unchanged completion bytes and exact selection.
+marker against the selected source generation. For the other adopters it
+repeats the real installer and requires unchanged completion bytes and exact
+selection. Dispatch and Vault use no-service modes, Dispatch disables its
+supervisor, and Index uses client-only configuration. Those installation
+witnesses do not qualify resident-service cutover or Index engine use.
 
 ## See also
 

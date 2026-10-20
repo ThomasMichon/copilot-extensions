@@ -6403,7 +6403,7 @@ def main(argv: list[str] | None = None) -> int:
             from ._build_info import BUILD_INFO
         except ImportError:
             BUILD_INFO = {"version": "?.?.?", "commit": "unknown", "build_timestamp": "unknown"}
-        v = BUILD_INFO.get("version", "?.?.?")
+        v = BUILD_INFO.get("runtime_version", BUILD_INFO.get("version", "?.?.?"))
         c = BUILD_INFO.get("commit", "unknown")[:10]
         ts = BUILD_INFO.get("build_timestamp", "unknown")
         br = BUILD_INFO.get("branch", "unknown")

@@ -26,6 +26,8 @@ def run(
     owner: Path | None = None,
     wait_timeout: float = 180,
     child_timeout: float = 180,
+    expected_source_identity: dict | None = None,
+    frontend: dict | None = None,
 ) -> dict:
     """Bootstrap installed control code without selecting a replacement slot."""
     governance = lifecycle.Governance(root, payload)
@@ -40,16 +42,32 @@ def run(
     source_identity = lifecycle.runtime_source.read_source_identity(
         plugin, version, plugin="agent-worktrees",
     )
+    if expected_source_identity is not None and (
+        lifecycle.runtime_source.manifest_fields(source_identity) != expected_source_identity
+    ):
+        raise lifecycle.InstallationRefused("Source identity changed after frontend runtime selection")
     provenance = lifecycle._source_provenance(plugin, version, source_identity)
+    if "deployment_source" in provenance:
+        deployment_source = json.loads(provenance["deployment_source"])
+        deployment_source["path"] = governance.payload.as_posix()
+        deployment_source["kind"] = (
+            "marketplace" if "/.copilot/installed-plugins/" in governance.payload.as_posix() else "local"
+        )
+        if deployment_source["kind"] == "marketplace":
+            deployment_source.update(commit=None, branch=None, dirty=None)
+        provenance["deployment_source"] = json.dumps(deployment_source)
     with tempfile.TemporaryDirectory(dir=staging, prefix="mode-owner-") as temporary:
         control_root = Path(temporary)
         with ExitStack() as custody:
             with governance.held(timeout=wait_timeout):
+                if source_identity is not None:
+                    plugin = lifecycle.runtime_source.publish_source_snapshot(plugin, root, source_identity)
+                admitted = lifecycle.engine.freeze_inputs(plugin, control_root / "admitted-inputs")
                 control = custody.enter_context(
                     lifecycle.engine.numbered_candidate(
                         control_root,
                         "control",
-                        plugin=plugin,
+                        plugin=admitted.plugin,
                         uv=uv,
                         base_python=base_python,
                         health_module="agent_worktrees.runtime_candidate",
@@ -57,6 +75,7 @@ def run(
                         construction_callable="agent_worktrees.runtime_candidate:prepare_runtime_candidate",
                         construction_data=provenance,
                         process_retention=True,
+                        expected_source_identity=lifecycle.runtime_source.manifest_fields(source_identity),
                         wait_timeout=wait_timeout,
                         child_timeout=child_timeout,
                     )
@@ -70,7 +89,7 @@ def run(
                 "--root",
                 str(root),
                 "--plugin",
-                str(control.frozen_plugin),
+                str(admitted.plugin),
                 "--payload",
                 str(governance.payload),
                 "--uv",
@@ -89,6 +108,10 @@ def run(
                 "--child-timeout",
                 str(child_timeout),
             ]
+            if frontend is not None:
+                content = admitted.plugin
+                argv.extend(["--frontend", json.dumps(frontend),
+                             "--publication-source-root", str(content)])
             if owner is not None:
                 argv.extend(["--owner", str(owner)])
             environment = dict(os.environ)
@@ -126,6 +149,8 @@ def run_owned(
     owner: Path | None = None,
     wait_timeout: float = 180,
     child_timeout: float = 180,
+    frontend: dict | None = None,
+    publication_source_root: Path | None = None,
 ) -> dict:
     if mode not in ("repair", "dev", "dev-release"):
         raise lifecycle.InstallationRefused(f"Unsupported whole-operation runtime mode: {mode}")
@@ -141,6 +166,7 @@ def run_owned(
             "Installation governance changed before mode ownership"
         )
     root = governance.root
+    candidate_plugin = publication_source_root if publication_source_root is not None else plugin
     os.environ["AGENT_WORKTREES_PAYLOAD_ROOT"] = str(governance.payload)
     with ExitStack() as custody:
         guard = cutover._acquire_cutover_lock(
@@ -178,7 +204,7 @@ def run_owned(
                 version = lifecycle.runtime.DEV_VERSION
             else:
                 source_identity = lifecycle.runtime_source.read_source_identity(
-                    plugin, package_version, plugin="agent-worktrees",
+                    candidate_plugin, package_version, plugin="agent-worktrees",
                 )
                 generation_base = (
                     source_identity.runtime_version if source_identity is not None else package_version
@@ -196,7 +222,7 @@ def run_owned(
                     "Frozen control provenance differs from candidate package version"
                 )
             candidate_arguments = dict(
-                plugin=plugin,
+                plugin=candidate_plugin,
                 uv=uv,
                 base_python=base_python,
                 health_module="agent_worktrees.runtime_candidate",
@@ -207,6 +233,8 @@ def run_owned(
                 wait_timeout=wait_timeout,
                 child_timeout=child_timeout,
             )
+            if mode != "dev":
+                candidate_arguments["expected_source_identity"] = lifecycle.runtime_source.manifest_fields(source_identity)
             candidate_context = (
                 lifecycle.engine.dev_candidate(root, owner=str(owner), **candidate_arguments)
                 if mode == "dev"
@@ -225,6 +253,12 @@ def run_owned(
             lifecycle_slot=control_slot,
             package_version=package_version,
             force_monitor_transition=mode == "dev",
+            frontend=frontend,
+            publication_source_root=(
+                (publication_source_root if publication_source_root is not None else candidate.frozen_plugin)
+                if frontend is not None else None
+            ),
+            child_timeout=child_timeout, base_python=base_python,
         )
         result["reused"] = candidate.reused
         return result

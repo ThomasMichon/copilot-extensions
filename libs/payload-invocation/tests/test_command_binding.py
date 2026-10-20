@@ -66,7 +66,11 @@ def binding_fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict:
         },
     })
     _write(legacy / "retained-state.json", {"retained": True})
-    environment = {"HOME": str(home), "USERPROFILE": str(home)}
+    environment = {
+        "HOME": str(home), "USERPROFILE": str(home),
+        # Keep parent and child identity equal for a named direct WSL fixture.
+        "WSL_DISTRO_NAME": "fixture-wsl",
+    }
     primitive = _load(
         ROOT / "libs/installation-context/installation_context.py", "binding_primitive"
     )
@@ -294,6 +298,15 @@ def _prepare_catalog(fixture: dict) -> None:
     for name in ("install", "resolve-runtime", "invoke-payload-runtime"):
         for suffix in ("sh", "ps1"):
             (scripts / f"{name}.{suffix}").write_text("# fixture\n", encoding="utf-8")
+    for suffix in ("sh", "ps1"):
+        shutil.copyfile(
+            ROOT / f"plugins/agent-worktrees/scripts/source-runtime.{suffix}",
+            scripts / f"source-runtime.{suffix}",
+        )
+    shutil.copyfile(
+        ROOT / "plugins/agent-worktrees/scripts/versioned_runtime_native.ps1",
+        scripts / "versioned_runtime_native.ps1",
+    )
     context = scripts / "installation-context"
     context.mkdir()
     for path in (ROOT / "libs/installation-context").glob("*.py"):
@@ -746,6 +759,7 @@ def test_command_binding_native_manifest_publication_and_foreign_refusal(
     environment.update({
         "TEST_PAYLOAD": str(binding_fixture["payload"]),
         "TEST_RUNTIME": str(runtime),
+        "TEST_SOURCE_SCRIPTS": str(ROOT / "plugins/agent-worktrees/scripts"),
         "TEST_PYTHON": (
             sys.executable if os.name == "nt" else
             str(binding_fixture["home"] / "test-bin/python3")
@@ -766,6 +780,8 @@ def test_command_binding_native_manifest_publication_and_foreign_refusal(
             "err() { printf '%s\\n' \"$*\" >&2; }\n"
             "PLUGIN_DIR=\"$TEST_PAYLOAD\"\nINSTALL_DIR=\"$TEST_RUNTIME\"\n"
             "VENV_PYTHON=\"$TEST_PYTHON\"\nLINK_DIR=\"$TEST_RUNTIME/.venv\"\n"
+            "SCRIPT_DIR=\"$TEST_SOURCE_SCRIPTS\"\nSRC_VERSION='1.0.0'\n"
+            '. "$SCRIPT_DIR/source-runtime.sh"\n_initialize_source_runtime\n'
             f"CONTEXTUAL_INSTALL={'true' if contextual else 'false'}\n"
             + function + "\nwrite_deploy_manifest\n"
         )
@@ -786,6 +802,8 @@ def test_command_binding_native_manifest_publication_and_foreign_refusal(
             "}\n"
             "$PluginDir=$env:TEST_PAYLOAD\n$InstallDir=$env:TEST_RUNTIME\n"
             "$VenvPython=$env:TEST_PYTHON\n$LinkDir=Join-Path $InstallDir '.venv'\n"
+            "$ScriptDir=$env:TEST_SOURCE_SCRIPTS\n$SrcVersion='1.0.0'\n"
+            ". (Join-Path $ScriptDir 'source-runtime.ps1')\nInitialize-SourceRuntime\n"
             f"$ContextualInstall=${'true' if contextual else 'false'}\n"
             + function + "\nWrite-V3Manifest\n"
         )
@@ -803,7 +821,8 @@ def test_command_binding_native_manifest_publication_and_foreign_refusal(
 
     completed = run()
     assert completed.returncode == 0, completed.stdout + completed.stderr
-    assert _resolve(binding_fixture)["status"] == "selected"
+    resolved = _resolve(binding_fixture)
+    assert resolved["status"] == "selected", resolved
     if contextual:
         manifest = json.loads((runtime / "deploy-manifest.json").read_text(encoding="utf-8"))
         assert manifest["schema_version"] == 3

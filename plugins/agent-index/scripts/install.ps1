@@ -402,7 +402,7 @@ if ($Action -in @('cell-provision', 'cell-recover', 'slot-cutover')) {
     }
     $cellPython = $null
     foreach ($candidate in @('python', 'python3', 'py')) {
-        $found = Get-Command $candidate -ErrorAction SilentlyContinue
+        $found = Get-Command $candidate -ErrorAction SilentlyContinue | Select-Object -First 1
         if (-not $found) { continue }
         if ($candidate -eq 'py') {
             $resolved = @(& $found.Source -3 -c 'import sys; print(sys.executable)' 2>$null)
@@ -573,6 +573,7 @@ function Invoke-VersionedActivate {
     if (-not $VersionedRuntime) { return $true }
     $publicationMutex = Enter-IndexStampLock -Scope 'Publish'
     try {
+    Assert-SourceRuntime
     if (-not (Test-IndexPublicationFresh -Version $SrcVersion -AllowDowngrade $Force)) {
         Write-Skip 'Keeping newer runtime or stamp -- not activating an older slot'
         return $true
@@ -638,21 +639,25 @@ function Invoke-VersionedGc {
 # === install-contract:v4 marker/toss helpers (#935) ===
 function Get-BootstrapPython {
     <# A python to run the stdlib-only versioned_runtime.py helper (#935).
-       Prefers the freshly-built slot venv python ($VenvDir, present at
-       mark-complete before the link is swapped), then the active link's
-       python, then a real base python via the `py` launcher -- avoiding the
-       Windows Store 'python' alias stub. Returns $null if none. #>
-    foreach ($d in @($VenvDir, $LinkDir)) {
-        # Windows venv layout first; `bin/python` is the POSIX layout pwsh sees off Windows.
-        if ($d) { foreach ($rel in 'Scripts\python.exe', 'bin/python') { $p = Join-Path $d $rel; if (Test-Path $p) { return $p } } }
-    }
-    if (Get-Command py -ErrorAction SilentlyContinue) {
-        $exe = (& py -3 -c 'import sys; print(sys.executable)' 2>$null | Out-String).Trim()
+       Prefers a base Python via the launcher or PATH, avoiding Windows
+       Store aliases, then considers an existing slot interpreter.
+       Returns $null if none. #>
+    $launcher = Get-Command py -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($launcher) {
+        $exe = (Invoke-Hidden -FilePath $launcher.Source -ArgList @('-3', '-c', 'import sys; print(sys.executable)') | Out-String).Trim()
         if ($LASTEXITCODE -eq 0 -and $exe -and (Test-Path $exe)) { return $exe }
     }
     foreach ($cand in 'python3', 'python') {
-        $c = Get-Command $cand -ErrorAction SilentlyContinue
+        $c = Get-Command $cand -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
         if ($c -and $c.Source -notmatch 'WindowsApps') { return $c.Source }
+    }
+    foreach ($d in @($VenvDir, $LinkDir)) {
+        if ($d) {
+            foreach ($rel in 'Scripts\python.exe', 'bin/python') {
+                $p = Join-Path $d $rel
+                if (Test-Path -LiteralPath $p -PathType Leaf) { return $p }
+            }
+        }
     }
     return $null
 }
@@ -662,6 +667,14 @@ function Get-PayloadHash(
     [long]$MaxPathBytes = 4096,
     [long]$MaxContentBytes = 4294967296
 ) {
+    if (Get-Variable -Name SourceRuntimeIdentity -Scope Script -ValueOnly -ErrorAction SilentlyContinue) {
+        Assert-SourceRuntime
+        $sha = [Security.Cryptography.SHA256]::Create()
+        try {
+            return (-join ($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($script:SourceRuntimeIdentity)) |
+                ForEach-Object { $_.ToString('x2') }))
+        } finally { $sha.Dispose() }
+    }
     <# Match installation-context snapshot content hashing over the whole payload.
        All non-root entries, including root snapshot-provenance.json, count
        toward the limits; only its digest record is excluded. #>
@@ -952,6 +965,7 @@ public static class CePayloadDirectoryState {
 }
 
 function Invoke-VersionedSlotClean {
+    Assert-SourceRuntime
     if (-not $VersionedRuntime) { throw 'Construction requires a versioned runtime candidate' }
     $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
     $py = Get-BootstrapPython
@@ -964,11 +978,13 @@ function Invoke-VersionedSlotClean {
     $script:RuntimeConstructionReuse = Start-RuntimeConstruction `
         -Python $py -Helper $vr -Root $InstallDir -Version $SrcVersion `
         -PayloadHash (Get-PayloadHash) -LinkName (Split-Path -Leaf $LinkDir)
+    Assert-SourceRuntime
 
 }
 
 function Invoke-VersionedMarkComplete {
     param([string]$PayloadHash = '')
+    Assert-SourceRuntime
     $actualHash = Get-PayloadHash
     if ($PayloadHash -and $PayloadHash -ne $actualHash) {
         throw 'Payload changed during construction; completion refused'
@@ -999,6 +1015,9 @@ function Resolve-VendoredLib {
     $candidate = Join-Path $PluginDir "libs\$LibName"
     if (Test-Path (Join-Path $candidate 'pyproject.toml')) {
         return (Resolve-Path $candidate).Path
+    }
+    if (Get-Variable -Name SourceRuntimeIdentity -Scope Script -ValueOnly -ErrorAction SilentlyContinue) {
+        throw "Source-qualified payload is missing a required vendored dependency: $LibName"
     }
 
     # 2. Relative path (git checkout layout)
@@ -1095,6 +1114,8 @@ function Get-VerTuple {
 
 function Test-VersionLt {
     param([string]$A, [string]$B)
+    $A = $A -replace '[+.]source\..*$', ''
+    $B = $B -replace '[+.]source\..*$', ''
     if ($A -eq $B) { return $false }
     $ta = Get-VerTuple $A; $tb = Get-VerTuple $B
     $n = [Math]::Max($ta.Count, $tb.Count)
@@ -1201,10 +1222,12 @@ function Deploy-SetupGatedBinstub {
     param([string]$PayloadRoot = '')
     $publicationMutex = Enter-IndexStampLock -Scope 'Publish'
     try {
+    Assert-SourceRuntime
     if (-not (Test-IndexPublicationFresh -Version $SrcVersion -AllowDowngrade $Force)) {
         Write-Skip 'Newer runtime or stamp superseded launcher publication'
         return
     }
+    if ($script:SourceRuntimeIdentity) { $PayloadRoot = Publish-SourceSnapshot }
     if (-not $PayloadRoot) {
         $snapshots = [IO.Path]::GetFullPath((Join-Path $InstallDir 'snapshots')).TrimEnd('/\') + [IO.Path]::DirectorySeparatorChar
         $comparison = if ($env:OS -eq 'Windows_NT') { [StringComparison]::OrdinalIgnoreCase } else { [StringComparison]::Ordinal }
@@ -1224,7 +1247,11 @@ function Deploy-SetupGatedBinstub {
         if (Test-Path $rSrc) { Copy-Item $rSrc (Join-Path $binDir $r) -Force }
     }
     $payloadDirMarker = Join-Path $InstallDir 'payload-dir'
-    Publish-FileAtomically -Path $payloadDirMarker -Content $PayloadRoot
+    if ($script:SourceRuntimeIdentity) {
+        Publish-SourceRedirects -Snapshot $PayloadRoot
+    } else {
+        Publish-FileAtomically -Path $payloadDirMarker -Content $PayloadRoot
+    }
 
     $ps1Path = Join-Path $LocalBin 'agent-index.ps1'
     $ps1Content = @'
@@ -1319,6 +1346,24 @@ function New-IndexVenv {
     return (Test-IndexVenv -Dir $Dir -Python $Python)
 }
 
+function Test-IndexServerVenv {
+    param([string]$Dir, [string]$Python)
+    if (-not (Test-IndexVenv -Dir $Dir -Python $Python)) { return $false }
+    $health = Invoke-NativeCapture {
+        & $Python -I -c 'import fastapi, uvicorn, numpy, pyarrow, lancedb; import agent_index.server'
+    }
+    if ($health.ExitCode -ne 0) {
+        Write-Warn "Server venv failed host dependency health validation: $($health.Output)"
+        return $false
+    }
+    $cliHealth = Invoke-NativeCapture { & $Python -I -m agent_index --help }
+    if ($cliHealth.ExitCode -ne 0) {
+        Write-Warn "Server venv failed CLI health validation: $($cliHealth.Output)"
+        return $false
+    }
+    return (Test-RuntimeOrigin -Python $Python -Slot $Dir)
+}
+
 function Install-ServerVenv {
     <# Required host-only sibling runtime, matching config.server_venv_python().
        New-IndexVenv keeps signed-Python/SSH policy consistent across runtimes.
@@ -1377,13 +1422,8 @@ function Install-ServerVenv {
         return $false
     }
     Remove-ConsoleTrampolines -VenvDir $serverVenvDir
-    $healthOut = & $serverVenvPython -I -c 'import fastapi, uvicorn, numpy, pyarrow, lancedb; import agent_index.server' 2>&1 | Out-String
-    if ($LASTEXITCODE -ne 0) {
-        Write-Warn "Server venv failed host dependency health validation: $healthOut"
-        return $false
-    }
-    if (-not (Test-RuntimeOrigin -Python $serverVenvPython -Slot $serverVenvDir)) {
-        Write-Warn 'Server venv failed package-origin health validation'
+    if (-not (Test-IndexServerVenv -Dir $serverVenvDir -Python $serverVenvPython)) {
+        Write-Warn 'Server venv failed complete host health validation'
         return $false
     }
     Write-Ok "Server venv provisioned: $serverVenvDir"
@@ -1394,6 +1434,10 @@ function Install-ServerVenv {
 }
 
 function Install-Runtime {
+    Assert-SourceRuntime
+    if (Get-Variable -Name SourceRuntimeIdentity -Scope Script -ValueOnly -ErrorAction SilentlyContinue) {
+        [void](Publish-SourceSnapshot)
+    }
     if (-not (Test-Path $PkgSrcDir)) { Write-Fail "Package source not found at $PkgSrcDir"; exit 1 }
     $pythonCmd = $null
     foreach ($candidate in @('python', 'python3', 'py')) {
@@ -1421,6 +1465,7 @@ function Install-Runtime {
 
     $buildMutex = Enter-IndexBuildLock -VenvPath $VenvDir
     try {
+    Assert-SourceRuntime
     [void](Invoke-VersionedSlotClean)
     if (-not $script:RuntimeConstructionReuse) {
     $preparationMutex = Enter-IndexStampLock -Scope 'Publish'
@@ -1547,11 +1592,29 @@ function Install-Runtime {
     }
 
     $prevVersion = ''
+    if ($script:SourceRuntimeIdentity -and $script:RuntimeConstructionReuse) {
+        $reuseRole = Get-ActivationRole
+        if ($reuseRole -eq 'unconfigured') { $reuseRole = Get-MachineRole }
+        if ($reuseRole -eq 'host') {
+            $serverDir = Join-Path $VenvDir 'server'
+            $serverPython = if ($env:OS -eq 'Windows_NT') {
+                Join-Path $serverDir 'Scripts\python.exe'
+            } else { Join-Path $serverDir 'bin/python3' }
+            if (-not (Test-IndexServerVenv -Dir $serverDir -Python $serverPython)) {
+                throw 'Immutable source generation lacks its host service closure; select a distinct complete generation'
+            }
+        }
+    }
     if ($VersionedRuntime) {
         $prevVersion = Get-VersionedCurrent
         $prevEAP = $ErrorActionPreference
         $ErrorActionPreference = 'Continue'
         $slotOk = Test-RuntimeOrigin -Python $VenvPython -Slot $VenvDir
+        if ($slotOk) {
+            $cliHealth = Invoke-NativeCapture { & $VenvPython -I -m agent_index --help }
+            $slotOk = $cliHealth.ExitCode -eq 0
+            if (-not $slotOk) { Write-Warn "Runtime CLI failed health validation: $($cliHealth.Output)" }
+        }
         $ErrorActionPreference = $prevEAP
         if (-not $slotOk) {
             Write-Fail "Fresh runtime slot failed its health gate (versions/$SrcVersion) -- not activating"
@@ -1584,11 +1647,24 @@ function Install-Runtime {
 }
 
 function Write-Manifest {
+    $sourcePath = $env:COPILOT_PLUGIN_STAGED_FROM
+    $gitInfo = { param($path) Get-GitInfo -Path (Split-Path $path) }
+    $extra = @{}
+    if ($script:SourceRuntimeIdentity) {
+        if (-not $sourcePath) { $sourcePath = $PluginDir }
+        $PluginDir = Join-Path (Join-Path $InstallDir 'snapshots') $SrcVersion
+        $ScriptDir = Join-Path $PluginDir 'scripts'
+        Assert-SourceRuntime
+        $identity = $script:SourceRuntimeIdentity | ConvertFrom-Json
+        $extra = @{ runtime_version = $identity.runtime_version; runtime_source = $identity.runtime_source }
+        $gitInfo = { param($path) @{commit=$identity.runtime_source.source_commit; branch=$null; dirty=$false} }
+    } else { Assert-SourceRuntime }
     Write-DeployManifest -Service 'agent-index' -Plugin 'agent-index' `
         -InstallPath $InstallDir -PluginPath $PluginDir -VenvPath $LinkDir `
-        -SourcePathOverride $env:COPILOT_PLUGIN_STAGED_FROM `
+        -SourcePathOverride $sourcePath `
         -GetSourceKind { param($path) Get-SourceKind -PluginPath $path } `
-        -GetGitInfo { param($path) Get-GitInfo -Path (Split-Path $path) }
+        -GetGitInfo $gitInfo `
+        -VersionOverride $PackageVersion -AdditionalFields $extra
 }
 
 function Get-MachineRole {
@@ -1833,7 +1909,7 @@ function Install-Engine {
     if ((Get-PayloadHash) -ne $payloadHash) { throw 'Engine payload changed during construction' }
     Complete-RuntimeConstruction -PayloadHash $payloadHash
     }
-    foreach ($name in @('versioned_runtime_leases.py', 'versioned_runtime_construction.py', 'versioned_runtime_source.py', 'versioned_runtime.py')) {
+    foreach ($name in @('versioned_runtime_leases.py', 'versioned_runtime_construction.py', 'versioned_runtime_source.py', 'versioned_runtime_publication.py', 'versioned_runtime.py')) {
         Publish-FileAtomically -Path (Join-Path $EngineHome $name) `
             -Content ([IO.File]::ReadAllText((Join-Path $PSScriptRoot $name)))
     }
@@ -2464,6 +2540,7 @@ function Test-IndexPublicationFresh {
 function Publish-IndexRuntime {
     $mutex = Enter-IndexStampLock -Scope 'Publish'
     try {
+        Assert-SourceRuntime
         $script:RuntimePublicationSuperseded = $false
         if (-not (Test-IndexPublicationFresh -Version $SrcVersion -AllowDowngrade $Force)) {
             $script:RuntimePublicationSuperseded = $true
@@ -2520,6 +2597,7 @@ function Materialize-IndexSnapshot {
 }
 
 function New-IndexSnapshot {
+    if ($script:SourceRuntimeIdentity) { return (Publish-SourceSnapshot) }
     $mutex = Enter-IndexStampLock -Scope 'Snapshot'
     $temporary = Join-Path $InstallDir "snapshots\.stage-$PID-$([Guid]::NewGuid().ToString('N'))"
     try {
@@ -2557,8 +2635,11 @@ function Invoke-Stamp {
     $snapshot = New-IndexSnapshot
     $mutex = Enter-IndexStampLock -Scope 'Publish'
     try {
-        $candidate = [IO.File]::ReadAllText((Join-Path $InstallDir "stamp-candidate-$SrcVersion"))
-        if ($candidate -cne $snapshot) { Write-Skip 'Newer same-version snapshot superseded this stamp'; return }
+        Assert-SourceRuntime
+        if (-not $script:SourceRuntimeIdentity) {
+            $candidate = [IO.File]::ReadAllText((Join-Path $InstallDir "stamp-candidate-$SrcVersion"))
+            if ($candidate -cne $snapshot) { Write-Skip 'Newer same-version snapshot superseded this stamp'; return }
+        }
         foreach ($marker in @('stamped-version', 'current-version')) {
             $path = Join-Path $InstallDir $marker
             if ((Test-Path -LiteralPath $path) -and -not $Force -and
@@ -2566,9 +2647,13 @@ function Invoke-Stamp {
                 Write-Skip "Newer $marker superseded this stamp"; return
             }
         }
-        Publish-FileAtomically -Path (Join-Path $InstallDir 'payload-origin') -Content $probePayload
-        Publish-FileAtomically -Path (Join-Path $InstallDir 'payload-dir') -Content $snapshot
-        Publish-FileAtomically -Path (Join-Path $InstallDir 'stamped-version') -Content $SrcVersion
+        if ($script:SourceRuntimeIdentity) {
+            Publish-SourceRedirects -Snapshot $snapshot -PayloadOrigin $probePayload
+        } else {
+            Publish-FileAtomically -Path (Join-Path $InstallDir 'payload-origin') -Content $probePayload
+            Publish-FileAtomically -Path (Join-Path $InstallDir 'payload-dir') -Content $snapshot
+            Publish-FileAtomically -Path (Join-Path $InstallDir 'stamped-version') -Content $SrcVersion
+        }
         Deploy-SetupGatedBinstub -PayloadRoot $snapshot
         Write-Ok "Snapshot: $snapshot"
         Write-Ok 'Stamped: agent-index binstub on PATH; runtime provisions after explicit setup.'
@@ -2662,6 +2747,15 @@ function Invoke-Uninstall {
     Write-Ok 'agent-index uninstalled'
 }
 
+$ScriptDir = $PSScriptRoot
+. (Join-Path $PSScriptRoot 'versioned_runtime_native.ps1')
+. (Join-Path $PSScriptRoot 'source-runtime.ps1')
+$PackageVersion = $SrcVersion
+$script:SourceRuntimeIdentity = $null
+if ($Action -in @('install', 'update', 'provision', 'stamp')) {
+    Initialize-SourceRuntime
+    Assert-SourceRuntime
+}
 if ($Action -notin @('uninstall', 'stamp', 'engine', 'engine-update') -and
     ((Test-Path (Join-Path $EngineHome 'current-version')) -or
      (Test-Path (Join-Path $EngineHome 'last-known-good')))) {

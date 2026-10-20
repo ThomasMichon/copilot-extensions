@@ -342,6 +342,11 @@ function Invoke-VersionedActivate {
     }
     if (-not (Invoke-VersionedMarkComplete)) { return $false }
     $prev = (& $py $vr --root $InstallDir --link-name '.venv' current 2>$null); $prev = ("$prev").Trim()
+    # Source manifest inputs are captured before activation.
+    if ($script:SourceRuntimeIdentity) {
+        $script:SourceManifestHash = Get-PayloadHash
+        $script:SourceManifestGit = Get-GitInfo -Path $RepoRoot
+    }
     Assert-SourceRuntime
     & $py $vr --root $InstallDir --link-name '.venv' activate $SrcVersion --no-link 2>&1 |
         ForEach-Object { Write-ServiceChanged $_ }
@@ -768,7 +773,7 @@ function Deploy-VersionedRuntimeHelper {
        standing in a source checkout (docs/patterns/mutable-dev-slot.md
        Runtime accessibility). Publication must not leave a stale release helper. #>
     if (-not $VersionedRuntime) { return }
-    foreach ($name in @('versioned_runtime_leases.py', 'versioned_runtime_construction.py', 'versioned_runtime_source.py', 'versioned_runtime.py')) {
+    foreach ($name in @('versioned_runtime_leases.py', 'versioned_runtime_construction.py', 'versioned_runtime_source.py', 'versioned_runtime_publication.py', 'versioned_runtime.py')) {
         $destination = Join-Path $InstallDir $name
         $temporary = "$destination.tmp-$([guid]::NewGuid().ToString('N'))"
         try {
@@ -1086,7 +1091,7 @@ exit /b %ERRORLEVEL%
 }
 
 function Write-CodespacesDeployManifest {
-    Assert-SourceRuntime
+    if (-not $script:SourceRuntimeIdentity) { Assert-SourceRuntime }
     $fields = @{}
     if ($script:SourceRuntimeIdentity) {
         $data = $script:SourceRuntimeIdentity | ConvertFrom-Json
@@ -1095,8 +1100,13 @@ function Write-CodespacesDeployManifest {
     Write-DeployManifest -Service 'agent-codespaces' -Plugin 'agent-codespaces' `
         -InstallPath $InstallDir -PluginPath $PluginDir -VenvPath $LinkDir `
         -GetSourceKind { param($path) Get-SourceKind -PluginPath $path } `
-        -GetGitInfo { param($path) Get-GitInfo -Path $RepoRoot } `
-        -VersionOverride $PackageVersion -AdditionalFields $fields
+        -GetGitInfo {
+            param($path)
+            if ($script:SourceRuntimeIdentity) { $script:SourceManifestGit }
+            else { Get-GitInfo -Path $RepoRoot }
+        } `
+        -VersionOverride $PackageVersion -AdditionalFields $fields `
+        -PayloadHash $(if ($script:SourceRuntimeIdentity) { $script:SourceManifestHash } else { '' })
 }
 
 # -- Actions ---------------------------------------------------------------
@@ -1625,8 +1635,21 @@ function Invoke-Stamp {
         Move-Item -LiteralPath $snapTmp -Destination $snapDir -Force
     }
     Assert-SourceSnapshot -Snapshot $snapDir
-    [System.IO.File]::WriteAllText((Join-Path $InstallDir 'payload-dir'), $snapDir, $utf8NoBom)
-    [System.IO.File]::WriteAllText((Join-Path $InstallDir 'stamped-version'), $SrcVersion, $utf8NoBom)
+    if ($script:SourceRuntimeIdentity) {
+        $py = Get-BootstrapPython
+        if (-not $py) { throw 'Source redirect publication requires a bootstrap Python interpreter' }
+        $nativeError = ''
+        $result = Invoke-Hidden -FilePath $py -ArgList @(
+            '-I', '-B', (Join-Path $ScriptDir 'versioned_runtime.py'),
+            '--root', $InstallDir, 'publish-redirects', '--payload-dir', $snapDir,
+            '--version', $SrcVersion, '--expected-source-identity', $script:SourceRuntimeIdentity
+        ) -ErrorOutput ([ref]$nativeError)
+        $code = $LASTEXITCODE
+        if ($code -ne 0) { throw "Source redirect publication failed (exit ${code}): $result$nativeError" }
+    } else {
+        [System.IO.File]::WriteAllText((Join-Path $InstallDir 'payload-dir'), $snapDir, $utf8NoBom)
+        [System.IO.File]::WriteAllText((Join-Path $InstallDir 'stamped-version'), $SrcVersion, $utf8NoBom)
+    }
     Write-ServiceOk "Snapshot: $snapDir"
     Deploy-SelfProvisioningBinstub
     Write-ServiceOk 'Stamped: agent-codespaces binstub on PATH; runtime provisions on first use.'

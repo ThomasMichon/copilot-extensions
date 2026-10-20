@@ -857,6 +857,7 @@ def codespaces_stamped_snapshot(tmp_path_factory, request):
         "versioned_runtime_leases.py",
         "versioned_runtime_construction.py",
         "versioned_runtime_source.py",
+        "versioned_runtime_publication.py",
         "versioned_runtime_native.ps1",
     ):
         assert (snapshot / "scripts" / name).read_bytes() == (PLUGIN / "scripts" / name).read_bytes()
@@ -1203,6 +1204,7 @@ def test_native_dev_generation_dependency_failure_preserves_working_runtime(tmp_
     for name in (
         "versioned_runtime_leases.py", "versioned_runtime_construction.py",
         "versioned_runtime_source.py", "versioned_runtime.py", "versioned_runtime_native.ps1",
+        "versioned_runtime_publication.py",
     ):
         shutil.copyfile(helper.with_name(name), tmp_path / name)
     if ext == "ps1":

@@ -75,12 +75,20 @@ def test_failed_server_venv_prevents_host_activation():
     sh_fn = sh.split("_install_server_venv() {", 1)[1].split(
         "\n_ensure_runtime() {", 1
     )[0]
+    ps_health = ps.split("function Test-IndexServerVenv {", 1)[1].split(
+        "\nfunction Install-ServerVenv {", 1
+    )[0]
+    sh_health = sh.split("_test_index_server_venv() {", 1)[1].split(
+        "\n_install_server_venv() {", 1
+    )[0]
     assert "return $false" in ps_fn
     assert "return 1" in sh_fn
-    assert "import fastapi, uvicorn, numpy, pyarrow, lancedb" in ps_fn
-    assert "import fastapi, uvicorn, numpy, pyarrow, lancedb" in sh_fn
-    assert "Test-RuntimeOrigin -Python $serverVenvPython -Slot $serverVenvDir" in ps_fn
-    assert '_runtime_origin_under "$server_venv_python" "$server_venv_dir"' in sh_fn
+    assert "Test-IndexServerVenv -Dir $serverVenvDir -Python $serverVenvPython" in ps_fn
+    assert '_test_index_server_venv "$server_venv_dir" "$server_venv_python"' in sh_fn
+    assert "import fastapi, uvicorn, numpy, pyarrow, lancedb; import agent_index.server" in ps_health
+    assert "import fastapi, uvicorn, numpy, pyarrow, lancedb; import agent_index.server" in sh_health
+    assert "Test-RuntimeOrigin -Python $Python -Slot $Dir" in ps_health
+    assert '_runtime_origin_under "$python" "$dir"' in sh_health
     assert "Required host runtime failed provisioning -- not activating" in ps
     assert "Required host runtime failed provisioning -- not activating" in sh
 

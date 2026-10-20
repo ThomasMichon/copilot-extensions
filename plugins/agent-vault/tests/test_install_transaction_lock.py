@@ -27,7 +27,7 @@ LOCK_END = "# === end install-transaction lock ==="
 SELF_STAGE_END = "# === end install-contract:v4 self-stage ==="
 SMOKE_END = "# === end install-contract:v4 smoke seam ==="
 PS_FIRST_MUTATION = "    switch ($Action) {"
-SH_FIRST_MUTATION = "case \"$ACTION\" in\n    install)   do_install ;;"
+SH_FIRST_MUTATION = "case \"$ACTION\" in\n    install)   do_install || exit 1 ;;"
 LOCK_FAILURE = "Could not acquire the install transaction lock"
 
 

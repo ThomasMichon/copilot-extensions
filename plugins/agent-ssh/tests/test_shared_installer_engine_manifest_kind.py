@@ -97,6 +97,64 @@ def test_manifest_kind_uses_override_path_classification(tmp_path: Path) -> None
     assert manifest["source"]["path"] == "/tmp/local/plugin"
 
 
+@pytest.mark.skipif(os.name == "nt", reason="native POSIX publication")
+@pytest.mark.parametrize("failure", ["write", "rename", "hash", "staging", "directory"])
+def test_conditional_manifest_failure_preserves_previous_file(tmp_path: Path, failure: str) -> None:
+    if BASH is None:
+        pytest.skip("Bash unavailable")
+    install = tmp_path / "install"
+    install.mkdir()
+    manifest = install / "deploy-manifest.json"
+    previous = b'{"previous":true}\n'
+    manifest.write_bytes(previous)
+    retained = manifest
+    if failure == "directory":
+        retained = install / "retained-manifest.json"
+        manifest.rename(retained)
+        manifest.mkdir()
+    script = f"""
+set -euo pipefail
+failure='{failure}'
+_ok() {{ printf 'SUCCESS: %s\\n' "$*"; }}
+_fail() {{ printf 'ERROR: %s\\n' "$*" >&2; }}
+_source_kind() {{ printf marketplace; }}
+_payload_hash() {{
+    if [[ "$failure" == hash ]]; then printf 'injected hash failure\\n' >&2; return 42; fi
+    printf hash
+}}
+cat() {{
+    if [[ "$failure" == write ]]; then
+        printf partial
+        printf 'injected write failure\\n' >&2
+        return 42
+    fi
+    command cat "$@"
+}}
+mv() {{
+    if [[ "$failure" == rename ]]; then printf 'injected rename failure\\n' >&2; return 42; fi
+    command mv "$@"
+}}
+mktemp() {{
+    if [[ "$failure" == staging ]]; then printf 'injected staging failure\\n' >&2; return 42; fi
+    command mktemp "$@"
+}}
+{_engine_functions()}
+if write_deploy_manifest svc plugin '{install}' '{tmp_path}' /venv '' '' 1.2.3; then
+    exit 0
+else
+    exit 19
+fi
+"""
+    result = subprocess.run(
+        [BASH, "-c", script], cwd=tmp_path, capture_output=True, text=True, timeout=15,
+    )
+    assert result.returncode == 19, result.stdout + result.stderr
+    assert retained.read_bytes() == previous
+    assert "SUCCESS:" not in result.stdout
+    assert "ERROR:" in result.stderr
+    assert not list(install.glob("deploy-manifest.json.tmp*"))
+
+
 def _ps1_function_source(source: str, name: str, next_marker: str) -> str:
     start_marker = f"function {name} {{"
     assert source.count(start_marker) == 1, f"missing unique {start_marker!r}"
@@ -109,6 +167,84 @@ def _ps1_function_source(source: str, name: str, next_marker: str) -> str:
 def _engine_ps1_functions() -> str:
     source = ENGINE_PS1.read_text(encoding="utf-8")
     return _ps1_function_source(source, "Write-DeployManifest", "\nfunction Write-SimpleBinstub {")
+
+
+@pytest.mark.parametrize("host", ["powershell", "pwsh"])
+@pytest.mark.parametrize("failure", ["none", "write", "directory", "locked"])
+def test_native_manifest_publication_preserves_previous_file(
+    tmp_path: Path, host: str, failure: str,
+) -> None:
+    executable = shutil.which(host)
+    if not executable:
+        pytest.skip(f"{host} unavailable")
+    if failure == "locked" and os.name != "nt":
+        pytest.skip("Windows mandatory sharing boundary")
+    install = tmp_path / "install"
+    install.mkdir()
+    manifest = install / "deploy-manifest.json"
+    previous = b'{"previous":true}\n'
+    manifest.write_bytes(previous)
+    retained = manifest
+    if failure == "directory":
+        retained = install / "retained-manifest.json"
+        manifest.rename(retained)
+        manifest.mkdir()
+    install_literal = str(install).replace("'", "''")
+    script = tmp_path / "manifest-failure.ps1"
+    script.write_text(f"""
+$ErrorActionPreference = 'Continue'
+$failure = '{failure}'
+$install = '{install_literal}'
+$lock = $null
+function Write-Ok($Value) {{ Write-Output "SUCCESS: $Value" }}
+function Set-Content {{
+    [CmdletBinding()]
+    param([Parameter(ValueFromPipeline)]$Value, $Path, $LiteralPath, $Encoding)
+    process {{
+        $target = if ($LiteralPath) {{ $LiteralPath }} else {{ $Path }}
+        if ($failure -eq 'write') {{
+            [IO.File]::WriteAllText($target, 'partial manifest')
+            Write-Error 'Injected manifest write failure'
+            return
+        }}
+        Microsoft.PowerShell.Management\\Set-Content @PSBoundParameters
+    }}
+}}
+{_engine_ps1_functions()}
+try {{
+    if ($failure -eq 'locked') {{
+        $lock = [IO.File]::Open((Join-Path $install 'deploy-manifest.json'), 'Open', 'Read', 'Read')
+    }}
+    Write-DeployManifest -Service fixture -Plugin fixture -InstallPath $install `
+        -PluginPath $install -VenvPath $install -VersionOverride 1.2.3 `
+        -GetSourceKind {{ param($Path) 'marketplace' }} `
+        -GetGitInfo {{ param($Path) @{{commit='unknown';branch='unknown';dirty=$false}} }}
+}} catch {{
+    [Console]::Error.WriteLine($_.Exception.Message)
+    $cause = $_.Exception
+    while ($cause.InnerException) {{ $cause = $cause.InnerException }}
+    [Console]::Error.WriteLine("NATIVE_ERROR_CODE=" + ($cause.HResult -band 65535))
+    exit 19
+}} finally {{
+    if ($lock) {{ $lock.Dispose() }}
+}}
+""", encoding="utf-8")
+    result = subprocess.run(
+        [executable, "-NoProfile", "-NonInteractive", "-File", str(script)],
+        cwd=tmp_path, capture_output=True, text=True, timeout=20,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    if failure == "none":
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert json.loads(manifest.read_text(encoding="utf-8-sig"))["service"] == "fixture"
+        assert "SUCCESS:" in result.stdout
+    else:
+        assert result.returncode == 19, result.stdout + result.stderr
+        assert retained.read_bytes() == previous
+        assert "SUCCESS:" not in result.stdout
+        if failure == "locked":
+            assert "NATIVE_ERROR_CODE=32" in result.stderr
+    assert not list(install.glob("deploy-manifest.json.tmp*"))
 
 
 def _run_manifest_harness_ps1(tmp_path: Path, *, plugin_path: str, source_override: str | None) -> dict:

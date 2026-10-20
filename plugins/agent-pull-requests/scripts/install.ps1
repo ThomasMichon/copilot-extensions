@@ -423,7 +423,7 @@ function Test-SourceRuntimeUnchanged {
 }
 
 function Get-SourceManifestFields {
-    Test-SourceRuntimeUnchanged
+    if (-not $SourceRuntimeIdentity) { Test-SourceRuntimeUnchanged }
     $fields = @{}
     if ($SourceRuntimeIdentity) {
         foreach ($property in ($SourceRuntimeIdentity | ConvertFrom-Json).PSObject.Properties) {
@@ -678,8 +678,21 @@ function Invoke-Stamp {
     Move-Item -LiteralPath $snapTmp -Destination $snapDir -Force
     }
     Test-SourceRuntimeUnchanged
-    [System.IO.File]::WriteAllText((Join-Path $InstallDir 'payload-dir'), $snapDir, $utf8NoBom)
-    [System.IO.File]::WriteAllText((Join-Path $InstallDir 'stamped-version'), $SrcVersion, $utf8NoBom)
+    if ($SourceRuntimeIdentity) {
+        $py = Get-BootstrapPython
+        if (-not $py) { throw 'Source redirect publication requires a bootstrap Python interpreter' }
+        $nativeError = ''
+        $result = Invoke-Hidden -FilePath $py -ArgList @(
+            '-I', '-B', (Join-Path $PSScriptRoot 'versioned_runtime.py'),
+            '--root', $InstallDir, 'publish-redirects', '--payload-dir', $snapDir,
+            '--version', $SrcVersion, '--expected-source-identity', $SourceRuntimeIdentity
+        ) -ErrorOutput ([ref]$nativeError)
+        $code = $LASTEXITCODE
+        if ($code -ne 0) { throw "Source redirect publication failed (exit ${code}): $result$nativeError" }
+    } else {
+        [System.IO.File]::WriteAllText((Join-Path $InstallDir 'payload-dir'), $snapDir, $utf8NoBom)
+        [System.IO.File]::WriteAllText((Join-Path $InstallDir 'stamped-version'), $SrcVersion, $utf8NoBom)
+    }
     Write-Ok "Snapshot: $snapDir"
     Write-SimpleBinstub `
         -CommandName 'agent-pull-requests' `
@@ -800,6 +813,12 @@ try {
         Write-Ok 'Package installed: agent-pull-requests'
 
     }
+    # Source manifest inputs are captured before activation.
+    if ($SourceRuntimeIdentity) {
+        Test-SourceRuntimeUnchanged
+        $sourceOwner = if ($env:COPILOT_PLUGIN_STAGED_FROM) { $env:COPILOT_PLUGIN_STAGED_FROM } else { $PluginDir }
+        $sourceManifestGit = Get-GitInfo -Path (Split-Path $sourceOwner)
+    }
     if (-not (Invoke-VersionedActivate -PayloadHash $payloadHash)) { exit 1 }
 
     Write-SimpleBinstub `
@@ -821,7 +840,11 @@ try {
         -PluginPath $PluginDir `
         -VenvPath $VenvDir `
         -GetSourceKind ${function:Get-SourceKind} `
-        -GetGitInfo ${function:Get-GitInfo} `
+        -GetGitInfo {
+            param($path)
+            if ($SourceRuntimeIdentity) { $sourceManifestGit }
+            else { Get-GitInfo -Path $path }
+        } `
         -PayloadHash $payloadHash `
         -VersionOverride $PackageVersion `
         -AdditionalFields $sourceFields

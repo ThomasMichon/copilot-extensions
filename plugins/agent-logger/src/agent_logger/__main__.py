@@ -29,7 +29,9 @@ from agent_logger.segmenter.platform import detect_machine
 
 
 def _cmd_version(_args: argparse.Namespace) -> int:
-    print(f"agent-logger {__version__} (commit {COMMIT}, built {BUILT_AT})")
+    from agent_logger.source_build import effective_runtime_version
+
+    print(f"agent-logger {effective_runtime_version(__version__)} (commit {COMMIT}, built {BUILT_AT})")
     return 0
 
 

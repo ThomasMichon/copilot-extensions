@@ -26,6 +26,54 @@ they receive attributable installation context.
 3. **Install KeePassXC** with `keepassxc-cli` on PATH (or at `C:\Program Files\KeePassXC\keepassxc-cli.exe` on Windows).
 4. **Point the CLI at a database** with `KPDB`, a named vault, or a repo-local `.agent-vault.json`.
 
+## Source-qualified runtimes
+
+Both native installers accept canonically prepared `runtime-source.json`
+payloads, pinning the complete identity across the install lock, construction,
+completion and activation. These non-editable generations include the package
+version, full source commit and assembly hash; package-only installs remain
+separate. Deferred stamps retain the complete verified payload and vendor
+closure, allowing provisioning after the publisher checkout is unavailable.
+
+Identical inputs preserve snapshots and completion evidence; failed candidates
+do not replace the healthy selected generation. Resolvers require an exact
+current or last-known-good selector when source-qualified slots exist rather
+than choosing an unordered source hash or downgrading to a plain package slot.
+`agent-vault --version` exposes the selected generation while package metadata
+is unchanged. Compatibility helpers continue through their existing command
+routes; this source-adoption path does not change service-supervision policy.
+Retained source slots pass the same isolated interpreter CLI `--help` probe as
+fresh slots before activation; importing only the lazy initializer is insufficient.
+Reselection refreshes source and venv manifest fields
+without rewriting completion evidence.
+Required resolver/binstub publication succeeds after isolated health gating and
+before activation on both native installers. Retained source retries reconcile
+these helpers before selecting the target or refreshing its manifest; publication
+failures are not allowed to fall through into activation.
+The POSIX stamp path refuses directory-preparation failures before changing the
+payload pointer, including when invoked by a conditional caller.
+Service-enabled POSIX install/update callers refuse failed directory preparation,
+unit construction or publication before reconciling systemd or reporting success.
+Unit contents are staged before replacement. Client-only and unavailable-systemd
+skips, and the documented warning-only unsupported-manager behavior, remain
+best-effort and never require a host service in the regression fixtures.
+Custom askpass and service-unit publication also refuses directory and
+symlink-to-directory destinations and invalid staging types; colliding
+directories are preserved rather than treated as move containers.
+
+The cross-plugin native source contracts are in
+`plugins/agent-logger/tests/test_source_runtime_install.py`. Required smoke uses
+small assembled payloads and the real native source/stamp boundaries. Full
+release installation and checkout-removal proof is explicitly gated by
+`COPILOT_EXTENSIONS_SOURCE_INSTALL_FULL=1` and `--allow-explicit-tiers`; select
+the two Vault contracts with
+`-k "(stamp_provision_reuse or failed_source_candidate) and agent-vault"` in
+their own bounded invocation. They share one real healthy installation rather
+than rebuilding it for each contract; existing item/group limits are unchanged.
+The offline package fixture identifies retained projects
+by their declared project names, not their compact retention directory names,
+and still checks complete project metadata and Python source contents.
+
 ## Runtime removal
 
 The installer's `uninstall` action serializes with install/update and keeps vault

@@ -86,7 +86,8 @@ def _extract_function(name: str) -> str:
         elif text[i] == "}":
             depth -= 1
             if depth == 0:
-                return text[start : i + 1]
+                source = (_PLUGIN_ROOT / "scripts" / "source-runtime.sh").as_posix()
+                return f". '{source}'\n" + text[start : i + 1]
         i += 1
     raise AssertionError(f"unbalanced braces extracting {name!r}")
 

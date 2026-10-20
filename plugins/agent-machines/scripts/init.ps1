@@ -503,6 +503,11 @@ function Write-CellDeployManifest {
         $branch = $existing.source.branch
         $dirty = [bool]$existing.source.dirty
     }
+    elseif ($kind -eq 'local' -and $SourceRuntimeIdentity) {
+        $commit = $script:SourceManifestGit.commit
+        $branch = $script:SourceManifestGit.branch
+        $dirty = $script:SourceManifestGit.dirty
+    }
     elseif ($kind -eq 'local') {
         $repoRoot = Split-Path -Parent (Split-Path -Parent $SourcePluginDir)
         try {
@@ -563,7 +568,7 @@ function Write-CellDeployManifest {
         }
     }
     $tmp = "$manifestPath.tmp.$PID"
-    Assert-SourceRuntimeIdentity
+    if (-not $SourceRuntimeIdentity) { Assert-SourceRuntimeIdentity }
     if ($SourceRuntimeIdentity) {
         ($SourceRuntimeIdentity | ConvertFrom-Json).PSObject.Properties | ForEach-Object {
             $manifest[$_.Name] = $_.Value
@@ -868,6 +873,23 @@ function Assert-SourceRuntimeIdentity {
     }
 }
 
+function Get-GitInfo {
+    param([string]$Path)
+    try {
+        $commit = git -C $Path rev-parse --short HEAD 2>$null
+        $branch = git -C $Path rev-parse --abbrev-ref HEAD 2>$null
+        $dirty = $false
+        if (git -C $Path status --porcelain 2>$null) { $dirty = $true }
+        return @{
+            commit = $(if ($commit) { $commit } else { 'unknown' })
+            branch = $(if ($branch) { $branch } else { 'unknown' })
+            dirty  = $dirty
+        }
+    } catch {
+        return @{ commit = 'unknown'; branch = 'unknown'; dirty = $false }
+    }
+}
+
 $PackageVersion = $SrcVersion
 Initialize-SourceRuntime
 $selectedSourceIdentity = if ($SourceRuntimeIdentity) { $SourceRuntimeIdentity } else { '{}' }
@@ -876,6 +898,11 @@ if ($env:AGENT_MACHINES_EXPECTED_SOURCE_IDENTITY -and
     throw 'Source runtime identity changed across the installation transaction'
 }
 $env:AGENT_MACHINES_EXPECTED_SOURCE_IDENTITY = $selectedSourceIdentity
+# Source manifest inputs are captured before activation.
+if ($SourceRuntimeIdentity) {
+    $sourceOwner = if ($env:COPILOT_PLUGIN_STAGED_FROM) { $env:COPILOT_PLUGIN_STAGED_FROM } else { $PluginDir }
+    $script:SourceManifestGit = Get-GitInfo -Path (Split-Path -Parent (Split-Path -Parent $sourceOwner))
+}
 if (
     $Action -in @('cell-provision', 'slot-cutover') -and
     -not $env:AGENT_MACHINES_CELL_PROVISION_LOCK_HELD
@@ -1831,23 +1858,6 @@ function Get-SourceKind {
 }
 # === end install-contract:v3 source-kind ===
 
-function Get-GitInfo {
-    param([string]$Path)
-    try {
-        $commit = git -C $Path rev-parse --short HEAD 2>$null
-        $branch = git -C $Path rev-parse --abbrev-ref HEAD 2>$null
-        $dirty = $false
-        if (git -C $Path status --porcelain 2>$null) { $dirty = $true }
-        return @{
-            commit = $(if ($commit) { $commit } else { 'unknown' })
-            branch = $(if ($branch) { $branch } else { 'unknown' })
-            dirty  = $dirty
-        }
-    } catch {
-        return @{ commit = 'unknown'; branch = 'unknown'; dirty = $false }
-    }
-}
-
 function Deploy-SelfProvisioningBinstub {
     # agent-machines ships a SINGLE self-provisioning .cmd (no .ps1): it is
     # spawned by Copilot as a bare ``command: agent-machines`` stdio MCP server,
@@ -1945,11 +1955,11 @@ goto :eof
     Write-Ok "Binstub: $cmdPath (self-provisioning)"
 }
 
-# Serializes every stamp-family action (this fast binstub-only path AND the
-# full Invoke-Stamp below) against concurrent invocations -- e.g. two fresh
+# Serializes full stamps and source-qualified fast stamps against concurrent
+# invocations -- e.g. two fresh
 # sessions launching their sessionStart hook at nearly the same instant --
-# under ONE named mutex keyed by the install dir, so they can never observe
-# or produce a half-written binstub/marker set.
+# under ONE named mutex keyed by the install dir. Legacy fast stamps remain
+# deliberately unlocked.
 function Enter-StampLock {
     $stampHash = [BitConverter]::ToString(
         [Security.Cryptography.SHA256]::Create().ComputeHash(
@@ -2007,12 +2017,18 @@ function Invoke-StampBinstubOnly {
         Write-Fail "stamp-binstub only supports the default install dir ($DefaultInstallDir) -- the generated launcher hardcodes that root and cannot read markers written to '$InstallDir'."
         exit 1
     }
-    # Review finding (round 11): this used to take the SAME Enter-StampLock
+    # Source stamps share the full stamp's lock across selection and publication.
+    # Legacy stamps remain Python-free and deliberately unlocked.
+    $stampMutex = $null
+    if ($SourceRuntimeIdentity) { $stampMutex = Enter-StampLock }
+    try {
+    Assert-SourceRuntimeIdentity
+    # Review finding (round 11): the legacy path used to take Enter-StampLock
     # mutex Invoke-Stamp holds across its whole (multi-second) snapshot copy.
     # A concurrent slow `stamp` already holding it made this "fast" path wait
     # behind it for up to 20 seconds -- reintroducing the very hook-timeout
     # race this two-stage split exists to prevent. Deliberately NOT taking
-    # any lock here: every operation below (Publish-FileAtomically's marker
+    # any lock for legacy here: every operation below (Publish-FileAtomically's marker
     # writes, Deploy-SelfProvisioningBinstub's stub/resolver writes) was
     # already hardened in round 9 to be safe under UNLOCKED concurrent
     # callers -- non-overwriting Move-Item with retry-through-Replace() on a
@@ -2059,8 +2075,8 @@ function Invoke-StampBinstubOnly {
     # scripts\init.ps1 (whether from a concurrent/prior full `stamp` or a
     # concurrent/prior stamp-binstub), so this fast path can never regress
     # an already-valid marker -- it only ever fills in a genuinely missing
-    # or broken one. payload-origin needs no such guard: both functions
-    # always write it the identical value ($probePayload).
+    # or broken one. Legacy payload-origin retains its existing independent
+    # publication; source publication below binds origin to the selected payload.
     $payloadDirAlreadyValid = $false
     if (Test-Path -LiteralPath $payloadDirMarker -PathType Leaf) {
         try {
@@ -2068,18 +2084,46 @@ function Invoke-StampBinstubOnly {
             if ($existingPayloadDir -and (Test-Path -LiteralPath (Join-Path $existingPayloadDir 'scripts\init.ps1') -PathType Leaf)) {
                 $payloadDirAlreadyValid = $true
                 if ($SourceRuntimeIdentity) {
-                    $existingIdentity = Get-SourceRuntimeIdentity -Payload $existingPayloadDir -ExpectedVersion $SrcVersion
+                    $existingIdentity = Get-SourceRuntimeIdentity -Payload $existingPayloadDir
+                    if ($existingIdentity -cne $SourceRuntimeIdentity -and $existingIdentity -cne '{}') {
+                        throw 'Published source payload differs from the selected source; refusing fast-stamp replacement'
+                    }
                     $payloadDirAlreadyValid = $existingIdentity -ceq $SourceRuntimeIdentity
                 }
             }
-        } catch { $payloadDirAlreadyValid = $false }
+        } catch {
+            if ($SourceRuntimeIdentity -and $payloadDirAlreadyValid) { throw }
+            $payloadDirAlreadyValid = $false
+        }
     }
-    if (-not $payloadDirAlreadyValid) {
-        Assert-SourceRuntimeIdentity -Payload $probePayload
-        Publish-FileAtomically -Path $payloadDirMarker -Content $probePayload -Encoding $utf8NoBom
+    if ($SourceRuntimeIdentity) {
+        $stampPayload = if ($payloadDirAlreadyValid) { $existingPayloadDir } else { $probePayload }
+        Assert-SourceRuntimeIdentity -Payload $stampPayload
+        Assert-SourceRuntimeIdentity
+        $py = Get-BootstrapPython
+        if (-not $py) { throw 'Source redirect publication requires a bootstrap Python interpreter' }
+        $nativeError = ''
+        $result = Invoke-Hidden -FilePath $py -ArgList @(
+            '-I', '-B', (Join-Path $PSScriptRoot 'versioned_runtime.py'),
+            '--root', $InstallDir, 'publish-redirects', '--payload-dir', $stampPayload,
+            '--payload-origin', $probePayload, '--expected-source-identity', $SourceRuntimeIdentity
+        ) -ErrorOutput ([ref]$nativeError)
+        $code = $LASTEXITCODE
+        if ($code -ne 0) { throw "Source redirect publication failed (exit ${code}): $result$nativeError" }
+    } else {
+        if (-not $payloadDirAlreadyValid) {
+            Assert-SourceRuntimeIdentity -Payload $probePayload
+            Publish-FileAtomically -Path $payloadDirMarker -Content $probePayload -Encoding $utf8NoBom
+        }
+        Publish-FileAtomically -Path $payloadOriginMarker -Content $probePayload -Encoding $utf8NoBom
     }
-    Publish-FileAtomically -Path $payloadOriginMarker -Content $probePayload -Encoding $utf8NoBom
     Deploy-SelfProvisioningBinstub
+    } finally {
+        if ($stampMutex) {
+            [void]$stampMutex.ReleaseMutex()
+            $stampMutex.Dispose()
+        }
+    }
 }
 
 function Invoke-Stamp {
@@ -2172,9 +2216,23 @@ function Invoke-Stamp {
     Assert-SourceRuntimeIdentity
     # Same atomic-publish rationale as Invoke-StampBinstubOnly above: a
     # generated binstub reads payload-dir outside this stamp mutex.
-    Publish-FileAtomically -Path $payloadOriginMarker -Content $probePayload -Encoding $utf8NoBom
-    Publish-FileAtomically -Path $payloadDirMarker -Content $snapDir -Encoding $utf8NoBom
-    [System.IO.File]::WriteAllText((Join-Path $InstallDir 'stamped-version'), $SrcVersion, $utf8NoBom)
+    if ($SourceRuntimeIdentity) {
+        $py = Get-BootstrapPython
+        if (-not $py) { throw 'Source redirect publication requires a bootstrap Python interpreter' }
+        $nativeError = ''
+        $result = Invoke-Hidden -FilePath $py -ArgList @(
+            '-I', '-B', (Join-Path $PSScriptRoot 'versioned_runtime.py'),
+            '--root', $InstallDir, 'publish-redirects', '--payload-dir', $snapDir,
+            '--version', $SrcVersion, '--payload-origin', $probePayload,
+            '--expected-source-identity', $SourceRuntimeIdentity
+        ) -ErrorOutput ([ref]$nativeError)
+        $code = $LASTEXITCODE
+        if ($code -ne 0) { throw "Source redirect publication failed (exit ${code}): $result$nativeError" }
+    } else {
+        Publish-FileAtomically -Path $payloadOriginMarker -Content $probePayload -Encoding $utf8NoBom
+        Publish-FileAtomically -Path $payloadDirMarker -Content $snapDir -Encoding $utf8NoBom
+        [System.IO.File]::WriteAllText((Join-Path $InstallDir 'stamped-version'), $SrcVersion, $utf8NoBom)
+    }
     Write-Ok "Snapshot: $snapDir"
     Deploy-SelfProvisioningBinstub
     Write-Ok 'Stamped: agent-machines binstub on PATH; runtime provisions on first use.'
@@ -2478,7 +2536,7 @@ if ($VersionedRuntime) {
 # -- 4. Deploy binstub -------------------------------------------------
 
 if (-not $CellMode) {
-    Assert-SourceRuntimeIdentity
+    if (-not $SourceRuntimeIdentity) { Assert-SourceRuntimeIdentity }
     Deploy-SelfProvisioningBinstub
 }
 
@@ -2489,16 +2547,16 @@ if (-not $CellMode) {
 $manifestPath = Join-Path $InstallDir 'deploy-manifest.json'
 $sourcePluginDir = if ($CellMode) { $OriginPayloadRoot } else { $PluginDir }
 $kind = Get-SourceKind -PluginPath $sourcePluginDir
-$ver = '0.0.0'
+$ver = if ($SourceRuntimeIdentity) { $PackageVersion } else { '0.0.0' }
 $pyproj = Join-Path $PluginDir 'pyproject.toml'
-if (Test-Path $pyproj) {
+if (-not $SourceRuntimeIdentity -and (Test-Path $pyproj)) {
     $verLine = Select-String -Path $pyproj -Pattern '^\s*version\s*=' | Select-Object -First 1
     if ($verLine) { $ver = ($verLine.Line -replace '.*=\s*"([^"]+)".*', '$1') }
 }
 $commit = $null; $branch = $null; $dirty = $false
 if ($kind -eq 'local') {
     $repoRoot = Split-Path -Parent (Split-Path -Parent $sourcePluginDir)
-    $git = Get-GitInfo -Path $repoRoot
+    $git = if ($SourceRuntimeIdentity) { $script:SourceManifestGit } else { Get-GitInfo -Path $repoRoot }
     $commit = $git.commit; $branch = $git.branch; $dirty = $git.dirty
 }
 if ($CellMode) {
@@ -2531,7 +2589,7 @@ if ($CellMode) {
         runtime        = 'python'
     }
     $tmp = "$manifestPath.tmp"
-    Assert-SourceRuntimeIdentity
+    if (-not $SourceRuntimeIdentity) { Assert-SourceRuntimeIdentity }
     if ($SourceRuntimeIdentity) {
         ($SourceRuntimeIdentity | ConvertFrom-Json).PSObject.Properties | ForEach-Object {
             $manifest[$_.Name] = $_.Value
