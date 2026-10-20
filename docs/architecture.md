@@ -62,7 +62,7 @@ remain separate slices of the
 
 | Plugin | Kind | Deployed as | Lifecycle |
 |--------|------|-------------|-----------|
-| [efforts](../plugins/efforts/) | Planning skills (`planning-efforts`, `efforts-setup`) | Marketplace payload (skills + assets) | Loaded on demand when a skill matches; no runtime to install |
+| [efforts](../plugins/efforts/) | Planning and execution skills (`planning-efforts`, `efforts-setup`, `driving-backlog-burndown`) | Marketplace payload (skills + assets) | Loaded on demand when a skill matches; no runtime to install |
 | [visions](../plugins/visions/) | North-star skills (`envisioning`, `visions-setup`) | Marketplace payload (skills + assets) | Loaded on demand when a skill matches; no runtime to install |
 | [context-handoff](../plugins/context-handoff/) | Ambient continuity hook + session **extension** + `/handoff` skill | Marketplace payload (hook, scripts, extension, and skill) | Hook injects a concise owner-marked continuity kernel; extension is auto-discovered from the enabled plugin's `extensions/` dir; no copy to `~/.copilot/extensions/`, no deploy manifest |
 | [customizing-copilot](../plugins/customizing-copilot/) | Customization and CLI-diagnostics skills (authoring skills, sub-agents, MCP servers, plugins, harnesses, review, startup hangs, module decomposition, agent hoisting, instruction-sync automation) | Marketplace payload (skills) | Loaded on demand when a CLI customization or startup-diagnostics prompt matches; no runtime to install |

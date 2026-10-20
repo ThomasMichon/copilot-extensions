@@ -39,6 +39,11 @@ extra sections). The full reference is
 [`references/efforts.md`](references/efforts.md); the README template is
 [`assets/TEMPLATE.md`](assets/TEMPLATE.md).
 
+For a scoped backlog recovery with measurable count/age targets and ongoing
+original-owner supervision, use [driving-backlog-burndown](../driving-backlog-burndown/SKILL.md)
+after establishing this canonical effort. It adds a charter and operating
+loop without replacing this skill's placement or completion lifecycle.
+
 ## First: resolve the effort home, then read its addendum
 
 Efforts are standalone. If no external state-root binding is in play, the

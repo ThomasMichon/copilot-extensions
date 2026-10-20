@@ -1,0 +1,9 @@
+{
+  "comment": "Add a charter-driven backlog burndown skill with owner tracking, supervision and continuity templates",
+  "changes": [
+    {
+      "plugin": "efforts",
+      "type": "patch"
+    }
+  ]
+}

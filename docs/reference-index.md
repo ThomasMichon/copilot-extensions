@@ -32,7 +32,7 @@ mechanics. Plugin-local guides and skills own their current commands.
 
 | Component | References |
 |-----------|------------|
-| Efforts | [Overview](../plugins/efforts/README.md), [planning](../plugins/efforts/skills/planning-efforts/SKILL.md), [schema/lifecycle reference](../plugins/efforts/skills/planning-efforts/references/efforts.md), [repo setup](../plugins/efforts/skills/efforts-setup/SKILL.md) |
+| Efforts | [Overview](../plugins/efforts/README.md), [planning](../plugins/efforts/skills/planning-efforts/SKILL.md), [schema/lifecycle reference](../plugins/efforts/skills/planning-efforts/references/efforts.md), [backlog burndown charter and continuity](../plugins/efforts/skills/driving-backlog-burndown/SKILL.md), [repo setup](../plugins/efforts/skills/efforts-setup/SKILL.md) |
 | Visions | [Overview](../plugins/visions/README.md), [envisioning](../plugins/visions/skills/envisioning/SKILL.md), [repo setup](../plugins/visions/skills/visions-setup/SKILL.md) |
 | Logger | [Overview](../plugins/agent-logger/README.md), [one-session logging](../plugins/agent-logger/skills/log-session/SKILL.md), [backlog processing](../plugins/agent-logger/skills/process-backlog/SKILL.md), [session-sync setup](../plugins/agent-logger/skills/session-sync-setup/SKILL.md) |
 | Index | [Indexing/retrieval owner](../plugins/agent-index/README.md) |
