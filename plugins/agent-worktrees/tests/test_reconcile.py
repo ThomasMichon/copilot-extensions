@@ -234,7 +234,8 @@ def env(tmp_path: Path, monkeypatch):
                     shutil.copyfile(source, helper_py.parent / source.name)
             helper_ps1 = helper_py.with_name("installation-context.ps1")
             if not helper_ps1.is_file():
-                shutil.copyfile(INSTALLATION_CONTEXT_PS1, helper_ps1)
+                for source in INSTALLATION_CONTEXT_PS1.parent.glob("*.ps1"):
+                    shutil.copyfile(source, helper_py.parent / source.name)
         return pdir
 
     def deploy_runtime(name: str, version: str):
@@ -276,7 +277,8 @@ def env(tmp_path: Path, monkeypatch):
                 shutil.copyfile(source, helper.parent / source.name)
         helper_ps1 = helper.with_name("installation-context.ps1")
         if not helper_ps1.is_file():
-            shutil.copyfile(INSTALLATION_CONTEXT_PS1, helper_ps1)
+            for source in INSTALLATION_CONTEXT_PS1.parent.glob("*.ps1"):
+                shutil.copyfile(source, helper.parent / source.name)
         durable = e.home / ".copilot-extensions"
         namespace_generation = 0
         if marketplace_key == MKT:
@@ -801,8 +803,10 @@ def test_deferred_runtime_admission_uses_target_project_without_ambient_state(
     monkeypatch.setattr(main, "_provisioning_status_diagnostic", lambda cwd: "")
     workers, spawned = [], []
     monkeypatch.setattr(
-        main.threading, "Thread",
-        lambda *, target, **kwargs: SimpleNamespace(start=lambda: workers.append(target)),
+        main, "threading",
+        SimpleNamespace(Thread=lambda *, target, **kwargs: SimpleNamespace(
+            start=lambda: workers.append(target),
+        )),
     )
 
     real_popen = main.subprocess.Popen
@@ -822,7 +826,11 @@ def test_deferred_runtime_admission_uses_target_project_without_ambient_state(
     release.set()
     assert len(workers) == 1
     workers[0]()
-    assert len(spawned) == 1
+    preview_log = env.home / ".agent-worktrees" / "logs" / "provision-preview.log"
+    assert len(spawned) == 1, (
+        preview_log.read_text(encoding="utf-8") if preview_log.exists()
+        else "no provisioning preview diagnostic"
+    )
     assert spawned[0][spawned[0].index("--repo") + 1] == str(launch_dir)
     assert cfg.active_project() == resident_project
 

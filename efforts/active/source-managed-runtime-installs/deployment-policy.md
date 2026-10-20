@@ -112,6 +112,28 @@ second registry of runtime roots or an extension of the binary mode policy.
 Explicit management will compose with the existing source-qualified lifecycle
 lease rather than treating this read-only decision as a management permit.
 
+## Reconciler caller integration
+
+The first caller slice gates each runtime-needed `build_plan` action after
+marketplace payload decisions and the existing monotonic version guard.
+It uses that plugin's governed root and owning helper, not the Worktrees
+installation's policy as a fleet-wide switch. `apply_plan` repeats the check
+immediately before default or custom execution and rejects a changed
+payload/root/receipt. An older standalone helper remains usable when there
+is no policy; a present policy without capable canonical support refuses
+publication with a diagnostic.
+
+Real helper fixtures cover legacy policy states, independent targets,
+policy changes between preview and execution, active-cell versus legacy-root
+scope, healthy-runtime reuse, unsupported helpers and unauthenticated hints.
+Existing unsupported cell-installer readiness remains independent of deployment
+permission; the policy does not invent an installer capability.
+
+This is not a completed publication boundary. Native installers, launcher-run
+plans, session bootstrap and indirect first use still need their own admission
+at the actual mutation seam, including explicit management authorization.
+Those remaining paths and positive retained-hook assertions keep Phase 3 open.
+
 ## Validation before claiming Phase 3 complete
 
 - [ ] Exercise the real session-bootstrap and indirect first-use paths with

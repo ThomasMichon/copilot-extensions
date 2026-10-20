@@ -1157,6 +1157,22 @@ deactivation-required state reconciles only after the helper validates the exact
 plugin receipt and root; activation-required, maintenance, invalid, foreign,
 orphaned, revalidation, and provenance-uncertain states remain read-only.
 
+Runtime planning also checks the addressed installation's
+[`runtime-deployment.json`](../../../libs/installation-context/README.md)
+before emitting an installer action. A managed, malformed, unsupported or
+foreign policy suppresses only that runtime action and supplies a diagnostic;
+it does not suppress requested marketplace payload refreshes or another
+plugin's runtime. With no policy, older standalone payloads retain their
+existing behavior. A present policy requires a capable owning helper; an older
+helper cannot silently ignore it.
+
+`reconcile-plugins --apply` revalidates the installation, plan root/receipt and
+deployment permission before either its default or custom execution adapter.
+This catches a policy added after planning. Healthy runtimes need no
+publication permission to remain selected. Uninstall is a separate action,
+not runtime publication. These checks cover the reconciler, not independent
+bootstrap, first-use or direct native installer entry points.
+
 ### Teardown sweep (`uninstall-plugins`)
 
 The symmetric counterpart to `reconcile-plugins`, but for removal rather than

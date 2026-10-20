@@ -64,6 +64,8 @@ import yaml
 from . import config as cfg
 from . import runtime_identity
 from .installer_capabilities import posix_zero_downtime_flag_supported
+from .installation_probe import run_installation_probe, strict_json_object as _strict_json_object
+from .reconcile_deployment import execution_diagnostic, publication_diagnostic
 from .update_gate import runtime_allowed as runtime_allowed
 
 MARKETPLACE = "copilot-extensions"
@@ -173,19 +175,6 @@ def _read_json(path: Path) -> dict[str, Any] | None:
         return json.loads(path.read_text(encoding="utf-8"))
     except Exception:
         return None
-
-
-def _strict_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
-    """Build one JSON object while rejecting duplicate or case-conflicting keys."""
-    result: dict[str, Any] = {}
-    normalized: set[str] = set()
-    for key, value in pairs:
-        folded = key.casefold()
-        if key in result or folded in normalized:
-            raise ValueError(f"duplicate or case-conflicting JSON key: {key}")
-        result[key] = value
-        normalized.add(folded)
-    return result
 
 
 def _home() -> Path:
@@ -740,6 +729,7 @@ def _run_installation_mode_helper(
     legacy_root: Path,
     *,
     context: Path | None,
+    action: str = "probe-legacy",
 ) -> dict[str, Any]:
     durable_home = _home() / ".copilot-extensions"
     common = {
@@ -765,7 +755,7 @@ def _run_installation_mode_helper(
             "-NoProfile",
             "-File",
             str(helper),
-            "probe-legacy",
+            action,
             "-SourceJson",
             common["source_json"],
             "-MarketplaceKey",
@@ -793,7 +783,7 @@ def _run_installation_mode_helper(
         command = [
             sys.executable, "-I", "-X", "utf8",
             str(helper),
-            "probe-legacy",
+            action,
             "--source-json",
             common["source_json"],
             "--marketplace-key",
@@ -821,55 +811,9 @@ def _run_installation_mode_helper(
     child_environment = os.environ.copy()
     for key in _RUNTIME_ENV_UNSET:
         child_environment.pop(key, None)
-    try:
-        process = subprocess.run(
-            command,
-            capture_output=True,
-            text=True, encoding="utf-8",
-            check=False,
-            env=child_environment,
-            timeout=15,
-        )
-    except subprocess.TimeoutExpired as error:
-        raise ValueError(
-            f"installation-mode resolution timed out for {plugin_name}"
-        ) from error
-    except OSError as error:
-        raise ValueError(
-            f"installation-mode resolver could not run for {plugin_name}: {error}"
-        ) from error
-    if process.returncode not in {0, 3}:
-        detail = " ".join(
-            (process.stderr.strip() or process.stdout.strip()).split()
-        )[:240]
-        suffix = f": {detail}" if detail else ""
-        raise ValueError(
-            f"installation-mode resolver failed for {plugin_name} "
-            f"(exit {process.returncode}){suffix}"
-        )
-    try:
-        result = json.loads(
-            process.stdout,
-            object_pairs_hook=_strict_json_object,
-        )
-    except (json.JSONDecodeError, TypeError, ValueError) as error:
-        raise ValueError(
-            f"installation-mode resolver returned invalid JSON for {plugin_name}"
-        ) from error
-    if not isinstance(result, dict):
-        raise ValueError(
-            f"installation-mode resolver returned a non-object for {plugin_name}"
-        )
-    allow_mutation = result.get("allowMutation")
-    if (
-        (process.returncode == 0 and allow_mutation is not True)
-        or (process.returncode == 3 and allow_mutation is not False)
-    ):
-        raise ValueError(
-            f"installation-mode resolver returned inconsistent mutation status "
-            f"for {plugin_name}"
-        )
-    return result
+    return run_installation_probe(
+        command, child_environment, plugin_name, action=action,
+    )
 
 
 def _path_field(
@@ -2005,6 +1949,16 @@ def build_plan(
                 # (rver is None) and forward/ambiguous cases still deploy.
                 if _version_lt(pver, rver):
                     continue
+                diagnostic = publication_diagnostic(
+                    name, pdir, selected_runtime_root,
+                    context=(
+                        Path(runtime_env["COPILOT_EXTENSIONS_CONTEXT"])
+                        if "COPILOT_EXTENSIONS_CONTEXT" in runtime_env else None
+                    ),
+                )
+                if diagnostic is not None:
+                    diagnostics.append(diagnostic)
+                    continue
                 try:
                     built = runtime_installer_argv(
                         pdir,
@@ -2037,6 +1991,8 @@ def build_plan(
                         "from_version": rver,
                         "to_version": pver,
                         "scope": scope,
+                        "payload_root": str(pdir),
+                        "runtime_root": str(selected_runtime_root),
                         "command": cmd,
                         "argv": argv,
                         "environment": {
@@ -2148,6 +2104,17 @@ def apply_plan(
                 argv[0] = copilot
             _log(f"provision: {service} [{upd.get('reason', '?')}] -> {' '.join(argv)}")
             try:
+                diagnostic = execution_diagnostic(upd)
+                if diagnostic is not None:
+                    _log(
+                        f"provision: {service} [{diagnostic['reason']}] "
+                        f"{diagnostic['message']}"
+                    )
+                    executed.append({
+                        "service": service, "argv": argv, "ok": False,
+                        "returncode": 3, "diagnostic": diagnostic,
+                    })
+                    continue
                 rc = (
                     _custom_runner(argv, upd)
                     if runner is not None

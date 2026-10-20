@@ -109,8 +109,9 @@ The [deployment-policy slice](deployment-policy.md) maps the existing trigger,
 publication and command-ownership boundaries; it does not disable whole hooks.
 
 - [ ] Add a local managed-deployment policy at the shared publication boundary, retaining standalone defaults and installation scope.
-- [ ] Land and qualify the shared installation-owned decision on Python,
+- [x] Land and qualify the shared installation-owned decision on Python,
   no-Python POSIX and PowerShell 5.1 before wiring every publication caller.
+- [ ] Gate each plugin's reconciliation plan and in-process execution without suppressing marketplace refresh or independent targets.
 - [ ] Cover session bootstrap and indirect first-use publication without disabling other hook or extension behavior.
 - [ ] Keep adapters thin and enforce drift-compatible service interaction without implicit runtime replacement.
 
@@ -414,3 +415,13 @@ onto one branch.
 - Implemented the read-only installation-context decision and native diagnostic/probe adapters under #7030. The installation-local record matches existing source/plugin/mode/root/environment ownership; it does not select runtime source or authorize management.
 - Native fixture coverage distinguishes absent, managed, explicit standalone, malformed, unsupported, inaccessible and foreign policies without runtime or redirect writes. The focused Linux reference/Bash/PowerShell matrix passes 108 cases; Windows API/PowerShell 7, the separate 23-case PowerShell 5.1 matrix, packaging and existing mode smoke checks also pass.
 - Publication callers, skew behavior, explicit management admission and the complete native transition remain open. This helper alone does not enforce the plugin/runtime boundary or complete Phase 3.
+
+### 2026-10-20 - Shared deployment decision merged
+- PR #7415 merged as `03019a44d3cb16746a9a8bd95c6a40f65afae4a8` after exact-head Copilot approval with no open findings and successful required checks. The review caught a PowerShell singleton-root-array coercion; the canonical original-root guard and seven additional parity cases close that bug class across all native copies.
+- Re-read the Plan and Validation Plan. Only the shared-decision foundation item closes; actual publication enforcement, retained hook behavior, explicit management, skew and all later adoption gates remain open.
+- Next wire the real bootstrap, indirect first-use and per-installation reconciliation/publication paths to the canonical decision. Preserve independent hook behavior and existing ownership admission; an installed healthy runtime must not require publication permission.
+
+### 2026-10-20 - Per-installation reconciliation implementation
+- Wired the first real caller: each needed runtime plan checks its own deployment policy after payload refresh and monotonic-version decisions. In-process execution revalidates permission and selected root/receipt immediately before either runner. Healthy runtime selection, unrelated plugins and uninstall remain independent.
+- Real helper fixtures cover legacy and active-cell policy scope, late opt-in, older adapters and foreign ownership. Final native Windows passes 191 cases with one platform skip; Linux passes 186 with six Windows-only skips. The bounded diagnostic transport is extracted rather than growing the grandfathered reconciler.
+- Full hook/first-use/native-installer and launcher execution admission, explicit management, skew, source selection and maintenance remain open. No policy, source binding, native deployment or schedule was enabled.
