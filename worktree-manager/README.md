@@ -40,6 +40,52 @@ your shell after a PATH change) and idempotent (re-running heals a partial
 install). The core install is never reimplemented — the Worktree Manager locates and
 calls agent-worktrees' own `install.{ps1,sh}`.
 
+The Manager is a standalone canonical Python-installer-engine adopter. Bootstrap
+selects Python 3.11 or newer without running project resolution, then the engine
+retains the source/dependency/configuration inputs and constructs a non-editable
+runtime. Governed `uv pip install` selects runtime dependencies for this platform,
+not development groups or unrelated platforms, while retaining the configured
+indexes and the seven-day minimum external-dependency age.
+
+Only a candidate passing isolated installed-origin and real CLI-import health
+receives canonical completion and becomes `current-version`. Construction failure
+leaves the previous selector and mux untouched. A legacy payload-only or
+interpreter-only slot is retained; repair constructs a distinct generation rather
+than rewriting an active runtime.
+
+Selector publication uses canonical created-object receipts and recovery while
+holding the selector lease. A partial write restores both previous selector
+states (including absence); prior selected/last-known-good runtimes remain
+retained until publication or recovery settles. Recovery never copies over
+foreign objects. An unsettled recovery retains custody rather than cutting over.
+
+PowerShell, CMD and Bash launch the selected slot through the canonical retention
+bootstrap in isolated mode, preserve its exit status, and never resolve or acquire
+dependencies during ordinary launch. Mux cutover uses that same constructed
+interpreter, not an old interpreter with the new source on `PYTHONPATH`.
+Mux routes and target readiness use the constructed slot's immutable generation,
+including repair/source qualifiers. Health preserves the semantic package
+`version` and separately reports `runtime_generation` from its own interpreter
+prefix, never from the mutable selected marker.
+
+Enter this migration through the current published bootstrap once when the
+selected Manager predates the canonical engine. Already-running legacy updater
+code cannot acquire the new construction contract merely by copying a new
+payload. After bootstrap has selected a canonical runtime, ordinary `update`
+uses the new construction and selection path.
+
+In particular, normal `agent-worktrees update` delegates only to a healthy
+registered Manager; a failing Manager probe falls back to plugin-only updating,
+not Manager bootstrap. A pre-engine `worktree-manager update` still runs its
+old implementation and can select a copied payload without installing it.
+Neither is the migration entrypoint. After this adopter is present on the
+published ref selected by the existing source configuration, invoke the
+published bootstrap command in **One-line bootstrap** below (PowerShell:
+`iex (irm https://raw.githubusercontent.com/ThomasMichon/copilot-extensions/main/worktree-manager/bootstrap.ps1)`).
+It honors `WORKTREE_MANAGER_ROOT` and that root's `[source]` configuration;
+the selected payload ref must contain the canonical adapter. Do not rewrite a
+deployed launcher or use update bypass flags to force this transition.
+
 `doctor` also reports **plugin-catalog alignment**: whether the authored
 catalog (`data/plugins.toml`) still matches the discovered plugin membership
 (same report as `plugins --reconcile`, folded into one surface). A discovered
@@ -67,6 +113,13 @@ reported separately under `repo_registration.unknown` — visible, but never
 treated as confirmed drift.
 
 ## Launch preparation
+
+For changes to installation or launch, run the ordinary contained Manager tests
+and `python tools/run-manager-runtime-acceptance.py --root .validation` from the
+repository root. The latter constructs fresh candidates under the existing
+bounded native supervisor before running its isolated-import, rollback,
+retained-launch and target-interpreter mux assertions through the standard
+test runner. It does not install on the host.
 
 Normal shell launch maintenance reports each synchronous marketplace installer,
 bootstrap update and reconciliation action's start, process exit code and
@@ -337,24 +390,18 @@ registry rather than a literal `worktree-manager` PATH probe.
 
 ### Slot completeness and recovery
 
-Each `versions/<version>/` slot is proven complete by its own
-`.install-complete` marker, written only as the **last** step of a fully
-successful copy + pointer materialization, and invalidated **before** any
-mutation of that slot begins (never left to the copy/removal step that
-follows, which can itself fail partway through on a locked file) -- the
-marker is what proves the build itself completed. A version is reported
-installed (`current-version` published) only when its slot carries that
-marker **and** its key entrypoint files (`pyproject.toml`,
-`src/worktree_manager/__init__.py`, `src/worktree_manager/__main__.py`) --
-a cheap, independent check against *later* damage to an otherwise-complete
-slot, not an exhaustive scan of every module `__main__.py` imports. This
-closes a real failure mode: a Windows `PermissionError` (WinError 32) from
-`shutil.rmtree`/`shutil.copytree` hitting a slot still held open by another
-process (a stranded or still-live mux-daemon pinned there) could otherwise
-leave an existing-but-empty slot on disk while `current-version` still
-correctly named it — every subsequent run then failed with `No module named
-worktree_manager`, indefinitely, since presence-only (`is_dir()`) checking
-treated that broken slot as valid forever.
+Each `versions/<generation>/` directory is an engine-owned venv with canonical
+`.install-complete.json`, `.runtime-input-origins.json` and `.runtime-bootstrap/`
+evidence. Its self-contained source payload is retained under `payload/`;
+that subtree's legacy `.install-complete` proves only assembly. It does not
+authorize runtime selection. Frozen source provenance and isolated installed
+health precede canonical completion, and candidate custody is retained through
+selection and update-triggered mux cutover.
+
+Package versions and runtime generations are distinct: a repair adds the
+canonical `+repair.<identity>` qualifier (or `.repair.<identity>` after a local
+version). Existing source-qualified identities retain their canonical identity.
+This installer does not implicitly claim a mutable `dev` slot.
 
 If you hit `No module named worktree_manager`, the `worktree-manager` binstub
 itself is unusable (it runs `python -m worktree_manager` straight out of the

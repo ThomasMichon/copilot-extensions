@@ -7,7 +7,6 @@ import secrets
 import shlex
 import socket
 import subprocess
-import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -266,30 +265,22 @@ def adopt_kind() -> str:
 
 
 def spawn_passive(slot: Path, *, root: Path, port: int):
-    """Spawn a passive mux-daemon candidate serving ``slot``'s payload.
+    """Spawn from the target's installed interpreter and retention bootstrap.
 
-    Cross-version process isolation invariant (see
-    ``docs/patterns/graceful-daemon-cutover.md``): a spawned child's ``cwd``
-    must never be pinned inside the version slot it serves. ``slot`` is
-    reachable solely as a ``PYTHONPATH`` entry below -- the child's working
-    directory is ``root`` (the stable install root, never itself replaced)
-    instead. Pinning ``cwd`` to ``slot`` was the direct cause of
-    copilot-extensions#4999/#5053: on Windows, a process's cwd holds an open
-    directory handle for as long as the process lives, so any later
-    self-install targeting that exact slot (a retry, or a second payload at
-    the same version) collided with `shutil.rmtree(slot)` for as long as this
-    passive (or its abandoned remains) kept running.
+    The stable-root cwd preserves cross-version process isolation. No source
+    path or dependency environment is borrowed from the updating interpreter.
     """
-    pythonpath = [str(slot / "src")]
-    libs_dir = slot / "libs"
-    if libs_dir.is_dir():
-        for child in sorted(libs_dir.iterdir()):
-            src = child / "src"
-            if src.is_dir():
-                pythonpath.append(str(src))
-    python, extra_env = mux_daemon_process.direct_daemon_python(sys.executable)
+    from .self_install import _runtime_installer
+
+    runtime = _runtime_installer().runtime
+    selected_python = runtime.slot_python(slot.parent.parent, slot.name)
+    bootstrap = slot / ".runtime-bootstrap" / "runtime_launcher.py"
+    if not runtime.is_complete(slot.parent.parent, slot.name) or selected_python is None or not bootstrap.is_file():
+        raise RuntimeError("Mux cutover requires a constructed Manager runtime")
+    python, extra_env = mux_daemon_process.direct_daemon_python(str(selected_python))
     argv = [
         python,
+        "-I", "-S", "-B", "-X", "utf8", str(bootstrap),
         "-m",
         "worktree_manager",
         "mux-daemon",
@@ -299,6 +290,9 @@ def spawn_passive(slot: Path, *, root: Path, port: int):
         "--passive",
     ]
     env = mux_daemon_process.scrub_session_credentials(dict(os.environ))
+    env["WORKTREE_MANAGER_ROOT"] = str(root)
+    for name in ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV", "__PYVENV_LAUNCHER__"):
+        env.pop(name, None)
     env.update(extra_env)
     kwargs: dict[str, object] = {
         "cwd": str(root),
@@ -307,20 +301,19 @@ def spawn_passive(slot: Path, *, root: Path, port: int):
         "stderr": subprocess.DEVNULL,
         "env": env,
     }
-    existing = env.get("PYTHONPATH")
-    env["PYTHONPATH"] = os.pathsep.join(
-        pythonpath + ([existing] if existing else [])
-    )
     kwargs.update(windowless_daemon_kwargs(breakaway=True))
     if os.name != "nt":
         kwargs.update(detached_kwargs())
     return subprocess.Popen(argv, **kwargs)  # noqa: S603
 
 
-def _health_check(host: str, port: int, *, root: Path) -> bool:
+def _health_check(host: str, port: int, *, root: Path, generation: str | None = None) -> bool:
     try:
         status = ControlClient(f"http://{routing.format_authority(host, port)}", root=root).health()
-        return status.get("status") != "draining"
+        return (
+            (status.get("status") == "ready" if generation is not None else status.get("status") != "draining")
+            and (generation is None or status.get("runtime_generation") == generation)
+        )
     except Exception:
         return False
 
@@ -518,13 +511,16 @@ def _lock_data_is_live(lock_data: dict | None) -> bool:
         return False
 
 
-def _await_health(host: str, port: int, *, root: Path, timeout: float, poll: float = 0.5) -> bool:
+def _await_health(
+    host: str, port: int, *, root: Path, timeout: float, poll: float = 0.5,
+    generation: str | None = None,
+) -> bool:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        if _health_check(host, port, root=root):
+        if _health_check(host, port, root=root, generation=generation):
             return True
         time.sleep(poll)
-    return _health_check(host, port, root=root)
+    return _health_check(host, port, root=root, generation=generation)
 
 
 def _legacy_lock_cutover(
@@ -543,7 +539,7 @@ def _legacy_lock_cutover(
         return summary
     new_port = pick_free_port()
     handle = spawn_passive(slot, root=root, port=new_port)
-    if not _await_health(_BIND, new_port, root=root, timeout=health_timeout):
+    if not _await_health(_BIND, new_port, root=root, timeout=health_timeout, generation=version):
         handle.terminate()
         summary["result"] = {"ok": False, "new_port": new_port, "error": "health-timeout"}
         return summary
@@ -572,7 +568,7 @@ def _legacy_lock_cutover(
 
 
 def _already_at_version(route: routing.Endpoint | None, version: str, *, root: Path) -> bool:
-    """True if ``route`` is already serving ``version`` and is actually healthy.
+    """True if the endpoint proves this exact slot generation and readiness.
 
     A cutover attempt is only ever necessary on a genuine version change; a
     caller that reconciles on every session launch (self_update runs at the
@@ -585,7 +581,7 @@ def _already_at_version(route: routing.Endpoint | None, version: str, *, root: P
     return (
         route is not None
         and route.version == version
-        and _health_check(_BIND, route.port, root=root)
+        and _health_check(_BIND, route.port, root=root, generation=version)
     )
 
 
@@ -612,6 +608,7 @@ def activate_after_update(
     health_timeout: float = 60.0,
     drain_timeout: float = 30.0,
 ) -> dict[str, object]:
+    """Cut over to ``version``, the immutable slot name, not package version."""
     resolved_root = root if root is not None else default_root()
     summary: dict[str, object] = {"action": "noop", "root": str(resolved_root)}
 
@@ -687,12 +684,22 @@ def activate_after_update(
             summary["route"] = {"port": route.port, "pid": route.pid, "version": route.version}
             return summary
 
+        target_ports: set[int] = set()
+
+        def spawn_target(port):
+            handle = spawn_passive(slot, root=resolved_root, port=port)
+            target_ports.add(port)
+            return handle
+
         orch = CutoverOrchestrator(
             routing_dir(resolved_root),
             bind=_BIND,
             version=version,
-            spawn_passive=lambda port: spawn_passive(slot, root=resolved_root, port=port),
-            health_check=lambda host, port: _health_check(host, port, root=resolved_root),
+            spawn_passive=spawn_target,
+            health_check=lambda host, port: _health_check(
+                host, port, root=resolved_root,
+                generation=version if port in target_ports else None,
+            ),
             make_client=lambda base_url: _make_client(base_url, root=resolved_root),
             pick_free_port=pick_free_port,
             service="worktree-manager-mux-daemon",

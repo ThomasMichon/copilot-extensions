@@ -38,6 +38,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import uv_editable_ref as uer
+import installer_engine_ref as ier
 
 REPO = Path(__file__).resolve().parent.parent
 PLUGINS_DIR = REPO / "plugins"
@@ -137,7 +138,9 @@ def main() -> int:
             print(f"canonical runtime component missing or linked: {name}", file=sys.stderr)
             return 1
         component_bytes[name] = source.read_bytes()
-    for plugin in plugins:
+    standalone = ier.standalone_python_adopter_dirs(REPO)
+    consumers = (*plugins, *standalone)
+    for plugin in consumers:
         pairs.append((canonical_bytes, plugin / "scripts" / VRT_NAME))
         pairs.append((policy_bytes, plugin / "scripts" / DEPENDENCY_POLICY.name))
         pairs.append((config_bytes, plugin / "scripts" / DEPENDENCY_CONFIG.name))
@@ -177,7 +180,7 @@ def main() -> int:
 
     n_plugins = len(plugins)
     n_res = len(resolver_plugins)
-    scope = f"{n_plugins} plugins (+ resolvers in {n_res})"
+    scope = f"{n_plugins} plugins (+ resolvers in {n_res}); {len(standalone)} standalone adopter(s)"
     if args.check:
         if drifted:
             print(

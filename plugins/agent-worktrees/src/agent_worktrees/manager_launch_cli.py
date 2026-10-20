@@ -239,11 +239,26 @@ def _usable_worktree_manager_launcher_dir() -> Path | None:
     )
     if slot is None:
         return None
+    bootstrap = slot / ".runtime-bootstrap" / "runtime_launcher.py"
+    if bootstrap.is_file():
+        python = next(
+            (path for path in (slot / "bin" / "python", slot / "Scripts" / "python.exe") if path.is_file()),
+            None,
+        )
+        if python is None:
+            output.warn(f"Ignoring an incomplete Worktree Manager runtime at {slot}")
+            return None
+        command = [
+            str(python), "-I", "-S", "-B", "-X", "utf8", str(bootstrap),
+            "-m", "worktree_manager", "--version",
+        ]
+        launcher_dir = slot / "payload" / "bin"
+    else:
+        command = ["uv", "run", "--quiet", "--project", str(slot), "python", "-m", "worktree_manager", "--version"]
+        launcher_dir = slot / "bin"
     version, proc = _core_helper(
         "_probe_worktree_manager_version", _probe_worktree_manager_version
-    )(
-        ["uv", "run", "--quiet", "--project", str(slot), "python", "-m", "worktree_manager", "--version"]
-    )
+    )(command)
     if proc is None:
         output.warn(
             "Ignoring an unusable Worktree Manager install at "
@@ -263,7 +278,7 @@ def _usable_worktree_manager_launcher_dir() -> Path | None:
             f"{slot}: its --version output did not include a supported version."
         )
         return None
-    return slot / "bin"
+    return launcher_dir
 
 
 def _agent_worktrees_launch_command(project: str | None) -> list[str]:

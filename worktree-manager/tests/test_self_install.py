@@ -2,9 +2,9 @@
 
 Asserts the shared versioning artifacts: a plain-text ``current-version`` marker,
 an immutable ``versions/<ver>/`` slot, and a ``~/.local/bin`` binstub — plus
-idempotent, version-gated behavior. No real venv is built (uv is not invoked);
-the fast materialize+marker+binstub path is exercised against a synthetic payload
-and a synthetic HOME/root.
+idempotent, version-gated behavior. Construction is stubbed here so assembly
+and orchestration units never install packages. The separate native acceptance
+lane exercises real governed construction and installed-origin health.
 """
 
 from __future__ import annotations
@@ -19,6 +19,7 @@ import pytest
 from _conftest_sandbox import _apply_sandbox
 
 import worktree_manager.self_install as si
+from _manager_constructor_fixture import apply_constructor_fixture
 from worktree_manager.__main__ import main
 from worktree_manager.self_install import (
     current_version,
@@ -28,6 +29,11 @@ from worktree_manager.self_install import (
     status,
     version_slot,
 )
+
+
+@pytest.fixture(autouse=True)
+def _unit_constructor(monkeypatch):
+    apply_constructor_fixture(monkeypatch)
 
 
 def _fake_payload(tmp: Path, version: str) -> Path:
@@ -81,7 +87,7 @@ def test_apply_installs_marker_slot_and_binstub(tmp_path, monkeypatch):
     # immutable version slot with the payload copied in
     slot = version_slot("1.2.3", root)
     assert slot.is_dir()
-    assert (slot / "src" / "worktree_manager" / "__init__.py").exists()
+    assert (slot / "payload" / "src" / "worktree_manager" / "__init__.py").exists()
     # binstub deployed to ~/.local/bin
     stub = lb / "worktree-manager"
     assert stub.exists()
@@ -104,17 +110,11 @@ def test_windows_binstubs_force_utf8_mode():
     """
     assert 'set "PYTHONUTF8=1"' in si._cmd_binstub()
     assert "$env:PYTHONUTF8 = '1'" in si._ps1_binstub()
+    assert all("-X utf8" in body for body in (si._cmd_binstub(), si._ps1_binstub(), si._sh_binstub()))
 
 
-def test_apply_reaps_stranded_cutover_passive_before_copying_payload(tmp_path, monkeypatch):
-    """A slot left occupied by an abandoned cutover passive (spawned by
-    ``mux_daemon_cutover.spawn_passive`` with its ``cwd`` pinned inside the
-    slot, then stranded when the orchestrator driving that cutover died
-    before promoting or terminating it) must be reaped via the existing
-    breadcrumb-driven recovery BEFORE ``_copy_payload`` tries to delete the
-    slot -- otherwise a bare ``self-install --apply`` can hit a Windows
-    ``PermissionError`` that only ``self_update()``'s own cutover path would
-    have cleared (the gap this test guards against regressing)."""
+def test_apply_retains_stranded_passive_and_constructs_a_distinct_slot(tmp_path, monkeypatch):
+    """Immutable construction preserves occupied old slots and their evidence."""
     from zdd import breadcrumb, diagnostics, routing
 
     import worktree_manager.mux_daemon_cutover as mdc
@@ -162,10 +162,12 @@ def test_apply_reaps_stranded_cutover_passive_before_copying_payload(tmp_path, m
     res = self_install(pd, root=root, dry_run=False)
 
     assert res.action == "installed"
-    assert reaped == [stranded_pid], "the stranded passive must be reaped before rmtree"
-    assert not (slot / "stale-marker.txt").exists(), "the slot must be freshly recopied"
-    assert (slot / "src" / "worktree_manager" / "__init__.py").exists()
-    assert current_version(root) == "9.9.9"
+    assert reaped == [], "immutable construction must not terminate an old passive"
+    assert stranded_pid in live
+    assert (slot / "stale-marker.txt").exists()
+    assert Path(res.slot) != slot
+    assert (Path(res.slot) / "payload" / "src" / "worktree_manager" / "__init__.py").exists()
+    assert current_version(root) == Path(res.slot).name
     # The breadcrumb must be left ALONE (not cleared, not rewritten): it may
     # still name an "old" endpoint that a later, full activate_after_update()
     # -> recover_stale_cutover() needs to undrain. A later real cutover
@@ -200,7 +202,11 @@ def test_apply_retains_slot_when_native_passive_custody_is_unavailable(tmp_path,
     monkeypatch.setattr(diagnostics, "process_start_time", lambda _: "12345")
     monkeypatch.setattr(mdc, "_iter_mux_daemon_pids", lambda: {999999})
     monkeypatch.setattr(mdc, "_terminate_mux_daemon_pid", lambda *_a, **_k: pytest.fail("unsafe kill"))
-    monkeypatch.setattr(si, "_copy_payload", lambda *_: pytest.fail("unsafe slot replacement"))
+    copy = si._copy_payload
+    def copy_new_payload(source, destination):
+        assert not destination.is_relative_to(slot), "unsafe occupied-slot replacement"
+        return copy(source, destination)
+    monkeypatch.setattr(si, "_copy_payload", copy_new_payload)
     if refusal == "promoted":
         for pid, port in ((999999, 54321), (999998, 54322), (999997, 54323)):
             routing.publish_active(
@@ -214,9 +220,9 @@ def test_apply_retains_slot_when_native_passive_custody_is_unavailable(tmp_path,
         monkeypatch.setattr(mdc, "_reap_abandoned_passive", unavailable)
     before = breadcrumb.breadcrumb_path(route).read_bytes()
     result = self_install(pd, root=root, dry_run=False)
-    assert result.action == "error" and "version slot retained" in result.reason
+    assert result.action == "installed" and Path(result.slot) != slot
     assert marker.read_text() == "retained"
-    assert current_version(root) is None
+    assert current_version(root) == Path(result.slot).name
     assert breadcrumb.breadcrumb_path(route).read_bytes() == before
 
 
@@ -254,12 +260,16 @@ def test_failed_native_census_retains_occupied_slot(
         return subprocess.CompletedProcess(argv, code, stdout="", stderr="fixture census failure")
 
     monkeypatch.setattr(mdc.subprocess, "run", census)
-    monkeypatch.setattr(si, "_copy_payload", lambda *_: pytest.fail("unsafe slot replacement"))
+    copy = si._copy_payload
+    def copy_new_payload(source, destination):
+        assert not destination.is_relative_to(slot), "unsafe occupied-slot replacement"
+        return copy(source, destination)
+    monkeypatch.setattr(si, "_copy_payload", copy_new_payload)
     result = self_install(pd, root=root, dry_run=False)
-    assert result.action == "error" and "version slot retained" in result.reason
-    assert len(calls) == (1 if failure_phase == "passive-reap" else 2)
-    assert calls[0][0] == ("powershell" if platform == "nt" else "ps")
-    assert marker.read_text() == "retained" and current_version(root) is None
+    assert result.action == "installed" and Path(result.slot) != slot
+    assert calls == [], "distinct immutable construction must not census the old slot"
+    assert marker.read_text() == "retained"
+    assert current_version(root) == Path(result.slot).name
     assert breadcrumb.breadcrumb_path(route).read_bytes() == before
 
 
@@ -286,56 +296,39 @@ def test_apply_new_slot_does_not_retire_or_block_on_a_promoted_old_slot(tmp_path
     assert breadcrumb.breadcrumb_path(route).read_bytes() == before
 
 
-def test_apply_rechecks_install_need_after_acquiring_the_lease(tmp_path, monkeypatch):
-    """A concurrent self_install()/self_update() could finish installing (and
-    even activating) this EXACT version while this call was waiting to
-    acquire the cutover lease. Without a recheck under the lease, this call
-    would blindly rmtree + recopy a slot that is now the live, already-active
-    install -- racing whatever is currently running out of it. The
-    lock-free pre-check only proves the version was needed at that point in
-    time, not that it still is by the time the lease is actually held."""
+def test_apply_rechecks_selection_before_publication(tmp_path, monkeypatch):
+    """A concurrent selector change refuses publication without rewriting it."""
+    from contextlib import contextmanager
     pd = _fake_payload(tmp_path, "7.8.9")
     root = tmp_path / "root"
     _patch_local_bin(monkeypatch, tmp_path)
     _patch_provider_registry(monkeypatch, tmp_path)
 
-    real_needs_install = si.needs_install
-    calls: list[bool] = []
-
-    def _needs_install_then_satisfied(version_arg, root_arg):
-        result = real_needs_install(version_arg, root_arg)
-        calls.append(result)
-        if len(calls) == 1:
-            return True  # the lock-free pre-check: install still needed
-        # Simulate a concurrent self_install() having finished installing
-        # (and activating) this exact version while we waited for the lease.
-        slot = version_slot(version_arg, root_arg)
-        slot.mkdir(parents=True, exist_ok=True)
-        (slot / "installed-by-concurrent-caller.txt").write_text("already live")
-        si._write_marker(root_arg, version_arg)
-        return False
-
-    monkeypatch.setattr(si, "needs_install", _needs_install_then_satisfied)
+    installer = si._runtime_installer()
+    construct = installer.candidate
+    @contextmanager
+    def concurrent_selection(*args, **kwargs):
+        with construct(*args, **kwargs) as ready:
+            slot = version_slot("concurrent", root)
+            slot.mkdir()
+            (slot / "installed-by-concurrent-caller.txt").write_text("already live")
+            si._write_marker(root, "concurrent")
+            yield ready
+    monkeypatch.setattr(installer, "candidate", concurrent_selection)
 
     res = self_install(pd, root=root, dry_run=False)
 
-    assert res.action == "already-current"
-    assert len(calls) == 2, "must recheck needs_install() a second time under the lease"
+    assert res.action == "error" and "selection changed" in res.reason
     # The concurrently-installed slot must be left completely untouched --
     # not rmtree'd and not recopied over.
-    slot = version_slot("7.8.9", root)
+    slot = version_slot("concurrent", root)
     assert (slot / "installed-by-concurrent-caller.txt").exists()
     assert not (slot / "src").exists()
+    assert current_version(root) == "concurrent"
 
 
-def test_apply_defers_when_cutover_lock_is_busy(tmp_path, monkeypatch):
-    """If another process genuinely holds the cutover lock (a real,
-    concurrent self_update()/activate_after_update() in flight),
-    self_install must never mutate the slot unprotected -- per
-    docs/patterns/graceful-daemon-cutover.md's "serialize cutover attempts
-    under one lease" rule, it must defer (report action="error") rather
-    than proceed with an unguarded rmtree/copy that a concurrent cutover's
-    own spawn_passive could race against."""
+def test_distinct_construction_does_not_require_the_mux_cutover_lock(tmp_path, monkeypatch):
+    """Construction does not replace files held by a concurrent cutover."""
     import worktree_manager.mux_daemon_cutover as mdc
 
     pd = _fake_payload(tmp_path, "4.5.6")
@@ -350,11 +343,9 @@ def test_apply_defers_when_cutover_lock_is_busy(tmp_path, monkeypatch):
 
     res = self_install(pd, root=root, dry_run=False)
 
-    assert res.action == "error"
-    assert "cutover" in res.reason
-    # Nothing must have been mutated: no marker, no slot.
-    assert current_version(root) is None
-    assert not version_slot("4.5.6", root).exists()
+    assert res.action == "installed"
+    assert current_version(root) == "4.5.6"
+    assert si._slot_is_complete(Path(res.slot))
 
 
 def test_apply_is_idempotent_and_version_gated(tmp_path, monkeypatch):
@@ -425,7 +416,8 @@ def test_needs_install_rejects_an_empty_broken_slot(tmp_path, monkeypatch):
     )
     res = self_install(pd, root=root, dry_run=False)
     assert res.action == "installed"
-    assert (slot / "src" / "worktree_manager" / "__init__.py").exists()
+    assert not any(slot.iterdir()), "the damaged prior generation remains untouched"
+    assert (Path(res.slot) / "payload" / "src" / "worktree_manager" / "__init__.py").exists()
     assert needs_install("1.2.3", root) is False
 
 
@@ -445,8 +437,8 @@ def test_needs_install_rejects_a_slot_missing_the_module_launch_target(tmp_path,
     assert needs_install("1.2.3", root) is False
 
     slot = version_slot("1.2.3", root)
-    (slot / "src" / "worktree_manager" / "__main__.py").unlink()
-    assert (slot / "src" / "worktree_manager" / "__init__.py").is_file()
+    (slot / "payload" / "src" / "worktree_manager" / "__main__.py").unlink()
+    assert (slot / "payload" / "src" / "worktree_manager" / "__init__.py").is_file()
 
     assert needs_install("1.2.3", root) is True, (
         "a slot missing its module launch target must never be treated as a valid install"
@@ -520,13 +512,8 @@ def test_copy_payload_oserror_is_normalized_to_a_clean_error_result(tmp_path, mo
     assert current_version(root) == "1.2.3"
 
 
-def test_marker_invalidation_permission_error_aborts_instead_of_proceeding(tmp_path, monkeypatch):
-    """A ``PermissionError`` on the final atomic swap into ``slot`` (e.g. a
-    transient Windows access-denied exhausting ``_replace_with_retry``'s own
-    retries) must abort the install cleanly, restoring the previously-good
-    slot rather than leaving it half-replaced or stripped (#5219's
-    requested fix 3 -- the full-copy failure path must be non-destructive).
-    """
+def test_stale_binstub_does_not_recopy_a_completed_runtime(tmp_path, monkeypatch):
+    """Binstub repair must not attempt a filesystem swap of a healthy slot."""
     pd = _fake_payload(tmp_path, "1.2.3")
     root = tmp_path / "root"
     _patch_local_bin(monkeypatch, tmp_path)
@@ -534,9 +521,7 @@ def test_marker_invalidation_permission_error_aborts_instead_of_proceeding(tmp_p
     self_install(pd, root=root, dry_run=False)
     assert current_version(root) == "1.2.3"
 
-    # Force a reinstall of the SAME version so _copy_payload_unsafe's swap
-    # actually runs against a slot that already holds a previously-good
-    # install.
+    # Request binstub repair without changing the completed package identity.
     monkeypatch.setattr(si, "_binstubs_are_stale", lambda: True)
 
     real_replace_with_retry = si._replace_with_retry
@@ -544,9 +529,7 @@ def test_marker_invalidation_permission_error_aborts_instead_of_proceeding(tmp_p
 
     def _flaky_replace(src, dst, **kwargs):
         calls.append((src, dst))
-        # Let the FIRST rename (slot -> retired) succeed; fail the SECOND
-        # (staging -> slot) -- matching what a transient Windows
-        # access-denied on the final publish step looks like.
+        # Any attempted multi-step runtime swap would hit this failure.
         if len(calls) == 2:
             raise PermissionError(5, "Access is denied")
         return real_replace_with_retry(src, dst, **kwargs)
@@ -554,19 +537,17 @@ def test_marker_invalidation_permission_error_aborts_instead_of_proceeding(tmp_p
     monkeypatch.setattr(si, "_replace_with_retry", _flaky_replace)
 
     slot = version_slot("1.2.3", root)
-    original_init = (slot / "src" / "worktree_manager" / "__init__.py").read_text()
+    original_init = (slot / "payload" / "src" / "worktree_manager" / "__init__.py").read_text()
 
     res = self_install(pd, root=root, dry_run=False)
 
-    assert res.action == "error"
-    assert "Access is denied" in (res.reason or "")
-    # Two renames attempted (slot -> retired, then staging -> slot, which
-    # fails), plus a third restoring retired -> slot.
-    assert len(calls) == 3
+    assert res.action == "installed"
+    assert calls
+    assert all(not src.is_relative_to(slot) and not dst.is_relative_to(slot) for src, dst in calls)
     # The previously-good slot must be restored exactly as it was -- never
     # left half-replaced or stripped.
     assert slot.is_dir()
-    assert (slot / "src" / "worktree_manager" / "__init__.py").read_text() == original_init
+    assert (slot / "payload" / "src" / "worktree_manager" / "__init__.py").read_text() == original_init
     assert current_version(root) == "1.2.3"
 
 
@@ -604,8 +585,8 @@ def test_self_install_refuses_to_overwrite_the_currently_running_slot(tmp_path, 
     res = self_install(pd, root=root, dry_run=False)
 
     assert copied == [], "must never attempt to overwrite the currently-running slot"
-    assert res.action == "already-current"
-    assert "currently-executing slot" in (res.reason or "")
+    assert res.action == "installed"
+    assert Path(res.slot) == slot
     # The slot -- and the "python.exe" the process is running from -- must
     # still exist, completely untouched.
     assert fake_exe.exists()
@@ -864,7 +845,7 @@ def test_public_status_rejects_damaged_slot_and_stale_binstub(tmp_path, monkeypa
     _patch_provider_registry(monkeypatch, tmp_path)
     self_install(pd, root=root, dry_run=False)
     assert status(root).installed is True
-    (version_slot("3.3.3", root) / "src" / "worktree_manager" / "__main__.py").unlink()
+    (version_slot("3.3.3", root) / "payload" / "src" / "worktree_manager" / "__main__.py").unlink()
     damaged = status(root)
     assert damaged.installed_version == "3.3.3"
     assert damaged.binstub is not None
@@ -874,7 +855,8 @@ def test_public_status_rejects_damaged_slot_and_stale_binstub(tmp_path, monkeypa
     stub = lb / ("worktree-manager.cmd" if os.name == "nt" else "worktree-manager")
     stub.write_text("stale", encoding="ascii")
     stale = status(root)
-    assert stale.installed_version == "3.3.3"
+    assert stale.installed_version == current_version(root)
+    assert stale.installed_version.startswith("3.3.3")
     assert stale.binstub is not None
     assert stale.installed is False
 
@@ -926,7 +908,7 @@ def test_self_install_materializes_a_vendor_pointer_from_a_live_monorepo(tmp_pat
     res = self_install(pd, root=root, dry_run=False)
     assert res.action == "installed"
     slot = version_slot("5.5.5", root)
-    copy_dir = slot / "libs" / "shared-lib"
+    copy_dir = slot / "payload" / "libs" / "shared-lib"
     assert not (copy_dir / "VENDOR_POINTER.json").exists()
     assert (copy_dir / "src" / "shared_lib" / "__init__.py").read_text() == "value = 1\n"
 
@@ -955,7 +937,7 @@ def test_self_install_never_requires_a_monorepo_ancestor_when_there_are_no_point
     res = self_install(pd, root=root, dry_run=False)
     assert res.action == "installed"
     slot = version_slot("6.6.7", root)
-    assert (slot / "libs" / "real-lib" / "src" / "real_lib" / "__init__.py").read_text() == (
+    assert (slot / "payload" / "libs" / "real-lib" / "src" / "real_lib" / "__init__.py").read_text() == (
         "value = 1\n"
     )
 
@@ -1041,9 +1023,9 @@ def test_self_install_materializes_a_uv_editable_ref_from_a_live_monorepo(tmp_pa
     res = self_install(pd, root=root, dry_run=False)
     assert res.action == "installed"
     slot = version_slot("5.5.6", root)
-    lib_dir = slot / "libs" / "shared-lib"
+    lib_dir = slot / "payload" / "libs" / "shared-lib"
     assert (lib_dir / "src" / "shared_lib" / "__init__.py").read_text() == "value = 1\n"
-    manifest_text = (slot / "pyproject.toml").read_text(encoding="utf-8")
+    manifest_text = (slot / "payload" / "pyproject.toml").read_text(encoding="utf-8")
     assert 'agent-shared-lib = { path = "libs/shared-lib" }' in manifest_text
     assert "editable = true" not in manifest_text
 
@@ -1141,7 +1123,7 @@ def test_bin_directory_is_deployed_into_the_slot(tmp_path, monkeypatch):
     _patch_provider_registry(monkeypatch, tmp_path)
     self_install(pd, root=root, dry_run=False)
     slot = version_slot("4.4.4", root)
-    deployed = slot / "bin" / "pane-launch.ps1"
+    deployed = slot / "payload" / "bin" / "pane-launch.ps1"
     assert deployed.exists()
     assert deployed.read_bytes() == (pd / "bin" / "pane-launch.ps1").read_bytes()
 

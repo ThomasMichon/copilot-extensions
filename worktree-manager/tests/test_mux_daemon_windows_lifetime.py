@@ -13,7 +13,8 @@ from pathlib import Path
 import agent_procutil as pu
 import pytest
 
-from worktree_manager import mux_daemon, mux_daemon_cutover
+from worktree_manager import mux_daemon_cutover
+from _manager_process_fixture import synthetic_runtime
 
 pytestmark = [
     pytest.mark.skipif(os.name != "nt", reason="native Windows Job lifetime"),
@@ -67,6 +68,7 @@ def test_mux_daemon_survives_caller_job(
 ) -> None:
     root = tmp_path / "isolated runtime"
     root.mkdir()
+    slot = synthetic_runtime(root, "passive") if mode == "passive" else root
     env = dict(os.environ)
     # Only finite, isolated fixture daemons escape this fixture's inner Job.
     # The outer test retains containment and never changes a deployed service.
@@ -88,7 +90,7 @@ def test_mux_daemon_survives_caller_job(
     try:
         caller, job = pu.spawn_sync_in_kill_on_close_job(
             [sys.executable, "-c", _CALLER, str(root), mode,
-             str(Path(mux_daemon.__file__).resolve().parents[2])],
+             str(slot)],
             env=env, cwd=root, stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, **pu.no_window_kwargs(),
         )

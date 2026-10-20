@@ -31,9 +31,10 @@ class _Handle:
 
 
 class _FakeMuxDaemon:
-    def __init__(self, pid: int, *, token: str):
+    def __init__(self, pid: int, *, token: str, generation: str = "2.0.0"):
         self.pid = pid
         self.token = token
+        self.generation = generation
         self.port = None
         self.alive = True
         self.draining = False
@@ -55,7 +56,10 @@ class _FakeMuxDaemon:
 
     def _compute(self, kind: str, payload: dict) -> dict:
         if kind == mdc.health_kind():
-            return {"status": "draining" if self.draining else "ready"}
+            return {
+                "status": "draining" if self.draining else "ready",
+                "runtime_generation": self.generation,
+            }
         if kind == mdc.drain_kind():
             self.draining = True
             timeout = float(payload["timeout"])
@@ -132,7 +136,7 @@ def test_activate_after_update_cuts_over_and_converges(tmp_path, monkeypatch):
     old = _FakeMuxDaemon(101, token=token)
     old.start(mdc.pick_free_port())
     first_new = _FakeMuxDaemon(202, token=token)
-    second_new = _FakeMuxDaemon(303, token=token)
+    second_new = _FakeMuxDaemon(303, token=token, generation="3.0.0")
     daemons = {old.pid: old, first_new.pid: first_new, second_new.pid: second_new}
     pending = [first_new, second_new]
 
@@ -320,7 +324,7 @@ def test_activate_after_update_is_noop_when_already_at_target_version(tmp_path, 
     route_dir.mkdir(parents=True)
     token = mdc.load_or_create_control_token(tmp_path)
 
-    live = _FakeMuxDaemon(101, token=token)
+    live = _FakeMuxDaemon(101, token=token, generation="1.2.3")
     live.start(mdc.pick_free_port())
     routing.publish_active(route_dir, bind="127.0.0.1", port=live.port, pid=live.pid, version="1.2.3")
 
@@ -628,6 +632,8 @@ def test_spawn_passive_never_pins_cwd_inside_the_target_slot(tmp_path, monkeypat
     root = tmp_path / "root"
     slot = root / "versions" / "9.9.9-test"
     (slot / "src").mkdir(parents=True)
+    from _manager_process_fixture import stub_runtime
+    stub_runtime(slot)
 
     captured: dict[str, object] = {}
 

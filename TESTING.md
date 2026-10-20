@@ -1396,6 +1396,35 @@ Explicit out-of-plugin targets use the same bounded runner and admission lease:
 `libs/payload-invocation/tests`, and `runtime-source` selects the source
 preparation/identity/native-consumer contracts in `libs/versioned-runtime/tests`.
 `--all` remains scoped to plugin suites.
+
+Manager's cold canonical-adopter acceptance has an explicit native lane:
+
+```text
+python tools/run-manager-runtime-acceptance.py --root .validation
+```
+
+It uses the existing process-tree containment supervisor and one 300-second
+group budget for fresh/legacy-repair fixture construction plus the assertions.
+Fixtures are constructed before pytest's unchanged 30-second item checks;
+no constructor, dependency policy, package health or failed-selection assertion
+is mocked. The assertions run through `run-plugin-tests.py` with explicit
+`tests/native/test_manager_runtime_install.py` selection. The ordinary Manager
+suite does not recurse into that prepared native lane. Report both ordinary
+orchestration/assembly units and this cold native acceptance before publishing
+a Manager installation change; neither is a substitute for the other.
+The migration fixture requires Git history containing published pre-engine
+Manager `0.6.35-dev1` at `9c7a61518540787498c77a284f640c36bbe7d8e4`.
+It executes that release's controller against the new payload, witnesses the
+old launcher fail with an interpreter-only selection, then enters the new
+bootstrap and reuses the same registered command without `uv` on `PATH`.
+This is an isolated handoff proof, not a live-host or live registry-age probe;
+missing pinned history refuses the lane rather than substituting new code.
+The lane also constructs two same-package, distinct generations, imports both
+through their isolated installed interpreters, and exercises a real contained
+fixture mux cutover to the source-qualified target. Injected failures before and
+after the second selector replacement prove both selector states and runtime
+receipts survive, with no failed-update cutover. Fixture mux processes suppress
+production breakaway and are terminated/waited within the containing test.
 The payload suite's PowerShell contracts require a real `pwsh`; when it is absent
 from the isolation container, run that target through the host's contained runner
 rather than counting skipped PowerShell contracts as validation.

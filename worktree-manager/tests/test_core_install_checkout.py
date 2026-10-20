@@ -11,7 +11,24 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+import pytest
+
 import worktree_manager.core_install as ci
+
+
+@pytest.fixture(autouse=True)
+def _isolate_checkout_ancestors(tmp_path, monkeypatch):
+    # Runner-owned storage may live inside the real checkout. Hide only its
+    # ancestor markers; synthetic checkouts and the real discovery walk remain.
+    markers = {
+        ancestor / ".github" / "plugin" / "marketplace.json"
+        for ancestor in tmp_path.parents
+    }
+    is_file = Path.is_file
+    monkeypatch.setattr(
+        Path, "is_file", lambda path: False if path in markers else is_file(path),
+    )
+    assert ci.find_repo_root(tmp_path) is None
 
 
 def _make_checkout(root: Path) -> Path:
@@ -72,4 +89,4 @@ def test_install_command_uses_resolved_checkout(tmp_path, monkeypatch):
     assert cmd is not None
     name = "install.ps1" if os.name == "nt" else "install.sh"
     assert cmd[-1] == "install"
-    assert name in cmd[-2]
+    assert Path(cmd[-2]) == wmroot / "staging" / "plugins" / "agent-worktrees" / "scripts" / name

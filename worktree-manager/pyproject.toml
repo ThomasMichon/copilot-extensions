@@ -11,7 +11,7 @@ version = "0.1.0-dev97"
 description = "Standalone, out-of-plugin control plane (installer, configurator & worktree launcher) for the copilot-extensions harness."
 readme = "README.md"
 license = "MIT"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 authors = [{ name = "Thomas Michon" }]
 # Textual is the visual-wizard toolkit the Phase 4 configurator UI uses; declared
 # now so the packaging/venv is validated against the real dependency, even
@@ -156,6 +156,9 @@ line-length = 99
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Cold construction is prepared under the existing bounded native group before
+# explicit file selection; its assertions keep the normal per-item deadline.
+norecursedirs = ["*.egg", ".*", "_darcs", "build", "CVS", "dist", "node_modules", "venv", "{arch}", "native"]
 markers = [
     "guard: fast structural and contract checks",
     "contract(name): behavioral contract attribution",

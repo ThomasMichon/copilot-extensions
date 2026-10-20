@@ -67,7 +67,7 @@ plugins/agent-worktrees/src/agent_worktrees/lease_store.py:763  pre-existing at 
 plugins/agent-worktrees/src/agent_worktrees/list_views_cli.py:160  pre-existing at rule introduction, see #5518
 plugins/agent-worktrees/src/agent_worktrees/maintenance_cli.py:237  pre-existing at rule introduction, see #5518 (line shifted by targeted doctor repair)
 plugins/agent-worktrees/src/agent_worktrees/maintenance_cli.py:887  pre-existing at rule introduction, see #5518 (line shifted by targeted doctor repair)
-plugins/agent-worktrees/src/agent_worktrees/manager_launch_cli.py:327  pre-existing at rule introduction, see #5518
+plugins/agent-worktrees/src/agent_worktrees/manager_launch_cli.py:342  unchanged interactive ssh call moved by canonical Manager discovery; pre-existing at rule introduction, see #5518
 plugins/agent-worktrees/src/agent_worktrees/pr_complete.py:58  pre-existing at rule introduction, see #5518
 plugins/agent-worktrees/src/agent_worktrees/pr_complete.py:69  pre-existing at rule introduction, see #5518
 plugins/agent-worktrees/src/agent_worktrees/pr_complete.py:76  pre-existing at rule introduction, see #5518

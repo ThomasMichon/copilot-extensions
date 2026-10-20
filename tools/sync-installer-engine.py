@@ -280,10 +280,10 @@ def verify() -> list[str]:
                     raise ValueError(f"{declaration}: native human-output declaration drift")
             except (OSError, ValueError) as error:
                 problems.append(str(error))
-    for plugin in PYTHON_ADOPTERS:
+    for consumer in ier.python_adopter_dirs(REPO, plugins=PYTHON_ADOPTERS):
         for name in (*ier.PYTHON_FILES, *ier.SUPPORT_FILES):
             source = CANONICAL_DIR / name
-            destination = _plugin_dir(plugin) / "scripts" / name
+            destination = consumer / "scripts" / name
             indirect = next(
                 (found for path in (source, destination)
                  if (found := uer._find_symlinked_ancestor(path, REPO.resolve())) is not None),
@@ -358,10 +358,10 @@ def sync() -> list[str]:
             if not declaration.is_file() or declaration.read_text(encoding="utf-8") != expected:
                 declaration.write_text(expected, encoding="utf-8")
                 written.append(declaration.relative_to(REPO).as_posix())
-    for plugin in PYTHON_ADOPTERS:
+    for consumer in ier.python_adopter_dirs(REPO, plugins=PYTHON_ADOPTERS):
         for name in (*ier.PYTHON_FILES, *ier.SUPPORT_FILES):
             source = CANONICAL_DIR / name
-            destination = _plugin_dir(plugin) / "scripts" / name
+            destination = consumer / "scripts" / name
             for path in (source, destination):
                 indirect = uer._find_symlinked_ancestor(path, REPO.resolve())
                 if indirect is not None:
@@ -390,7 +390,10 @@ def main() -> int:
                 print(f"  - {problem}", file=sys.stderr)
             print("\nRun: python tools/sync-installer-engine.py", file=sys.stderr)
             return 1
-        print(f"installer-engine files in sync across {len(ADOPTERS)} adopter(s).")
+        print(
+            f"installer-engine files in sync across {len(ADOPTERS)} shell adopter(s) "
+            f"and {len(ier.python_adopter_dirs(REPO, plugins=PYTHON_ADOPTERS))} Python consumer(s)."
+        )
         return 0
 
     written = sync()

@@ -1,0 +1,9 @@
+{
+  "comment": "Probe canonical Manager runtimes through their retained interpreter and resolve launcher assets from the retained payload without project resolution.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

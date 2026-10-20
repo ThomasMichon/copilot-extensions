@@ -14,6 +14,7 @@ import pytest
 import agent_procutil as interpreter
 
 from worktree_manager import mux_daemon_cutover, mux_daemon_process
+from _manager_process_fixture import stub_runtime, synthetic_runtime
 
 
 def _venv_python(tmp_path, home="synthetic-base"):
@@ -143,7 +144,7 @@ def test_passive_start_preserves_direct_venv_and_payload_environment(tmp_path, m
     root.mkdir()
     slot = root / "versions" / "candidate"
     captured = {}
-    original_python = mux_daemon_cutover.sys.executable
+    target_python = stub_runtime(slot)
     monkeypatch.setattr(
         mux_daemon_process, "direct_daemon_python",
         lambda source: ("base-pythonw", {"__PYVENV_LAUNCHER__": source}),
@@ -160,8 +161,8 @@ def test_passive_start_preserves_direct_venv_and_payload_environment(tmp_path, m
     assert captured["argv"][0] == "base-pythonw"
     assert captured["kwargs"]["cwd"] == str(root)
     env = captured["kwargs"]["env"]
-    assert env["__PYVENV_LAUNCHER__"] == original_python
-    assert env["PYTHONPATH"].split(os.pathsep)[0] == str(slot / "src")
+    assert env["__PYVENV_LAUNCHER__"] == str(target_python)
+    assert "PYTHONPATH" not in env
     assert "GH_TOKEN" not in env
 
 
@@ -174,12 +175,7 @@ def test_real_windows_venv_runtime_pid_matches_spawn_and_routing(tmp_path):
 
     root = tmp_path / "stable"
     root.mkdir()
-    slot = root / "versions" / "probe"
-    package = slot / "src" / "worktree_manager"
-    package.mkdir(parents=True)
-    (package / "__init__.py").write_text("", encoding="utf-8")
-    (package / "__main__.py").write_text(
-        """import json, os, pathlib, sys, time
+    slot = synthetic_runtime(root, "probe", program="""import json, os, pathlib, sys, time
 from work_coalescing_singleton import CoalescingServer
 root = pathlib.Path(next(a.split('=', 1)[1] for a in sys.argv if a.startswith('--root=')))
 port = int(next(a.split('=', 1)[1] for a in sys.argv if a.startswith('--listen-port=')))
@@ -191,9 +187,7 @@ try:
         time.sleep(0.02)
 finally:
     server.close()
-""",
-        encoding="utf-8",
-    )
+""")
     port = mux_daemon_cutover.pick_free_port()
     proc = mux_daemon_cutover.spawn_passive(slot, root=root, port=port)
     result_path = root / "runtime.json"
@@ -204,7 +198,7 @@ finally:
         assert result_path.exists(), f"probe exited or timed out: {proc.poll()}"
         data = json.loads(result_path.read_text(encoding="utf-8"))
         assert data["pid"] == proc.pid
-        assert os.path.normcase(data["prefix"]) == os.path.normcase(sys.prefix)
+        assert os.path.normcase(data["prefix"]) == os.path.normcase(str(slot))
         from work_coalescing_singleton import client
         client_id = client.new_client_id()
         try:

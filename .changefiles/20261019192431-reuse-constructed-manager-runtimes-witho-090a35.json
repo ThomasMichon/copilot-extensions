@@ -1,0 +1,9 @@
+{
+  "comment": "Adopt canonical Manager runtime construction and installed-origin health before selection; retain prior runtimes on failure and launch/cut over with the constructed interpreter without project resolution.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
