@@ -1228,7 +1228,7 @@ Write-Host '  Try: agent-ssh version' -ForegroundColor DarkGray
 exit 0
 } finally {
     try {
-        if (Get-Command Stop-RuntimeConstruction -ErrorAction SilentlyContinue) {
+        if (Test-Path -LiteralPath 'Function:\Stop-RuntimeConstruction') {
             Stop-RuntimeConstruction
         }
     } finally {

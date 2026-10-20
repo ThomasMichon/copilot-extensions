@@ -1843,7 +1843,7 @@ function Install-Engine {
     return $true
     } finally {
         try {
-            if (Get-Command Stop-RuntimeConstruction -ErrorAction SilentlyContinue) { Stop-RuntimeConstruction }
+            if (Test-Path -LiteralPath 'Function:\Stop-RuntimeConstruction') { Stop-RuntimeConstruction }
         } finally {
             [void]$buildMutex.ReleaseMutex(); $buildMutex.Dispose()
         }
@@ -2716,7 +2716,7 @@ switch ($Action) {
 }
 
 } finally {
-    if (Get-Command Stop-RuntimeConstruction -ErrorAction SilentlyContinue) {
+    if (Test-Path -LiteralPath 'Function:\Stop-RuntimeConstruction') {
         Stop-RuntimeConstruction
     }
 }

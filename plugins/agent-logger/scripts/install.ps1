@@ -1534,7 +1534,7 @@ switch ($Action) {
 }
 
 } finally {
-    if (Get-Command Stop-RuntimeConstruction -ErrorAction SilentlyContinue) {
+    if (Test-Path -LiteralPath 'Function:\Stop-RuntimeConstruction') {
         Stop-RuntimeConstruction
     }
 }

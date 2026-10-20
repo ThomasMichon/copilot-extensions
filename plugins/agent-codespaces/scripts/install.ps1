@@ -1684,7 +1684,7 @@ try {
     exit 1
 } finally {
     try {
-        if (Get-Command Stop-RuntimeConstruction -ErrorAction SilentlyContinue) {
+        if (Test-Path -LiteralPath 'Function:\Stop-RuntimeConstruction') {
             Stop-RuntimeConstruction
         }
     } finally {

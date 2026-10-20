@@ -1517,6 +1517,13 @@ this helper does not itself enroll an old shell installer's build lifetime.
 Installation-cell provenance/receipt governance and its receipt-only
 reservation release remain independently binding.
 
+Optional PowerShell construction cleanup probes the loaded `Function:` provider
+with `Test-Path -LiteralPath`, not `Get-Command`. Command discovery can import an
+autoloadable module even with `-ErrorAction SilentlyContinue`; a cold installer
+must not trigger that side effect merely to decide whether cleanup is present.
+An already-loaded cleanup function still runs, and outer `finally` blocks retain
+their existing lock-release and caller-error behavior.
+
 The attached Bash construction adapter owns `INT` and `TERM` while a candidate
 is held. Both terminate through its `EXIT` settlement, which finishes candidate
 cleanup before chaining the installer's previous exit handler and releasing

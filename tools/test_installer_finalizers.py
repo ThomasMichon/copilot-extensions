@@ -2,6 +2,7 @@
 
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -10,6 +11,70 @@ import pytest
 
 REPO = Path(__file__).resolve().parents[1]
 ENGINE = REPO / "libs" / "installer-engine"
+
+
+@pytest.mark.parametrize("host", ["powershell.exe", "pwsh"])
+@pytest.mark.parametrize("state", ["absent", "loaded", "autoload", "negative-control"])
+def test_native_construction_cleanup_only_uses_loaded_functions(tmp_path, host, state):
+    executable = shutil.which(host) if os.name == "nt" else None
+    if executable is None:
+        pytest.skip(f"native Windows {host} unavailable")
+    guards = []
+    for name in (
+        "agent-bridge", "agent-codespaces", "agent-dispatch", "agent-index",
+        "agent-logger", "agent-pull-requests", "agent-ssh", "agent-vault",
+        "agent-worktrees", "budget-guidance",
+    ):
+        source = (REPO / "plugins" / name / "scripts" / "install.ps1").read_text(encoding="utf-8")
+        matches = re.findall(
+            r"if \([^\r\n]+\) \{\s*Stop-RuntimeConstruction\s*\}", source,
+        )
+        assert len(matches) == (2 if name == "agent-index" else 1), name
+        guards.extend(matches)
+    modules = tmp_path / "modules"
+    module = modules / "CleanupPoison"
+    module.mkdir(parents=True)
+    (module / "CleanupPoison.psd1").write_text(
+        "@{ RootModule='CleanupPoison.psm1'; ModuleVersion='1.0'; "
+        "FunctionsToExport=@('Stop-RuntimeConstruction') }\n", encoding="utf-8",
+    )
+    (module / "CleanupPoison.psm1").write_text(
+        "[IO.File]::WriteAllText($env:CLEANUP_AUTOLOAD_MARKER, 'imported')\n"
+        "throw 'unexpected-cleanup-module-autoload'\n"
+        "function Stop-RuntimeConstruction {}\n", encoding="utf-8",
+    )
+    if state == "negative-control":
+        guards = [
+            "if (Get-Command Stop-RuntimeConstruction -ErrorAction SilentlyContinue) "
+            "{ Stop-RuntimeConstruction }"
+        ]
+    runner = tmp_path / "cleanup.ps1"
+    runner.write_text(
+        "$ErrorActionPreference = 'Stop'\n"
+        "$PSModuleAutoLoadingPreference = 'All'\n"
+        "$script:cleanupCalls = 0\n"
+        + ("function Stop-RuntimeConstruction { $script:cleanupCalls++ }\n" if state == "loaded" else "")
+        + "\n".join(guards)
+        + f"\nif ($script:cleanupCalls -ne {len(guards) if state == 'loaded' else 0}) "
+        "{ throw 'incorrect-cleanup-call-count' }\n"
+        "Write-Output 'cleanup-guard-completed'\n",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [executable, "-NoProfile", "-NonInteractive", "-File", str(runner)],
+        capture_output=True, text=True, timeout=15, creationflags=subprocess.CREATE_NO_WINDOW,
+        env={
+            **os.environ,
+            "PSModulePath": str(modules) if state != "absent" else str(tmp_path / "empty"),
+            "CLEANUP_AUTOLOAD_MARKER": str(tmp_path / "autoload-marker"),
+        },
+    )
+    if state == "negative-control":
+        assert (tmp_path / "autoload-marker").read_text() == "imported"
+    else:
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert result.stdout.strip() == "cleanup-guard-completed"
+        assert not (tmp_path / "autoload-marker").exists()
 
 
 def _purge_fixture(tmp_path):
