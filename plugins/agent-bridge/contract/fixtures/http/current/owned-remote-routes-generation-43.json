@@ -62,11 +62,11 @@
   },
   "independent_expectations": "Hand-authored managed owner capability floor, client request identity and public relationship inspection shape. Local-only retirement and unsupported transfer are exercised by managed lifecycle and native provider tests, not inferred from this vector.",
   "captured_from": {
-    "commit": "7012a063dec7734c643c3c1f5229efde77fb0c35",
+    "commit": "4cee06ed296deec2b17fa9bbcfed7c9b488cfe61",
     "plugin_version": "0.4.1-dev3",
-    "protocol_generation": 43,
     "source_path": "plugins/agent-bridge/src/agent_bridge/routes/relationships.py",
     "source_git_blob": "e81850ca0e0cb8091fe60fe93e771c1ac9ce0baf",
+    "protocol_generation": 43,
     "source_sha256": "89c1680f6e8e7a295a64b07524b7e1823287fdeb614bdc8b7a85f268a77240fa"
   }
 }

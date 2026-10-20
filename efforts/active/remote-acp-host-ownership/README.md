@@ -235,6 +235,16 @@ before the proposal clears review.
   optional-worktree restoration, provider startup and passive restoration, but
   two native cold-start cases still fail. This remains an explicit publication
   qualification blocker, not a reason to widen timeouts or retry into a pass.
+- Generation-43 evidence now identifies exact committed source
+  `4cee06ed296deec2b17fa9bbcfed7c9b488cfe61`: 52 registered sources and 45
+  current vectors, with all upstream generation-42 bytes retained. The registry
+  checker passes both contracts and 353 fixtures. The guard run passes 315
+  cases with eight platform/optional skips; its one stale current-generation
+  provider consumer is corrected to the independent generation-43 vector and
+  passes its real HTTP producer/consumer case. A further focused run passes
+  109 cases, including queue, schema, reconciliation and attention behavior,
+  before that same provider assertion was corrected. No native acceptance is
+  inferred from those results.
 
 ### 2026-10-20 - Optimize production cold startup, not the native deadline
 

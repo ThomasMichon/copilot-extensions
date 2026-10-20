@@ -1,10 +1,10 @@
 {
   "captured_from": {
-    "commit": "1d527942d774bc9da23ad878ba8eac62ea10c40e",
+    "commit": "4cee06ed296deec2b17fa9bbcfed7c9b488cfe61",
     "plugin_version": "0.4.1-dev3",
-    "protocol_generation": 43,
     "source_path": "plugins/agent-bridge/src/agent_bridge/routes/prompts.py",
     "source_git_blob": "85233f1327e3e2ad55dbbe2dd9ce28f35e3e2396",
+    "protocol_generation": 43,
     "source_sha256": "b9045926e4f96defda6416e321729fdf2e66539f594ee55166314a30e08aa8ee"
   },
   "request": {

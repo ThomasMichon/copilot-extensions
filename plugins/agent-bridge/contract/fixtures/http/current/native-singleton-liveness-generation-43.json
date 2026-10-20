@@ -1,10 +1,10 @@
 {
   "captured_from": {
-    "commit": "1d527942d774bc9da23ad878ba8eac62ea10c40e",
+    "commit": "4cee06ed296deec2b17fa9bbcfed7c9b488cfe61",
     "plugin_version": "0.4.1-dev3",
-    "protocol_generation": 43,
     "source_path": "plugins/agent-bridge/src/agent_bridge/singleton_resume.py",
     "source_git_blob": "44ae0445dae3347199a200f8d119e8ffb75eeaa5",
+    "protocol_generation": 43,
     "source_sha256": "1f0ee4f1599af18cdf3f1184af115eb660a2f8d1ff23db812cfac342667132f5"
   },
   "request": {

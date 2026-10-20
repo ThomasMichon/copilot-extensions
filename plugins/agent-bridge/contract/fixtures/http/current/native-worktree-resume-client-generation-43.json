@@ -1,10 +1,10 @@
 {
   "captured_from": {
-    "commit": "1d527942d774bc9da23ad878ba8eac62ea10c40e",
+    "commit": "4cee06ed296deec2b17fa9bbcfed7c9b488cfe61",
     "plugin_version": "0.4.1-dev3",
-    "protocol_generation": 43,
     "source_path": "plugins/agent-bridge/src/agent_bridge/client.py",
     "source_git_blob": "4cc342a43aa7c4b648150ebf3a8be30379577ba2",
+    "protocol_generation": 43,
     "source_sha256": "5baf0775e49aebd69bb67e734b19d07f7e6fbdc5a0d7485c1ab6577da5994ef9"
   },
   "response": {

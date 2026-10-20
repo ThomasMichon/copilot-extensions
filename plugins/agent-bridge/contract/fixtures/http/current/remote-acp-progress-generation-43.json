@@ -22,12 +22,12 @@
     "historical_output_is_fresh": false
   },
   "captured_from": {
-    "commit": "1d527942d774bc9da23ad878ba8eac62ea10c40e",
+    "commit": "4cee06ed296deec2b17fa9bbcfed7c9b488cfe61",
     "plugin_version": "0.4.1-dev3",
-    "protocol_generation": 43,
     "source_path": "plugins/agent-bridge/src/agent_bridge/session_core.py",
-    "source_git_blob": "337327675392254d076f9e99d4f1cfaba1609504",
-    "source_sha256": "59e17e5bf559e09c63c88a2aab5100c5e5900422d0dc4c51384cedda04a4f955"
+    "source_git_blob": "660e8e8bc02f6b1faa438304407f10382e03710d",
+    "protocol_generation": 43,
+    "source_sha256": "8305b4c9c3afd7e8870f2931ffe9ce6e7bebad3ca771605673c306e05d5f4709"
   },
   "reattested_from": {
     "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-acp-progress-generation-42.json",

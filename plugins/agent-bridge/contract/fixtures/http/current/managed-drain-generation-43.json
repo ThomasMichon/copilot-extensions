@@ -13,11 +13,11 @@
   },
   "independent_expectations": "A clean drain may finish while a managed claim inspection is pending, but releasing that inspection cannot admit or persist a new turn. The existing turn-drain refusal remains distinct from answers that settle already-admitted work.",
   "captured_from": {
-    "commit": "2a150b33ee33c1caf758f3a498149a27ff286e2c",
+    "commit": "4cee06ed296deec2b17fa9bbcfed7c9b488cfe61",
     "plugin_version": "0.4.1-dev3",
-    "protocol_generation": 43,
     "source_path": "plugins/agent-bridge/src/agent_bridge/session_prompts.py",
-    "source_git_blob": "8d97b34c3092e833850dd7c09204991c77375b7b",
-    "source_sha256": "83876d3d126b78187fd3d1ba486355f2b97f08adb28805ae66ffdddf06c51a49"
+    "source_git_blob": "f1a860987a909577eb78561431154037aef3ab59",
+    "protocol_generation": 43,
+    "source_sha256": "42ea824ce048c80d61c7039cb7f851c88a090d7bbb981f4b7867d4f2a28da12c"
   }
 }

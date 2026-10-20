@@ -205,7 +205,7 @@ async def test_unconfirmed_reservation_retirement_requires_authoritative_reconci
 async def test_clean_drain_during_authority_inspection_cannot_admit_a_turn(managed, monkeypatch):
     expected = json.loads((
         Path(__file__).resolve().parents[1]
-        / "contract/fixtures/http/current/managed-drain-generation-42.json"
+        / "contract/fixtures/http/current/managed-drain-generation-43.json"
     ).read_text(encoding="utf-8"))
     manager, _, _, _ = managed
     started = await create(manager)

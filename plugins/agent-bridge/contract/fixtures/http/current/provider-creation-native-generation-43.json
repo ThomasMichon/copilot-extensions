@@ -44,11 +44,11 @@
     "required_provider_capability": "instance_pinned_exec"
   },
   "captured_from": {
-    "commit": "1d527942d774bc9da23ad878ba8eac62ea10c40e",
+    "commit": "4cee06ed296deec2b17fa9bbcfed7c9b488cfe61",
     "plugin_version": "0.4.1-dev3",
-    "protocol_generation": 43,
     "source_path": "plugins/agent-bridge/src/agent_bridge/provider_creation.py",
     "source_git_blob": "22bb72dc8a3f90b5123fdb5d515db1e820778507",
+    "protocol_generation": 43,
     "source_sha256": "a85d7ef19f9afa05d6c40f06fb6a5e6a5956b18c260be6cd4666f0c01623880e"
   },
   "compatibility": {
