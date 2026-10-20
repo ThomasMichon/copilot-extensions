@@ -1,5 +1,5 @@
 """Real-Git parity for built-in publication evidence, without provider mutations."""
-from dataclasses import replace
+from dataclasses import asdict, replace
 import json
 from pathlib import Path
 
@@ -67,6 +67,18 @@ def test_unrelated_base_merge_preserves_exact_review(branch):
     git(branch, "checkout", "-q", "change")
     git(branch, "merge", "-q", "--no-edit", "origin/main")
     assert checks.before_publish(branch, BASE, POLICY)["ok"]
+
+
+def test_optional_ssh_binding_preserves_legacy_receipt_identity_when_unset(branch):
+    legacy = asdict(POLICY)
+    del legacy["ssh_url"]
+    expected = checks._hash({"config": legacy, "lenses": checks._lenses(branch, POLICY)})
+    receipt = record(branch)
+    assert receipt["policy_hash"] == expected
+    assert checks.before_publish(branch, BASE, POLICY)["ok"]
+    bound = replace(POLICY, ssh_url="git@forge.invalid:example/project.git")
+    assert not checks.before_publish(branch, BASE, bound)["ok"]
+    assert record(branch, bound)["policy_hash"] != expected
 
 
 def test_dirty_expected_head_policy_and_base_fail_closed(branch):

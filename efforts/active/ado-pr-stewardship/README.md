@@ -197,6 +197,17 @@ remain outside this proposal's authority.
 
 ## Journal
 
+### 2026-10-19 - Preserving unchanged-policy receipt compatibility
+
+- Review found that an empty optional SSH field changed serialized policy
+  fingerprints despite leaving destination behavior unchanged. The fingerprint
+  now omits that empty default, preserving existing receipt identities.
+  A nonempty binding still participates and invalidates previous evidence.
+- The publication selection passes 41 cases. The new regression constructs the
+  pre-field fingerprint explicitly, verifies receipt reuse, then proves adding
+  an SSH binding requires new evidence. Worker coverage also includes all four
+  public CLI checks against real fresh Azure HTTPS and Gitea SSH repositories.
+
 ### 2026-10-19 - Explicit Gitea SSH destination binding
 
 - Follow-up review identified a real Gitea transport distinction: an HTTPS

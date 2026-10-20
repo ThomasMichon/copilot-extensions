@@ -89,10 +89,13 @@ def _snapshot(workspace: str | Path, base: str, config: PublicationChecksConfig,
         raise CheckError("publication base is missing or ambiguous")
     git_dir = Path(_git(root, "rev-parse", "--absolute-git-dir").strip()).resolve()
     lenses = _lenses(root, config)
+    policy = asdict(config)
+    if not config.ssh_url:
+        policy.pop("ssh_url")
     result = {
         "workspace": str(root), "git_dir": str(git_dir), "base_ref": base,
         "merge_base": bases[0], "head": candidate, "workspace_head": current,
-        "policy_hash": _hash({"config": asdict(config), "lenses": lenses}),
+        "policy_hash": _hash({"config": policy, "lenses": lenses}),
         "diff_hash": _hash(_diff(root, bases[0], candidate)), "lenses_available": sorted(lenses),
     }
     if _commit(root, "HEAD") != current or _commit(root, head) != candidate:

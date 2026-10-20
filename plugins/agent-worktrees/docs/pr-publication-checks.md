@@ -104,6 +104,8 @@ HTTP endpoint, configure that repository's canonical clone destination as
 binding, preserved by export, not a guessed removal of the HTTP subpath.
 Absent that declaration, an SSH path that does not match the full endpoint
 refuses. Only secure SSH URLs without password/query data are accepted.
+An absent/empty SSH binding preserves existing receipt fingerprints; declaring
+or changing a binding invalidates evidence for the previous effective policy.
 Missing, malformed or empty explicit configuration, including a non-mapping
 `repos` block or repository entry, refuses the read/check
 instead of falling back to ambient policy.
