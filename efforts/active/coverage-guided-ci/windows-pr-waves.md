@@ -1,7 +1,9 @@
 # Reviewed waves for the remaining Windows PR work
 
-**Status:** Proposed; implementation and further extraction are paused until
-this plan clears the repository's PR review gate.
+**Status:** Reviewed and merged in #7338 as
+`5a6f4e374893999fb1176408acfa6b8e44b5aabb`. The
+[pinned residual census](windows-residual-ledger.md) is the next entry gate;
+plan approval alone does not admit an implementation batch.
 
 **Owner:** the Primary maintainer in the [canonical effort](README.md).
 **Tracking:** #5694, #5682 and umbrella #4453. This document is a sequencing

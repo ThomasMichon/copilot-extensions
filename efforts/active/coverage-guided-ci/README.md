@@ -46,10 +46,10 @@ replace that plugin's collect-only tier with genuine diff-scoped selection.
 - **Handoff:** each phase's PR merges to `dev` before the next phase begins;
   no phase depends on an unmerged predecessor's uncommitted state.
 - **Remaining Windows work:** #5694 is a preserved source of candidate
-  changes, not the next all-in-one publication. Follow the proposed
-  [reviewed wave plan](windows-pr-waves.md); its plan-only PR must clear
-  review before implementation resumes. Existing sibling owners retain
-  their scopes.
+  changes, not the next all-in-one publication. The
+  [reviewed wave plan](windows-pr-waves.md) merged in #7338; its
+  [pinned residual census](windows-residual-ledger.md) precedes the first
+  implementation batch. Existing sibling owners retain their scopes.
 
 ## Context
 
@@ -128,8 +128,9 @@ order.
 
 ### Remaining Windows PR work - reviewed waves
 
-- [ ] Review and merge the [plan-only wave proposal](windows-pr-waves.md)
-      before further implementation or extraction.
+- [x] Review and merge the [plan-only wave proposal](windows-pr-waves.md)
+      before further implementation or extraction. #7338 merged as
+      `5a6f4e374893999fb1176408acfa6b8e44b5aabb`.
 - [ ] Inventory each remaining #5694 hunk against current `dev`, then land
       the bounded contract-specific batches in the reviewed order.
 - [ ] Complete the unchanged native Windows acceptance and settle the
@@ -739,6 +740,27 @@ regardless of this effort's local fixes.
 _Pending review of this plan._
 
 ## Journal
+
+### 2026-10-20 - Reviewed wave plan and pinned residual census
+- Plan-only #7338 received a fresh full Copilot approval on
+  `01ed1aa9542d1e302f1581705ee161a44fdffc0f`, green required CI and no
+  unresolved threads. Its actual merge is
+  `5a6f4e374893999fb1176408acfa6b8e44b5aabb`; the plan-review prerequisite
+  is complete, not the parent effort.
+- The [residual ledger](windows-residual-ledger.md) pins current Dev,
+  original published #5694, the preserved continuation and its historical
+  base. It distinguishes implementation, tests, generated copies,
+  paragraph-level documentation and historical changefiles. Dirty policy
+  corrections remain separate from committed evidence.
+- The optional-cleanup extraction already merged in #7304 as
+  `55a93b92cda57031cc6f00d225da62b719f0de51`. Reuse that contract rather
+  than republishing it. Existing installer and workflow-fixture owners keep
+  their scopes; private validation overlays are not landed dependencies.
+- This is a docs-only entry-gate proposal. Implementation remains paused
+  pending the census's reviewed dispositions. Complete same-head Windows
+  qualification remains open: repeated 900-second runs including cleanup,
+  every group within 240 seconds, exactly two Worktrees workers and the
+  original coverage/resource limits.
 
 ### 2026-10-08 — Phase 6: Windows coverage rotation drafted, landed, and merged (PR #5662)
 Direct follow-up to reviewing CI build history after Phase 3.5 wrapped

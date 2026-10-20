@@ -1,0 +1,603 @@
+# Windows residual census: libraries, native integration and installer scripts
+
+Read-only reconciliation for the reviewed wave plan in
+[windows-pr-waves.md](windows-pr-waves.md), introduced by
+ThomasMichon/copilot-extensions#7338. This is an inventory, not implementation,
+batch publication, retirement approval, or native/performance acceptance.
+The coordinator owns integration with the other census reports.
+
+## Immutable inputs and scope
+
+- Continuation: `8b7b8778b69e6bd1b6a6f2b0018fa6e1f59d961f`.
+- Continuation base: `6e2e59ceed9a5cb822bd02906f5d4e1173aeae71`.
+- Original published head: `339dc00123964d84a117afd55197a192895ebac8`.
+- Published merge base: `936926d76a7066ac6eb5a1b11a83c91716eddf69`.
+- Current Dev comparison: `442be2d536fe9b77fb8336805f2bbe461199d94d`.
+- Scope: changed `libs/`, `worktree-manager/`, and `plugins/` paths, excluding
+  `plugins/agent-worktrees/` except its `scripts/` subtree. Tools/Fleet and
+  Worktrees non-script work have separate owners.
+- Exactly **62 paths / 128 unified-3 hunks** in the continuation census below.
+  A key is the path, full hunk header, and first 12 hexadecimal SHA-256 digits.
+  Hash input starts at `@@`, includes all context/addition/deletion lines and
+  each terminal LF, and stops before the next hunk or file header. CRLF is
+  normalized to LF. Identical copied hunks intentionally share hashes; path
+  remains part of their key.
+
+The source operating policy and the complete wave plan were read. No source
+files, Git state, installed payloads, or dependencies were changed; no tests,
+builds, native launches, or network operations were performed for this census.
+Evidence is model-neutral; no model registry or eligibility is inferred.
+
+## Single-disposition vocabulary
+
+Each ledger row has exactly one code. A retained code identifies one narrow
+contract, not permission to combine every contract in its wave.
+An indivisible census key may identify a mixed source hunk: its one blocked
+code then owns an explicit subspan partition, not permission to retain the
+whole hunk. Subspan decisions do not add or duplicate census keys.
+
+### Actual merged references
+
+- **M7304 — actual merged:** ThomasMichon/copilot-extensions#7304,
+  `55a93b92cda57031cc6f00d225da62b719f0de51`. The inspected commit changes
+  optional cleanup discovery to
+  `Test-Path -LiteralPath 'Function:\Stop-RuntimeConstruction'`, retaining the
+  cleanup call and surrounding finally/lock release. Dev contains that stronger
+  spelling in all nine affected installers, including both Index finalizers.
+  It is semantically the source hunk's loaded-function probe, not an exact
+  textual replay of `Test-Path Function:\...`. Do not republish it.
+- **M7283 — actual merged:** ThomasMichon/copilot-extensions#7283,
+  `36d30f31bf03db78d5f8be256c6bb7cfe577b03e`. Its inspected Vault patch already
+  makes that same LiteralPath cleanup correction; Vault was consequently not
+  changed by #7304.
+- **M6707 — actual merged:** ThomasMichon/copilot-extensions#6707,
+  `7519c4113c84c00b7831d3fc146dab455013097f`. `git log -S` finds the actual
+  `Copy-StampDirectory` `__pycache__` exclusion, and pinned Dev blame attributes
+  the exact line to this commit. This is not an ancestry-only assertion.
+
+For human-output receipts assigned a merged code, Dev's receipt was parsed and
+its `entrypoint_sha256` checked against the Git blob bytes of Dev's installer;
+all nine checked receipts match. Path-specific history identifies #7304 or
+#7283 as their actual latest generator-output change. Historical checksum
+literals are not to be replayed. Receipts for installers with still-blocked
+copier changes instead belong to B6909, not an already-merged claim.
+
+### Blocked existing owner
+
+- **B6909 — blocked by the existing ThomasMichon/copilot-extensions#6909
+  installer owner:** canonical `Copy-InstallSnapshotItem`, its Bridge,
+  Codespaces, Dispatch and Index callers, directly dependent extracted-function
+  fixture wiring, and selected/unselected malformed-slot recovery assertions.
+  Do not absorb or publish the owner's copier/overlay work. Its private
+  source/materialized comparison is diagnostic only, not landed evidence.
+  Four mixed installer receipts must be regenerated from the owner's eventual
+  reviewed source rather than copied from this continuation. No alternative or
+  competing installer fix is authorized. The owner must reconcile any
+  overlap before these hunks can enter a batch.
+- **B-CODESPACES-SPLIT — blocked by the canonical effort's integration
+  coordinator pending explicit split and retirement review:** the mixed
+  `test_unsaved_guard.py` hunk keyed `7c269d084096` contains both retained
+  portability subspans and a prohibited added-skip subspan. Its partition is:
+  - **Retained W4-CODESPACES-PORTABLE subspans:** import/use `_resolve_bash`
+    for host-native Bash selection; frame `workspace_root` and every extra
+    directory as POSIX paths; build the audit argv with `shlex.split`; bind
+    its executable to the selected native Bash; and use checked subprocess
+    execution with the existing timeout and no-window flags.
+  - **R-BASH-SKIP — proposed retirement requiring review, not retired:** the
+    added `if bash is None:` branch and its
+    `pytest.skip("requires a host-native Bash, not a WSL launcher")` call.
+    These two added lines create a skip and therefore cannot enter the
+    retained batch under the unchanged parent gate. Retire this addition
+    only after review; preserve a failing, non-skip prerequisite when native
+    Bash is unavailable. Merely excluding the skip from passing evidence
+    would not satisfy the gate.
+  The original full header/hash remains one blocked census key until the
+  coordinator reviews this partition. No source edit or skip waiver is
+  authorized by the proposed split.
+
+### Retained named narrow batches and exact contracts
+
+- **W4-PANE:** compiler-free native pane Job Object binding.
+  `worktree-manager/bin/pane-wrapper.ps1`, its `bin/README.md`, and
+  `tests/test_pane_wrapper_job.py` stay together. Assertions: actual kernel
+  extended-limit ABI is 144/112 bytes, kill-on-close flag is `0x2000`,
+  no unintended process/memory limits, no Add-Type compilation, native child
+  starts and is reaped when the real wrapper terminates. Keep ownership of the
+  job handle and child deadlines. No dependency on the installer copier.
+- **W4-BIND:** single-process isolated Python command-binding bootstrap.
+  `libs/payload-invocation/generate.py`, its README and command-binding tests
+  own all three generated Worktrees `emit-command-catalog.ps1` hunks,
+  including its declaration hash. Assert `py -3` reports the interpreter and
+  executes only the addressed helper in the same process, unavailable
+  interpreter falls back without WindowsApps aliases, helper failure is not
+  retried, empty output fails closed, changed installation ownership is
+  re-read/refused, and boot tracing is stderr-only and opt-in. Regenerate
+  the script/hash from the generator; never patch the generated script alone.
+- **W4-TRANSPORT:** fresh safe YAML parsing with the available safe backend.
+  `libs/machine-transport/README.md`, `registry.py`, and `test_registry.py`
+  share this contract: C safe loader when available, Python safe fallback,
+  replacement observed on each call, malformed/unsafe tags and missing-file
+  failures preserved, aliases/merges/quoted scalars preserved. This does not
+  cache machine identity, authority, or registry contents.
+- **W4-ATTR-ENCODING:** native attribution Git UTF-8 output capture and
+  caller encoding restoration. Attribution README, `emit-policy.ps1`, and
+  `test_emit_policy.py` own Unicode repository-path assertions under available
+  PowerShell implementations. It is separate from guidance fixture work.
+- **W4-ATTR-FIXTURE:** native-compatible attribution Bash guidance fixtures.
+  Only `test_write_session_guidance.py`: real-tool launchers retain DLL lookup,
+  explicit native Python is available only where intended, POSIX paths and
+  isolated home are correct, and warm cache works with no Python fallback.
+  Do not weaken cold-cache or bounded session-file assertions.
+- **W1-BRIDGE-HOLDER:** namespace resolver timeout remains in its owning task.
+  Bridge README, Python-3.10 backport dependency, resolver source, and first
+  roster-cache hunk stay together. Preserve cancellation-resistant provider
+  ownership across repeated cancellation, replacement and shutdown; release
+  test waiters in finally. New dependency still owes seasoning and normal
+  manifest/release gates; the census does not establish its age.
+- **W1-BRIDGE-DISCOVERY:** deterministic abandoned-discovery report rejection.
+  Only the latter two roster-cache hunks: synchronize worker entry/call count,
+  distinguish stale/fresh reports, require advancing generation, ensure the old
+  worker's eventual result is never applied, and always drain the caller/cache.
+  Do not merge with holder changes merely because both touch one file.
+- **W4-BRIDGE-STDIO:** native Worktrees-owner launch regression assertion:
+  exact argv/environment, inherited stdin/stdout/stderr, no-window flags,
+  and returned exit status. Only `test_worktree_owner_launch.py`; this census
+  does not treat that mocked assertion as real native-launch evidence.
+- **W4-CODESPACES-PORTABLE:** isolated native profile and audit fixture
+  portability, in `test_launch_policy.py` and only the explicitly retained
+  audit subspans partitioned under B-CODESPACES-SPLIT. Keep Path.home
+  isolation, host-native Bash (not a WSL launcher), POSIX extra-directory
+  framing, checked subprocess failure, and a failing rather than skipping
+  unavailable-Bash prerequisite. The mixed audit hunk cannot be extracted
+  wholesale; its added skip is excluded from this retained contract and
+  awaits the separate R-BASH-SKIP review.
+- **W4-CODESPACES-PREP:** immutable installer payload preparation only.
+  Recovery-test helper/template and uninstall fixture hunks share staged
+  immutable runtime materialization but make a private copy per test, excluding
+  nested test suites rather than runtime dependencies. Selected/unselected
+  recovery behavior remains B6909 and must not slip into this fixture batch.
+  Depends on the actual current materializer contract and, if used, its
+  separately merged owner changes; a private overlay cannot satisfy it.
+- **W4-INDEX-SHUTDOWN:** only `test_installation_cells.py` hunks.
+  Retain per-instance shutdown token from successful observations, skip already
+  exited processes, capture control failures, require explicit shutdown success
+  and graceful zero exit, and report timeout/control errors rather than silently
+  swallowing them. No production service or installer lifecycle rewrite.
+- **W4-WATCH-BURST:** only Pull Requests `test_watch_delivery.py`.
+  Hold fetch until all subscriptions register, prove no early callback,
+  retain bounded eight-way callback concurrency/no lost events, and release
+  both gates in finally. Independent of native pane and installer work.
+- **W4-VAULT-COMPILER:** only the offline UV compiler-construction hunk
+  `dac8b6718c26` in Vault `test_install_snapshot_ps1.py`.
+  Compile the offline UV fixture with the available .NET Framework compiler,
+  retaining compiler failure diagnostics. This contract changes fixture
+  executable construction, not scheduled-task controls.
+- **W4-VAULT-NOSERVICE:** only the two provisioning-harness hunks
+  `bfddebeed21e` and `def46d35da51` in that same Vault test file.
+  Prove NoService provisioning cannot mutate scheduled tasks using explicit
+  throwing controls, invoking the wrapper with the actual installer/root
+  arguments and forwarding its exit status. This contract does not change
+  how the offline UV executable is compiled.
+  The compiler and NoService contracts are independently scoped candidate
+  PRs; sharing a file does not justify combining them. No code dependency
+  between them is established by this census. If a consumer requires one,
+  name and land that prerequisite separately rather than merging the scopes.
+  Neither contract authorizes a global runtime repair.
+- **W4-DEPENDENCY-METADATA:** canonical
+  `libs/installer-engine/installer_dependency_policy.py` and all thirteen
+  plugin copies. Preserve existing setup.cfg data/interpolation behavior while
+  locating retained setuptools egg-info in the private retained input, fail
+  explicitly on configuration/filesystem errors, and leave the full dependency
+  graph, seven-day seasoning and resolution/retention checks intact.
+  Copies are derived from the canonical library, not independent patches.
+  Dev moved the surrounding retained-input preparation (including package-dir
+  rewriting) into its current helper, but still has no proposed setup.cfg/
+  egg_base addition; rebase the contract onto that actual helper, not the old
+  run_uv_install line coordinates. The separately owned
+  `tools/test_installer_dependency_policy.py` assertions must accompany the
+  canonical contract at integration, with their own census disposition.
+  This batch is not permission to take #6909's snapshot copier or overlay.
+
+Each batch above also needs the reviewed plan, its own newly scoped
+changefile, current-head review, required CI, and the actual consumer
+validation specified by the plan. The cross-scope tools tests and
+changefiles are coordinator-owned integration dependencies, not silently
+assigned implementation work by this report. Unresolved ownership or failed
+reconciliation blocks admission rather than expanding a batch.
+
+### Proposed retirement requiring review
+
+- **R-IMPORT — proposed retirement, not retired:** the Codespaces audit
+  import-order-only hunk moves an already-present Path import; pinned Dev
+  already imports Path (actual introduction in
+  ThomasMichon/copilot-extensions#7155,
+  `cc6aa177e44a864551f036e5e76ed84622651cd1`, confirmed by patch/blame),
+  but does not contain the proposed reorder. It carries no distinct runtime or
+  assertion contract; review may omit that cosmetic change while retaining
+  W4-CODESPACES-PORTABLE. This is not an already-landed reorder claim.
+- **R-ROUNDING — proposed retirement, not retired:** the reader-observation
+  hunk only adds an explanatory floating-point rounding comment beside an
+  existing pytest.approx assertion. No assertion changes. Review may omit the
+  comment rather than manufacture a new telemetry batch. No telemetry
+  correctness or native CPU evidence is inferred.
+
+## Continuation hunk ledger
+
+### `libs/installer-engine/installer-engine.ps1`
+
+- `@@ -17,6 +17,27 @@` — `a26347235fb1` — B6909
+
+### `libs/installer-engine/installer_dependency_policy.py`
+
+- `@@ -8,6 +8,7 @@ Captured settings may contain credentials and must never be printed.` — `7c3a2f974941` — W4-DEPENDENCY-METADATA
+- `@@ -876,6 +877,19 @@ def run_uv_install(` — `d498636ff61a` — W4-DEPENDENCY-METADATA
+
+### `libs/machine-transport/README.md`
+
+- `@@ -5,6 +5,11 @@ identity, and local-vs-SSH transport resolution, vendored (shared, not` — `96d6672d87b3` — W4-TRANSPORT
+
+### `libs/machine-transport/src/machine_transport/registry.py`
+
+- `@@ -31,6 +31,8 @@ import yaml` — `d6741aa0c62f` — W4-TRANSPORT
+- `@@ -139,7 +141,7 @@ def parse_machines_yaml_file(` — `fcc53c6c01ac` — W4-TRANSPORT
+
+### `libs/machine-transport/tests/test_registry.py`
+
+- `@@ -4,7 +4,9 @@ from dataclasses import replace` — `50309299da22` — W4-TRANSPORT
+- `@@ -157,7 +159,48 @@ def test_legacy_guest_hostname_and_display_metadata_do_not_alias_native_identity` — `2bf4983b2622` — W4-TRANSPORT
+
+### `libs/payload-invocation/README.md`
+
+- `@@ -65,10 +65,16 @@ the real Worktrees CLI retain the complete copied runtime and staged dependencie` — `82efa7836d8b` — W4-BIND
+
+### `libs/payload-invocation/generate.py`
+
+- `@@ -462,14 +462,39 @@ def render(` — `861a8d2296c7` — W4-BIND
+- `@@ -480,19 +505,27 @@ def render(` — `e9bbf0de1d0d` — W4-BIND
+
+### `libs/payload-invocation/tests/test_command_binding.py`
+
+- `@@ -449,9 +449,8 @@ def test_command_binding_catalog_disables_user_site_startup(` — `559f0578fc59` — W4-BIND
+- `@@ -642,6 +641,7 @@ def test_command_binding_real_catalog_read_only(` — `f2caae713082` — W4-BIND
+- `@@ -671,11 +671,14 @@ def test_command_binding_real_catalog_read_only(` — `999c4dc5154f` — W4-BIND
+- `@@ -687,7 +690,13 @@ def test_command_binding_catalog_python_launcher_avoids_app_alias(` — `8efa6a7c1482` — W4-BIND
+- `@@ -698,12 +707,12 @@ def test_command_binding_catalog_python_launcher_avoids_app_alias(` — `d4d416365954` — W4-BIND
+- `@@ -717,11 +726,28 @@ def test_command_binding_catalog_python_launcher_avoids_app_alias(` — `7bdbb1eebf76` — W4-BIND
+
+### `libs/versioned-runtime/tests/test_source_install_transactions.py`
+
+- `@@ -49,8 +49,9 @@ def _bash() -> str | None:` — `7001e9edeef8` — B6909
+- `@@ -190,6 +191,7 @@ function Invoke-VersionedActivate {{` — `1b219328bb62` — B6909
+
+### `plugins/agent-bridge/README.md`
+
+- `@@ -508,6 +508,10 @@ reaping. Sampling is provider-local, off-loop, at most once per second, with a` — `d67d4250cb30` — W1-BRIDGE-HOLDER
+
+### `plugins/agent-bridge/pyproject.toml`
+
+- `@@ -16,6 +16,7 @@ authors = [` — `1c2b3254c62b` — W1-BRIDGE-HOLDER
+
+### `plugins/agent-bridge/scripts/install.human-output.json`
+
+- `@@ -2,7 +2,7 @@` — `f6229a828873` — B6909
+
+### `plugins/agent-bridge/scripts/install.ps1`
+
+- `@@ -2174,7 +2174,7 @@ function Materialize-SnapshotVendoredLibs {` — `936748ef55f3` — B6909
+- `@@ -2259,7 +2259,7 @@ function Invoke-Stamp {` — `a7174256bab1` — B6909
+- `@@ -3457,7 +3457,7 @@ try {` — `0bffccc5f470` — M7304
+
+### `plugins/agent-bridge/scripts/installer_dependency_policy.py`
+
+- `@@ -8,6 +8,7 @@ Captured settings may contain credentials and must never be printed.` — `7c3a2f974941` — W4-DEPENDENCY-METADATA
+- `@@ -876,6 +877,19 @@ def run_uv_install(` — `d498636ff61a` — W4-DEPENDENCY-METADATA
+
+### `plugins/agent-bridge/src/agent_bridge/agent_registry_resolver.py`
+
+- `@@ -5,10 +5,16 @@ from __future__ import annotations` — `2cefb12fff81` — W1-BRIDGE-HOLDER
+- `@@ -860,7 +866,9 @@ class AgentResolver(_ProviderDiscoveryMixin):` — `61869aca9ce8` — W1-BRIDGE-HOLDER
+
+### `plugins/agent-bridge/tests/test_agent_roster_cache.py`
+
+- `@@ -312,25 +312,29 @@ async def test_provider_replacement_keeps_cancel_resistant_scan_owned_until_shut` — `c63b05502de2` — W1-BRIDGE-HOLDER
+- `@@ -1368,16 +1372,24 @@ async def test_abandoned_scans_report_is_never_applied_to_the_registry():` — `ae5f24cac116` — W1-BRIDGE-DISCOVERY
+- `@@ -1389,26 +1401,40 @@ async def test_abandoned_scans_report_is_never_applied_to_the_registry():` — `495027e6740a` — W1-BRIDGE-DISCOVERY
+
+### `plugins/agent-bridge/tests/test_reader_observation.py`
+
+- `@@ -678,6 +678,7 @@ async def test_native_cpu_receipt_and_telemetry(` — `add84909fe89` — R-ROUNDING
+
+### `plugins/agent-bridge/tests/test_worktree_owner_launch.py`
+
+- `@@ -77,6 +77,25 @@ def test_native_windows_never_launches_a_bash_or_wsl_fallback(tmp_path, monkeypa` — `dc3ef0c9e847` — W4-BRIDGE-STDIO
+
+### `plugins/agent-codespaces/scripts/install.human-output.json`
+
+- `@@ -2,7 +2,7 @@` — `cd1cb67cf519` — B6909
+
+### `plugins/agent-codespaces/scripts/install.ps1`
+
+- `@@ -1564,7 +1564,7 @@ function Materialize-SnapshotDependencies {` — `df3fb54ccbc6` — B6909
+- `@@ -1618,7 +1618,7 @@ function Invoke-Stamp {` — `fbe98687edee` — B6909
+- `@@ -1684,7 +1684,7 @@ try {` — `ce017de3cbaa` — M7304
+
+### `plugins/agent-codespaces/scripts/installer_dependency_policy.py`
+
+- `@@ -8,6 +8,7 @@ Captured settings may contain credentials and must never be printed.` — `7c3a2f974941` — W4-DEPENDENCY-METADATA
+- `@@ -876,6 +877,19 @@ def run_uv_install(` — `d498636ff61a` — W4-DEPENDENCY-METADATA
+
+### `plugins/agent-codespaces/tests/test_install_ps1_recovery.py`
+
+- `@@ -204,15 +204,17 @@ def _slot(home: Path) -> Path:` — `5667e5189491` — W4-CODESPACES-PREP
+- `@@ -226,9 +228,26 @@ def _copy_plugin_tree(dst: Path) -> None:` — `56cc8b3bc1b2` — W4-CODESPACES-PREP
+- `@@ -266,7 +285,8 @@ def test_uv_only_construction_bootstrap_is_fail_closed(tmp_path: Path, mode: str` — `3775871f4c7d` — B6909
+- `@@ -275,11 +295,14 @@ def test_uv_only_host_refuses_selected_malformed_slot(tmp_path: Path) -> None:` — `b8e98d0b5ee5` — B6909
+- `@@ -290,10 +313,21 @@ def test_uv_only_host_refuses_selected_malformed_slot(tmp_path: Path) -> None:` — `4a57b51b5f12` — B6909
+- `@@ -334,7 +368,8 @@ def _seed_healthy_slot(home: Path) -> Path:` — `e99b2881c433` — B6909
+- `@@ -343,24 +378,32 @@ def test_install_refuses_selected_slot_with_incomplete_metadata(tmp_path: Path)` — `07996adab79e` — B6909
+- `@@ -462,6 +505,7 @@ def test_first_use_propagates_provision_failure(tmp_path: Path) -> None:` — `2d1148191189` — W4-CODESPACES-PREP
+- `@@ -473,7 +517,7 @@ def test_marketplace_staged_uninstall_removes_runtime_and_binstubs(` — `5e8175042e04` — W4-CODESPACES-PREP
+- `@@ -494,6 +538,7 @@ def test_marketplace_staged_uninstall_removes_runtime_and_binstubs(` — `5874a69a50c0` — W4-CODESPACES-PREP
+- `@@ -505,7 +550,7 @@ def test_marketplace_staged_uninstall_waits_without_holding_runtime_cwd(` — `e00c0c86f5a1` — W4-CODESPACES-PREP
+
+### `plugins/agent-codespaces/tests/test_launch_policy.py`
+
+- `@@ -6,6 +6,7 @@ import argparse` — `77b67744e9a7` — W4-CODESPACES-PORTABLE
+- `@@ -19,6 +20,7 @@ def _align_isolated_profile(monkeypatch, tmp_path):` — `a03cdbb259e0` — W4-CODESPACES-PORTABLE
+
+### `plugins/agent-codespaces/tests/test_unsaved_guard.py`
+
+- `@@ -4,10 +4,10 @@ box and force only that refusal when all of them are verified clean."""` — `74ca42dc78e4` — R-IMPORT
+- `@@ -133,16 +133,20 @@ def _repo(path, remotes):` — `7c269d084096` — B-CODESPACES-SPLIT
+
+### `plugins/agent-containers/scripts/installer_dependency_policy.py`
+
+- `@@ -8,6 +8,7 @@ Captured settings may contain credentials and must never be printed.` — `7c3a2f974941` — W4-DEPENDENCY-METADATA
+- `@@ -876,6 +877,19 @@ def run_uv_install(` — `d498636ff61a` — W4-DEPENDENCY-METADATA
+
+### `plugins/agent-dispatch/scripts/install.human-output.json`
+
+- `@@ -2,7 +2,7 @@` — `b50875609eb0` — B6909
+
+### `plugins/agent-dispatch/scripts/install.ps1`
+
+- `@@ -1159,7 +1159,7 @@ function Materialize-DispatchSnapshot {` — `23152754aa94` — B6909
+- `@@ -1333,7 +1333,7 @@ function New-PluginBuildSnapshot {` — `28eb36281086` — B6909
+- `@@ -4189,7 +4189,7 @@ switch ($Action) {` — `69e4e888bdb4` — M7304
+
+### `plugins/agent-dispatch/scripts/installer_dependency_policy.py`
+
+- `@@ -8,6 +8,7 @@ Captured settings may contain credentials and must never be printed.` — `7c3a2f974941` — W4-DEPENDENCY-METADATA
+- `@@ -876,6 +877,19 @@ def run_uv_install(` — `d498636ff61a` — W4-DEPENDENCY-METADATA
+
+### `plugins/agent-dispatch/tests/test_install_ps1_build_snapshot.py`
+
+- `@@ -42,6 +42,7 @@ import pytest` — `41369215d2a6` — B6909
+- `@@ -58,10 +59,10 @@ _skip_pwsh_race = pytest.mark.skipif(` — `19c13fc75305` — B6909
+- `@@ -82,8 +83,8 @@ def _harness_script(extra_script: str) -> str:` — `4f2a86c0f8cf` — B6909
+- `@@ -94,6 +95,8 @@ def _harness_script(extra_script: str) -> str:` — `4e124468775a` — B6909
+
+### `plugins/agent-index/scripts/install.human-output.json`
+
+- `@@ -2,7 +2,7 @@` — `d42cdae9b364` — B6909
+
+### `plugins/agent-index/scripts/install.ps1`
+
+- `@@ -1843,7 +1843,7 @@ function Install-Engine {` — `2830dc56b3c0` — M7304
+- `@@ -2494,7 +2494,7 @@ function Materialize-IndexSnapshot {` — `9ac443858cc8` — B6909
+- `@@ -2526,7 +2526,7 @@ function New-IndexSnapshot {` — `51b54d38f912` — B6909
+- `@@ -2716,7 +2716,7 @@ switch ($Action) {` — `50dbb18a706c` — M7304
+
+### `plugins/agent-index/scripts/installer_dependency_policy.py`
+
+- `@@ -8,6 +8,7 @@ Captured settings may contain credentials and must never be printed.` — `7c3a2f974941` — W4-DEPENDENCY-METADATA
+- `@@ -876,6 +877,19 @@ def run_uv_install(` — `d498636ff61a` — W4-DEPENDENCY-METADATA
+
+### `plugins/agent-index/tests/test_installation_cells.py`
+
+- `@@ -4432,6 +4432,8 @@ def test_two_cell_local_services_bind_distinct_os_assigned_ports(` — `81f4541aef45` — W4-INDEX-SHUTDOWN
+- `@@ -4536,20 +4538,19 @@ def test_two_cell_local_services_bind_distinct_os_assigned_ports(` — `2af627149899` — W4-INDEX-SHUTDOWN
+- `@@ -4560,17 +4561,22 @@ def test_two_cell_local_services_bind_distinct_os_assigned_ports(` — `1515dab41eb1` — W4-INDEX-SHUTDOWN
+- `@@ -4579,21 +4585,25 @@ def test_two_cell_local_services_bind_distinct_os_assigned_ports(` — `98155104f7ca` — W4-INDEX-SHUTDOWN
+
+### `plugins/agent-logger/scripts/install.human-output.json`
+
+- `@@ -2,7 +2,7 @@` — `c58d567d566a` — M7304
+
+### `plugins/agent-logger/scripts/install.ps1`
+
+- `@@ -1534,7 +1534,7 @@ switch ($Action) {` — `73537df63674` — M7304
+
+### `plugins/agent-logger/scripts/installer_dependency_policy.py`
+
+- `@@ -8,6 +8,7 @@ Captured settings may contain credentials and must never be printed.` — `7c3a2f974941` — W4-DEPENDENCY-METADATA
+- `@@ -876,6 +877,19 @@ def run_uv_install(` — `d498636ff61a` — W4-DEPENDENCY-METADATA
+
+### `plugins/agent-machines/scripts/installer_dependency_policy.py`
+
+- `@@ -8,6 +8,7 @@ Captured settings may contain credentials and must never be printed.` — `7c3a2f974941` — W4-DEPENDENCY-METADATA
+- `@@ -876,6 +877,19 @@ def run_uv_install(` — `d498636ff61a` — W4-DEPENDENCY-METADATA
+
+### `plugins/agent-mcp/scripts/installer_dependency_policy.py`
+
+- `@@ -8,6 +8,7 @@ Captured settings may contain credentials and must never be printed.` — `7c3a2f974941` — W4-DEPENDENCY-METADATA
+- `@@ -876,6 +877,19 @@ def run_uv_install(` — `d498636ff61a` — W4-DEPENDENCY-METADATA
+
+### `plugins/agent-pull-requests/scripts/install.human-output.json`
+
+- `@@ -2,7 +2,7 @@` — `66c150752e4d` — M7304
+
+### `plugins/agent-pull-requests/scripts/install.ps1`
+
+- `@@ -851,7 +851,7 @@ try {` — `5b9d094d7f39` — M7304
+
+### `plugins/agent-pull-requests/scripts/installer_dependency_policy.py`
+
+- `@@ -8,6 +8,7 @@ Captured settings may contain credentials and must never be printed.` — `7c3a2f974941` — W4-DEPENDENCY-METADATA
+- `@@ -876,6 +877,19 @@ def run_uv_install(` — `d498636ff61a` — W4-DEPENDENCY-METADATA
+
+### `plugins/agent-pull-requests/tests/test_watch_delivery.py`
+
+- `@@ -445,6 +445,7 @@ def test_unchanged_snapshots_do_not_rewrite_registry(make, monkeypatch):` — `9de716138927` — W4-WATCH-BURST
+- `@@ -463,16 +464,23 @@ def test_callback_burst_has_bounded_concurrency_and_no_lost_events(make):` — `8e164df76d48` — W4-WATCH-BURST
+
+### `plugins/agent-ssh/scripts/install.human-output.json`
+
+- `@@ -2,7 +2,7 @@` — `9411dd332ebc` — M7304
+
+### `plugins/agent-ssh/scripts/install.ps1`
+
+- `@@ -1228,7 +1228,7 @@ Write-Host '  Try: agent-ssh version' -ForegroundColor DarkGray` — `6ca2e9f412e1` — M7304
+
+### `plugins/agent-ssh/scripts/installer_dependency_policy.py`
+
+- `@@ -8,6 +8,7 @@ Captured settings may contain credentials and must never be printed.` — `7c3a2f974941` — W4-DEPENDENCY-METADATA
+- `@@ -876,6 +877,19 @@ def run_uv_install(` — `d498636ff61a` — W4-DEPENDENCY-METADATA
+
+### `plugins/agent-vault/scripts/install.human-output.json`
+
+- `@@ -2,7 +2,7 @@` — `468883502314` — M7283
+
+### `plugins/agent-vault/scripts/install.ps1`
+
+- `@@ -1341,7 +1341,7 @@ try {` — `ae3c109dc679` — M7283
+
+### `plugins/agent-vault/scripts/installer_dependency_policy.py`
+
+- `@@ -8,6 +8,7 @@ Captured settings may contain credentials and must never be printed.` — `7c3a2f974941` — W4-DEPENDENCY-METADATA
+- `@@ -876,6 +877,19 @@ def run_uv_install(` — `d498636ff61a` — W4-DEPENDENCY-METADATA
+
+### `plugins/agent-vault/tests/test_install_snapshot_ps1.py`
+
+- `@@ -265,19 +265,22 @@ public class OfflineUv {` — `dac8b6718c26` — W4-VAULT-COMPILER
+- `@@ -574,6 +577,17 @@ def provisioned_snapshot(stamped_snapshot):` — `bfddebeed21e` — W4-VAULT-NOSERVICE
+- `@@ -581,10 +595,8 @@ def provisioned_snapshot(stamped_snapshot):` — `def46d35da51` — W4-VAULT-NOSERVICE
+
+### `plugins/ai-attribution/README.md`
+
+- `@@ -107,7 +107,9 @@ grammar, keys, precedence, authority boundaries, and diagnostics.` — `f4aafb2aa54f` — W4-ATTR-ENCODING
+
+### `plugins/ai-attribution/scripts/emit-policy.ps1`
+
+- `@@ -651,6 +651,13 @@ function Invoke-Policy {` — `978cd04361f6` — W4-ATTR-ENCODING
+
+### `plugins/ai-attribution/tests/test_emit_policy.py`
+
+- `@@ -91,10 +91,11 @@ def _run(` — `ba6c4547c0e7` — W4-ATTR-ENCODING
+- `@@ -252,11 +253,21 @@ def test_payload_cwd_is_authoritative_when_process_cwd_differs(` — `4e163bc20889` — W4-ATTR-ENCODING
+
+### `plugins/ai-attribution/tests/test_write_session_guidance.py`
+
+- `@@ -5,6 +5,7 @@ from __future__ import annotations` — `f8533d1361b1` — W4-ATTR-FIXTURE
+- `@@ -399,6 +400,23 @@ def _bash_prereqs():` — `09672a182c8d` — W4-ATTR-FIXTURE
+- `@@ -411,9 +429,9 @@ def test_bash_wrapper_writes_bounded_session_file(tmp_path):` — `ffc654b37c1e` — W4-ATTR-FIXTURE
+- `@@ -430,10 +448,10 @@ def test_bash_wrapper_writes_bounded_session_file(tmp_path):` — `ab4ef1d4e855` — W4-ATTR-FIXTURE
+- `@@ -465,6 +483,14 @@ def test_bash_wrapper_serves_warm_cache_without_spawning_python(tmp_path):` — `25aa8c1db2a3` — W4-ATTR-FIXTURE
+- `@@ -475,11 +501,12 @@ def test_bash_wrapper_serves_warm_cache_without_spawning_python(tmp_path):` — `fc0d183330d5` — W4-ATTR-FIXTURE
+- `@@ -505,9 +532,9 @@ def test_bash_wrapper_falls_back_on_cold_cache(tmp_path):` — `6923abfa91d6` — W4-ATTR-FIXTURE
+
+### `plugins/budget-guidance/scripts/install.ps1`
+
+- `@@ -1134,7 +1134,7 @@ Write-Host '  Try: budget-guidance --version' -ForegroundColor DarkGray` — `78aa29ab1419` — M7304
+
+### `plugins/budget-guidance/scripts/installer_dependency_policy.py`
+
+- `@@ -8,6 +8,7 @@ Captured settings may contain credentials and must never be printed.` — `7c3a2f974941` — W4-DEPENDENCY-METADATA
+- `@@ -876,6 +877,19 @@ def run_uv_install(` — `d498636ff61a` — W4-DEPENDENCY-METADATA
+
+### `worktree-manager/bin/README.md`
+
+- `@@ -12,6 +12,10 @@ of the `worktree-manager-control-plane` effort.` — `818365a959b9` — W4-PANE
+
+### `worktree-manager/bin/pane-wrapper.ps1`
+
+- `@@ -54,31 +54,43 @@ function Set-AwPaneKillOnCloseJob {` — `6eced593549d` — W4-PANE
+
+### `worktree-manager/tests/test_pane_wrapper_job.py`
+
+- `@@ -0,0 +1,180 @@` — `ea2912aeeebb` — W4-PANE
+
+### `plugins/agent-worktrees/scripts/emit-command-catalog.ps1`
+
+- `@@ -1,6 +1,6 @@` — `2041e504e346` — W4-BIND
+- `@@ -26,11 +26,28 @@ $catalog = [ordered]@{` — `12e7feef63a7` — W4-BIND
+- `@@ -40,16 +57,24 @@ if (-not $bindingPython) {` — `da9969913718` — W4-BIND
+
+### `plugins/agent-worktrees/scripts/install.human-output.json`
+
+- `@@ -2,7 +2,7 @@` — `b9e8b3f1c3ce` — M7304
+
+### `plugins/agent-worktrees/scripts/install.ps1`
+
+- `@@ -3712,6 +3712,7 @@ function Copy-StampDirectory {` — `6a84464cc634` — M6707
+- `@@ -4241,7 +4242,7 @@ switch ($Action) {` — `e61fec4a55c2` — M7304
+
+### `plugins/agent-worktrees/scripts/installer_dependency_policy.py`
+
+- `@@ -8,6 +8,7 @@ Captured settings may contain credentials and must never be printed.` — `7c3a2f974941` — W4-DEPENDENCY-METADATA
+- `@@ -876,6 +877,19 @@ def run_uv_install(` — `d498636ff61a` — W4-DEPENDENCY-METADATA
+
+## Published-only residual reconciliation
+
+The original merge-base-to-published diff changes the same **62 scoped paths**;
+there are **zero published-only scoped paths**. This was not inferred from
+path overlap alone: published final contents were compared with continuation
+contents, then original unique-change hunks were inspected for the five paths
+whose final contents differ.
+
+- `libs/payload-invocation/README.md`: original binding behavior additions are
+  retained verbatim; unrelated intervening fixture documentation shifts hunk
+  context. Its contract remains W4-BIND.
+- `libs/payload-invocation/generate.py`: both original changed hunks are
+  retained; other intervening generator content differs. No original binding
+  behavior disappeared.
+- `libs/payload-invocation/tests/test_command_binding.py`: all six original
+  changed assertion/setup blocks remain in the continuation, with shifted
+  coordinates. Their contract remains W4-BIND.
+- `plugins/agent-worktrees/scripts/install.ps1`: both original changed blocks
+  remain in the continuation; their independent current-Dev dispositions are
+  M6707 and M7304 above. Larger intervening installer reconciliation is not an
+  additional unlanded published feature.
+- `plugins/agent-worktrees/scripts/install.human-output.json`: the original
+  literal checksum differs from both continuation and Dev, because it binds a
+  different installer input. This is the one published-only literal residual,
+  not an extra continuation hunk:
+  `@@ -2,7 +2,7 @@` — `b5c129139808` — **R-PUBLISHED-RECEIPT
+  (proposed retirement requiring review)**. Rationale: preserve the original
+  Git/review artifact, but do not replay a receipt for an obsolete installer;
+  current merged installer receipts must be regenerated from actual inputs.
+  This disposition does not claim that the original checksum itself landed.
+
+The other 57 published final paths equal their continuation counterparts.
+There are therefore no uncovered published-only behavioral hunks in this
+scope; the explicit stale receipt proposal above still requires review.
+Original published variants are not double-counted among the 128 continuation
+keys.
+
+## Completion boundaries and mechanical verification
+
+The report's only completion claim is census coverage. Every continuation
+path/header/hash must occur exactly once, with one disposition, and be
+mechanically compared with the pinned unified-3 diff. Published-only receipt
+handling is separately counted. No unspecified hunk is silently retired.
+
+Mechanical self-check passed against freshly read immutable Git objects:
+**62 distinct paths, 128 distinct exact keys, zero missing/extra/duplicate
+keys, and one disposition on every row**. Totals are **17 actual-merged,
+25 blocked (24 B6909 and 1 B-CODESPACES-SPLIT), 84 retained, and 2
+proposed-retirement** continuation hunks. The blocked mixed key additionally
+partitions retained portability subspans from the R-BASH-SKIP review proposal;
+these are not additional full-hunk census rows.
+The separately identified published-only receipt contributes one additional
+review-required proposal, not a 129th continuation hunk. No
+blocked-unclassified row remains; the explicit existing-owner block remains
+binding. A public-safety check found no absolute machine paths in this report.
+
+The parent remains open: repeated complete same-head native runs, each at or
+below 900 seconds including preparation and cleanup, every group at or below
+240 seconds, exactly two Worktrees workers, and unchanged 30-second item,
+300-second runner-group, 900-second plugin, 128-process, 4096 MiB memory and
+2048 MiB temporary-storage limits. Native child deadlines and mark semantics
+are unchanged. No acceptance, performance improvement, restored CI lane,
+skip waiver, external-venue result, or installer-owner completion is claimed.
+Root workflow ownership under #6237/#1303 is outside this report.
