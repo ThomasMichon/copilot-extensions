@@ -4,8 +4,8 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** Independent reviewed proposal and implementation PRs targeting `dev`
 - **Created:** 2026-10-18
-- **Status:** Active
-- **Vision:** [externally-hosted-acp-agents](../../../visions/plugins/agent-bridge/README.md#externally-hosted-acp-agents), [topology-aware-agent-resolution](../../../visions/plugins/agent-bridge/README.md#topology-aware-agent-resolution)
+- **Status:** Done - generic source merged to dev; release and adopter acceptance transferred, no rollout
+- **Vision:** [externally-hosted-acp-agents](../../../../visions/plugins/agent-bridge/README.md#externally-hosted-acp-agents), [topology-aware-agent-resolution](../../../../visions/plugins/agent-bridge/README.md#topology-aware-agent-resolution)
 - **Umbrella issue:** #7218
 
 ## Guiding Intent
@@ -108,9 +108,9 @@ are **agent-recommended**.
 
 - [x] Update bridge/credential-source configuration docs and agent-facing usage;
   add required plugin changefiles and shared-library consumer validation.
-- [ ] Satisfy the validation matrix, address review findings and merge the
+- [x] Satisfy the validation matrix, address review findings and merge the
   implementation PRs to `dev`.
-- [ ] Journal merged evidence, resolve every plan/validation item and archive
+- [x] Journal merged evidence, resolve every plan/validation item and archive
   this effort. Transfer any release or adopter acceptance obligation to a
   named tracked owner; never describe a `dev` merge as a running capability.
 
@@ -118,31 +118,36 @@ are **agent-recommended**.
 
 All cases below are **agent-recommended** acceptance detail.
 
-- [ ] Unit tests cover active/inactive/indeterminate plugins, verified payload
+- [x] Unit tests cover active/inactive/indeterminate plugins, verified payload
   roots, supported empty providers, malformed declarations, duplicate target
   ownership and project/operator precedence. One broken contribution does not
   hide healthy unrelated providers or become an empty-success result.
-- [ ] Discovery and detail tests assert zero credential-source calls and zero
+- [x] Discovery and detail tests assert zero credential-source calls and zero
   network connections; unbound contributions remain visible and non-runnable.
-- [ ] URL tests cover accepted secure schemes, invalid/ambiguous endpoints,
+- [x] URL tests cover accepted secure schemes, invalid/ambiguous endpoints,
   matching policy, origin/path identity and refusal before side effects.
-- [ ] Auth tests inspect actual constructed header bytes for a synthetic token
+- [x] Auth tests inspect actual constructed header bytes for a synthetic token
   scheme and prove source approval, identity/origin/resource/scope/generation
   isolation, missing/ambiguous bindings and bounded 401 retry.
-- [ ] A synthetic TLS peer exercises the normal catalog-to-create/send/resume
+- [x] A synthetic TLS peer exercises the normal catalog-to-create/send/resume
   path for configured, URL and plugin-contributed targets, with approval,
   denial, reconnect and no-prompt-replay checks; assert no local spawning or
   worktree/filesystem acquisition.
-- [ ] Existing remote ACP, provider discovery, roster/routes/client-connect
+- [x] Existing remote ACP, provider discovery, roster/routes/client-connect
   and shared credential-relay suites remain green using the canonical isolated
   runner; lint, install-contract and applicable shared-library vendoring gates
   pass without weakening thresholds or skipping encountered failures.
-- [ ] Run a fresh-environment contribution/binding check when practical;
+- [x] Run a fresh-environment contribution/binding check when practical;
   record exact tier coverage and reasons for any omitted clean-room lane.
-- [ ] Record live-venue validation availability explicitly. Any real endpoint,
-  source grant, promotion or installed-runtime proof requires separate
-  authorization; blocked acceptance is transferred, not claimed successful.
-- [ ] Public issues, docs, fixtures, commits and PR descriptions contain only
+- [x] Record live-venue validation availability explicitly: real endpoint,
+  source grant, promotion and installed-runtime proof remain unauthorized.
+  No live acceptance is claimed.
+- [x] Deferred to `#7237`: host relationship and separately authorized
+  adopter acceptance; the existing host-ownership effort owns that next
+  integration boundary rather than this target-contribution effort.
+- [x] Deferred to `#3336`: release promotion; separately authorized adopter
+  rollout remains governed by the existing promotion/runtime holds.
+- [x] Public issues, docs, fixtures, commits and PR descriptions contain only
   generic examples and approved public attribution.
 
 ## Proposal
@@ -175,6 +180,34 @@ Schema details must reconcile with current configuration and provider patterns
 during Phase 2; any material expansion returns through proposal review first.
 
 ## Journal
+
+### 2026-10-20 - Generic source merged and effort closed
+
+- #7231 merged at `2026-10-20T03:29:30Z` as
+  `28db8c9a2c700317824e96e1880fdcb5bd4df478`. Current-head review
+  `5580394495` is an owner-authored passing Comment with no open findings,
+  as permitted by the repository's contribution policy. All applicable checks
+  passed and all review threads were resolved. Managed merge reported no
+  review-gate bypass.
+- Current-base consumer validation passed 154 cases; the unchanged contract
+  closure passed 265 fixtures. Earlier calibrated roster/startup/relay suites
+  remain recorded below. Fresh temporary plugin roots, actual provider
+  commands and a fresh bridge database exercise first-touch contribution and
+  binding through the contained TLS peer. A whole-machine installer clean room
+  was not run: no installer changed and installed-runtime rollout is explicitly
+  held. Real endpoint/grant/installed-version evidence is likewise not claimed.
+- Re-read every Plan and Validation Plan item. Generic source acceptance is
+  complete; #7237 retains host relationship and separately authorized adopter
+  acceptance, and #3336 retains release responsibility. Historical
+  #7020/#6266 cause/qualification work remains with its existing owners and is
+  not reclassified as fixed by current CI policy or this source merge.
+- Pull-forward initially aborted safely on the multi-commit squash history.
+  Verified the provider's exact merged head and compared every owned file:
+  all source changes were preserved, with only an unrelated upstream testing
+  note added. Kept a backup, rebased the fully merged stack onto its exact merge
+  commit and completed managed sync; no reset, stash or unpublished work loss.
+- Archived this resolved source effort. `dev` merge means pending release and
+  authorized adoption, not an installed or running capability.
 
 ### 2026-10-20 - Current contribution policy and dependency repair
 
