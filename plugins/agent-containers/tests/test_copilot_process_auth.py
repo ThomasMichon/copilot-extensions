@@ -224,6 +224,12 @@ def test_native_launcher_directory_is_private_with_inherited_default_acl(tmp_pat
     auth_env = str(directory / "input.env")
     monkeypatch.setattr(resolver, "host_copilot_cli_token", lambda account: "synthetic")
     monkeypatch.setattr(auth.transport, "write_remote_env", lambda *a: auth_env)
+    real_guard = auth.directory_guard
+    # No credential is staged here; retain all guards except the unrelated tmpfs check.
+    monkeypatch.setattr(
+        auth, "directory_guard",
+        lambda path, **kwargs: real_guard(path, **{"require_ram": False, **kwargs}),
+    )
 
     def execute(argv, **kwargs):
         if "--secret-env-vars" in argv[-1]:
