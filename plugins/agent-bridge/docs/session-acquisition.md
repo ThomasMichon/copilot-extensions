@@ -51,12 +51,20 @@ replays only the ground owner's same key; ambiguous native start requires
 reconciliation of the recorded session, never another `session/new`.
 Changed facts conflict. Removed/retired workspace or native results refuse,
 not fresh-create. Standalone embodiment grants no task/claim authority.
-An absent workspace observation does not prove disposal: a resident roster can
-precede the ground allocation. Missing rows and advisory, stale or malformed
-projection observations explicitly refuse while retaining the same allocation
-and creation key for reconciliation. They never permanently terminalize it or
-authorize another create. A positively observed terminal workspace or retired
-native result still refuses replay. Ordinary same-key replay reconciles a
+Known-workspace preflight reads the ground owner's exact version-1 `record`
+response, not the resident inventory roster. Roster publication may lag a new
+allocation or be unavailable without preventing an exact current owner read.
+The record must identify the requested project/worktree, absolute path, creation
+nonce, lifecycle state and explicit session/history opacity. These metadata
+facts do not grant launch authority: native-head, holder and launch-gate checks
+remain independent. Missing, malformed or unavailable exact records refuse
+while retaining the allocation and creation key; they do not establish disposal
+or authorize another create. A changed path/nonce conflicts before lifecycle
+classification, and finalizing/terminal workspaces cannot start another native
+conversation. Positive sessionless admission requires zero sessions, indexed
+history, absent execution/backend bindings, and nonopaque owner facts.
+A positively observed terminal workspace or retired native result still
+refuses replay. Ordinary same-key replay reconciles a
 previously terminalized pre-launch observation only when the ground owner now
 returns the same active, sessionless allocation and the original journal has
 no native, turn, persisted session or launch-gate history. It retains the

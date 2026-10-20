@@ -9,6 +9,18 @@ from agent_bridge.acquisition_contract import AcquisitionRefused, AcquisitionReq
 
 pytestmark = pytest.mark.contract("agent_bridge.acquisition.worktree_owner")
 
+
+def _owner_result(row):
+    if isinstance(row, dict):
+        row = {
+            "repo": "project-a", "creation_nonce": "original-allocation",
+            "session_count": 0, "last_session_id": None, "execution_leg": None,
+            "execution_leg_opaque": False, "session_backend": None,
+            "session_backend_opaque": False, "sessions_indexed": True,
+            **row,
+        }
+    return {"version": 1, "ok": True, "worktree": row}
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("status", ["pending", "conflict", "terminal"])
 async def test_ground_keyed_creation_preserves_only_typed_pending(monkeypatch, status):
@@ -41,23 +53,23 @@ def acquisition_request():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("rows,code", [
-    ([], "worktree_unknown"),
-    ([{"id": "other", "path": "/fixture", "status": "active"}], "worktree_unknown"),
-    ([{"id": "worktree-a", "status": "active"}], "worktree_unknown"),
-    ([{"id": "worktree-a", "path": "/fixture"}] * 2, "worktree_unknown"),
+    ([], "owner_response_invalid"),
+    ([{"id": "other", "path": "/fixture", "status": "active"}], "owner_response_invalid"),
+    ([{"id": "worktree-a", "status": "active"}], "owner_response_invalid"),
+    ([{"id": "worktree-a", "path": "/fixture"}] * 2, "owner_response_invalid"),
     *[([{"id": "worktree-a", "path": "/fixture", "status": status}], "worktree_terminal")
       for status in ("finalized", "complete", "completed", "archived")],
 ])
 async def test_invalid_tracking_record_refuses_before_head(
     acquisition_request, monkeypatch, rows, code,
 ):
-    command = AsyncMock(return_value={"worktrees": rows})
+    command = AsyncMock(return_value=_owner_result(rows[0] if len(rows) == 1 else rows))
     monkeypatch.setattr(authority, "worktree_command", command)
     with pytest.raises(AcquisitionRefused) as error:
         await authority.verify_worktree(acquisition_request)
     assert error.value.code == code
     command.assert_awaited_once_with(
-        ["list", "--json", "--cache-only", "--worktree-id", "worktree-a"], "project-a",
+        ["record", "--worktree-id", "worktree-a", "--json"], "project-a",
     )
 
 
@@ -71,10 +83,10 @@ async def test_cached_display_never_overrides_native_head(
     acquisition_request, monkeypatch, head, code,
 ):
     command = AsyncMock(side_effect=[
-        {"worktrees": [{
+        _owner_result({
             "id": "worktree-a", "path": "/fixture", "status": "active",
             "state": "resolved", "session_count": 0,
-        }]},
+        }),
         head,
     ])
     monkeypatch.setattr(authority, "worktree_command", command)
@@ -97,11 +109,11 @@ async def test_workspace_owner_identity_must_match_request(
     request = acquisition_request.model_copy(update={
         "version": 2, "project": "execution-repo", "worktree_path": "workspace-path",
     })
-    command = AsyncMock(return_value={"worktrees": [{
+    command = AsyncMock(return_value=_owner_result({
         "id": "worktree-a", "repo": project, "path": path,
-    }]})
+    }))
     monkeypatch.setattr(authority, "worktree_command", command)
     with pytest.raises(AcquisitionRefused) as error:
         await authority.verify_worktree(request)
-    assert error.value.code in {"worktree_unknown", "workspace_identity_conflict"}
+    assert error.value.code in {"owner_response_invalid", "workspace_identity_conflict"}
     assert command.await_count == 1

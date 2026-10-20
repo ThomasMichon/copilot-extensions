@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import Awaitable, Callable
+from pathlib import PurePosixPath, PureWindowsPath
 from typing import Any
 
 from ._peer_launch import ContextRefused
@@ -60,6 +62,60 @@ async def worktree_command(args: list[str], project: str | None) -> dict[str, An
     return result
 
 
+async def read_worktree_record(
+    worktree_id: str, project: str | None, *,
+    command: Callable[[list[str], str | None], Awaitable[dict[str, Any]]] | None = None,
+) -> dict[str, Any]:
+    """Read exact owner metadata, never a roster or launch/no-start attestation."""
+    result = await (command or worktree_command)(
+        ["record", "--worktree-id", worktree_id, "--json"], project,
+    )
+    if not isinstance(result, dict) or type(result.get("version")) is not int or result["version"] != 1:
+        raise AcquisitionRefused("owner_response_invalid", "worktree owner must support record JSON version 1")
+    if result.get("ok") is False:
+        raise AcquisitionRefused("owner_refused", f"exact worktree record read failed: {result.get('error')}")
+    row = result.get("worktree")
+    if result.get("ok") is not True or not isinstance(row, dict):
+        raise AcquisitionRefused("owner_response_invalid", "owner returned no successful exact worktree record")
+    if not {
+        "id", "repo", "path", "status", "creation_nonce", "session_count", "last_session_id",
+        "execution_leg", "sessions_indexed", "execution_leg_opaque",
+        "session_backend", "session_backend_opaque",
+    } <= row.keys():
+        raise AcquisitionRefused("owner_response_invalid", "owner returned an incomplete exact worktree record")
+    if (
+        row.get("id") != worktree_id
+        or not isinstance(row.get("repo"), str) or not row["repo"].strip()
+        or project is not None and row["repo"] != project
+        or not isinstance(row.get("path"), str) or not row["path"].strip()
+    ):
+        raise AcquisitionRefused("owner_response_invalid", "owner did not resolve the exact workspace identity")
+    path = row["path"]
+    posix, windows = PurePosixPath(path), PureWindowsPath(path)
+    if (
+        "\0" in path or not (posix.is_absolute() or windows.is_absolute())
+        or ".." in posix.parts or ".." in windows.parts
+        or not isinstance(row.get("status"), str)
+        or row["status"] not in {
+            "active", "complete", "completed", "pushed", "finalizing",
+            "finalized", "orphaned", "archived",
+        }
+    ):
+        raise AcquisitionRefused("owner_response_invalid", "owner returned an invalid workspace path or status")
+    count = row.get("session_count")
+    if count is not None and (type(count) is not int or count < 0):
+        raise AcquisitionRefused("owner_response_invalid", "owner returned invalid recorded session history")
+    for field in ("last_session_id", "creation_nonce"):
+        if row.get(field) is not None and (
+            not isinstance(row[field], str) or not row[field].strip()
+        ):
+            raise AcquisitionRefused("owner_response_invalid", f"owner returned invalid {field}")
+    for field in ("sessions_indexed", "execution_leg_opaque", "session_backend_opaque"):
+        if type(row[field]) is not bool:
+            raise AcquisitionRefused("owner_response_invalid", f"owner returned invalid {field}")
+    return row
+
+
 async def verify_dispatch(request: AcquisitionRequest, resolver: Any) -> dict[str, Any]:
     """Current generation fences admission; historical generation is not lineage."""
     try:
@@ -93,20 +149,13 @@ async def verify_dispatch(request: AcquisitionRequest, resolver: Any) -> dict[st
 
 
 async def verify_worktree(request: AcquisitionRequest) -> tuple[dict[str, Any], str | None]:
-    # Tracking identity is current; cached display enrichment is not authority.
-    listed = await worktree_command(
-        ["list", "--json", "--cache-only", "--worktree-id", request.worktree_id],
-        request.project,
-    )
-    matches = [row for row in listed.get("worktrees", [])
-               if isinstance(row, dict) and row.get("id") == request.worktree_id]
-    if len(matches) != 1 or not matches[0].get("path"):
-        raise AcquisitionRefused("worktree_unknown", "worktree owner did not resolve one target")
-    row = matches[0]
+    row = await read_worktree_record(request.worktree_id, request.project)
     if request.version == 2 and (
         row.get("repo") != request.project or row.get("path") != request.worktree_path
     ):
         raise AcquisitionRefused("workspace_identity_conflict", "worktree owner changed execution identity")
+    if row.get("status") == "finalizing":
+        raise AcquisitionRefused("transition_pending", "worktree finalization is in progress")
     if row.get("status") in {"finalized", "complete", "completed", "archived"}:
         raise AcquisitionRefused("worktree_terminal", "worktree is terminal")
     head = parse_head_payload(json.dumps(await worktree_command(

@@ -31,6 +31,8 @@ def creation_rig(rig, monkeypatch, tmp_path):
     row = {
         "id": "worktree-a", "repo": "test-project", "path": str(tmp_path),
         "creation_nonce": "original-allocation", "session_count": 0, "status": "active",
+        "last_session_id": None, "execution_leg": None, "execution_leg_opaque": False,
+        "session_backend": None, "session_backend_opaque": False, "sessions_indexed": True,
     }
 
     async def command(args, project):
@@ -40,6 +42,10 @@ def creation_rig(rig, monkeypatch, tmp_path):
             return {"worktree": dict(row), "creation": {"version": 1, "status": "complete"}}
         if args[0] == "list":
             return {"worktrees": [dict(row)]}
+        if args[0] == "record":
+            return {"version": 1, "ok": True, "worktree": {
+                **row, "last_session_id": row.get("last_session_id") or rig.head["id"],
+            }}
         if args[0] == "head-session":
             return {
                 "tracked": True, "head_session": rig.head["id"],
@@ -59,7 +65,7 @@ def creation_rig(rig, monkeypatch, tmp_path):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("missing_read", [1, 2])
 @pytest.mark.parametrize("projected", [False, True])
-async def test_missing_workspace_observation_retains_allocation_for_exact_replay(
+async def test_missing_exact_record_retains_allocation_for_exact_replay(
     creation_rig, monkeypatch, missing_read, projected,
 ):
     rig = creation_rig
@@ -69,10 +75,12 @@ async def test_missing_workspace_observation_retains_allocation_for_exact_replay
     async def lagging_owner(args, project):
         nonlocal reads
         result = await command(args, project)
-        if args[0] == "list":
+        if args[0] == "record":
             reads += 1
             if reads == missing_read:
-                result["worktrees"] = []
+                result["ok"] = False
+                result["worktree"] = None
+                result["error"] = {"code": "record-unavailable"}
             if projected:
                 result["projection"] = {"quality": "current"}
         return result
@@ -82,7 +90,7 @@ async def test_missing_workspace_observation_retains_allocation_for_exact_replay
         await workspace_creation.start(
             rig.manager, rig.target, key="logical-work", prompt="Do the work",
         )
-    assert refused.value.code == "workspace_identity_unknown"
+    assert refused.value.code == "owner_refused"
     saved = rig.db.execute_read("SELECT state,session_id,worktree_json FROM workspace_embodiments")[0]
     assert saved["state"] == "allocated"
     assert not rig.manager.list_sessions()
@@ -110,7 +118,7 @@ async def test_missing_workspace_observation_retains_allocation_for_exact_replay
         {"projection": "invalid"},
     ],
 )
-async def test_noncurrent_workspace_observation_cannot_launch_or_terminalize(
+async def test_noncurrent_roster_does_not_override_exact_owner(
     creation_rig, monkeypatch, metadata,
 ):
     rig = creation_rig
@@ -123,16 +131,16 @@ async def test_noncurrent_workspace_observation_cannot_launch_or_terminalize(
         return result
 
     monkeypatch.setattr(workspace_creation, "worktree_command", stale_owner)
-    for _ in range(2):
-        with pytest.raises(AcquisitionRefused) as refused:
-            await workspace_creation.start(rig.manager, rig.target, key="logical-work")
-        assert refused.value.code == "workspace_identity_unknown"
-    assert rig.db.execute_read("SELECT state FROM workspace_embodiments")[0]["state"] == "allocated"
+    first, _ = await workspace_creation.start(rig.manager, rig.target, key="logical-work")
+    replay, _ = await workspace_creation.start(rig.manager, rig.target, key="logical-work")
+    assert replay is first
+    assert rig.db.execute_read("SELECT state FROM workspace_embodiments")[0]["state"] == "complete"
     assert sum(args[0] == "create" for args, _ in rig.calls) == 1
-    assert not rig.manager.list_sessions()
+    assert len(rig.manager.list_sessions()) == 1
     assert not rig.db.execute_read("SELECT * FROM turns")
     assert not rig.db.execute_read("SELECT 1 FROM acquisition_launch_gates")
-    assert not any(args[0] == "head-session" for args, _ in rig.calls)
+    assert not any(args[0] == "list" for args, _ in rig.calls)
+    await asyncio.sleep(0)
 
 
 @pytest.mark.asyncio
@@ -146,7 +154,7 @@ async def test_legacy_terminal_reconciles_only_unstarted_original_allocation(
     command = workspace_creation.worktree_command
 
     async def legacy_missing_owner(args, project):
-        if args[0] == "list":
+        if args[0] == "record":
             raise AcquisitionRefused("creation_terminal", "original workspace is no longer tracked")
         return await command(args, project)
 
@@ -184,7 +192,12 @@ async def test_legacy_terminal_reconciles_only_unstarted_original_allocation(
             await workspace_creation.start(
                 rig.manager, rig.target, key="logical-work", prompt="Do the work",
             )
-        assert refused.value.code == ("creation_conflict" if blocker == "nonce" else "creation_terminal")
+        expected = (
+            "creation_conflict" if blocker == "nonce"
+            else "owner_response_invalid" if blocker == "status"
+            else "creation_terminal"
+        )
+        assert refused.value.code == expected
         assert rig.db.execute_read("SELECT state FROM workspace_embodiments")[0]["state"] == "terminal"
         assert not rig.manager.list_sessions()
         assert not rig.db.execute_read("SELECT * FROM turns")
@@ -207,7 +220,7 @@ async def test_legacy_terminal_reconciles_only_unstarted_original_allocation(
     ("field", "changed", "code"),
     [
         ("creation_nonce", "replacement-allocation", "creation_conflict"),
-        ("status", None, "live_holder"),
+        ("status", None, "owner_response_invalid"),
     ],
 )
 async def test_allocation_change_during_revalidation_prevents_native_start(
@@ -219,7 +232,7 @@ async def test_allocation_change_during_revalidation_prevents_native_start(
 
     async def changed_owner(args, project):
         nonlocal reads
-        if args[0] == "list":
+        if args[0] == "record":
             reads += 1
             if reads == 2:
                 rig.row[field] = changed

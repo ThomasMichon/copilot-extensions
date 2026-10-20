@@ -75,6 +75,15 @@ def rig(tmp_db, session_manager, mock_acp_client, monkeypatch, tmp_path):
                 "list", "--json", "--cache-only", "--worktree-id", "worktree-a",
             ]
             return {"worktrees": [{"id": "worktree-a", "path": str(tmp_path), "status": "active"}]}
+        if args[0] == "record":
+            return {"version": 1, "ok": True, "worktree": {
+                "id": "worktree-a", "repo": "test-project", "path": str(tmp_path),
+                "status": "active", "creation_nonce": "native-fixture-allocation",
+                "session_count": 1 if head["id"] else 0, "last_session_id": head["id"],
+                "execution_leg": None, "execution_leg_opaque": False,
+                "session_backend": None, "session_backend_opaque": False,
+                "sessions_indexed": True,
+            }}
         if args[0] == "head-session":
             return {"tracked": True, "head_session": head["id"],
                     "active": bool(head["id"]), "state": "active" if head["id"] else None}
