@@ -115,6 +115,34 @@ now move 226 original cases; the setup-bearing finalize/push class retains
 91. Its helper extraction, method partitions, fixture contracts and the
 complete same-head Windows qualification remain open.
 
+### Independent finalize/push setup-helper extraction
+
+This partition began independently from Dev while the separately reviewed
+role-class move #7421 awaited the retained completion owner's review-policy
+disposition. After that owner restored the prior policy arrangement, #7421
+actually merged as `7da41c6d06464012088b4e311e476144c4f3bfb0`, with fresh
+full review/CI/authority checks, and its child was finalized. No policy or
+installed runtime was changed by this test-extraction worker.
+
+Extract only the finalize/push class's eight setup helpers into a shared,
+non-test `PRWorkflowSetup` base. Every helper and test-method AST is identical;
+the static method remains static. Real before/after collection preserves all
+317 expanded identities and their resolved fixture bodies/scopes/closures,
+parameter values and effective marks. It does not change any shared fixture,
+provider double, seed, assertion, parameter, mark or production decision.
+
+All 60 expanded consumers of those helpers pass on native Windows without
+skips in six bounded ten-node groups, exactly two work-stealing workers:
+71.53, 67.81, 91.83, 75.00, 75.05 and 63.89 seconds including each sandbox's
+preparation and cleanup; 445.11 seconds in aggregate. The unchanged
+30-second item, 240-second diagnostic group and resource bounds remain.
+Ruff F/E9 passes; install-contract checks cover thirteen plugins with zero
+violations. Both complete collection passes and cleanup took 25.69 seconds.
+Clean-room provisioning is inapplicable to unchanged test-helper relocation;
+unavailable Linux/external execution receives no credit. This prepares
+separately reviewable method partitions; it is not those partitions or the
+parent repeated complete same-head Windows qualification.
+
 ### B-ROLE prerequisite: current provider-result and review-exception contract
 
 **Actually merged:** #7419 as
