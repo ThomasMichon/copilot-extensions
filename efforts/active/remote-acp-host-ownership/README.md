@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** Serial proposal and implementation PRs targeting `dev`
 - **Created:** 2026-10-19
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** [externally-hosted-acp-agents](../../../visions/plugins/agent-bridge/README.md#externally-hosted-acp-agents)
 - **Umbrella issue:** #7237
 
@@ -53,6 +53,14 @@ ownership of a disposable peer service. Do not adopt that ABI merely because
 its reserve/bind verbs look convenient; the implementation must establish
 compatible relationship semantics without weakening existing producers.
 
+The Phase 2 authority check found that the public legacy `claims add` allowlist
+does not include bridge/session claims, ordinary add transactions may reopen a
+finalized owner, and reverse-owner lookup is explicitly best-effort diagnostic
+data. None is a substitute for the required retained-relationship transaction.
+Any shared claim-contract extension must be explicitly designed and reviewed;
+do not work around this gap with private-store writes or disposable-peer
+absence claims.
+
 ## Request
 
 **Public-safe summary of the operator request:** Allow agents to open and
@@ -65,6 +73,12 @@ systems and private deployment details are omitted without changing the
 ownership requirement. The lifecycle design and validation decomposition below
 are **agent-recommended**.
 
+**Source scope follow-up:** Necessary shared worktree claim-authority source
+changes are permitted, but the compatible retained-relationship contract must
+clear a separate design review before implementation. No wire shape is selected
+by that scope permission. Preserve existing producer/lifecycle guarantees and
+all release, runtime, credential and live-request holds.
+
 **Execution constraint:** Review and merge this proposal before implementation.
 Neither this plan nor a `dev` merge authorizes promotion, installed-runtime
 updates, daemon restarts, credential grants or live external requests.
@@ -74,11 +88,14 @@ updates, daemon restarts, credential grants or live external requests.
 ### Phase 1 - Reviewed relationship contract
 
 - [x] Deduplicate and claim #7237; confirm the effort slug and native adoption.
-- [ ] Review and merge the effort and the focused vision clarification.
-- [ ] Sync onto the reviewed plan and merged target-contribution prerequisite.
+- [x] Review and merge the effort and the focused vision clarification.
+- [x] Sync onto the reviewed plan and merged target-contribution prerequisite.
 
 ### Phase 2 - Durable owner and claim integration
 
+- [ ] Review and merge the separate
+  [retained relationship authority proposal](relationship-authority.md) before
+  implementing shared claim changes; execute its ordered source slices.
 - [ ] Carry the qualified host owner through ordinary CLI/client/API creation
   into the existing remote session record, separately from caller-session
   attribution, the bridge handle and target-qualified remote identity.
@@ -175,7 +192,61 @@ protocol during Phase 2 against current owners. Any required change to the
 generic disposable-producer contract is a separate reviewed design decision,
 not an implicit dependency of this effort.
 
+The [Phase 2 authority proposal](relationship-authority.md) selects the
+agent-recommended compatibility boundary for that separate review: a distinct
+retained-relationship command using the existing protected claim machinery,
+provider-verified local retirement and acknowledged accepted transfer.
+It does not change the available version-1 disposable ABI or authorize coding
+before the proposal clears review.
+
 ## Journal
+
+### 2026-10-20 - Separate retained-relationship authority design
+
+- Prepared the focused Phase 2 source-contract proposal after the operator
+  permitted needed shared claim changes subject to separate design review.
+  The wire/lifetime choices are agent-recommended, not attributed to the
+  operator's scope permission.
+- Kept the version-1 disposable allocation/absence contract intact and named
+  the new-lifetime preservation, old-writer refusal, uncertain acquisition,
+  local retirement and acknowledged-transfer validation obligations.
+- This delta is planning only. No ownership runtime code, promotion, installed
+  update, shared restart, credential action or live request is included.
+
+### 2026-10-20 - Connection prerequisite merged; relationship integration next
+
+- #7231 merged as `28db8c9a2c700317824e96e1880fdcb5bd4df478` after a passing
+  current-head owner review, required checks and resolved threads. Its generic
+  target/auth source acceptance is complete; this effort accepts the next
+  host relationship and separately authorized adopter acceptance boundary.
+  Release promotion remains with #3336 and does not authorize rollout.
+- Preserved the unpublished reviewed-plan status commit, rebased it onto the
+  merged prerequisite and reconciled only the host-ownership index row while
+  retaining newer unrelated entries. The source is now ready for Phase 2.
+- The exact claim authority, capability and reconciliation contract must be
+  checked before implementation. A retained conversation is not a disposable
+  remote service: existing reserve/bind/delete semantics cannot be assumed
+  compatible. No ownership code, runtime update, grant or live request has
+  been performed by this transition.
+- Source inspection confirmed the public legacy claim kind/terminal-owner
+  mismatch and diagnostic-only reverse lookup. Establish the reviewed retained
+  relationship authority boundary before coding; preserve existing disposable
+  producer behavior and older-daemon refusal.
+- Source-only scope now permits needed shared claim-contract changes after
+  separate design review. Next is the bounded authority contract proposal,
+  not implementation against an assumed disposable or best-effort interface.
+
+### 2026-10-19 - Reviewed proposal merged
+
+- #7258 merged to `dev` at `2026-10-19T20:32:24Z`, commit
+  `06638e155269bcdd3d9498c5d6cfce6e85ed0e64`. Copilot approved the proposal
+  and its narrow index-conflict reconciliation; all observed final-head checks
+  passed before the managed merge.
+- Synced onto the merged plan and re-read this contract. Ownership code has not
+  begun: #7231 is still undergoing review of its production source-registration
+  repair and remains an explicit implementation prerequisite.
+- The effort remains Active; plan merge is neither ownership acceptance nor
+  permission to promote, deploy, restart or acquire live credentials.
 
 ### 2026-10-19 - Proposal
 
