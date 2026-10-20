@@ -438,6 +438,7 @@ def test_windows_job_reports_unproven_termination_instead_of_claiming_reaped(mon
 
 def test_posix_group_waits_until_no_live_members_remain(monkeypatch):
     signals = []
+    monkeypatch.setattr(plugin_test_containment.signal, "SIGKILL", 9, raising=False)
     monkeypatch.setattr(
         plugin_test_containment.os, "killpg",
         lambda pid, sig: signals.append((pid, sig)), raising=False,
@@ -447,7 +448,7 @@ def test_posix_group_waits_until_no_live_members_remain(monkeypatch):
     monkeypatch.setattr(plugin_test_containment.time, "sleep", lambda seconds: None)
     monkeypatch.setattr(plugin_test_containment, "_posix_group_identity", lambda pid: (pid, pid))
     plugin_test_containment._terminate_posix_group(12345, (12345, 12345))
-    assert signals == [(12345, plugin_test_containment.signal.SIGTERM)]
+    assert signals == [(12345, plugin_test_containment.signal.SIGTERM), (12345, 9)]
 
 
 def test_posix_usage_does_not_treat_zombies_as_file_holding_members(monkeypatch):
@@ -467,6 +468,25 @@ def test_linux_empty_group_does_not_require_ps(monkeypatch):
         lambda pid: pytest.fail("native empty-group measurement is authoritative"),
     )
     assert plugin_test_containment._posix_group_usage(7) == (0, 0)
+
+
+def test_partial_control_pipe_allocation_closes_owned_descriptors(tmp_path, monkeypatch):
+    calls = []
+
+    def pipe():
+        calls.append("pipe")
+        if len(calls) == 1:
+            return 10, 11
+        raise OSError("owner pipe allocation failed")
+
+    monkeypatch.setattr(plugin_test_containment, "os", SimpleNamespace(
+        name="posix", pipe=pipe, close=lambda fd: calls.append(("close", fd)),
+    ))
+    with pytest.raises(OSError, match="owner pipe allocation failed"):
+        plugin_test_containment._run_contained_process(
+            ["fake"], cwd=tmp_path, env={}, sandbox=tmp_path, limits=Limits(),
+        )
+    assert calls == ["pipe", "pipe", ("close", 10), ("close", 11)]
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX process-budget accounting")
@@ -506,6 +526,30 @@ def test_posix_group_verifies_members_after_sigkill(monkeypatch):
     monkeypatch.setattr(plugin_test_containment, "_posix_group_identity", lambda pid: (pid, pid))
     plugin_test_containment._terminate_posix_group(12345, (12345, 12345))
     assert signals == [plugin_test_containment.signal.SIGTERM, 9]
+
+
+def test_posix_teardown_kills_children_missed_by_term_enumeration(monkeypatch):
+    events = []
+    monkeypatch.setattr(plugin_test_containment.signal, "SIGKILL", 9, raising=False)
+    monkeypatch.setattr(plugin_test_containment, "_posix_group_identity", lambda pid: (pid, pid))
+    monkeypatch.setattr(plugin_test_containment.os, "killpg",
+                        lambda pid, sig: events.append(("signal", sig)), raising=False)
+    # TERM enumeration saw only the controller: a parent forked after the
+    # directory snapshot and exited before its stat read. KILL is still required.
+    observations = iter((1, 2, 0))
+
+    def usage(pid):
+        count = next(observations)
+        events.append(("members", count))
+        return count, 0
+
+    monkeypatch.setattr(plugin_test_containment, "_posix_live_group_usage", usage)
+    monkeypatch.setattr(plugin_test_containment.time, "sleep", lambda seconds: None)
+    plugin_test_containment._terminate_posix_group(12345, (12345, 12345))
+    assert events == [
+        ("signal", plugin_test_containment.signal.SIGTERM), ("members", 1),
+        ("signal", 9), ("members", 2), ("members", 0),
+    ]
 
 
 @pytest.mark.parametrize("changed_before_kill", [False, True])
@@ -581,6 +625,7 @@ def test_controller_reports_status_then_stays_alive_without_leaking_control_env(
         return SimpleNamespace(poll=lambda: 7)
 
     monkeypatch.setattr(plugin_test_containment.subprocess, "Popen", command)
+    monkeypatch.setattr(plugin_test_containment.signal, "signal", lambda *args: None)
     monkeypatch.setattr(plugin_test_containment.os, "set_blocking", lambda *args: None,
                         raising=False)
 
@@ -613,6 +658,7 @@ def test_posix_worker_reaps_abandoned_group_even_if_status_write_races_owner_exi
     ready.touch()
     monkeypatch.setattr(plugin_test_containment.os, "set_blocking", lambda *args: None,
                         raising=False)
+    monkeypatch.setattr(plugin_test_containment.signal, "signal", lambda *args: None)
 
     def owner(*args):
         if during_report:
@@ -665,7 +711,7 @@ def test_linux_membership_ignores_unrelated_process_name_encoding(tmp_path, monk
     assert plugin_test_containment._linux_group_usage(7, live_only=True) == (0, 0)
 
 
-def _assert_posix_owner_death_reaps_group(root, command, *, after_status):
+def _assert_posix_owner_death_reaps_group(root, command, *, boundary):
     root.mkdir()
     owner_code = """
 import os,sys,time
@@ -682,11 +728,18 @@ containment._posix_group_identity=record
 observe=containment._posix_exit_code
 def status(fd):
     result=observe(fd)
-    if result is not None:
+    if result is not None and sys.argv[4]=='reported':
         (root/'reported').touch()
         time.sleep(60)
     return result
 containment._posix_exit_code=status
+killpg=os.killpg
+def signal_group(pid,sig):
+    killpg(pid,sig)
+    if sig==containment.signal.SIGTERM and sys.argv[4]=='term':
+        (root/'termed').touch()
+        time.sleep(60)
+os.killpg=signal_group
 containment.run_contained(
     [sys.executable,'-c',sys.argv[3],str(root/'held')],
     cwd=root,env=containment.isolated_environment(os.environ,root),sandbox=root,
@@ -695,12 +748,13 @@ containment.run_contained(
 """
     owner = subprocess.Popen(
         [sys.executable, "-c", owner_code, str(Path(__file__).resolve().parents[1]),
-         str(root), command],
+         str(root), command, boundary],
+        **plugin_test_containment.no_window_kwargs(),
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
     )
     controller = None
     try:
-        marker = root / ("reported" if after_status else "held")
+        marker = root / {"reported": "reported", "term": "termed", "executing": "held"}[boundary]
         deadline = time.monotonic() + 8
         while not marker.exists():
             assert owner.poll() is None, "owner exited before the controlled kill"
@@ -756,8 +810,13 @@ def test_file_holding_descendant_is_reaped_before_return(tmp_path, hang_controll
         pgid = int(Path(str(held) + ".pgid").read_text())
         assert plugin_test_containment._posix_live_group_usage(pgid) == (0, 0)
         _assert_posix_owner_death_reaps_group(
-            tmp_path / "owner-death", program, after_status=not hang_controller,
+            tmp_path / "owner-death", program,
+            boundary="executing" if hang_controller else "reported",
         )
+        if not hang_controller:
+            _assert_posix_owner_death_reaps_group(
+                tmp_path / "term-owner-death", program, boundary="term",
+            )
     held.unlink()
     assert not held.exists()
 

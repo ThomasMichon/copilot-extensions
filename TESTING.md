@@ -1258,6 +1258,9 @@ Sandbox cleanup requires verified process-tree termination, not just the
 command's exit. The POSIX controller reports status through a private pipe
 and keeps its PID allocated until teardown; the owner verifies its group and
 session identity before each signal and confirms no live members remain.
+The controller stays live through TERM grace and is excluded only from the
+grace-period member count. An identity-checked final SIGKILL is mandatory even
+when an earlier census appears empty; post-kill membership must reach zero.
 An independent owner pipe stays open only in the runner. EOF makes an abandoned
 controller terminate and then kill its own still-pinned group, both during
 command execution and after reporting status; abrupt runner death cannot leave

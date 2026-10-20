@@ -802,6 +802,16 @@ _Pending review of this plan._
   cases without skips on Windows, and 69 on Ubuntu with five existing
   Windows-only cleanup skips; first-touch/native teardown remains diagnostic,
   not the open complete Windows performance qualification.
+- The second full review identified TERM-phase races in unchanged teardown
+  code: a fork can invalidate an empty census, and the runner can die between
+  TERM and KILL. Final SIGKILL is now mandatory after a fresh identity check;
+  a caught TERM handler keeps the controller's abandonment reaper live without
+  transmitting an ignored TERM disposition through exec. The real native test
+  additionally kills the owner inside TERM grace; the census-race regression
+  requires final kill and post-kill zero-member proof. Updated focused runs
+  pass 75 cases without skips on Windows and 70 on Ubuntu with the same five
+  existing Windows-only cleanup skips. Control-pipe setup also closes already
+  allocated descriptors if the second allocation fails.
 
 ### 2026-10-20 - Land module isolation and admit fresh bounded storage accounting
 - C-MODULE #7353 actually merged as

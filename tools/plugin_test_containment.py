@@ -444,7 +444,7 @@ def _terminate_posix_group(pgid: int, identity: tuple[int, int]) -> None:
         if current != identity or identity != (pgid, pgid):
             raise UnreapedProcessError("Refusing stale or reused POSIX process-group identity")
 
-    def wait_until_empty(seconds: float) -> bool:
+    def wait_until_empty(seconds: float, *, remaining: int = 0) -> bool:
         deadline = time.monotonic() + seconds
         while True:
             try:
@@ -455,7 +455,7 @@ def _terminate_posix_group(pgid: int, identity: tuple[int, int]) -> None:
                 ) from exc
             if usage is None:
                 raise UnreapedProcessError("Cannot verify POSIX process-group termination")
-            if usage[0] == 0:
+            if usage[0] <= remaining:
                 return True
             if time.monotonic() >= deadline:
                 return False
@@ -468,8 +468,9 @@ def _terminate_posix_group(pgid: int, identity: tuple[int, int]) -> None:
         return
     except OSError as exc:
         raise UnreapedProcessError(f"Cannot terminate POSIX process group: {exc}") from exc
-    if wait_until_empty(2.0):
-        return
+    # The live controller remains the abandonment reaper through TERM.
+    # A racy census cannot exclude a newly forked child, so always send KILL.
+    wait_until_empty(2.0, remaining=1)
     verify_identity()
     try:
         os.killpg(pgid, signal.SIGKILL)
@@ -723,6 +724,9 @@ def _terminate_abandoned_posix_group() -> None:
 
 
 def _posix_worker(command: list[str], ready: Path, result_fd: int, owner_fd: int) -> int:
+    # A caught handler resets on exec; unlike SIG_IGN it is not inherited by
+    # the command. Stay live to reap if the owner dies during TERM grace.
+    signal.signal(signal.SIGTERM, lambda *_: None)
     os.set_blocking(owner_fd, False)
     command_proc = None
     deadline = time.monotonic() + 30.0
@@ -789,14 +793,14 @@ def _run_contained_process(
     result_read = result_write = None
     owner_read = owner_write = None
     kwargs: dict[str, Any] = {}
-    if os.name != "nt":
-        result_read, result_write = os.pipe()
-        owner_read, owner_write = os.pipe()
-        os.set_blocking(result_read, False)
-        worker_env["COPILOT_EXTENSIONS_CONTAINMENT_RESULT_FD"] = str(result_write)
-        worker_env["COPILOT_EXTENSIONS_CONTAINMENT_OWNER_FD"] = str(owner_read)
-        kwargs["pass_fds"] = (result_write, owner_read)
     try:
+        if os.name != "nt":
+            result_read, result_write = os.pipe()
+            owner_read, owner_write = os.pipe()
+            os.set_blocking(result_read, False)
+            worker_env["COPILOT_EXTENSIONS_CONTAINMENT_RESULT_FD"] = str(result_write)
+            worker_env["COPILOT_EXTENSIONS_CONTAINMENT_OWNER_FD"] = str(owner_read)
+            kwargs["pass_fds"] = (result_write, owner_read)
         proc = subprocess.Popen(
             _worker_command(command, ready),
             cwd=str(cwd),
