@@ -301,22 +301,37 @@ def _communicate_windows_bounded(
                 ):
                     fail(error)
 
+    def run_worker(callback, completed, *args) -> None:
+        try:
+            callback(*args)
+        finally:
+            completed.set()
+
     workers = []
+    attempted = []
     cleanup_error = None
     try:
         for index, stream in enumerate((process.stdout, process.stderr)):
             if stream is not None:
-                workers.append(threading.Thread(target=read, args=(stream, index), daemon=True))
+                completed = threading.Event()
+                workers.append((threading.Thread(
+                    target=run_worker, args=(read, completed, stream, index), daemon=True,
+                ), completed))
         if process.stdin is not None:
-            workers.append(threading.Thread(target=write, daemon=True))
-        for worker in workers:
+            completed = threading.Event()
+            workers.append((threading.Thread(
+                target=run_worker, args=(write, completed), daemon=True,
+            ), completed))
+        for worker, completed in workers:
+            attempted.append((worker, completed))
             worker.start()
-        for worker in workers:
+        for worker, _completed in workers:
             while worker.is_alive():
                 worker.join(min(0.05, _remaining(deadline, argv, timeout)))
         while process.poll() is None:
+            remaining = _remaining(deadline, argv, timeout)
             try:
-                process.wait(timeout=min(0.05, _remaining(deadline, argv, timeout)))
+                process.wait(timeout=min(0.05, remaining))
             except subprocess.TimeoutExpired:
                 continue
         if time.monotonic() >= deadline:
@@ -328,11 +343,16 @@ def _communicate_windows_bounded(
             retire()
         except BaseException as error:
             cleanup_error = error
-        for worker in workers:
-            if worker.ident is not None:
+        for worker, completed in attempted:
+            try:
+                if not completed.wait(2.0):
+                    raise RuntimeError("native child pipe worker startup or completion is unconfirmed")
                 worker.join(timeout=2.0)
-                if worker.is_alive() and cleanup_error is None:
-                    cleanup_error = RuntimeError("native child pipe worker did not settle")
+                if worker.is_alive():
+                    raise RuntimeError("native child pipe worker did not settle")
+            except BaseException as error:
+                if cleanup_error is None:
+                    cleanup_error = error
         try:
             process.wait(timeout=2.0)
         except BaseException as error:

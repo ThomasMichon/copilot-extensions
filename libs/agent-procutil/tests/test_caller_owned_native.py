@@ -549,3 +549,87 @@ def test_worker_interruption_retires_job_with_traceback_retained(monkeypatch, bo
             for pin in pins:
                 cleanup.callback(pin.close)
                 cleanup.callback(pin.kill)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows pre-ident startup interruption")
+def test_pre_ident_startup_interruption_keeps_streams_until_worker_settles(monkeypatch):
+    from agent_procutil import _windows_caller_owned as native
+    from agent_procutil import owned_process as ownership
+
+    entered = threading.Event()
+    release = threading.Event()
+    returned = threading.Event()
+    pins = []
+    processes = []
+    workers = []
+    failures = []
+    initialize = native._Process.__init__
+
+    def record(process, argv, info, streams):
+        initialize(process, argv, info, streams)
+        processes.append(process)
+        pins.append(PinnedProcess(fixture.identity(info.dwProcessId)))
+
+    def make_thread(*args, **kwargs):
+        worker = threading.Thread(*args, **kwargs)
+        set_ident = worker._set_ident
+
+        def paused():
+            entered.set()
+            release.wait(3)
+            set_ident()
+
+        worker._set_ident = paused
+        workers.append(worker)
+        return worker
+
+    def unblock():
+        try:
+            assert entered.wait(3), "native thread did not enter bootstrap"
+            _wait(lambda: pins and all(pin.gone() for pin in pins), 2, "Job did not retire")
+            time.sleep(0.05)
+            assert workers[0].ident is None
+            assert not returned.is_set(), "interruption escaped before bootstrap settled"
+            assert not processes[0].stdout.closed and not processes[0].stderr.closed
+        except BaseException as error:
+            failures.append(error)
+        finally:
+            release.set()
+
+    releaser = threading.Thread(target=unblock, daemon=True)
+    releaser.start()
+    startup_name = (
+        "_start_joinable_thread" if hasattr(threading, "_start_joinable_thread")
+        else "_start_new_thread"
+    )
+    start = getattr(threading, startup_name)
+
+    def interrupt(*args, **kwargs):
+        start(*args, **kwargs)
+        raise KeyboardInterrupt()
+
+    monkeypatch.setattr(threading, startup_name, interrupt)
+    monkeypatch.setattr(native._Process, "__init__", record)
+    monkeypatch.setattr(ownership, "threading", SimpleNamespace(
+        Lock=threading.Lock, Event=threading.Event, Thread=make_thread,
+    ))
+    try:
+        with pytest.raises(KeyboardInterrupt) as caught:
+            ownership.run_caller_owned(
+                [sys.executable, "-I", "-c", "import time;time.sleep(60)"],
+                timeout=5, max_stdout_bytes=32, max_stderr_bytes=32,
+            )
+        returned.set()
+        releaser.join(timeout=3)
+        assert not releaser.is_alive()
+        assert not failures, failures
+        assert caught.value.__traceback__ is not None
+        assert pins and all(pin.gone() for pin in pins)
+        assert all(not worker.is_alive() for worker in workers)
+    finally:
+        release.set()
+        releaser.join(timeout=3)
+        with ExitStack() as cleanup:
+            for pin in pins:
+                cleanup.callback(pin.close)
+                cleanup.callback(pin.kill)

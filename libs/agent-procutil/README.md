@@ -97,6 +97,8 @@ cannot leave an unassigned suspended target.
 Input writing and bounded output draining remain deadline-supervised together;
 the Job must report zero active processes and pipe workers must settle before
 completion or an output-limit error.
+Worker setup and startup stay inside that boundary, including interruption
+before a launched thread has assigned its identity.
 Normal early stdin closure preserves the target's result; unexpected input
 errors remain explicit.
 
@@ -142,6 +144,9 @@ The focused contracts are in `tests/test_caller_owned.py`; the explicit manual
 native lane is `tests/test_caller_owned_native.py`. Prepare the library's `dev`
 dependencies, then run these selections through the repository's bounded test
 supervisor with the normal 30-second item and 300-second group limits. The native
+execution cases are gated to Windows/Linux; input validation and mocked
+contracts remain portable, with explicit refusal coverage for unsupported POSIX.
+The native
 lane builds and installs an offline wheel, removes its source fixture, and
 executes actual installed interpreters. Two cycles per scenario cover caller
 death (including pre-resume Windows startup and a surviving unrelated Linux

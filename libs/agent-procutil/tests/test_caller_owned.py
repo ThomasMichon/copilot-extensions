@@ -25,6 +25,11 @@ from agent_procutil.owned_process import (
     run_owned,
 )
 
+native_execution = pytest.mark.skipif(
+    os.name != "nt" and not sys.platform.startswith("linux"),
+    reason="caller-owned native execution supports Windows and Linux",
+)
+
 
 def _run(code: str, *, timeout: float = 5, stdout: int = 4096, stderr: int = 4096, **kwargs):
     return run_caller_owned(
@@ -34,6 +39,7 @@ def _run(code: str, *, timeout: float = 5, stdout: int = 4096, stderr: int = 409
 
 
 @pytest.mark.parametrize("capture", [True, False])
+@native_execution
 def test_separate_utf8_streams_input_and_real_returncode(capture):
     result = _run(
         "import sys; data=sys.stdin.buffer.read(); "
@@ -47,6 +53,7 @@ def test_separate_utf8_streams_input_and_real_returncode(capture):
 
 
 @pytest.mark.parametrize("stream", ["stdout", "stderr"])
+@native_execution
 def test_raw_byte_limit_accepts_exact_boundary(stream):
     result = _run(
         f"import sys; sys.{stream}.buffer.write(('\\u00e9'*8).encode('utf-8'))",
@@ -57,6 +64,7 @@ def test_raw_byte_limit_accepts_exact_boundary(stream):
 
 
 @pytest.mark.parametrize("stream", ["stdout", "stderr"])
+@native_execution
 def test_raw_byte_overflow_is_typed_prompt_and_nondisclosing(stream):
     started = time.monotonic()
     with pytest.raises(OutputLimitExceeded) as caught:
@@ -73,6 +81,7 @@ def test_raw_byte_overflow_is_typed_prompt_and_nondisclosing(stream):
     assert not hasattr(caught.value, "stderr")
 
 
+@native_execution
 def test_both_streams_are_drained_concurrently():
     result = _run(
         "import sys,threading; "
@@ -85,6 +94,7 @@ def test_both_streams_are_drained_concurrently():
     assert result.stderr == "e" * 131072
 
 
+@native_execution
 def test_blocked_input_obeys_absolute_timeout_and_original_command():
     code = "import time; time.sleep(60)"
     started = time.monotonic()
@@ -95,6 +105,7 @@ def test_blocked_input_obeys_absolute_timeout_and_original_command():
     assert caught.value.timeout == 0.5
 
 
+@native_execution
 def test_child_closing_stdin_early_preserves_result():
     result = _run(
         "import os,sys;os.close(0);sys.stdout.write('closed');sys.exit(7)",
@@ -137,6 +148,7 @@ def test_windows_input_errors_distinguish_early_closure_from_failure(number, bou
         assert communicate() == ("closed", "")
 
 
+@native_execution
 def test_output_overflow_settles_a_concurrently_blocked_input_writer():
     started = time.monotonic()
     with pytest.raises(OutputLimitExceeded) as caught:
@@ -149,9 +161,35 @@ def test_output_overflow_settles_a_concurrently_blocked_input_writer():
     assert caught.value.stream == "stdout"
 
 
+@native_execution
 def test_invalid_utf8_is_not_returned_as_success():
     with pytest.raises(UnicodeError):
         _run("import sys; sys.stdout.buffer.write(b'\\xff')")
+
+
+@native_execution
+@pytest.mark.parametrize("capture", [True, False])
+def test_absolute_deadline_retires_target_after_output_closes(capture):
+    started = time.monotonic()
+    with pytest.raises(subprocess.TimeoutExpired) as caught:
+        _run(
+            "import os,time;os.close(1);os.close(2);time.sleep(60)",
+            timeout=0.3, capture=capture,
+        )
+    assert caught.value.timeout == 0.3
+    assert time.monotonic() - started < 4
+
+
+@pytest.mark.parametrize("platform", ["darwin", "freebsd14"])
+def test_unsupported_posix_platform_refuses_before_spawn(monkeypatch, platform):
+    def forbidden(*args, **kwargs):
+        raise AssertionError("unsupported platform reached native spawn")
+
+    monkeypatch.setattr(protocol, "sys", SimpleNamespace(platform=platform))
+    monkeypatch.setattr(protocol, "os", SimpleNamespace(name="posix"))
+    monkeypatch.setattr(protocol, "_run_owned", forbidden)
+    with pytest.raises(RuntimeError, match="requires Linux"):
+        _run("pass")
 
 
 def test_invalid_utf8_input_refuses_before_spawn(monkeypatch):
@@ -197,10 +235,14 @@ def test_invalid_argv_refuses_before_spawn(monkeypatch, argv):
         run_caller_owned(argv, timeout=1, max_stdout_bytes=10, max_stderr_bytes=10)
 
 
-def test_existing_run_owned_signature_and_unbounded_default_remain_unchanged():
+def test_existing_run_owned_signature_remains_unchanged():
     assert list(inspect.signature(run_owned).parameters) == [
         "argv", "timeout", "input_text", "capture", "inherit_process_group",
     ]
+
+
+@native_execution
+def test_existing_run_owned_unbounded_default_remains_unchanged():
     result = run_owned(
         [sys.executable, "-I", "-c", "import sys;sys.stdout.write('x'*131072)"],
         timeout=5,
@@ -209,6 +251,7 @@ def test_existing_run_owned_signature_and_unbounded_default_remain_unchanged():
     assert result.stdout == "x" * 131072
 
 
+@native_execution
 def test_missing_program_does_not_fabricate_a_completed_result(tmp_path: Path):
     with pytest.raises(OSError):
         run_caller_owned(
@@ -364,7 +407,6 @@ def test_pidfd_exit_observation_accepts_high_descriptors():
         process.wait(timeout=3)
 
 
-@pytest.mark.skipif(os.name == "nt", reason="POSIX retained cleanup custody")
 @pytest.mark.parametrize("boundary", ["retire", "confirm", "wait"])
 def test_all_caller_owned_cleanup_failures_retain_process(monkeypatch, boundary):
     process = SimpleNamespace(stdin=None, stdout=None, stderr=None, returncode=None)
@@ -376,6 +418,16 @@ def test_all_caller_owned_cleanup_failures_retain_process(monkeypatch, boundary)
     def fail(*args, **kwargs):
         raise failure
 
+    monkeypatch.setattr(protocol, "_require_posix_support", lambda: None)
+    monkeypatch.setattr(protocol, "os", SimpleNamespace(
+        name="posix", pipe=os.pipe, set_inheritable=os.set_inheritable, close=os.close,
+    ))
+    monkeypatch.setattr(ownership, "os", SimpleNamespace(
+        name="posix", waitid=object(), P_PID=1, WEXITED=1, WNOHANG=1, WNOWAIT=1,
+    ))
+    monkeypatch.setattr(ownership, "signal", SimpleNamespace(
+        SIGCHLD=1, SIG_DFL=0, getsignal=lambda value: 0,
+    ))
     process.wait = fail if boundary == "wait" else lambda **kwargs: None
     monkeypatch.setattr(ownership, "spawn_sync_in_kill_on_close_job", lambda *a, **k: (process, None))
     monkeypatch.setattr(ownership, "_communicate_unreaped", lambda *a, **k: ("", ""))
@@ -392,7 +444,7 @@ def test_all_caller_owned_cleanup_failures_retain_process(monkeypatch, boundary)
     assert process.returncode is None
 
 
-@pytest.mark.skipif(os.name == "nt", reason="native POSIX group ownership")
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="native Linux group ownership")
 def test_guard_owns_the_group_before_target_execution():
     result = _run(
         "import json,os; "
@@ -402,7 +454,7 @@ def test_guard_owns_the_group_before_target_execution():
     assert observation["parent"] == observation["group"] == observation["session"]
 
 
-@pytest.mark.skipif(os.name == "nt", reason="native POSIX setup refusal")
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="native Linux setup refusal")
 def test_closed_lifetime_pipe_refuses_before_target_launch(tmp_path):
     reader, writer = os.pipe()
     os.close(writer)
