@@ -189,13 +189,39 @@ class WorkerIdentityEntry:
         return out
 
 
+def _resolution_hits(
+    name: str, tiers: list[tuple[str, Path]]
+) -> list[tuple[str, Path]]:
+    """The files ``load_worker_identity(name)`` would consider, in order.
+
+    Probed with the same ``is_file()`` lookups as runtime, so filename
+    matching (e.g. case-insensitivity) follows the filesystem exactly.
+    """
+    hits: list[tuple[str, Path]] = []
+    for source, directory in tiers:
+        path = directory / f"{name}{_IDENTITY_SUFFIX}"
+        if path.is_file():
+            hits.append((source, path))
+    return hits
+
+
+def _file_key(path: Path) -> object:
+    try:
+        st = path.stat()
+    except OSError:
+        return str(path)
+    return (st.st_dev, st.st_ino) if st.st_ino else str(path.resolve())
+
+
 def _entry(name: str, hits: list[tuple[str, Path]]) -> WorkerIdentityEntry:
     (source, path), rest = hits[0], hits[1:]
     identity: WorkerIdentity | None = None
     error: str | None = None
     try:
         identity = _parse_identity_file(path)
-    except (RegistrarError, OSError, UnicodeDecodeError) as exc:
+    # ValueError covers UnicodeDecodeError and YAML scalar constructors
+    # (e.g. an impossible timestamp) that escape ``yaml.YAMLError``.
+    except (RegistrarError, OSError, ValueError) as exc:
         error = str(exc)
     return WorkerIdentityEntry(
         name=name,
@@ -214,16 +240,31 @@ def list_worker_identities(*, cwd: Path | None = None) -> list[WorkerIdentityEnt
     and path are exactly what a declaration selecting that name resolves.
     A malformed effective file is reported via ``error`` rather than raising,
     so one bad override does not hide the rest of the listing. Read-only.
+
+    On a case-insensitive filesystem, filename spellings that resolve to the
+    same files (``Goal-Driven`` vs ``goal-driven``) collapse into one entry
+    named by the spelling from the lowest-precedence tier (e.g. the packaged
+    name); on a case-sensitive one they stay distinct identities.
     """
-    hits: dict[str, list[tuple[str, Path]]] = {}
-    for source, directory in _candidate_tiers(cwd=cwd):
+    tiers = _candidate_tiers(cwd=cwd)
+    # name -> index of the lowest-precedence tier its file appears in.
+    discovered: dict[str, int] = {}
+    for index, (_, directory) in enumerate(tiers):
         if not directory.is_dir():
             continue
-        for path in sorted(directory.glob(f"*{_IDENTITY_SUFFIX}")):
+        for path in directory.glob(f"*{_IDENTITY_SUFFIX}"):
             if path.is_file():
-                name = path.name[: -len(_IDENTITY_SUFFIX)]
-                hits.setdefault(name, []).append((source, path))
-    return [_entry(name, hits[name]) for name in sorted(hits)]
+                discovered[path.name[: -len(_IDENTITY_SUFFIX)]] = index
+    seen: set[tuple[object, ...]] = set()
+    resolved: dict[str, list[tuple[str, Path]]] = {}
+    for name in sorted(discovered, key=lambda n: (-discovered[n], n)):
+        hits = _resolution_hits(name, tiers)
+        key = tuple(_file_key(path) for _, path in hits)
+        if not hits or key in seen:
+            continue
+        seen.add(key)
+        resolved[name] = hits
+    return [_entry(name, resolved[name]) for name in sorted(resolved)]
 
 
 def describe_worker_identity(name: str, *, cwd: Path | None = None) -> WorkerIdentityEntry:
@@ -232,11 +273,7 @@ def describe_worker_identity(name: str, *, cwd: Path | None = None) -> WorkerIde
     Raises ``RegistrarError`` for an unknown or malformed identity.
     """
     identity = load_worker_identity(name, cwd=cwd)
-    hits = [
-        (source, directory / f"{name}{_IDENTITY_SUFFIX}")
-        for source, directory in _candidate_tiers(cwd=cwd)
-    ]
-    hits = [(source, path) for source, path in hits if path.is_file()]
+    hits = _resolution_hits(name, _candidate_tiers(cwd=cwd))
     return WorkerIdentityEntry(
         name=name,
         source=hits[0][0],

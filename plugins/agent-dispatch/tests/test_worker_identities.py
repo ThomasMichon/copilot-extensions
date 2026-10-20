@@ -195,6 +195,46 @@ def test_list_legacy_dir_and_malformed_entry(tmp_path: Path, no_overlay):
     assert "frontmatter" in entries["broken"].error
 
 
+def test_list_reports_yaml_value_error_without_hiding_others(tmp_path: Path, no_overlay):
+    repo_dir = tmp_path / ".copilot-extensions" / "agent-dispatch" / "identities"
+    repo_dir.mkdir(parents=True)
+    (repo_dir / "bad.identity.md").write_text(
+        "---\nname: bad\ndescription: 2026-13-01\n---\n\nbody\n", encoding="utf-8"
+    )
+    entries = {e.name: e for e in list_worker_identities(cwd=tmp_path)}
+    assert entries["bad"].identity is None
+    assert entries["bad"].error
+    assert _packaged_names() <= set(entries)
+
+
+def test_list_case_variants_follow_runtime_resolution(tmp_path: Path, no_overlay):
+    repo_dir = tmp_path / ".copilot-extensions" / "agent-dispatch" / "identities"
+    legacy_dir = tmp_path / ".agent-dispatch" / "identities"
+    _write_identity(repo_dir, "Custom-Name", "Repo.", "Repo rules.")
+    _write_identity(legacy_dir, "custom-name", "Legacy.", "Legacy rules.")
+    packaged = sorted(_packaged_names())[0]
+    _write_identity(repo_dir, packaged.upper(), "Upper override.", "Rules.")
+    case_insensitive = (repo_dir / "custom-name.identity.md").is_file()
+
+    entries = list_worker_identities(cwd=tmp_path)
+    for entry in entries:
+        assert load_worker_identity(entry.name, cwd=tmp_path).source_path == entry.path
+    group = [e for e in entries if e.name.lower() == "custom-name"]
+    packaged_group = [e for e in entries if e.name.lower() == packaged.lower()]
+    if case_insensitive:
+        assert len(group) == 1
+        assert group[0].source == "repository"
+        assert group[0].identity.description == "Repo."
+        assert [s for s, _ in group[0].shadows] == ["legacy-repository"]
+        assert [e.name for e in packaged_group] == [packaged]
+        assert packaged_group[0].source == "repository"
+        assert [s for s, _ in packaged_group[0].shadows] == ["packaged"]
+    else:
+        assert sorted(e.name for e in group) == ["Custom-Name", "custom-name"]
+        assert all(e.shadows == () for e in group)
+        assert sorted(e.name for e in packaged_group) == sorted([packaged, packaged.upper()])
+
+
 def test_describe_returns_rules_and_provenance(tmp_path: Path, no_overlay):
     _write_identity(tmp_path / ".agent-dispatch" / "identities", "custom", "Legacy one.", "Old rules.")
     path = _write_identity(
