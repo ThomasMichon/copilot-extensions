@@ -6,6 +6,7 @@ import ast
 import importlib.util
 import json
 import os
+import signal
 import subprocess
 import sys
 import time
@@ -276,6 +277,7 @@ def test_exec_refuses_arbitrary_commands_or_secret_arguments(tmp_path: Path) -> 
 
 
 def test_missing_docker_is_reported_not_skipped_or_installed(tmp_path: Path) -> None:
+    previous = signal.getsignal(signal.SIGTERM)
     with patch.object(RUN, "materialize", return_value={"source_commit": "a" * 40}), \
             patch.object(RUN.shutil, "which", return_value=None), \
             patch.object(RUN, "Engine") as engine:
@@ -284,6 +286,84 @@ def test_missing_docker_is_reported_not_skipped_or_installed(tmp_path: Path) -> 
     assert receipt["result"] == "fail" and receipt["cleanup"] == "complete"
     report = json.loads((tmp_path / "cr-report.json").read_text())
     assert report["failed"] == 1 and report["jams"][0]["hint"] == "docker-unavailable"
+    assert signal.getsignal(signal.SIGTERM) == previous
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux-only host runner")
+def test_sigterm_enters_cleanup_and_repeated_sigterm_cannot_interrupt_it(tmp_path: Path) -> None:
+    script = """
+import json, signal, sys, time
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+import run as subject
+root = Path(sys.argv[2])
+class Engine:
+    def __init__(self, root, receipt):
+        self.deadline = 0
+    def journal(self):
+        pass
+    def preflight(self):
+        pass
+    def build(self, sha, timeout):
+        return "synthetic-image"
+    def cleanup(self):
+        (root / "cleanup-started").touch()
+        deadline = time.monotonic() + 5
+        while not (root / "release-cleanup").exists():
+            if time.monotonic() >= deadline:
+                raise RuntimeError("cleanup-release-timeout")
+            time.sleep(0.01)
+        (root / "cleanup-finished").touch()
+        return []
+class Witness:
+    def __init__(self, *args):
+        pass
+    def passed(self, *args):
+        pass
+    def run(self):
+        (root / "witness-ready").touch()
+        while True:
+            time.sleep(0.01)
+subject.Engine, subject.Witness = Engine, Witness
+subject.shutil.which = lambda name: "/synthetic/docker"
+subject.materialize = lambda *args: {
+    "source_commit": "a" * 40, "source_manifest_sha256": "b" * 64,
+    "image_id": "synthetic-image", "architecture": {},
+}
+previous = signal.getsignal(signal.SIGTERM)
+receipt = subject.run(root, "a" * 40, root)
+assert signal.getsignal(signal.SIGTERM) == previous
+print(json.dumps(receipt))
+"""
+    process = subprocess.Popen(
+        [sys.executable, "-c", script, str(PROOF), str(tmp_path)],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+
+    def wait_for(name: str) -> None:
+        deadline = time.monotonic() + 5
+        while not (tmp_path / name).exists():
+            assert process.poll() is None, "proof child exited before " + name
+            assert time.monotonic() < deadline, "proof child did not reach " + name
+            time.sleep(0.01)
+
+    try:
+        wait_for("witness-ready")
+        process.send_signal(signal.SIGTERM)
+        wait_for("cleanup-started")
+        process.send_signal(signal.SIGTERM)
+        (tmp_path / "release-cleanup").touch()
+        stdout, stderr = process.communicate(timeout=5)
+        assert process.returncode == 0, stderr
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.communicate(timeout=5)
+    receipt = json.loads(stdout)
+    assert receipt["result"] == "fail" and receipt["error"] == "runner-terminated"
+    assert receipt["cleanup"] == "complete"
+    assert (tmp_path / "cleanup-finished").exists()
+    report = json.loads((tmp_path / "cr-report.json").read_text())
+    assert report["failed"] == 1 and report["jams"][0]["hint"] == "runner-terminated"
 
 
 def test_docker_timeout_is_classified_without_echoing_args(tmp_path: Path) -> None:

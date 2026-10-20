@@ -6,6 +6,7 @@ import argparse
 import json
 import os
 import shutil
+import signal
 import sys
 import time
 from pathlib import Path
@@ -26,6 +27,20 @@ def report_template() -> dict:
 
 
 def run(repository: Path, ref: str, root: Path, build_timeout: int = 900) -> dict:
+    previous = signal.getsignal(signal.SIGTERM)
+
+    def terminated(signum: int, frame: object) -> None:
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        raise ProofError("runner-terminated")
+
+    signal.signal(signal.SIGTERM, terminated)
+    try:
+        return _run(repository, ref, root, build_timeout)
+    finally:
+        signal.signal(signal.SIGTERM, previous)
+
+
+def _run(repository: Path, ref: str, root: Path, build_timeout: int) -> dict:
     report = report_template()
     receipt = {
         "version": 1, "result": "fail", "cleanup": "pending",
@@ -63,6 +78,8 @@ def run(repository: Path, ref: str, root: Path, build_timeout: int = 900) -> dic
                                "evidence": "cr-logs/" if engine else "receipt.json",
                                "hint": code})
     finally:
+        # Repeated termination cannot interrupt exact-ID teardown or its receipts.
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
         errors = engine.cleanup() if engine else []
         receipt["cleanup"] = "failed" if errors else "complete"
         if errors:
