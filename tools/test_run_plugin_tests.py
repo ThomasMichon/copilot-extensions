@@ -329,8 +329,9 @@ def test_cleanup_wait_interruptions_join_before_preserving_ownership_error(
             shutil.rmtree(roots[0])
 
 
-def test_final_sandbox_cleanup_failure_cannot_report_pass(
-    monkeypatch, tmp_path, capsys, cleanup_runner,
+@pytest.mark.parametrize("cancellation", [None, KeyboardInterrupt, SystemExit])
+def test_final_sandbox_cleanup_failure_cannot_mask_cancellation_or_report_pass(
+    monkeypatch, tmp_path, capsys, cleanup_runner, cancellation,
 ):
     original_remove = runner.tempfile.TemporaryDirectory._rmtree
 
@@ -341,13 +342,104 @@ def test_final_sandbox_cleanup_failure_cannot_report_pass(
         return original_remove(name, *args, **kwargs)
 
     monkeypatch.setattr(runner.tempfile.TemporaryDirectory, "_rmtree", staticmethod(remove))
+    if cancellation is not None:
+        def cancel(*args, **kwargs):
+            raise cancellation("stop runner")
+
+        monkeypatch.setattr(runner, "run_contained", cancel)
     try:
-        with pytest.raises(OSError, match="final sandbox removal refused"):
+        with pytest.raises(cancellation or OSError):
             cleanup_runner()
-        assert "[PASS]" not in capsys.readouterr().out
+        output = capsys.readouterr()
+        assert "[PASS]" not in output.out
+        if cancellation is not None:
+            assert "Sandbox cleanup failed: final sandbox removal refused" in output.err
     finally:
         for root in tmp_path.glob("ce-alph-*"):
             shutil.rmtree(root)
+
+
+@pytest.mark.parametrize("seam", ["wait", "shutdown"])
+@pytest.mark.parametrize("pending", [None, OSError, runner.UnreapedProcessError])
+@pytest.mark.parametrize("cancellation", [KeyboardInterrupt, SystemExit])
+def test_cleanup_cancellation_precedes_errors_but_not_unreaped_ownership(
+    monkeypatch, tmp_path, cleanup_runner, seam, pending, cancellation,
+):
+    started = threading.Event()
+    release = threading.Event()
+    finished = threading.Event()
+    roots = []
+    calls = []
+    interrupted = []
+    original_remove = runner.tempfile.TemporaryDirectory._rmtree
+    plugin = tmp_path / "alpha"
+    monkeypatch.setattr(runner, "_test_file_groups", lambda *a, **k: [
+        [plugin / "tests" / f"test_{index}.py"] for index in range(3)
+    ])
+
+    def remove(name, *args, **kwargs):
+        if Path(name).name == "g1":
+            raise OSError("first removal refused")
+        if Path(name).name == "g2":
+            started.set()
+            assert release.wait(5)
+        original_remove(name, *args, **kwargs)
+        if Path(name).name == "g2":
+            finished.set()
+
+    class Pool(ThreadPoolExecutor):
+        def submit(self, fn, name):
+            future = super().submit(fn, name)
+            if Path(name).name == "g2":
+                result = future.result
+
+                def interrupt_once(*args, **kwargs):
+                    if seam == "wait" and not interrupted:
+                        assert not future.done()
+                        interrupted.append(seam)
+                        raise cancellation("cancel during wait")
+                    release.set()
+                    return result(*args, **kwargs)
+
+                monkeypatch.setattr(future, "result", interrupt_once)
+            return future
+
+        def shutdown(self, *args, **kwargs):
+            if seam == "shutdown" and not interrupted:
+                assert finished.is_set()
+                interrupted.append(seam)
+                raise cancellation("cancel during shutdown")
+            return super().shutdown(*args, **kwargs)
+
+    def run(command, **kwargs):
+        roots.append(kwargs["sandbox"])
+        calls.append(command)
+        group = Path(next(arg.split("=", 1)[1] for arg in command
+                          if arg.startswith("--basetemp=")))
+        (group / "owned.txt").write_text("preserve")
+        if len(calls) == 3:
+            assert started.wait(5)
+            if pending is not None:
+                raise pending("third group failed")
+        return 0
+
+    monkeypatch.setattr(runner, "ThreadPoolExecutor", Pool)
+    monkeypatch.setattr(runner, "run_contained", run)
+    monkeypatch.setattr(runner.tempfile.TemporaryDirectory, "_rmtree", staticmethod(remove))
+    try:
+        expected = pending if pending is runner.UnreapedProcessError else cancellation
+        with pytest.raises(expected):
+            cleanup_runner()
+        assert interrupted == [seam]
+        assert finished.is_set()
+        if pending is runner.UnreapedProcessError:
+            assert (roots[0] / "t" / "g3" / "owned.txt").read_text() == "preserve"
+        else:
+            assert not roots[0].exists()
+    finally:
+        release.set()
+        if roots and roots[0].exists():
+            shutil.rmtree(roots[0])
 
 
 def test_real_group_processes_release_readonly_files_before_cleanup(

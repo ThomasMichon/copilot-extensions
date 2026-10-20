@@ -413,6 +413,7 @@ def _group_cleanup_worker() -> Iterator[tuple[ThreadPoolExecutor, list[Future[No
     finally:
         pending = sys.exception()
         failure: BaseException | None = None
+        cancellation: KeyboardInterrupt | SystemExit | None = None
         for cleanup in cleanups:
             while True:
                 try:
@@ -422,6 +423,8 @@ def _group_cleanup_worker() -> Iterator[tuple[ThreadPoolExecutor, list[Future[No
                     print(f"[FAIL] Group sandbox cleanup failed: {exc}", file=sys.stderr)
                     if failure is None:
                         failure = exc
+                    if cancellation is None and isinstance(exc, (KeyboardInterrupt, SystemExit)):
+                        cancellation = exc
                     if cleanup.done() or not isinstance(exc, (KeyboardInterrupt, SystemExit)):
                         break
         while True:
@@ -432,10 +435,15 @@ def _group_cleanup_worker() -> Iterator[tuple[ThreadPoolExecutor, list[Future[No
                 print(f"[FAIL] Cleanup worker shutdown interrupted: {exc}", file=sys.stderr)
                 if failure is None:
                     failure = exc
+                if cancellation is None:
+                    cancellation = exc
         # Defer cancellation until every cleanup has joined, without replacing
         # an ownership error that TestSandbox must see to retain live files.
-        if failure is not None and pending is None:
-            raise failure
+        if not isinstance(pending, UnreapedProcessError):
+            if cancellation is not None and not isinstance(pending, (KeyboardInterrupt, SystemExit)):
+                raise cancellation
+            if failure is not None and pending is None:
+                raise failure
 
 
 def run_plugin(

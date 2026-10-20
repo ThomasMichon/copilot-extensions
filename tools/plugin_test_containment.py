@@ -162,7 +162,13 @@ class TestSandbox(tempfile.TemporaryDirectory):
         if isinstance(exc_value, UnreapedProcessError):
             self.retain()
             return False
-        return super().__exit__(exc_type, exc_value, traceback)
+        try:
+            return super().__exit__(exc_type, exc_value, traceback)
+        except OSError as cleanup_error:
+            if not isinstance(exc_value, (KeyboardInterrupt, SystemExit)):
+                raise
+            print(f"[FAIL] Sandbox cleanup failed: {cleanup_error}", file=sys.stderr)
+            return False
 
 
 @dataclass(frozen=True)
