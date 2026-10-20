@@ -87,7 +87,41 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Mechanical move mapping: preserved, not conflated with fixtures
 
+### Sixth admitted move: complete role-resolution class
+
+Baseline: Dev `26db968a27bdfd4a5c0b88fbbe4a1c17ffd1c8b5`, the actual
+#7419 B-ROLE prerequisite merge. Move the complete, corrected
+`TestCreatePRRoleResolution` class from `tests/test_pr_ops.py` into
+`tests/test_create_pr_roles.py`; every method and helper AST is identical.
+Only unused section headings disappear from the retained module.
+
+Real before/after collection proves the full 317-expanded-node bijection:
+five module-only moves and 312 unchanged identities, with identical fixture
+bodies/scopes/closures, parameter values and effective marks. Native
+Windows executes all five moved cases without skips in 22.74 seconds with
+exactly two work-stealing workers and unchanged 30-second item and
+240-second diagnostic group limits. Both full collection passes plus
+execution, sandbox preparation and final cleanup take 53.62 seconds.
+The two existing real-Git/contained partial-split controls pass without
+skips in 5.12 seconds (7.44 inclusive), preserving both changed whole files
+without invented moved-node coverage credit. Install-contract checks cover
+thirteen plugins with zero violations.
+
+No production behavior, shared fixture, provider correction, assertion,
+parameter, mark, test-tier or CI-admission change is included. Clean-room
+provisioning is inapplicable to a test-only whole-class move; unavailable
+Linux/external execution receives no credit. Six mechanical partitions
+now move 226 original cases; the setup-bearing finalize/push class retains
+91. Its helper extraction, method partitions, fixture contracts and the
+complete same-head Windows qualification remain open.
+
 ### B-ROLE prerequisite: current provider-result and review-exception contract
+
+**Actually merged:** #7419 as
+`26db968a27bdfd4a5c0b88fbbe4a1c17ffd1c8b5`, after exact-head full Copilot
+approval and green required CI. Its child is finalized. The following
+mechanical move starts from these corrected merged bodies; it does not
+replay the provider correction.
 
 The unchanged five-case `TestCreatePRRoleResolution` class in
 `tests/test_pr_ops.py` reproduced four passes and one failure on native
