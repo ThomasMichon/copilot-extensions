@@ -425,9 +425,11 @@ def _pr_merge_now(
     # requiring 1 approving review but granting the acting Maintainer
     # pull-request-scoped bypass rights). Only a provider that
     # exposes ``pull_review_exception`` (currently GitHub) is checked; other
-    # providers' auto-merge already means what it says.
+    # providers' auto-merge already means what it says. The same verified
+    # exception is needed for direct completion: prefer_auto_merge selects the
+    # completion mechanism, not the actor's review-rule authority.
     bypass_review_gate = False
-    if prefer_auto and hasattr(provider, "pull_review_exception"):
+    if hasattr(provider, "pull_review_exception"):
         bypass_review_gate, unsafe_exception, exception_reason = provider.pull_review_exception(
             args.repo, args.pr,
             expected_head_sha=expected_head_sha,

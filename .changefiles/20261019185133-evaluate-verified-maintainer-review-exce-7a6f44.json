@@ -1,0 +1,9 @@
+{
+  "comment": "Evaluate verified Maintainer review exceptions independently of direct versus automatic completion preference.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

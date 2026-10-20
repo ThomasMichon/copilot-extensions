@@ -111,6 +111,10 @@ or invent a flow.
   policy, then use `pr-merge <repo> <PR> --now` if the caller's resolved role
   authorizes it. Bare `pr-merge` deliberately refuses rather than applying
   consent. A human-review or ownership veto is not waived by this profile.
+  For GitHub, the verified Maintainer exception for a missing additional
+  CODEOWNER approval is independent of `pr.prefer_auto_merge`: that setting
+  selects direct versus native auto-completion, not review-rule authority.
+  Both paths retain current-head, required-check and mutation-safety gates.
 - If `pr-merge` reports "no automerge_label" on a repo you **expected** to be
   `pr-agent-merge`, inspect its effective profile and resolved configuration.
   A stale binding is one possible cause; refresh it through the project's

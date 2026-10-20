@@ -735,8 +735,9 @@ def test_prefer_auto_merge_dry_run_previews_auto(monkeypatch, capsys):
 
 # --- bypassable review-gate short-circuit (#3296 follow-up) ----------------
 
+@pytest.mark.parametrize("prefer_auto", [False, True])
 def test_bypassable_review_gate_skips_auto_merge_and_admin_bypasses(
-    monkeypatch, capsys,
+    monkeypatch, capsys, prefer_auto,
 ):
     # A live, required review that the acting identity CAN bypass must skip
     # straight to an admin merge -- auto-merge would otherwise arm
@@ -744,7 +745,7 @@ def test_bypassable_review_gate_skips_auto_merge_and_admin_bypasses(
     import json as _json
     fake = _FakeProvider(auto_err="", review_gate=(True, True))
     _patch_provider(monkeypatch, fake)
-    rc = m._pr_merge_now(_args(json=True), _prcfg(prefer_auto_merge=True),
+    rc = m._pr_merge_now(_args(json=True), _prcfg(prefer_auto_merge=prefer_auto),
                          _self_merge_flow(), apply=True)
     assert rc == 0
     assert fake.auto_calls == []  # never attempted -- would have queued forever
@@ -797,24 +798,24 @@ def test_unknown_bypassability_still_arms_auto_merge(monkeypatch):
     assert fake.calls == []
 
 
-def test_bypassable_review_gate_not_consulted_when_prefer_auto_off(monkeypatch):
-    # The whole short-circuit only matters when auto-merge would otherwise be
-    # tried -- with prefer_auto_merge off, the existing direct-merge path is
-    # unaffected and pull_review_gate is never even called.
-    fake = _FakeProvider(auto_err="", review_gate=(True, True))
+@pytest.mark.parametrize("review_gate", [(False, None), (True, False), (True, None)])
+def test_direct_mode_consults_exception_without_inventing_bypass(monkeypatch, review_gate):
+    fake = _FakeProvider(auto_err="", review_gate=review_gate)
     _patch_provider(monkeypatch, fake)
     rc = m._pr_merge_now(_args(), _prcfg(prefer_auto_merge=False),
                          _self_merge_flow(), apply=True)
     assert rc == 0
-    assert fake.review_gate_calls == []
+    assert fake.review_gate_calls == [dict(repo="o/r", number=7)]
+    assert fake.auto_calls == []
     assert fake.calls == [dict(repo="o/r", number=7, squash=True, admin=False, delete_source_branch=True, expected_head_sha=HEAD)]
 
 
 @pytest.mark.parametrize("blocked", ["negative", "draft", "hold", "wip", "conflict"])
-def test_mutation_preflight_blocks_every_write(monkeypatch, blocked):
+@pytest.mark.parametrize("prefer_auto", [False, True])
+def test_mutation_preflight_blocks_every_write(monkeypatch, blocked, prefer_auto):
     fake = _FakeProvider(auto_err="", review_gate=(True, True))
     snap = pc.PRSnapshot(pr_state="open", head_sha=HEAD, mergeable=True)
-    prcfg = _prcfg(prefer_auto_merge=True)
+    prcfg = _prcfg(prefer_auto_merge=prefer_auto)
     if blocked == "negative":
         snap = pc.PRSnapshot(
             pr_state="open", head_sha=HEAD, mergeable=True,
@@ -826,12 +827,12 @@ def test_mutation_preflight_blocks_every_write(monkeypatch, blocked):
         snap = pc.PRSnapshot(
             pr_state="open", head_sha=HEAD, mergeable=True, labels=("hold",),
         )
-        prcfg = _prcfg(prefer_auto_merge=True, hold_labels=("hold",))
+        prcfg = _prcfg(prefer_auto_merge=prefer_auto, hold_labels=("hold",))
     elif blocked == "wip":
         snap = pc.PRSnapshot(
             pr_state="open", head_sha=HEAD, mergeable=True, title="WIP: unsafe",
         )
-        prcfg = _prcfg(prefer_auto_merge=True, wip_title_prefixes=("WIP:",))
+        prcfg = _prcfg(prefer_auto_merge=prefer_auto, wip_title_prefixes=("WIP:",))
     elif blocked == "conflict":
         snap = pc.PRSnapshot(pr_state="open", head_sha=HEAD, mergeable=False)
     fake.get_snapshot = lambda *args, **kwargs: snap
@@ -893,14 +894,15 @@ def test_direct_mode_rejects_malformed_raw_safety_metadata(monkeypatch, mutation
     assert not any(argv[:3] == ["gh", "pr", "merge"] for argv in calls)
 
 
-def test_new_unsafe_evidence_after_snapshot_blocks_every_write(monkeypatch):
+@pytest.mark.parametrize("prefer_auto", [False, True])
+def test_new_unsafe_evidence_after_snapshot_blocks_every_write(monkeypatch, prefer_auto):
     fake = _FakeProvider(auto_err="", review_gate=(True, True))
     fake.pull_review_exception = lambda *args, **kwargs: (
         False, True, "hold label present: hold",
     )
     _patch_provider(monkeypatch, fake)
     assert m._pr_merge_now(
-        _args(), _prcfg(prefer_auto_merge=True), _self_merge_flow(), apply=True,
+        _args(), _prcfg(prefer_auto_merge=prefer_auto), _self_merge_flow(), apply=True,
     ) == 1
     assert fake.auto_calls == []
     assert fake.calls == []
