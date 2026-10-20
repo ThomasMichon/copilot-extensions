@@ -152,6 +152,23 @@ its uncertainty rather than claiming that a naming change fixed it. Duplicate
 environment qualifiers in historical IDs are a naming-generation defect in
 this host's case, not permission to rename existing IDs or paths.
 
+**New-record schema choice (operator-selected response):**
+
+> tuple-first
+
+The selected form option makes the new record's machine the physical host,
+with environment and one-term execution-owner identity separate. This is a
+source-schema choice, not approval to migrate existing records or deploy.
+
+**One-term addressing intent (verbatim):**
+
+> An intent is to be able to refer to machines' WSL environments via `<machine>-wsl` for speed, though, when a one-term reference is useful/needed
+
+Tuple-first storage must retain that concise execution address; it does not
+require tuple-shaped commands. The [new-record contract](physical-machine-environment-boundary.md#tuple-first-new-record-contract)
+keeps the physical tuple and one-term shorthand distinct and equivalent at the
+appropriate interfaces.
+
 ## Plan
 
 ### Phase 0 - Empty-mux readiness prerequisite
@@ -262,6 +279,9 @@ _(Agent-recommended realization of the operator's explicit model clarification.)
 - [x] Reuse the shared map's physical-machine/environment selection; identify
       compact execution-ID boundaries explicitly, without another registry or
       suffix-derived authority.
+- [ ] Review the [tuple-first new-record contract](physical-machine-environment-boundary.md#tuple-first-new-record-contract)
+      and one-term WSL reference equivalence before changing durable creation
+      semantics.
 - [ ] Make runtime admission, structured machine guidance and prospective
       worktree naming/metadata consume the correct dimension. Keep native and
       guest execution authority distinct and use the same policy in update and
@@ -334,6 +354,20 @@ operator's all-alias/all-worktree acceptance requirement, not authorization for
 unrelated service changes or a second machine registry.
 
 ## Journal
+
+### 2026-10-19 - Guidance merged; tuple-first creation selected
+- #7334 merged after exact-head approval and required Source checks. Guidance
+  now distinguishes physical machine, observed hostname, selected environment
+  and execution address; legacy text keeps OS descriptions and SSH aliases
+  separate. `get machine` retains its one-term execution-ID contract.
+- The operator selected tuple-first identity for new durable records, rather
+  than keeping the old `machine` field overloaded and adding a parallel snapshot.
+  Captured the schema decision and the explicit fast `<machine>-wsl` addressing
+  intent in Request and the existing Phase 3d contract.
+- The next implementation must audit one-term owner/ref consumers and retained
+  allocation repair before changing new-record semantics. Existing records,
+  IDs, paths, references, queues and live sessions remain untouched; reviewed
+  source and separately authorized installed acceptance still gate completion.
 
 ### 2026-10-19 - Physical runtime admission merged; structured guidance next
 - #7321 merged after exact-head Copilot approval, required Source checks and

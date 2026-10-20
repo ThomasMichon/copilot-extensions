@@ -31,16 +31,17 @@ This closes the existing
 It does not reverse the requirement to distinguish native and guest execution,
 or replace the existing shared map and installation identity authority.
 
-## Observed mismatch
+## Original observed mismatch
 
-Current `config.detect_machine` deliberately returns an execution name. Runtime
-update passes that value to the same literal `runtime_allowed` predicate used
+`config.detect_machine` deliberately returns an execution name and remains a
+one-ID API. At inception, runtime update passed that value to the same literal
+`runtime_allowed` predicate used
 by launch reconciliation. A physical-machine allowlist containing `example-host`
 therefore denies an actual guest represented as `example-host-wsl`. Copying that
 compact value into an adopter's physical-machine policy would mask the consumer
 error and make the model less coherent.
 
-Machine guidance also labels an execution entry's key as its machine name.
+Machine guidance also labeled an execution entry's key as its machine name.
 Prospective worktree naming receives machine and environment as separate inputs,
 but the machine input can already contain the environment. Modern naming
 suppresses a repeated suffix; allocation replay deliberately retains historical
@@ -51,6 +52,11 @@ A reported post-update Manager resolution failure currently has no retained
 reproducer. One successful legacy preview and unchanged roster totals do not
 prove all records resolve, and do not establish that this mismatch caused the
 transient failure.
+
+The admission and guidance source repairs subsequently merged as #7321 and
+#7334. Prospective creation semantics, qualified delivery and installed
+acceptance remain open; these source merges do not prove the containing
+rollout complete.
 
 ## Boundary inventory
 
@@ -65,6 +71,68 @@ transient failure.
 The inventory is an **agent-recommended implementation decomposition**. Audit
 ambiguous `machine` call sites before changing their semantics; a globally renamed
 helper must not silently change an external identifier contract.
+
+## Tuple-first new-record contract
+
+The operator selected **tuple-first** for newly created durable records and
+explicitly retained `<machine>-wsl` as a fast one-term reference. Those are
+complementary requirements: the physical identity has separate dimensions,
+while an execution address may compose them for interfaces accepting one term.
+Existing records, IDs, paths and references are not migration targets.
+
+### New-record representation
+
+The following field names and realization are **agent-recommended** and require
+review before implementation; the tuple-first role separation is the operator's
+decision:
+
+| Field or boundary | Required meaning |
+|---|---|
+| New record `machine` | Canonical physical machine from the existing shared selection |
+| New record `environment` | Explicit selected execution environment, independent of hostname |
+| New record `execution_machine` | Authoritative registered one-term execution-owner identity |
+| Existing `platform` compatibility field | Retain its platform contract; reject conflicts with an explicitly stored environment |
+| Qualified owner, pair, controller, claim and resource reference slots | Use the execution-owner identity where the slot accepts one term, never physical-host equality alone |
+
+Use typed, explicitly versioned identity metadata and one shared accessor/codec
+boundary for new and supported historical representations. Do not globally
+change `Config.machine` or `detect_machine`, introduce another registry, or let
+ordinary reads/saves silently upgrade a historical record's identity format.
+Unknown or internally conflicting identity representations must remain explicit
+errors or opaque read-only data, never become authority by a guessed default.
+
+The implementation inventory must include authoritative creation producers,
+paired records, serialization and JSON projections, ownership/locality,
+qualified relationships, session/head registration and retained creation repair.
+Audit consumers outside the record module before repurposing its `machine`
+field. This contract does not authorize rewriting any existing relationship.
+
+### Fast one-term addressing
+
+Keep `<machine>-wsl` accepted wherever a one-term machine/environment reference
+is appropriate. It must select the same declared guest as the physical machine
+plus an explicit WSL environment, without requiring the longer form at every
+call site. Exact custom execution keys and configured transport aliases remain
+valid under the existing map; the shorthand is not an SSH alias or another
+physical machine.
+
+Resolve shorthand through declared shared relationships, preserving exact-key
+precedence, ambiguity and conflicting-environment refusals. A suffix alone is
+not proof of locality or ownership. A native/guest name collision must not
+silently choose the other execution space.
+
+### Prospective naming and retained allocations
+
+Generate a new session ID from the selected physical machine and explicit
+environment, including that environment once. A physical name that itself ends
+in a platform-like suffix must remain intact; do not trim it as a cosmetic fix.
+Worktree names are not transport or ownership authority.
+
+Creation-key replay and interrupted-creation repair must preserve the exact
+admitted ID, checkout, branch, creation nonce and relationship identity. Do not
+reformat a reserved ID using the new naming rule. Historical tuple, compact-key
+and repeated-qualifier records remain supported through existing compatibility
+and provenance checks, without automatic relabeling or reference rewrites.
 
 ## Implementation sequence
 
@@ -115,6 +183,17 @@ The sequence below is **agent-recommended** and requires this proposal's review.
 - [ ] Existing physical/environment tuples, compact legacy labels, repeated
   historical ID prefixes and admitted allocation replay resolve without
   changing their stored bytes.
+- [ ] New records store the physical tuple and separate execution-owner
+  identity; serialization, JSON, paired creation and relationship consumers
+  agree without changing the identity representation of existing records.
+- [ ] `<machine>-wsl` and physical machine plus explicit WSL environment select
+  the same declared guest across appropriate one-term creation, lookup and
+  resume interfaces. Custom keys remain usable, conflicting contexts refuse,
+  and native/guest mutation authority stays distinct.
+- [ ] Admitted creation-key replay and interrupted-creation repair retain exact
+  historical allocations under the new producer, including changed current
+  registry spelling, or report a demonstrated identity conflict without
+  allocating a replacement.
 - [ ] Bounded in-process unit fixtures cover the decision rules; actual Git,
   installed runtime, cross-process and native acceptance stay outside promotion.
 - [ ] Installed Windows and WSL creation, lookup and resume work across all
