@@ -56,11 +56,21 @@ def _ancestor(old: str, new: str, cwd: str) -> bool:
     return bool(old and new and git_ops.is_commit_ancestor(old, new, cwd=cwd))
 
 
-def _series(base: str, head: str, cwd: str) -> list[str] | None:
+def _empty_upstream_commit(commit: str, parent: str, upstream: str, cwd: str) -> bool:
+    if not upstream or not _ancestor(commit, upstream, cwd):
+        return False
+    trees = _git("rev-parse", f"{commit}^{{tree}}", f"{parent}^{{tree}}", cwd=cwd).splitlines()
+    return len(trees) == 2 and trees[0] == trees[1] and bool(
+        re.fullmatch(r"[0-9a-f]{40,64}", trees[0])
+    )
+
+
+def _series(base: str, head: str, cwd: str, *, upstream: str = "") -> list[str] | None:
     """Ordered diagnostic patch IDs, including whitespace and binary changes.
 
     They do not bind hunk locations; tree reconstruction authorizes the replay.
-    Merge commits and empty/unreadable patches are not evidence of a replay.
+    Only empty commits already reachable from the pinned upstream may lack IDs.
+    Merge commits and other empty/unreadable patches are not replay evidence.
     """
     commits = _git("rev-list", "--reverse", "--parents", f"{base}..{head}", cwd=cwd)
     rows = [line.split() for line in commits.splitlines()]
@@ -74,6 +84,13 @@ def _series(base: str, head: str, cwd: str) -> list[str] | None:
     )
     output = _git_bytes("patch-id", "--verbatim", cwd=cwd, stdin=diff)
     pairs = [line.split() for line in output.splitlines()]
+    if len(pairs) != len(rows):
+        represented = {pair[1] for pair in pairs if len(pair) == 2}
+        rows = [
+            row for row in rows
+            if row[0].encode("ascii") in represented
+            or not _empty_upstream_commit(row[0], row[1], upstream, cwd)
+        ]
     if (
         len(pairs) != len(rows)
         or any(
@@ -160,9 +177,15 @@ def _conflict_lineage(
     new_rows = [row.split() for row in _git(
         "rev-list", "--reverse", "--parents", f"{onto}..{finished}", cwd=cwd,
     ).splitlines()]
+    if any(len(row) != 2 for row in [*old_rows, *new_rows]):
+        return None
+    if len(old_rows) != len(old):
+        old_rows = [
+            row for row in old_rows
+            if not _empty_upstream_commit(row[0], row[1], onto, cwd)
+        ]
     if (
         len(old_rows) != len(old) or len(new_rows) != len(new)
-        or any(len(row) != 2 for row in [*old_rows, *new_rows])
         or [sha for sha, _ in steps] != [row[0] for row in new_rows]
     ):
         return None
@@ -282,7 +305,7 @@ def verify(record, repo, remote: str, refspec: str, expected: str, *, cwd: str,
     if not published_ids or not re.fullmatch(rb"[0-9a-f]{40,64}", published_ids[0]):
         return refuse("The saved published head has no reconstructible patch against its base.")
     published_patch = published_ids[0].decode("ascii")
-    old = _series(base, original, cwd)
+    old = _series(base, original, cwd, upstream=onto)
     new = _series(onto, finished, cwd)
     if old is None or new is None or not old:
         return refuse("The source series is empty, unreadable, or contains unsupported merge commits.")

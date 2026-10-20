@@ -777,8 +777,11 @@ an unchanged reconstructed tree proves an already-applied source commit. Exact
 source commit objects already reachable from the new base also need no replay,
 even when a stale recorded base includes upstream changes later edited again.
 This ancestry check uses the original new base, never later replayed source work
-or patch-ID equivalence. A Git
-version without this plumbing capability refuses recovery explicitly.
+or patch-ID equivalence. Empty upstream commits in a stale saved-base range
+need no patch ID only when their raw trees match their sole parent's tree and
+their exact commit objects are ancestors of that pinned new base. Source-owned
+empty commits and merge commits remain unsupported, even if a rebase drops them.
+A Git version without this plumbing capability refuses recovery explicitly.
 Older runtimes could leave the cached patch ID behind after an incremental
 push; recovery records both that cache and the reconstructed published patch,
 but authorizes only the freshly verified full source replay, never the cache.

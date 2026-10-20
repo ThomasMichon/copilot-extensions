@@ -215,9 +215,14 @@ def test_owned_pr_rebase_rejects_concurrent_reviewer_commit(pr_repo, command):
 
 @pytest.mark.guard
 @pytest.mark.parametrize("drop_source", [False, True], ids=["preserved", "dropped"])
-def test_owned_pr_rebase_with_stale_base_preserves_exact_upstream_ancestors(pr_repo, drop_source):
+@pytest.mark.parametrize("empty_upstream", [False, True], ids=["content-only", "empty-upstream"])
+def test_owned_pr_rebase_with_stale_base_preserves_exact_upstream_ancestors(
+    pr_repo, drop_source: bool, empty_upstream: bool,
+) -> None:
     config, wid, path, remote, branch, _ = _prepare(pr_repo)
     old_base = _record(wid).pr.base_sha
+    if empty_upstream:
+        _git("commit", "--allow-empty", "-m", "upstream bookkeeping", cwd=config.default_repo.anchor)
     first_base = _advance(config, path, "README.md")
     _git("rebase", "origin/master", cwd=path)
     assert finalize.push_changes(wid, config)
@@ -253,6 +258,31 @@ def test_owned_pr_rebase_with_stale_base_preserves_exact_upstream_ancestors(pr_r
         assert (path / "README.md").read_text() == "later upstream revision\n"
         assert (path / "feedback.txt").read_text() == "unpublished source work\n"
         assert _record(wid).pr.base_sha == onto
+
+
+@pytest.mark.guard
+@pytest.mark.parametrize("drop_empty", [False, True], ids=["retained", "dropped"])
+def test_owned_pr_rebase_refuses_source_owned_empty_commits(pr_repo, drop_empty: bool) -> None:
+    config, wid, path, remote, branch, published = _prepare(pr_repo)
+    _git("commit", "--allow-empty", "-m", "source bookkeeping", cwd=path)
+    _advance(config, path)
+    options = ("--no-keep-empty",) if drop_empty else ()
+    _git("rebase", *options, "origin/master", cwd=path)
+    assert not finalize.push_changes(wid, config)
+    assert _git("--git-dir", str(remote), "rev-parse", branch, cwd=path) == published
+    assert _record(wid).pr.head_sha == published
+
+
+@pytest.mark.guard
+def test_owned_pr_rebase_still_refuses_upstream_merge_commits(pr_repo) -> None:
+    _, wid, path, _, _, published = _prepare(pr_repo)
+    base = _record(wid).pr.base_sha
+    tree = _git("rev-parse", f"{base}^{{tree}}", cwd=path)
+    side = _git("commit-tree", tree, "-p", base, "-m", "side bookkeeping", cwd=path)
+    merged = _git("commit-tree", tree, "-p", base, "-p", side, "-m", "upstream merge", cwd=path)
+    source_tree = _git("rev-parse", f"{published}^{{tree}}", cwd=path)
+    original = _git("commit-tree", source_tree, "-p", merged, "-m", "source change", cwd=path)
+    assert pr_rebase._series(base, original, str(path), upstream=merged) is None
 
 
 @exhaustive
