@@ -1,0 +1,9 @@
+{
+  "comment": "Enforce installation-owned deployment policy at legacy publication admission and preserve explicit management purpose across native child leases.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

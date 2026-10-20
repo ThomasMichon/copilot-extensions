@@ -22,6 +22,60 @@ TICKET_ENV = "COPILOT_EXTENSIONS_COMMAND_LIFECYCLE"
 _CURRENT: contextvars.ContextVar[Any] = contextvars.ContextVar("command_lifecycle", default=None)
 
 
+def _purpose(binding: Any, owner: Any) -> dict[str, Any]:
+    purpose = owner.get("runtimeDeployment", {
+        "version": 1, "origin": "plugin", "operation": "publish",
+    })
+    if (
+        not isinstance(purpose, dict)
+        or set(purpose) != {"version", "origin", "operation"}
+        or type(purpose.get("version")) is not int
+        or purpose["version"] != 1
+        or not isinstance(purpose["origin"], str)
+        or purpose["origin"] not in {"plugin", "management"}
+        or not isinstance(purpose["operation"], str)
+        or purpose["operation"] not in {"publish", "teardown"}
+        or (purpose["origin"] == "management" and purpose["operation"] == "teardown")
+    ):
+        raise binding.CommandOwnershipConflict("Invalid runtime deployment lease purpose.")
+    return dict(purpose)
+
+
+def _publication(
+    binding: Any, primitive: Any, arguments: dict[str, Any], purpose: dict[str, Any],
+) -> None:
+    if purpose["operation"] == "teardown":
+        return
+    resolver = getattr(primitive, "resolve_runtime_deployment", None)
+    root = Path(arguments["legacy_root"])
+    if resolver is None:
+        if not os.path.lexists(root / "runtime-deployment.json"):
+            return
+        raise binding.CommandOwnershipConflict(
+            "Runtime deployment policy requires a capable installation helper."
+        )
+    result = resolver(
+        **{key: arguments[key] for key in (
+            "payload_root", "plugin_id", "legacy_root", "project_root", "environment",
+        ) if key in arguments},
+        **dict(arguments.get("mode_arguments") or {}),
+    )
+    deployment = result["deployment"]
+    actual_root = result["runtimeRoot"] or result["legacy"]["root"]
+    if Path(actual_root).resolve() != root.resolve():
+        raise binding.CommandOwnershipConflict("Runtime deployment policy names another root.")
+    if deployment["allowPluginPublication"] is True or (
+        purpose["origin"] == "management"
+        and deployment["state"] == "valid"
+        and deployment["managed"] is True
+    ):
+        return
+    raise binding.CommandOwnershipConflict(
+        f"Runtime publication refused: {deployment['reason']}. "
+        f"{deployment['diagnostic'] or ''} {deployment['recovery'] or ''}".strip()
+    )
+
+
 def _owner(binding: Any, primitive: Any, arguments: dict[str, Any]) -> dict[str, Any]:
     try:
         receipt = binding.publish_legacy_binding(primitive, **arguments)
@@ -81,6 +135,7 @@ class LifecycleLease:
         self.lock = lock
         self.owner = owner
         self.ticket = ticket
+        self.purpose = _purpose(binding, lock._owner())
 
     def assert_owned(self) -> None:
         self.lock.assert_owned()
@@ -89,10 +144,12 @@ class LifecycleLease:
             current["host"] != self.lock.host
             or current["pid"] != self.ticket["pid"]
             or not self.primitive._pid_is_live(current["pid"])
+            or _purpose(self.binding, current) != self.purpose
             or _owner(self.binding, self.primitive, self.arguments) != self.owner
         ):
             raise self.binding.CommandOwnershipConflict("Runtime lifecycle admission changed.")
         _reservation(self.binding, self.primitive, Path(self.arguments["legacy_root"]), self.owner)
+        _publication(self.binding, self.primitive, self.arguments, self.purpose)
 
 
 def _lock(primitive: Any, arguments: dict[str, Any]) -> Any:
@@ -143,11 +200,20 @@ def borrowed_lease(binding: Any, primitive: Any, **arguments: Any) -> LifecycleL
 @contextmanager
 def legacy_lifecycle(
     binding: Any, primitive: Any, *, reserve: bool = True, teardown: bool = False,
-    diagnostic: Any = None, **arguments: Any,
+    managed_deployment: bool = False, diagnostic: Any = None, **arguments: Any,
 ) -> Iterator[LifecycleLease]:
     """Reserve the existing manifest before the first shared-runtime write."""
+    if managed_deployment and teardown:
+        raise ValueError("Managed deployment cannot authorize teardown.")
+    if teardown and reserve:
+        raise ValueError("Teardown must not reserve an unfinished runtime build.")
     borrowed = borrowed_lease(binding, primitive, **arguments)
     if borrowed is not None:
+        if (
+            (managed_deployment and borrowed.purpose["origin"] != "management")
+            or teardown != (borrowed.purpose["operation"] == "teardown")
+        ):
+            raise binding.CommandOwnershipConflict("Runtime deployment lease cannot change purpose.")
         yield borrowed
         if teardown:
             borrowed.lock.assert_owned()
@@ -157,14 +223,21 @@ def legacy_lifecycle(
     root = Path(arguments["legacy_root"])
     if not root.is_absolute():
         raise ValueError("Runtime lifecycle requires an absolute runtime root.")
-    if teardown and reserve:
-        raise ValueError("Teardown must not reserve an unfinished runtime build.")
+    purpose = {
+        "version": 1, "origin": "management" if managed_deployment else "plugin",
+        "operation": "teardown" if teardown else "publish",
+    }
     # Refuse obvious foreign ownership without creating even a lock directory;
     # admission is repeated after acquisition to close the concurrent-writer race.
+    _publication(binding, primitive, arguments, purpose)
     _reservation(binding, primitive, root, _owner(binding, primitive, arguments))
     with _lock(primitive, arguments) as lock:
         owner = _owner(binding, primitive, arguments)
         manifest = _reservation(binding, primitive, root, owner)
+        _publication(binding, primitive, arguments, purpose)
+        primitive._atomic_write_json(
+            lock.owner_path, {**lock._owner(), "runtimeDeployment": purpose}, lock=lock,
+        )
         if owner.get("unattributed"):
             message = (
                 "Runtime source is unavailable; legacy mutation is admitted by the "
@@ -226,11 +299,14 @@ def _human_output() -> Any:
 def run_lifecycle(
     binding: Any, primitive: Any, command: list[str], *,
     deferred_runtime: bool = False, teardown: bool = False,
+    managed_deployment: bool = False,
     timeout: float | None = None, human_operation: str | None = None, **arguments: Any,
 ) -> int:
     """Keep the native installer child contained under its admitting parent."""
     if not command or not Path(command[0]).is_absolute():
         raise ValueError("A lifecycle child requires an exact absolute interpreter.")
+    if managed_deployment and teardown:
+        raise ValueError("Managed deployment cannot authorize teardown.")
     if timeout is not None and (not math.isfinite(timeout) or timeout <= 0):
         raise ValueError("A lifecycle deadline must be finite and positive.")
     if timeout is not None and os.name != "nt":
@@ -268,7 +344,8 @@ def run_lifecycle(
         work = stack.enter_context(ExitStack())
         lease = work.enter_context(legacy_lifecycle(
             binding, primitive, reserve=not (deferred_runtime or teardown),
-            teardown=teardown, diagnostic=diagnostic if operation else None, **arguments,
+            teardown=teardown, managed_deployment=managed_deployment,
+            diagnostic=diagnostic if operation else None, **arguments,
         ))
         environment[TICKET_ENV] = json.dumps(lease.ticket)
         output = work.enter_context(human.native_output()) if human is not None else None

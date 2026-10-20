@@ -111,7 +111,8 @@ publication and command-ownership boundaries; it does not disable whole hooks.
 - [ ] Add a local managed-deployment policy at the shared publication boundary, retaining standalone defaults and installation scope.
 - [x] Land and qualify the shared installation-owned decision on Python,
   no-Python POSIX and PowerShell 5.1 before wiring every publication caller.
-- [ ] Gate each plugin's reconciliation plan and in-process execution without suppressing marketplace refresh or independent targets.
+- [x] Gate each plugin's reconciliation plan and in-process execution without suppressing marketplace refresh or independent targets.
+- [ ] Qualify shared legacy lifecycle publication admission and explicit management purpose on the existing source-qualified lease.
 - [ ] Cover session bootstrap and indirect first-use publication without disabling other hook or extension behavior.
 - [ ] Keep adapters thin and enforce drift-compatible service interaction without implicit runtime replacement.
 
@@ -426,3 +427,14 @@ onto one branch.
 - Real helper fixtures cover legacy and active-cell policy scope, late opt-in, older adapters and foreign ownership. Final native Windows passes 191 cases with one platform skip; Linux passes 186 with six Windows-only skips. The bounded diagnostic transport is extracted rather than growing the grandfathered reconciler.
 - Review exposed physical-versus-aliased home spelling in the new root, context and policy comparisons. Validated canonical path comparison replaces string equality; the expanded 22-case deployment suite passes on both Windows junctions and Linux symlinks without runtime writes.
 - Full hook/first-use/native-installer and launcher execution admission, explicit management, skew, source selection and maintenance remain open. No policy, source binding, native deployment or schedule was enabled.
+
+### 2026-10-20 - Reconciliation caller merged; native publication next
+- PR #7424 merged as `c0c20a5a54e1ee4acb26775bb74c7098204e198a` after exact-head Copilot approval with no open findings and successful required checks. The review-discovered alias issue is closed by real Windows-junction and Linux-symlink regressions.
+- Re-read the Plan and Validation Plan. Only the per-plugin reconciliation planning/in-process execution item closes; the whole publication boundary and retained-hook/skew validation remain open.
+- Next integrate bootstrap and indirect first use with actual native publication admission, reusing the source-qualified lifecycle lease for explicit management rather than an environment hint. Preserve non-deployment hook execution and native launcher-run plans; no installation or maintenance opt-in is implied.
+
+### 2026-10-20 - Shared native admission implementation
+- Composed the canonical deployment decision with the existing legacy lifecycle before lock/reservation writes, under the acquired lock and on each ownership assertion. Direct manifest publication checks the same policy even without an enclosing installer.
+- Explicit management purpose is recorded on the existing live lock owner and inherited by source-qualified native children. A plugin lease cannot upgrade its purpose; malformed, unsupported or foreign policy remains blocking. Teardown remains policy-independent and cannot publish.
+- Real native installer fixtures verify managed install/update/provision/stamp refusal before staging and explicit CLI admission through the borrowed child lease. Corrected the older manifest fixture to include its real builder-function closure; no production fallback was introduced.
+- Installation-cell admission, bootstrap lib-copy reconciliation, early first-use writes, retained hooks, skew and Manager source selection remain open. No live policy, deployment or maintenance cadence is enabled.

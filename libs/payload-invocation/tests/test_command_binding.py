@@ -768,8 +768,8 @@ def test_command_binding_native_manifest_publication_and_foreign_refusal(
     })
     if shell == "bash":
         source = (ROOT / "plugins/agent-worktrees/scripts/install.sh").read_text()
-        function = "write_deploy_manifest() {" + source.split(
-            "write_deploy_manifest() {", 1
+        function = "_build_deploy_manifest_json() {" + source.split(
+            "_build_deploy_manifest_json() {", 1
         )[1].split("show_deploy_status() {", 1)[0]
         program = (
             "set -euo pipefail\n"
@@ -788,8 +788,8 @@ def test_command_binding_native_manifest_publication_and_foreign_refusal(
         argv = ["bash", "-c", program]
     else:
         source = (ROOT / "plugins/agent-worktrees/scripts/install.ps1").read_text()
-        function = "function Write-V3Manifest {" + source.split(
-            "function Write-V3Manifest {", 1
+        function = "function New-V3Manifest {" + source.split(
+            "function New-V3Manifest {", 1
         )[1].split("function Test-UvConfiguredIndex {", 1)[0]
         program = (
             "$ErrorActionPreference='Stop'\n"

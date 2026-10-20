@@ -134,6 +134,26 @@ plans, session bootstrap and indirect first use still need their own admission
 at the actual mutation seam, including explicit management authorization.
 Those remaining paths and positive retained-hook assertions keep Phase 3 open.
 
+## Source-qualified lifecycle admission
+
+The shared legacy lifecycle now composes the canonical deployment decision
+before lock/reservation writes, after acquiring the existing lock and whenever
+a live lease asserts ownership. Direct manifest publication performs the same
+admission even without an enclosing installer. Worktrees' existing native
+legacy admission therefore refuses managed `install`, `update`, `provision`
+and deferred `stamp` before self-staging.
+
+An explicit management caller requests `--managed-deployment` on
+`--run-lifecycle`. The existing lock owner records its immutable purpose;
+borrowed native children authenticate that purpose through the live
+source-qualified token rather than trusting an environment boolean. A borrowed
+plugin lease cannot become management, invalid/unsupported/foreign deployment
+policy remains blocking, and teardown cannot become publication.
+
+This slice does not wire Manager source selection, installation-cell admission,
+bootstrap lib-copy reconciliation or early first-use writes. Their actual
+mutation gates and positive retained-hook behavior remain required.
+
 ## Validation before claiming Phase 3 complete
 
 - [ ] Exercise the real session-bootstrap and indirect first-use paths with

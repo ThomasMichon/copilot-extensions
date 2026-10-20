@@ -98,6 +98,26 @@ Deferred `stamp` holds the same admission lock but neither reserves an
 unfinished runtime build nor publishes new selectable ownership. First-use
 `provision` performs the runtime-building transaction.
 
+The same admission checks the addressed installation's runtime-deployment
+policy before creating its lock or reservation, again under the lock and on
+every lease ownership assertion. Managed plugin publication is refused, including
+deferred stamping and direct manifest publication. Missing policy preserves
+standalone behavior; an older helper may proceed only when no policy exists.
+Malformed, unsupported or foreign policy cannot authorize publication.
+
+An explicit management caller may use `--managed-deployment` with
+`--run-lifecycle` (never teardown or a read/check operation). This requests
+management purpose on the existing token-owned lock, not another updater or a
+source-ownership bypass. The lock owner's additive `runtimeDeployment` record
+binds version, origin and publication/teardown operation. Borrowed children
+derive their purpose from that live durable owner and revalidate it; a plugin
+lease cannot upgrade itself by passing the flag or an environment hint.
+Management admits a valid managed policy but still requires the original
+installation, source and environment ownership. Teardown remains available
+independently of deployment policy, and its lease cannot publish a manifest.
+This API is a composition point for explicit management, not proof that every
+native bootstrap or installation-cell caller has adopted it.
+
 Windows callers with a bounded grace window may supply `--lifecycle-timeout <seconds>`
 with `--run-lifecycle`. The admitting parent owns this deadline: it stops the
 native installer tree and waits for the child before releasing its lease.
