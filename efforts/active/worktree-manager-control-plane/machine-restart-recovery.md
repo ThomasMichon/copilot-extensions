@@ -183,6 +183,10 @@ means of fulfilling the operator's request. They require normal source review.
   binds retained original-source
   history to fresh native hosting and invoking ancestry before durable seed
   pickup; its fixtures are not actual native CLI qualification.
+  [#7344](https://github.com/ThomasMichon/copilot-extensions/pull/7344)
+  retains acknowledged later-boot history without eviction or retry authority,
+  reserves future ACK/counter capacity before invocation, and preserves frozen
+  historical target identity during explicit read-only inspection.
 - [ ] Apply bounded admission and concurrency. Authentication, dependency or
   ownership failures remain visible and resumable without busy retry loops.
 
@@ -1005,3 +1009,58 @@ The umbrella effort remains Active independently of this slice's completion.
   Full native/platform qualification, surviving-session adoption,
   task/producer/profile action-time admission, startup/enrollment and blocking
   notification timing remain open under the original objective.
+
+### 2026-10-19 - Bounded receipt history merged; notification timing next
+
+- [#7344](https://github.com/ThomasMichon/copilot-extensions/pull/7344)
+  squash-merged to `dev` as `8dae9d9145` after genuine approval of exact head
+  `1a2a1565946`, no findings and passing required checks. A concurrent umbrella
+  journal edit required a supported owned rebase; both independent entries
+  were retained, source/test bytes were unchanged and the new head received
+  its own approval before merge.
+- Re-read the actual focused Plan, Validation Plan and completion gate after
+  merge. Retained receipt lifecycle is delivered, not complete recovery.
+  Original tracking and the umbrella remain open; no release, installation,
+  startup enrollment or automatic eligibility follows from the merge.
+- Next source-only stretch: service native shutdown I/O despite ordinary
+  blocking attachment/owner/status work, preserving existing lease, mutation
+  admission and drain ownership. Qualify that timing boundary with disposable
+  notification fixtures rather than the host bus or a production shutdown.
+  Actual native CLI readiness/seed consumption, surviving-session adoption,
+  task/producer/profile action-time admission and platform startup/enrollment
+  remain under this same objective.
+
+### 2026-10-19 - Independent notification I/O and drain ownership
+
+- Reproduced two failures: ordinary main-loop work prevented notification I/O,
+  and drain could report clean without stopping native resources. A single
+  daemon-owned thread now exclusively constructs, pumps and closes the Linux
+  adapter, independent of ordinary attachment/owner/status work. No new daemon,
+  scheduler, agent or platform enrollment was introduced.
+- Current admission is rechecked under the I/O-owner gate. Drain closes it and
+  requests stop independently of the ordinary loop, then waits through all
+  callbacks, journal writes and descriptor cleanup. Shutdown joins the owner
+  before lease release; undrain cannot overlap old/new notification owners.
+  Default-off, passive and unsupported paths remain thread-free.
+- The initial disconnected daemon/runtime lane passed 147 tests with three
+  native-platform skips. Expanded failure injection found an incorrectly
+  classified cleanup-failure flag; separating I/O failure from failed cleanup
+  restored the intended visible blocker and clean-drain distinction.
+  The corrected focused runtime/thread lane passed 15 tests.
+- A disposable derivative of the pinned isolation image restored only the
+  already-used private `dbus-daemon` fixture. The disconnected integrated
+  notification/evidence/attempt/daemon lane passed 328 tests with three platform
+  skips. The exact final private-bus/runtime/thread lane passed 19 tests without
+  skips: while ordinary work blocks for 1.25 seconds, actual native D-Bus signal
+  handling must persist the checkpoint and release the inhibitor within
+  0.75 seconds, before its one-second delay expires. Actual daemon lease release
+  also asserts the notification thread and event loop have already stopped.
+- Documentation-impact review updates Manager behavior, the focused test flow
+  and the graceful-cutover safe point. The bounded I/O owner closes part of the
+  existing session-hosting persist-before-notify/snapshot intent under the
+  existing active lease and drain pattern; it does not extend authority.
+  Source still awaits review/merge. Hard real-time filesystem/OS bounds, actual
+  host shutdown/startup coverage, native CLI readiness/seed consumption,
+  surviving-session adoption and task/producer/profile action-time admission
+  remain unresolved. Transport qualification and automatic eligibility remain
+  false; no combined Plan/Validation item is declared complete.

@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import logging
-import time
+import threading
 from collections.abc import Callable
-from contextlib import AbstractContextManager
 from pathlib import Path
 
 from .manager_config import ManagerConfigError, RestartRecoveryConfig, load_config
@@ -20,7 +19,10 @@ log = logging.getLogger(__name__)
 class RestartNotificationRuntime:
     """No native connection before active lease acquisition and explicit opt-in."""
 
-    def __init__(self, root: Path, observer: RestartObserver) -> None:
+    def __init__(
+        self, root: Path, observer: RestartObserver, *,
+        can_admit: Callable[[], bool] = lambda: True,
+    ) -> None:
         self.root = root
         self.observer = observer
         self._config: RestartRecoveryConfig | None = None
@@ -29,17 +31,23 @@ class RestartNotificationRuntime:
         self._blocker: str | None = None
         self._paused = True
         self._attempts: dict | None = None
+        self._can_admit = can_admit
+        self._lock = threading.Lock()
+        self._worker: threading.Thread | None = None
+        self._stop = threading.Event()
+        self._transport_status: dict | None = None
+        self._cleanup_failed = False
 
     @property
     def status(self) -> dict:
         """Return an immutable-by-publication snapshot for server-thread health."""
-        adapter = self._adapter
+        transport = self._transport_status
         result = {
             "capabilities": {
                 **self._capabilities,
                 **({"shutdown_notifications": {
-                    "requested": True, **adapter.status,
-                }} if adapter is not None else {}),
+                    "requested": True, **transport,
+                }} if transport is not None else {}),
             },
             "automatic_eligible": False,
             "admitted": not self._paused,
@@ -83,7 +91,7 @@ class RestartNotificationRuntime:
     def _start(self) -> None:
         if (
             self._config is None or not self._config.shutdown_notifications
-            or self._blocker or self._adapter is not None
+            or self._blocker or self._worker is not None and self._worker.is_alive()
         ):
             return
         epoch = self.observer.epoch
@@ -97,47 +105,94 @@ class RestartNotificationRuntime:
             except ImportError as exc:
                 self._blocker = f"Native shutdown transport dependency unavailable: {exc}"
             else:
-                self._adapter = LogindShutdownAdapter(self.observer.journal, epoch)
-                self._adapter.start()
+                self._stop = threading.Event()
+                self._transport_status = {"status": "connecting", "qualified": False}
+                self._worker = threading.Thread(
+                    target=self._run, args=(LogindShutdownAdapter, epoch, self._stop),
+                    name="restart-notifications", daemon=False,
+                )
+                try:
+                    self._worker.start()
+                except RuntimeError as exc:
+                    self._worker = None
+                    self._blocker = f"Could not start native notification I/O: {exc}"
+                    self._transport_status = {"status": "blocked", "qualified": False, "blocker": self._blocker}
         if self._blocker:
             log.warning("Restart notification admission blocked: %s", self._blocker)
 
-    def pump(self, *, admitted: bool, wait_s: float = 0.0) -> None:
-        """Run only inside the owning daemon loop's current mutation admission."""
+    def _run(self, factory, epoch, stop: threading.Event) -> None:
+        """One daemon-owned thread exclusively owns native I/O and its cleanup."""
+        adapter = None
+        failed = False
+        try:
+            adapter = factory(self.observer.journal, epoch)
+            self._adapter = adapter
+            adapter.start()
+            while not stop.is_set():
+                adapter.pump(wait_s=0.05)
+                self._transport_status = dict(adapter.status)
+                if adapter.status["status"] in {"blocked", "closed"}:
+                    if adapter.status["status"] == "blocked":
+                        self._blocker = adapter.status["blocker"]
+                    break
+        except Exception as exc:
+            failed = True
+            self._blocker = f"Native notification I/O failed ({type(exc).__name__}): {exc}"
+            self._transport_status = {"status": "blocked", "qualified": False, "blocker": self._blocker}
+            log.exception("Restart notification I/O failed")
+        finally:
+            if adapter is not None:
+                previous = dict(adapter.status)
+                try:
+                    adapter.close()
+                except Exception as exc:
+                    failed = True
+                    self._cleanup_failed = True
+                    self._blocker = f"Native notification cleanup failed ({type(exc).__name__}): {exc}"
+                    self._transport_status = {"status": "blocked", "qualified": False, "blocker": self._blocker}
+                    log.exception("Restart notification cleanup failed")
+                if not failed:
+                    self._transport_status = previous if previous["status"] == "blocked" else dict(adapter.status)
+
+    def pump(self, *, admitted: bool) -> None:
+        """Admit one native I/O owner; ordinary daemon work never pumps its loop."""
         if not admitted:
-            self.pause()
+            self.request_pause()
             return
         if self._config is None:
             return
-        self._paused = False
-        self._start()
-        if self._adapter is not None:
-            if wait_s:
-                self._adapter.pump(wait_s=wait_s)
-            else:
-                self._adapter.pump()
-
-    def wait(
-        self, seconds: float, *, admitted: Callable[[], bool],
-        mutation: Callable[[], AbstractContextManager],
-    ) -> None:
-        """Service native I/O during the existing idle wait, on its owning loop."""
-        deadline = time.monotonic() + seconds
-        while (remaining := deadline - time.monotonic()) > 0:
-            adapter = self._adapter
-            if adapter is None or adapter.status["status"] in {"blocked", "closed"}:
-                time.sleep(remaining)
+        with self._lock:
+            if not self._can_admit():
+                self._request_pause()
                 return
-            with mutation():
-                self.pump(admitted=admitted(), wait_s=min(0.05, remaining))
+            self._paused = False
+            self._start()
+
+    @property
+    def drained(self) -> bool:
+        """Drain includes native callbacks, journal writes and descriptor cleanup."""
+        with self._lock:
+            return not self._cleanup_failed and (self._worker is None or not self._worker.is_alive())
+
+    def _request_pause(self) -> None:
+        self._paused = True
+        self._stop.set()
+
+    def request_pause(self) -> None:
+        """Close admission without blocking a server-thread drain request."""
+        with self._lock:
+            self._request_pause()
 
     def pause(self) -> None:
-        """Close native resources on the owning loop before releasing its lease."""
-        self._paused = True
-        if self._adapter is not None:
-            self._adapter.close()
-            self._adapter = None
+        """Join owned native cleanup before releasing the daemon's active lease."""
+        self.request_pause()
+        worker = self._worker
+        if worker is not None:
+            worker.join()
+        self._adapter = None
 
     def close(self) -> None:
         """Release notification ownership without changing enrollment/config."""
         self.pause()
+        if self._cleanup_failed:
+            raise RuntimeError(self._blocker)

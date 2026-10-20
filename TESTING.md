@@ -208,7 +208,7 @@ restart-seed delivery. Those remain separate native integration obligations.
 Default-off recovery configuration and native notification transport use:
 
 ```text
-python tools/run_tests_in_devcontainer.py worktree-manager -k 'test_manager_config or test_restart_capabilities or test_restart_notification_runtime or test_restart_notifications'
+python tools/run_tests_in_devcontainer.py worktree-manager -k 'test_manager_config or test_restart_capabilities or test_restart_notification_runtime or test_restart_notification_thread or test_restart_notifications'
 ```
 
 The disposable transport tests exercise actual pipe-FD ownership, inhibitor-before-
@@ -220,8 +220,16 @@ fixture skips explicitly if the binary is unavailable (including the standard
 isolated image), so such a run is not actual D-Bus qualification. A disposable
 derivative of the same pinned, hardened image with Debian's `dbus-daemon`
 installed can run this fixture without changing the wrapper's filesystem,
-credential or network isolation. Neither fixture proves resident-loop latency,
-real host shutdown coverage, automatic enrollment or acknowledged Resume.
+credential or network isolation. At production daemon cadence, the private-bus
+fixture also delivers a real shutdown signal while ordinary work stays blocked
+for 1.25 seconds: checkpoint and inhibitor release must occur within 0.75 seconds,
+before the one-second native delay expires. It asserts the notification thread
+and its event loop are closed before the actual daemon lease is released.
+Thread fixtures prove exclusive adapter ownership, stale-admission refusal,
+drain waiting through cleanup, safe undrain and visible startup/I/O/cleanup
+failures without busy retry. Default-off/passive paths create no native owner.
+These contracts do not prove hard real-time OS/filesystem bounds, real host
+shutdown/startup coverage, automatic enrollment or acknowledged Resume.
 
 Explicit exact-original restart Resume and read-only outcome composition use:
 

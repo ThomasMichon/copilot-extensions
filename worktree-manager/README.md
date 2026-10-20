@@ -499,14 +499,22 @@ writes stay visible; no elevation or busy reconnect loop is attempted.
 Permanent failure disconnects the bus and drains pending tasks and received
 descriptors before the adapter stops pumping, including a timed-out inhibitor
 request whose FD reply arrives late.
-Drain/pause and shutdown close native resources on the owning daemon loop
-before its active lease ends. The existing inter-sweep idle wait services native
-I/O on that same loop, rechecking active mutation/drain admission at most every
-50 ms. Disabled, blocked and absent adapters retain the ordinary idle wait
-without a busy loop or worker thread. The transport is **not timing-qualified**:
-other blocking daemon work can delay notification handling beyond logind's
-budget. Its health descriptor therefore retains `qualified: false`; automatic
-recovery cannot treat the transport alone as proof of shutdown coverage.
+One daemon-owned I/O thread constructs, pumps and closes the native adapter.
+Its at-most-50-ms I/O waits remain independent of ordinary blocking attachment,
+owner and status work; no parallel scheduler or separate daemon is added.
+Only explicitly requested native Linux notifications under current active
+admission can start it. Default-off, unsupported and blocked paths create no
+thread or busy reconnect loop.
+Drain closes its admission and signals stop independently of the ordinary loop.
+Clean drain includes every admitted callback, journal write and native resource
+cleanup; pause/shutdown join that owner before the active lease can end.
+Undrain can admit a new owner only after the previous thread has stopped.
+I/O/startup failures stay visible, and cleanup failure cannot report clean drain.
+Disposable private-bus coverage proves a shutdown checkpoint and inhibitor
+release within a one-second native delay while ordinary work blocks longer.
+This does not establish hard real-time filesystem/OS bounds or real host
+shutdown/startup coverage. Health retains `qualified: false`; automatic recovery
+cannot treat the transport alone as platform qualification.
 See [configuration](docs/configuration.md#restart-recovery-requests) for the
 strict, default-off preferences and capability reporting.
 

@@ -390,6 +390,12 @@ failure degrades to `active`/`previous: null` rather than failing the whole
 | **agent-vault** | `agent_vault.service` (owns the in-memory unlocked KeePass master + credential cache; serves loopback/pipe/TCP) | ❌ **None** — update re-registers the task + starts; the unlocked master + cache **die on restart** | no in-flight secret request in flight (requests are short) | **Lightest tier** (connection-owner, dotfiles#1333): the "connection" is the *authenticated in-memory session*. Make **`install.ps1 update`/activation** adopt `zdd` routing (clients follow the new daemon) and perform the flip automatically, and define **reconnect** as re-establishing the auth state on the new daemon — either (a) hand off via the opt-in **encrypted persistent cache** (`credential-cache.enc` + wrapped key) so the new daemon warms without a re-prompt, or (b) accept a single re-unlock prompt on first post-cutover use. Drain = finish the in-flight request; never cut over mid-request |
 | **agent-mcp** | `serve` (resident warmth daemon: one-shot `call`/`materialize`/`list`, plus long-lived multiplexed `bridge`/`forward` attach sessions) | ✅ **Cutover already the default on activation** — `zdd` vendored + adopted; `init.ps1`/`init.sh` (agent-mcp's installer, named `init` rather than `install`) now invoke `agent-mcp cutover --require-live --force --json` unconditionally on every activation, right before the existing stale-slot process reap. `--require-live` makes this safe with no opt-in: it never starts a resident daemon where none was running (`serve` stays optional, on-demand warmth) and no-ops when the live daemon is already on the target version; only a genuinely live, differently-versioned daemon actually cuts over. A public `cutover` verb also remains for a manual/operator-triggered run | one-shot ops: unaffected by drain, finish normally; attach sessions: drain refuses *new* attaches (the client's existing "live host refuses attach → direct in-process bridge" fallback already covers this) and lets already-attached sessions ride out to natural close before the old generation retires | Add the **generation self-retire** backstop (deferred in v1, matching the reference implementation's own optional status for it). If agent-mcp's installer is ever renamed `install.ps1`/`install.sh` to converge with the other plugins' naming convention, also set `"zeroDowntimeUpdate": true` (inert today since the launch-time reconciler only wires that flag onto a script named `install.ps1`). See effort `agent-mcp-graceful-cutover` |
 
+With explicitly requested native Linux restart notifications, Worktree
+Manager's drain also closes notification admission and waits for its owned I/O
+thread's callbacks, journal writes and native-resource cleanup. Shutdown joins
+that thread before releasing the active lease; ordinary blocking daemon work
+does not drive or own the notification event loop.
+
 ### Classification note
 
 agent-vault is **borderline Thread-A/Thread-B**: it is a connection-owner (holds
@@ -626,6 +632,8 @@ cheaper than a review round.
    both platforms. Its routed `mux-status-v1` control plane uses the same
    owner-scoped loopback token shape, and demoted generations wait for admitted
    status-apply work plus the current republish cycle to drain before exit.
+   Explicitly opted-in native shutdown notification I/O is also stopped and
+   drained, including journal writes and descriptor cleanup, before lease release.
 4. **agent-vault** — installer-driven routing flip + auth-state reconnect
    (persistent-cache hand-off or re-unlock). Add Thread-A `stamp`/`provision`.
 5. **agent-index engine daemon** — the outlive + reconnect gap (installer-driven

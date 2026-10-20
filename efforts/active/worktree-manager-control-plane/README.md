@@ -1247,6 +1247,24 @@ claiming discipline alone.
 
 ## Journal
 
+- **2026-10-19** - Implemented a single daemon-owned native notification I/O
+  thread for [restart recovery](machine-restart-recovery.md), so ordinary
+  blocking work no longer drives the bus loop. Drain closes admission and
+  waits for callbacks/journal/native cleanup; shutdown joins before lease
+  release. Disposable private-bus coverage proves a sub-delay checkpoint and
+  inhibitor release during longer ordinary work, plus joined cleanup before
+  lease release. Source still awaits review/merge; full native/platform recovery
+  qualification remains open, with no enrollment or rollout.
+
+- **2026-10-19** - Bounded restart receipt history merged in
+  [#7344](https://github.com/ThomasMichon/copilot-extensions/pull/7344), after
+  fresh exact-head approval and required green checks following a journal-only
+  conflict resolution. Re-read and reconciled the
+  [focused recovery gate](machine-restart-recovery.md); it remains open.
+  Next is source-only notification timing under blocking ordinary daemon work,
+  preserving lease/drain ownership. No release, installation or live enrollment
+  is implied; real native/platform recovery qualification remains owed.
+
 - **2026-10-20** - Claimed the bounded Phase 7 platform-local runtime planning
   slice under [#7305](https://github.com/ThomasMichon/copilot-extensions/issues/7305#issuecomment-6283978608),
   public source handle `spry-workbench`. Added the

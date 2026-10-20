@@ -5,7 +5,6 @@ from __future__ import annotations
 import sys
 import threading
 import time
-from contextlib import contextmanager
 from types import SimpleNamespace
 
 import pytest
@@ -40,7 +39,7 @@ def test_default_off_and_passive_do_not_construct_transport(tmp_path, monkeypatc
 
 def test_adapter_is_pumped_and_closed_on_owning_thread(tmp_path, monkeypatch):
     events = []
-    owner = threading.get_ident()
+    pumped = threading.Event()
 
     class Adapter:
         status = {"status": "watching", "qualified": False}
@@ -51,11 +50,14 @@ def test_adapter_is_pumped_and_closed_on_owning_thread(tmp_path, monkeypatch):
         def start(self):
             events.append(("start", threading.get_ident()))
 
-        def pump(self):
+        def pump(self, *, wait_s):
             events.append(("pump", threading.get_ident()))
+            pumped.set()
+            time.sleep(wait_s)
 
         def close(self):
             events.append(("close", threading.get_ident()))
+            self.status = {"status": "closed", "qualified": False}
 
     monkeypatch.setitem(sys.modules, "worktree_manager.restart_notifications", SimpleNamespace(
         LogindShutdownAdapter=Adapter,
@@ -69,9 +71,14 @@ def test_adapter_is_pumped_and_closed_on_owning_thread(tmp_path, monkeypatch):
     runtime.activate()
     assert events == []
     runtime.pump(admitted=True)
-    assert events == [(name, owner) for name in ("construct", "start", "pump")]
+    assert pumped.wait(1)
+    owners = {owner for _, owner in events}
+    assert len(owners) == 1 and threading.get_ident() not in owners
+    owner = owners.pop()
+    assert events[:3] == [(name, owner) for name in ("construct", "start", "pump")]
     assert runtime.status["capabilities"]["shutdown_notifications"]["qualified"] is False
     runtime.pump(admitted=False)
+    runtime.pause()
     assert events[-1] == ("close", owner)
     assert runtime.status["admitted"] is False
     runtime.close()
@@ -117,13 +124,12 @@ def test_health_keeps_adapter_snapshot_during_concurrent_pause(tmp_path):
     runtime = build_runtime(tmp_path)
     reading = threading.Event()
     paused = threading.Event()
-    adapter = SimpleNamespace(status={"status": "watching", "qualified": False}, close=lambda: None)
-    runtime._adapter = adapter
+    runtime._transport_status = {"status": "watching", "qualified": False}
 
     class InterleavedRuntime(type(runtime)):
         def __getattribute__(self, name):
             value = super().__getattribute__(name)
-            if name == "_adapter" and threading.current_thread() is reader:
+            if name == "_transport_status" and threading.current_thread() is reader:
                 reading.set()
                 assert paused.wait(3)
             return value
@@ -143,6 +149,7 @@ def test_health_keeps_adapter_snapshot_during_concurrent_pause(tmp_path):
     try:
         assert reading.wait(3)
         runtime.pause()
+        runtime._transport_status = {"status": "closed", "qualified": False}
     finally:
         paused.set()
         reader.join(3)
@@ -165,60 +172,3 @@ def test_non_utf8_config_blocks_recovery_without_disabling_mux_daemon(tmp_path):
         assert runtime.accepting_requests() is True
     finally:
         runtime.shutdown()
-
-
-@pytest.mark.parametrize("status", [None, "blocked", "closed"])
-def test_idle_wait_without_usable_adapter_does_not_spin_or_enter_mutation(
-    tmp_path, monkeypatch, status,
-):
-    runtime = build_runtime(tmp_path)
-    if status is not None:
-        runtime._adapter = SimpleNamespace(status={"status": status})
-    sleeps = []
-    monkeypatch.setattr(restart_notification_runtime.time, "sleep", sleeps.append)
-
-    def forbidden():
-        pytest.fail("inactive native wait entered admission/mutation")
-
-    runtime.wait(1.0, admitted=forbidden, mutation=forbidden)
-    assert len(sleeps) == 1 and 0 < sleeps[0] <= 1.0
-
-
-def test_idle_wait_rechecks_admission_and_closes_before_leaving_mutation(tmp_path):
-    runtime = build_runtime(tmp_path)
-    runtime.activate()
-    admitted = True
-    mutating = False
-    events = []
-    owner = threading.get_ident()
-
-    @contextmanager
-    def mutation():
-        nonlocal mutating
-        assert not mutating
-        mutating = True
-        try:
-            yield
-        finally:
-            mutating = False
-
-    class Adapter:
-        status = {"status": "watching", "qualified": False}
-
-        def pump(self, *, wait_s):
-            nonlocal admitted
-            assert mutating and threading.get_ident() == owner
-            assert 0 < wait_s <= 0.05
-            events.append("pump")
-            time.sleep(wait_s)
-            admitted = False
-
-        def close(self):
-            assert mutating and threading.get_ident() == owner
-            events.append("close")
-
-    runtime._adapter = Adapter()
-    runtime.wait(0.15, admitted=lambda: admitted, mutation=mutation)
-    assert events == ["pump", "close"]
-    assert runtime.status["admitted"] is False
-    assert runtime._adapter is None and not mutating

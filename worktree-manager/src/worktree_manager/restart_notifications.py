@@ -1,4 +1,4 @@
-"""Native Linux logind notification transport, pumped by the active daemon."""
+"""Native Linux logind transport, owned by the active daemon's I/O thread."""
 
 from __future__ import annotations
 
@@ -40,9 +40,9 @@ class NotificationError(RuntimeError):
 class LogindShutdownAdapter:
     """Own one connection and inhibitor; never spawn a worker, timer or daemon.
 
-    All methods, callbacks and journal writes run on the daemon's owning loop.
-    This transport alone does not qualify the resident loop's notification
-    latency or authorize automatic restoration.
+    All methods, callbacks and journal writes run on one owning I/O thread.
+    This transport alone does not authorize automatic restoration or establish
+    platform startup qualification.
     """
 
     def __init__(
@@ -312,7 +312,7 @@ class LogindShutdownAdapter:
             self._block(error)
 
     def start(self) -> None:
-        """Begin setup without blocking the resident loop on native bus calls."""
+        """Begin setup on the notification owner's event loop."""
         if self._loop is not None:
             return
         if self.epoch.platform != "linux":
@@ -323,7 +323,7 @@ class LogindShutdownAdapter:
         self._schedule(self._setup())
 
     def pump(self, *, wait_s: float = 0.0) -> None:
-        """Advance only from the active lease holder's own mutation admission."""
+        """Advance only on the active lease holder's admitted I/O thread."""
         if self._loop is None or self._loop.is_closed():
             return
         if self.status["status"] != "blocked":

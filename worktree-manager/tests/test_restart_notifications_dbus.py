@@ -7,6 +7,7 @@ import os
 import shutil
 import subprocess
 import sys
+import threading
 import time
 from types import SimpleNamespace
 
@@ -236,10 +237,13 @@ def test_inhibit_timeout_closes_connection_before_late_fd_reply(tmp_path, privat
                 os.close(service.pipe[1])
 
 
-def test_real_dbus_setup_at_production_daemon_cadence(tmp_path, private_bus, monkeypatch):
+@pytest.mark.parametrize("blocked_work", [False, True])
+def test_real_dbus_setup_at_production_daemon_cadence(
+    tmp_path, private_bus, monkeypatch, blocked_work,
+):
     from dbus_next import PropertyAccess
     from dbus_next.aio import MessageBus
-    from dbus_next.service import ServiceInterface, dbus_property, method
+    from dbus_next.service import ServiceInterface, dbus_property, method, signal
 
     from worktree_manager import mux_daemon, restart_observer, source_config
     from worktree_manager.restart_notifications import LogindShutdownAdapter
@@ -257,11 +261,15 @@ def test_real_dbus_setup_at_production_daemon_cadence(tmp_path, private_bus, mon
 
         @dbus_property(access=PropertyAccess.READ)
         def InhibitDelayMaxUSec(self) -> "t":  # noqa: F821
-            return 5_000_000
+            return 1_000_000 if blocked_work else 5_000_000
 
         @dbus_property(access=PropertyAccess.READ)
         def PreparingForShutdown(self) -> "b":  # noqa: F821
             return False
+
+        @signal()
+        def PrepareForShutdown(self, preparing) -> "b":  # noqa: F821
+            return preparing
 
     loop = asyncio.new_event_loop()
     service = Logind()
@@ -274,9 +282,14 @@ def test_real_dbus_setup_at_production_daemon_cadence(tmp_path, private_bus, mon
 
     service_bus = loop.run_until_complete(serve())
     final_states = []
+    watching = threading.Event()
+    checkpointed = threading.Event()
+    closed = threading.Event()
+    owners = []
 
     class ObservedAdapter(LogindShutdownAdapter):
         def __init__(self, journal, epoch):
+            owners.append(threading.current_thread())
             super().__init__(
                 journal, epoch,
                 bus_factory=lambda: MessageBus(bus_address=private_bus, negotiate_unix_fd=True),
@@ -287,6 +300,17 @@ def test_real_dbus_setup_at_production_daemon_cadence(tmp_path, private_bus, mon
             final_states.append(self.status.copy())
             service_bus.disconnect()
             super().close()
+            closed.set()
+
+        def pump(self, **kwargs):
+            super().pump(**kwargs)
+            if self.status["status"] == "watching":
+                watching.set()
+
+        def _prepare(self, preparing):
+            super()._prepare(preparing)
+            if preparing and self.status["status"] == "shutdown-pending":
+                checkpointed.set()
 
     monkeypatch.setitem(sys.modules, "worktree_manager.restart_notifications", SimpleNamespace(
         LogindShutdownAdapter=ObservedAdapter,
@@ -299,15 +323,60 @@ def test_real_dbus_setup_at_production_daemon_cadence(tmp_path, private_bus, mon
     source_config.config_path(root).write_text(
         "[restart_recovery]\nshutdown_notifications = true\n", encoding="utf-8",
     )
+    journal = RecoveryJournal(root)
+    journal.observe(PositiveEvidence(
+        project="example", worktree_id="example-one", worktree_path="/example/worktree",
+        native_session_id="00000000-0000-4000-8000-000000000001",
+        native_incarnation="native-one", binding_proof="inuse-hold-v1", owner_revision=1,
+        session_incarnation="mux-one", mapping_revision=1, platform="linux",
+        environment_id="environment-one", boot_id="boot-one",
+        observed_at=100.0, observation_sequence=1,
+    ))
+    closed_writers = set()
+    probed = False
+
+    def blocking_probe(self, registry):
+        nonlocal probed
+        if not blocked_work or probed:
+            return
+        probed = True
+        assert watching.wait(5), "notification setup waited on the blocked ordinary loop"
+        reader, writer = service.pipes[-1]
+        os.close(writer)
+        closed_writers.add(len(service.pipes) - 1)
+        os.set_blocking(reader, False)
+        with pytest.raises(BlockingIOError):
+            os.read(reader, 1)
+        started = time.monotonic()
+        loop.call_soon_threadsafe(service.PrepareForShutdown, True)
+        assert checkpointed.wait(0.75), "shutdown checkpoint missed the native delay budget"
+        elapsed = time.monotonic() - started
+        assert elapsed < 0.75
+        assert journal.snapshot()[0]["disposition"] == "shutdown-pending"
+        assert os.read(reader, 1) == b""
+        # Keep ordinary work blocked beyond the one-second native delay.
+        time.sleep(max(0.0, 1.25 - elapsed))
+
+    monkeypatch.setattr(mux_daemon.AttachedClientObserver, "observe", blocking_probe)
+    release_lease = mux_daemon._release_daemon_lease
+
+    def release_after_native_cleanup(lease):
+        assert closed.is_set() and loop.is_closed()
+        assert len(owners) == 1 and not owners[0].is_alive()
+        release_lease(lease)
+
+    monkeypatch.setattr(mux_daemon, "_release_daemon_lease", release_after_native_cleanup)
     try:
         assert mux_daemon.run_daemon_foreground(root, max_iterations=5) == 0
-        assert final_states and final_states[0]["status"] == "watching"
+        expected = "shutdown-pending" if blocked_work else "watching"
+        assert final_states and final_states[0]["status"] == expected
         assert final_states[0]["qualified"] is False
     finally:
         service_bus.disconnect()
         if not loop.is_closed():
             loop.run_until_complete(service_bus.wait_for_disconnect())
             loop.close()
-        for reader, writer in service.pipes:
+        for index, (reader, writer) in enumerate(service.pipes):
             os.close(reader)
-            os.close(writer)
+            if index not in closed_writers:
+                os.close(writer)

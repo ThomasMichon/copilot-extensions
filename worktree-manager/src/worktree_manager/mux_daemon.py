@@ -15,6 +15,7 @@ import tempfile
 import threading
 import time
 from collections.abc import Callable
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -634,7 +635,6 @@ class MuxDaemonRuntime:
         self.handler_tracker = _ActiveHandlerTracker()
         self.root = root if root is not None else default_root()
         self.recovery_observer = RestartObserver(self.root)
-        self.restart_notifications = RestartNotificationRuntime(self.root, self.recovery_observer)
         self.passive = passive
         self.listen_port = listen_port or 0
         self.admissions_open = not passive
@@ -651,6 +651,10 @@ class MuxDaemonRuntime:
         # docstring.
         self._control_requests_in_flight = 0
         self._control_requests_lock = threading.Lock()
+        self.restart_notifications = RestartNotificationRuntime(
+            self.root, self.recovery_observer,
+            can_admit=lambda: not self.passive and self.republish_enabled and self.accepting_requests(),
+        )
 
     def activate_restart_recovery(self) -> None:
         """Freeze under the owning loop's drain-visible mutation boundary."""
@@ -690,23 +694,17 @@ class MuxDaemonRuntime:
     def accepting_requests(self) -> bool:
         return self.admissions_open and not self.draining
 
+    @contextmanager
     def loop_mutation(self):
-        class _LoopMutation:
-            def __init__(self, owner: MuxDaemonRuntime) -> None:
-                self._owner = owner
-
-            def __enter__(self):
-                self._owner._loop_mutation_active = True
-
-            def __exit__(self, exc_type, exc, tb):
-                self._owner._loop_mutation_active = False
-                return False
-
-        return _LoopMutation(self)
+        self._loop_mutation_active = True
+        try:
+            yield
+        finally:
+            self._loop_mutation_active = False
 
     def _is_drained(self, *, exclude_current_request: bool = False) -> bool:
         if self.server is None:
-            return True
+            return self.restart_notifications.drained
         active_handlers = self.server.active_handler_count()
         if exclude_current_request and active_handlers > 0:
             active_handlers -= 1
@@ -714,11 +712,13 @@ class MuxDaemonRuntime:
             active_handlers == 0
             and self.handler_tracker.wait_for_drain(0.0)
             and not self._loop_mutation_active
+            and self.restart_notifications.drained
         )
 
     def begin_drain(self) -> None:
         self.draining = True
         self.republish_enabled = False
+        self.restart_notifications.request_pause()
 
     def begin_retire(self) -> None:
         self.begin_drain()
@@ -823,11 +823,13 @@ class MuxDaemonRuntime:
         return self.registry.has_any_live()
 
     def shutdown(self) -> None:
-        self.restart_notifications.close()
-        if self.server is not None:
-            self.handler_tracker.wait_for_drain(self.SHUTDOWN_DRAIN_TIMEOUT_S)
-            self.server.close()
-        self.server = None
+        try:
+            self.restart_notifications.close()
+        finally:
+            if self.server is not None:
+                self.handler_tracker.wait_for_drain(self.SHUTDOWN_DRAIN_TIMEOUT_S)
+                self.server.close()
+            self.server = None
 
 
 def run_daemon_foreground(
@@ -945,10 +947,7 @@ def run_daemon_foreground(
                 iterations += 1
                 if max_iterations is not None and iterations >= max_iterations:
                     break
-                runtime.restart_notifications.wait(
-                    poll_interval_s, mutation=runtime.loop_mutation,
-                    admitted=lambda: lease is not None and runtime.republish_enabled and runtime.accepting_requests(),
-                )
+                time.sleep(poll_interval_s)
         finally:
             runtime.shutdown()
             mux_daemon_cutover.clear_route_if_owner(os.getpid(), root=resolved_root)
