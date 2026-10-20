@@ -46,8 +46,13 @@ class Probe:
             text = await response.text()
             if len(text) > 16384:
                 raise RuntimeError("probe-response-limit")
-            value = json.loads(text) if not html else {}
-            if instance and (instance not in text if html else value.get("instance") != instance):
+            if html:
+                if (not instance or response.content_type != "text/html"
+                        or text != f"<html><body>{instance}</body></html>"):
+                    raise RuntimeError("wrong-html-response")
+                return {}
+            value = json.loads(text)
+            if instance and value.get("instance") != instance:
                 raise RuntimeError("wrong-service-instance")
             return value
 
