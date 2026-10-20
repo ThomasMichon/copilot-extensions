@@ -87,7 +87,43 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Mechanical move mapping: preserved, not conflated with fixtures
 
+### Ninth admitted move: record reassignment and stale-writer method family
+
+Baseline: Dev `58caadeacd0c1f0af8ee0f618e85b9dcb80f477e`, the actual
+#7444 finalization partition merge. Nine methods move unchanged from
+`test_pr_ops.py::TestPRFinalizeAndPush` to
+`test_pr_record_reassignment.py::TestPRRecordReassignment`: all
+`test_set_pr_*` and `test_a_stale_writer_*` methods. Their existing
+parameterization expands to fifteen cases. Both classes retain the identical
+merged `PRWorkflowSetup`.
+
+Real before/after collection proves the complete 317-node bijection:
+15 module/class-only moves and 302 unchanged identities, with identical
+method/decorator/base AST, fixture body/scope/closure, parameter value and
+effective mark. Complete collection passes take 22.22 and 12.88 seconds,
+including sandbox preparation and removal.
+
+All fifteen moved cases pass on native Windows without skips in 88.96
+seconds (93.73 inclusive), exactly two work-stealing workers and unchanged
+30-second item, 240-second diagnostic group and resource limits. The two
+existing real-Git/contained partial-split selection controls pass without skips
+in 5.05 seconds (7.42 inclusive), preserving both changed whole files without
+invented moved-node coverage credit. Ruff F/E9 passes; the install-contract
+guard covers thirteen plugins with zero violations.
+
+No production decision, helper, provider double, fixture, seed, assertion,
+parameter, mark, tier or CI-admission change enters this partition. Clean-room
+provisioning is inapplicable to unchanged test relocation; unavailable
+Linux/external execution receives no credit. Nine mechanical partitions now
+move 269 original expanded cases, leaving 48 publication/push cases.
+Their independent partitions, fixture contracts and repeated complete
+same-head Windows qualification remain open.
+
 ### Eighth admitted move: finalization and reconciliation method family
+
+**Actually merged:** #7444 as
+`58caadeacd0c1f0af8ee0f618e85b9dcb80f477e`. Subsequent partitions retain
+these merged bodies; fixture contracts and parent qualification remain open.
 
 Baseline: Dev `07b22c1f5f8b4ba114de3241756565431e2cf3bc`.
 Eighteen methods move unchanged from
