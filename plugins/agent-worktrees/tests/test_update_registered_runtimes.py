@@ -877,6 +877,9 @@ def test_module_names_reads_manifest(tmp_path):
 def _gate(monkeypatch, *, allowed: dict[str, set[str]], present: bool,
           machine: str = "this-box") -> list[Path]:
     """Install a gate manifest stub; returns the repo dirs it was resolved from."""
+    from agent_worktrees import machine_identity
+
+    monkeypatch.setattr(machine_identity, "repository_config", lambda repo_dir: None)
     seen: list[Path] = []
 
     def load(repo_dir):

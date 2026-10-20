@@ -1,6 +1,7 @@
 """Update policy must retain explicit execution-space configuration."""
 
 from pathlib import Path
+from dataclasses import replace
 import os
 import subprocess
 import sys
@@ -156,6 +157,66 @@ def test_update_gate_selects_declared_physical_machine(
         {"agent-example": {"local-space"}}, repo_dir=anchor,
     )
     assert cfg.load_config().machine == "local-space"
+
+
+@pytest.mark.parametrize("ambient_available", [False, True])
+@pytest.mark.parametrize("allowed", [False, True])
+def test_update_and_launch_use_explicit_target_project(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, ambient_available: bool, allowed: bool,
+) -> None:
+    from agent_worktrees import front_door_cli
+
+    ambient_anchor = _configure(tmp_path, monkeypatch, "wsl")
+    ambient_config = cfg.load_config()
+    target = tmp_path / "target"
+    target.mkdir()
+    (target / "machines.yaml").write_text(yaml.safe_dump({
+        "machines": {
+            "local-space": {"execution_platform": "wsl", "physical_host": "ambient-host"},
+            "target-space": {"execution_platform": "wsl", "physical_host": "physical-host"},
+        },
+    }), encoding="utf-8")
+    (target / "services.yaml").write_text(yaml.safe_dump({
+        "plugins": [{
+            "name": "agent-example",
+            "deploy_machines": ["physical-host" if allowed else "foreign-host"],
+        }],
+    }), encoding="utf-8")
+    target_config = replace(
+        ambient_config, machine="target-space", configured_machine="target-space",
+        repo_name="target-project", repos={"target-project": cfg.RepoConfig(
+            anchor=str(target), worktree_root=str(tmp_path / "target-trees"),
+        )},
+    )
+
+    def load(
+        path: Path | None = None, *, project: str | None = None, **kwargs: object,
+    ) -> cfg.Config:
+        if path == cfg.project_dir("target-project") / "config.yaml" and project == "target-project":
+            return target_config
+        if not ambient_available:
+            raise RuntimeError("No active project could be resolved")
+        return ambient_config
+
+    monkeypatch.setattr(cfg, "load_config", load)
+    monkeypatch.setattr(front_door_cli, "_git_toplevel", lambda path: target)
+    monkeypatch.setattr(
+        front_door_cli, "_reverse_lookup_project",
+        lambda anchor: "target-project" if anchor == target else None,
+    )
+    monkeypatch.setattr(reconcile, "GATE_ANCHOR", "")
+    monkeypatch.setattr(reconcile, "GATE_MANIFESTS", ("services.yaml",))
+    monkeypatch.setattr(reconcile, "read_enabled_plugins", lambda repo: [])
+    plan = reconcile.build_plan(target, cache={}, save=False)
+    assert plan["machine"] == "target-space"
+    assert update_gate._machine_gate_blocks(
+        "agent-example", "machine-gated", target,
+    ) is (not allowed)
+    assert reconcile.runtime_allowed(
+        "machine-gated", "agent-example", plan["machine"],
+        reconcile.load_runtime_gate(target), repo_dir=target, config=target_config,
+    ) is allowed
+    assert ambient_config.default_repo.anchor == str(ambient_anchor)
 
 
 def test_empty_machine_setting_retains_existing_global_fallback(tmp_path, monkeypatch):

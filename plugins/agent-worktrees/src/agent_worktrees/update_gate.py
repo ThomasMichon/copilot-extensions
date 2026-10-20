@@ -57,9 +57,12 @@ def _machine_gate_blocks(name: str, scope: str, context: Path | None) -> bool:
     if scope != "machine-gated":
         return False
     from . import reconcile
+    from .machine_identity import repository_config
 
     try:
-        config = cfg.load_config()
+        config = repository_config(context) if context is not None else None
+        if config is None:
+            config = cfg.load_config()
     except Exception as error:
         raise MachineDetectionError(
             f"could not resolve the repository and machine configuration for {name}: {error}"

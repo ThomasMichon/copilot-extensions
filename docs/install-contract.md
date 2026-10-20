@@ -1449,8 +1449,8 @@ Deployment selectors may name the canonical physical machine shared by its
 declared environments. Update and launch reconciliation resolve a registered
 execution ID through the same `machine_transport` physical/environment map;
 custom execution keys and physical names ending in platform-like suffixes are
-not rewritten. Deferred launch planning selects the target repository's project
-configuration explicitly, without changing the resident's active project.
+not rewritten. Update and deferred launch planning select the target repository's
+project configuration explicitly, without changing the resident's active project.
 That configuration follows both execution detection and physical projection, so
 a stateless harness retains its declared knowledge-overlay machine registry.
 Registry lookup prefers checkout-local data. If absent, a linked checkout may

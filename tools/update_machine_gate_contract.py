@@ -79,6 +79,7 @@ def _check_machine_gate(source: Path) -> None:
         identity.resolve_execution_context = lambda *args, **kwargs: SimpleNamespace(
             target=SimpleNamespace(machine="physical-host"),
         )
+        identity.repository_config = lambda repo_dir: None
         policy = _function(source / "update_gate.py", "runtime_allowed", {
             "__name__": reconcile.__name__, "__package__": package_name, "cfg": config,
         })
