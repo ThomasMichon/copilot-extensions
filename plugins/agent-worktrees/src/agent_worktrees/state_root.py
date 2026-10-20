@@ -794,7 +794,7 @@ def resolve_pair(config: cfg.Config | None, *, cwd: str | None = None) -> StateP
         ):
             parsed = tracking.parse_claim_ref(raw_ref or "")
             expected = tracking.format_claim_ref(
-                target.machine,
+                target.execution_machine,
                 target.repo,
                 target.worktree_id,
             )
@@ -817,7 +817,7 @@ def resolve_pair(config: cfg.Config | None, *, cwd: str | None = None) -> StateP
                 parsed.worktree_id,
             )
             expected_identity = (
-                target.machine,
+                target.execution_machine,
                 target.repo,
                 target.worktree_id,
             )

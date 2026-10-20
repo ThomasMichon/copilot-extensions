@@ -1049,15 +1049,19 @@ def test_anchor_pair_rejects_rebound_knowledge_before_resolving(
         ("current-ref-wrong-repo", "does not reference the sibling"),
         ("sibling-ref-wrong-worktree", "does not reference the current"),
         ("sibling-ref-wrong-repo", "does not reference the current"),
+        ("current-ref-physical-owner", "does not reference the sibling"),
+        ("sibling-ref-physical-owner", "does not reference the current"),
         ("unqualified-ref", "is not a qualified"),
         ("self-pair", "cannot pair with itself"),
         ("valid", None),
     ],
 )
+@pytest.mark.parametrize("versioned", [False, True])
 def test_worktree_pair_requires_coherent_reciprocal_records(
-    tmp_path, monkeypatch, case, message
+    tmp_path, monkeypatch, case, message, versioned,
 ):
     from agent_worktrees import tracking as tk
+    from agent_worktrees.worktree_machine_identity import WorktreeMachineIdentity
 
     def _record(
         wt_id,
@@ -1072,8 +1076,9 @@ def test_worktree_pair_requires_coherent_reciprocal_records(
             branch=f"worktree/{wt_id}",
             worktree_path=str(path),
             repo=repo,
-            machine="test",
+            machine="desk" if versioned else "test",
             platform="wsl",
+            machine_identity=WorktreeMachineIdentity("desk", "wsl", "test") if versioned else None,
             started_at="2026-06-01T10:00:00",
             last_resumed_at="2026-06-01T10:00:00",
             resume_count=0,
@@ -1118,6 +1123,10 @@ def test_worktree_pair_requires_coherent_reciprocal_records(
         sibling.pair_ref = "test/harness/wt-other"
     elif case == "sibling-ref-wrong-repo":
         sibling.pair_ref = "test/wrong-repo/wt-harness"
+    elif case == "current-ref-physical-owner":
+        current.pair_ref = "desk/knowledge/wt-knowledge"
+    elif case == "sibling-ref-physical-owner":
+        sibling.pair_ref = "desk/harness/wt-harness"
     elif case == "unqualified-ref":
         current.pair_ref = "wt-knowledge"
     elif case == "self-pair":
@@ -1138,9 +1147,17 @@ def test_worktree_pair_requires_coherent_reciprocal_records(
         assert result.sibling is not None
         assert result.sibling.worktree_id == "wt-knowledge"
         assert result.pair_id == "pair-1"
+        from agent_worktrees.creation_tail_repair import _existing_pair
+
+        root = sr.StateRoot(str(knowledge), "knowledge_repo", "knowledge", False, True, True)
+        assert _existing_pair(None, current, root) == result
     else:
         assert result.sibling is None
         assert message in result.error
+        if case in {"unqualified-ref", "current-ref-physical-owner"}:
+            assert "'test/knowledge/wt-knowledge'" in result.error
+        elif case == "sibling-ref-physical-owner":
+            assert "'test/harness/wt-harness'" in result.error
 
 
 # ---------------------------------------------------------------------------
