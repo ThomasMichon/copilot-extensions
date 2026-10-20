@@ -25,11 +25,13 @@ file can change the behavior being investigated.
 
 ## Bounded comparisons, not a deployment workaround
 
-1. Preserve the real launch shape and use the OS-correct no-window primitive;
-   on Windows use Python `CREATE_NO_WINDOW`, Node `windowsHide: true`, or .NET
-   `UseShellExecute = false` and `CreateNoWindow = true`. If installed, consult
-   `agent-conduct-guidance:spawning-headless-processes` for its full recipes.
-   Never pop up a terminal to make a headless failure disappear.
+1. Preserve the caller's SSH-specific no-window launcher and proxy-child
+   ownership. Suite consumers use the shared library's
+   `ssh_manager.proxy.create_ssh_subprocess`, including its owned cleanup.
+   Do not substitute generic captured-child flags: native OpenSSH and its
+   proxy children have their own launch boundary. If no qualified headless
+   launch path is available, report that limitation and retain recorded
+   evidence rather than improvising a process launcher or visible terminal.
 2. Compare only the missing variable. For logging interference, compare the
    same harmless command with stderr discarded and with `ssh -E <private-log>`
    opening its own diagnostic file. `-q` can be a diagnostic control, but hides
