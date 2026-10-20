@@ -18,6 +18,10 @@ from witness import Witness
 TERMINATION_SIGNALS = (signal.SIGTERM, signal.SIGINT)
 
 
+class RunnerTerminated(BaseException):
+    """Control flow, not a retryable operation failure."""
+
+
 def shield_termination() -> None:
     for number in TERMINATION_SIGNALS:
         signal.signal(number, signal.SIG_IGN)
@@ -38,7 +42,7 @@ def run(repository: Path, ref: str, root: Path, build_timeout: int = 900) -> dic
 
     def terminated(signum: int, frame: object) -> None:
         shield_termination()
-        raise ProofError("runner-terminated")
+        raise RunnerTerminated("runner-terminated")
 
     for number in TERMINATION_SIGNALS:
         signal.signal(number, terminated)
@@ -76,8 +80,9 @@ def _run(repository: Path, ref: str, root: Path, build_timeout: int) -> dict:
         })
         witness.run()
         receipt["result"] = "pass"
-    except (ProofError, OSError, ValueError, KeyError, TypeError) as exc:
-        code = str(exc) if isinstance(exc, ProofError) else "host-proof-operation-failed"
+    except (RunnerTerminated, ProofError, OSError, ValueError, KeyError, TypeError) as exc:
+        code = (str(exc) if isinstance(exc, (RunnerTerminated, ProofError))
+                else "host-proof-operation-failed")
         category = exc.category if isinstance(exc, ProofError) else "runtime-install"
         receipt["error"] = code
         report["failed"] += 1

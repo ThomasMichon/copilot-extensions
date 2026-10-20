@@ -7,6 +7,7 @@ import os
 import re
 import subprocess
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 from source import ProofError, save
@@ -54,7 +55,8 @@ class Engine:
             raise ProofError("docker-log-write-failed") from None
 
     def call(self, *args: str, timeout: float = 20, build: bool = False,
-             cleanup: bool = False) -> str:
+             cleanup: bool = False,
+             on_success: Callable[[bytes], None] | None = None) -> str:
         remaining = self.deadline - time.monotonic()
         if not build and not cleanup:
             if remaining <= 0:
@@ -79,6 +81,8 @@ class Engine:
         except subprocess.TimeoutExpired:
             self.write_log(log, b"bounded Docker command timed out\n")
             raise ProofError("docker-command-timeout") from None
+        if result.returncode == 0 and on_success is not None:
+            on_success(result.stdout)
         # Fixture processes print only classified outcomes; never credential contents.
         self.write_log(log, result.stdout + result.stderr)
         if result.returncode:
@@ -116,14 +120,21 @@ class Engine:
 
     def create_network(self) -> None:
         self.ambiguous_network = True
-        network = self.call("network", "create", "--internal",
-                            "--label", "gateway-role-witness=" + self.root.name,
-                            self.root.name)
-        if not ID.fullmatch(network):
-            raise ProofError("invalid-network-receipt")
-        self.network = network
-        self.ambiguous_network = False
-        self.journal()
+
+        def retain(data: bytes) -> None:
+            try:
+                network = data.decode("ascii").strip()
+            except UnicodeError:
+                raise ProofError("invalid-network-receipt") from None
+            if not ID.fullmatch(network):
+                raise ProofError("invalid-network-receipt")
+            self.network = network
+            self.ambiguous_network = False
+            self.journal()
+
+        self.call("network", "create", "--internal",
+                  "--label", "gateway-role-witness=" + self.root.name,
+                  self.root.name, on_success=retain)
 
     def create(self, image: str, *, name: str, command: list[str] | None = None,
                mounts: list[tuple[Path, str, bool]] | None = None,

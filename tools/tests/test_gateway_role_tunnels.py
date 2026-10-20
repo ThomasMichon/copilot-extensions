@@ -255,6 +255,33 @@ def test_log_write_failure_cannot_abort_owned_resource_cleanup(
     assert json.loads((tmp_path / "receipt.json").read_text())["cleanup_errors"] == errors
 
 
+def test_network_creation_retains_exact_id_before_fallible_logging(tmp_path: Path) -> None:
+    engine = ENGINE.Engine(tmp_path, {})
+    calls = []
+    write = Path.write_bytes
+    writes = 0
+
+    def log(path: Path, data: bytes) -> int:
+        nonlocal writes
+        writes += 1
+        if writes == 1:
+            raise OSError("synthetic creation log failure")
+        return write(path, data)
+
+    def launch(argv: list[str], **kwargs: object) -> SimpleNamespace:
+        calls.append(tuple(argv[1:]))
+        return SimpleNamespace(returncode=0, stdout=NETWORK.encode(), stderr=b"")
+
+    with patch.object(ENGINE.subprocess, "run", side_effect=launch), \
+            patch.object(Path, "write_bytes", log):
+        with pytest.raises(SOURCE.ProofError, match="docker-log-write-failed"):
+            engine.create_network()
+        assert engine.network == NETWORK and engine.ambiguous_network is False
+        assert json.loads((tmp_path / "receipt.json").read_text())["network_id"] == NETWORK
+        assert engine.cleanup() == []
+    assert ("network", "rm", NETWORK) in calls
+
+
 def test_uncertain_creation_without_receipt_is_not_clean_success(tmp_path: Path) -> None:
     engine = ENGINE.Engine(tmp_path, {})
     engine.pending = [tmp_path / "missing.cid"]
@@ -303,6 +330,7 @@ from pathlib import Path
 sys.path.insert(0, sys.argv[1])
 import run as subject
 root = Path(sys.argv[2])
+eventually = subject.Witness.eventually
 class Engine:
     def __init__(self, root, receipt):
         self.deadline = 0
@@ -323,13 +351,15 @@ class Engine:
         return []
 class Witness:
     def __init__(self, *args):
-        pass
+        self.engine = args[0]
     def passed(self, *args):
         pass
     def run(self):
-        (root / "witness-ready").touch()
-        while True:
-            time.sleep(0.01)
+        def action():
+            (root / "witness-ready").touch()
+            while True:
+                time.sleep(0.01)
+        eventually(self, action)
 subject.Engine, subject.Witness = Engine, Witness
 subject.shutil.which = lambda name: "/synthetic/docker"
 subject.materialize = lambda *args: {
