@@ -142,6 +142,15 @@ reached over a process boundary. The small `packaging` dependency is explicit
 so reconciliation preserves version ordering and downgrade protection without
 relying on UI dependencies.
 
+Manager version-probe failures retain bounded, credential-redacted startup
+details on stderr, including resolver, spawn and exhausted-timeout errors.
+A failed probe is not diagnosed as a stale launcher, and does not promise a
+bundled Picker that is absent. When no interactive front door can start, the
+bootstrap-guidance path exits nonzero; displaying instructions is not launch
+success. Healthy Manager handoff, an actual bundled fallback, and headless
+command behavior are unchanged. This reporting does not itself repair a
+dependency or interpreter-policy failure.
+
 ## Authoritative Repository Roots
 
 Consumers requiring authoritative repository roots use

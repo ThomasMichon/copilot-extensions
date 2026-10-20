@@ -1,0 +1,9 @@
+{
+  "comment": "Report Manager startup failures and fail unavailable interactive launches",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

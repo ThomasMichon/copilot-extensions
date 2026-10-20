@@ -804,10 +804,13 @@ def test_bare_invocation_ignores_inherited_worktree_id(monkeypatch):
     # Context comes from CWD resolution (not the retired $WORKTREE_PROJECT).
     monkeypatch.setattr(m, "_resolve_active_project", lambda proj: ("demo", None))
     monkeypatch.setattr(m, "_is_headless_project", lambda: False)
-    monkeypatch.setattr(m, "cmd_launch", lambda argv: 0)
+    monkeypatch.setattr(m, "_bundled_picker_available", lambda: True)
+    launched = []
+    monkeypatch.setattr(m, "cmd_launch", lambda argv: launched.append(argv) or 0)
 
     rc = m.main([])
     assert rc == 0
+    assert launched == [[]]
     assert os.environ.get("WORKTREE_ID") == "keep-me"
 
 
@@ -1602,12 +1605,12 @@ def test_bare_no_project_install_trigger_when_picker_retired(monkeypatch):
 def test_install_trigger_reads_as_first_run_onboarding(monkeypatch, capsys):
     """The absent-Manager install trigger is a calm first-run onboarding
     message: trustworthy source, explicit bootstrap command, and all output on
-    stderr."""
+    stderr. Guidance is not a successful interactive launch."""
     monkeypatch.setattr(m.platform, "system", lambda: "Linux")
     rc = m.cmd_manager_install_trigger("demo")
     captured = capsys.readouterr()
     err = captured.err
-    assert rc == 0
+    assert rc == 1
     assert captured.out == ""
     assert "interactive mode needs Worktree Manager" in err
     assert "On a first run that's expected" in err
@@ -1621,7 +1624,7 @@ def test_install_trigger_reads_as_first_run_onboarding(monkeypatch, capsys):
     rc = m.cmd_manager_install_trigger("demo")
     captured = capsys.readouterr()
     err = captured.err
-    assert rc == 0
+    assert rc == 1
     assert captured.out == ""
     assert "bootstrap.ps1" in err and "irm " in err
     assert "bootstrap.sh" not in err

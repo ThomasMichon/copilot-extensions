@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import os
 import platform
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -99,6 +100,33 @@ def _launch_probe_env() -> dict[str, str]:
     return env
 
 
+def _safe_probe_diagnostic(text: str | bytes) -> str:
+    from ._lifecycle_human.redact import redact
+
+    if isinstance(text, bytes):
+        text = text.decode("utf-8", errors="replace")
+    text = re.sub(
+        r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\))", "", text,
+    )
+    text = "".join(char for char in text if char.isprintable() or char in "\n\t")
+    text = redact(text).strip()
+    text = re.sub(r"(?i)(\bhttps?://[^\s?#]+)[?#][^\s]*", r"\1?[redacted]", text)
+    lines = text.splitlines()
+    detail = "\n".join(lines[-10:])
+    truncated = len(lines) > 10 or len(detail) > 2048
+    return ("[diagnostic truncated]\n" if truncated else "") + detail[-2048:]
+
+
+def _report_manager_probe_failure(
+    summary: str, detail: str | bytes = "", *, warning: bool = False,
+) -> None:
+    with output.stdout_to_stderr():
+        report = output.warn if warning else output.err
+        report(_safe_probe_diagnostic(summary))
+        if diagnostic := _safe_probe_diagnostic(detail):
+            report(f"Startup detail:\n{diagnostic}")
+
+
 def _probe_worktree_manager_version(
     command: list[str],
     *,
@@ -117,7 +145,9 @@ def _probe_worktree_manager_version(
     working install uninstalled/broken (the loud reinstall-from-scratch
     guidance) when it was really just transient load.
     """
-    for attempt in range(max(1, attempts)):
+    probe_attempts = max(1, attempts)
+    timeout_detail: str | bytes = ""
+    for _attempt in range(probe_attempts):
         try:
             proc = subprocess.run(
                 command,
@@ -126,9 +156,13 @@ def _probe_worktree_manager_version(
                 timeout=timeout,
                 env=_launch_probe_env(),
             )
-        except subprocess.TimeoutExpired:
+        except subprocess.TimeoutExpired as error:
+            timeout_detail = error.stderr or error.stdout or timeout_detail
             continue
-        except (OSError, subprocess.SubprocessError):
+        except (OSError, subprocess.SubprocessError) as error:
+            _report_manager_probe_failure(
+                "Control-plane --version probe could not start.", str(error),
+            )
             return None, None
         if proc.returncode != 0:
             return None, proc
@@ -136,6 +170,11 @@ def _probe_worktree_manager_version(
         if version is None:
             return None, proc
         return version, proc
+    _report_manager_probe_failure(
+        f"Control-plane --version probe timed out after {probe_attempts} attempts "
+        f"({timeout:g}s each).",
+        timeout_detail,
+    )
     return None, None
 
 
@@ -155,31 +194,29 @@ def _usable_worktree_manager() -> tuple[str, ...] | None:
     display_name, display_source = _provider_command_display_name(manifest)
     command0 = manifest.command[0]
     if proc is None:
-        output.err(
+        _report_manager_probe_failure(
             f"Ignoring an unusable {display_name} {display_source} ({command0}): "
-            "it could not be run. Falling back to the bundled picker."
+            "its --version probe did not complete."
         )
         return None
     if version is None and proc.returncode != 0:
-        output.err(
+        _report_manager_probe_failure(
             f"Ignoring a broken {display_name} {display_source} ({command0}): it "
-            f"failed a --version health check (exit {proc.returncode}). This is "
-            "usually a stale binstub from an old install; reinstall or remove "
-            "it. Falling back to the bundled picker."
+            f"failed a --version health check (exit {proc.returncode}).",
+            proc.stderr or proc.stdout or "",
         )
         return None
     if version is None:
-        output.err(
+        _report_manager_probe_failure(
             f"Ignoring an incompatible {display_name} {display_source} ({command0}): "
-            "its --version output did not include a supported version. Falling "
-            "back to the bundled picker."
+            "its --version output did not include a supported version.",
+            proc.stderr or proc.stdout or "",
         )
         return None
     if version < manifest.minimum_version:
-        output.err(
+        _report_manager_probe_failure(
             f"Ignoring an older {display_name} {display_source} ({command0}): "
-            f"production Picker handoff requires {manifest.minimum_version_text} or newer. "
-            "Falling back to the bundled picker."
+            f"production Picker handoff requires {manifest.minimum_version_text} or newer."
         )
         return None
     return manifest.command
@@ -224,22 +261,27 @@ def _usable_worktree_manager_launcher_dir() -> Path | None:
         ["uv", "run", "--quiet", "--project", str(slot), "python", "-m", "worktree_manager", "--version"]
     )
     if proc is None:
-        output.warn(
+        _report_manager_probe_failure(
             "Ignoring an unusable Worktree Manager install at "
-            f"{slot}: its versioned runtime could not be started."
+            f"{slot}: its versioned runtime could not be started.",
+            warning=True,
         )
         return None
     if version is None and proc.returncode != 0:
-        output.warn(
+        _report_manager_probe_failure(
             "Ignoring a broken Worktree Manager install at "
             f"{slot}: its versioned runtime failed a --version health check "
-            f"(exit {proc.returncode})."
+            f"(exit {proc.returncode}).",
+            proc.stderr or proc.stdout or "",
+            warning=True,
         )
         return None
     if version is None:
-        output.warn(
+        _report_manager_probe_failure(
             "Ignoring an incompatible Worktree Manager install at "
-            f"{slot}: its --version output did not include a supported version."
+            f"{slot}: its --version output did not include a supported version.",
+            proc.stderr or proc.stdout or "",
+            warning=True,
         )
         return None
     return slot / "bin"
@@ -443,8 +485,8 @@ def cmd_manager_install_trigger(project: str | None) -> int:
         output.header(f"{name} -- interactive mode needs Worktree Manager")
     print(
         "No usable Worktree Manager is available right now. On a first run "
-        "that's expected; if this machine already had one, update or repair "
-        "it with the bootstrap below.",
+        "that's expected; if this machine already had one, inspect the startup "
+        "diagnostics above before choosing an update or repair.",
         file=out,
     )
     print(
@@ -466,7 +508,7 @@ def cmd_manager_install_trigger(project: str | None) -> int:
         "finalize) works headless without the Manager.",
         file=out,
     )
-    return 0
+    return 1
 
 
 def _is_headless_project() -> bool:
