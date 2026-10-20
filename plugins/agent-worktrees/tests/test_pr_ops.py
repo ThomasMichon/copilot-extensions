@@ -1,4 +1,4 @@
-"""Tests for agent_worktrees.pr_ops -- PR-workflow git operations."""
+"""Real-Git PR publication-target integration tests."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from agent_worktrees import config as cfg
 from agent_worktrees import git_ops, pr_ops, tracking
 
 
-class TestPRFinalizeAndPush(PRWorkflowSetup):
+class TestPRPublication(PRWorkflowSetup):
     # --- a fork-headed PR: its head lives on the fork remote, not origin ------
 
 

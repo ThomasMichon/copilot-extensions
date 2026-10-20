@@ -1,0 +1,9 @@
+{
+  "comment": "Name the isolated publication-target test family while retaining the legacy module path.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

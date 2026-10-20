@@ -87,7 +87,53 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Mechanical move mapping: preserved, not conflated with fixtures
 
+### Final mechanical family: retain the legacy publication module path
+
+Baseline: Dev `98b77a6d2de17cec5c850b742ea1a0d08f7dab5e`, the actual
+#7452 push-changes partition merge. The 33 remaining methods already form
+one isolated publication-target family. Rename only
+`test_pr_ops.py::TestPRFinalizeAndPush` to
+`test_pr_ops.py::TestPRPublication`, with an accurate module docstring.
+The complete class body AST and the merged `PRWorkflowSetup` stay identical.
+
+Keep the existing module path deliberately. The exact-node consumer validates
+that every requested baseline node's file exists; deleting this legacy module
+would therefore refuse old selections before the new whole file could execute.
+A still-existing changed whole file instead admits all replacement identities
+without claiming their old coverage. File retirement is deferred to the
+separate Wave 5 selection-compatibility contract, not hidden in a test move.
+This refines the preceding whole-class-relocation proposal from observed
+consumer behavior; no compatibility mechanism is changed here.
+
+Real complete before/after collection proves all 317 nodes: 33 class-only
+identity mappings and 284 unchanged, with identical method/decorator/base AST,
+resolved fixture body/scope/closure, parameter values and effective marks.
+Collection passes take 18.39 and 12.36 seconds inclusive of preparation/removal.
+All 33 publication cases pass on native Windows without skips in 175.09 seconds
+(180.89 inclusive), exactly two work-stealing workers and unchanged 30-second
+item, 240-second diagnostic group and resource limits.
+
+Four existing real-Git/contained selection controls pass without skips in
+7.30 seconds (9.72 inclusive): both parameterizations of whole changed-file
+replacement for retired baseline identities, plus the partial-split execution
+and selection controls. No moved-node coverage is invented. Ruff F/E9 and
+the thirteen-plugin install-contract guard pass.
+
+All 317 original expanded cases now belong to bounded, cohesive mechanical
+families: 284 move to dedicated modules and 33 remain at the legacy module
+path under the publication class name. No production decision, helper, provider
+double, fixture, seed, assertion, parameter, mark, tier or CI-admission change
+enters this last mechanical slice. Clean-room provisioning is inapplicable;
+unavailable Linux/external execution receives no credit. Fixture-semantic
+contracts, selection compatibility and repeated complete same-head Windows
+qualification remain open.
+
 ### Tenth admitted move: push-changes method family
+
+**Actually merged:** #7452 as
+`98b77a6d2de17cec5c850b742ea1a0d08f7dab5e`. The residual publication
+family retains these merged bodies; fixture contracts and parent qualification
+remain open.
 
 Baseline: Dev `6177f31efc216f723e16a4d8670b01cb40b812c6`, after the actual
 #7450 record reassignment partition merge. Thirteen methods move unchanged
