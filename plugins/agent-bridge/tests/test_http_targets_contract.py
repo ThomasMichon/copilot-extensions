@@ -36,7 +36,7 @@ VECTOR = json.loads(
     )
 )
 CURRENT_VECTOR = json.loads(
-    (CONTRACT / "fixtures/http/current/remote-acp-targets-generation-42.json").read_text(
+    (CONTRACT / "fixtures/http/current/remote-acp-targets-generation-43.json").read_text(
         encoding="utf-8",
     )
 )
@@ -65,7 +65,7 @@ async def test_health_matches_current_independent_expected_vector(monkeypatch):
     assert {key: body[key] for key in CURRENT_VECTOR["health"]} == CURRENT_VECTOR["health"]
 
 
-@pytest.mark.parametrize("generation", [37, 38, 39, 40, 41, 42])
+@pytest.mark.parametrize("generation", [37, 38, 39, 40, 41, 42, 43])
 @pytest.mark.parametrize("address", ["url", "named"])
 def test_client_target_negotiation_precedes_request(generation, address):
     client = BridgeClient.__new__(BridgeClient)
@@ -84,7 +84,7 @@ def test_client_target_negotiation_precedes_request(generation, address):
         assert request.call_count == 1
         assert request.call_args.args == (
             expected["method"], expected["path"],
-            {"agent": VECTOR["client"][address], "protocol_version": 42},
+            {"agent": VECTOR["client"][address], "protocol_version": 43},
         )
 
 
@@ -205,7 +205,7 @@ def _wire_generation(value, previous=40, current=41):
     return value
 
 
-@pytest.mark.parametrize(("generation", "expected_count"), [(41, 40), (42, 42)])
+@pytest.mark.parametrize(("generation", "expected_count"), [(41, 40), (42, 42), (43, 42)])
 def test_reattestations_retain_independent_historical_expectations(generation, expected_count):
     registry = json.loads((CONTRACT / "registry.json").read_text(encoding="utf-8"))
     contract = next(item for item in registry["contracts"] if item["id"] == "agent-bridge.http-wire")
@@ -228,6 +228,9 @@ def test_reattestations_retain_independent_historical_expectations(generation, e
         expected.pop("captured_from")
         expected.pop("reattested_from", None)
         assert actual == expected
-        vector = VECTOR if generation == 41 else CURRENT_VECTOR
+        vector = json.loads(
+            (CONTRACT / f"fixtures/http/current/remote-acp-targets-generation-{generation}.json")
+            .read_text(encoding="utf-8")
+        )
         assert current["captured_from"]["commit"] == vector["captured_from"]["commit"]
     assert count == expected_count

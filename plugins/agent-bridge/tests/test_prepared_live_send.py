@@ -48,7 +48,7 @@ async def test_library_stdin_to_real_send_cli_http_and_native_bound_queue_once(
     lost = []
     def request(method, path, payload=None, **kwargs):
         if path == "/health":
-            return {"protocol_version": 42}
+            return {"protocol_version": 43}
         response = http.request(method, path, json=payload)
         if response.status_code >= 400:
             raise BridgeClientError(response.status_code, response.json().get("detail"))
@@ -154,7 +154,7 @@ async def test_failed_or_cancelled_readiness_never_admits_owned_prompt(tmp_db, t
     assert len(tmp_db.execute_read("SELECT id FROM live_messages WHERE kind NOT LIKE 'control:%'")) == 1
 
 
-@pytest.mark.parametrize("generation", [40, 41])
+@pytest.mark.parametrize("generation", [40, 41, 42])
 def test_typed_client_old_peer_is_rejected_without_posting_and_legacy_schema_stays_plain(generation):
     client = BridgeClient("http://fixture", "fixture", connect_grace=0)
     calls = []
@@ -169,7 +169,7 @@ def test_typed_client_old_peer_is_rejected_without_posting_and_legacy_schema_sta
     assert "plugin_readiness" not in SendMessageRequest(sender="operator", body="ordinary").model_dump()
 
 
-@pytest.mark.parametrize("generation", [39, 40, 41])
+@pytest.mark.parametrize("generation", [39, 40, 41, 42])
 def test_ordinary_receipt_delivery_retains_older_peer_capability_floor(generation):
     client = BridgeClient("http://fixture", "fixture", connect_grace=0)
     calls = []
