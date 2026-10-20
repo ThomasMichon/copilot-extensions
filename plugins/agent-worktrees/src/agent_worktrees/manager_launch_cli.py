@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import os
 import platform
+import re
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -121,6 +122,33 @@ def _launch_probe_env() -> dict[str, str]:
     return env
 
 
+def _safe_probe_diagnostic(text: str | bytes, limit: int = 2048) -> str:
+    from ._lifecycle_human.redact import redact
+
+    if isinstance(text, bytes):
+        text = text.decode("utf-8", errors="replace")
+    text = re.sub(
+        r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\))", "", text,
+    )
+    text = "".join(char for char in text if char.isprintable() or char in "\n\t")
+    text = redact(text).strip()
+    text = re.sub(r"(?i)(\bhttps?://[^\s?#]+)[?#][^\s]*", r"\1?[redacted]", text)
+    lines = text.splitlines()
+    detail = "\n".join(lines[-10:])
+    truncated = len(lines) > 10 or len(detail) > limit
+    return ("[diagnostic truncated]\n" if truncated else "") + detail[-limit:]
+
+
+def _report_manager_probe_failure(
+    summary: str, detail: str | bytes = "", *, warning: bool = False,
+) -> None:
+    with output.stdout_to_stderr():
+        report = output.warn if warning else output.err
+        report(_safe_probe_diagnostic(summary))
+        if diagnostic := _safe_probe_diagnostic(detail):
+            report(f"Startup detail:\n{diagnostic}")
+
+
 def _probe_worktree_manager_version(
     command: list[str],
     *,
@@ -139,7 +167,9 @@ def _probe_worktree_manager_version(
     working install uninstalled/broken (the loud reinstall-from-scratch
     guidance) when it was really just transient load.
     """
-    for attempt in range(max(1, attempts)):
+    probe_attempts = max(1, attempts)
+    timeout_detail: str | bytes = ""
+    for _attempt in range(probe_attempts):
         try:
             proc = subprocess.run(
                 command,
@@ -148,9 +178,17 @@ def _probe_worktree_manager_version(
                 timeout=timeout,
                 env=_launch_probe_env(),
             )
-        except subprocess.TimeoutExpired:
+        except subprocess.TimeoutExpired as error:
+            timeout_detail = (
+                _safe_probe_diagnostic(error.stderr or "")
+                or _safe_probe_diagnostic(error.stdout or "")
+                or timeout_detail
+            )
             continue
-        except (OSError, subprocess.SubprocessError):
+        except (OSError, subprocess.SubprocessError) as error:
+            _report_manager_probe_failure(
+                "Control-plane --version probe could not start.", str(error),
+            )
             return None, None
         if proc.returncode != 0:
             return None, proc
@@ -158,6 +196,11 @@ def _probe_worktree_manager_version(
         if version is None:
             return None, proc
         return version, proc
+    _report_manager_probe_failure(
+        f"Control-plane --version probe timed out after {probe_attempts} attempts "
+        f"({timeout:g}s each).",
+        timeout_detail,
+    )
     return None, None
 
 
@@ -179,7 +222,9 @@ def _worktree_manager_health() -> _ManagerHealth:
         "_probe_worktree_manager_version", _probe_worktree_manager_version
     )([*manifest.command, "--version"])
     display_name, display_source = _provider_command_display_name(manifest)
-    source = bounded(f"{display_name} {display_source} ({manifest.command[0]})", 240)
+    source = _safe_probe_diagnostic(
+        f"{display_name} {display_source} ({manifest.command[0]})", 240,
+    )
     if proc is None:
         reason = "its --version health check could not complete (could not start or timed out)"
     elif proc.returncode != 0:
@@ -194,8 +239,12 @@ def _worktree_manager_health() -> _ManagerHealth:
     else:
         return _ManagerHealth("ready", command=manifest.command)
     detail = f"Cannot use {source}: {reason}."
-    if proc is not None and proc.stderr and proc.stderr.strip():
-        detail += f" stderr: {bounded(proc.stderr.strip(), 400)}"
+    if proc is not None:
+        stderr = _safe_probe_diagnostic(proc.stderr or "")
+        evidence = stderr or _safe_probe_diagnostic(proc.stdout or "")
+        if evidence:
+            stream = "stderr" if stderr else "stdout"
+            detail += f"\nStartup detail ({stream}):\n{evidence}"
     return _ManagerHealth("failed", diagnostic=detail)
 
 
@@ -266,8 +315,7 @@ def _usable_worktree_manager_launcher_dir() -> Path | None:
     )(command)
     if proc is None:
         output.warn(
-            "Ignoring an unusable Worktree Manager install at "
-            f"{slot}: its versioned runtime could not be started."
+            f"Ignoring an unusable Worktree Manager install at {slot}: its versioned runtime could not be started."
         )
         return None
     if version is None and proc.returncode != 0:
@@ -488,8 +536,8 @@ def cmd_manager_install_trigger(project: str | None) -> int:
         output.header(f"{name} -- interactive mode needs Worktree Manager")
     print(
         "No usable Worktree Manager is available right now. On a first run "
-        "that's expected; if this machine already had one, update or repair "
-        "it with the bootstrap below.",
+        "that's expected; if this machine already had one, inspect the startup "
+        "diagnostics above before choosing an update or repair.",
         file=out,
     )
     print(
