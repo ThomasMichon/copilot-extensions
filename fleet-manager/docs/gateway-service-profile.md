@@ -200,8 +200,14 @@ key/caller withdrawal, replacement, genuine SSE, client cancellation, slow-peer
 backpressure and resource limits. They are isolated in-process socket witnesses,
 not separate-process/container or ARM64 deployment evidence.
 
-Container packaging, Cloudflare/protected-origin interoperability, native
-architecture qualification and live adoption remain in
+The [standalone image specification](../containers/gateway/README.md) packages
+this optional runtime and connector SDK without changing thin-client defaults.
+The [isolated container witness](../../tools/clean-room/gateway-role-tunnels/README.md)
+qualifies exact committed source on a native amd64 engine; its mechanical
+guards alone do not prove an assembled run.
+
+Cloudflare/protected-origin interoperability, native architecture qualification
+and live adoption remain in
 [Gateway Role Tunnels](../../efforts/active/gateway-role-tunnels/README.md).
 No provider-account, DNS, access-policy, production-key, firewall or running
 facility configuration is modified by this source implementation.

@@ -1,0 +1,285 @@
+"""Mechanical boundaries only; these mocks never qualify a real container run."""
+
+from __future__ import annotations
+
+import ast
+import importlib.util
+import json
+import os
+import subprocess
+import sys
+import time
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
+
+import pytest
+
+ROOT = Path(__file__).resolve().parents[2]
+PROOF = ROOT / "tools/clean-room/gateway-role-tunnels"
+
+
+def load() -> tuple:
+    loaded = {}
+    with patch.dict(sys.modules):
+        for name in ("source", "engine", "witness", "run"):
+            spec = importlib.util.spec_from_file_location(name, PROOF / (name + ".py"))
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[name] = module
+            spec.loader.exec_module(module)
+            loaded[name] = module
+    return tuple(loaded[name] for name in ("source", "engine", "witness", "run"))
+
+
+SOURCE, ENGINE, WITNESS, RUN = load()
+CID_A, CID_B, NETWORK = "a" * 64, "b" * 64, "c" * 64
+IMAGE = "sha256:" + "d" * 64
+
+
+def test_hardened_argv_has_no_host_privilege_or_secret_material(tmp_path: Path) -> None:
+    with patch.object(ENGINE.os, "getuid", return_value=1001):
+        argv = ENGINE.container_args(
+            IMAGE, tmp_path / "cid", "proof-gateway", NETWORK,
+            [(tmp_path, "/config", False)], True, None)
+    for flag, value in {
+        "--network": NETWORK, "--memory": "256m", "--memory-swap": "256m",
+        "--cpus": "1", "--pids-limit": "64", "--cap-drop": "ALL",
+        "--security-opt": "no-new-privileges:true", "--network-alias": "gateway",
+    }.items():
+        assert argv[argv.index(flag) + 1] == value
+    assert "--read-only" in argv
+    assert argv[argv.index("--user") + 1].startswith("1001:")
+    assert argv[argv.index("--mount") + 1].endswith(",readonly")
+    assert not set(argv) & {"--privileged", "--publish", "-p", "--pid", "--env", "-e",
+                           "--net=host", "--network=host", "--device", "--volume", "-v"}
+    assert "docker.sock" not in " ".join(argv)
+    assert "TOKEN" not in " ".join(argv)
+    assert "--rm" not in argv  # Creation receipts survive until finally.
+
+
+def test_preparation_is_networkless_and_only_explicit_output_is_writable(tmp_path: Path) -> None:
+    engine = ENGINE.Engine(tmp_path, {})
+    with patch.object(ENGINE.os, "getuid", return_value=1001):
+        argv = ENGINE.container_args(
+            IMAGE, tmp_path / "cid", "fixture-prep", "none",
+            [(tmp_path / "fixtures", "/output", True)], False,
+            ["/proof/fixture_auth.py", "/output"])
+    assert argv[argv.index("--network") + 1] == "none"
+    assert argv[-3:] == [IMAGE, "/proof/fixture_auth.py", "/output"]
+    with pytest.raises(SOURCE.ProofError, match="foreign-or-writable"):
+        engine.create(IMAGE, name="bad", mounts=[(tmp_path.parent, "/output", True)])
+
+
+@pytest.mark.parametrize("network", [None, "host", "bridge", "foreign"])
+def test_only_receipted_network_or_none_is_admitted(tmp_path: Path, network: str) -> None:
+    with pytest.raises(SOURCE.ProofError, match="owned-network"):
+        ENGINE.container_args(IMAGE, tmp_path / "cid", "test", network, [], False, None)
+
+
+def test_symlink_and_public_results_roots_refuse(tmp_path: Path) -> None:
+    private = tmp_path / "private"
+    private.mkdir(mode=0o700)
+    linked = tmp_path / "linked"
+    linked.symlink_to(private, target_is_directory=True)
+    with pytest.raises(SOURCE.ProofError, match="indirection"):
+        SOURCE.private_root(linked, ROOT)
+    private.chmod(0o755)
+    with pytest.raises(SOURCE.ProofError, match="not-private"):
+        SOURCE.private_root(private, ROOT)
+    with pytest.raises(SOURCE.ProofError, match="not-absolute"):
+        SOURCE.private_root(Path("relative"), ROOT)
+
+
+def test_repository_and_session_results_roots_refuse(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / ".git").write_text("gitdir: elsewhere")
+    with pytest.raises(SOURCE.ProofError, match="in-repository"):
+        SOURCE.private_root(repo, ROOT)
+    state = tmp_path / "session-state"
+    state.mkdir(mode=0o700)
+    with pytest.raises(SOURCE.ProofError, match="not-private"):
+        SOURCE.private_root(state, ROOT)
+
+
+def test_fresh_run_directory_is_unique_private_and_below_supplied_root(tmp_path: Path) -> None:
+    first, second = SOURCE.fresh_run(tmp_path), SOURCE.fresh_run(tmp_path)
+    assert first != second and first.parent == second.parent == tmp_path
+    assert first.stat().st_mode & 0o077 == 0
+    assert first.name.startswith("gateway-role-")
+
+
+def tree(override: tuple[str, str] | None = None, extra: str | None = None) -> bytes:
+    entries = []
+    for name in sorted(SOURCE.REQUIRED):
+        mode = override[1] if override and name == override[0] else "100644"
+        entries.append(f"{mode} blob {'a' * 40}\t{name}".encode())
+    if extra:
+        entries.append(f"100644 blob {'b' * 40}\t{extra}".encode())
+    return b"\0".join(entries) + b"\0"
+
+
+@pytest.mark.parametrize("listing", [
+    b"", tree(("fleet-manager/setup.py", "120000")),
+    tree(extra="fleet-manager/src/fleet_manager/unknown.py"),
+])
+def test_incomplete_linked_or_unknown_source_closure_refuses(
+    tmp_path: Path, listing: bytes,
+) -> None:
+    def git(repository: Path, *args: str) -> bytes:
+        return b"a" * 40 if args[0] == "rev-parse" else listing
+    with patch.object(SOURCE, "git", git), pytest.raises(SOURCE.ProofError):
+        SOURCE.materialize(ROOT, "a" * 40, tmp_path)
+    assert not (tmp_path / "context").exists()
+
+
+@pytest.mark.parametrize("ref", ["", "--help", "HEAD:secret", "HEAD^{tree}", "x\nx"])
+def test_unsafe_source_ref_never_invokes_git(tmp_path: Path, ref: str) -> None:
+    with patch.object(SOURCE, "git") as git, pytest.raises(SOURCE.ProofError):
+        SOURCE.materialize(ROOT, ref, tmp_path)
+    git.assert_not_called()
+
+
+def test_materialization_never_copies_live_checkout_or_unallowlisted_blobs(tmp_path: Path) -> None:
+    blobs = {}
+    for index, name in enumerate(sorted(SOURCE.REQUIRED)):
+        oid = f"{index:040x}"
+        blobs[oid] = ((PROOF / Path(name).name).read_bytes()
+                      if name.startswith(SOURCE.PROOF) else b"canonical-git-blob\n")
+    listing = b"\0".join(
+        f"100644 blob {index:040x}\t{name}".encode()
+        for index, name in enumerate(sorted(SOURCE.REQUIRED))) + b"\0"
+
+    def git(repository: Path, *args: str) -> bytes:
+        if args[0] == "rev-parse":
+            return b"a" * 40
+        if args[0] == "ls-tree":
+            return listing + b"100644 blob ffffffffffffffffffffffffffffffffffffffff\tprivate.key\0"
+        assert args[0:2] == ("cat-file", "blob")
+        return blobs[args[2]]
+
+    with patch.object(SOURCE, "git", git):
+        facts = SOURCE.materialize(ROOT, "a" * 40, tmp_path)
+    assert facts["source_commit"] == "a" * 40
+    assert not (tmp_path / "context/private.key").exists()
+    assert (tmp_path / "context/fleet-manager/setup.py").read_bytes() == b"canonical-git-blob\n"
+    manifest = json.loads((tmp_path / "source-manifest.json").read_text())
+    assert set(manifest["blobs"]) == SOURCE.REQUIRED
+    assert len(facts["source_manifest_sha256"]) == 64
+
+
+def test_commands_have_finite_timeouts_and_do_not_inherit_credentials(tmp_path: Path) -> None:
+    engine = ENGINE.Engine(tmp_path, {})
+    with patch.dict(os.environ, {"GH_TOKEN": "must-not-propagate",
+                                "DOCKER_HOST": "tcp://must-not-connect"}):
+        with patch.object(ENGINE.subprocess, "run") as launch:
+            launch.return_value = SimpleNamespace(returncode=0, stdout=b"ok", stderr=b"")
+            assert engine.call("info") == "ok"
+            kwargs = launch.call_args.kwargs
+    assert 0 < kwargs["timeout"] <= 20
+    assert "GH_TOKEN" not in kwargs["env"] and "DOCKER_HOST" not in kwargs["env"]
+    assert kwargs["env"]["DOCKER_CONFIG"] == str(tmp_path / "docker-config")
+    engine.deadline = time.monotonic() - 1
+    with pytest.raises(SOURCE.ProofError, match="deadline"):
+        engine.call("info")
+
+
+def test_cleanup_only_uses_exact_creation_receipts_including_partial_create(tmp_path: Path) -> None:
+    engine = ENGINE.Engine(tmp_path, {})
+    engine.containers = [CID_A]
+    cidfile = tmp_path / "partial.cid"
+    cidfile.write_text(CID_B)
+    engine.pending = [cidfile]
+    engine.network = NETWORK
+    calls = []
+    engine.call = lambda *args, **kwargs: calls.append(args) or ""
+    assert engine.cleanup() == []
+    assert ("stop", "--time", "5", CID_A) in calls
+    assert ("stop", "--time", "5", CID_B) in calls
+    assert ("rm", CID_A) in calls and ("rm", CID_B) in calls
+    assert ("network", "rm", NETWORK) in calls
+    assert not any("prune" in call or "--force" in call or "-f" in call for call in calls)
+    with pytest.raises(SOURCE.ProofError, match="foreign-container"):
+        engine.execute("e" * 64, "python", "--version")
+
+
+def test_cleanup_failure_is_explicit_and_does_not_skip_network_cleanup(tmp_path: Path) -> None:
+    engine = ENGINE.Engine(tmp_path, {})
+    engine.containers = [CID_A]
+    engine.network = NETWORK
+    calls = []
+
+    def fail(*args: str, **kwargs: object) -> str:
+        calls.append(args)
+        if args[0] == "stop":
+            raise SOURCE.ProofError("synthetic-stop-failed")
+        return ""
+
+    engine.call = fail
+    assert engine.cleanup() == ["owned-container-cleanup-failed"]
+    assert ("rm", CID_A) in calls
+    assert ("network", "rm", NETWORK) in calls
+
+
+def test_uncertain_creation_without_receipt_is_not_clean_success(tmp_path: Path) -> None:
+    engine = ENGINE.Engine(tmp_path, {})
+    engine.pending = [tmp_path / "missing.cid"]
+    engine.ambiguous_network = True
+    with patch.object(engine, "call") as call:
+        assert engine.cleanup() == [
+            "container-create-outcome-unknown-no-id", "network-create-outcome-unknown-no-id"]
+    call.assert_not_called()
+
+
+def test_exec_refuses_arbitrary_commands_or_secret_arguments(tmp_path: Path) -> None:
+    engine = ENGINE.Engine(tmp_path, {})
+    engine.containers = [CID_A]
+    with patch.object(engine, "call") as call:
+        with pytest.raises(SOURCE.ProofError, match="unsafe-exec"):
+            engine.execute(CID_A, "python", "/proof/probe.py", "synthetic-secret")
+        with pytest.raises(SOURCE.ProofError, match="unsafe-exec"):
+            engine.execute(CID_A, "sh", "-c", "unapproved")
+    call.assert_not_called()
+
+
+def test_missing_docker_is_reported_not_skipped_or_installed(tmp_path: Path) -> None:
+    with patch.object(RUN, "materialize", return_value={"source_commit": "a" * 40}), \
+            patch.object(RUN.shutil, "which", return_value=None), \
+            patch.object(RUN, "Engine") as engine:
+        receipt = RUN.run(ROOT, "a" * 40, tmp_path)
+    engine.assert_not_called()
+    assert receipt["result"] == "fail" and receipt["cleanup"] == "complete"
+    report = json.loads((tmp_path / "cr-report.json").read_text())
+    assert report["failed"] == 1 and report["jams"][0]["hint"] == "docker-unavailable"
+
+
+def test_docker_timeout_is_classified_without_echoing_args(tmp_path: Path) -> None:
+    engine = ENGINE.Engine(tmp_path, {})
+    with patch.object(ENGINE.subprocess, "run", side_effect=subprocess.TimeoutExpired("x", 1)):
+        with pytest.raises(SOURCE.ProofError, match="command-timeout"):
+            engine.call("info")
+
+
+def test_real_header_construction_preserves_values_without_importing_optional_dependencies() -> None:
+    module = ast.parse((PROOF / "probe.py").read_text())
+    node = next(item for item in module.body if isinstance(item, ast.FunctionDef)
+                and item.name == "auth_headers")
+    namespace = {}
+    exec(compile(ast.Module(body=[node], type_ignores=[]), "auth_headers", "exec"), namespace)
+    assert namespace["auth_headers"]("synthetic-access", "synthetic-proof") == {
+        "Authorization": "DP" + "oP " + "synthetic-access", "DPoP": "synthetic-proof"}
+
+
+def test_new_sources_remain_bounded_and_production_image_has_no_fixture_dependency() -> None:
+    for name in SOURCE.RUNNER_FILES:
+        assert len((PROOF / name).read_text().splitlines()) < 500
+    assert len(Path(__file__).read_text().splitlines()) < 500
+    dockerfile = (ROOT / SOURCE.IMAGE / "Dockerfile").read_text()
+    assert "python:3.13-slim" in dockerfile and "uv:0.11.7" in dockerfile
+    assert dockerfile.count('--exclude-newer "7 days"') == 2
+    assert "USER 10001:10001" in dockerfile and "[service-gateway]" in dockerfile
+    assert "HEALTHCHECK NONE" in dockerfile
+    assert '"doctor"' not in dockerfile
+    assert "COPY . " not in dockerfile and "fixture" not in dockerfile.lower()
+    assert "pip install" not in dockerfile.replace("uv pip install", "")
+    assert "PYTHONPATH" not in dockerfile

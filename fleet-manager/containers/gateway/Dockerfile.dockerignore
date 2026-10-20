@@ -1,0 +1,15 @@
+**
+!fleet-manager/
+!fleet-manager/pyproject.toml
+!fleet-manager/setup.py
+!fleet-manager/README.md
+!fleet-manager/src/
+!fleet-manager/src/fleet_manager/
+!fleet-manager/src/fleet_manager/*.py
+!libs/
+!libs/versioned-runtime/
+!libs/versioned-runtime/standalone_build.py
+!libs/versioned-runtime/versioned_runtime.py
+!libs/versioned-runtime/versioned_runtime_leases.py
+!libs/versioned-runtime/versioned_runtime_construction.py
+!libs/versioned-runtime/versioned_runtime_source.py

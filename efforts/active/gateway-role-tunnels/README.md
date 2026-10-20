@@ -138,7 +138,7 @@ This settles that source-scope decision, not production trust or deployment.
 - [x] Route declared bounded HTTP API/UX traffic and streaming through that
   channel; advertise supported capabilities and explicitly refuse unsupported
   upgrades/transports instead of using a direct-backend fallback.
-- [ ] Prove replacement/reconnect generation fencing, cancellation, policy
+- [x] Prove replacement/reconnect generation fencing, cancellation, policy
   withdrawal, bounded backpressure and truthful uncertain-effect outcomes.
   Real in-process TLS/socket witnesses cover these paths. Independently
   isolated container/process qualification remains a Phase 3 gate.
@@ -146,12 +146,12 @@ This settles that source-scope decision, not production trust or deployment.
   authorization, deadlines, credential custody and error semantics.
 
 ### Phase 3 - Reusable packaging and isolated adoption proof
-- [ ] Supply the base Gateway and connector container specification using the
+- [x] Supply the base Gateway and connector container specification using the
   selected package/runtime closure, non-root execution and explicit state/config
   mounts; preserve thin client installation defaults.
 - [ ] Add the optional generic Cloudflare ingress adapter and external-origin
   contract without creating DNS, Access policies or provider credentials.
-- [ ] Prove one Gateway and two independently isolated service instances:
+- [x] Prove one Gateway and two independently isolated service instances:
   expected-but-absent slots, actual routing, valid hot updates, denied hijacking,
   reconnect and stream behavior, with unchanged Gateway process identity.
 - [ ] Qualify declared image architectures, including the intended ARM64 host
@@ -168,23 +168,23 @@ This settles that source-scope decision, not production trust or deployment.
 
 ## Validation Plan
 
-- [ ] **Manifest:** reject unknown/malformed fields, namespace collisions,
+- [x] **Manifest:** reject unknown/malformed fields, namespace collisions,
   unsafe route forms, undeclared roles/capabilities and secret-bearing inline
   credentials; bound input and output before publication.
-- [ ] **Authority:** a connector cannot turn self-description into enrollment;
+- [x] **Authority:** a connector cannot turn self-description into enrollment;
   stale source revisions, revoked identities and old connection generations
   cannot restore authority.
-- [ ] **Reload:** valid candidates publish coherently under concurrent use;
+- [x] **Reload:** valid candidates publish coherently under concurrent use;
   invalid candidates leave existing state intact. No-op reload is stable.
-- [ ] **Serving:** actual authenticated routed requests reach only their
+- [x] **Serving:** actual authenticated routed requests reach only their
   configured service; expected absence and unsupported behavior are explicit.
-- [ ] **Streaming:** actual sustained responses, disconnect and backpressure
+- [x] **Streaming:** actual sustained responses, disconnect and backpressure
   stay bounded; revocation/cancellation is not mistaken for successful work.
-- [ ] **Compatibility:** current real static/index/credential tests remain
+- [x] **Compatibility:** current real static/index/credential tests remain
   green without changing deadlines or replacing authentication with fixtures.
 - [ ] **Ingress:** external-origin/TLS/forwarded-identity rules are verified;
   edge admission never replaces role or fleet authorization.
-- [ ] **Containers:** separate Gateway/service containers prove routing and
+- [x] **Containers:** separate Gateway/service containers prove routing and
   live configuration with synthetic secrets and no production mounts, host
   socket, public listener, live account or hidden privileged admission.
 - [ ] **Architecture:** distinguish image build, emulated run, native run and
@@ -269,3 +269,35 @@ provider credentials and production placement with their existing owners.
 - Qualification remains in-process, with synthetic issuer/provider fixtures.
   Proxy/Cloudflare compatibility, container/ARM64 evidence, durable restart
   revision custody and live adoption are not claimed by these tests.
+
+### 2026-10-19 - Service runtime merged; isolated packaging next
+- Runtime PR #7278 merged as
+  `a335f39283af46ccd3a1df499134bf56a6cc5268` after clean current-head
+  Copilot review and successful required CI, through the managed merge flow.
+- The standard bounded portfolio passed 1,647 cases with two platform skips
+  and fourteen documented full-portfolio exclusions. Additional real TLS
+  peer-close/protocol-error and Python 3.10 timeout cases cover bounded closure
+  and downstream aborts; no provider account or production runtime was used.
+- Phase 2 and the corresponding in-process validation items are complete.
+  Restored the prepared non-root image and exact-source host-driven witness
+  candidate for the next serial slice. Its separate-container execution is
+  still unrun, not inferred from SDK tests or mechanical runner guards.
+- Phase 3 now selects ordinary isolated amd64 image/routing qualification.
+  Generic ingress, ARM64 qualification and adopter readiness remain open.
+
+### 2026-10-19 - Native amd64 isolated container proof
+- Built the committed noneditable wheel/extra closure into the non-root base
+  image and executed the host-driven [container witness](../../../tools/clean-room/gateway-role-tunnels/README.md)
+  on a native amd64 Linux engine. All ten assembled stages passed; the
+  twenty-seven mechanical runner/ownership guards passed separately.
+- Independently isolated Gateway, two services and observer proved actual API,
+  HTML and unfinished-backend SSE delivery; denied caller/slot/principal
+  hijacking; invalid-candidate preservation; higher role/route publication;
+  connector replacement and predecessor retirement; service restart/reconnect;
+  and caller revocation. Seven Gateway PID/start observations were identical.
+- The witness used only offline synthetic credentials, an internal network,
+  bounded non-root containers and exact-ID cleanup, which completed. No host
+  socket, published port, privileged container or live provider was admitted.
+- This qualifies native amd64 direct-TLS behavior, not ARM64, Cloudflare,
+  durable restart revision authority, managed deployment or adopter readiness.
+  The next slice closes the generic ingress/external-origin contract.
