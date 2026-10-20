@@ -227,6 +227,9 @@ def test_buffered_cancels_retire_workers_that_never_start(monkeypatch) -> None:
             async def receive(self, **kwargs):
                 return SimpleNamespace(type=WSMsgType.TEXT, data='{"type":"attached"}')
 
+            async def close(self, **kwargs):
+                return True
+
             def __aiter__(self):
                 return self
 
@@ -273,4 +276,43 @@ def test_backend_disconnect_never_implicitly_replays_mutation(tmp_path, method) 
                 assert await response.json() == {"error": "outcome-unknown"}
             assert rig.backends[0].mutations == 1
             assert len(rig.backends[0].requests) == 1
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("operation", ["reload", "shutdown"])
+def test_stalled_close_drain_cannot_block_reload_or_shutdown(
+    tmp_path, monkeypatch, caplog, operation,
+) -> None:
+    async def scenario() -> None:
+        async with running(tmp_path) as rig:
+            await rig.connect()
+            channel = rig.state.channels["service-a"]
+            writer = channel.ws._payload_writer
+            drain = type(writer).drain
+            stalled, canceled = asyncio.Event(), asyncio.Event()
+
+            async def stalled_drain(selected):
+                if selected is writer:
+                    stalled.set()
+                    try:
+                        await asyncio.Future()
+                    finally:
+                        canceled.set()
+                else:
+                    await drain(selected)
+
+            monkeypatch.setattr(type(writer), "drain", stalled_drain)
+            monkeypatch.setattr("fleet_manager.gateway_service_channel.SEND_TIMEOUT", 0.1)
+            if operation == "reload":
+                rig.h.document["manifest"]["slots"][0]["role"] = "assets"
+                await rig.update()
+                await asyncio.wait_for(stalled.wait(), 1)
+                await rig.update()
+                assert rig.state.context.manifest.revision == 3
+            else:
+                await asyncio.wait_for(rig.serving.close(), 2)
+                assert stalled.is_set()
+            await asyncio.wait_for(canceled.wait(), 1)
+            assert channel.closed and channel.ws.closed
+            assert "service-channel-closed code=close-timeout" in caplog.text
     asyncio.run(scenario())

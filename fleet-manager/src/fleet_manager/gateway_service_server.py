@@ -19,7 +19,7 @@ from .gateway_service_channel import (
     DEADLINE, FRAME_BYTES, GLOBAL_REQUESTS, REQUEST_HEADERS, RESPONSE_BYTES,
     BODY_BYTES,
     Channel, Pending, TransportError, ValueFreeLogger, binary, check, headers,
-    encode_frame, send, send_encoded, shape, target, unpack,
+    close_socket, encode_frame, send, send_encoded, shape, target, unpack,
 )
 from .gateway_service_context import ServiceContext, ServicePolicyError
 from .gateway_service_listener import Listener, read_bounded
@@ -229,7 +229,7 @@ class ServiceRuntime:
                 self.authority.release_service(grant)
             if candidate is not None:
                 self.authority.release_candidate(candidate)
-            await ws.close(code=1008, message=b"attachment-refused")
+            await close_socket(ws, code=1008, message=b"attachment-refused")
             if isinstance(exc, asyncio.CancelledError):
                 raise
             return ws

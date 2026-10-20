@@ -167,6 +167,16 @@ async def send(
     await send_encoded(ws, encode_frame(value))
 
 
+async def close_socket(
+    ws: web.WebSocketResponse | ClientWebSocketResponse, *,
+    code: int = 1001, message: bytes = b"",
+) -> None:
+    try:
+        await asyncio.wait_for(ws.close(code=code, message=message), SEND_TIMEOUT)
+    except asyncio.TimeoutError:
+        logging.getLogger(__name__).warning("service-channel-closed code=close-timeout")
+
+
 @dataclass(eq=False)
 class Pending:
     caller: CallerGrant
@@ -223,7 +233,7 @@ class Channel:
             pending.fail("outcome-unknown" if pending.dispatched and pending.method
                          not in ("GET", "HEAD", "OPTIONS") else code)
         self.authority.release_service(self.grant)
-        await self.ws.close(code=1001, message=code.encode("ascii"))
+        await close_socket(self.ws, code=1001, message=code.encode("ascii"))
 
     def receive(self, value: dict) -> None:
         kind, correlation = value.get("type"), value.get("id")

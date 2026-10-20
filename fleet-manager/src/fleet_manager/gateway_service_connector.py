@@ -11,7 +11,8 @@ import base64
 import logging
 import ssl
 from collections import deque
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Any
 
@@ -22,7 +23,7 @@ from .gateway_auth import make_proof
 from .gateway_service_channel import (
     BODY_BYTES, CHANNEL_REQUESTS, CHUNK_BYTES, DEADLINE, FRAME_BYTES,
     REQUEST_HEADERS, RESPONSE_BYTES, RESPONSE_HEADERS, TransportError,
-    binary, check, headers, origin, send, shape, target, unpack, wire_headers,
+    binary, check, close_socket, headers, origin, send, shape, target, unpack, wire_headers,
 )
 from .gateway_service_context import METHODS
 
@@ -33,6 +34,20 @@ def verified_tls(ca: str | None) -> ssl.SSLContext:
     context = ssl.create_default_context(cafile=ca)
     context.minimum_version = ssl.TLSVersion.TLSv1_2
     return context
+
+
+@asynccontextmanager
+async def channel_socket(
+    session: aiohttp.ClientSession, uri: str, tls: ssl.SSLContext,
+) -> AsyncIterator[aiohttp.ClientWebSocketResponse]:
+    async with session.ws_connect(
+        uri, ssl=tls, heartbeat=10, max_msg_size=FRAME_BYTES, compress=0,
+        autoclose=True, timeout=aiohttp.ClientWSTimeout(ws_close=2),
+    ) as ws:
+        try:
+            yield ws
+        finally:
+            await close_socket(ws)
 
 
 @dataclass(eq=False)
@@ -118,7 +133,7 @@ class ServiceConnector:
             await self._exchange(ws, session, exchange, request)
         except (aiohttp.ClientError, OSError, asyncio.TimeoutError):
             LOG.warning("service-connector-closed code=response-writer-failed")
-            await ws.close(code=1011, message=b"response-writer-failed")
+            await close_socket(ws, code=1011, message=b"response-writer-failed")
         finally:
             self._retire(exchange)
 
@@ -197,10 +212,8 @@ class ServiceConnector:
             # aiohttp 3 has no public toggle for replaying PUT/DELETE on disconnect.
             session._retry_connection = False
             ticket = await self._admit(session)
-            async with session.ws_connect(
-                self.gateway + "/_fleet/service-channel", ssl=self._gateway_tls,
-                heartbeat=10, max_msg_size=FRAME_BYTES, compress=0,
-                autoclose=True, timeout=aiohttp.ClientWSTimeout(ws_close=2),
+            async with channel_socket(
+                session, self.gateway + "/_fleet/service-channel", self._gateway_tls,
             ) as ws:
                 await send(ws, {"ticket": ticket})
                 attached = await asyncio.wait_for(ws.receive(), 5)

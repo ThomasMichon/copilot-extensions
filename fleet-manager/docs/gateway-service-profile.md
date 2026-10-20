@@ -79,6 +79,9 @@ first bounded WebSocket message within five seconds.
 That is an absolute attachment deadline, not an idle receive timeout;
 unauthenticated PING/PONG keepalives cannot extend it. The connector applies
 the same absolute bound while waiting for attachment confirmation.
+Socket closure also has a five-second absolute bound around close-frame writes,
+drain and peer acknowledgment, so a stalled peer cannot hold policy sweep or
+shutdown indefinitely. Expiry reports a value-free `close-timeout` diagnostic.
 
 Ticket preparation does not withdraw a healthy active channel. Promotion occurs
 only after attachment confirmation is written, before the channel becomes
