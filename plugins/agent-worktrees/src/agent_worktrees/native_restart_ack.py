@@ -107,6 +107,8 @@ def cmd_acknowledge(args: argparse.Namespace) -> int:
         ):
             raise ValueError("Restart acknowledgement requires reconciled status and no other intent")
         witness = native_source_context.capture()
+        if witness.get("qualified") is not True:
+            raise ValueError("Restart acknowledgement native source is unqualified")
         path = cli.cfg.tracking_dir() / f"{worktree_id}.yaml"
         config = cli.cfg.load_config()
         record = tracking.load_record(path)

@@ -879,3 +879,9 @@ The umbrella effort remains Active independently of this slice's completion.
   contracts and 55 Manager outcome/capability contracts. High-signal Python
   checks and documentation consistency passed; ordinary Resume/Bridge semantics
   and the existing module ceilings are unchanged.
+- Provider review identified unsupported native capture continuing into
+  platform-specific receipt I/O. A failed source witness now refuses before
+  configuration, fences or receipt access, covering unsupported platforms,
+  containers and unavailable epochs as one class. Three unskipped regressions
+  failed before the fix and passed after it; the unchanged qualified native
+  acknowledgement/lifecycle lane passed 197 additional contracts.

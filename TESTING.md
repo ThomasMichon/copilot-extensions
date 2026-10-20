@@ -236,6 +236,9 @@ exact typed version-2 acknowledged binding, retaining false restored/automatic
 flags and a qualification blocker. They do not launch Copilot, prove prompt
 readiness or actual seed consumption, or qualify automatic startup/platform
 recovery.
+`test_native_restart_ack_platform.py` is not POSIX-skipped: unsupported platform,
+container or unavailable-epoch capture must return a structured refusal before
+configuration, lifecycle/admission locks or Unix-only receipt I/O is reached.
 
 Frozen restart-attempt identities and historical owner bindings use:
 

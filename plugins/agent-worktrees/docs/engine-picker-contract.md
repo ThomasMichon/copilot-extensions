@@ -435,9 +435,11 @@ native identity/ready/seed acknowledgement remain separate qualification gates.
 intent. The original resumed agent calls it only after the seed's status
 reconciliation; neither Manager nor native registration emits it. No supplied
 session environment variable, launch argv or caller-provided source witness
-establishes this proof. Under the existing lifecycle/native-admission and strict
-record locks, it captures invoking ancestry and corroborates the original UUID's
-live native hold, mux PID/birth, unique current activation and exact target epoch.
+establishes this proof. Unsupported or unavailable native-source capture refuses
+before configuration, fences or platform-specific receipt I/O. Under the
+existing lifecycle/native-admission and strict record locks, it corroborates
+the original UUID's live native hold, mux PID/birth, unique current activation
+and exact target epoch against the captured invoking ancestry.
 Current worktree incarnation/head revision must match the frozen request,
 owner/activation revisions must advance, and the frozen original source must
 remain unambiguous in retained history. Its inferred next-Start closure is
