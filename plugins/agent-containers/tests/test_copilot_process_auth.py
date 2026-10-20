@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -203,7 +204,7 @@ def test_unsupported_native_cli_is_not_weakened(monkeypatch):
 
 
 @pytest.mark.guard
-@pytest.mark.skipif(os.name == "nt", reason="POSIX default ACL inheritance")
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux POSIX ACL extended attributes")
 def test_native_launcher_directory_is_private_with_inherited_default_acl(tmp_path, monkeypatch):
     import errno
     import struct
