@@ -2373,3 +2373,22 @@ requested contract.
   `6281119961` after direct and relay transport refused delivery. Acceptance
   names the separate repair owner; it does not claim the native cause fixed,
   permit a timeout increase or waive any failing check.
+
+### 2026-10-20 - Keep optional progress admission failures off the master path
+
+- Full exact-head review `5579836787` identifies a body-only Medium:
+  optional progress-worker submission can raise during discovery or after unit
+  mutation, aborting reconciliation before its summary. Four fail-first
+  regressions reproduce actual construction refusal and real executor thread
+  start refusal at both boundaries.
+- Progress admission now retires the failed pool without waiting, cancels its
+  queued work, clears its active reference and emits the existing classified,
+  throttled warning. Latest progress/final-status frames remain coalesced for
+  a later healthy retry. Discovery and completed unit mutations still reach
+  the caller; optional I/O does not acquire lifecycle authority.
+- The tests inspect the actual executor's queued futures after start failure,
+  prove they are cancelled, and verify fresh-pool progress and final-status
+  publication plus the next desired-state cycle. The complete blocking,
+  bounded-recovery, daemon and health cohort passes 207 cases. No installer,
+  provisioning or external rollout behavior changes. Fresh full resulting-head
+  review, all current CI and managed merge remain required.

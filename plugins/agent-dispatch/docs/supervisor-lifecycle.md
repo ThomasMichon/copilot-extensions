@@ -134,6 +134,10 @@ partial scheduling cannot be reported as a clean drain.
 Completed legacy reconciliation futures are cleared on success or failure;
 only genuinely pending work is retained. A worker-raised timeout is surfaced as
 a failed operation, not mistaken for a still-running wait.
+Optional progress-worker construction or submission failures cancel queued work
+on the failed pool and clear it for a later retry. They emit the same classified,
+throttled warning without aborting discovery or hiding completed unit mutations;
+the latest progress and final-status frames remain coalesced until admission succeeds.
 Receipt reconciliation invoked outside an active cycle uses a forward call
 budget; an existing cycle deadline, including an expired one, is not extended.
 Cycle deadline and admission-token references are cleared on both success and

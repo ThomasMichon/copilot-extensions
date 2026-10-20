@@ -529,6 +529,84 @@ def test_failed_progress_worker_does_not_abort_next_reconciliation(caplog, failu
         daemon.shutdown()
 
 
+@pytest.mark.parametrize("failure", ["construction", "submission"])
+@pytest.mark.parametrize("phase", ["discovery", "complete"])
+def test_progress_admission_failure_preserves_reconciliation_and_retry(monkeypatch, caplog, failure, phase):
+    from agent_dispatch import supervisor_reconcile
+
+    daemon = SupervisorDaemon(
+        FakeClient([_reg("unit", machine="host")]), "host", launcher=FakeLauncher(),
+        companion_controller=FakeCompanionController(),
+    )
+    rejected = False
+    pools, queued, frames, written = [], [], [], []
+    start = threading.Thread.start
+    original_phase = daemon._phase
+
+    class ProgressPool(ThreadPoolExecutor):
+        def submit(self, *args, **kwargs):
+            try:
+                return super().submit(*args, **kwargs)
+            except RuntimeError:
+                item = self._work_queue.get_nowait()
+                queued.append(item.future)
+                self._work_queue.put(item)
+                raise
+
+    def pool(*args, **kwargs):
+        if kwargs.get("thread_name_prefix") != "dispatch-progress":
+            return ThreadPoolExecutor(*args, **kwargs)
+        if rejected and failure == "construction":
+            raise RuntimeError("private-progress-construction-detail")
+        executor = ProgressPool(*args, **kwargs)
+        pools.append(executor)
+        return executor
+
+    def start_thread(thread, *args, **kwargs):
+        if rejected and failure == "submission" and thread.name.startswith("dispatch-progress"):
+            raise RuntimeError("private-progress-submission-detail")
+        return start(thread, *args, **kwargs)
+
+    def enter_phase(value):
+        nonlocal rejected
+        if value == phase:
+            if daemon._progress_future is not None:
+                daemon._progress_future.result(2)
+            if daemon._progress_executor is not None:
+                daemon._progress_executor.shutdown(wait=True)
+                daemon._progress_executor = None
+            rejected = True
+        original_phase(value)
+
+    monkeypatch.setattr(supervisor_reconcile, "ThreadPoolExecutor", pool)
+    monkeypatch.setattr(threading.Thread, "start", start_thread)
+    monkeypatch.setattr(daemon, "_phase", enter_phase)
+    daemon._progress_callback = frames.append
+    try:
+        summary = daemon.reconcile_once()
+        assert summary.started == ["unit"]
+        assert summary.progress["phase"] == "complete"
+        assert daemon._progress_executor is None
+        assert not daemon._progress_worker_active
+        assert all(executor._shutdown for executor in pools)
+        if failure == "submission":
+            assert queued and all(future.cancelled() for future in queued)
+        assert "progress-worker-unavailable" in caplog.text
+        assert "private-progress-" not in caplog.text
+        assert all(record.exc_info is None for record in caplog.records)
+        daemon.queue_final_status(summary, written.append)
+        assert written == []
+        rejected = False
+        original_phase("retry")
+        daemon._progress_future.result(2)
+        assert frames[-1]["phase"] == "retry"
+        assert written == [summary]
+        assert daemon.reconcile_once().running == ["unit"]
+    finally:
+        rejected = False
+        daemon.shutdown()
+
+
 @pytest.mark.parametrize("boundary", ["start", "progress", "final", "receipts"])
 def test_indeterminate_optional_progress_is_already_classified(caplog, boundary):
     controller = FakeCompanionController()

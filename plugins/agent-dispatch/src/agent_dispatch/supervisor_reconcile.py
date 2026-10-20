@@ -82,16 +82,20 @@ class BoundedReconciliation:
                     previous.result()
                 except Exception as exc:
                     self._warn_progress_failure("progress-worker-unavailable", exc)
-            if self._progress_executor is None:
-                self._progress_executor = ThreadPoolExecutor(
-                    max_workers=1, thread_name_prefix="dispatch-progress",
-                )
-            self._progress_worker_active = True
             try:
+                if self._progress_executor is None:
+                    self._progress_executor = ThreadPoolExecutor(
+                        max_workers=1, thread_name_prefix="dispatch-progress",
+                    )
+                self._progress_worker_active = True
                 self._progress_future = self._progress_executor.submit(self._publish_progress)
-            except RuntimeError:
+            except RuntimeError as exc:
                 self._progress_worker_active = False
-                raise
+                if self._progress_executor is not None:
+                    self._progress_executor.shutdown(wait=False, cancel_futures=True)
+                    self._progress_executor = None
+                self._warn_progress_failure("progress-worker-unavailable", exc)
+                return
             self._probe_inflight.add(self._progress_future)
 
     def queue_final_status(self, summary, callback: Callable) -> None:
