@@ -4716,8 +4716,8 @@ def reap_orphan_mux_sessions(
 #      merely look orphaned".
 #   2. Service/daemon veto. A session-0 (service) pid, or one whose command line
 #      bears a daemon/service/ACP marker, is skipped even if it matched (1).
-#   3. Liveness gate. A shell with a live descendant (copilot/node, or a mux
-#      client) is a LIVE session and is always spared.
+#   3. Liveness gate. A shell with a live descendant (copilot/node, a mux
+#      client, or an SSH/WSL transport) is a LIVE session and is always spared.
 #   4. Self-preservation. The reaper never touches its own process tree.
 #   5. Orphan + idle gates. Only a shell whose parent has exited AND that has
 #      been alive past the grace window is eligible.
@@ -4759,7 +4759,7 @@ _LAUNCHER_REAP_VETOES = (
 )
 # Descendant image names that mark a LIVE session under a launcher shell ->
 # spare it. Deliberately broad: over-sparing is safe, over-reaping is not.
-_LIVE_DESCENDANT_NAMES = ("copilot", "node", "tmux", "psmux")
+_LIVE_DESCENDANT_NAMES = ("copilot", "node", "tmux", "psmux", "ssh", "wsl")
 # Concrete process images the enumerators must snapshot **in addition to**
 # _LAUNCHER_SHELL_NAMES, purely so the live-descendant veto above can see them.
 # They are never reap candidates (the candidate loop gates on
@@ -4770,16 +4770,7 @@ _LIVE_DESCENDANT_NAMES = ("copilot", "node", "tmux", "psmux")
 # while its mux client kept rendering, leaving the pane painted but the console
 # handed back to the parent shell.
 _LIVE_DESCENDANT_IMAGES = frozenset(
-    {
-        "copilot.exe",
-        "node.exe",
-        "tmux.exe",
-        "psmux.exe",
-        "copilot",
-        "node",
-        "tmux",
-        "psmux",
-    }
+    name + suffix for name in _LIVE_DESCENDANT_NAMES for suffix in ("", ".exe")
 )
 
 
