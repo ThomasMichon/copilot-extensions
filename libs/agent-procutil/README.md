@@ -90,7 +90,9 @@ command's return code and separate, newline-normalized text streams. With
 `capture=False`, both streams are discarded and returned as `None`. No successful
 partial result, silent truncation or automatic retry is supplied.
 
-Windows retains suspended-before-assignment, strict non-breakaway Job ownership.
+Windows creates the suspended target atomically in its strict non-breakaway Job
+using `PROC_THREAD_ATTRIBUTE_JOB_LIST`; caller death before resume therefore
+cannot leave an unassigned suspended target.
 Input writing and bounded output draining remain deadline-supervised together;
 the Job must report zero active processes and pipe workers must settle before
 completion or an output-limit error.
@@ -100,7 +102,9 @@ readable `/proc` pidfd identity, and the existing unreaped-child/default-SIGCHLD
 prerequisites. Unsupported prerequisites refuse before target launch. One finite
 helper owns its session/group before starting the target in that inherited
 scope. A dedicated lifetime writer belongs only to the caller; EOF, including
-caller `SIGTERM`/`SIGKILL`, retires that group. The caller retains unreaped custody
+caller `SIGTERM`/`SIGKILL`, retires that group. Synchronized fork callbacks close
+active lifetime writers in unrelated fork children as well as excluding them
+from exec inheritance. The caller retains unreaped custody
 of the helper through the final group sweep and pidfd-based exit confirmation
 before reporting completion. No caller pre-wrapping, persistent daemon,
 per-session subscription worker, network endpoint or sibling runtime is needed.
@@ -137,7 +141,8 @@ dependencies, then run these selections through the repository's bounded test
 supervisor with the normal 30-second item and 300-second group limits. The native
 lane builds and installs an offline wheel, removes its source fixture, and
 executes actual installed interpreters. Two cycles per scenario cover caller
-death, interruption, blocked input, timeout, both stream overflows and normal
+death (including pre-resume Windows startup and a surviving unrelated Linux
+fork child), interruption, blocked input, timeout, both stream overflows and normal
 return. Birth-pinned process handles/pidfds observe exit before observer cleanup;
 returning callers also check exit before recording their result. Windows checks
 visible windows and foreground transitions. These native cases are not added

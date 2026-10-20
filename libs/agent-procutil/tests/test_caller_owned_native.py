@@ -193,12 +193,15 @@ def _wait(predicate, seconds, message):
 )
 @pytest.mark.parametrize("mode", [
     "completed", "timeout", "blocked-input", "stdout", "stderr", "interrupt", "kill", "term",
+    "fork-keeper",
 ])
 def test_installed_console_faults_settle_before_observer_cleanup(
     tmp_path, installed_console, mode,
 ):
     if mode == "term" and os.name == "nt":
         pytest.skip("native SIGTERM case; Windows actual-console termination uses a pinned handle")
+    if mode == "fork-keeper" and os.name == "nt":
+        pytest.skip("fork inheritance is a native Linux contract")
     if os.name != "nt" and not all(
         hasattr(module, name) for module, name in (
             (os, "pidfd_open"), (signal, "pidfd_send_signal"),
@@ -219,6 +222,7 @@ def test_installed_console_faults_settle_before_observer_cleanup(
             state = tmp_path / str(cycle)
             state.mkdir()
             pins = {}
+            keeper = None
             process = job = None
             try:
                 process, job = pu.spawn_sync_in_kill_on_close_job(
@@ -244,11 +248,16 @@ def test_installed_console_faults_settle_before_observer_cleanup(
                 for identity in identities:
                     if identity["pid"] not in pins:
                         pins[identity["pid"]] = PinnedProcess(identity)
+                if mode == "fork-keeper":
+                    unrelated = _wait(
+                        lambda: _read(state / "unrelated.json"), 3, "unrelated fork child missing",
+                    )
+                    keeper = PinnedProcess(unrelated)
                 assert not any(pin.gone() for pin in pins.values())
                 if os.name != "nt":
                     assert target["parent"]["pid"] == target["group"] == target["session"]
                 started = time.monotonic()
-                if mode in ("kill", "term"):
+                if mode in ("kill", "term", "fork-keeper"):
                     pins[caller["self"]["pid"]].kill(
                         signal.SIGTERM if mode == "term" else None,
                     )
@@ -256,7 +265,7 @@ def test_installed_console_faults_settle_before_observer_cleanup(
                     pins[caller["self"]["pid"]].kill(signal.SIGINT)
                 else:
                     (state / "gate").write_text("go", encoding="ascii")
-                if mode not in ("kill", "term"):
+                if mode not in ("kill", "term", "fork-keeper"):
                     outcome = _wait(
                         lambda: _read(state / "result.json"), 7, "caller did not finish its scope",
                     )
@@ -273,15 +282,22 @@ def test_installed_console_faults_settle_before_observer_cleanup(
                     lambda: all(pin.gone() for pin in pins.values()),
                     3, "owned role survived before observer cleanup",
                 )
-                if mode in ("kill", "term", "interrupt", "stdout", "stderr", "completed"):
+                if mode in (
+                    "kill", "term", "interrupt", "stdout", "stderr", "completed", "fork-keeper",
+                ):
                     assert time.monotonic() - started < 3
+                if keeper is not None:
+                    assert not keeper.gone(), "the unrelated fork child must remain alive"
                 process.wait(timeout=3)
                 stdout, stderr = process.communicate(timeout=3)
                 assert not stderr, stderr.decode("utf-8", errors="replace")
-                if mode not in ("kill", "term"):
+                if mode not in ("kill", "term", "fork-keeper"):
                     assert process.returncode == 0, stdout
             finally:
                 with ExitStack() as cleanup:
+                    if keeper is not None:
+                        cleanup.callback(keeper.close)
+                        cleanup.callback(keeper.kill)
                     for pin in pins.values():
                         cleanup.callback(pin.close)
                     if process is not None:
@@ -298,3 +314,95 @@ def test_installed_console_faults_settle_before_observer_cleanup(
         if os.name == "nt":
             assert not window_observer.surfaced
             assert not window_observer.focus_changes
+
+
+@pytest.mark.skipif(os.name != "nt", reason="atomic Windows Job assignment")
+def test_installed_caller_death_before_resume_keeps_atomic_custody(tmp_path, installed_console):
+    python, script, slot = installed_console
+    for cycle in range(2):
+        state = tmp_path / str(cycle)
+        state.mkdir()
+        process = subprocess.Popen(
+            [str(python), "-I", str(script), "caller", str(state), "suspended"],
+            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            **pu.no_window_kwargs(),
+        )
+        pins = []
+        try:
+            caller = _wait(lambda: _read(state / "caller.json"), 4, "caller missing")
+            assert Path(caller["package"]).resolve().is_relative_to(slot.resolve())
+            pins.append(PinnedProcess(caller["self"]))
+            suspended = _wait(
+                lambda: _read(state / "suspended.json"), 4, "atomic suspended target missing",
+            )
+            pins.append(PinnedProcess(suspended))
+            assert not any(pin.gone() for pin in pins)
+            assert not (state / "target.json").exists()
+            pins[0].kill()
+            _wait(lambda: all(pin.gone() for pin in pins), 3, "suspended target outlived caller")
+            assert not (state / "target.json").exists()
+            process.communicate(timeout=3)
+        finally:
+            with ExitStack() as cleanup:
+                for pin in pins:
+                    cleanup.callback(pin.close)
+                for stream in (process.stdout, process.stderr):
+                    cleanup.callback(stream.close)
+                cleanup.callback(process.wait, timeout=3)
+                cleanup.callback(lambda: process.kill() if process.poll() is None else None)
+                for pin in pins:
+                    cleanup.callback(pin.kill)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native atomic Windows spawn failures")
+@pytest.mark.parametrize("stage", ["job-attribute", "resume", "create-interrupt"])
+def test_atomic_spawn_failures_do_not_release_live_processes(tmp_path, monkeypatch, stage):
+    from agent_procutil import _windows_caller_owned as native
+    from agent_procutil.owned_process import run_caller_owned
+
+    kernel = native._api()
+    marker = tmp_path / "must-not-run"
+    pins = []
+    initialize = native._Process.__init__
+
+    def record(process, argv, info, streams):
+        initialize(process, argv, info, streams)
+        pins.append(PinnedProcess(fixture.identity(info.dwProcessId)))
+
+    monkeypatch.setattr(native._Process, "__init__", record)
+    if stage == "job-attribute":
+        update = kernel.UpdateProcThreadAttribute
+
+        def refuse(*args):
+            if args[2] == 0x2000D:
+                raise OSError("synthetic Job-list refusal")
+            return update(*args)
+
+        monkeypatch.setattr(kernel, "UpdateProcThreadAttribute", refuse)
+    elif stage == "resume":
+        def refuse(*args):
+            raise OSError("synthetic resume failure")
+
+        monkeypatch.setattr(kernel, "ResumeThread", refuse)
+    else:
+        create = kernel.CreateProcessW
+
+        def interrupt(*args):
+            assert create(*args)
+            raise KeyboardInterrupt()
+
+        monkeypatch.setattr(kernel, "CreateProcessW", interrupt)
+    try:
+        with pytest.raises(KeyboardInterrupt if stage == "create-interrupt" else OSError):
+            run_caller_owned(
+                [sys.executable, "-I", "-c", f"open({str(marker)!r},'w').write('bad')"],
+                timeout=5, max_stdout_bytes=32, max_stderr_bytes=32,
+            )
+        assert not marker.exists()
+        assert all(pin.gone() for pin in pins), "spawn failure released a live native target"
+        assert bool(pins) == (stage != "job-attribute")
+    finally:
+        with ExitStack() as cleanup:
+            for pin in pins:
+                cleanup.callback(pin.close)
+                cleanup.callback(pin.kill)

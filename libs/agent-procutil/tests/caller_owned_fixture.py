@@ -145,6 +145,33 @@ def main() -> None:
     _write(root, "caller", {
         "self": identity(), "package": agent_procutil.__file__, "prefix": sys.prefix,
     })
+    if mode == "suspended":
+        from agent_procutil import _windows_caller_owned
+
+        original = _windows_caller_owned._Process.__init__
+
+        def suspend(process, argv, info, streams):
+            original(process, argv, info, streams)
+            _write(root, "suspended", identity(info.dwProcessId))
+            time.sleep(60)
+
+        _windows_caller_owned._Process.__init__ = suspend
+    if mode == "fork-keeper":
+        import warnings
+
+        warnings.filterwarnings("ignore", category=DeprecationWarning)
+
+        def fork_keeper():
+            while not (root / "leaf.json").exists():
+                time.sleep(0.01)
+            if os.fork() == 0:
+                for fd in (0, 1, 2):
+                    os.close(fd)
+                _write(root, "unrelated", identity())
+                time.sleep(60)
+                os._exit(0)
+
+        threading.Thread(target=fork_keeper, daemon=True).start()
     if mode == "interrupt" and os.name == "nt":
         def interrupt() -> None:
             _gate(root)

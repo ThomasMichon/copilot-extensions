@@ -23,10 +23,28 @@ from agent_procutil.owned_process import (
 )
 
 _MAX_REQUEST = 16 * 1024 * 1024
+_lifetime_lock = threading.Lock()
+_lifetime_writers: set[int] = set()
 _BOOTSTRAP = (
     "import sys;sys.path.insert(0,sys.argv.pop(1));"
     "from agent_procutil._caller_owned import _main;_main()"
 )
+
+
+def _after_fork_child() -> None:
+    try:
+        for writer in _lifetime_writers:
+            os.close(writer)
+        _lifetime_writers.clear()
+    finally:
+        _lifetime_lock.release()
+
+
+if hasattr(os, "register_at_fork"):
+    os.register_at_fork(
+        before=_lifetime_lock.acquire, after_in_parent=_lifetime_lock.release,
+        after_in_child=_after_fork_child,
+    )
 
 
 def _pidfd_pid(fd: int) -> int:
@@ -56,8 +74,7 @@ def _confirm_group(process: subprocess.Popen) -> None:
     empty = 0
     try:
         while True:
-            _observe_unreaped(process)
-            active = False
+            active = _observe_unreaped(process) is None
             with os.scandir("/proc") as entries:
                 for entry in entries:
                     if not entry.name.isdigit():
@@ -174,7 +191,9 @@ def run(
             capture_limits=(max_stdout_bytes, max_stderr_bytes),
         )
     _require_posix_support()
-    reader, writer = os.pipe()
+    with _lifetime_lock:
+        reader, writer = os.pipe()
+        _lifetime_writers.add(writer)
     try:
         os.set_inheritable(writer, False)
         try:
@@ -193,7 +212,9 @@ def run(
             raise RuntimeError("caller-owned completion frame exceeded its byte budget") from error
     finally:
         os.close(reader)
-        os.close(writer)
+        with _lifetime_lock:
+            _lifetime_writers.remove(writer)
+            os.close(writer)
     try:
         reply = json.loads(result.stdout)
     except (ValueError, TypeError) as error:

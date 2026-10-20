@@ -239,7 +239,11 @@ def test_group_confirmation_waits_for_exit_without_releasing_root(monkeypatch, e
         checks[0] += 1
         return ([7] if exits and checks[0] > 1 else [], [], [])
 
-    monkeypatch.setattr(protocol, "_observe_unreaped", lambda root: observations.append(root))
+    def exited(root):
+        observations.append(root)
+        return object()
+
+    monkeypatch.setattr(protocol, "_observe_unreaped", exited)
     monkeypatch.setattr(protocol, "_pidfd_pid", lambda fd: 20)
     monkeypatch.setattr(protocol, "select", SimpleNamespace(select=ready))
     monkeypatch.setattr(protocol, "os", SimpleNamespace(
@@ -261,6 +265,51 @@ def test_group_confirmation_waits_for_exit_without_releasing_root(monkeypatch, e
     assert process.returncode is None
     assert observations and all(root is process for root in observations)
     assert len(closed) == checks[0]
+
+
+def test_live_root_cannot_confirm_an_otherwise_empty_group(monkeypatch):
+    process = SimpleNamespace(pid=10, returncode=None)
+    clock = [0.0]
+    monkeypatch.setattr(protocol, "_observe_unreaped", lambda root: None)
+    monkeypatch.setattr(protocol, "os", SimpleNamespace(
+        scandir=lambda path: nullcontext([]),
+    ))
+    monkeypatch.setattr(protocol, "time", SimpleNamespace(
+        monotonic=lambda: clock[0],
+        sleep=lambda delay: clock.__setitem__(0, clock[0] + 1.1),
+    ))
+    with pytest.raises(OwnedCleanupError) as caught:
+        protocol._confirm_group(process)
+    assert caught.value.process is process
+    assert process.returncode is None
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX retained cleanup custody")
+@pytest.mark.parametrize("boundary", ["retire", "confirm", "wait"])
+def test_all_caller_owned_cleanup_failures_retain_process(monkeypatch, boundary):
+    process = SimpleNamespace(stdin=None, stdout=None, stderr=None, returncode=None)
+    failure = (
+        subprocess.TimeoutExpired(["guard"], 2) if boundary == "wait"
+        else OSError("synthetic cleanup failure")
+    )
+
+    def fail(*args, **kwargs):
+        raise failure
+
+    process.wait = fail if boundary == "wait" else lambda **kwargs: None
+    monkeypatch.setattr(ownership, "spawn_sync_in_kill_on_close_job", lambda *a, **k: (process, None))
+    monkeypatch.setattr(ownership, "_communicate_unreaped", lambda *a, **k: ("", ""))
+    monkeypatch.setattr(
+        ownership, "_retire_posix_group", fail if boundary == "retire" else lambda *a, **k: None,
+    )
+    monkeypatch.setattr(
+        protocol, "_confirm_group", fail if boundary == "confirm" else lambda *a: None,
+    )
+    with pytest.raises(OwnedCleanupError) as caught:
+        _run("pass")
+    assert caught.value.process is process
+    assert caught.value.__cause__ is failure
+    assert process.returncode is None
 
 
 @pytest.mark.skipif(os.name == "nt", reason="native POSIX group ownership")

@@ -367,7 +367,11 @@ def _run_owned(
         raise RuntimeError("native child custody requires the default SIGCHLD disposition")
     deadline = time.monotonic() + timeout
     bounded_windows = windows and capture_limits is not None
-    process, job = spawn_sync_in_kill_on_close_job(
+    spawn = spawn_sync_in_kill_on_close_job
+    if bounded_windows:
+        from agent_procutil._windows_caller_owned import spawn
+
+    process, job = spawn(
         argv, require_job=True, allow_breakaway=False,
         stdin=subprocess.PIPE if input_text is not None else subprocess.DEVNULL,
         stdout=subprocess.PIPE if capture else subprocess.DEVNULL,
@@ -379,6 +383,7 @@ def _run_owned(
         **({"start_new_session": True} if not windows and not inherit_process_group else {}),
         **({"pass_fds": pass_fds} if pass_fds else {}),
     )
+    retained = False
     try:
         if bounded_windows:
             stdout, stderr = _communicate_windows_bounded(
@@ -394,19 +399,32 @@ def _run_owned(
                 process, input_text=input_text, deadline=deadline, argv=argv, timeout=timeout,
                 capture_limits=capture_limits,
             )
+    except OwnedCleanupError:
+        retained = True
+        raise
     finally:
         try:
             if not windows:
-                _retire_posix_group(process, inherit_process_group=inherit_process_group)
                 if confirm_posix_group:
                     from agent_procutil._caller_owned import _confirm_group
 
-                    _confirm_group(process)
-                process.wait(timeout=2.0)
+                    try:
+                        _retire_posix_group(process)
+                        _confirm_group(process)
+                        process.wait(timeout=2.0)
+                    except BaseException as error:
+                        retained = True
+                        raise OwnedCleanupError(process) from error
+                else:
+                    _retire_posix_group(process, inherit_process_group=inherit_process_group)
+                    process.wait(timeout=2.0)
         finally:
-            for stream in (process.stdin, process.stdout, process.stderr):
-                if stream is not None:
-                    stream.close()
+            if not retained:
+                for stream in (process.stdin, process.stdout, process.stderr):
+                    if stream is not None:
+                        stream.close()
+                if bounded_windows:
+                    process.close()
     return subprocess.CompletedProcess(argv, process.returncode, stdout, stderr)
 
 
