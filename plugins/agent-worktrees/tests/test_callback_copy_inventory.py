@@ -6,12 +6,66 @@ from pathlib import Path
 import pytest
 
 from test_source_python_publication import (
+    native_hosts,
     publication_case as shared_publication_case,
     publication_transform as default_publication_transform,
 )
+from test_source_install_transactions import _function, _ps, _run, _sh
 
 publication_case = shared_publication_case
 publication_transform = default_publication_transform
+
+
+@pytest.mark.parametrize("publication_case", ["legacy"], indirect=True)
+@pytest.mark.parametrize(("shell", "executable"), native_hosts())
+def test_native_wrapper_inventory_matches_declared_scope(publication_case, shell, executable):
+    driver, root, _slot, _owner, content, _identity = publication_case
+    copies = root / "wrapper-copies"
+    if shell == "ps1":
+        script = f"""
+$ErrorActionPreference = 'Stop'
+$PluginDir = {_ps(content)}
+$ScriptDir = Join-Path $PluginDir 'scripts'
+$InstallDir = {_ps(root)}
+$BinDir = Join-Path $InstallDir 'bin'
+$Action = 'publish-runtime-helpers'
+$script:RuntimePublicationCopies = {_ps(copies)}
+function Ensure-InstallDir {{ param($Path) }}
+function Assert-SourceRuntime {{ }}
+function Write-ServiceOk {{ param($Message) }}
+{_function('Publish-RuntimeFile', shell)}
+{_function('Deploy-RuntimeResolvers', shell)}
+{_function('Deploy-Wrappers', shell)}
+if (-not (Deploy-Wrappers)) {{ throw 'Wrapper inventory failed' }}
+"""
+        argv = [executable, "-NoProfile", "-NonInteractive", "-File"]
+    else:
+        script = f"""
+set -eu
+PLUGIN_DIR={_sh(content)}
+SCRIPT_DIR="$PLUGIN_DIR/scripts"
+INSTALL_DIR={_sh(root)}
+BIN_DIR="$INSTALL_DIR/bin"
+ACTION=publish-runtime-helpers
+RUNTIME_PUBLICATION_COPIES={_sh(copies)}
+_assert_source_runtime() {{ :; }}
+ok() {{ :; }}
+{_function('_publish_runtime_file', shell)}
+{_function('deploy_runtime_resolvers', shell)}
+{_function('deploy_wrappers', shell)}
+deploy_wrappers
+"""
+        argv = [executable]
+    entry = root / f"wrapper-inventory.{shell}"
+    entry.write_text(script, encoding="utf-8")
+    result = _run([*argv, str(entry)], root)
+    assert result.returncode == 0, result.stdout + result.stderr
+    helper = driver.helper_publication
+    bindings = helper.declared_copies(content, root, "wrappers", shell, True)
+    parsed = helper.parse_copies({"copies": str(copies), "bindings": bindings})
+    expected = content / "src" / "agent_worktrees" / "native_source_context.py"
+    assert any(item.source == expected for item in parsed)
+    assert all(not Path(item["target"]).exists() for item in bindings)
 
 
 @pytest.mark.parametrize("publication_case", ["legacy"], indirect=True)
