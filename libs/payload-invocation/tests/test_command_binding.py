@@ -347,6 +347,8 @@ def _catalog_environment(fixture: dict, interpreter: str | None = None) -> dict[
         "    record=original(uid)\n"
         "    return pwd.struct_passwd((*record[:5],os.environ['HOME'],record.pw_shell))\n"
         "pwd.getpwuid=getpwuid\n"
+        # Interpreter admission must retain the same isolated OS-profile wrapper.
+        f"sys.executable={str(wrapper_dir / 'python3')!r}\n"
         "args=sys.argv[1:]\n"
         "while args and args[0].startswith('-') and args[0] not in ('-c','-m'):\n"
         "    option=args.pop(0)\n"
