@@ -60,6 +60,8 @@ import time
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any, BinaryIO
 
+from ._interpreter import physical_executable as _physical_executable
+
 if TYPE_CHECKING:
     from .daemon_broker import WindowsDaemonProcess
 
@@ -541,6 +543,36 @@ def spawn_sync_in_kill_on_close_job(
     return process, job_handle
 
 
+def _venv_home_python(python: str, filename: str) -> str | None:
+    venv_root = os.path.dirname(os.path.dirname(python))
+    cfg_path = os.path.join(venv_root, "pyvenv.cfg")
+    try:
+        with open(cfg_path, encoding="utf-8", errors="replace") as fh:
+            home = next(
+                (value.strip() for line in fh
+                 for key, _, value in [line.partition("=")] if key.strip() == "home"),
+                "",
+            )
+    except OSError:
+        return None
+    # Keep resolution outside the optional-config read: access errors, unreadable
+    # reparse points and cycles are not evidence that an interpreter is absent.
+    physical = _physical_executable(os.path.join(home, filename)) if home else None
+    if physical:
+        # CPython rereads this home through __PYVENV_LAUNCHER__. A physical
+        # executable alone cannot make a blocked venv configuration usable.
+        try:
+            os.stat(home)
+        except OSError as exc:
+            if getattr(exc, "winerror", None) == 448:
+                raise RuntimeError(
+                    "Cannot preserve the Windows venv: pyvenv.cfg home is blocked "
+                    "by RedirectionGuard; rebuild the runtime with a physical Python home."
+                ) from exc
+            raise
+    return physical
+
+
 def _venv_home_pythonw(python: str) -> str | None:
     """Return the base ``pythonw.exe`` recorded by a venv's ``pyvenv.cfg``.
 
@@ -550,22 +582,7 @@ def _venv_home_pythonw(python: str) -> str | None:
     ships a genuine GUI-subsystem ``pythonw.exe``, prefer it over the local
     trampoline so the detached daemon never re-enters a console interpreter.
     """
-    venv_root = os.path.dirname(os.path.dirname(python))
-    cfg_path = os.path.join(venv_root, "pyvenv.cfg")
-    try:
-        with open(cfg_path, encoding="utf-8", errors="replace") as fh:
-            for line in fh:
-                key, _, value = line.partition("=")
-                if key.strip() != "home":
-                    continue
-                home = value.strip()
-                if not home:
-                    return None
-                base_pythonw = os.path.join(home, "pythonw.exe")
-                return base_pythonw if os.path.isfile(base_pythonw) else None
-    except OSError:
-        return None
-    return None
+    return _venv_home_python(python, "pythonw.exe")
 
 
 def no_window_flags() -> int:
@@ -611,7 +628,7 @@ def windowless_python(executable: str | os.PathLike[str] | None = None) -> str:
     if base_pythonw:
         return base_pythonw
     candidate = os.path.join(os.path.dirname(python), "pythonw.exe")
-    return candidate if os.path.isfile(candidate) else python
+    return _physical_executable(candidate) or python
 
 
 def windowless_python_env(
@@ -645,14 +662,21 @@ def direct_python(executable: str) -> tuple[str, dict[str, str]]:
             "Cannot start daemon directly: the Windows venv's base "
             "pythonw.exe is unavailable; repair the Python installation."
         )
-    if os.path.basename(python).lower() == "pythonw.exe":
-        python = os.path.join(os.path.dirname(python), "python.exe")
-        if not os.path.isfile(python):
+    if extra_env or python != executable or os.path.basename(python).lower() == "pythonw.exe":
+        console = (
+            _venv_home_python(executable, "python.exe") if extra_env
+            else (
+                _physical_executable(os.path.join(os.path.dirname(executable), "python.exe"))
+                or _physical_executable(os.path.join(os.path.dirname(python), "python.exe"))
+            )
+        )
+        if not console:
             raise RuntimeError(
                 "Cannot start daemon directly: the base python.exe "
                 "is unavailable; repair the Python installation."
             )
-    return python, extra_env
+        python = console
+    return _physical_executable(python) or python, extra_env
 
 
 def detached_kwargs(*, breakaway: bool = False) -> dict:
