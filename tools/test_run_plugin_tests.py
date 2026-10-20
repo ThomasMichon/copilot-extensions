@@ -623,9 +623,12 @@ def test_containment_owner_launch_preserves_process_contract(monkeypatch, tmp_pa
     assert captured["cwd"] == str(tmp_path)
     expected_environment = {"TEST": "value"}
     if os.name != "nt":
-        assert len(captured["pass_fds"]) == 1
+        assert len(captured["pass_fds"]) == 2
         expected_environment["COPILOT_EXTENSIONS_CONTAINMENT_RESULT_FD"] = str(
             captured["pass_fds"][0]
+        )
+        expected_environment["COPILOT_EXTENSIONS_CONTAINMENT_OWNER_FD"] = str(
+            captured["pass_fds"][1]
         )
     assert captured["env"] == expected_environment
     assert {

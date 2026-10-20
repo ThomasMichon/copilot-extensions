@@ -23,6 +23,47 @@ runner = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(runner)
 
 
+def test_unreaped_standalone_tree_retains_sandbox_and_releases_lease(
+    tmp_path, monkeypatch, capsys,
+):
+    monkeypatch.setattr(runner, "REPO", tmp_path)
+    root = tmp_path / "fleet-manager"
+    (root / "tests").mkdir(parents=True)
+    python = runner.default_python("fleet-manager")
+    python.parent.mkdir(parents=True)
+    python.touch()
+    events = []
+    retained = []
+    sandbox_type = runner.TestSandbox
+
+    def sandbox(*args, **kwargs):
+        instance = sandbox_type(*args, **kwargs)
+        retained.append(instance)
+        return instance
+
+    def run(*args, **kwargs):
+        (kwargs["sandbox"] / "still-owned").write_text("preserve")
+        raise runner.UnreapedProcessError("forced teardown failure")
+
+    monkeypatch.setattr(runner, "TestSandbox", sandbox)
+    monkeypatch.setattr(runner, "acquire", lambda *args: type(
+        "Lease", (), {"release": lambda self: events.append("released")},
+    )())
+    monkeypatch.setattr(runner, "run_contained", run)
+    monkeypatch.setattr(runner, "cleanup_sandbox",
+                        lambda temporary: pytest.fail("unreaped sandbox was cleaned"))
+    assert runner.main(["fleet-manager", "--timeout", "10"]) == 1
+    temporary = retained[0]
+    try:
+        assert temporary.retained
+        assert not temporary._finalizer.alive
+        assert (Path(temporary.name) / "still-owned").read_text() == "preserve"
+        assert "[KEEP] Unreaped process tree: sandbox retained at" in capsys.readouterr().err
+        assert events == ["released"]
+    finally:
+        shutil.rmtree(temporary.name)
+
+
 @pytest.mark.parametrize("component,package", [
     ("fleet-manager", "fleet_manager"),
     ("services/index", "agent_index_service"),

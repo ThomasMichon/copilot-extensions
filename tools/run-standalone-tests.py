@@ -20,6 +20,8 @@ from _admission_protocol import AlreadyRunningError, acquire
 from plugin_test_containment import (
     ContainmentError,
     Limits,
+    TestSandbox,
+    UnreapedProcessError,
     isolated_environment,
     run_contained,
 )
@@ -307,7 +309,7 @@ def main(argv: list[str] | None = None) -> int:
         # Windows: it tries to create the temp dir under a nonexistent
         # subdirectory). Sanitize for this use only.
         safe_component = args.component.replace("/", "-")
-        temporary = tempfile.TemporaryDirectory(prefix=f"{safe_component}-tests-")
+        temporary = TestSandbox(prefix=f"{safe_component}-tests-")
         try:
             sandbox = Path(temporary.name)
             env = isolated_environment(os.environ, sandbox)
@@ -334,8 +336,12 @@ def main(argv: list[str] | None = None) -> int:
                 sandbox=sandbox,
                 limits=limits,
             )
+        except UnreapedProcessError:
+            temporary.retain()
+            raise
         finally:
-            cleanup_sandbox(temporary)
+            if not temporary.retained:
+                cleanup_sandbox(temporary)
     except (ContainmentError, OSError, ValueError, subprocess.CalledProcessError) as exc:
         print(f"standalone tests: {exc}", file=sys.stderr)
         if isinstance(exc, subprocess.CalledProcessError):

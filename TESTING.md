@@ -1258,10 +1258,15 @@ Sandbox cleanup requires verified process-tree termination, not just the
 command's exit. The POSIX controller reports status through a private pipe
 and keeps its PID allocated until teardown; the owner verifies its group and
 session identity before each signal and confirms no live members remain.
+An independent owner pipe stays open only in the runner. EOF makes an abandoned
+controller terminate and then kill its own still-pinned group, both during
+command execution and after reporting status; abrupt runner death cannot leave
+the controller waiting forever.
 Zombies still count toward process admission but cannot hold sandbox files.
 Windows teardown explicitly terminates the Job Object and waits for zero
 active members before closing its handle. Uncertain termination raises
-`UnreapedProcessError`; the runner retains the sandbox and reports its path
+`UnreapedProcessError`; plugin and standalone runners and the parallel coverage
+collector retain their sandbox, detach automatic cleanup and report its path
 rather than deleting potentially owned files. Normal exit, deadline and
 cancellation retain the same reaping requirement and existing resource limits.
 

@@ -786,6 +786,22 @@ _Pending review of this plan._
   C-CLEANUP stays separate: no cleanup executor, overlap or aggregate-budget
   change is imported. Source CI remains unit-only, every existing test and
   resource budget remains intact, and complete Windows acceptance stays open.
+- Full review of the first published head identified three actual gaps.
+  Linux membership now parses the command-name field as bytes, so unrelated
+  non-ASCII names do not break numeric process-group observation. A separate
+  owner pipe is monitored while the command runs and after status reporting;
+  abrupt owner death, including a status-write race, triggers TERM/KILL of
+  the controller's still-pinned group. The native descendant cases additionally
+  kill the owner before and after reporting and verify no live members remain.
+- The same unreaped exception also reaches standalone and parallel coverage
+  sandbox owners. They now share retention-aware `TestSandbox`; standalone
+  retains instead of calling its custom cleanup, and both detach automatic
+  finalization and report the preserved path. Focused failure-path tests prove
+  the files survive and standalone admission is released. No cleanup scheduling
+  or accounting behavior was added. The review-update partition passed 74
+  cases without skips on Windows, and 69 on Ubuntu with five existing
+  Windows-only cleanup skips; first-touch/native teardown remains diagnostic,
+  not the open complete Windows performance qualification.
 
 ### 2026-10-20 - Land module isolation and admit fresh bounded storage accounting
 - C-MODULE #7353 actually merged as

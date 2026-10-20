@@ -64,7 +64,8 @@ from plugin_test_selection import (
 from plugin_test_containment import (
     ContainmentError,
     Limits,
-    UnreapedProcessError,
+    TestSandbox as _TestSandbox,
+    UnreapedProcessError as UnreapedProcessError,
     isolated_environment,
     partition,
     run_contained,
@@ -82,17 +83,6 @@ EXTERNAL_TEST_DEPENDENCIES = {
 LEASE_LIB = REPO / "libs" / "single-instance-lease" / "src"
 TOOLS_DIR = REPO / "tools"
 
-
-class _TestSandbox(tempfile.TemporaryDirectory):
-    def __exit__(self, exc_type, exc_value, traceback):
-        if isinstance(exc_value, UnreapedProcessError):
-            self._finalizer.detach()
-            print(
-                f"[KEEP] Unreaped process tree: sandbox retained at {self.name}",
-                file=sys.stderr,
-            )
-            return False
-        return super().__exit__(exc_type, exc_value, traceback)
 
 # Plugins whose OWN test suites assert properties about OTHER plugins (a
 # repo-wide contract, not something scoped to their own diff) -- see

@@ -14,6 +14,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import time
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass
@@ -139,6 +140,29 @@ class ContainmentError(RuntimeError):
 
 class UnreapedProcessError(ContainmentError):
     """Owned processes may still hold the sandbox; cleanup is unsafe."""
+
+
+class TestSandbox(tempfile.TemporaryDirectory):
+    """Retain owned files whenever termination cannot be established."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.retained = False
+
+    def retain(self) -> None:
+        if not self.retained:
+            self._finalizer.detach()
+            self.retained = True
+            print(
+                f"[KEEP] Unreaped process tree: sandbox retained at {self.name}",
+                file=sys.stderr,
+            )
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        if isinstance(exc_value, UnreapedProcessError):
+            self.retain()
+            return False
+        return super().__exit__(exc_type, exc_value, traceback)
 
 
 @dataclass(frozen=True)
@@ -333,9 +357,9 @@ def _linux_group_usage(pgid: int, *, live_only: bool = False) -> tuple[int, int]
         if not entry.name.isdigit():
             continue
         try:
-            stat = (entry / "stat").read_text(encoding="ascii")
-            fields = stat[stat.rfind(")") + 2 :].split()
-            if int(fields[2]) != pgid or (live_only and fields[0] == "Z"):
+            stat = (entry / "stat").read_bytes()
+            fields = stat[stat.rfind(b")") + 2 :].split()
+            if int(fields[2]) != pgid or (live_only and fields[0] == b"Z"):
                 continue
             count += 1
             if live_only:
@@ -668,25 +692,69 @@ def _worker_main(argv: Sequence[str]) -> int:
         raise SystemExit("worker requires a ready path and command")
     ready = Path(argv[0])
     command = list(argv[1:])
+    result_fd = os.environ.pop("COPILOT_EXTENSIONS_CONTAINMENT_RESULT_FD", None)
+    owner_fd = os.environ.pop("COPILOT_EXTENSIONS_CONTAINMENT_OWNER_FD", None)
+    if owner_fd is not None:
+        if result_fd is None:
+            raise ContainmentError("POSIX controller status pipe is missing")
+        return _posix_worker(command, ready, int(result_fd), int(owner_fd))
     deadline = time.monotonic() + 30.0
     while not ready.exists():
         if time.monotonic() >= deadline:
             print("containment worker was not assigned before launch", file=sys.stderr)
             return 126
         time.sleep(0.01)
-    result_fd = os.environ.pop("COPILOT_EXTENSIONS_CONTAINMENT_RESULT_FD", None)
-    returncode = subprocess.run(
+    return subprocess.run(
         command, check=False, **no_window_kwargs(), **_windows_stdio_kwargs(),
     ).returncode
-    if result_fd is None:
-        return returncode
-    fd = int(result_fd)
-    os.write(fd, f"{returncode}\n".encode("ascii"))
-    os.close(fd)
-    # Keep the owning PID allocated until the parent tears down the group.
-    # Unlike waitid(WNOWAIT), this also works on older macOS Python.
+
+
+def _terminate_abandoned_posix_group() -> None:
+    pid = os.getpid()
+    if _posix_group_identity(pid) != (pid, pid):
+        raise ContainmentError("Abandoned controller no longer owns its process group")
+    # Stay allocated through escalation, even if a descendant ignores TERM.
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    os.killpg(pid, signal.SIGTERM)
+    time.sleep(2)
+    if _posix_group_identity(pid) != (pid, pid):
+        raise ContainmentError("Abandoned controller process-group identity changed")
+    os.killpg(pid, signal.SIGKILL)
+
+
+def _posix_worker(command: list[str], ready: Path, result_fd: int, owner_fd: int) -> int:
+    os.set_blocking(owner_fd, False)
+    command_proc = None
+    deadline = time.monotonic() + 30.0
+    reported = False
     while True:
-        time.sleep(1)
+        try:
+            owner_status = os.read(owner_fd, 1)
+        except BlockingIOError:
+            owner_status = None
+        if owner_status == b"":
+            _terminate_abandoned_posix_group()
+            raise ContainmentError("Abandoned process-group termination returned unexpectedly")
+        if command_proc is None:
+            if ready.exists():
+                command_proc = subprocess.Popen(command, **no_window_kwargs())
+            elif time.monotonic() >= deadline:
+                raise ContainmentError("POSIX controller was not assigned before launch")
+        if command_proc is not None and not reported:
+            returncode = command_proc.poll()
+            if returncode is not None:
+                try:
+                    os.write(result_fd, f"{returncode}\n".encode("ascii"))
+                except BrokenPipeError:
+                    _terminate_abandoned_posix_group()
+                    raise ContainmentError(
+                        "Abandoned process-group termination returned unexpectedly"
+                    )
+                os.close(result_fd)
+                reported = True
+        # Keep the owning PID allocated until normal teardown, but not after
+        # abrupt owner death. The owner pipe cannot be reused as a PID can.
+        time.sleep(0.05)
 
 
 def _reap_controller(proc: subprocess.Popen) -> None:
@@ -717,13 +785,17 @@ def _run_contained_process(
     ready.unlink(missing_ok=True)
     worker_env = dict(env)
     worker_env.pop("COPILOT_EXTENSIONS_CONTAINMENT_RESULT_FD", None)
+    worker_env.pop("COPILOT_EXTENSIONS_CONTAINMENT_OWNER_FD", None)
     result_read = result_write = None
+    owner_read = owner_write = None
     kwargs: dict[str, Any] = {}
     if os.name != "nt":
         result_read, result_write = os.pipe()
+        owner_read, owner_write = os.pipe()
         os.set_blocking(result_read, False)
         worker_env["COPILOT_EXTENSIONS_CONTAINMENT_RESULT_FD"] = str(result_write)
-        kwargs["pass_fds"] = (result_write,)
+        worker_env["COPILOT_EXTENSIONS_CONTAINMENT_OWNER_FD"] = str(owner_read)
+        kwargs["pass_fds"] = (result_write, owner_read)
     try:
         proc = subprocess.Popen(
             _worker_command(command, ready),
@@ -737,10 +809,14 @@ def _run_contained_process(
     except BaseException:
         if result_read is not None:
             os.close(result_read)
+        if owner_write is not None:
+            os.close(owner_write)
         raise
     finally:
         if result_write is not None:
             os.close(result_write)
+        if owner_read is not None:
+            os.close(owner_read)
     job = None
     posix_identity = None
     try:
@@ -827,7 +903,11 @@ def _run_contained_process(
         finally:
             if result_read is not None:
                 os.close(result_read)
-            _reap_controller(proc)
+            try:
+                _reap_controller(proc)
+            finally:
+                if owner_write is not None:
+                    os.close(owner_write)
         ready.unlink(missing_ok=True)
 
 

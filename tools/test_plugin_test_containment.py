@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -570,14 +571,23 @@ def test_controller_reports_status_then_stays_alive_without_leaking_control_env(
     ready.touch()
     events = []
     monkeypatch.setenv("COPILOT_EXTENSIONS_CONTAINMENT_RESULT_FD", "12")
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTAINMENT_OWNER_FD", "13")
 
     def command(*args, **kwargs):
         assert "COPILOT_EXTENSIONS_CONTAINMENT_RESULT_FD" not in os.environ
+        assert "COPILOT_EXTENSIONS_CONTAINMENT_OWNER_FD" not in os.environ
         assert "pass_fds" not in kwargs
         events.append("command")
-        return SimpleNamespace(returncode=7)
+        return SimpleNamespace(poll=lambda: 7)
 
-    monkeypatch.setattr(plugin_test_containment.subprocess, "run", command)
+    monkeypatch.setattr(plugin_test_containment.subprocess, "Popen", command)
+    monkeypatch.setattr(plugin_test_containment.os, "set_blocking", lambda *args: None,
+                        raising=False)
+
+    def owner_alive(*args):
+        raise BlockingIOError
+
+    monkeypatch.setattr(plugin_test_containment.os, "read", owner_alive)
     monkeypatch.setattr(plugin_test_containment.os, "write",
                         lambda fd, data: events.append(("status", fd, data)))
     monkeypatch.setattr(plugin_test_containment.os, "close",
@@ -595,13 +605,136 @@ def test_controller_reports_status_then_stays_alive_without_leaking_control_env(
     ]
 
 
+@pytest.mark.parametrize("during_report", [False, True])
+def test_posix_worker_reaps_abandoned_group_even_if_status_write_races_owner_exit(
+    tmp_path, monkeypatch, during_report,
+):
+    ready = tmp_path / "ready"
+    ready.touch()
+    monkeypatch.setattr(plugin_test_containment.os, "set_blocking", lambda *args: None,
+                        raising=False)
+
+    def owner(*args):
+        if during_report:
+            raise BlockingIOError
+        return b""
+
+    def report(*args):
+        raise BrokenPipeError
+
+    def abandoned():
+        raise RuntimeError("abandoned group reaped")
+
+    monkeypatch.setattr(plugin_test_containment.os, "read", owner)
+    monkeypatch.setattr(plugin_test_containment.os, "write", report)
+    monkeypatch.setattr(plugin_test_containment.subprocess, "Popen",
+                        lambda *a, **k: SimpleNamespace(poll=lambda: 0))
+    monkeypatch.setattr(plugin_test_containment, "_terminate_abandoned_posix_group", abandoned)
+    with pytest.raises(RuntimeError, match="abandoned group reaped"):
+        plugin_test_containment._posix_worker(["command"], ready, 12, 13)
+
+
+def test_abandoned_controller_keeps_its_identity_through_kill_escalation(monkeypatch):
+    events = []
+    monkeypatch.setattr(plugin_test_containment.os, "getpid", lambda: 12345)
+    monkeypatch.setattr(plugin_test_containment, "_posix_group_identity",
+                        lambda pid: events.append("identity") or (pid, pid))
+    monkeypatch.setattr(plugin_test_containment.signal, "signal",
+                        lambda sig, handler: events.append("ignore-term"))
+    monkeypatch.setattr(plugin_test_containment.os, "killpg",
+                        lambda pid, sig: events.append(sig), raising=False)
+    monkeypatch.setattr(plugin_test_containment.signal, "SIGKILL", 9, raising=False)
+    monkeypatch.setattr(plugin_test_containment.time, "sleep",
+                        lambda seconds: events.append(("grace", seconds)))
+    plugin_test_containment._terminate_abandoned_posix_group()
+    assert events == [
+        "identity", "ignore-term", plugin_test_containment.signal.SIGTERM,
+        ("grace", 2), "identity", 9,
+    ]
+
+
+@pytest.mark.parametrize("name", [b"caf\xc3\xa9", b"invalid\xff"])
+def test_linux_membership_ignores_unrelated_process_name_encoding(tmp_path, monkeypatch, name):
+    process = tmp_path / "99"
+    process.mkdir()
+    (process / "stat").write_bytes(b"99 (" + name + b") S 1 42 42 0\n")
+    path = Path
+    monkeypatch.setattr(plugin_test_containment, "Path",
+                        lambda value: tmp_path if value == "/proc" else path(value))
+    monkeypatch.setattr(plugin_test_containment.os, "sysconf", lambda name: 4096, raising=False)
+    assert plugin_test_containment._linux_group_usage(7, live_only=True) == (0, 0)
+
+
+def _assert_posix_owner_death_reaps_group(root, command, *, after_status):
+    root.mkdir()
+    owner_code = """
+import os,sys,time
+from pathlib import Path
+sys.path.insert(0,sys.argv[1])
+from tools import plugin_test_containment as containment
+root=Path(sys.argv[2])
+identity=containment._posix_group_identity
+def record(pid):
+    result=identity(pid)
+    (root/'controller').write_text(str(pid))
+    return result
+containment._posix_group_identity=record
+observe=containment._posix_exit_code
+def status(fd):
+    result=observe(fd)
+    if result is not None:
+        (root/'reported').touch()
+        time.sleep(60)
+    return result
+containment._posix_exit_code=status
+containment.run_contained(
+    [sys.executable,'-c',sys.argv[3],str(root/'held')],
+    cwd=root,env=containment.isolated_environment(os.environ,root),sandbox=root,
+    limits=containment.Limits(wall_seconds=20,max_processes=8,max_memory_mb=256,max_temp_mb=32),
+)
+"""
+    owner = subprocess.Popen(
+        [sys.executable, "-c", owner_code, str(Path(__file__).resolve().parents[1]),
+         str(root), command],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    controller = None
+    try:
+        marker = root / ("reported" if after_status else "held")
+        deadline = time.monotonic() + 8
+        while not marker.exists():
+            assert owner.poll() is None, "owner exited before the controlled kill"
+            assert time.monotonic() < deadline, "controller did not reach the test boundary"
+            time.sleep(0.01)
+        controller = int((root / "controller").read_text())
+        owner.kill()
+        owner.wait(timeout=3)
+        deadline = time.monotonic() + 8
+        while plugin_test_containment._posix_live_group_usage(controller)[0]:
+            assert time.monotonic() < deadline, "abandoned group remained live"
+            time.sleep(0.05)
+        (root / "held").unlink()
+    finally:
+        if owner.poll() is None:
+            owner.kill()
+        owner.wait(timeout=3)
+        if controller is not None:
+            usage = plugin_test_containment._posix_live_group_usage(controller)
+            if usage and usage[0]:
+                if plugin_test_containment._posix_group_identity(controller) == (
+                    controller, controller,
+                ):
+                    os.killpg(controller, plugin_test_containment.signal.SIGKILL)
+
+
 @pytest.mark.parametrize("hang_controller", [False, True])
 def test_file_holding_descendant_is_reaped_before_return(tmp_path, hang_controller):
     held = tmp_path / "held.txt"
     program = (
         "import os,pathlib,subprocess,sys,time;"
         "p=pathlib.Path(sys.argv[1]);"
-        "child='import sys,time;f=open(sys.argv[1],\"w\");"
+        "child='import signal,sys,time;signal.signal(signal.SIGTERM,signal.SIG_IGN);"
+        "f=open(sys.argv[1],\"w\");"
         "f.write(\"ready\");f.flush();time.sleep(60)';"
         "subprocess.Popen([sys.executable,'-c',child,str(p)],"
         "stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,"
@@ -622,6 +755,9 @@ def test_file_holding_descendant_is_reaped_before_return(tmp_path, hang_controll
     if os.name != "nt":
         pgid = int(Path(str(held) + ".pgid").read_text())
         assert plugin_test_containment._posix_live_group_usage(pgid) == (0, 0)
+        _assert_posix_owner_death_reaps_group(
+            tmp_path / "owner-death", program, after_status=not hang_controller,
+        )
     held.unlink()
     assert not held.exists()
 

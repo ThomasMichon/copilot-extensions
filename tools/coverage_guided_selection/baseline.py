@@ -35,7 +35,6 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
-import tempfile
 import textwrap
 from datetime import datetime, timezone
 from pathlib import Path
@@ -50,6 +49,8 @@ except ImportError:  # plain-script entry point
         BaselineCollectionError, Chunk, collect_contained, run_chunk,
         timeout_error as _timeout_error,
     )
+
+from tools.plugin_test_containment import TestSandbox
 
 BASELINE_SCHEMA_VERSION = 3
 DEFAULT_MAX_FILES_PER_CHUNK = 5
@@ -491,17 +492,11 @@ def collect_baseline(
         raise ValueError("coverage workers must be 1 or 2")
     if max_files_per_chunk < 1:
         raise ValueError("max_files_per_chunk must be positive")
-    with tempfile.TemporaryDirectory(
+    with TestSandbox(
         prefix="cgs-baseline-", ignore_cleanup_errors=True
     ) as tmp:
-        # `ignore_cleanup_errors=True` matches `run-plugin-tests.py`'s own
-        # sandboxed-tempdir handling -- confirmed live: a plugin whose own
-        # real tests spawn child processes (e.g. `agent-worktrees`' real
-        # cross-process file-lock tests) can leave a lingering handle open
-        # on a file under this tempdir past this function's own return,
-        # which would otherwise turn a clean, fully-passing collection run
-        # into a raised `OSError` on cleanup -- discarding a baseline that
-        # was already earned.
+        # Preserve the existing best-effort file cleanup, but never attempt it
+        # after UnreapedProcessError: TestSandbox detaches its finalizer.
         cwd = cwd.resolve()  # resolve once: both the subprocess cwd and the
         # driver's own cwd argv must agree, or a relative `cwd` double-joins
         # itself when the driver re-resolves it from inside that directory.

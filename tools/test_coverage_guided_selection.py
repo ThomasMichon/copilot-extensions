@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -59,6 +60,33 @@ from tools.coverage_baseline_chunk_contract import (
     test_workers_share_one_unchanged_containment_budget as test_workers_share_one_unchanged_containment_budget,
     test_workflow_keeps_deadline_enrollment_and_only_two_heavy_opt_ins as test_workflow_keeps_deadline_enrollment_and_only_two_heavy_opt_ins,
 )
+
+
+def test_unreaped_parallel_collection_retains_automatic_sandbox(
+    tmp_path, monkeypatch, capsys,
+):
+    from tools.plugin_test_containment import UnreapedProcessError
+
+    retained = []
+    monkeypatch.setattr(baseline_mod, "_plan_chunks", lambda *a: [["tests/test_one.py"]])
+    monkeypatch.setattr(baseline_mod, "_prepare_project_venv", lambda *a, **k: Path(sys.executable))
+
+    def collect(tasks, root):
+        retained.append(root)
+        (root / "still-owned").write_text("preserve")
+        raise UnreapedProcessError("forced teardown failure")
+
+    monkeypatch.setattr(baseline_mod, "collect_contained", collect)
+    with pytest.raises(UnreapedProcessError, match="forced teardown failure"):
+        baseline_mod.collect_baseline(
+            cwd=tmp_path, test_path="tests", cov_source="src", plugin="synthetic",
+            project_dir=tmp_path, workers=2,
+        )
+    try:
+        assert (retained[0] / "still-owned").read_text() == "preserve"
+        assert "[KEEP] Unreaped process tree: sandbox retained at" in capsys.readouterr().err
+    finally:
+        shutil.rmtree(retained[0])
 
 
 def test_baseline_error_preserves_collection_output_despite_coverage_warning():
