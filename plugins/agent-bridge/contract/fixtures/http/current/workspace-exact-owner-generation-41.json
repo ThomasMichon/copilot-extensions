@@ -1,11 +1,11 @@
 {
   "captured_from": {
-    "commit": "02ed44e8a43b1c552f9f8c59368358642b67b5b1",
+    "commit": "25382bc74ad1d0b4a9dfe205d7475ca869dc91c2",
     "plugin_version": "0.4.1-dev3",
     "protocol_generation": 41,
     "source_path": "plugins/agent-bridge/src/agent_bridge/workspace_creation.py",
-    "source_git_blob": "f2b8f169e27726313c50cd2cd5a8e662e11c7563",
-    "source_sha256": "109fb934c134206c8d07432734ad4872e79a708bd2ca55db707a93af23f4237a"
+    "source_git_blob": "7eae54d09a321567bca551daa899c6fd73cdc526",
+    "source_sha256": "6ccf7f7a685ed260ce5c4e80c3ef192d2f25f4c665ecb50d8cccc22c2bf07228"
   },
   "evidence_kind": "independently-authored exact-owner admission vectors; not a native or HTTP body capture",
   "legacy_metadata_cases": [
