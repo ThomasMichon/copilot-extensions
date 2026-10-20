@@ -161,6 +161,25 @@ def test_monitor_spawn_rejects_unsupported_interpreter(monkeypatch, caplog, pass
         assert "unsupported direct interpreter" in caplog.text
 
 
+def test_monitor_spawn_logs_invalid_retention_bootstrap_and_returns_failure(
+    tmp_path, monkeypatch, caplog,
+):
+    slot = tmp_path / "versions" / "1.0.0"
+    bootstrap = slot / ".runtime-bootstrap"
+    bootstrap.mkdir(parents=True)
+    (bootstrap / "runtime_launcher.py").touch()
+    monkeypatch.setattr(runtime, "_daemon_environment", lambda: {})
+    monkeypatch.setattr(
+        cutover, "spawn_daemon",
+        lambda *_args, **_kwargs: pytest.fail("invalid retained runtime must not launch"),
+    )
+    python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+
+    assert not runtime._spawn_detached([str(python), "-m", "agent_worktrees", "status-monitor"])
+    assert "Cannot spawn status-monitor" in caplog.text
+    assert "Monitor process-retention bootstrap is invalid" in caplog.text
+
+
 @pytest.mark.skipif(
     os.name != "nt" or sys.prefix == sys.base_prefix,
     reason="requires an owner-contained Windows test venv",

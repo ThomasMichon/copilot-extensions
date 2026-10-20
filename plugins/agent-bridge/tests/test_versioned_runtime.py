@@ -478,7 +478,10 @@ def test_list_versions_sorted(tmp_path):
 
 @pytest.mark.parametrize("old,new", [
     ("1.0.0-dev2+base", "1.0.0+base"),
+    ("1.0.0.dev2+base", "1.0.0+base"),
     ("1.0.0-dev10+provider-exec", "1.0.0"),
+    ("1.0.0.dev10+provider-exec", "1.0.0"),
+    ("1.0.0.dev9", "1.0.0.dev10"),
     ("1.0.0+provider-exec", "1.0.1-dev1+base"),
 ])
 def test_profiled_recovery_orders_package_version_before_qualifier(tmp_path, old, new):

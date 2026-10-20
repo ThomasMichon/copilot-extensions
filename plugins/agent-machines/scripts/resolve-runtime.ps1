@@ -136,7 +136,7 @@ if ($_rtRoot) {
 
   function _Rt-VersionKey([string]$ver) {
     $packageVersion = $ver -creplace '[+.]repair\.[0-9a-f]{32}$', ''
-    if ($packageVersion -cmatch '^(\d+)\.(\d+)\.(\d+)(?:-dev(\d+))?(?:\+([A-Za-z0-9][A-Za-z0-9._-]*))?$') {
+    if ($packageVersion -cmatch '^(\d+)\.(\d+)\.(\d+)(?:[.-]dev(\d+))?(?:\+([A-Za-z0-9][A-Za-z0-9._-]*))?$') {
       $phase = if ($Matches[4]) { '0' } else { '1' }
       $dev = if ($Matches[4]) { $Matches[4] } else { '0' }
       return '0:{0}.{1}.{2}.{3}.{4}.{5}!{6}' -f

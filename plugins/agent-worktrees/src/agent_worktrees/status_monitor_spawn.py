@@ -19,9 +19,9 @@ def _spawn_detached(
     argv = list(argv)
     from .runtime_monitor_launch import retained_monitor_argv
 
-    argv = retained_monitor_argv(argv)
     env = runtime._daemon_environment()
     try:
+        argv = retained_monitor_argv(argv)
         from .status_monitor_cutover import spawn_monitor
 
         argv[0], extra_env = runtime.direct_monitor_python(argv[0])

@@ -93,7 +93,9 @@ explicit development refreshes build distinct `dev-<generation>` slots and
 never rewrite the working environment. Tier-3
 package-only fallback uses the same numeric-token ordering in Python, POSIX shell, and
 PowerShell, so development versions such as `dev10` sort after `dev9` without
-`packaging` or GNU `sort -V`. Source-qualified slots instead require an exact
+`packaging` or GNU `sort -V`. Both manifest `-devN` and normalized `.devN`
+spellings remain prereleases before the matching final package release,
+including repair generations. Source-qualified slots instead require an exact
 current or last-known-good selection; hashes are not ordered recovery candidates.
 
 ## Construction ownership (Python API)

@@ -169,7 +169,7 @@ _aw_version_key() {
       package = original
       if (match(package, /[+.]repair\.[0-9a-f]+$/) && RLENGTH == 40)
         package = substr(package, 1, RSTART - 1)
-      if (package ~ /^[0-9]+\.[0-9]+\.[0-9]+(-dev[0-9]+)?(\+[a-z0-9][a-z0-9.-]*)?$/) {
+      if (package ~ /^[0-9]+\.[0-9]+\.[0-9]+([.-]dev[0-9]+)?(\+[a-z0-9][a-z0-9.-]*)?$/) {
         sub(/\+.*/, "", package)
         count = split(package, part, /[.-]/)
         phase = (count == 4) ? 0 : 1

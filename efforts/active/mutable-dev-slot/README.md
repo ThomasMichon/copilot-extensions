@@ -358,6 +358,27 @@ existing manual container integration route, and actual native Windows
 acceptance. A green source-unit gate is not full/native validation or Main
 activation evidence.
 
+Exact candidate `ba4988f5b` passed both real Windows lifecycle modes in
+1,283.70 seconds, with unchanged construction and case deadlines. All four
+current source-CI jobs, including the selected unit/coverage packet, passed.
+The subsequent review identified normalized `.devN` ordering and an escaping
+monitor retention-validation exception; both are corrected at their owners.
+Canonical and bespoke Python/shell comparators recognize both supported dev
+spellings, and monitor spawn validation uses its existing visible failure
+boundary so callers retain their fallback. Native resolver/monitor contracts
+passed 48 cases; focused runtime ordering passed eight.
+
+The exact-head manual container run exercised all nine Linux plugins: seven
+passed. Worktrees' three cold installer cases could not fetch dependencies
+inside the disconnected execution profile; Containers' two non-RAM negative
+fixtures were created on that profile's tmpfs. These match the already recorded
+`network-installers` and `non-ram-fixture-tier` residuals in
+`tools/periodic-integration-inventory.json`, owned by #1303. The run remains
+partial and failed, not full/native qualification. No network permission,
+fixture exclusion, filesystem safeguard or deadline was relaxed. Those
+capacity obligations remain with the portfolio owner; this component does not
+claim to complete them.
+
 ### 2026-10-18 -- Recovery preserves WIP and proves both native dev lifecycles
 
 The operator released the backlog-related waiting holds and authorized recovery

@@ -64,7 +64,7 @@ def package_version(slot_name: str) -> str:
 def version_key(version: str):
     """Order package releases and profiles before generated identities."""
     supported = re.fullmatch(
-        r"(\d+)\.(\d+)\.(\d+)(?:-dev(\d+))?(?:\+([A-Za-z0-9][A-Za-z0-9._-]*))?",
+        r"(\d+)\.(\d+)\.(\d+)(?:[.-]dev(\d+))?(?:\+([A-Za-z0-9][A-Za-z0-9._-]*))?",
         package_version(version),
     )
     if supported:

@@ -45,7 +45,7 @@ def engine(monkeypatch):
     return module
 
 
-@pytest.mark.parametrize("version", ["1.0.0-dev7", "1.0.0", "1.0.0+local"])
+@pytest.mark.parametrize("version", ["1.0.0-dev7", "1.0.0.dev7", "1.0.0", "1.0.0+local"])
 def test_repair_identity_cannot_outrank_later_package_release(engine, version):
     separator = "." if "+" in version else "+"
     repair = f"{version}{separator}repair.{'a' * 32}"
@@ -120,16 +120,20 @@ def test_ordinary_generation_discovery_uses_frozen_content_and_retains_repair(
 
 @pytest.mark.parametrize("resolver_kind", ["canonical", "worktrees"])
 @pytest.mark.parametrize("shell", ["powershell.exe", "pwsh.exe", "bash"])
+@pytest.mark.parametrize("development,preferred", [
+    ("1.0.0-dev9", "1.0.0-dev10"),
+    ("1.0.0.dev99", "1.0.0"),
+])
 def test_native_first_run_prefers_later_release_over_older_repair(
-    tmp_path, resolver_kind, shell,
+    tmp_path, resolver_kind, shell, development, preferred,
 ):
     directory = (
         REPO / "libs" / "versioned-runtime" if resolver_kind == "canonical"
         else REPO / "plugins" / "agent-worktrees" / "scripts"
     )
     root = tmp_path / "runtime"
-    repair = f"1.0.0-dev9+repair.{'f' * 32}"
-    for version in (repair, "1.0.0-dev10"):
+    repair = f"{development}+repair.{'f' * 32}"
+    for version in (repair, preferred):
         slot = root / "versions" / version
         python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
         python.parent.mkdir(parents=True)
@@ -169,7 +173,7 @@ def test_native_first_run_prefers_later_release_over_older_repair(
         argv, env=env, capture_output=True, text=True, timeout=30, **no_window_kwargs(),
     )
     assert result.returncode == 0, result.stderr
-    assert "1.0.0-dev10" in result.stdout and repair not in result.stdout
+    assert preferred in result.stdout and repair not in result.stdout
 
 
 def _identity():

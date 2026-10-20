@@ -174,7 +174,7 @@ if [ -n "$_rt_root" ]; then
         package = original
         if (match(package, /[+.]repair\.[0-9a-f]+$/) && RLENGTH == 40)
           package = substr(package, 1, RSTART - 1)
-        if (package ~ /^[0-9]+\.[0-9]+\.[0-9]+(-dev[0-9]+)?(\+[A-Za-z0-9][A-Za-z0-9._-]*)?$/) {
+        if (package ~ /^[0-9]+\.[0-9]+\.[0-9]+([.-]dev[0-9]+)?(\+[A-Za-z0-9][A-Za-z0-9._-]*)?$/) {
           split(package, qualified, /[+]/)
           count = split(qualified[1], part, /[.-]/)
           phase = (count == 4) ? 0 : 1
