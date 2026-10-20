@@ -67,6 +67,12 @@ match the client result -- invoke and follow the
 **`agent-bridge-troubleshooting` skill first**. It is the operational guidebook;
 do not improvise recovery from this command overview.
 
+A `carrier_unavailable` error, EOF or transport timeout does not establish that
+the hosting Bridge is down or its session is absent. Report the failed boundary
+and leave unobserved remote state unknown. A reconnectable transport is not
+permission to resend a possibly accepted prompt; follow the troubleshooting
+guide's acceptance and retry distinction.
+
 The default response is **preserve and file**, not diagnose or repair:
 
 1. Preserve the existing session and report/file the exact command, error, and

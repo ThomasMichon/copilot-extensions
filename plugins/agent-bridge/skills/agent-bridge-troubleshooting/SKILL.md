@@ -1,19 +1,21 @@
 ---
 name: agent-bridge-troubleshooting
 description: >
-  Diagnose agent-bridge CodeSpace dispatch failures without destroying evidence
-  or changing shared state by default. Covers expected disconnect-and-resume,
+  Diagnose agent-bridge transport and CodeSpace dispatch failures without
+  destroying evidence or changing shared state by default. Covers expected disconnect-and-resume,
   ACP resume hangs, 409 starting/not-idle errors, protocol disconnects,
   mid-turn aborts, credential-relay auth flaps, persisted traces, split-brain
-  checks, agent-bridge peek, and operator-authorized remediation. Use for
+  checks, carrier EOF/timeouts, Windows SSH stdio stalls, agent-bridge peek,
+  and operator-authorized remediation. Use for
   "agent-bridge session stuck/wedged", "resume hang", "dispatch stuck in
   starting", "send returns 409", "agent-bridge protocol error", "session
   aborted mid-turn", "connection closed", "restart agent-bridge", "codespace
-  can't push", "relay unreachable", "unable to get password", or
+  can't push", "relay unreachable", "unable to get password",
+  "carrier_unavailable", "bridge unavailable", or
   "diagnose an agent-bridge dispatch".
 ---
 
-# Troubleshooting agent-bridge CodeSpace dispatch
+# Troubleshooting agent-bridge transport and dispatch
 
 Use the exact `argv[0]` from the agent-bridge session command catalog for every
 interactive bridge operation below. Replace
@@ -24,8 +26,16 @@ service or provider management boundaries remain literal global-wrapper
 invocations. If the catalog is missing, follow the single-installed-payload
 fallback in the `agent-bridge` skill and fail on ambiguity.
 
-Diagnose a wedged `agent-bridge` CodeSpace dispatch without discarding the
-session, disturbing unrelated work, or erasing the evidence. Two distinct
+For `carrier_unavailable`, EOF, a timeout, or an apparently unavailable Bridge,
+first read [transport failure classification](../../docs/transport-diagnostics.md).
+Distinguish local service health, SSH progress, carrier negotiation, hosting
+Bridge response and operation acceptance. A failed transport leaves unobserved
+remote health **unknown**, not down; reconnectability does not authorize replay
+of a mutation with an uncertain outcome. Preserve the session and do not restart
+shared services to test an availability guess.
+
+Diagnose a wedged dispatch without discarding the session, disturbing unrelated
+work, or erasing the evidence. Two distinct
 failure modes -- jump to the matching section:
 
 - **ACP resume-hang** --

@@ -767,6 +767,12 @@ retention:
 
 ## Connection pipeline & diagnostics
 
+For carrier EOF/timeouts and apparently unavailable peers, use
+[transport failure classification](docs/transport-diagnostics.md) before
+concluding that a hosting Bridge is down. It separates local service health,
+transport progress, carrier negotiation, hosting-service response and operation
+acceptance, including Windows SSH diagnostic-handle interference.
+
 Bringing up a remote agent passes through seven distinct stages, each with its
 own patience/fail-fast profile. agent-bridge records a `connect_checkpoint`
 event (`started` / `reached` / `failed`, with `elapsed_ms`) at every stage —

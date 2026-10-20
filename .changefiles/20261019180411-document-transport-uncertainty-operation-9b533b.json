@@ -1,0 +1,13 @@
+{
+  "comment": "Document transport uncertainty, operation acceptance boundaries, and Windows SSH stdio diagnostic interference",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-ssh",
+      "type": "patch"
+    }
+  ]
+}

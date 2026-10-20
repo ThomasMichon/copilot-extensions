@@ -120,6 +120,14 @@ succeeds. A confirmed-stale managed alias is rejected before the network probe;
 ordinary connection failure remains reachability status and does not classify
 the fragment as stale.
 
+### Windows SSH stalls and diagnostic interference
+
+For a hung SSH subprocess, read
+[Windows stdio diagnostics](references/windows-stdio-diagnostics.md) before
+classifying the target as unreachable. Distinguish a live SSH child blocked on
+logging or stream completion from a dead child whose inherited pipe remains
+open. A failed probe does not establish that a remote service is down.
+
 ## Use a configured target
 
 Once a machine-name profile is present and verified, use that configured name
