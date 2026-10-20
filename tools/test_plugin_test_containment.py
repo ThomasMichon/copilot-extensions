@@ -489,6 +489,34 @@ def test_partial_control_pipe_allocation_closes_owned_descriptors(tmp_path, monk
     assert calls == ["pipe", "pipe", ("close", 10), ("close", 11)]
 
 
+def test_failed_teardown_releases_owner_before_reaping_controller(tmp_path, monkeypatch):
+    events = []
+    pipes = iter(((10, 11), (12, 13)))
+    monkeypatch.setattr(plugin_test_containment, "os", SimpleNamespace(
+        name="posix", pipe=lambda: next(pipes), set_blocking=lambda *args: None,
+        close=lambda fd: events.append(("close", fd)),
+    ))
+    monkeypatch.setattr(plugin_test_containment.subprocess, "Popen",
+                        lambda *a, **k: SimpleNamespace(pid=12345))
+    monkeypatch.setattr(plugin_test_containment, "_posix_group_identity", lambda pid: (pid, pid))
+    monkeypatch.setattr(plugin_test_containment, "_posix_exit_code", lambda fd: 0)
+
+    def unavailable(*args):
+        raise plugin_test_containment.UnreapedProcessError("membership unavailable")
+
+    def reap(proc):
+        assert ("close", 13) in events
+        events.append("reap")
+
+    monkeypatch.setattr(plugin_test_containment, "_terminate_posix_group", unavailable)
+    monkeypatch.setattr(plugin_test_containment, "_reap_controller", reap)
+    with pytest.raises(plugin_test_containment.UnreapedProcessError, match="membership unavailable"):
+        plugin_test_containment._run_contained_process(
+            ["fake"], cwd=tmp_path, env={}, sandbox=tmp_path, limits=Limits(),
+        )
+    assert events[-3:] == [("close", 13), ("close", 10), "reap"]
+
+
 @pytest.mark.skipif(os.name == "nt", reason="POSIX process-budget accounting")
 def test_zombie_heavy_group_exceeds_process_budget(tmp_path, capfd, monkeypatch):
     class Process:
@@ -740,11 +768,19 @@ def signal_group(pid,sig):
         (root/'termed').touch()
         time.sleep(60)
 os.killpg=signal_group
-containment.run_contained(
-    [sys.executable,'-c',sys.argv[3],str(root/'held')],
-    cwd=root,env=containment.isolated_environment(os.environ,root),sandbox=root,
-    limits=containment.Limits(wall_seconds=20,max_processes=8,max_memory_mb=256,max_temp_mb=32),
-)
+if sys.argv[4]=='membership-failure':
+    def unavailable(pid):
+        raise PermissionError('controlled membership observation failure')
+    containment._posix_live_group_usage=unavailable
+try:
+    containment.run_contained(
+        [sys.executable,'-c',sys.argv[3],str(root/'held')],
+        cwd=root,env=containment.isolated_environment(os.environ,root),sandbox=root,
+        limits=containment.Limits(wall_seconds=20,max_processes=8,max_memory_mb=256,max_temp_mb=32),
+    )
+except containment.UnreapedProcessError:
+    (root/'unreaped').touch()
+    raise
 """
     owner = subprocess.Popen(
         [sys.executable, "-c", owner_code, str(Path(__file__).resolve().parents[1]),
@@ -754,15 +790,21 @@ containment.run_contained(
     )
     controller = None
     try:
-        marker = root / {"reported": "reported", "term": "termed", "executing": "held"}[boundary]
+        marker = root / {
+            "reported": "reported", "term": "termed", "executing": "held",
+            "membership-failure": "unreaped",
+        }[boundary]
         deadline = time.monotonic() + 8
         while not marker.exists():
-            assert owner.poll() is None, "owner exited before the controlled kill"
+            assert owner.poll() is None or marker.exists(), "owner exited before the test boundary"
             assert time.monotonic() < deadline, "controller did not reach the test boundary"
             time.sleep(0.01)
         controller = int((root / "controller").read_text())
-        owner.kill()
-        owner.wait(timeout=3)
+        if boundary == "membership-failure":
+            assert owner.wait(timeout=3) != 0
+        else:
+            owner.kill()
+            owner.wait(timeout=3)
         deadline = time.monotonic() + 8
         while plugin_test_containment._posix_live_group_usage(controller)[0]:
             assert time.monotonic() < deadline, "abandoned group remained live"
@@ -816,6 +858,9 @@ def test_file_holding_descendant_is_reaped_before_return(tmp_path, hang_controll
         if not hang_controller:
             _assert_posix_owner_death_reaps_group(
                 tmp_path / "term-owner-death", program, boundary="term",
+            )
+            _assert_posix_owner_death_reaps_group(
+                tmp_path / "membership-failure", program, boundary="membership-failure",
             )
     held.unlink()
     assert not held.exists()

@@ -812,6 +812,14 @@ _Pending review of this plan._
   pass 75 cases without skips on Windows and 70 on Ubuntu with the same five
   existing Windows-only cleanup skips. Control-pipe setup also closes already
   allocated descriptors if the second allocation fails.
+- A subsequent full review found that failure teardown still waited for the
+  controller before releasing its owner pipe. The pipe now closes first, giving
+  the independent controller reaper a chance to kill the group instead of being
+  killed alone. The original unreaped exception still propagates and retains the
+  sandbox. A portable ordering assertion and a native after-status membership
+  failure exercise this exact path. The final focused consumer partition passes
+  77 cases without skips on Windows (25.26 seconds) and 72 on Ubuntu with the
+  same five existing Windows-only cleanup skips (50.00 seconds).
 
 ### 2026-10-20 - Land module isolation and admit fresh bounded storage accounting
 - C-MODULE #7353 actually merged as

@@ -905,13 +905,15 @@ def _run_contained_process(
         except (OSError, KeyboardInterrupt) as exc:
             raise UnreapedProcessError("Process-tree teardown could not be verified") from exc
         finally:
-            if result_read is not None:
-                os.close(result_read)
             try:
-                _reap_controller(proc)
-            finally:
                 if owner_write is not None:
                     os.close(owner_write)
+                if result_read is not None:
+                    os.close(result_read)
+            except OSError as exc:
+                raise UnreapedProcessError("Controller pipes could not be released") from exc
+            finally:
+                _reap_controller(proc)
         ready.unlink(missing_ok=True)
 
 

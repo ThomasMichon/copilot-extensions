@@ -1265,6 +1265,9 @@ An independent owner pipe stays open only in the runner. EOF makes an abandoned
 controller terminate and then kill its own still-pinned group, both during
 command execution and after reporting status; abrupt runner death cannot leave
 the controller waiting forever.
+Failed membership observation also releases that pipe before waiting for the
+controller, allowing its independent reaper to escalate while the original
+unreaped error still requires sandbox retention.
 Zombies still count toward process admission but cannot hold sandbox files.
 Windows teardown explicitly terminates the Job Object and waits for zero
 active members before closing its handle. Uncertain termination raises
