@@ -91,6 +91,7 @@ item in this umbrella.
 |-------------|---------------------|-------------|
 | Solo operator (private control repo) | Drives every phase end-to-end: claims the next unclaimed Plan item in the Journal, dispatches implementation, lands each slice's PR, and journals the outcome. | `copilot-extensions` worktrees created from a private control repo; no standing feature branch between slices. |
 | Restart recovery implementer | Owns the reviewed machine-restart recovery slice under #4564, with milestone reports and separate implementation PRs. | Dedicated native CLI/mux session, launched and messaged through agent-bridge; public source handle `steady-resistor`. |
+| Platform runtime implementer | Owns only the Phase 7 platform-local runtime slice coordinated under #7305; preserves initializer/profile-diagnostic and restart-recovery ownership. | Managed source worktree; public source handle `spry-workbench`; coordination through #7305 and the linked slice plan. |
 
 ## Context
 
@@ -1057,6 +1058,16 @@ _(agent-recommended)_ realizations of that operator-approved boundary.
       `harness_state`/`doctor` surface. No design doc exists yet — that is
       the next real open item if this phase is picked up again.
 
+### Phase 7a - Platform-local installed runtime (#7305)
+
+- [ ] Review, implement and qualify the
+      [platform-local runtime plan](phase-7-platform-local-runtime.md).
+      Construct and health-check the selected platform's complete environment
+      before publication; bootstrap and generated launchers share that contract.
+      Preserve configured dependency sources, seven-day seasoning, immutable
+      selection and existing cutover ownership. This is a bounded slice, not
+      ownership of the entire update-flow repair or this umbrella.
+
 ### Phase 8 — Reconcile deferred backlog
 
 - [ ] Accept manager and worktree-control candidates only through
@@ -1162,6 +1173,12 @@ _Correlated via a facility-driven sweep of open `bug`-labeled issues against act
 
 ## Validation Plan
 
+- [ ] Complete the [platform-local runtime validation matrix](phase-7-platform-local-runtime.md#validation-plan),
+      including an actual generated launcher from a standalone installed slot,
+      fresh bootstrap, rejected construction without activation, and authorized
+      published-runtime readback. Unit tests or a completion marker alone do
+      not qualify the installed consumer.
+
 - [ ] Complete the [restart-recovery validation matrix](machine-restart-recovery.md#validation-plan),
       including clean exits, abrupt restart, daemon-only replacement and
       concurrent recovery. A process-launch receipt is not successful recovery.
@@ -1229,6 +1246,14 @@ overlapping work before it diverges, rather than relying on issue-comment
 claiming discipline alone.
 
 ## Journal
+
+- **2026-10-20** - Claimed the bounded Phase 7 platform-local runtime planning
+  slice under [#7305](https://github.com/ThomasMichon/copilot-extensions/issues/7305#issuecomment-6283978608),
+  public source handle `spry-workbench`. Added the
+  [proposed implementation and validation contract](phase-7-platform-local-runtime.md)
+  for review before code. Existing initializer/profile diagnostics,
+  restart-recovery, Bridge transport and sibling-runtime owners retain their
+  scopes. No implementation, installation or completed-update claim is made.
 
 - **2026-10-19** - Implemented narrowly fenced canonical original self-session
   claim admission for [machine restart recovery](machine-restart-recovery.md).
