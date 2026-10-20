@@ -17,7 +17,7 @@ def assert_producers_settled(
     """Apply the same non-bypassable producer gate before and during cleanup."""
     if record is not None and any(c.has_producer and c.is_unsettled for c in record.resources):
         emit_error(
-            f"Worktree {worktree_id} owns unsettled disposable producer obligations; "
+            f"Worktree {worktree_id} owns unsettled protected producer obligations; "
             "verified close or explicitly accepted handoff is required. "
             "Abandon and obligation-gate mode cannot bypass this ownership."
         )

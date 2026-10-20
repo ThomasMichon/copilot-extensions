@@ -361,6 +361,7 @@ _NO_PROJECT_COMMANDS = {
     "hook",
     "knowledge",
     "resource-producer",
+    "resource-relationship",
     "reconcile-marketplaces",
     "picker",
     "doctor",

@@ -1,0 +1,9 @@
+{
+  "comment": "Add protected replayable retained relationship claim authority with provider-verified local retirement; handoff remains capability-refused",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

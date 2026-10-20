@@ -91,7 +91,11 @@ def _matched_claim(record, token):
     if len(matches) != 1:
         raise ValueError("producer token is missing or ambiguous in this owner's ledger")
     claim = matches[0]
-    if not producer.valid_metadata(claim.producer) or producer.claim_ref(claim.producer) != claim.ref:
+    if (
+        not producer.valid_metadata(claim.producer)
+        or claim.producer.get("lifetime") != "disposable-owned"
+        or producer.claim_ref(claim.producer) != claim.ref
+    ):
         raise ValueError("producer metadata/ref is malformed or unsupported; obligation retained")
     return claim
 

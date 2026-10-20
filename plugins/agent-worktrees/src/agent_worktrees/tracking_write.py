@@ -200,6 +200,7 @@ _VERB_MODULES: tuple[str, ...] = (
     "agent_worktrees.tracking_followup_write",
     "agent_worktrees.tracking_claim_write",
     "agent_worktrees.tracking_producer_write",
+    "agent_worktrees.tracking_relationship_write",
     "agent_worktrees.tracking_session_lifecycle_write",
     "agent_worktrees.tracking_session_registration_write",
     "agent_worktrees.tracking_session_deregistration_write",

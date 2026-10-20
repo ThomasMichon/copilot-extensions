@@ -93,9 +93,10 @@ updates, daemon restarts, credential grants or live external requests.
 
 ### Phase 2 - Durable owner and claim integration
 
-- [ ] Review and merge the separate
+- [x] Review and merge the separate
   [retained relationship authority proposal](relationship-authority.md) before
-  implementing shared claim changes; execute its ordered source slices.
+  implementing shared claim changes.
+- [ ] Execute the authority proposal's ordered source and acceptance slices.
 - [ ] Carry the qualified host owner through ordinary CLI/client/API creation
   into the existing remote session record, separately from caller-session
   attribution, the bridge handle and target-qualified remote identity.
@@ -200,6 +201,29 @@ It does not change the available version-1 disposable ABI or authorize coding
 before the proposal clears review.
 
 ## Journal
+
+### 2026-10-20 - Retained authority design reviewed; first source slice
+
+- #7345 merged as `18c88f1e6b2fb213c8bbf906c89beb5133f363ec` after a clean
+  current-head Copilot approval and green required checks; the normal managed
+  merge used no review bypass. Reconciled only the owned effort-index row
+  against concurrent updates, then synced onto the reviewed design.
+- Began the Worktrees metadata/transaction/preservation slice. A fail-first
+  focused regression confirmed the missing retained authority. The current
+  58 retained-lifetime cases pass, including an actual interpreter CLI, a real
+  registered provider process, final cleanup and an OS-sidecar race.
+- Disposable allocation, absence, transfer recovery, projection, token and
+  legacy preservation selections pass. Command-boundary coverage found and
+  fixed a missing project-free route; legacy fixtures found and fixed an
+  unintended dependency on record status for non-relationship preservation.
+  Slow compatibility files used complementary bounded selections, without
+  changing deadlines or dropping cases.
+- Fresh temporary ledgers provide first-touch API proof. No installer or
+  provisioning behavior changed; full synthetic peer integration belongs to
+  the next source slice. Live external acceptance remains separately held,
+  not claimed by these source tests.
+- The effort remains Active. This design merge and source work do not grant
+  runtime update, shared restart, credential or live-request authority.
 
 ### 2026-10-20 - Separate retained-relationship authority design
 

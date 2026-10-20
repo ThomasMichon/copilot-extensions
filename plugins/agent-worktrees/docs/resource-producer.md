@@ -6,6 +6,11 @@ It does not allocate, start, remove, or discover resources itself. It has no
 Docker dependency, sibling installer, authentication bootstrap, or second ledger.
 Reusable fleet borrowing/return and legacy claims keep their existing semantics.
 
+Retained local relationship responsibility uses the separate
+[resource-relationship API](resource-relationship.md), not this disposable
+allocation/absence protocol. Both share protected ledger preservation;
+their version/lifetime, callbacks and transaction semantics remain distinct.
+
 Provider callback commands may include a registered argument prefix, for example
 `["agent-containers", "raw-docker"]`. Status and reclaim retain their own prefix
 before `claim-status` or `claim-reclaim` and the resource identifier. Installation

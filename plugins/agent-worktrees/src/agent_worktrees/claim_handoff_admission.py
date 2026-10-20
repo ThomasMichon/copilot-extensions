@@ -83,6 +83,8 @@ def validate_producer_offer(
         return
     if len(producers) != len(claims):
         raise error_type("offer disposable producer claims in a separate bundle")
+    if any(isinstance(claim.producer, dict) and claim.producer.get("lifetime") == "retained-relationship" for claim in producers):
+        raise error_type("retained relationship handoff requires provider acknowledgement; not available")
     _require_local_producer_actors(source, consumer, machine=machine, error_type=error_type)
     if any(not resource_producer.valid_metadata(claim.producer) or claim.producer["phase"] != "bound"
            or resource_producer.claim_ref(claim.producer) != claim.ref for claim in producers):
@@ -121,6 +123,8 @@ def validate_supported_claims(
     if producer_claims:
         if len(producer_claims) != len(bundle.claims):
             raise error_type("offer disposable producer claims in a separate bundle")
+        if any(isinstance(c["producer"], dict) and c["producer"].get("lifetime") == "retained-relationship" for c in producer_claims):
+            raise error_type("retained relationship handoff requires provider acknowledgement; not available")
         _require_local_producer_actors(
             qualified_ref(bundle.source, "source"), qualified_ref(bundle.consumer, "consumer"),
             accepted=bundle.state == "accepted", error_type=error_type,

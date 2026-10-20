@@ -53,6 +53,9 @@ def canonical_json(value: object) -> str:
 
 def claim_ref(metadata: dict) -> str:
     """Encode an opaque callback envelope; terminal receipts retain its subject."""
+    if metadata.get("lifetime") == "retained-relationship":
+        from .resource_relationship import claim_ref as relationship_ref
+        return relationship_ref(metadata)
     envelope = {key: metadata[key] for key in ("version", "token", "creator", "recovery")}
     envelope["phase"] = "allocating" if metadata["phase"] == "allocating" else (
         "bound" if "identity" in metadata else "pending"
@@ -95,6 +98,9 @@ def valid_metadata(value: object) -> bool:
 
     if not isinstance(value, dict):
         return False
+    if value.get("lifetime") == "retained-relationship":
+        from .resource_relationship import valid_metadata as valid_relationship
+        return valid_relationship(value)
     required = {"version", "lifetime", "token", "namespace", "phase", "creator", "recovery"}
     if not required.issubset(value) or set(value) - (
         required | {"identity", "closeout", "transfer", "allocation_epoch", "allocation_completion"}
@@ -198,6 +204,15 @@ def preserve_claims(record, current, path: Path) -> None:
     sides = (record.resources, current.resources if current is not None else [])
     if not any(claim.has_producer for claims in sides for claim in claims):
         return
+    retained_unsettled = any(
+        claim.has_producer and isinstance(claim.producer, dict)
+        and claim.producer.get("lifetime") == "retained-relationship" and claim.is_unsettled
+        for claims in sides for claim in claims
+    )
+    if retained_unsettled and record.status in FROZEN_OWNER_STATUSES and (
+        current is None or current.status not in FROZEN_OWNER_STATUSES
+    ):
+        raise ValueError("unsettled retained relationship prevents freezing/finalizing its owner")
     for claims in sides:
         seen: dict[str, bool] = {}
         tokens: set[str] = set()

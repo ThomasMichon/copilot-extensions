@@ -15,6 +15,35 @@ def add_parsers(sub) -> None:
     parser.add_argument("operation", choices=("capabilities", "reserve", "begin", "complete", "bind", "inspect", "close"))
     parser.add_argument("--json", action="store_true", required=True)
     parser.add_argument("--owner-ref", help="Qualified local owner; omitted, resolve current worktree/supported anchor")
+    relationship = sub.add_parser("resource-relationship", help="Reserve/bind/inspect/verify-retire a retained relationship; JSON stdin/stdout")
+    relationship.add_argument("operation", choices=("capabilities", "reserve", "bind", "inspect", "close"))
+    relationship.add_argument("--json", action="store_true", required=True)
+    relationship.add_argument("--owner-ref", help="Qualified local worktree owner; required except for capabilities")
+
+
+def read_input(label: str = "producer") -> dict:
+    """Read one byte-bounded strict JSON object before resolving authority."""
+    raw_bytes = sys.stdin.buffer.read(producer.MAX_INPUT_BYTES + 1)
+    if len(raw_bytes) > producer.MAX_INPUT_BYTES:
+        raise ValueError(f"{label} stdin exceeds size limit")
+
+    def unique(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError(f"duplicate {label} JSON key")
+            result[key] = value
+        return result
+
+    payload = json.loads(raw_bytes.decode("utf-8", errors="strict"), object_pairs_hook=unique)
+    if not isinstance(payload, dict):
+        raise ValueError(f"{label} stdin must be exactly one JSON object")
+    return payload
+
+
+def cmd_resource_relationship(args) -> int:
+    from .resource_relationship_cli import cmd_resource_relationship as command
+    return command(args)
 
 
 def cmd_resource_producer(args) -> int:
@@ -29,20 +58,7 @@ def cmd_resource_producer(args) -> int:
                 "max_ref_bytes": producer.MAX_REF_BYTES, "max_input_bytes": producer.MAX_INPUT_BYTES,
             })
             return 0
-        raw_bytes = sys.stdin.buffer.read(producer.MAX_INPUT_BYTES + 1)
-        if len(raw_bytes) > producer.MAX_INPUT_BYTES:
-            raise ValueError("producer stdin exceeds size limit")
-        raw = raw_bytes.decode("utf-8", errors="strict")
-        def unique(pairs):
-            result = {}
-            for key, value in pairs:
-                if key in result:
-                    raise ValueError("duplicate producer JSON key")
-                result[key] = value
-            return result
-        payload = json.loads(raw, object_pairs_hook=unique)
-        if not isinstance(payload, dict):
-            raise ValueError("producer stdin must be exactly one JSON object")
+        payload = read_input()
         owner_ref = args.owner_ref or worktree_ops_cli._resolve_owner_ref()
         if not owner_ref:
             raise ValueError("no durable producer owner resolved from current directory")
