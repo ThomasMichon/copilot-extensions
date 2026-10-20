@@ -61,6 +61,19 @@ def target_for(root, controller=None):
     )
 
 
+def test_static_plugin_arguments_survive_typed_runtime_snapshot(tmp_path):
+    from pydantic import TypeAdapter
+
+    target = target_for(tmp_path)
+    adapter = TypeAdapter(SpawnTarget)
+    restored = adapter.validate_json(adapter.dump_json(target), strict=True)
+    assert restored == target
+    assert restored.static_plugin_args == {
+        "base": ["--plugin-dir", "explicit"],
+        "automatic": ["--plugin-dir", "old"],
+    }
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("entry", ["bin", "", "."])
 @pytest.mark.parametrize("checkout_name", ["execution", "execution checkout"])
