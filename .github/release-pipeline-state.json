@@ -18,8 +18,8 @@
     "tag": "promote-dev-6e2e59ceed9a5cb822bd02906f5d4e1173aeae71"
   },
   "last_rollback": null,
-  "pause_reason": "Operator-approved containment until pre-merge qualification makes Main safe to consume (#6237)",
-  "paused": true,
+  "pause_reason": null,
+  "paused": false,
   "schema": "copilot-extensions.release-pipeline-state",
   "version": 1
 }
