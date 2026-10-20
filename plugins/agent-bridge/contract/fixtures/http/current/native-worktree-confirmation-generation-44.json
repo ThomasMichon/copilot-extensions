@@ -1,0 +1,42 @@
+{
+  "captured_from": {
+    "commit": "632cac7b9de4c42ef2c765053a783fbead0bbff0",
+    "plugin_version": "0.4.1-dev3",
+    "source_path": "plugins/agent-bridge/src/agent_bridge/worktree_native_resume.py",
+    "source_git_blob": "479172e6483513d6ecd60652ac2c995c94603a2e",
+    "protocol_generation": 44,
+    "source_sha256": "5188f9cbc9063cc4b0289402ca8ad626a452d6f1c0b91381710e0c68528f3a60"
+  },
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/worktrees/example-worktree/resume/cli"
+  },
+  "owner_launch": {
+    "ok": true,
+    "worktree_id": "example-worktree",
+    "work_dir": "example-workspace",
+    "resume_session": "native-example-head",
+    "mux_verified": true
+  },
+  "execution_confirmation": {
+    "owner_head_session": "native-example-head",
+    "accept_owner_live_session": true,
+    "accept_exact_fresh_bridge_registration": true,
+    "display_flag_is_not_a_runtime_veto": true,
+    "reject_foreign_execution": true
+  },
+  "identity": {
+    "durable_session_id": "native-example-head",
+    "acp_session_id": "native-example-head",
+    "native_history_replacement": false
+  },
+  "refusals": [
+    "native_identity_changed",
+    "live_holder",
+    "cli_launch_unconfirmed"
+  ],
+  "reattested_from": {
+    "path": "plugins/agent-bridge/contract/fixtures/http/current/native-worktree-confirmation-generation-43.json",
+    "sha256": "369270e80182ef69e9b59138e77d17b1b19091e5aad0a4964d33424bf160a961"
+  }
+}

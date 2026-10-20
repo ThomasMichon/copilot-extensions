@@ -1,4 +1,4 @@
-"""Independent HTTP-41 target expectations, with no live endpoint or secrets."""
+"""Independent HTTP target and owner expectations, with no live endpoint or secrets."""
 
 from __future__ import annotations
 
@@ -30,16 +30,15 @@ from agent_bridge.routes import health as health_route
 pytestmark = pytest.mark.guard
 CONTRACT = Path(__file__).resolve().parents[1] / "contract"
 REPO = Path(__file__).resolve().parents[3]
-VECTOR = json.loads(
-    (CONTRACT / "fixtures/http/current/remote-acp-targets-generation-41.json").read_text(
-        encoding="utf-8",
+def _targets_vector(generation):
+    return json.loads(
+        (CONTRACT / f"fixtures/http/current/remote-acp-targets-generation-{generation}.json").read_text(
+            encoding="utf-8",
+        )
     )
-)
-CURRENT_VECTOR = json.loads(
-    (CONTRACT / "fixtures/http/current/remote-acp-targets-generation-43.json").read_text(
-        encoding="utf-8",
-    )
-)
+
+
+VECTOR = _targets_vector(44)
 
 
 def _request(**state):
@@ -54,7 +53,7 @@ def _target():
 
 
 @pytest.mark.asyncio
-async def test_health_matches_current_independent_expected_vector(monkeypatch):
+async def test_health_44_matches_independent_expected_vector(monkeypatch):
     monkeypatch.setattr(
         health_route, "get_default_manager",
         lambda: SimpleNamespace(carrier_diagnostics=lambda: {}),
@@ -62,10 +61,10 @@ async def test_health_matches_current_independent_expected_vector(monkeypatch):
     monkeypatch.setattr(health_route, "slot_descriptor", lambda *args, **kwargs: {})
     monkeypatch.setattr(health_route, "config_dir", lambda: Path("synthetic-unused"))
     body = await health_route.health(_request())
-    assert {key: body[key] for key in CURRENT_VECTOR["health"]} == CURRENT_VECTOR["health"]
+    assert {key: body[key] for key in VECTOR["health"]} == VECTOR["health"]
 
 
-@pytest.mark.parametrize("generation", [37, 38, 39, 40, 41, 42, 43])
+@pytest.mark.parametrize("generation", [37, 38, 39, 40, 41, 42, 43, 44])
 @pytest.mark.parametrize("address", ["url", "named"])
 def test_client_target_negotiation_precedes_request(generation, address):
     client = BridgeClient.__new__(BridgeClient)
@@ -84,7 +83,10 @@ def test_client_target_negotiation_precedes_request(generation, address):
         assert request.call_count == 1
         assert request.call_args.args == (
             expected["method"], expected["path"],
-            {"agent": VECTOR["client"][address], "protocol_version": 43},
+            {
+                "agent": VECTOR["client"][address],
+                "protocol_version": VECTOR["health"]["protocol_version"],
+            },
         )
 
 
@@ -193,22 +195,23 @@ def test_source_approval_matches_exact_policy_without_resolving_secrets():
     assert source.resolve.call_count == VECTOR["endpoint_policy"]["discovery_secret_reads"]
 
 
-def _wire_generation(value, previous=40, current=41):
+def _wire_generation(value, generation):
     if isinstance(value, dict):
         return {
-            key: current if key == "protocol_version" and item == previous
-            else _wire_generation(item, previous, current)
+            key: generation if key == "protocol_version" and item == generation - 1
+            else _wire_generation(item, generation)
             for key, item in value.items()
         }
     if isinstance(value, list):
-        return [_wire_generation(item, previous, current) for item in value]
+        return [_wire_generation(item, generation) for item in value]
     return value
 
 
-@pytest.mark.parametrize(("generation", "expected_count"), [(41, 40), (42, 42), (43, 42)])
-def test_reattestations_retain_independent_historical_expectations(generation, expected_count):
+@pytest.mark.parametrize(("generation", "reattested"), [(41, 40), (42, 42), (43, 42), (44, 45)])
+def test_reattestations_retain_independent_historical_expectations(generation, reattested):
     registry = json.loads((CONTRACT / "registry.json").read_text(encoding="utf-8"))
     contract = next(item for item in registry["contracts"] if item["id"] == "agent-bridge.http-wire")
+    vector = _targets_vector(generation)
     count = 0
     for registered in contract["fixtures"]:
         if registered["generation"] != generation:
@@ -221,16 +224,84 @@ def test_reattestations_retain_independent_historical_expectations(generation, e
         previous_bytes = previous_path.read_bytes().replace(b"\r\n", b"\n")
         assert hashlib.sha256(previous_bytes).hexdigest() == current["reattested_from"]["sha256"]
         previous = json.loads(previous_bytes)
-        expected = _wire_generation(previous, generation - 1, generation)
+        expected = _wire_generation(previous, generation)
         actual = copy.deepcopy(current)
         actual.pop("captured_from")
         actual.pop("reattested_from")
         expected.pop("captured_from")
         expected.pop("reattested_from", None)
         assert actual == expected
-        vector = json.loads(
-            (CONTRACT / f"fixtures/http/current/remote-acp-targets-generation-{generation}.json")
-            .read_text(encoding="utf-8")
-        )
         assert current["captured_from"]["commit"] == vector["captured_from"]["commit"]
-    assert count == expected_count
+    assert count == reattested
+
+
+def test_generation_44_capture_matches_current_registered_sources():
+    registry = json.loads((CONTRACT / "registry.json").read_text(encoding="utf-8"))
+    contract = next(item for item in registry["contracts"] if item["id"] == "agent-bridge.http-wire")
+    sources = {item["path"]: item["sha256"] for item in contract["source_paths"]}
+    captures = {
+        (item["commit"], item["plugin_version"], item["generation"], item["source_path"], item["source_git_blob"])
+        for item in contract["provenance"]
+    }
+    for registered in contract["fixtures"]:
+        if registered["generation"] != 44:
+            continue
+        current = json.loads((REPO / registered["path"]).read_text(encoding="utf-8"))
+        captured = current["captured_from"]
+        assert captured["source_sha256"] == sources[captured["source_path"]]
+        assert (
+            captured["commit"], captured["plugin_version"], captured["protocol_generation"],
+            captured["source_path"], captured["source_git_blob"],
+        ) in captures
+
+
+OWNED = json.loads(
+    (CONTRACT / "fixtures/http/current/owned-remote-generation-44.json").read_text(encoding="utf-8")
+)
+
+
+@pytest.mark.parametrize("generation", [38, 39, 40, 41, 42, 43, 44])
+@pytest.mark.parametrize("address", ["remote-acp:example-agent", "https://example.com/acp"])
+def test_owned_remote_client_refuses_before_sending_to_older_daemon(generation, address):
+    from agent_bridge import protocol
+
+    assert protocol.REMOTE_ACP_OWNERSHIP_PROTOCOL_VERSION == OWNED["capability"]["remote_acp_ownership"]
+    client = BridgeClient.__new__(BridgeClient)
+    client._daemon_proto = (generation, 1)
+    client._request = Mock(return_value={})
+    payload = {**OWNED["request"]["json"], "agent": address}
+    payload.pop("protocol_version")
+    if generation < OWNED["capability"]["remote_acp_ownership"]:
+        with pytest.raises(BridgeClientError) as refused:
+            client.start_session(**payload)
+        assert refused.value.status == OWNED["capability"]["unsupported_status"]
+        client._request.assert_not_called()
+    else:
+        client.start_session(**payload)
+        client._request.assert_called_once_with(
+            OWNED["request"]["method"], OWNED["request"]["path"],
+            {**OWNED["request"]["json"], "agent": address},
+            request_timeout=None,
+        )
+
+
+@pytest.mark.parametrize("phase", ["bound", "attempting", "retired", "closed"])
+def test_owned_remote_inspection_preserves_retained_terminal_identity(phase):
+    from agent_bridge.remote_relationships import inspect_row
+
+    row = {**OWNED["journal"], "phase": phase}
+    expected = {**OWNED["inspection"], "ownership": "owned" if phase == "bound" else phase}
+    assert inspect_row(row) == expected
+
+
+def test_unreserved_retirement_reports_its_confirmed_absence():
+    from agent_bridge.relationship_authority import confirm_absence
+    from agent_bridge.remote_relationships import inspect_row
+
+    expected = OWNED["unreserved_retirement"]
+    row = {
+        **OWNED["journal"], "phase": "closed", "claim": None, "native_id": None,
+        "absence": expected["authority"],
+    }
+    assert confirm_absence(row["absence"], owner=row["owner"], request_id=row["id"])
+    assert inspect_row(row) == expected["inspection"]

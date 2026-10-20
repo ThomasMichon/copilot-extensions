@@ -20,7 +20,7 @@ function fixture(t, rows = [{ name: "hooks-only", marketplace: "alias", enabled:
 
 test("protocol-41 golden task is held until its declared native loadout registers", async (t) => {
   const golden = JSON.parse(readFileSync(new URL(
-    "../contract/fixtures/http/current/startup-plugin-readiness-generation-43.json", import.meta.url,
+    "../contract/fixtures/http/current/startup-plugin-readiness-generation-44.json", import.meta.url,
   ), "utf8"));
   const f = fixture(t, []);
   const queued = structuredClone(golden.queued_message);

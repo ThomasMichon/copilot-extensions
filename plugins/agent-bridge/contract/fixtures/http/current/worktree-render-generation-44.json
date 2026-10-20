@@ -1,0 +1,52 @@
+{
+  "captured_from": {
+    "commit": "632cac7b9de4c42ef2c765053a783fbead0bbff0",
+    "plugin_version": "0.4.1-dev3",
+    "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
+    "source_git_blob": "fa939cfb481d9b06ae2c8d3203f90c4691c472df",
+    "protocol_generation": 44,
+    "source_sha256": "fe0809a2504d2058f012218323561f1ae64da9793db7cce7c0d94ea498b54a87"
+  },
+  "response": {
+    "protocol_version": 44,
+    "min_protocol_version": 1
+  },
+  "capability": {
+    "required_protocol_version": 37,
+    "metadata_version": 1,
+    "render_wall_goal_seconds": 2,
+    "live_wall_wait_seconds": 10,
+    "legacy_cold_request_blocks": true,
+    "caller_expiry_releases_holder": false
+  },
+  "requests": {
+    "render": {
+      "method": "GET",
+      "path": "/api/v1/worktrees",
+      "params": {
+        "render": "true"
+      }
+    },
+    "refresh": {
+      "method": "GET",
+      "path": "/api/v1/worktrees",
+      "params": {
+        "refresh": "true"
+      }
+    }
+  },
+  "cold_projection": {
+    "groups": {},
+    "discovery": {
+      "version": 1,
+      "freshness": "unknown",
+      "completeness": "unknown",
+      "refresh_pending": true,
+      "warming": true
+    }
+  },
+  "reattested_from": {
+    "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-generation-43.json",
+    "sha256": "e08781e74980d06013773c2c80cd335f141260dbec580d43d937476a0786b1ae"
+  }
+}

@@ -1,0 +1,122 @@
+{
+  "captured_from": {
+    "commit": "632cac7b9de4c42ef2c765053a783fbead0bbff0",
+    "plugin_version": "0.4.1-dev3",
+    "source_path": "plugins/agent-bridge/src/agent_bridge/workspace_creation.py",
+    "source_git_blob": "7eae54d09a321567bca551daa899c6fd73cdc526",
+    "protocol_generation": 44,
+    "source_sha256": "6ccf7f7a685ed260ce5c4e80c3ef192d2f25f4c665ecb50d8cccc22c2bf07228"
+  },
+  "evidence_kind": "independently-authored exact-owner admission vectors; not a native or HTTP body capture",
+  "legacy_metadata_cases": [
+    [
+      "companion-repo",
+      "original-allocation"
+    ],
+    [
+      "project-a",
+      ""
+    ],
+    [
+      "project-a",
+      null
+    ],
+    [
+      "project-a",
+      " "
+    ],
+    [
+      "companion-repo",
+      " "
+    ]
+  ],
+  "invalid_keyed_nonces": [
+    null,
+    "",
+    " ",
+    123,
+    false
+  ],
+  "record": {
+    "id": "worktree-a",
+    "repo": "project-a",
+    "path": "/fixture",
+    "status": "active",
+    "creation_nonce": "allocation-a",
+    "session_count": 0,
+    "last_session_id": null,
+    "execution_leg": null,
+    "execution_leg_opaque": false,
+    "session_backend": null,
+    "session_backend_opaque": false,
+    "sessions_indexed": true
+  },
+  "head": {
+    "tracked": true,
+    "head_session": null,
+    "active": false,
+    "occupied": false,
+    "state": null
+  },
+  "cases": [
+    {
+      "name": "cold-roster-with-exact-owner",
+      "record_changes": {},
+      "head_changes": {},
+      "expected_error": null,
+      "expected_sessionless": true
+    },
+    {
+      "name": "finalizing-owner",
+      "record_changes": {
+        "status": "finalizing"
+      },
+      "head_changes": {},
+      "expected_error": "transition_pending"
+    },
+    {
+      "name": "replacement-allocation",
+      "record_changes": {
+        "creation_nonce": "replacement-allocation"
+      },
+      "head_changes": {},
+      "expected_error": "creation_conflict"
+    },
+    {
+      "name": "opaque-execution-history",
+      "record_changes": {
+        "execution_leg_opaque": true
+      },
+      "head_changes": {},
+      "expected_error": null,
+      "expected_sessionless": false
+    },
+    {
+      "name": "unindexed-session-history",
+      "record_changes": {
+        "sessions_indexed": false
+      },
+      "head_changes": {},
+      "expected_error": null,
+      "expected_sessionless": false
+    },
+    {
+      "name": "foreign-native-head",
+      "record_changes": {
+        "last_session_id": "foreign-native"
+      },
+      "head_changes": {
+        "head_session": "foreign-native",
+        "active": true,
+        "occupied": true,
+        "state": "active"
+      },
+      "expected_error": null,
+      "expected_sessionless": false
+    }
+  ],
+  "reattested_from": {
+    "path": "plugins/agent-bridge/contract/fixtures/http/current/workspace-exact-owner-generation-43.json",
+    "sha256": "8f52f6fa4ca90a34e2655f48044c840dd2bfbfd9a28d36a6a21c037d0e10e709"
+  }
+}

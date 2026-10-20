@@ -1,0 +1,100 @@
+{
+  "captured_from": {
+    "commit": "632cac7b9de4c42ef2c765053a783fbead0bbff0",
+    "plugin_version": "0.4.1-dev3",
+    "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
+    "source_git_blob": "fa939cfb481d9b06ae2c8d3203f90c4691c472df",
+    "protocol_generation": 44,
+    "source_sha256": "fe0809a2504d2058f012218323561f1ae64da9793db7cce7c0d94ea498b54a87"
+  },
+  "health": {
+    "protocol_version": 44,
+    "min_protocol_version": 1
+  },
+  "capability": {
+    "remote_acp_targets": 41,
+    "remote_acp": 38,
+    "unsupported_status": 426
+  },
+  "client": {
+    "url": "https://example.com/acp",
+    "named": "remote-acp:native",
+    "url_refused_daemon_generations": [
+      38,
+      39,
+      40
+    ],
+    "named_supported_daemon_generations": [
+      38,
+      39,
+      40,
+      41
+    ],
+    "refusal_requests": 0,
+    "accepted_request": {
+      "method": "POST",
+      "path": "/api/v1/sessions"
+    }
+  },
+  "roster": {
+    "list": "/api/v1/agents",
+    "detail": "/api/v1/agents/{name}",
+    "rows": [
+      {
+        "name": "remote-acp:native",
+        "target_type": "remote-acp",
+        "state": "bound",
+        "spawnable": true,
+        "unavailable_reason": ""
+      },
+      {
+        "name": "remote-acp:assistant",
+        "target_type": "remote-acp",
+        "state": "requires-binding",
+        "spawnable": false,
+        "unavailable_reason": "instance-binding-required"
+      },
+      {
+        "name": "remote-acp:broken",
+        "target_type": "remote-acp",
+        "state": "unavailable",
+        "spawnable": false,
+        "unavailable_reason": "invalid-requirements"
+      }
+    ],
+    "bound_contribution": {
+      "state": "bound",
+      "spawnable": true,
+      "unavailable_reason": ""
+    },
+    "wrong_owner": {
+      "state": "requires-binding",
+      "spawnable": false,
+      "unavailable_reason": "binding-owner-mismatch"
+    },
+    "source_unapproved": {
+      "state": "requires-binding",
+      "spawnable": false,
+      "unavailable_reason": "credential-source-binding-required"
+    }
+  },
+  "endpoint_policy": {
+    "canonical_match": "https://EXAMPLE.com:443/acp",
+    "rejected": [
+      "https://example.com/other",
+      "https://example.com/acp?query=1",
+      "https://example.com/acp#fragment",
+      "http://example.com/acp",
+      "https://other.example.com/acp",
+      "wss://example.com/acp"
+    ],
+    "ambiguous_matching_targets": 2,
+    "discovery_network_requests": 0,
+    "discovery_secret_reads": 0
+  },
+  "independent_expectations": "Hand-authored generation-41 capability, client negotiation, ordinary roster and local binding/refusal expectations; exercised by test_http_targets_contract.py using real entry points with synthetic enabled payloads and no network or secret access.",
+  "reattested_from": {
+    "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-acp-targets-generation-43.json",
+    "sha256": "0a2a7a9c7f157ff3569d7b17973376e55d4b8ff4e3e343bd4aa1c8d22bbacf3c"
+  }
+}

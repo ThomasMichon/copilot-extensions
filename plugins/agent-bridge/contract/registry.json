@@ -8,9 +8,9 @@
       "kind": "wire-protocol",
       "normative": true,
       "declared_range": {
-        "current": 43,
+        "current": 44,
         "minimum": 1,
-        "previous_generation": 42,
+        "previous_generation": 43,
         "previous_absent_reason": null
       },
       "evidence_window": {
@@ -49,7 +49,8 @@
           40,
           41,
           42,
-          43
+          43,
+          44
         ],
         "runtimes": [
           "0.4.0-dev423",
@@ -110,21 +111,22 @@
         "worktree_native_resume": 40,
         "remote_acp_targets": 41,
         "attention_boundary": 42,
-        "plugin_readiness": 43
+        "remote_acp_ownership": 43,
+        "plugin_readiness": 44
       },
       "durable_records": [],
       "source_paths": [
         {
           "path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
-          "sha256": "c5a570d84c9aaa27480cca28ecd4b82b1a7b76a99f2e4b63b0048f69f5233b86",
+          "sha256": "fe0809a2504d2058f012218323561f1ae64da9793db7cce7c0d94ea498b54a87",
           "semantic": true,
           "non_semantic_reason": null
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/models.py",
-          "sha256": "24dd0ac828d603050d4a31cdc0dba444b31956e42297370041f5f62a4c0e0150",
-          "semantic": false,
-          "non_semantic_reason": "Only local topology configuration gains an automatically captured source-repository locator; HTTP request/response models and wire generation are unchanged."
+          "sha256": "9f40173a7e58e995b16dd592175aa0fa10c748a3fd5aefe145230c0c91780e5a",
+          "semantic": true,
+          "non_semantic_reason": null
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/routes/health.py",
@@ -134,7 +136,7 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/routes/sessions.py",
-          "sha256": "c894959a7b76990ad0bbd1affcb064be235fac53cbf651bdbd4f2244c183d111",
+          "sha256": "bbefb32975022523860d5d1d172e5e5ad40b511275443f63e8fce494eb144362",
           "semantic": true,
           "non_semantic_reason": null
         },
@@ -200,13 +202,13 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/session_resume.py",
-          "sha256": "3b848128648297a1a0e79bd3c55fae5981f9b81375a10070c8a5765107c74363",
+          "sha256": "bc62b07c43e8b0e702433398bd24871891ac963ba6406b8b34e1bff54b3628f4",
           "semantic": true,
           "non_semantic_reason": null
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/session_core.py",
-          "sha256": "282bc4d134a9dbc7c19783831adae938dfe7a89fd79cc47a1f39d9f845696ad2",
+          "sha256": "d5e10c0357f6a64995948d9ad63b2c9b03fcf69cf3b6c2a4155713265ac94741",
           "semantic": true,
           "non_semantic_reason": null
         },
@@ -236,7 +238,7 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/client_session_start.py",
-          "sha256": "6efbf3e29014cd964b677059f752909640b8441b1aa851fbd02b5d837672b808",
+          "sha256": "10730505d61c8568dde96983dce498ff05aced58fc511496a774d0a46a12e759",
           "semantic": true,
           "non_semantic_reason": null
         },
@@ -254,7 +256,7 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/remote_acp_sessions.py",
-          "sha256": "32b02a91924538ac07bc7ba98d2fd98df91fee299f498a8c4f57ff6ce4470a56",
+          "sha256": "8e46f2713647ff7fc626e1db28c0402d1d236017581709df949c2fe450169ecf",
           "semantic": true,
           "non_semantic_reason": null
         },
@@ -299,6 +301,132 @@
           "sha256": "1f0ee4f1599af18cdf3f1184af115eb660a2f8d1ff23db812cfac342667132f5",
           "semantic": true,
           "non_semantic_reason": null
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/http_provider_sources.py",
+          "sha256": "c29bad0dc0af5938dcd364018c8c05cb857114be01022dfe47aeb696ab0739fb",
+          "semantic": false,
+          "non_semantic_reason": "Local adapter registers explicitly advertised native provider HTTP credential sources and lazily invokes their fixed native command. It does not produce agent-bridge HTTP request/response fields. This source-only transitive closure evidence does not claim the HTTP fixtures capture relay-profile or http-credential native-command semantics."
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/provider_process.py",
+          "sha256": "fd8a6f23400b55e9810744dd1a1d16b9a148001504dc3ed5f8002c03f99008e8",
+          "semantic": false,
+          "non_semantic_reason": "Local bounded native-command subprocess helper adds optional stdin bytes and captures output; it is not an agent-bridge HTTP wire producer. Its exact source is pinned as the HTTP credential adapter execution dependency, not as an independently captured native-command protocol vector."
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/agent_registry_relay.py",
+          "sha256": "734a026677704eb565d801bf33ae775d946388d12dd87f14d378eb5490760b52",
+          "semantic": false,
+          "non_semantic_reason": "Local startup registration connects the relay builder to the opted-in native HTTP credential-source adapter; it does not add HTTP request/response fields. The pinned startup source is closure evidence only; HTTP fixture execution does not establish native provider discovery or command execution."
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/provider_sources.py",
+          "sha256": "2acfba87cca0cd6c08dbc42765a5b1cfe048e402ed8c088b784c7c9b5eadb8ec",
+          "semantic": false,
+          "non_semantic_reason": "Local native provider manifest discovery validates attribution, activation and the http_credentials_version opt-in. These on-disk/native-command declarations are not agent-bridge HTTP payload fields. Pin the actual adapter discovery dependency without presenting unchanged HTTP fixtures as native provider protocol captures."
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/remote_relationships.py",
+          "sha256": "e53882344d73fea5c1334bc280d4db253e34b7773d7c790a6da4af81c0dcfd2a",
+          "semantic": true,
+          "non_semantic_reason": null
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/routes/relationships.py",
+          "sha256": "89c1680f6e8e7a295a64b07524b7e1823287fdeb614bdc8b7a85f268a77240fa",
+          "semantic": true,
+          "non_semantic_reason": null
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/db_maintenance.py",
+          "sha256": "24fd30181a3b74b682686125e0ecd0f66fa9be9f144704d74622800c6bc80b28",
+          "semantic": false,
+          "non_semantic_reason": "Source-only retention dependency: nonclosed relationship handles are excluded from garbage collection; HTTP field shapes are unchanged. Aging and settlement recovery are tested separately."
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/session_lifecycle_cli.py",
+          "sha256": "a4d9dc1e436632adafa5e7a29ddc2d962f1a3e7099fc48b77bc124e23942237b",
+          "semantic": false,
+          "non_semantic_reason": "Source-only command discovery dependency: retained callers disable ambient PATH fallback while legacy callers retain their default. This is not an HTTP request or response field."
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/relationship_authority.py",
+          "sha256": "2675cbc71ae17706952e43f2c1c05590936bccdcef1b85ac133f18f1578ba5a4",
+          "semantic": false,
+          "non_semantic_reason": "Source-only retained claim command adapter dependency: strict owning-installation discovery and bounded command receipts are exercised by adapter and actual-command tests, not represented as HTTP payload captures."
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/db_relationships.py",
+          "sha256": "81cb9945bc8f999e515cbe6b0470d4f1c7b1a24994c15acac0bc623990fce8bf",
+          "semantic": false,
+          "non_semantic_reason": "Source-only durable journal dependency: retain a read-only absence authority receipt separately from a confirmed claim in the existing serialized authority-result slot; no HTTP payload is produced here."
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/session_lifecycle.py",
+          "sha256": "f248d3d7bf00aa5b91e9c8767d16bc51254cbc06b523aedd6866152edb51a1f0",
+          "semantic": false,
+          "non_semantic_reason": "Source-only local teardown dependency: retain a managed client until shutdown and transport tasks quiesce; public verification projection remains owned by remote_relationships.py."
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/session_start_cli.py",
+          "sha256": "f8e83dcff3405dbe319981ebb5189358dd91278b5a53233e5ce82f9bd7ab3701",
+          "semantic": false,
+          "non_semantic_reason": "Source-only CLI ownership dependency: a declared managed caller cannot become unowned when resolution probes fail; HTTP request and response field shapes remain unchanged."
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/session_prompts.py",
+          "sha256": "42ea824ce048c80d61c7039cb7f851c88a090d7bbb981f4b7867d4f2a28da12c",
+          "semantic": true,
+          "non_semantic_reason": null
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/db_core.py",
+          "sha256": "f4f919f02cbc3a691e93996dfb8032aa0c0577727166a76a6d77d6a57c4a351f",
+          "semantic": false,
+          "non_semantic_reason": "Source-only schema boundary: schema 27 distinguishes prepared retained-relationship tables and authority identity from the preceding schema 26; HTTP fields and capability floors are unchanged."
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/local_cache_refresh.py",
+          "sha256": "e40a6816e9d75b5b956d848377b5be58a831f11bc86617c11b924cf2c68f511b",
+          "semantic": false,
+          "non_semantic_reason": "Source-only reused native process-group retirement primitive: authority commands use its identity-checked group cleanup; rendering behavior and HTTP wire shapes are unchanged."
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/db_schema.py",
+          "sha256": "42813fe5515a0c31783f27e2391f5b43d50b0c5596dc341637a64f468b2e35b0",
+          "semantic": false,
+          "non_semantic_reason": "Source-only schema preparation: ordinary writable bootstrap prepares and stamps the additive relationship schema; passive preparation and writable adoption remain migration-free."
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/db_events.py",
+          "sha256": "109d8ef7c7217650edf39247a72cee486a693035b9c06e3206535d1adfd1a73c",
+          "semantic": false,
+          "non_semantic_reason": "Source-only durable admission dependency: exact queued-row consumption and turn insertion commit atomically, with rollback on refusal; HTTP field shapes remain unchanged."
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/db_prompts.py",
+          "sha256": "18054c7452d16523ea37e303c72bad47396f63a2e4d9cb78581cac269dc12122",
+          "semantic": false,
+          "non_semantic_reason": "Source-only durable queue dependency: admission peeks without deleting work before an authority await; queue IDs, caller attribution and FIFO order remain durable through process exit."
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/app.py",
+          "sha256": "2ac91227da88c7b886afdf43a7aed5d113d7a9af342bf825a0656e5ca2f4d836",
+          "semantic": false,
+          "non_semantic_reason": "Import placement only: optional registry composition, worktree restoration and candidate serving/relay construction are deferred to their existing use boundaries. No HTTP shape, schema, custody, strict decoding or activation fence changes."
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/runtime_restore.py",
+          "sha256": "3eae167879be5a46d40f49ec38a375dfde11b3011873ff5b69a9227e6d4aafe6",
+          "semantic": false,
+          "non_semantic_reason": "Import placement only: optional registry composition, worktree restoration and candidate serving/relay construction are deferred to their existing use boundaries. No HTTP shape, schema, custody, strict decoding or activation fence changes."
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/runtime_transfer.py",
+          "sha256": "ed1acec054c25dffbb1bc753dc050bf2882e0884d72e4bfa1c3ff17654e5f840",
+          "semantic": false,
+          "non_semantic_reason": "Import placement only: optional registry composition, worktree restoration and candidate serving/relay construction are deferred to their existing use boundaries. No HTTP shape, schema, custody, strict decoding or activation fence changes."
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/plugin_readiness.py",
@@ -347,30 +475,6 @@
           "sha256": "54ad082ab38b584c277963d9583076da4542f7fd9a80852c35fc495d017f0f92",
           "semantic": true,
           "non_semantic_reason": null
-        },
-        {
-          "path": "plugins/agent-bridge/src/agent_bridge/http_provider_sources.py",
-          "sha256": "c29bad0dc0af5938dcd364018c8c05cb857114be01022dfe47aeb696ab0739fb",
-          "semantic": false,
-          "non_semantic_reason": "Local adapter registers explicitly advertised native provider HTTP credential sources and lazily invokes their fixed native command. It does not produce agent-bridge HTTP request/response fields. This source-only transitive closure evidence does not claim the HTTP fixtures capture relay-profile or http-credential native-command semantics."
-        },
-        {
-          "path": "plugins/agent-bridge/src/agent_bridge/provider_process.py",
-          "sha256": "fd8a6f23400b55e9810744dd1a1d16b9a148001504dc3ed5f8002c03f99008e8",
-          "semantic": false,
-          "non_semantic_reason": "Local bounded native-command subprocess helper adds optional stdin bytes and captures output; it is not an agent-bridge HTTP wire producer. Its exact source is pinned as the HTTP credential adapter execution dependency, not as an independently captured native-command protocol vector."
-        },
-        {
-          "path": "plugins/agent-bridge/src/agent_bridge/agent_registry_relay.py",
-          "sha256": "734a026677704eb565d801bf33ae775d946388d12dd87f14d378eb5490760b52",
-          "semantic": false,
-          "non_semantic_reason": "Local startup registration connects the relay builder to the opted-in native HTTP credential-source adapter; it does not add HTTP request/response fields. The pinned startup source is closure evidence only; HTTP fixture execution does not establish native provider discovery or command execution."
-        },
-        {
-          "path": "plugins/agent-bridge/src/agent_bridge/provider_sources.py",
-          "sha256": "2acfba87cca0cd6c08dbc42765a5b1cfe048e402ed8c088b784c7c9b5eadb8ec",
-          "semantic": false,
-          "non_semantic_reason": "Local native provider manifest discovery validates attribution, activation and the http_credentials_version opt-in. These on-disk/native-command declarations are not agent-bridge HTTP payload fields. Pin the actual adapter discovery dependency without presenting unchanged HTTP fixtures as native provider protocol captures."
         }
       ],
       "fixtures": [
@@ -2170,303 +2274,591 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/acquisition-protocol-generation-43.json",
-          "sha256": "82df9b1e8c45a27504d558204f979bf12c39219b7c2eb2771a49b43c04fb2eb8",
-          "role": "Generation-43 independent expected-vector re-attestation: acquisition-protocol-generation-43.json",
-          "generation": 43
-        },
-        {
-          "path": "plugins/agent-bridge/contract/fixtures/http/current/agents-list-generation-43.json",
-          "sha256": "507ba1b024cd0e025031f2f12b346e3ce92f766c24d490ccc5950e44d4473f8d",
-          "role": "Generation-43 independent expected-vector re-attestation: agents-list-generation-43.json",
+          "sha256": "d4d2926d7ce14229df4ac1af09627c8d7b656f6bac735954af5be62ae3a43b65",
+          "role": "Generation-42 independent expected-vector re-attestation: acquisition-protocol-generation-42.json",
           "generation": 43
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/live-message-receipt-generation-43.json",
-          "sha256": "b30f1ad1e3acefda28016f1321881817247de6d79cbdb91c388ea00ebfe65d69",
-          "role": "Generation-43 independent expected-vector re-attestation: live-message-receipt-generation-43.json",
-          "generation": 43
-        },
-        {
-          "path": "plugins/agent-bridge/contract/fixtures/http/current/live-registration-generation-43.json",
-          "sha256": "776b2911fccc7a665074b24ff86e3453a475f508005d32446980522d44aa25ed",
-          "role": "Generation-43 independent expected-vector re-attestation: live-registration-generation-43.json",
-          "generation": 43
-        },
-        {
-          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-bound-extracted-prompt_models-generation-43.json",
-          "sha256": "28ba554967b8f39dfbccf86d781e094037587ba85d78d6aed1a9d61df7fb9e4f",
-          "role": "Generation-43 independent expected-vector re-attestation: native-bound-extracted-prompt_models-generation-43.json",
-          "generation": 43
-        },
-        {
-          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-bound-extracted-routes-prompts-generation-43.json",
-          "sha256": "884a77771c3be33fbe9aa9135fb4edef44c131b0b70a8cdb47f5a909e7b16c52",
-          "role": "Generation-43 independent expected-vector re-attestation: native-bound-extracted-routes-prompts-generation-43.json",
-          "generation": 43
-        },
-        {
-          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-singleton-liveness-generation-43.json",
-          "sha256": "007244ed7be2c16cc23218fdd0e864415f29abae9cac727d272b03c4a3a8fc63",
-          "role": "Generation-43 independent expected-vector re-attestation: native-singleton-liveness-generation-43.json",
-          "generation": 43
-        },
-        {
-          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-singleton-resume-generation-43.json",
-          "sha256": "b349bda4664fd2bf607772521eb373e5811c1ecb202522c6c881f5ca1f24dcc0",
-          "role": "Generation-43 independent expected-vector re-attestation: native-singleton-resume-generation-43.json",
-          "generation": 43
-        },
-        {
-          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-worktree-confirmation-generation-43.json",
-          "sha256": "b5784c91e1432161c70551014381f48b5c1cd652a6a8ca94d4b0897fc2f4f48b",
-          "role": "Generation-43 independent expected-vector re-attestation: native-worktree-confirmation-generation-43.json",
-          "generation": 43
-        },
-        {
-          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-worktree-reconciliation-generation-43.json",
-          "sha256": "4e5844fffe276db9dc56756d91919183ed8087943ac5c104e6f40d69483058e1",
-          "role": "Generation-43 independent expected-vector re-attestation: native-worktree-reconciliation-generation-43.json",
-          "generation": 43
-        },
-        {
-          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-worktree-resume-client-generation-43.json",
-          "sha256": "bfd48b5532925c3e27641891b672e4dfd76ea4247310643b12ad463f4bd2ca7d",
-          "role": "Generation-43 independent expected-vector re-attestation: native-worktree-resume-client-generation-43.json",
-          "generation": 43
-        },
-        {
-          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-worktree-resume-generation-43.json",
-          "sha256": "d5bccad0edd1a7b4724690c13fa0f915595cc9a3c4019cac22d90220d28ffb29",
-          "role": "Generation-43 independent expected-vector re-attestation: native-worktree-resume-generation-43.json",
+          "sha256": "5fe006fcb6cfc5bab622ac59917e23acbd5d0abb43dfedcf1b1161850b074380",
+          "role": "Generation-42 independent expected-vector re-attestation: live-message-receipt-generation-42.json",
           "generation": 43
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/peer-replies-generation-43.json",
-          "sha256": "cd63b483e81435ca9538ace531a9c1f17f63201594827fddf4bfe4605f810be9",
-          "role": "Generation-43 independent expected-vector re-attestation: peer-replies-generation-43.json",
-          "generation": 43
-        },
-        {
-          "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-admission-generation-43.json",
-          "sha256": "7ef8c7838ef326218c5b90e38d4eae1633cdc56f25026781fa5c48e9d09f3a97",
-          "role": "Generation-43 independent expected-vector re-attestation: provider-creation-admission-generation-43.json",
-          "generation": 43
-        },
-        {
-          "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-generation-43.json",
-          "sha256": "c69ad9cb485634cc7f3d06a71b5c32b6c010718a67886dc8ba56f4a23261c9f3",
-          "role": "Generation-43 independent expected-vector re-attestation: provider-creation-generation-43.json",
-          "generation": 43
-        },
-        {
-          "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-models-generation-43.json",
-          "sha256": "e9c29c06f92e0ffd38ca1226b721edac5787b261d0bfa2bf5af48cad3637879b",
-          "role": "Generation-43 independent expected-vector re-attestation: provider-creation-models-generation-43.json",
-          "generation": 43
-        },
-        {
-          "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-native-generation-43.json",
-          "sha256": "ca1248a037ee1d4914c7849a7adfb6312d4d5481980df1d42238b1fefbfb1a6d",
-          "role": "Generation-43 independent expected-vector re-attestation: provider-creation-native-generation-43.json",
-          "generation": 43
-        },
-        {
-          "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-refresh-generation-43.json",
-          "sha256": "6cdfc436376e8027bb38718324d2245ed90cc2e5050008be8b517c43dc0578f2",
-          "role": "Generation-43 independent expected-vector re-attestation: provider-creation-refresh-generation-43.json",
-          "generation": 43
-        },
-        {
-          "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-resume-generation-43.json",
-          "sha256": "50b4e761de7e1d66fa3d4af897e1cadbe701cd7e264b4c60629dbf6eec62ccde",
-          "role": "Generation-43 independent expected-vector re-attestation: provider-creation-resume-generation-43.json",
-          "generation": 43
-        },
-        {
-          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-acp-client_answers-generation-43.json",
-          "sha256": "fefac70e42bd106bb3d1bc2160f79764e2f997851d0d598939e46270e40b2d36",
-          "role": "Generation-43 independent expected-vector re-attestation: remote-acp-client_answers-generation-43.json",
-          "generation": 43
-        },
-        {
-          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-acp-client_session_start-generation-43.json",
-          "sha256": "81df7f86da29d79a4e7a7ebabd4a532d171f1a85d95f8b8dd4f303197699012b",
-          "role": "Generation-43 independent expected-vector re-attestation: remote-acp-client_session_start-generation-43.json",
-          "generation": 43
-        },
-        {
-          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-acp-models-generation-43.json",
-          "sha256": "c22416efb622e07d8df517b962c7d46de9789f77d3280e7aba219e9f1171d8c3",
-          "role": "Generation-43 independent expected-vector re-attestation: remote-acp-models-generation-43.json",
-          "generation": 43
-        },
-        {
-          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-acp-progress-generation-43.json",
-          "sha256": "5d4c43720d76920b14ea43e6e035bdddb4003f168a1c936a2d86883f606f7003",
-          "role": "Generation-43 independent expected-vector re-attestation: remote-acp-progress-generation-43.json",
-          "generation": 43
-        },
-        {
-          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-acp-remote_acp_sessions-generation-43.json",
-          "sha256": "be2fd0a5b31d5990d0b89f110f7691b842037f3e79775520d652f8745b8637ca",
-          "role": "Generation-43 independent expected-vector re-attestation: remote-acp-remote_acp_sessions-generation-43.json",
-          "generation": 43
-        },
-        {
-          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-acp-routes-answers-generation-43.json",
-          "sha256": "3e861800cd4c0d8cbfe24d733e9e4a86e84b502c5266cc5b5deab74e7aa80b20",
-          "role": "Generation-43 independent expected-vector re-attestation: remote-acp-routes-answers-generation-43.json",
-          "generation": 43
-        },
-        {
-          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-message-receipt-generation-43.json",
-          "sha256": "a9adea5b449a3e77e8d2cc342ba289e2ff7da9546150c31e28bdd68e825cb9d3",
-          "role": "Generation-43 independent expected-vector re-attestation: remote-message-receipt-generation-43.json",
-          "generation": 43
-        },
-        {
-          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-message-receipt-ssh-profile-generation-43.json",
-          "sha256": "8176077ae4783667e66880450efeec05f01b8b5d73503cfd1b1208c3909bb540",
-          "role": "Generation-43 independent expected-vector re-attestation: remote-message-receipt-ssh-profile-generation-43.json",
-          "generation": 43
-        },
-        {
-          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-operation-versions-generation-43.json",
-          "sha256": "b9efdf44db869533f81e00209d891f1a4edf9749bc20a474b2ad9739f4119acd",
-          "role": "Generation-43 independent expected-vector re-attestation: remote-operation-versions-generation-43.json",
-          "generation": 43
-        },
-        {
-          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-peer-generation-43.json",
-          "sha256": "1a3550e81fe1b6d0446a1b8eeea38884775d4083c14d96cb298cd38704777f72",
-          "role": "Generation-43 independent expected-vector re-attestation: remote-peer-generation-43.json",
-          "generation": 43
-        },
-        {
-          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-zero-reply-generation-43.json",
-          "sha256": "0275e91bf6b4e92772cf0d02957adb03d5fb110eb9aba1c020924e89accba215",
-          "role": "Generation-43 independent expected-vector re-attestation: remote-zero-reply-generation-43.json",
+          "sha256": "69e7436e65b2cf7e09f7af32a5b35de909afbdc44cdcb909095b959d1cd7f2fc",
+          "role": "Generation-42 independent expected-vector re-attestation: peer-replies-generation-42.json",
           "generation": 43
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/workspace-creation-generation-43.json",
-          "sha256": "6a237fe20668f3cd458476895398514bb8e67e54b9e6ef77a5751e8a3cd1905e",
-          "role": "Generation-43 independent expected-vector re-attestation: workspace-creation-generation-43.json",
+          "sha256": "f8e811b352fed913a3c525c1464462cb84ef152fad4b7a98df601965ef6c8a57",
+          "role": "Generation-42 independent expected-vector re-attestation: workspace-creation-generation-42.json",
           "generation": 43
         },
         {
-          "path": "plugins/agent-bridge/contract/fixtures/http/current/workspace-creation-models-generation-43.json",
-          "sha256": "f26e7892b2807127d98eb3d93b72254d25bd4c909b4f77b61102a1190618c7ab",
-          "role": "Generation-43 independent expected-vector re-attestation: workspace-creation-models-generation-43.json",
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-message-receipt-generation-43.json",
+          "sha256": "24eb0db81ff434799556ab81876d74bbeb01102da71d18c98d9a82024618bcaa",
+          "role": "Generation-42 independent expected-vector re-attestation: remote-message-receipt-generation-42.json",
+          "generation": 43
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-zero-reply-generation-43.json",
+          "sha256": "37857ebc9a84195647e64183553457cb56a0020ad740ac01d77a1c59c70c5042",
+          "role": "Generation-42 independent expected-vector re-attestation: remote-zero-reply-generation-42.json",
+          "generation": 43
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-generation-43.json",
+          "sha256": "85abc1335151d5897cfae56db30a130c27d34e534dc40b9494e4ed74fc1c2a10",
+          "role": "Generation-42 independent expected-vector re-attestation: provider-creation-generation-42.json",
           "generation": 43
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/workspace-creation-routes-generation-43.json",
-          "sha256": "b96e9fbb334d303262b9ba344d2a6b9058bd1eb1c7d4f9b3afc9f377e40f64cb",
-          "role": "Generation-43 independent expected-vector re-attestation: workspace-creation-routes-generation-43.json",
+          "sha256": "ffcf050736863a54b0616e86946d59c214ee0f56dd0e8ab062d239b33944fc25",
+          "role": "Generation-42 independent expected-vector re-attestation: workspace-creation-routes-generation-42.json",
           "generation": 43
         },
         {
-          "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-owner-record-generation-43.json",
-          "sha256": "564d0cf3994e108dd846785137d1bf47345f125a77b384f80f57d03d4f85a998",
-          "role": "Generation-43 independent expected-vector re-attestation: worktree-owner-record-generation-43.json",
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-peer-generation-43.json",
+          "sha256": "c61b53b0065d445c8d3fc6185e4248ef31fc9b077fa3620c94c8b0b51e98cf9f",
+          "role": "Generation-42 independent expected-vector re-attestation: remote-peer-generation-42.json",
           "generation": 43
         },
         {
-          "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-client_worktrees-generation-43.json",
-          "sha256": "2a5f8a9db9775821ba11f720995b704557d661edd040d6d8ac6eed023f33cd15",
-          "role": "Generation-43 independent expected-vector re-attestation: worktree-render-client_worktrees-generation-43.json",
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/agents-list-generation-43.json",
+          "sha256": "02a3ceefb88b69b3d99048c9a403bb1ba546bb96d1c4ed2f116d0b84e34fd82e",
+          "role": "Generation-42 independent expected-vector re-attestation: agents-list-generation-42.json",
+          "generation": 43
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-bound-extracted-prompt_models-generation-43.json",
+          "sha256": "ce7a0fbbfcd9f250367c0a1c36a0d957621c52451a9383505b54361023e28d26",
+          "role": "Generation-42 independent expected-vector re-attestation: native-bound-extracted-prompt_models-generation-42.json",
+          "generation": 43
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-models-generation-43.json",
+          "sha256": "cdaf26806f89c7f230d298f3e1f5279542ad5abe9f7a964c597f36b6b9c8e853",
+          "role": "Generation-42 independent expected-vector re-attestation: provider-creation-models-generation-42.json",
+          "generation": 43
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-bound-extracted-routes-prompts-generation-43.json",
+          "sha256": "85ba878ddd1cd46c54949795c26044ef5c38397435345d1e670d043badb6d9f5",
+          "role": "Generation-42 independent expected-vector re-attestation: native-bound-extracted-routes-prompts-generation-42.json",
+          "generation": 43
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/live-registration-generation-43.json",
+          "sha256": "215956c2c673c575fadec6a6732a2c20ab5a5727b682cc3feb6e9b515ed26f18",
+          "role": "Generation-42 independent expected-vector re-attestation: live-registration-generation-42.json",
+          "generation": 43
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-admission-generation-43.json",
+          "sha256": "81677595d5125e9069b699f70d90a4cc78bd912389f11fb5190cfc1bd4d31294",
+          "role": "Generation-42 independent expected-vector re-attestation: provider-creation-admission-generation-42.json",
+          "generation": 43
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-native-generation-43.json",
+          "sha256": "b35544a78998d183464af3606c6d29a8de2adfedf14967e3d14a9fe552a568eb",
+          "role": "Generation-42 independent expected-vector re-attestation: provider-creation-native-generation-42.json",
+          "generation": 43
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-resume-generation-43.json",
+          "sha256": "b0b85612b044c002858fcb4edcab7be88d2511864cbe5fd7dbab0c716322b357",
+          "role": "Generation-42 independent expected-vector re-attestation: provider-creation-resume-generation-42.json",
+          "generation": 43
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-refresh-generation-43.json",
+          "sha256": "a6c7602928aea6cadc71ec17c9e63420824abf02e89f344706b42e9cda5f6880",
+          "role": "Generation-42 independent expected-vector re-attestation: provider-creation-refresh-generation-42.json",
           "generation": 43
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-generation-43.json",
-          "sha256": "6265ac55a84f929db8e3a6d4f02c32d6ab6e57ed78c582a8f37128e66e2d9ab3",
-          "role": "Generation-43 independent expected-vector re-attestation: worktree-render-generation-43.json",
+          "sha256": "e08781e74980d06013773c2c80cd335f141260dbec580d43d937476a0786b1ae",
+          "role": "Generation-42 independent expected-vector re-attestation: worktree-render-generation-42.json",
           "generation": 43
         },
         {
-          "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-worktree_entry-generation-43.json",
-          "sha256": "fbd5eb08e6618969cb3ae2c41e90575c137220b53730d59ed1fc2a29d3a3c900",
-          "role": "Generation-43 independent expected-vector re-attestation: worktree-render-worktree_entry-generation-43.json",
-          "generation": 43
-        },
-        {
-          "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-worktree_refresh-generation-43.json",
-          "sha256": "4e440ea863cb215c6efcd69db2a18fc8a66f9f93cb183686ebd012d44c6c2991",
-          "role": "Generation-43 independent expected-vector re-attestation: worktree-render-worktree_refresh-generation-43.json",
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/workspace-creation-models-generation-43.json",
+          "sha256": "e2092934418996fe7d2d7c6038db40c74a6d75138db45f851b43c1294c4933e4",
+          "role": "Generation-42 independent expected-vector re-attestation: workspace-creation-models-generation-42.json",
           "generation": 43
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-worktrees-generation-43.json",
-          "sha256": "6f5983dd6c157efe61c4562de86fc75c902435906b4a2c7ea0853f87139d9686",
-          "role": "Generation-43 independent expected-vector re-attestation: worktree-render-worktrees-generation-43.json",
+          "sha256": "a90c69806da8aeff6600e5e9e163d2b9c4b248cae834bb721e56f206657918e0",
+          "role": "Generation-42 independent expected-vector re-attestation: worktree-render-worktrees-generation-42.json",
+          "generation": 43
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-worktree_refresh-generation-43.json",
+          "sha256": "6bbb6fde86c5eea228afe03780452269ec59ec5b0949e024cd24e386a9b644c5",
+          "role": "Generation-42 independent expected-vector re-attestation: worktree-render-worktree_refresh-generation-42.json",
+          "generation": 43
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-client_worktrees-generation-43.json",
+          "sha256": "ea5e5719b7aebe7d3824e2756ecc633badb780ea46c373763d42e5cc9af7b37b",
+          "role": "Generation-42 independent expected-vector re-attestation: worktree-render-client_worktrees-generation-42.json",
+          "generation": 43
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-worktree_entry-generation-43.json",
+          "sha256": "359cb2fe92cc0a3b0c30fdd77fb272f047305d4201d39a682106a82c127594fb",
+          "role": "Generation-42 independent expected-vector re-attestation: worktree-render-worktree_entry-generation-42.json",
+          "generation": 43
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-acp-models-generation-43.json",
+          "sha256": "b555643320e584300562ae9cddd26d8fe866718bd8cb470b972113e97a93b59d",
+          "role": "Generation-42 independent expected-vector re-attestation: remote-acp-models-generation-42.json",
+          "generation": 43
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-acp-client_session_start-generation-43.json",
+          "sha256": "1d4cb6b3a0e691cd28570ec5f147039df589d36518d39083a8d46ab46103dff4",
+          "role": "Generation-42 independent expected-vector re-attestation: remote-acp-client_session_start-generation-42.json",
+          "generation": 43
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-acp-client_answers-generation-43.json",
+          "sha256": "1455e479d79936c4b0a70eb3686c1d6aa30384cc99c4f28acfcd0595404b1f2a",
+          "role": "Generation-42 independent expected-vector re-attestation: remote-acp-client_answers-generation-42.json",
+          "generation": 43
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-acp-routes-answers-generation-43.json",
+          "sha256": "37b3cde77767c4f1e2daecb707c25e57dcab41de5a3dad948c5b8c42b8ce7421",
+          "role": "Generation-42 independent expected-vector re-attestation: remote-acp-routes-answers-generation-42.json",
+          "generation": 43
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-acp-remote_acp_sessions-generation-43.json",
+          "sha256": "ebb27e537d8b9d10ef4306f745b588ca149576646d7e39663b5bba9522686e3f",
+          "role": "Generation-42 independent expected-vector re-attestation: remote-acp-remote_acp_sessions-generation-42.json",
+          "generation": 43
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-acp-progress-generation-43.json",
+          "sha256": "52d18082b1a04d483767818db14136a119ca3954517499480fe4e22a7b04d885",
+          "role": "Generation-42 independent expected-vector re-attestation: remote-acp-progress-generation-42.json",
+          "generation": 43
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-operation-versions-generation-43.json",
+          "sha256": "4f541fb5d109af02e240da639fe6a54958fc7e5a37a1e475fe2765ad46fa90a7",
+          "role": "Generation-42 independent expected-vector re-attestation: remote-operation-versions-generation-42.json",
+          "generation": 43
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-worktree-resume-generation-43.json",
+          "sha256": "11fb8a35f707a3194b0c2c31ce31b14f1e3fabf3a691ab1ce75a8edeb2954ffd",
+          "role": "Generation-42 independent expected-vector re-attestation: native-worktree-resume-generation-42.json",
+          "generation": 43
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-worktree-resume-client-generation-43.json",
+          "sha256": "7e1f65d09dcda44993977d99f411b9d2357e75b656805d67c8c02c2c96f0b20a",
+          "role": "Generation-42 independent expected-vector re-attestation: native-worktree-resume-client-generation-42.json",
+          "generation": 43
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-singleton-resume-generation-43.json",
+          "sha256": "331a6a128e8b5a04382eb8ba607a525d001e00410d673888e51f86b69ce10e23",
+          "role": "Generation-42 independent expected-vector re-attestation: native-singleton-resume-generation-42.json",
+          "generation": 43
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-worktree-confirmation-generation-43.json",
+          "sha256": "369270e80182ef69e9b59138e77d17b1b19091e5aad0a4964d33424bf160a961",
+          "role": "Generation-42 independent expected-vector re-attestation: native-worktree-confirmation-generation-42.json",
+          "generation": 43
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-owner-record-generation-43.json",
+          "sha256": "438f0adeaff2366f2d86d9c9822e1b6a9c51a972333bbfc8c656dca6df1cfb04",
+          "role": "Generation-42 independent expected-vector re-attestation: worktree-owner-record-generation-42.json",
+          "generation": 43
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-worktree-reconciliation-generation-43.json",
+          "sha256": "e6dd0cf0257c398c1eaba8a4c2fb48eec248189c62f79497fb4b09a8381e3e45",
+          "role": "Generation-42 independent expected-vector re-attestation: native-worktree-reconciliation-generation-42.json",
+          "generation": 43
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-singleton-liveness-generation-43.json",
+          "sha256": "5e1a220be8e5a3cb445e11ae00a608b421d283e5c400ffaa5286f3590a788174",
+          "role": "Generation-42 independent expected-vector re-attestation: native-singleton-liveness-generation-42.json",
           "generation": 43
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-worktrees-ssh-profile-generation-43.json",
-          "sha256": "2f49fc89ac795f9e3af9a95800b0266c81f8ade99da0df2f47505e9f12bae8d9",
-          "role": "Generation-43 independent expected-vector re-attestation: worktree-render-worktrees-ssh-profile-generation-43.json",
+          "sha256": "3f88af73a563606c92c9ce12bcdfea4c8cccc344cdb0f9228bc19db18df0988b",
+          "role": "Generation-42 independent expected-vector re-attestation: worktree-render-worktrees-ssh-profile-generation-42.json",
           "generation": 43
         },
         {
-          "path": "plugins/agent-bridge/contract/fixtures/http/current/startup-plugin-readiness-generation-43.json",
-          "sha256": "18b7a84115d3e1b1355958a646b13e4bb21712ffa251d948f03f0d5641982e73",
-          "role": "Freeze independent typed startup-readiness, queued-task, mode, and legacy-omission vectors; model, durable queue, native observation and delivery guards exercise the actual owning source without plugin reload or model-side readiness inference.",
-          "generation": 43
-        },
-        {
-          "path": "plugins/agent-bridge/contract/fixtures/http/current/startup-plugin-readiness-live_controls-generation-43.json",
-          "sha256": "00cec761027dc2e2ad3f62f1952836d747fe734bf0132b30a8b355a1ae36bab9",
-          "role": "Freeze independent typed startup-readiness, queued-task, mode, and legacy-omission vectors; model, durable queue, native observation and delivery guards exercise the actual owning source without plugin reload or model-side readiness inference.",
-          "generation": 43
-        },
-        {
-          "path": "plugins/agent-bridge/contract/fixtures/http/current/startup-plugin-readiness-acquisition_contract-generation-43.json",
-          "sha256": "2f7d5f079f4f58614e80ff32c8681d37373988a502cae903eb261fae377c2324",
-          "role": "Freeze independent typed startup-readiness, queued-task, mode, and legacy-omission vectors; model, durable queue, native observation and delivery guards exercise the actual owning source without plugin reload or model-side readiness inference.",
-          "generation": 43
-        },
-        {
-          "path": "plugins/agent-bridge/contract/fixtures/http/current/startup-plugin-readiness-routes-live_sessions-generation-43.json",
-          "sha256": "bf086a70b58a4faa3cffc8d6618db0651925abb826c676c6c41a14560fdd4d44",
-          "role": "Freeze independent typed startup-readiness, queued-task, mode, and legacy-omission vectors; model, durable queue, native observation and delivery guards exercise the actual owning source without plugin reload or model-side readiness inference.",
-          "generation": 43
-        },
-        {
-          "path": "plugins/agent-bridge/contract/fixtures/http/current/startup-plugin-readiness-native-observation-generation-43.json",
-          "sha256": "66a10642c395d87f144157ac817b92887ab06cf3e4eb43b7a98e963a14d38c01",
-          "role": "Freeze independent typed startup-readiness, queued-task, mode, and legacy-omission vectors; model, durable queue, native observation and delivery guards exercise the actual owning source without plugin reload or model-side readiness inference.",
-          "generation": 43
-        },
-        {
-          "path": "plugins/agent-bridge/contract/fixtures/http/current/startup-plugin-readiness-native-delivery-generation-43.json",
-          "sha256": "92eeeac451bddbd30bd476a848c633c04cba1785b5ea501362ade660cb69b1bc",
-          "role": "Freeze independent typed startup-readiness, queued-task, mode, and legacy-omission vectors; model, durable queue, native observation and delivery guards exercise the actual owning source without plugin reload or model-side readiness inference.",
-          "generation": 43
-        },
-        {
-          "path": "plugins/agent-bridge/contract/fixtures/http/current/startup-plugin-readiness-client-cli-mode-generation-43.json",
-          "sha256": "834df59f4736ee0415db57b3d252bafb6885f120ddca19bf34f671d9ef78ce43",
-          "role": "Preserve typed HTTP-41 startup readiness after mechanical extraction of the original client/control producer; public routes and capability floors are unchanged.",
-          "generation": 43
-        },
-        {
-          "path": "plugins/agent-bridge/contract/fixtures/http/current/startup-plugin-readiness-routes-live-startup-controls-generation-43.json",
-          "sha256": "f0366c54cebad810316f7478ccf4e6e114c24be89d2eb5233304086a1f58de70",
-          "role": "Preserve typed HTTP-41 startup readiness after mechanical extraction of the original client/control producer; public routes and capability floors are unchanged.",
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-message-receipt-ssh-profile-generation-43.json",
+          "sha256": "ea4418c3b390eb6a81fc4ff70edc2c2959dfde005f53a6f3b7b1eb72c0e0dede",
+          "role": "Generation-42 independent expected-vector re-attestation: remote-message-receipt-ssh-profile-generation-42.json",
           "generation": 43
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-acp-targets-generation-43.json",
-          "sha256": "e15cc14c24df86ad622cefbaed13cb76f3162a80cb8343f97280fcb019ad03bc",
-          "role": "Generation-43 independent expected-vector re-attestation: remote-acp-targets-generation-43.json",
+          "sha256": "0a2a7a9c7f157ff3569d7b17973376e55d4b8ff4e3e343bd4aa1c8d22bbacf3c",
+          "role": "Generation-42 independent expected-vector re-attestation: remote-acp-targets-generation-42.json",
           "generation": 43
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/workspace-exact-owner-generation-43.json",
-          "sha256": "865c7d4c6e7597640b2e0cdf6bc2348b82fee4faeeb65859fc2529ae14f0db62",
-          "role": "Generation-43 independent expected-vector re-attestation: workspace-exact-owner-generation-43.json",
+          "sha256": "8f52f6fa4ca90a34e2655f48044c840dd2bfbfd9a28d36a6a21c037d0e10e709",
+          "role": "Generation-42 independent expected-vector re-attestation: workspace-exact-owner-generation-42.json",
           "generation": 43
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/owned-remote-generation-43.json",
+          "sha256": "317f1d39efa7d985a3307a1b7de7cfa34c41b9c9567a1bf265efdedee2e9e1d9",
+          "role": "Independent managed remote ownership client and inspection expectations",
+          "generation": 43
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/owned-remote-routes-generation-43.json",
+          "sha256": "feaf4034720ca39e7fed0dc1dd46dd13b9629511a1a768656a912e314cc8a694",
+          "role": "Retained ownership HTTP adapter expectations",
+          "generation": 43
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/managed-drain-generation-43.json",
+          "sha256": "1307427228491be3efa7fcfcfdc7d4cbb793b7e424870a708986201223fa99ff",
+          "role": "Independent managed inspection versus clean drain admission expectations",
+          "generation": 43
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/acquisition-protocol-generation-44.json",
+          "sha256": "6c9f274a45c6ec63e6230c0a01a2e7f741d0f2860f91a8da1e149a0e3cdfefd4",
+          "role": "Generation-43 independent expected-vector re-attestation: acquisition-protocol-generation-43.json",
+          "generation": 44
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/live-message-receipt-generation-44.json",
+          "sha256": "af4b0f585d9b3244edd266ec6606dbe50dde76d7f990d49eaffe3bdb8d83fd3f",
+          "role": "Generation-43 independent expected-vector re-attestation: live-message-receipt-generation-43.json",
+          "generation": 44
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/peer-replies-generation-44.json",
+          "sha256": "1fcc885ac45c4ea9d5a6020c1e1f105f295c93922f2b4e4d116c1c5cd7474a86",
+          "role": "Generation-43 independent expected-vector re-attestation: peer-replies-generation-43.json",
+          "generation": 44
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/workspace-creation-generation-44.json",
+          "sha256": "bb8f1bc6a5cba4df2a5f3e8d9134be387b19bc0a484ad3059423959441083a80",
+          "role": "Generation-43 independent expected-vector re-attestation: workspace-creation-generation-43.json",
+          "generation": 44
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-message-receipt-generation-44.json",
+          "sha256": "0828419177775c98081f82903c8fac35708f3f710cb4acabe4e3a9c9ee585e3c",
+          "role": "Generation-43 independent expected-vector re-attestation: remote-message-receipt-generation-43.json",
+          "generation": 44
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-zero-reply-generation-44.json",
+          "sha256": "d1c593fe5ff183aa33404ab1ff97535137058583afbcf69e493de3b5f0d7c15f",
+          "role": "Generation-43 independent expected-vector re-attestation: remote-zero-reply-generation-43.json",
+          "generation": 44
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-generation-44.json",
+          "sha256": "3d2882a83501e4bd027916fe9b73e0aafc273d0195f4b087a96bba41c7269f4f",
+          "role": "Generation-43 independent expected-vector re-attestation: provider-creation-generation-43.json",
+          "generation": 44
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/workspace-creation-routes-generation-44.json",
+          "sha256": "3f8084b42a58bc370bc079acd9258f05334e3c7ff024711abc7b2a2e232b6de6",
+          "role": "Generation-43 independent expected-vector re-attestation: workspace-creation-routes-generation-43.json",
+          "generation": 44
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-peer-generation-44.json",
+          "sha256": "ca829a903e3ebd02b918ca491dad1bbe2677b5c24759a08d5974f7584c591d90",
+          "role": "Generation-43 independent expected-vector re-attestation: remote-peer-generation-43.json",
+          "generation": 44
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/agents-list-generation-44.json",
+          "sha256": "aa56cf4ea313040285ac0513dbf6273df9972f477c377bdc7bd461cc9aa131c3",
+          "role": "Generation-43 independent expected-vector re-attestation: agents-list-generation-43.json",
+          "generation": 44
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-bound-extracted-prompt_models-generation-44.json",
+          "sha256": "87214688e11384fca04f5cd57c49839c7780003e44644c831d29064a934f330f",
+          "role": "Generation-43 independent expected-vector re-attestation: native-bound-extracted-prompt_models-generation-43.json",
+          "generation": 44
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-models-generation-44.json",
+          "sha256": "c61422373574de5c6c27bc93b8a298b16930c72d6c5ad92e32740646312227b3",
+          "role": "Generation-43 independent expected-vector re-attestation: provider-creation-models-generation-43.json",
+          "generation": 44
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-bound-extracted-routes-prompts-generation-44.json",
+          "sha256": "5629d11289fa74780839afe13279183835007337ce970a68a633f711b7451a98",
+          "role": "Generation-43 independent expected-vector re-attestation: native-bound-extracted-routes-prompts-generation-43.json",
+          "generation": 44
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/live-registration-generation-44.json",
+          "sha256": "b6d95127143fe41552b964967d82b3b507e9d33b5ea35b831160c3f07beb503f",
+          "role": "Generation-43 independent expected-vector re-attestation: live-registration-generation-43.json",
+          "generation": 44
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-admission-generation-44.json",
+          "sha256": "4f4ab9f1528f8239816b62cc76098523b750df40506eddf4b2be206067878c3d",
+          "role": "Generation-43 independent expected-vector re-attestation: provider-creation-admission-generation-43.json",
+          "generation": 44
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-native-generation-44.json",
+          "sha256": "ea4c043795568e89b653b398c357fc5aa82aaaaf7c8f303dc9556623a59af667",
+          "role": "Generation-43 independent expected-vector re-attestation: provider-creation-native-generation-43.json",
+          "generation": 44
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-resume-generation-44.json",
+          "sha256": "7be80241acc9ad6aa89258548cb6bec3e2b686e74382f3cd56dd9c99608a80d6",
+          "role": "Generation-43 independent expected-vector re-attestation: provider-creation-resume-generation-43.json",
+          "generation": 44
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-refresh-generation-44.json",
+          "sha256": "373bdea5322193545bd4aef70cc9587a66f86c3504332e5eebbb8a8f544af52e",
+          "role": "Generation-43 independent expected-vector re-attestation: provider-creation-refresh-generation-43.json",
+          "generation": 44
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-generation-44.json",
+          "sha256": "d21d9c01fe231776b5e111727db47f6b245a1f39b8005f925b6487e97da67355",
+          "role": "Generation-43 independent expected-vector re-attestation: worktree-render-generation-43.json",
+          "generation": 44
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/workspace-creation-models-generation-44.json",
+          "sha256": "579371afbf57b21cd3e714634d0a6f924b5344016c07e74634e06ad90d9b7ccc",
+          "role": "Generation-43 independent expected-vector re-attestation: workspace-creation-models-generation-43.json",
+          "generation": 44
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-worktrees-generation-44.json",
+          "sha256": "4ae9bc36e3858419fe87f87c8296cfa5b79cc5fe9b4b5c37cd978265e25db9de",
+          "role": "Generation-43 independent expected-vector re-attestation: worktree-render-worktrees-generation-43.json",
+          "generation": 44
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-worktree_refresh-generation-44.json",
+          "sha256": "756f22df0f6524598a4ba67daffe6dc2f05f827fd7c7f074b66445691d6fdf8a",
+          "role": "Generation-43 independent expected-vector re-attestation: worktree-render-worktree_refresh-generation-43.json",
+          "generation": 44
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-client_worktrees-generation-44.json",
+          "sha256": "60079fe6ed45c58be1bb35bd488951d8b240b14cecc74fd862203eafc27e939c",
+          "role": "Generation-43 independent expected-vector re-attestation: worktree-render-client_worktrees-generation-43.json",
+          "generation": 44
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-worktree_entry-generation-44.json",
+          "sha256": "e9b6ba6a43fceacce8aa43aa5b13ef3ab2b52b0c9fc812dbea4536c4813d9b2f",
+          "role": "Generation-43 independent expected-vector re-attestation: worktree-render-worktree_entry-generation-43.json",
+          "generation": 44
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-acp-models-generation-44.json",
+          "sha256": "b24f85e382916ed75e36de8757784ecd5c371a12b9a36ffb8be1ee4bc6804f53",
+          "role": "Generation-43 independent expected-vector re-attestation: remote-acp-models-generation-43.json",
+          "generation": 44
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-acp-client_session_start-generation-44.json",
+          "sha256": "bb6b07cea38cf1bbf23845dca33b591d774bd4f223652029fb9295ddde3c05c5",
+          "role": "Generation-43 independent expected-vector re-attestation: remote-acp-client_session_start-generation-43.json",
+          "generation": 44
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-acp-client_answers-generation-44.json",
+          "sha256": "2f00b31df4cdc84913abf86b435b8162e65cde201790bf297ed70fecd36802fd",
+          "role": "Generation-43 independent expected-vector re-attestation: remote-acp-client_answers-generation-43.json",
+          "generation": 44
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-acp-routes-answers-generation-44.json",
+          "sha256": "30d1664d332ab52ccbeda1526130a3d1022cd979c20370d32ab74b275b42a363",
+          "role": "Generation-43 independent expected-vector re-attestation: remote-acp-routes-answers-generation-43.json",
+          "generation": 44
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-acp-remote_acp_sessions-generation-44.json",
+          "sha256": "51cf371b191367298521c21791685d87ab5f16496767594807ca2e9a0ab74487",
+          "role": "Generation-43 independent expected-vector re-attestation: remote-acp-remote_acp_sessions-generation-43.json",
+          "generation": 44
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-acp-progress-generation-44.json",
+          "sha256": "51194cd7c4b3befdaa29f1d6eff1f0cd1f103cedaf7c40aa5b7fffe4d2cf7ac4",
+          "role": "Generation-43 independent expected-vector re-attestation: remote-acp-progress-generation-43.json",
+          "generation": 44
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-operation-versions-generation-44.json",
+          "sha256": "f51f269c7ad44620a2c478b242e5c1cc4200f196b0c8470cc14db7456c54ac51",
+          "role": "Generation-43 independent expected-vector re-attestation: remote-operation-versions-generation-43.json",
+          "generation": 44
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-worktree-resume-generation-44.json",
+          "sha256": "835cd33440ccb6d3b883ed10262f5d8d5edc72c82e46ec8e6ef64d0b0196a842",
+          "role": "Generation-43 independent expected-vector re-attestation: native-worktree-resume-generation-43.json",
+          "generation": 44
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-worktree-resume-client-generation-44.json",
+          "sha256": "ed288282bef157cf76f21f47ab4f132d41fe6cba874dd6991fca9958eaee373a",
+          "role": "Generation-43 independent expected-vector re-attestation: native-worktree-resume-client-generation-43.json",
+          "generation": 44
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-singleton-resume-generation-44.json",
+          "sha256": "494d8762bc0a73c8a975ca0e5db33bf9e70e9cb343425cc74caa3c317e238b1c",
+          "role": "Generation-43 independent expected-vector re-attestation: native-singleton-resume-generation-43.json",
+          "generation": 44
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-worktree-confirmation-generation-44.json",
+          "sha256": "085e4dfa07c756e7bb6c01a40b7cc2c9eddc8f3d19983c4fa2a47a44560d1a94",
+          "role": "Generation-43 independent expected-vector re-attestation: native-worktree-confirmation-generation-43.json",
+          "generation": 44
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-owner-record-generation-44.json",
+          "sha256": "e18ad86fdc31481525485fa26387f5657d3f8e6931861645ce4e242ccb80f81d",
+          "role": "Generation-43 independent expected-vector re-attestation: worktree-owner-record-generation-43.json",
+          "generation": 44
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-worktree-reconciliation-generation-44.json",
+          "sha256": "217f3e8016f5c791b55113012504d5de159bbe6b1ab459dea8507b8d995d55eb",
+          "role": "Generation-43 independent expected-vector re-attestation: native-worktree-reconciliation-generation-43.json",
+          "generation": 44
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-singleton-liveness-generation-44.json",
+          "sha256": "34be72cb7c4379852dbe311b01b2e70f2140cf65cc2d4f1aeb66d7fc826985c5",
+          "role": "Generation-43 independent expected-vector re-attestation: native-singleton-liveness-generation-43.json",
+          "generation": 44
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-worktrees-ssh-profile-generation-44.json",
+          "sha256": "46189a44599ec5d83cd70ede06a2cf3a1156c317ad0dfb20b0572474883a501d",
+          "role": "Generation-43 independent expected-vector re-attestation: worktree-render-worktrees-ssh-profile-generation-43.json",
+          "generation": 44
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-message-receipt-ssh-profile-generation-44.json",
+          "sha256": "0c6d053e5c28025d33ea11ace7b5e69eb03f65bde544b80d31ee87f1b7ada7e9",
+          "role": "Generation-43 independent expected-vector re-attestation: remote-message-receipt-ssh-profile-generation-43.json",
+          "generation": 44
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-acp-targets-generation-44.json",
+          "sha256": "0bc606bb93deb53406f93f3c46bf112f8469db6736c7e91db268a629d78ec563",
+          "role": "Generation-43 independent expected-vector re-attestation: remote-acp-targets-generation-43.json",
+          "generation": 44
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/workspace-exact-owner-generation-44.json",
+          "sha256": "ba4de38fb558452a9bb7a352581e18fc23992e7cbec886004cae2feec24fa9fa",
+          "role": "Generation-43 independent expected-vector re-attestation: workspace-exact-owner-generation-43.json",
+          "generation": 44
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/owned-remote-generation-44.json",
+          "sha256": "36e2299672a7d4e5de7159d9348aaeaa383938a93d1797f3ff9f9135e8781125",
+          "role": "Generation-43 independent expected-vector re-attestation: owned-remote-generation-43.json",
+          "generation": 44
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/owned-remote-routes-generation-44.json",
+          "sha256": "db603769e601b8f98f3358e30716df98e89c6feefc14f5c6d1dc5446b76fc505",
+          "role": "Generation-43 independent expected-vector re-attestation: owned-remote-routes-generation-43.json",
+          "generation": 44
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/managed-drain-generation-44.json",
+          "sha256": "4e99afe61ab9b590a6a7c5df923fab491605d542f83116d64a6c067bcd2fd493",
+          "role": "Generation-43 independent expected-vector re-attestation: managed-drain-generation-43.json",
+          "generation": 44
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/startup-plugin-readiness-generation-44.json",
+          "sha256": "9be2615e3b5e065fb68e8ff4cd857e0e4b7d6edcf1d0a3189d759f2ccab1eba1",
+          "role": "Freeze independent typed startup-readiness, queued-task, mode, and legacy-omission vectors; model, durable queue, native observation and delivery guards exercise the actual owning source without plugin reload or model-side readiness inference.",
+          "generation": 44
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/startup-plugin-readiness-live_controls-generation-44.json",
+          "sha256": "d241e77104dc9a3afb782f9e54cec4b5f1dd3aedabb2f3c5fe4cffd8b72b2e8a",
+          "role": "Freeze independent typed startup-readiness, queued-task, mode, and legacy-omission vectors; model, durable queue, native observation and delivery guards exercise the actual owning source without plugin reload or model-side readiness inference.",
+          "generation": 44
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/startup-plugin-readiness-acquisition_contract-generation-44.json",
+          "sha256": "8d51a657f0e65b0bfb109a30f4917712564a6d1ca69f9fb7ca0aeeb007e66729",
+          "role": "Freeze independent typed startup-readiness, queued-task, mode, and legacy-omission vectors; model, durable queue, native observation and delivery guards exercise the actual owning source without plugin reload or model-side readiness inference.",
+          "generation": 44
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/startup-plugin-readiness-routes-live_sessions-generation-44.json",
+          "sha256": "88d7da3c8597579e74d95f34f0761cd91714773c4d08a45cc5ecdbf42207d8c2",
+          "role": "Freeze independent typed startup-readiness, queued-task, mode, and legacy-omission vectors; model, durable queue, native observation and delivery guards exercise the actual owning source without plugin reload or model-side readiness inference.",
+          "generation": 44
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/startup-plugin-readiness-native-observation-generation-44.json",
+          "sha256": "5c2d98c2a5c1563ff037fa08bd49238413dadf190a5d2a27210b2302db771fee",
+          "role": "Freeze independent typed startup-readiness, queued-task, mode, and legacy-omission vectors; model, durable queue, native observation and delivery guards exercise the actual owning source without plugin reload or model-side readiness inference.",
+          "generation": 44
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/startup-plugin-readiness-native-delivery-generation-44.json",
+          "sha256": "d30cadd6eab4ef0b59ebae9ca5c09f89cd35152a3d6a4295bbe0bb7e4e7b4319",
+          "role": "Freeze independent typed startup-readiness, queued-task, mode, and legacy-omission vectors; model, durable queue, native observation and delivery guards exercise the actual owning source without plugin reload or model-side readiness inference.",
+          "generation": 44
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/startup-plugin-readiness-client-cli-mode-generation-44.json",
+          "sha256": "e50ea6edb2d7c7438476eb6860eb125209cf592c90dede31d83057c5fd8d90a2",
+          "role": "Preserve typed HTTP-41 startup readiness after mechanical extraction of the original client/control producer; public routes and capability floors are unchanged.",
+          "generation": 44
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/startup-plugin-readiness-routes-live-startup-controls-generation-44.json",
+          "sha256": "48bc912cad10a2a28ce3bbc01cf64c7800e0d76903e931fb16479a121d5a05e9",
+          "role": "Preserve typed HTTP-41 startup readiness after mechanical extraction of the original client/control producer; public routes and capability floors are unchanged.",
+          "generation": 44
         }
       ],
       "provenance": [
@@ -5479,6 +5871,422 @@
           "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification of the generation-42 producers, where current attention rows gain optional since/position behind attention_boundary 42. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots; only protocol_version advertisements advance to 42. Contained HTTP contract tests exercise model, client and route entry points, health 42, URL target floor 41, named remote ACP floor 38, receipt floor 39 and exact-native worktree resume floor 40 without live network or secret access. Historical generations and capability floors are unchanged."
         },
         {
+          "commit": "4cee06ed296deec2b17fa9bbcfed7c9b488cfe61",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 43,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
+          "source_git_blob": "3b77629485bcaf89568496a286359825e3d9281b",
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification. Generation-43 expected vectors retain independent upstream generation-42 wire bytes with only protocol_version advertisements advanced. Hand-authored ownership and clean-drain vectors remain independent of producer serialization; managed ownership floor 43 refuses attention-only generation 42. Attention boundary floor 42 and earlier capability floors are preserved. Queue removal and atomic turn-admission cases qualify the durable dependencies separately. This attests source identity, not a green native cold-start lane, live deployment or accepted ownership transfer."
+        },
+        {
+          "commit": "4cee06ed296deec2b17fa9bbcfed7c9b488cfe61",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 43,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/models.py",
+          "source_git_blob": "0f5cc84f3f7f7bbe3cc9b7fec2e3710629952553",
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification. Generation-43 expected vectors retain independent upstream generation-42 wire bytes with only protocol_version advertisements advanced. Hand-authored ownership and clean-drain vectors remain independent of producer serialization; managed ownership floor 43 refuses attention-only generation 42. Attention boundary floor 42 and earlier capability floors are preserved. Queue removal and atomic turn-admission cases qualify the durable dependencies separately. This attests source identity, not a green native cold-start lane, live deployment or accepted ownership transfer."
+        },
+        {
+          "commit": "4cee06ed296deec2b17fa9bbcfed7c9b488cfe61",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 43,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/health.py",
+          "source_git_blob": "366c8900d9b7823a48c1012ea754deeb2492b51d",
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification. Generation-43 expected vectors retain independent upstream generation-42 wire bytes with only protocol_version advertisements advanced. Hand-authored ownership and clean-drain vectors remain independent of producer serialization; managed ownership floor 43 refuses attention-only generation 42. Attention boundary floor 42 and earlier capability floors are preserved. Queue removal and atomic turn-admission cases qualify the durable dependencies separately. This attests source identity, not a green native cold-start lane, live deployment or accepted ownership transfer."
+        },
+        {
+          "commit": "4cee06ed296deec2b17fa9bbcfed7c9b488cfe61",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 43,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/sessions.py",
+          "source_git_blob": "5991aba8bc9074cc10065d615c045e91f6330153",
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification. Generation-43 expected vectors retain independent upstream generation-42 wire bytes with only protocol_version advertisements advanced. Hand-authored ownership and clean-drain vectors remain independent of producer serialization; managed ownership floor 43 refuses attention-only generation 42. Attention boundary floor 42 and earlier capability floors are preserved. Queue removal and atomic turn-admission cases qualify the durable dependencies separately. This attests source identity, not a green native cold-start lane, live deployment or accepted ownership transfer."
+        },
+        {
+          "commit": "4cee06ed296deec2b17fa9bbcfed7c9b488cfe61",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 43,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/remote.py",
+          "source_git_blob": "32ab059aad4fbc3eded6f9df0d80b35cfd3d2b3d",
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification. Generation-43 expected vectors retain independent upstream generation-42 wire bytes with only protocol_version advertisements advanced. Hand-authored ownership and clean-drain vectors remain independent of producer serialization; managed ownership floor 43 refuses attention-only generation 42. Attention boundary floor 42 and earlier capability floors are preserved. Queue removal and atomic turn-admission cases qualify the durable dependencies separately. This attests source identity, not a green native cold-start lane, live deployment or accepted ownership transfer."
+        },
+        {
+          "commit": "4cee06ed296deec2b17fa9bbcfed7c9b488cfe61",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 43,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/agents.py",
+          "source_git_blob": "e1cd7775e3ac5b39ef66d7c6f4badbf018ac3c51",
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification. Generation-43 expected vectors retain independent upstream generation-42 wire bytes with only protocol_version advertisements advanced. Hand-authored ownership and clean-drain vectors remain independent of producer serialization; managed ownership floor 43 refuses attention-only generation 42. Attention boundary floor 42 and earlier capability floors are preserved. Queue removal and atomic turn-admission cases qualify the durable dependencies separately. This attests source identity, not a green native cold-start lane, live deployment or accepted ownership transfer."
+        },
+        {
+          "commit": "4cee06ed296deec2b17fa9bbcfed7c9b488cfe61",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 43,
+          "source_path": "plugins/agent-bridge/tests/test_wire_compat.py",
+          "source_git_blob": "c2019cc05ae8398ef6a3f8457f248e7aa2cbbd64",
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification. Generation-43 expected vectors retain independent upstream generation-42 wire bytes with only protocol_version advertisements advanced. Hand-authored ownership and clean-drain vectors remain independent of producer serialization; managed ownership floor 43 refuses attention-only generation 42. Attention boundary floor 42 and earlier capability floors are preserved. Queue removal and atomic turn-admission cases qualify the durable dependencies separately. This attests source identity, not a green native cold-start lane, live deployment or accepted ownership transfer."
+        },
+        {
+          "commit": "4cee06ed296deec2b17fa9bbcfed7c9b488cfe61",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 43,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_status.py",
+          "source_git_blob": "8e8aac7d8b9d15ce5f3bcf45594a00f9ee142ee2",
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification. Generation-43 expected vectors retain independent upstream generation-42 wire bytes with only protocol_version advertisements advanced. Hand-authored ownership and clean-drain vectors remain independent of producer serialization; managed ownership floor 43 refuses attention-only generation 42. Attention boundary floor 42 and earlier capability floors are preserved. Queue removal and atomic turn-admission cases qualify the durable dependencies separately. This attests source identity, not a green native cold-start lane, live deployment or accepted ownership transfer."
+        },
+        {
+          "commit": "4cee06ed296deec2b17fa9bbcfed7c9b488cfe61",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 43,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/prompt_models.py",
+          "source_git_blob": "aac919244ab7d5519d656196f172c01c5740b56d",
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification. Generation-43 expected vectors retain independent upstream generation-42 wire bytes with only protocol_version advertisements advanced. Hand-authored ownership and clean-drain vectors remain independent of producer serialization; managed ownership floor 43 refuses attention-only generation 42. Attention boundary floor 42 and earlier capability floors are preserved. Queue removal and atomic turn-admission cases qualify the durable dependencies separately. This attests source identity, not a green native cold-start lane, live deployment or accepted ownership transfer."
+        },
+        {
+          "commit": "4cee06ed296deec2b17fa9bbcfed7c9b488cfe61",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 43,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_start_models.py",
+          "source_git_blob": "cf7a1f5d0f650e680b601a9087d3268dc302cfd3",
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification. Generation-43 expected vectors retain independent upstream generation-42 wire bytes with only protocol_version advertisements advanced. Hand-authored ownership and clean-drain vectors remain independent of producer serialization; managed ownership floor 43 refuses attention-only generation 42. Attention boundary floor 42 and earlier capability floors are preserved. Queue removal and atomic turn-admission cases qualify the durable dependencies separately. This attests source identity, not a green native cold-start lane, live deployment or accepted ownership transfer."
+        },
+        {
+          "commit": "4cee06ed296deec2b17fa9bbcfed7c9b488cfe61",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 43,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/prompts.py",
+          "source_git_blob": "85233f1327e3e2ad55dbbe2dd9ce28f35e3e2396",
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification. Generation-43 expected vectors retain independent upstream generation-42 wire bytes with only protocol_version advertisements advanced. Hand-authored ownership and clean-drain vectors remain independent of producer serialization; managed ownership floor 43 refuses attention-only generation 42. Attention boundary floor 42 and earlier capability floors are preserved. Queue removal and atomic turn-admission cases qualify the durable dependencies separately. This attests source identity, not a green native cold-start lane, live deployment or accepted ownership transfer."
+        },
+        {
+          "commit": "4cee06ed296deec2b17fa9bbcfed7c9b488cfe61",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 43,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/cli_mode_models.py",
+          "source_git_blob": "9941f066986c7b1427c4bfa70401412ac9789512",
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification. Generation-43 expected vectors retain independent upstream generation-42 wire bytes with only protocol_version advertisements advanced. Hand-authored ownership and clean-drain vectors remain independent of producer serialization; managed ownership floor 43 refuses attention-only generation 42. Attention boundary floor 42 and earlier capability floors are preserved. Queue removal and atomic turn-admission cases qualify the durable dependencies separately. This attests source identity, not a green native cold-start lane, live deployment or accepted ownership transfer."
+        },
+        {
+          "commit": "4cee06ed296deec2b17fa9bbcfed7c9b488cfe61",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 43,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/workspace_creation.py",
+          "source_git_blob": "7eae54d09a321567bca551daa899c6fd73cdc526",
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification. Generation-43 expected vectors retain independent upstream generation-42 wire bytes with only protocol_version advertisements advanced. Hand-authored ownership and clean-drain vectors remain independent of producer serialization; managed ownership floor 43 refuses attention-only generation 42. Attention boundary floor 42 and earlier capability floors are preserved. Queue removal and atomic turn-admission cases qualify the durable dependencies separately. This attests source identity, not a green native cold-start lane, live deployment or accepted ownership transfer."
+        },
+        {
+          "commit": "4cee06ed296deec2b17fa9bbcfed7c9b488cfe61",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 43,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/provider_creation.py",
+          "source_git_blob": "22bb72dc8a3f90b5123fdb5d515db1e820778507",
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification. Generation-43 expected vectors retain independent upstream generation-42 wire bytes with only protocol_version advertisements advanced. Hand-authored ownership and clean-drain vectors remain independent of producer serialization; managed ownership floor 43 refuses attention-only generation 42. Attention boundary floor 42 and earlier capability floors are preserved. Queue removal and atomic turn-admission cases qualify the durable dependencies separately. This attests source identity, not a green native cold-start lane, live deployment or accepted ownership transfer."
+        },
+        {
+          "commit": "4cee06ed296deec2b17fa9bbcfed7c9b488cfe61",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 43,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_resume.py",
+          "source_git_blob": "ca17ce7d2ba9bd3d602c94af663b1fa5ba33130d",
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification. Generation-43 expected vectors retain independent upstream generation-42 wire bytes with only protocol_version advertisements advanced. Hand-authored ownership and clean-drain vectors remain independent of producer serialization; managed ownership floor 43 refuses attention-only generation 42. Attention boundary floor 42 and earlier capability floors are preserved. Queue removal and atomic turn-admission cases qualify the durable dependencies separately. This attests source identity, not a green native cold-start lane, live deployment or accepted ownership transfer."
+        },
+        {
+          "commit": "4cee06ed296deec2b17fa9bbcfed7c9b488cfe61",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 43,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_core.py",
+          "source_git_blob": "660e8e8bc02f6b1faa438304407f10382e03710d",
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification. Generation-43 expected vectors retain independent upstream generation-42 wire bytes with only protocol_version advertisements advanced. Hand-authored ownership and clean-drain vectors remain independent of producer serialization; managed ownership floor 43 refuses attention-only generation 42. Attention boundary floor 42 and earlier capability floors are preserved. Queue removal and atomic turn-admission cases qualify the durable dependencies separately. This attests source identity, not a green native cold-start lane, live deployment or accepted ownership transfer."
+        },
+        {
+          "commit": "4cee06ed296deec2b17fa9bbcfed7c9b488cfe61",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 43,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktrees.py",
+          "source_git_blob": "7fa33c55151c13a6f093cf829298a3c66e3e2616",
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification. Generation-43 expected vectors retain independent upstream generation-42 wire bytes with only protocol_version advertisements advanced. Hand-authored ownership and clean-drain vectors remain independent of producer serialization; managed ownership floor 43 refuses attention-only generation 42. Attention boundary floor 42 and earlier capability floors are preserved. Queue removal and atomic turn-admission cases qualify the durable dependencies separately. This attests source identity, not a green native cold-start lane, live deployment or accepted ownership transfer."
+        },
+        {
+          "commit": "4cee06ed296deec2b17fa9bbcfed7c9b488cfe61",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 43,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktree_refresh.py",
+          "source_git_blob": "86759e4b1825af7c0044b64d6ded5fcbcc887bc3",
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification. Generation-43 expected vectors retain independent upstream generation-42 wire bytes with only protocol_version advertisements advanced. Hand-authored ownership and clean-drain vectors remain independent of producer serialization; managed ownership floor 43 refuses attention-only generation 42. Attention boundary floor 42 and earlier capability floors are preserved. Queue removal and atomic turn-admission cases qualify the durable dependencies separately. This attests source identity, not a green native cold-start lane, live deployment or accepted ownership transfer."
+        },
+        {
+          "commit": "4cee06ed296deec2b17fa9bbcfed7c9b488cfe61",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 43,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/client_worktrees.py",
+          "source_git_blob": "010ca9fa014afdad5c2876c84b78032e69a26455",
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification. Generation-43 expected vectors retain independent upstream generation-42 wire bytes with only protocol_version advertisements advanced. Hand-authored ownership and clean-drain vectors remain independent of producer serialization; managed ownership floor 43 refuses attention-only generation 42. Attention boundary floor 42 and earlier capability floors are preserved. Queue removal and atomic turn-admission cases qualify the durable dependencies separately. This attests source identity, not a green native cold-start lane, live deployment or accepted ownership transfer."
+        },
+        {
+          "commit": "4cee06ed296deec2b17fa9bbcfed7c9b488cfe61",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 43,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktree_entry.py",
+          "source_git_blob": "ae794db6b2223ecee04abf4c0280875883c1314c",
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification. Generation-43 expected vectors retain independent upstream generation-42 wire bytes with only protocol_version advertisements advanced. Hand-authored ownership and clean-drain vectors remain independent of producer serialization; managed ownership floor 43 refuses attention-only generation 42. Attention boundary floor 42 and earlier capability floors are preserved. Queue removal and atomic turn-admission cases qualify the durable dependencies separately. This attests source identity, not a green native cold-start lane, live deployment or accepted ownership transfer."
+        },
+        {
+          "commit": "4cee06ed296deec2b17fa9bbcfed7c9b488cfe61",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 43,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/client_session_start.py",
+          "source_git_blob": "8be375f0a61713c7a7a810bcf104b4aa19fe3d3c",
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification. Generation-43 expected vectors retain independent upstream generation-42 wire bytes with only protocol_version advertisements advanced. Hand-authored ownership and clean-drain vectors remain independent of producer serialization; managed ownership floor 43 refuses attention-only generation 42. Attention boundary floor 42 and earlier capability floors are preserved. Queue removal and atomic turn-admission cases qualify the durable dependencies separately. This attests source identity, not a green native cold-start lane, live deployment or accepted ownership transfer."
+        },
+        {
+          "commit": "4cee06ed296deec2b17fa9bbcfed7c9b488cfe61",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 43,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/client_answers.py",
+          "source_git_blob": "c55731f5cb1a26aaa54551161e82de1915842ada",
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification. Generation-43 expected vectors retain independent upstream generation-42 wire bytes with only protocol_version advertisements advanced. Hand-authored ownership and clean-drain vectors remain independent of producer serialization; managed ownership floor 43 refuses attention-only generation 42. Attention boundary floor 42 and earlier capability floors are preserved. Queue removal and atomic turn-admission cases qualify the durable dependencies separately. This attests source identity, not a green native cold-start lane, live deployment or accepted ownership transfer."
+        },
+        {
+          "commit": "4cee06ed296deec2b17fa9bbcfed7c9b488cfe61",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 43,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/answers.py",
+          "source_git_blob": "1f05d6749d0ecedef8d02a4bf2688a8fc1945c4b",
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification. Generation-43 expected vectors retain independent upstream generation-42 wire bytes with only protocol_version advertisements advanced. Hand-authored ownership and clean-drain vectors remain independent of producer serialization; managed ownership floor 43 refuses attention-only generation 42. Attention boundary floor 42 and earlier capability floors are preserved. Queue removal and atomic turn-admission cases qualify the durable dependencies separately. This attests source identity, not a green native cold-start lane, live deployment or accepted ownership transfer."
+        },
+        {
+          "commit": "4cee06ed296deec2b17fa9bbcfed7c9b488cfe61",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 43,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/remote_acp_sessions.py",
+          "source_git_blob": "0425fcff2907612477d1a1f715aaae7bfd1cd76a",
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification. Generation-43 expected vectors retain independent upstream generation-42 wire bytes with only protocol_version advertisements advanced. Hand-authored ownership and clean-drain vectors remain independent of producer serialization; managed ownership floor 43 refuses attention-only generation 42. Attention boundary floor 42 and earlier capability floors are preserved. Queue removal and atomic turn-admission cases qualify the durable dependencies separately. This attests source identity, not a green native cold-start lane, live deployment or accepted ownership transfer."
+        },
+        {
+          "commit": "4cee06ed296deec2b17fa9bbcfed7c9b488cfe61",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 43,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/live_message_models.py",
+          "source_git_blob": "b24f0c1b2b53d2cb9dcf92ae63a44d65f8052ba8",
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification. Generation-43 expected vectors retain independent upstream generation-42 wire bytes with only protocol_version advertisements advanced. Hand-authored ownership and clean-drain vectors remain independent of producer serialization; managed ownership floor 43 refuses attention-only generation 42. Attention boundary floor 42 and earlier capability floors are preserved. Queue removal and atomic turn-admission cases qualify the durable dependencies separately. This attests source identity, not a green native cold-start lane, live deployment or accepted ownership transfer."
+        },
+        {
+          "commit": "4cee06ed296deec2b17fa9bbcfed7c9b488cfe61",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 43,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/remote_operations.py",
+          "source_git_blob": "2d8861eec1ef30d3eda2449ac3a3601c8f2fb469",
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification. Generation-43 expected vectors retain independent upstream generation-42 wire bytes with only protocol_version advertisements advanced. Hand-authored ownership and clean-drain vectors remain independent of producer serialization; managed ownership floor 43 refuses attention-only generation 42. Attention boundary floor 42 and earlier capability floors are preserved. Queue removal and atomic turn-admission cases qualify the durable dependencies separately. This attests source identity, not a green native cold-start lane, live deployment or accepted ownership transfer."
+        },
+        {
+          "commit": "4cee06ed296deec2b17fa9bbcfed7c9b488cfe61",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 43,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/remote_operation_versions.py",
+          "source_git_blob": "e44bca130d16fdda753cbae074d2863a8cec26bf",
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification. Generation-43 expected vectors retain independent upstream generation-42 wire bytes with only protocol_version advertisements advanced. Hand-authored ownership and clean-drain vectors remain independent of producer serialization; managed ownership floor 43 refuses attention-only generation 42. Attention boundary floor 42 and earlier capability floors are preserved. Queue removal and atomic turn-admission cases qualify the durable dependencies separately. This attests source identity, not a green native cold-start lane, live deployment or accepted ownership transfer."
+        },
+        {
+          "commit": "4cee06ed296deec2b17fa9bbcfed7c9b488cfe61",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 43,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/worktree_native_resume.py",
+          "source_git_blob": "479172e6483513d6ecd60652ac2c995c94603a2e",
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification. Generation-43 expected vectors retain independent upstream generation-42 wire bytes with only protocol_version advertisements advanced. Hand-authored ownership and clean-drain vectors remain independent of producer serialization; managed ownership floor 43 refuses attention-only generation 42. Attention boundary floor 42 and earlier capability floors are preserved. Queue removal and atomic turn-admission cases qualify the durable dependencies separately. This attests source identity, not a green native cold-start lane, live deployment or accepted ownership transfer."
+        },
+        {
+          "commit": "4cee06ed296deec2b17fa9bbcfed7c9b488cfe61",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 43,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktree_probe.py",
+          "source_git_blob": "ea0cd4f31b2938ba6c674cee18867c192a24b151",
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification. Generation-43 expected vectors retain independent upstream generation-42 wire bytes with only protocol_version advertisements advanced. Hand-authored ownership and clean-drain vectors remain independent of producer serialization; managed ownership floor 43 refuses attention-only generation 42. Attention boundary floor 42 and earlier capability floors are preserved. Queue removal and atomic turn-admission cases qualify the durable dependencies separately. This attests source identity, not a green native cold-start lane, live deployment or accepted ownership transfer."
+        },
+        {
+          "commit": "4cee06ed296deec2b17fa9bbcfed7c9b488cfe61",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 43,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/client.py",
+          "source_git_blob": "4cc342a43aa7c4b648150ebf3a8be30379577ba2",
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification. Generation-43 expected vectors retain independent upstream generation-42 wire bytes with only protocol_version advertisements advanced. Hand-authored ownership and clean-drain vectors remain independent of producer serialization; managed ownership floor 43 refuses attention-only generation 42. Attention boundary floor 42 and earlier capability floors are preserved. Queue removal and atomic turn-admission cases qualify the durable dependencies separately. This attests source identity, not a green native cold-start lane, live deployment or accepted ownership transfer."
+        },
+        {
+          "commit": "4cee06ed296deec2b17fa9bbcfed7c9b488cfe61",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 43,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/singleton_resume.py",
+          "source_git_blob": "44ae0445dae3347199a200f8d119e8ffb75eeaa5",
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification. Generation-43 expected vectors retain independent upstream generation-42 wire bytes with only protocol_version advertisements advanced. Hand-authored ownership and clean-drain vectors remain independent of producer serialization; managed ownership floor 43 refuses attention-only generation 42. Attention boundary floor 42 and earlier capability floors are preserved. Queue removal and atomic turn-admission cases qualify the durable dependencies separately. This attests source identity, not a green native cold-start lane, live deployment or accepted ownership transfer."
+        },
+        {
+          "commit": "4cee06ed296deec2b17fa9bbcfed7c9b488cfe61",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 43,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/http_provider_sources.py",
+          "source_git_blob": "2fa57c43fae342ae1e709ca6115844923a6d6b62",
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification. Generation-43 expected vectors retain independent upstream generation-42 wire bytes with only protocol_version advertisements advanced. Hand-authored ownership and clean-drain vectors remain independent of producer serialization; managed ownership floor 43 refuses attention-only generation 42. Attention boundary floor 42 and earlier capability floors are preserved. Queue removal and atomic turn-admission cases qualify the durable dependencies separately. This attests source identity, not a green native cold-start lane, live deployment or accepted ownership transfer."
+        },
+        {
+          "commit": "4cee06ed296deec2b17fa9bbcfed7c9b488cfe61",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 43,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/provider_process.py",
+          "source_git_blob": "50b484ded1ed7b18292562bd384865c5bbf2cbd8",
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification. Generation-43 expected vectors retain independent upstream generation-42 wire bytes with only protocol_version advertisements advanced. Hand-authored ownership and clean-drain vectors remain independent of producer serialization; managed ownership floor 43 refuses attention-only generation 42. Attention boundary floor 42 and earlier capability floors are preserved. Queue removal and atomic turn-admission cases qualify the durable dependencies separately. This attests source identity, not a green native cold-start lane, live deployment or accepted ownership transfer."
+        },
+        {
+          "commit": "4cee06ed296deec2b17fa9bbcfed7c9b488cfe61",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 43,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/agent_registry_relay.py",
+          "source_git_blob": "7202464c964f810d44ff9aa5f83e6abf10086528",
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification. Generation-43 expected vectors retain independent upstream generation-42 wire bytes with only protocol_version advertisements advanced. Hand-authored ownership and clean-drain vectors remain independent of producer serialization; managed ownership floor 43 refuses attention-only generation 42. Attention boundary floor 42 and earlier capability floors are preserved. Queue removal and atomic turn-admission cases qualify the durable dependencies separately. This attests source identity, not a green native cold-start lane, live deployment or accepted ownership transfer."
+        },
+        {
+          "commit": "4cee06ed296deec2b17fa9bbcfed7c9b488cfe61",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 43,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/provider_sources.py",
+          "source_git_blob": "e69f697fb799e830677ab2aee51f6a0c6c93f541",
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification. Generation-43 expected vectors retain independent upstream generation-42 wire bytes with only protocol_version advertisements advanced. Hand-authored ownership and clean-drain vectors remain independent of producer serialization; managed ownership floor 43 refuses attention-only generation 42. Attention boundary floor 42 and earlier capability floors are preserved. Queue removal and atomic turn-admission cases qualify the durable dependencies separately. This attests source identity, not a green native cold-start lane, live deployment or accepted ownership transfer."
+        },
+        {
+          "commit": "4cee06ed296deec2b17fa9bbcfed7c9b488cfe61",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 43,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/remote_relationships.py",
+          "source_git_blob": "7c1c1ed66582315cafc9d6242846b81f283b0095",
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification. Generation-43 expected vectors retain independent upstream generation-42 wire bytes with only protocol_version advertisements advanced. Hand-authored ownership and clean-drain vectors remain independent of producer serialization; managed ownership floor 43 refuses attention-only generation 42. Attention boundary floor 42 and earlier capability floors are preserved. Queue removal and atomic turn-admission cases qualify the durable dependencies separately. This attests source identity, not a green native cold-start lane, live deployment or accepted ownership transfer."
+        },
+        {
+          "commit": "4cee06ed296deec2b17fa9bbcfed7c9b488cfe61",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 43,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/relationships.py",
+          "source_git_blob": "e81850ca0e0cb8091fe60fe93e771c1ac9ce0baf",
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification. Generation-43 expected vectors retain independent upstream generation-42 wire bytes with only protocol_version advertisements advanced. Hand-authored ownership and clean-drain vectors remain independent of producer serialization; managed ownership floor 43 refuses attention-only generation 42. Attention boundary floor 42 and earlier capability floors are preserved. Queue removal and atomic turn-admission cases qualify the durable dependencies separately. This attests source identity, not a green native cold-start lane, live deployment or accepted ownership transfer."
+        },
+        {
+          "commit": "4cee06ed296deec2b17fa9bbcfed7c9b488cfe61",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 43,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/db_maintenance.py",
+          "source_git_blob": "c64d421cc588fba657ac44f793cfffd729545690",
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification. Generation-43 expected vectors retain independent upstream generation-42 wire bytes with only protocol_version advertisements advanced. Hand-authored ownership and clean-drain vectors remain independent of producer serialization; managed ownership floor 43 refuses attention-only generation 42. Attention boundary floor 42 and earlier capability floors are preserved. Queue removal and atomic turn-admission cases qualify the durable dependencies separately. This attests source identity, not a green native cold-start lane, live deployment or accepted ownership transfer."
+        },
+        {
+          "commit": "4cee06ed296deec2b17fa9bbcfed7c9b488cfe61",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 43,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_lifecycle_cli.py",
+          "source_git_blob": "034858834bb16d2d0d4d77b46f46f230552ddab4",
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification. Generation-43 expected vectors retain independent upstream generation-42 wire bytes with only protocol_version advertisements advanced. Hand-authored ownership and clean-drain vectors remain independent of producer serialization; managed ownership floor 43 refuses attention-only generation 42. Attention boundary floor 42 and earlier capability floors are preserved. Queue removal and atomic turn-admission cases qualify the durable dependencies separately. This attests source identity, not a green native cold-start lane, live deployment or accepted ownership transfer."
+        },
+        {
+          "commit": "4cee06ed296deec2b17fa9bbcfed7c9b488cfe61",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 43,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/relationship_authority.py",
+          "source_git_blob": "387735f0dc20a8e49307f1017245a6bad216f2fd",
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification. Generation-43 expected vectors retain independent upstream generation-42 wire bytes with only protocol_version advertisements advanced. Hand-authored ownership and clean-drain vectors remain independent of producer serialization; managed ownership floor 43 refuses attention-only generation 42. Attention boundary floor 42 and earlier capability floors are preserved. Queue removal and atomic turn-admission cases qualify the durable dependencies separately. This attests source identity, not a green native cold-start lane, live deployment or accepted ownership transfer."
+        },
+        {
+          "commit": "4cee06ed296deec2b17fa9bbcfed7c9b488cfe61",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 43,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/db_relationships.py",
+          "source_git_blob": "9766063c3a8e5357734f692a8582d23d85974ffa",
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification. Generation-43 expected vectors retain independent upstream generation-42 wire bytes with only protocol_version advertisements advanced. Hand-authored ownership and clean-drain vectors remain independent of producer serialization; managed ownership floor 43 refuses attention-only generation 42. Attention boundary floor 42 and earlier capability floors are preserved. Queue removal and atomic turn-admission cases qualify the durable dependencies separately. This attests source identity, not a green native cold-start lane, live deployment or accepted ownership transfer."
+        },
+        {
+          "commit": "4cee06ed296deec2b17fa9bbcfed7c9b488cfe61",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 43,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_lifecycle.py",
+          "source_git_blob": "60dcae9f6af9a2a9aea66ce5f6a8a0884e3b03fa",
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification. Generation-43 expected vectors retain independent upstream generation-42 wire bytes with only protocol_version advertisements advanced. Hand-authored ownership and clean-drain vectors remain independent of producer serialization; managed ownership floor 43 refuses attention-only generation 42. Attention boundary floor 42 and earlier capability floors are preserved. Queue removal and atomic turn-admission cases qualify the durable dependencies separately. This attests source identity, not a green native cold-start lane, live deployment or accepted ownership transfer."
+        },
+        {
+          "commit": "4cee06ed296deec2b17fa9bbcfed7c9b488cfe61",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 43,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_start_cli.py",
+          "source_git_blob": "99d380b99f61dcb7bf4497d36a32c792006500ec",
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification. Generation-43 expected vectors retain independent upstream generation-42 wire bytes with only protocol_version advertisements advanced. Hand-authored ownership and clean-drain vectors remain independent of producer serialization; managed ownership floor 43 refuses attention-only generation 42. Attention boundary floor 42 and earlier capability floors are preserved. Queue removal and atomic turn-admission cases qualify the durable dependencies separately. This attests source identity, not a green native cold-start lane, live deployment or accepted ownership transfer."
+        },
+        {
+          "commit": "4cee06ed296deec2b17fa9bbcfed7c9b488cfe61",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 43,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_prompts.py",
+          "source_git_blob": "f1a860987a909577eb78561431154037aef3ab59",
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification. Generation-43 expected vectors retain independent upstream generation-42 wire bytes with only protocol_version advertisements advanced. Hand-authored ownership and clean-drain vectors remain independent of producer serialization; managed ownership floor 43 refuses attention-only generation 42. Attention boundary floor 42 and earlier capability floors are preserved. Queue removal and atomic turn-admission cases qualify the durable dependencies separately. This attests source identity, not a green native cold-start lane, live deployment or accepted ownership transfer."
+        },
+        {
+          "commit": "4cee06ed296deec2b17fa9bbcfed7c9b488cfe61",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 43,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/db_core.py",
+          "source_git_blob": "7e1493d998a211952408290022b1c4440ec1f212",
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification. Generation-43 expected vectors retain independent upstream generation-42 wire bytes with only protocol_version advertisements advanced. Hand-authored ownership and clean-drain vectors remain independent of producer serialization; managed ownership floor 43 refuses attention-only generation 42. Attention boundary floor 42 and earlier capability floors are preserved. Queue removal and atomic turn-admission cases qualify the durable dependencies separately. This attests source identity, not a green native cold-start lane, live deployment or accepted ownership transfer."
+        },
+        {
+          "commit": "4cee06ed296deec2b17fa9bbcfed7c9b488cfe61",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 43,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/local_cache_refresh.py",
+          "source_git_blob": "0b0eada9f6f293e693034bdeb8c20dd8d10884b3",
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification. Generation-43 expected vectors retain independent upstream generation-42 wire bytes with only protocol_version advertisements advanced. Hand-authored ownership and clean-drain vectors remain independent of producer serialization; managed ownership floor 43 refuses attention-only generation 42. Attention boundary floor 42 and earlier capability floors are preserved. Queue removal and atomic turn-admission cases qualify the durable dependencies separately. This attests source identity, not a green native cold-start lane, live deployment or accepted ownership transfer."
+        },
+        {
+          "commit": "4cee06ed296deec2b17fa9bbcfed7c9b488cfe61",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 43,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/db_schema.py",
+          "source_git_blob": "f4dd233f3ef40bcde583153b6c3fccd6d9503878",
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification. Generation-43 expected vectors retain independent upstream generation-42 wire bytes with only protocol_version advertisements advanced. Hand-authored ownership and clean-drain vectors remain independent of producer serialization; managed ownership floor 43 refuses attention-only generation 42. Attention boundary floor 42 and earlier capability floors are preserved. Queue removal and atomic turn-admission cases qualify the durable dependencies separately. This attests source identity, not a green native cold-start lane, live deployment or accepted ownership transfer."
+        },
+        {
+          "commit": "4cee06ed296deec2b17fa9bbcfed7c9b488cfe61",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 43,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/db_events.py",
+          "source_git_blob": "b55fbacf6e200b1245ba80f306842872794b684c",
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification. Generation-43 expected vectors retain independent upstream generation-42 wire bytes with only protocol_version advertisements advanced. Hand-authored ownership and clean-drain vectors remain independent of producer serialization; managed ownership floor 43 refuses attention-only generation 42. Attention boundary floor 42 and earlier capability floors are preserved. Queue removal and atomic turn-admission cases qualify the durable dependencies separately. This attests source identity, not a green native cold-start lane, live deployment or accepted ownership transfer."
+        },
+        {
+          "commit": "4cee06ed296deec2b17fa9bbcfed7c9b488cfe61",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 43,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/db_prompts.py",
+          "source_git_blob": "b22693cba48251047cfb5ae4ad6b94b7be053889",
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification. Generation-43 expected vectors retain independent upstream generation-42 wire bytes with only protocol_version advertisements advanced. Hand-authored ownership and clean-drain vectors remain independent of producer serialization; managed ownership floor 43 refuses attention-only generation 42. Attention boundary floor 42 and earlier capability floors are preserved. Queue removal and atomic turn-admission cases qualify the durable dependencies separately. This attests source identity, not a green native cold-start lane, live deployment or accepted ownership transfer."
+        },
+        {
+          "commit": "4cee06ed296deec2b17fa9bbcfed7c9b488cfe61",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 43,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/app.py",
+          "source_git_blob": "6ab068437795eb70a5a9137097103025cd36908c",
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification. Generation-43 expected vectors retain independent upstream generation-42 wire bytes with only protocol_version advertisements advanced. Hand-authored ownership and clean-drain vectors remain independent of producer serialization; managed ownership floor 43 refuses attention-only generation 42. Attention boundary floor 42 and earlier capability floors are preserved. Queue removal and atomic turn-admission cases qualify the durable dependencies separately. This attests source identity, not a green native cold-start lane, live deployment or accepted ownership transfer."
+        },
+        {
+          "commit": "4cee06ed296deec2b17fa9bbcfed7c9b488cfe61",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 43,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/runtime_restore.py",
+          "source_git_blob": "2a85dcaa328f6cd8ca7a10eee0199da4fa09021a",
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification. Generation-43 expected vectors retain independent upstream generation-42 wire bytes with only protocol_version advertisements advanced. Hand-authored ownership and clean-drain vectors remain independent of producer serialization; managed ownership floor 43 refuses attention-only generation 42. Attention boundary floor 42 and earlier capability floors are preserved. Queue removal and atomic turn-admission cases qualify the durable dependencies separately. This attests source identity, not a green native cold-start lane, live deployment or accepted ownership transfer."
+        },
+        {
+          "commit": "4cee06ed296deec2b17fa9bbcfed7c9b488cfe61",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 43,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/runtime_transfer.py",
+          "source_git_blob": "56b772e249f553a32561d2a74db62540ab3945f5",
+          "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification. Generation-43 expected vectors retain independent upstream generation-42 wire bytes with only protocol_version advertisements advanced. Hand-authored ownership and clean-drain vectors remain independent of producer serialization; managed ownership floor 43 refuses attention-only generation 42. Attention boundary floor 42 and earlier capability floors are preserved. Queue removal and atomic turn-admission cases qualify the durable dependencies separately. This attests source identity, not a green native cold-start lane, live deployment or accepted ownership transfer."
+        },
+        {
           "commit": "6d6a03a93349dd376642dc29ca7ffc5ebe83cec2",
           "plugin_version": "0.4.1-dev3",
           "generation": 40,
@@ -6349,9 +7157,321 @@
           "source_path": "plugins/agent-bridge/src/agent_bridge/routes/live_startup_controls.py",
           "source_git_blob": "8b1f74d379be0c4f56871f553fdf546c0127627b",
           "capture_method": "Integrated HTTP-43 re-attestation after published HTTP-42 attention boundaries: preserve all upstream immutable expectations and capability floors; readiness alone requires 43. Verify protocol negotiation, remote targets, attention boundaries, public HTTP/SQLite readiness admission and older ordinary receipts before native source-consumer acceptance."
+        },
+        {
+          "commit": "632cac7b9de4c42ef2c765053a783fbead0bbff0",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 44,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
+          "source_git_blob": "fa939cfb481d9b06ae2c8d3203f90c4691c472df",
+          "capture_method": "Re-attest HTTP-44 after published remote ACP ownership at 43. Preserve published historical packets and all existing capability floors; readiness alone requires 44. Exercise mixed-version admission and native delivery."
+        },
+        {
+          "commit": "632cac7b9de4c42ef2c765053a783fbead0bbff0",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 44,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/sessions.py",
+          "source_git_blob": "5991aba8bc9074cc10065d615c045e91f6330153",
+          "capture_method": "Re-attest HTTP-44 after published remote ACP ownership at 43. Preserve published historical packets and all existing capability floors; readiness alone requires 44. Exercise mixed-version admission and native delivery."
+        },
+        {
+          "commit": "632cac7b9de4c42ef2c765053a783fbead0bbff0",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 44,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/remote.py",
+          "source_git_blob": "32ab059aad4fbc3eded6f9df0d80b35cfd3d2b3d",
+          "capture_method": "Re-attest HTTP-44 after published remote ACP ownership at 43. Preserve published historical packets and all existing capability floors; readiness alone requires 44. Exercise mixed-version admission and native delivery."
+        },
+        {
+          "commit": "632cac7b9de4c42ef2c765053a783fbead0bbff0",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 44,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/agents.py",
+          "source_git_blob": "e1cd7775e3ac5b39ef66d7c6f4badbf018ac3c51",
+          "capture_method": "Re-attest HTTP-44 after published remote ACP ownership at 43. Preserve published historical packets and all existing capability floors; readiness alone requires 44. Exercise mixed-version admission and native delivery."
+        },
+        {
+          "commit": "632cac7b9de4c42ef2c765053a783fbead0bbff0",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 44,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/prompt_models.py",
+          "source_git_blob": "aac919244ab7d5519d656196f172c01c5740b56d",
+          "capture_method": "Re-attest HTTP-44 after published remote ACP ownership at 43. Preserve published historical packets and all existing capability floors; readiness alone requires 44. Exercise mixed-version admission and native delivery."
+        },
+        {
+          "commit": "632cac7b9de4c42ef2c765053a783fbead0bbff0",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 44,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_start_models.py",
+          "source_git_blob": "cf7a1f5d0f650e680b601a9087d3268dc302cfd3",
+          "capture_method": "Re-attest HTTP-44 after published remote ACP ownership at 43. Preserve published historical packets and all existing capability floors; readiness alone requires 44. Exercise mixed-version admission and native delivery."
+        },
+        {
+          "commit": "632cac7b9de4c42ef2c765053a783fbead0bbff0",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 44,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/prompts.py",
+          "source_git_blob": "85233f1327e3e2ad55dbbe2dd9ce28f35e3e2396",
+          "capture_method": "Re-attest HTTP-44 after published remote ACP ownership at 43. Preserve published historical packets and all existing capability floors; readiness alone requires 44. Exercise mixed-version admission and native delivery."
+        },
+        {
+          "commit": "632cac7b9de4c42ef2c765053a783fbead0bbff0",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 44,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/cli_mode_models.py",
+          "source_git_blob": "9941f066986c7b1427c4bfa70401412ac9789512",
+          "capture_method": "Re-attest HTTP-44 after published remote ACP ownership at 43. Preserve published historical packets and all existing capability floors; readiness alone requires 44. Exercise mixed-version admission and native delivery."
+        },
+        {
+          "commit": "632cac7b9de4c42ef2c765053a783fbead0bbff0",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 44,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/workspace_creation.py",
+          "source_git_blob": "7eae54d09a321567bca551daa899c6fd73cdc526",
+          "capture_method": "Re-attest HTTP-44 after published remote ACP ownership at 43. Preserve published historical packets and all existing capability floors; readiness alone requires 44. Exercise mixed-version admission and native delivery."
+        },
+        {
+          "commit": "632cac7b9de4c42ef2c765053a783fbead0bbff0",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 44,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/provider_creation.py",
+          "source_git_blob": "22bb72dc8a3f90b5123fdb5d515db1e820778507",
+          "capture_method": "Re-attest HTTP-44 after published remote ACP ownership at 43. Preserve published historical packets and all existing capability floors; readiness alone requires 44. Exercise mixed-version admission and native delivery."
+        },
+        {
+          "commit": "632cac7b9de4c42ef2c765053a783fbead0bbff0",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 44,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_resume.py",
+          "source_git_blob": "ca17ce7d2ba9bd3d602c94af663b1fa5ba33130d",
+          "capture_method": "Re-attest HTTP-44 after published remote ACP ownership at 43. Preserve published historical packets and all existing capability floors; readiness alone requires 44. Exercise mixed-version admission and native delivery."
+        },
+        {
+          "commit": "632cac7b9de4c42ef2c765053a783fbead0bbff0",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 44,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_core.py",
+          "source_git_blob": "4c54b8eb33e5a48c69eccade796be238feef4641",
+          "capture_method": "Re-attest HTTP-44 after published remote ACP ownership at 43. Preserve published historical packets and all existing capability floors; readiness alone requires 44. Exercise mixed-version admission and native delivery."
+        },
+        {
+          "commit": "632cac7b9de4c42ef2c765053a783fbead0bbff0",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 44,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktrees.py",
+          "source_git_blob": "7fa33c55151c13a6f093cf829298a3c66e3e2616",
+          "capture_method": "Re-attest HTTP-44 after published remote ACP ownership at 43. Preserve published historical packets and all existing capability floors; readiness alone requires 44. Exercise mixed-version admission and native delivery."
+        },
+        {
+          "commit": "632cac7b9de4c42ef2c765053a783fbead0bbff0",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 44,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktree_refresh.py",
+          "source_git_blob": "86759e4b1825af7c0044b64d6ded5fcbcc887bc3",
+          "capture_method": "Re-attest HTTP-44 after published remote ACP ownership at 43. Preserve published historical packets and all existing capability floors; readiness alone requires 44. Exercise mixed-version admission and native delivery."
+        },
+        {
+          "commit": "632cac7b9de4c42ef2c765053a783fbead0bbff0",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 44,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/client_worktrees.py",
+          "source_git_blob": "010ca9fa014afdad5c2876c84b78032e69a26455",
+          "capture_method": "Re-attest HTTP-44 after published remote ACP ownership at 43. Preserve published historical packets and all existing capability floors; readiness alone requires 44. Exercise mixed-version admission and native delivery."
+        },
+        {
+          "commit": "632cac7b9de4c42ef2c765053a783fbead0bbff0",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 44,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktree_entry.py",
+          "source_git_blob": "ae794db6b2223ecee04abf4c0280875883c1314c",
+          "capture_method": "Re-attest HTTP-44 after published remote ACP ownership at 43. Preserve published historical packets and all existing capability floors; readiness alone requires 44. Exercise mixed-version admission and native delivery."
+        },
+        {
+          "commit": "632cac7b9de4c42ef2c765053a783fbead0bbff0",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 44,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/client_session_start.py",
+          "source_git_blob": "8be375f0a61713c7a7a810bcf104b4aa19fe3d3c",
+          "capture_method": "Re-attest HTTP-44 after published remote ACP ownership at 43. Preserve published historical packets and all existing capability floors; readiness alone requires 44. Exercise mixed-version admission and native delivery."
+        },
+        {
+          "commit": "632cac7b9de4c42ef2c765053a783fbead0bbff0",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 44,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/client_answers.py",
+          "source_git_blob": "c55731f5cb1a26aaa54551161e82de1915842ada",
+          "capture_method": "Re-attest HTTP-44 after published remote ACP ownership at 43. Preserve published historical packets and all existing capability floors; readiness alone requires 44. Exercise mixed-version admission and native delivery."
+        },
+        {
+          "commit": "632cac7b9de4c42ef2c765053a783fbead0bbff0",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 44,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/answers.py",
+          "source_git_blob": "1f05d6749d0ecedef8d02a4bf2688a8fc1945c4b",
+          "capture_method": "Re-attest HTTP-44 after published remote ACP ownership at 43. Preserve published historical packets and all existing capability floors; readiness alone requires 44. Exercise mixed-version admission and native delivery."
+        },
+        {
+          "commit": "632cac7b9de4c42ef2c765053a783fbead0bbff0",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 44,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/remote_acp_sessions.py",
+          "source_git_blob": "0425fcff2907612477d1a1f715aaae7bfd1cd76a",
+          "capture_method": "Re-attest HTTP-44 after published remote ACP ownership at 43. Preserve published historical packets and all existing capability floors; readiness alone requires 44. Exercise mixed-version admission and native delivery."
+        },
+        {
+          "commit": "632cac7b9de4c42ef2c765053a783fbead0bbff0",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 44,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/live_message_models.py",
+          "source_git_blob": "688e638d85cef69b4e4b285e1280bdba8cf02f5d",
+          "capture_method": "Re-attest HTTP-44 after published remote ACP ownership at 43. Preserve published historical packets and all existing capability floors; readiness alone requires 44. Exercise mixed-version admission and native delivery."
+        },
+        {
+          "commit": "632cac7b9de4c42ef2c765053a783fbead0bbff0",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 44,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/remote_operations.py",
+          "source_git_blob": "2d8861eec1ef30d3eda2449ac3a3601c8f2fb469",
+          "capture_method": "Re-attest HTTP-44 after published remote ACP ownership at 43. Preserve published historical packets and all existing capability floors; readiness alone requires 44. Exercise mixed-version admission and native delivery."
+        },
+        {
+          "commit": "632cac7b9de4c42ef2c765053a783fbead0bbff0",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 44,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/remote_operation_versions.py",
+          "source_git_blob": "e44bca130d16fdda753cbae074d2863a8cec26bf",
+          "capture_method": "Re-attest HTTP-44 after published remote ACP ownership at 43. Preserve published historical packets and all existing capability floors; readiness alone requires 44. Exercise mixed-version admission and native delivery."
+        },
+        {
+          "commit": "632cac7b9de4c42ef2c765053a783fbead0bbff0",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 44,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/worktree_native_resume.py",
+          "source_git_blob": "479172e6483513d6ecd60652ac2c995c94603a2e",
+          "capture_method": "Re-attest HTTP-44 after published remote ACP ownership at 43. Preserve published historical packets and all existing capability floors; readiness alone requires 44. Exercise mixed-version admission and native delivery."
+        },
+        {
+          "commit": "632cac7b9de4c42ef2c765053a783fbead0bbff0",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 44,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktree_probe.py",
+          "source_git_blob": "ea0cd4f31b2938ba6c674cee18867c192a24b151",
+          "capture_method": "Re-attest HTTP-44 after published remote ACP ownership at 43. Preserve published historical packets and all existing capability floors; readiness alone requires 44. Exercise mixed-version admission and native delivery."
+        },
+        {
+          "commit": "632cac7b9de4c42ef2c765053a783fbead0bbff0",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 44,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/client.py",
+          "source_git_blob": "0db7713059acae0b1f3f829b4b5f0d124aeea971",
+          "capture_method": "Re-attest HTTP-44 after published remote ACP ownership at 43. Preserve published historical packets and all existing capability floors; readiness alone requires 44. Exercise mixed-version admission and native delivery."
+        },
+        {
+          "commit": "632cac7b9de4c42ef2c765053a783fbead0bbff0",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 44,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/singleton_resume.py",
+          "source_git_blob": "44ae0445dae3347199a200f8d119e8ffb75eeaa5",
+          "capture_method": "Re-attest HTTP-44 after published remote ACP ownership at 43. Preserve published historical packets and all existing capability floors; readiness alone requires 44. Exercise mixed-version admission and native delivery."
+        },
+        {
+          "commit": "632cac7b9de4c42ef2c765053a783fbead0bbff0",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 44,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/remote_relationships.py",
+          "source_git_blob": "7c1c1ed66582315cafc9d6242846b81f283b0095",
+          "capture_method": "Re-attest HTTP-44 after published remote ACP ownership at 43. Preserve published historical packets and all existing capability floors; readiness alone requires 44. Exercise mixed-version admission and native delivery."
+        },
+        {
+          "commit": "632cac7b9de4c42ef2c765053a783fbead0bbff0",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 44,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/relationships.py",
+          "source_git_blob": "e81850ca0e0cb8091fe60fe93e771c1ac9ce0baf",
+          "capture_method": "Re-attest HTTP-44 after published remote ACP ownership at 43. Preserve published historical packets and all existing capability floors; readiness alone requires 44. Exercise mixed-version admission and native delivery."
+        },
+        {
+          "commit": "632cac7b9de4c42ef2c765053a783fbead0bbff0",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 44,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_prompts.py",
+          "source_git_blob": "f1a860987a909577eb78561431154037aef3ab59",
+          "capture_method": "Re-attest HTTP-44 after published remote ACP ownership at 43. Preserve published historical packets and all existing capability floors; readiness alone requires 44. Exercise mixed-version admission and native delivery."
+        },
+        {
+          "commit": "632cac7b9de4c42ef2c765053a783fbead0bbff0",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 44,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/plugin_readiness.py",
+          "source_git_blob": "fd51388e8fd1b97f6374e61a7a8acd78b98799d3",
+          "capture_method": "Re-attest HTTP-44 after published remote ACP ownership at 43. Preserve published historical packets and all existing capability floors; readiness alone requires 44. Exercise mixed-version admission and native delivery."
+        },
+        {
+          "commit": "632cac7b9de4c42ef2c765053a783fbead0bbff0",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 44,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/live_controls.py",
+          "source_git_blob": "c55f500d6b1568ebf05153008d82b497d2544a2b",
+          "capture_method": "Re-attest HTTP-44 after published remote ACP ownership at 43. Preserve published historical packets and all existing capability floors; readiness alone requires 44. Exercise mixed-version admission and native delivery."
+        },
+        {
+          "commit": "632cac7b9de4c42ef2c765053a783fbead0bbff0",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 44,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/acquisition_contract.py",
+          "source_git_blob": "331f5b16d971e5069b8b9f9070ada176128c6478",
+          "capture_method": "Re-attest HTTP-44 after published remote ACP ownership at 43. Preserve published historical packets and all existing capability floors; readiness alone requires 44. Exercise mixed-version admission and native delivery."
+        },
+        {
+          "commit": "632cac7b9de4c42ef2c765053a783fbead0bbff0",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 44,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/live_sessions.py",
+          "source_git_blob": "37d905572259c17d5d2c501aee74176534c6fe0f",
+          "capture_method": "Re-attest HTTP-44 after published remote ACP ownership at 43. Preserve published historical packets and all existing capability floors; readiness alone requires 44. Exercise mixed-version admission and native delivery."
+        },
+        {
+          "commit": "632cac7b9de4c42ef2c765053a783fbead0bbff0",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 44,
+          "source_path": "plugins/agent-bridge/extensions/agent-bridge/plugin-readiness.mjs",
+          "source_git_blob": "441e130f19f486c5d69be71f9f82d770e988a542",
+          "capture_method": "Re-attest HTTP-44 after published remote ACP ownership at 43. Preserve published historical packets and all existing capability floors; readiness alone requires 44. Exercise mixed-version admission and native delivery."
+        },
+        {
+          "commit": "632cac7b9de4c42ef2c765053a783fbead0bbff0",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 44,
+          "source_path": "plugins/agent-bridge/extensions/agent-bridge/delivery.mjs",
+          "source_git_blob": "dd7d21971b3b224528428ff1c6b8529de9257185",
+          "capture_method": "Re-attest HTTP-44 after published remote ACP ownership at 43. Preserve published historical packets and all existing capability floors; readiness alone requires 44. Exercise mixed-version admission and native delivery."
+        },
+        {
+          "commit": "632cac7b9de4c42ef2c765053a783fbead0bbff0",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 44,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/client_cli_mode.py",
+          "source_git_blob": "d70a74c51ba3733a8210838deab704203aa508f3",
+          "capture_method": "Re-attest HTTP-44 after published remote ACP ownership at 43. Preserve published historical packets and all existing capability floors; readiness alone requires 44. Exercise mixed-version admission and native delivery."
+        },
+        {
+          "commit": "632cac7b9de4c42ef2c765053a783fbead0bbff0",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 44,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/live_startup_controls.py",
+          "source_git_blob": "8b1f74d379be0c4f56871f553fdf546c0127627b",
+          "capture_method": "Re-attest HTTP-44 after published remote ACP ownership at 43. Preserve published historical packets and all existing capability floors; readiness alone requires 44. Exercise mixed-version admission and native delivery."
+        },
+        {
+          "commit": "632cac7b9de4c42ef2c765053a783fbead0bbff0",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 44,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/models.py",
+          "source_git_blob": "0f5cc84f3f7f7bbe3cc9b7fec2e3710629952553",
+          "capture_method": "Re-attest published remote ownership models at HTTP-44 without shifting their capability floor."
         }
       ],
-      "support_window": "HTTP generations 1 through 40 remain supported. Receipt capability 39 and remote ACP capability 38 are retained; exact-native worktree resume begins at 40. Retain official receipt-generation evidence and the separately namespaced native-recovery draft vectors without rewriting either.",
+      "support_window": "HTTP generations 1 through 44 remain supported. Readiness-bound task/mode delivery requires generation 44; managed remote ACP ownership retains floor 43, attention boundaries 42, direct targets 41, exact-native resume 40, receipts 39 and named remote ACP 38. Ordinary older operations remain compatible. Generation-44 re-attestations retain independent generation-43 expectations.",
       "bridge_contract_rollback_window": "Retain the generation 11 fixture, the older generation 9 fixture, and a generation 10 prior-runtime fixture until the live and recoverable reference census permits retirement.",
       "mixed_version_scenarios": [
         "new-client_old-daemon",

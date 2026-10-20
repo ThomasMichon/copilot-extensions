@@ -33,17 +33,18 @@ optional caller `cwd`, `expected_session_id` and timeout assertions still apply.
 The field does not select or activate additional plugins. Omitted optional fields
 remain omitted from serialized requests, preserving legacy journal identities.
 
-The version-gated `acquisition_cli.acquire` requires HTTP protocol 43 for CLI
+The version-gated `acquisition_cli.acquire` requires HTTP protocol 44 for CLI
 acquisition. Raw HTTP callers must enforce the same floor; older daemons ignore
 unknown acquisition fields. ACP acquisition retains its prepared directories and
 native handshake and does not require a joined CLI extension.
 Readiness wire models likewise ignore additive unknown peer fields while
 retaining required ownership, identity, uniqueness and result-state validation.
-The default `acquisition-readiness` producer probe also requires protocol 43.
+The default `acquisition-readiness` producer probe also requires protocol 44.
 This is a capability floor, not the minimum-supported wire generation.
 Ordinary messages and receipt delivery retain their existing compatibility
 range; generation-41 peers can still serve remote ACP targets. Only a caller
-requesting readiness-bound delivery requires generation 43.
+requesting readiness-bound delivery requires generation 44. Managed remote ACP
+ownership retains its separate generation-43 floor.
 Existing ACP holders lacking the new optional metadata retain their established
 prepared-directory/handshake path; no new transcript or CLI-extension requirement
 is introduced to retrofit that metadata.

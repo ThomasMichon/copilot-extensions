@@ -1,10 +1,10 @@
 {
   "captured_from": {
-    "commit": "a2b7b5c976e2bfd474150c50243678916b7b8517",
+    "commit": "4cee06ed296deec2b17fa9bbcfed7c9b488cfe61",
     "plugin_version": "0.4.1-dev3",
-    "protocol_generation": 43,
     "source_path": "plugins/agent-bridge/src/agent_bridge/worktree_native_resume.py",
     "source_git_blob": "479172e6483513d6ecd60652ac2c995c94603a2e",
+    "protocol_generation": 43,
     "source_sha256": "5188f9cbc9063cc4b0289402ca8ad626a452d6f1c0b91381710e0c68528f3a60"
   },
   "response": {

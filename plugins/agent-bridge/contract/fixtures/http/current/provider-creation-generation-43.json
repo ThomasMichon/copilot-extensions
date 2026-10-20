@@ -44,12 +44,12 @@
     "required_provider_capability": "instance_pinned_exec"
   },
   "captured_from": {
-    "commit": "a2b7b5c976e2bfd474150c50243678916b7b8517",
+    "commit": "4cee06ed296deec2b17fa9bbcfed7c9b488cfe61",
     "plugin_version": "0.4.1-dev3",
-    "protocol_generation": 43,
     "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
-    "source_git_blob": "e76bb55012cf7f3ce2f2fa271a278a99aabeaa3f",
-    "source_sha256": "c5a570d84c9aaa27480cca28ecd4b82b1a7b76a99f2e4b63b0048f69f5233b86"
+    "source_git_blob": "3b77629485bcaf89568496a286359825e3d9281b",
+    "protocol_generation": 43,
+    "source_sha256": "17a4ad4c8035ce0330de9d4f39969c66ff471fb3852f53c9c7cb9b4b39a6bd73"
   },
   "compatibility": {
     "name_only_provider_refused": true

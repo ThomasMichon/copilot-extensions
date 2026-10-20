@@ -1,0 +1,39 @@
+{
+  "captured_from": {
+    "commit": "632cac7b9de4c42ef2c765053a783fbead0bbff0",
+    "plugin_version": "0.4.1-dev3",
+    "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
+    "source_git_blob": "fa939cfb481d9b06ae2c8d3203f90c4691c472df",
+    "protocol_generation": 44,
+    "source_sha256": "fe0809a2504d2058f012218323561f1ae64da9793db7cce7c0d94ea498b54a87"
+  },
+  "response": {
+    "protocol_version": 44,
+    "min_protocol_version": 1
+  },
+  "capability": {
+    "required_protocol_version": 39,
+    "required_carrier_operation_version": 5,
+    "address": "live:host-a:project-a:wt-a",
+    "unavailable_peer_creates_agent": false
+  },
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/remote/host-b/live-sessions/live:host-b:project-a:wt-b/messages",
+    "json": {
+      "qualified_peer": true,
+      "sender": "wt-a",
+      "message": "status?",
+      "reply_to": "live:host-a:project-a:wt-a",
+      "kind": "status-check",
+      "delivery": "steer",
+      "wait": true,
+      "wait_timeout": 120.0,
+      "timeout": 135.0
+    }
+  },
+  "reattested_from": {
+    "path": "plugins/agent-bridge/contract/fixtures/http/current/peer-replies-generation-43.json",
+    "sha256": "69e7436e65b2cf7e09f7af32a5b35de909afbdc44cdcb909095b959d1cd7f2fc"
+  }
+}

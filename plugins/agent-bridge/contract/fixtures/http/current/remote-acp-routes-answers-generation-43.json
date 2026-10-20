@@ -45,11 +45,11 @@
     "ordinary_provider_instance_default": false
   },
   "captured_from": {
-    "commit": "a2b7b5c976e2bfd474150c50243678916b7b8517",
+    "commit": "4cee06ed296deec2b17fa9bbcfed7c9b488cfe61",
     "plugin_version": "0.4.1-dev3",
-    "protocol_generation": 43,
     "source_path": "plugins/agent-bridge/src/agent_bridge/routes/answers.py",
     "source_git_blob": "1f05d6749d0ecedef8d02a4bf2688a8fc1945c4b",
+    "protocol_generation": 43,
     "source_sha256": "214fe3f869274504b0a2c1d51d33df38dc182bd128cb56fc8e7e9478c3b03b4d"
   },
   "reattested_from": {

@@ -20,9 +20,10 @@ The registry is repository-side evidence; no runtime component reads it.
    python tools/run-plugin-tests.py agent-bridge --guards
    ```
 
-HTTP generation 43 adds the Bridge-owned startup plugin-readiness requirement,
+HTTP generation 44 adds the Bridge-owned startup plugin-readiness requirement,
 after generation 41's direct remote ACP targets and generation 42's attention
-boundaries. Both historical generations and their capability floors remain
+boundaries, followed by generation 43's managed remote ACP ownership.
+All historical generations and their capability floors remain
 unchanged.
 Its frozen vectors include typed readiness results, readiness-bound task/mode
 inputs and omission-compatible ordinary input. Every readiness golden is replayed

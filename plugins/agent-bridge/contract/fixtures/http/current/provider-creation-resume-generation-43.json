@@ -44,12 +44,12 @@
     "required_provider_capability": "instance_pinned_exec"
   },
   "captured_from": {
-    "commit": "a2b7b5c976e2bfd474150c50243678916b7b8517",
+    "commit": "4cee06ed296deec2b17fa9bbcfed7c9b488cfe61",
     "plugin_version": "0.4.1-dev3",
-    "protocol_generation": 43,
     "source_path": "plugins/agent-bridge/src/agent_bridge/session_resume.py",
-    "source_git_blob": "6f789f626eb69b882a79e3a336fa8ba443be29fe",
-    "source_sha256": "3b848128648297a1a0e79bd3c55fae5981f9b81375a10070c8a5765107c74363"
+    "source_git_blob": "ca17ce7d2ba9bd3d602c94af663b1fa5ba33130d",
+    "protocol_generation": 43,
+    "source_sha256": "bc62b07c43e8b0e702433398bd24871891ac963ba6406b8b34e1bff54b3628f4"
   },
   "compatibility": {
     "caller_handoff_retains_worktree_scope": true,

@@ -397,7 +397,7 @@ Worktrees launch-plan metadata or configuration.
 
 Ordinary local CLI acquisition is integrated through the existing Worktrees
 owner after its profile-environment merge and before mux creation. Bridge-owned
-task delivery requires protocol 43 and confirmation of the compiled native
+task delivery requires protocol 44 and confirmation of the compiled native
 plugin selection; live reuse requires preparation evidence bound to that same
 native session. See the [startup-readiness contract](docs/startup-plugin-readiness.md).
 Ordinary operator launches are not retrofitted with this task gate.

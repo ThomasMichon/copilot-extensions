@@ -55,7 +55,7 @@ def _fixture(relative: str) -> dict:
 
 
 def test_http_declared_generation_matches_current_fixture() -> None:
-    fixture = _fixture("fixtures/http/current/startup-plugin-readiness-generation-43.json")
+    fixture = _fixture("fixtures/http/current/native-worktree-resume-generation-44.json")
     body = fixture["response"]
     assert body["protocol_version"] == bridge_protocol.HTTP_PROTOCOL_VERSION
     assert (
@@ -69,9 +69,9 @@ def test_native_resume_does_not_reuse_the_published_receipt_generation() -> None
     assert bridge_protocol.LIVE_MESSAGE_RECEIPT_PROTOCOL_VERSION == 39
     assert bridge_protocol.WORKTREE_NATIVE_RESUME_PROTOCOL_VERSION == 40
     assert bridge_protocol.REMOTE_ACP_TARGETS_PROTOCOL_VERSION == 41
-    assert bridge_protocol.ATTENTION_BOUNDARY_PROTOCOL_VERSION == 42
-    assert bridge_protocol.PLUGIN_READINESS_PROTOCOL_VERSION == 43
-    assert bridge_protocol.HTTP_PROTOCOL_VERSION == 43
+    assert bridge_protocol.REMOTE_ACP_OWNERSHIP_PROTOCOL_VERSION == 43
+    assert bridge_protocol.PLUGIN_READINESS_PROTOCOL_VERSION == 44
+    assert bridge_protocol.HTTP_PROTOCOL_VERSION == 44
     assert bridge_protocol.HTTP_PROTOCOL_MIN_SUPPORTED == 1
 
 
@@ -79,6 +79,12 @@ def test_attention_boundary_does_not_reuse_the_url_target_generation() -> None:
     assert bridge_protocol.REMOTE_ACP_TARGETS_PROTOCOL_VERSION == 41
     assert bridge_protocol.ATTENTION_BOUNDARY_PROTOCOL_VERSION == 42
     assert bridge_protocol.HTTP_PROTOCOL_VERSION >= bridge_protocol.ATTENTION_BOUNDARY_PROTOCOL_VERSION
+
+
+def test_remote_ownership_does_not_reuse_the_attention_boundary_generation() -> None:
+    assert bridge_protocol.ATTENTION_BOUNDARY_PROTOCOL_VERSION == 42
+    assert bridge_protocol.REMOTE_ACP_OWNERSHIP_PROTOCOL_VERSION == 43
+    assert bridge_protocol.HTTP_PROTOCOL_VERSION >= bridge_protocol.REMOTE_ACP_OWNERSHIP_PROTOCOL_VERSION
 
 
 def test_startup_readiness_fixture_matches_typed_wire_and_legacy_omission() -> None:
@@ -91,7 +97,7 @@ def test_startup_readiness_fixture_matches_typed_wire_and_legacy_omission() -> N
         READINESS_CONTROL, PluginReadinessRequest, PluginReadinessResult,
     )
 
-    fixture = _fixture("fixtures/http/current/startup-plugin-readiness-generation-43.json")
+    fixture = _fixture("fixtures/http/current/startup-plugin-readiness-generation-44.json")
     capability = fixture["capability"]
     assert capability["required_protocol_version"] == bridge_protocol.PLUGIN_READINESS_PROTOCOL_VERSION
     assert capability["readiness_control"] == READINESS_CONTROL
@@ -125,7 +131,7 @@ def test_startup_readiness_fixture_matches_typed_wire_and_legacy_omission() -> N
 def test_startup_readiness_fixture_does_not_report_failure_as_ready(status) -> None:
     from agent_bridge.plugin_readiness import PluginReadinessResult
 
-    fixture = _fixture("fixtures/http/current/startup-plugin-readiness-generation-43.json")
+    fixture = _fixture("fixtures/http/current/startup-plugin-readiness-generation-44.json")
     response = {**fixture["readiness_response"], "status": status, "cwd": None}
     assert PluginReadinessResult.model_validate(response).status == status
     with pytest.raises(ValueError):
@@ -139,7 +145,7 @@ def test_startup_readiness_fixture_does_not_report_failure_as_ready(status) -> N
 def test_startup_readiness_wire_ignores_future_fields_without_relaxing_ownership() -> None:
     from agent_bridge.plugin_readiness import PluginReadinessRequest, PluginReadinessResult
 
-    fixture = _fixture("fixtures/http/current/startup-plugin-readiness-generation-43.json")
+    fixture = _fixture("fixtures/http/current/startup-plugin-readiness-generation-44.json")
     expected = fixture["request"]["plugin_readiness"]
     future = {
         **expected, "future_observation": "optional",
@@ -158,7 +164,7 @@ def test_startup_readiness_wire_ignores_future_fields_without_relaxing_ownership
 @pytest.mark.parametrize(
     "name",
     sorted(path.name for path in (CONTRACT / "fixtures/http/current").glob(
-        "startup-plugin-readiness*-generation-43.json",
+        "startup-plugin-readiness*-generation-44.json",
     )),
 )
 async def test_startup_golden_replays_through_public_http_and_durable_inbox(
@@ -332,7 +338,7 @@ def test_live_registration_fixture_preserves_opt_in_wire_shape_and_default() -> 
     assert fixture["compatibility"]["ordinary_null_heartbeat_retains_metadata"] is True
 
 
-@pytest.mark.parametrize("generation", [35, 36, 37, 38, 39, 40, 41])
+@pytest.mark.parametrize("generation", [35, 36, 37, 38, 39, 40, 41, 42, 43, 44])
 @pytest.mark.parametrize("owner", ["prompt_models", "routes-prompts"])
 def test_native_bound_wire_is_preserved_at_later_generations(owner, generation) -> None:
     from agent_bridge.prompt_models import SubmitPromptRequest, SubmitPromptResponse
@@ -364,7 +370,7 @@ def test_worktree_render_contract_declares_versioned_opt_in_and_retained_holder(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("generation", [38, 39, 40])
+@pytest.mark.parametrize("generation", [38, 39, 40, 41, 42, 43, 44])
 async def test_remote_acp_route_matches_independent_expected_wire(monkeypatch, generation):
     from agent_bridge import remote_acp_sessions
     from agent_bridge.models import SessionStatus
@@ -377,6 +383,7 @@ async def test_remote_acp_route_matches_independent_expected_wire(monkeypatch, g
         return SimpleNamespace(
             session_id="bridge-example", name="example-agent",
             status=SessionStatus.IDLE, caller_session_id=None,
+            target=SimpleNamespace(type="remote-acp", caller_owner_ref=None),
         )
 
     monkeypatch.setattr(remote_acp_sessions, "connect_remote_session", connect)
@@ -388,14 +395,17 @@ async def test_remote_acp_route_matches_independent_expected_wire(monkeypatch, g
         StartSessionRequest.model_validate(fixture["request"]["json"]), request,
     )
     expected = {**fixture["response"], "protocol_version": bridge_protocol.HTTP_PROTOCOL_VERSION}
-    assert response.model_dump(mode="json", exclude_none=True) == expected
+    actual = response.model_dump(mode="json", exclude_none=True)
+    assert actual.pop("remote_relationship") == {"ownership": "unowned"}
+    assert actual == expected
     assert observed == [("example-agent", {
         "cwd": "/workspace", "caller_id": None, "caller_session_id": None,
         "remote_session_id": "saved-example",
+        "caller_owner_ref": None,
     })]
 
 
-@pytest.mark.parametrize("generation", [38, 39, 40])
+@pytest.mark.parametrize("generation", [38, 39, 40, 41, 42, 43, 44])
 def test_remote_acp_clients_retain_native_request_identity(generation):
     from agent_bridge.client import BridgeClient, BridgeClientError
 
@@ -610,7 +620,9 @@ def test_session_create_response_fixture_matches_model() -> None:
         status=expected["status"],
         protocol_version=expected["protocol_version"],
     )
-    assert response.model_dump(mode="json") == {**expected, "creation": None}
+    assert response.model_dump(mode="json") == {
+        **expected, "creation": None, "remote_relationship": None,
+    }
 
 
 @pytest.mark.asyncio
