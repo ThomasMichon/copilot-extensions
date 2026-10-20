@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import stat
 import tempfile
 from pathlib import Path
@@ -13,6 +14,41 @@ from .launch_seed_state import state_path
 
 _MAX_BYTES = 32768
 _STATES = {"launch-uncertain", "mux-created"}
+
+
+def validate_acknowledgement(request: dict, value: object) -> dict:
+    """Bind the explicit status attestation to the exact newly observed execution."""
+    from . import native_source_context, tracking
+
+    expected = request["expected"]
+    if (
+        not isinstance(value, dict) or set(value) != {
+            "native_session_id", "target_epoch", "source_identity", "native_incarnation",
+            "session_incarnation", "head_revision", "owner_revision", "activation_ordinal",
+            "status_reconciled",
+        }
+        or value["native_session_id"] != expected["native_session_id"]
+        or value["target_epoch"] != expected["target_epoch"]
+        or value["status_reconciled"] is not True
+        or type(value["head_revision"]) is not int
+        or value["head_revision"] != expected["head_revision"]
+        or any(
+            type(value[field]) is not int
+            or not expected[field] < value[field] <= tracking.MAX_PERSISTED_COUNTER
+            for field in ("owner_revision", "activation_ordinal")
+        )
+        or not isinstance(value["session_incarnation"], str)
+        or re.fullmatch(r"[A-Za-z0-9._:-]{1,128}", value["session_incarnation"]) is None
+        or not isinstance(value["native_incarnation"], str)
+        or re.fullmatch(r"[1-9][0-9]{0,9}:[0-9]{1,32}", value["native_incarnation"]) is None
+    ):
+        raise ValueError("Invalid restart seed acknowledgement")
+    pid, birth = value["native_incarnation"].split(":")
+    if value["source_identity"] != native_source_context.identity(
+        expected["native_session_id"], int(pid), birth, expected["target_epoch"],
+    ) or value["source_identity"] == expected["source_identity"]:
+        raise ValueError("Restart acknowledgement source is not the resumed execution")
+    return value
 
 
 def _path(yaml_path: Path) -> Path:
@@ -31,16 +67,23 @@ def _validate(value: object) -> dict:
         or set(value) != {
             "schema", "version", "request", "state", "seed_acknowledged",
             "restored", "automatic_eligible",
-        }
+        } | ({"acknowledgement"} if value.get("version") == 2 else set())
         or value["schema"] != "native-restart-launch"
-        or type(value["version"]) is not int or value["version"] != 1
-        or not isinstance(value["state"], str) or value["state"] not in _STATES
-        or any(value[field] is not False for field in (
-            "seed_acknowledged", "restored", "automatic_eligible",
-        ))
+        or type(value["version"]) is not int or value["version"] not in {1, 2}
+        or value["restored"] is not False or value["automatic_eligible"] is not False
     ):
         raise ValueError("Invalid restart launch receipt")
     validate_request(value["request"])
+    if value["version"] == 1:
+        if (
+            not isinstance(value["state"], str) or value["state"] not in _STATES
+            or value["seed_acknowledged"] is not False
+        ):
+            raise ValueError("Invalid restart launch receipt")
+    elif value["state"] != "seed-acknowledged" or value["seed_acknowledged"] is not True:
+        raise ValueError("Invalid restart seed acknowledgement state")
+    else:
+        validate_acknowledgement(value["request"], value["acknowledgement"])
     return value
 
 
@@ -84,6 +127,8 @@ def write(yaml_path: Path, value: dict, *, reserve: bool) -> None:
     after reservation leaves uncertainty, not evidence of an absent launch.
     """
     value = _validate(value)
+    if reserve and (value["version"] != 1 or value["state"] != "launch-uncertain"):
+        raise ValueError("Restart reservation must precede native launch and acknowledgement")
     path = _path(yaml_path)
     payload = json.dumps(value, sort_keys=True, allow_nan=False) + "\n"
     if len(payload.encode("utf-8")) > _MAX_BYTES:
@@ -104,7 +149,11 @@ def write(yaml_path: Path, value: dict, *, reserve: bool) -> None:
             current = read(yaml_path)
             if (
                 current is None or current["request"] != value["request"]
-                or current["state"] != "launch-uncertain" or value["state"] != "mux-created"
+                or not (
+                    current["version"] == value["version"] == 1
+                    and current["state"] == "launch-uncertain" and value["state"] == "mux-created"
+                    or current["version"] == 1 and value["version"] == 2
+                )
             ):
                 raise ValueError("Restart receipt transition is not owned")
             os.replace(staged, path)

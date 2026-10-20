@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import asdict
 from uuid import UUID
 
@@ -14,6 +15,39 @@ _EXPECTED_FIELDS = (
     "project", "worktree_id", "worktree_path", "native_session_id", "worktree_incarnation",
     "head_revision", "owner_revision", "activation_ordinal", "source_identity",
 )
+
+
+def _acknowledged(result: dict, request: dict) -> bool:
+    expected = request["expected"]
+    value = result.get("acknowledgement")
+    return (
+        result.get("state") == "seed-acknowledged"
+        and result.get("seed_acknowledged") is True
+        and isinstance(value, dict)
+        and set(value) == {
+            "native_session_id", "target_epoch", "source_identity", "native_incarnation",
+            "session_incarnation", "head_revision", "owner_revision", "activation_ordinal",
+            "status_reconciled",
+        }
+        and value["native_session_id"] == expected["native_session_id"]
+        and value["target_epoch"] == expected["target_epoch"]
+        and value["status_reconciled"] is True
+        and type(value["head_revision"]) is int
+        and value["head_revision"] == expected["head_revision"]
+        and all(
+            type(value[field]) is int and expected[field] < value[field] <= 2**63 - 1
+            for field in ("owner_revision", "activation_ordinal")
+        )
+        and all(
+            isinstance(value[field], str) and re.fullmatch(pattern, value[field]) is not None
+            for field, pattern in (
+                ("source_identity", r"native-source-v1:[0-9a-f]{64}"),
+                ("native_incarnation", r"[1-9][0-9]{0,9}:[0-9]{1,32}"),
+                ("session_incarnation", r"[A-Za-z0-9._:-]{1,128}"),
+            )
+        )
+        and value["source_identity"] != expected["source_identity"]
+    )
 
 
 def _attempt(attempt_id: str, attempts: list[dict], epoch: HostEpoch | None) -> tuple[dict, dict]:
@@ -86,15 +120,19 @@ def inspect_launch(attempt_id: str, attempts: list[dict], epoch: HostEpoch | Non
         set(result) != {
             "schema", "version", "request", "state", "seed_acknowledged",
             "restored", "automatic_eligible",
-        }
+        } | ({"acknowledgement"} if result.get("version") == 2 else set())
         or result["schema"] != "native-restart-launch"
-        or type(result["version"]) is not int or result["version"] != 1
+        or type(result["version"]) is not int or result["version"] not in {1, 2}
         or json.dumps(result["request"], sort_keys=True, allow_nan=False) != payload
-        or not isinstance(result["state"], str)
-        or result["state"] not in {"not-reserved", "launch-uncertain", "mux-created"}
-        or any(result[field] is not False for field in (
-            "seed_acknowledged", "restored", "automatic_eligible",
-        ))
+        or result["restored"] is not False or result["automatic_eligible"] is not False
+        or (
+            result["version"] == 1 and (
+                not isinstance(result["state"], str)
+                or result["state"] not in {"not-reserved", "launch-uncertain", "mux-created"}
+                or result["seed_acknowledged"] is not False
+            )
+            or result["version"] == 2 and not _acknowledged(result, request)
+        )
     ):
         raise ValueError("Restart inspection received an unconfirmed launch receipt")
     return result

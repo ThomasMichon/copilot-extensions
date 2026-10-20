@@ -20,12 +20,30 @@ _CONFLICTS = (
 )
 
 
+def is_restart_intent(args: argparse.Namespace) -> bool:
+    """Keep malformed/empty restart input out of ordinary embodiment."""
+    return (
+        getattr(args, "restart_request", None) is not None
+        or getattr(args, "restart_ack", None) is not None
+        or getattr(args, "restart_receipt", False)
+        or getattr(args, "status_reconciled", False)
+    )
+
+
 def add_arguments(parser: argparse.ArgumentParser, intent: argparse._ActionsContainer) -> None:
     """Register restart-only intent without changing ordinary Resume semantics."""
     intent.add_argument(
         "--restart-request", metavar="JSON",
         help="Explicit frozen restart request: exact-original native Resume with a "
         "durable uncertainty receipt; automatic recovery remains disabled",
+    )
+    intent.add_argument(
+        "--restart-ack", metavar="REQUEST-ID",
+        help="Acknowledge the restart seed from the resumed original native process",
+    )
+    parser.add_argument(
+        "--status-reconciled", action="store_true",
+        help="Explicitly attest completed STATUS FIRST reconciliation with --restart-ack",
     )
     parser.add_argument(
         "--restart-receipt", action="store_true",
@@ -78,6 +96,8 @@ def _request(args: argparse.Namespace) -> dict:
     raw = getattr(args, "restart_request", None)
     if raw is None:
         raise ValueError("--restart-receipt requires --restart-request")
+    if getattr(args, "status_reconciled", False):
+        raise ValueError("--status-reconciled requires --restart-ack")
     if not isinstance(raw, str) or len(raw.encode("utf-8")) > 8192:
         raise ValueError("Restart request exceeds its budget")
     if any(getattr(args, name, None) for name in _CONFLICTS):
@@ -116,11 +136,16 @@ def _seed(request: dict) -> str:
         "consequential operations. Launch and registration are NOT acknowledgement of "
         "this seed or completed recovery. "
         f"Recovery request: {request['request_id']}."
+        " AFTER completing that reconciliation, use this session's attributable "
+        "agent-worktrees command from its session catalog with these arguments: "
+        f"embody --worktree-id {request['expected']['worktree_id']} "
+        f"--restart-ack {request['request_id']} --status-reconciled --json. "
+        "Do not acknowledge before checking status; report refusal or uncertainty."
     )
 
 
 def _emit(receipt: dict, *, repeated: bool = False) -> int:
-    launched = receipt["state"] == "mux-created"
+    launched = receipt["state"] in {"mux-created", "seed-acknowledged"}
     output._json_output({
         **receipt, "ok": launched, "repeated": repeated,
         **({} if launched else {"error": "Native launch outcome is uncertain; do not retry"}),
@@ -132,6 +157,10 @@ def cmd_embody(args: argparse.Namespace) -> int:
     """Opt-in restart branch of embody; never called by automatic recovery."""
     from . import handoff_cli as cli
 
+    if getattr(args, "restart_ack", None) is not None or getattr(args, "status_reconciled", False):
+        from .native_restart_ack import cmd_acknowledge
+
+        return cmd_acknowledge(args)
     try:
         request = _request(args)
         expected = request["expected"]

@@ -592,12 +592,25 @@ additionally offers an explicit read-only owner-outcome inspection. It composes
 the frozen attempt UUID and original source epoch/PID/birth with the exact
 agent-worktrees `embody --restart-request ... --restart-receipt` API. The
 versioned, typed response distinguishes `not-reserved`, `launch-uncertain` and
-`mux-created`; none acknowledges a seed or marks restoration complete. Old
+`mux-created` (version 1), and `seed-acknowledged` (version 2). Only the last
+includes the original resumed agent's explicit STATUS FIRST assertion bound to
+the fresh native source, target epoch, mux incarnation and owner/activation
+revisions. The owner corroborates its actual live native hold and invoking
+ancestry under the existing lifecycle/admission/record fences. Registration or
+the Manager caller cannot manufacture that acknowledgement. No outcome marks
+restoration complete or grants automatic eligibility. Old
 owners, mismatched requests, unavailable owners and corrupt receipts remain
 blockers. The command returns nonzero because recovery is still unqualified.
 It does not rewrite the immutable frozen attempt, acquire a daemon lease,
 reserve or launch, or turn an absent/uncertain receipt into retry authority.
 Ordinary inspection still performs no owner call.
+
+For an acknowledged receipt the blocker identifies remaining native recovery
+qualification, rather than incorrectly reporting missing seed acknowledgement.
+The receipt is durable historical pickup evidence, not a new live status probe:
+later exits or policy changes require their current owners' reconciliation.
+No Manager attempt transition, retry, receipt reset or automatic launch follows
+from this read.
 
 The explicit owner restart-launch increment holds its existing lifecycle,
 native-admission and strict record-writer fences through final validation and

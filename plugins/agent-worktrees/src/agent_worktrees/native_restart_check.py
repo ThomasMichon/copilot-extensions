@@ -66,7 +66,8 @@ def validate_expected(expected: object) -> dict:
     return expected
 
 
-def _refusal(record: tracking.WorktreeRecord, expected: dict, task_policies: list[dict]) -> str | None:
+def policy_refusal(record: tracking.WorktreeRecord, expected: dict) -> str | None:
+    """Check common current-owner policy for launch and explicit native pickup."""
     if record.status != "active" or record.completed_at:
         return "terminal-worktree"
     if record.repo != expected["project"]:
@@ -99,6 +100,12 @@ def _refusal(record: tracking.WorktreeRecord, expected: dict, task_policies: lis
         return "non-native-execution"
     if record.bound_agent or record.profile_assignment_revision or record.profile_assignments:
         return "profile-policy-unqualified"
+    return None
+
+
+def _refusal(record: tracking.WorktreeRecord, expected: dict, task_policies: list[dict]) -> str | None:
+    if reason := policy_refusal(record, expected):
+        return reason
     from . import native_restart_task_check
 
     reason, policies = native_restart_task_check.check(record, expected)

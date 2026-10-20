@@ -109,3 +109,48 @@ def test_owner_unavailable_is_not_an_absent_receipt(subject, monkeypatch, capsys
     result = json.loads(capsys.readouterr().out)
     assert "owner unavailable" in result["blocker"]
     assert "launch_receipt" not in result
+
+
+def acknowledged(original):
+    return {
+        **original, "version": 2, "state": "seed-acknowledged", "seed_acknowledged": True,
+        "acknowledgement": {
+            "native_session_id": NATIVE, "target_epoch": vars(EPOCH),
+            "source_identity": "native-source-v1:" + "c" * 64,
+            "native_incarnation": "99:456", "session_incarnation": "new-mux",
+            "head_revision": 5, "owner_revision": 9, "activation_ordinal": 3,
+            "status_reconciled": True,
+        },
+    }
+
+
+def test_manager_composes_ack_without_claiming_automatic_or_completed_recovery(subject, monkeypatch, capsys):
+    original = engine_client.run_json
+    monkeypatch.setattr(engine_client, "run_json", lambda *a, **k: acknowledged(original(*a, **k)))
+    assert main(["mux-daemon", "recovery-evidence", "--check-launch", ATTEMPT]) == 1
+    result = json.loads(capsys.readouterr().out)
+    assert result["launch_receipt"]["seed_acknowledged"] is True
+    assert result["launch_receipt"]["restored"] is False
+    assert result["automatic_eligible"] is False
+    assert "qualification" in result["blocker"]
+
+
+@pytest.mark.parametrize("mutation", [
+    {"native_session_id": ATTEMPT}, {"target_epoch": {}}, {"status_reconciled": False},
+    {"owner_revision": True}, {"owner_revision": 8}, {"head_revision": 6},
+    {"activation_ordinal": 2}, {"source_identity": "unknown"},
+    {"native_incarnation": "unknown"}, {"session_incarnation": ""}, {"extra": True},
+])
+def test_manager_refuses_ack_not_bound_to_exact_frozen_identity(subject, monkeypatch, capsys, mutation):
+    original = engine_client.run_json
+
+    def run(*args, **kwargs):
+        result = acknowledged(original(*args, **kwargs))
+        result["acknowledgement"].update(mutation)
+        return result
+
+    monkeypatch.setattr(engine_client, "run_json", run)
+    assert main(["mux-daemon", "recovery-evidence", "--check-launch", ATTEMPT]) == 1
+    result = json.loads(capsys.readouterr().out)
+    assert "unconfirmed launch receipt" in result["blocker"]
+    assert "launch_receipt" not in result

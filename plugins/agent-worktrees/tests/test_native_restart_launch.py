@@ -322,8 +322,29 @@ def spawn(*args):
     time.sleep(0.15)
     return {"ok": True}
 sessions.mux_new_session = spawn
+if mode.startswith("ack"):
+    from agent_worktrees import native_hosting_evidence as hosting, native_restart_receipt
+    cli.cfg.detect_platform = lambda: "linux"
+    hosting.session_liveness = lambda _: "live"
+    hosting.session_process_owns_hold = lambda *a: True
+    sessions.mux_binding_for_session = lambda *a, **k: {
+        "session_name": sessions.mux_session_name(request["expected"]["worktree_id"]),
+        "pane_id": "%1", "pane_start_time": "455", "session_incarnation": "new-mux",
+        "copilot_pid": 99, "copilot_start_time": "456"}
+    native_source_context.capture = lambda: {
+        "version": 1, "qualified": True, **request["expected"]["target_epoch"],
+        "ancestors": [{"pid": 99, "start_time": "456"}]}
+    if mode == "ack-crash":
+        real_write = native_restart_receipt.write
+        def crash(*args, **kwargs):
+            real_write(*args, **kwargs)
+            os._exit(42)
+        native_restart_receipt.write = crash
+    intent = ["--restart-ack", request["request_id"], "--status-reconciled"]
+else:
+    intent = ["--restart-request", json.dumps(request)]
 args = parser.parse_args(["embody", "--worktree-id",
-    request["expected"]["worktree_id"], "--restart-request", json.dumps(request), "--json"])
+    request["expected"]["worktree_id"], *intent, "--json"])
 sys.exit(cli.cmd_embody(args))
 """
 
@@ -354,3 +375,191 @@ def test_actual_owner_crash_after_native_call_is_never_retried(subject):
     assert repeated.returncode == 4, repeated.stderr
     assert json.loads(repeated.stdout)["state"] == "launch-uncertain"
     assert subject.path.with_suffix(".launches").read_text() == "launch\n"
+
+
+@pytest.fixture
+def resumed(subject, capfd, monkeypatch):
+    from agent_worktrees import native_hosting_evidence
+    from agent_worktrees.tracking_session_registry import _start_session_activation
+
+    assert invoke(subject, capfd)[0] == 0
+    record = tracking.load_record(subject.path)
+    source = native_source_context.identity(NATIVE, 99, "456", TARGET)
+    assert _start_session_activation(
+        record.sessions[0], event_at="resumed", recorded_at="resumed",
+        source="hook", source_identity=source,
+    )
+    record.lifecycle_revision += 1
+    record.resources = [tracking.ResourceClaim(
+        kind="session", ref=tracking.format_claim_ref(
+            record.machine, record.repo, record.worktree_id, session=NATIVE,
+        ),
+    )]
+    tracking.save_record(record, subject.path)
+    monkeypatch.setattr(handoff_cli.cfg, "detect_platform", lambda: "linux")
+    monkeypatch.setattr(native_hosting_evidence, "session_liveness", lambda _: "live")
+    monkeypatch.setattr(native_hosting_evidence, "session_process_owns_hold", lambda *a: True)
+    monkeypatch.setattr(sessions, "mux_binding_for_session", lambda *a, **k: {
+        "session_name": sessions.mux_session_name(record.worktree_id),
+        "pane_id": "%1", "pane_start_time": "455", "session_incarnation": "new-mux",
+        "copilot_pid": 99, "copilot_start_time": "456",
+    })
+    monkeypatch.setattr(native_source_context, "capture", lambda: {
+        "version": 1, "qualified": True, **TARGET,
+        "ancestors": [{"pid": 99, "start_time": "456"}],
+    })
+    return subject
+
+
+def acknowledge(subject, capfd, *extra):
+    args = core.build_parser().parse_args([
+        "embody", "--worktree-id", subject.record.worktree_id,
+        "--restart-ack", subject.request["request_id"], "--status-reconciled", "--json", *extra,
+    ])
+    rc = handoff_cli.cmd_embody(args)
+    return rc, json.loads(capfd.readouterr().out)
+
+
+def test_acknowledgement_is_explicit_durable_and_bound_to_resumed_process(resumed, capfd):
+    from agent_worktrees import native_restart_receipt
+
+    assert native_restart_receipt.read(resumed.path)["seed_acknowledged"] is False
+    rc, result = acknowledge(resumed, capfd)
+    assert rc == 0 and result["state"] == "seed-acknowledged"
+    assert result["version"] == 2 and result["seed_acknowledged"] is True
+    assert result["restored"] is False and result["automatic_eligible"] is False
+    ack = result["acknowledgement"]
+    assert ack["native_session_id"] == NATIVE and ack["native_incarnation"] == "99:456"
+    assert ack["target_epoch"] == TARGET and ack["activation_ordinal"] == 3
+    assert ack["status_reconciled"] is True
+    assert native_restart_receipt.read(resumed.path)["acknowledgement"] == ack
+    before = native_restart_receipt._path(resumed.path).read_bytes()
+    assert acknowledge(resumed, capfd)[0] == 0
+    assert native_restart_receipt._path(resumed.path).read_bytes() == before
+    assert invoke(resumed, capfd, "--restart-receipt")[1]["seed_acknowledged"] is True
+    assert len(resumed.launches) == 1
+
+
+@pytest.mark.parametrize("damage", [
+    "wrong-ancestry", "wrong-boot", "wrong-head", "head-revision", "wrong-source",
+    "old-source", "pruned-source", "ended", "paused", "task", "owner-ref",
+    "pending-seed", "opaque-claim", "wrong-worktree-incarnation", "no-hold", "intentional-end",
+])
+def test_ack_refuses_unproven_or_changed_native_owner(resumed, capfd, monkeypatch, damage):
+    from agent_worktrees import native_hosting_evidence, native_restart_receipt
+
+    before = native_restart_receipt._path(resumed.path).read_bytes()
+    record = tracking.load_record(resumed.path)
+    if damage == "wrong-ancestry":
+        monkeypatch.setattr(native_source_context, "capture", lambda: {
+            "version": 1, "qualified": True, **TARGET,
+            "ancestors": [{"pid": 100, "start_time": "456"}],
+        })
+    elif damage == "wrong-boot":
+        monkeypatch.setattr(native_source_context, "epoch", lambda: SOURCE)
+    elif damage == "wrong-head":
+        other = str(uuid4())
+        record.sessions.append(tracking.SessionEntry(other, "new"))
+        tracking._append_head_transition(record, other, reason="bind", at="new")
+    elif damage == "head-revision":
+        record.head_revision += 1
+    elif damage == "wrong-source":
+        record.sessions[0].activations[-1].source_identity = "native-source-v1:" + "a" * 64
+    elif damage == "old-source":
+        record.sessions[0].activations[0].source_identity = "native-source-v1:" + "a" * 64
+    elif damage == "pruned-source":
+        record.sessions[0].pruned_sources = [resumed.request["expected"]["source_identity"]]
+    elif damage == "ended":
+        record.sessions[0].activations[-1].ended_at = "ended"
+    elif damage == "intentional-end":
+        record.sessions[0].activations[0].end_source = "hook"
+        record.sessions[0].activations[0].end_reason = "intentional-exit"
+    elif damage == "paused":
+        record.paused = True
+    elif damage == "task":
+        record.resources.append(tracking.ResourceClaim(kind="task", ref="dispatch-local-task:one"))
+    elif damage == "owner-ref":
+        record.owner_ref = "unknown"
+    elif damage == "pending-seed":
+        from agent_worktrees import launch_seed_state
+
+        monkeypatch.setattr(launch_seed_state, "peek", lambda *a, **k: object())
+    elif damage == "opaque-claim":
+        record.resources[0].metadata_opaque = True
+    elif damage == "wrong-worktree-incarnation":
+        record.creation_nonce = "fedcba9876543210"
+    else:
+        monkeypatch.setattr(native_hosting_evidence, "session_process_owns_hold", lambda *a: False)
+    tracking.save_record(record, resumed.path)
+    rc, result = acknowledge(resumed, capfd)
+    assert rc != 0 and result["error"]
+    assert native_restart_receipt._path(resumed.path).read_bytes() == before
+    assert len(resumed.launches) == 1
+
+
+def test_uncertain_launch_can_only_be_reconciled_by_actual_native_ack(resumed, capfd):
+    from agent_worktrees import native_restart_receipt
+
+    path = native_restart_receipt._path(resumed.path)
+    path.write_text(path.read_text().replace('"mux-created"', '"launch-uncertain"'))
+    assert acknowledge(resumed, capfd)[0] == 0
+    assert native_restart_receipt.read(resumed.path)["state"] == "seed-acknowledged"
+
+
+def test_ack_write_failure_preserves_unacknowledged_outcome(resumed, capfd, monkeypatch):
+    from agent_worktrees import native_restart_receipt
+
+    def denied(*args, **kwargs):
+        raise OSError("denied acknowledgement write")
+
+    monkeypatch.setattr(native_restart_receipt, "write", denied)
+    assert acknowledge(resumed, capfd)[0] != 0
+    assert native_restart_receipt.read(resumed.path)["seed_acknowledged"] is False
+
+
+def test_ack_requires_status_reconciliation_and_cannot_be_dry_run(resumed, capfd):
+    args = core.build_parser().parse_args([
+        "embody", "--worktree-id", resumed.record.worktree_id,
+        "--restart-ack", resumed.request["request_id"], "--json",
+    ])
+    assert handoff_cli.cmd_embody(args) != 0
+    capfd.readouterr()
+    assert acknowledge(resumed, capfd, "--dry-run")[0] != 0
+
+
+def test_actual_ack_crash_after_commit_is_idempotent_without_native_relaunch(resumed):
+    argv = [sys.executable, "-c", _CHILD, json.dumps(resumed.request), str(resumed.path)]
+    crashed = subprocess.run([*argv, "ack-crash"], capture_output=True, text=True, timeout=20)
+    assert crashed.returncode == 42, crashed.stderr
+    repeated = subprocess.run([*argv, "ack"], capture_output=True, text=True, timeout=20)
+    assert repeated.returncode == 0, repeated.stderr
+    assert json.loads(repeated.stdout)["seed_acknowledged"] is True
+    assert len(resumed.launches) == 1
+    assert not resumed.path.with_suffix(".launches").exists()
+
+
+def test_owner_changed_during_hosting_probe_cannot_ack(resumed, capfd, monkeypatch):
+    from agent_worktrees import native_hosting_evidence, native_restart_receipt
+
+    original = native_hosting_evidence.observe
+
+    def changed(*args, **kwargs):
+        result = original(*args, **kwargs)
+        record = tracking.load_record(resumed.path)
+        record.paused = True
+        tracking.save_record(record, resumed.path)
+        return result
+
+    monkeypatch.setattr(native_hosting_evidence, "observe", changed)
+    assert acknowledge(resumed, capfd)[0] != 0
+    assert native_restart_receipt.read(resumed.path)["seed_acknowledged"] is False
+
+
+@pytest.mark.parametrize("flag", ["--restart-request=", "--restart-ack="])
+def test_empty_restart_intent_never_falls_through_to_ordinary_launch(subject, capfd, flag):
+    args = core.build_parser().parse_args([
+        "embody", "--worktree-id", subject.record.worktree_id, flag, "--json",
+    ])
+    assert handoff_cli.cmd_embody(args) != 0
+    assert json.loads(capfd.readouterr().out)["error"]
+    assert subject.launches == []

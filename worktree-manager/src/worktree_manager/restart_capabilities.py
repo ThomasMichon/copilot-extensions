@@ -73,7 +73,11 @@ def inspect_recovery(
             result["launch_receipt"] = inspect_launch(
                 check_launch, result["attempts"], observer.epoch,
             )
-            blocker = "Launch outcome is not acknowledged seed pickup or completed recovery."
+            blocker = (
+                "Seed pickup is acknowledged; native recovery qualification remains incomplete."
+                if result["launch_receipt"]["seed_acknowledged"] else
+                "Launch outcome is not acknowledged seed pickup or completed recovery."
+            )
         except (EngineError, ValueError) as exc:
             blocker = str(exc)
         result["blocker"] = "; ".join(filter(None, [result.get("blocker"), blocker]))

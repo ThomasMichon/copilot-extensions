@@ -1230,6 +1230,25 @@ claiming discipline alone.
 
 ## Journal
 
+- **2026-10-19** - Implemented the explicit source-bound STATUS FIRST
+  acknowledgement increment for [machine restart recovery](machine-restart-recovery.md).
+  Durable seed pickup requires the original conversation's actual live native
+  hold/mux/process birth and a matching fresh invoking ancestor, retained original
+  activation history and current owner policy. Manager inspection composes the
+  exact typed acknowledged outcome without granting restored/automatic state.
+  Disposable process/contract fixtures are not native CLI qualification;
+  the focused and umbrella completion gates remain open.
+
+- **2026-10-19** - Exact-original restart-owner launch and durable uncertainty
+  landed in [#7286](https://github.com/ThomasMichon/copilot-extensions/pull/7286)
+  after exact-head provider approval and required green CI. Reconciled the
+  [focused Plan/Validation Plan](machine-restart-recovery.md): mux creation
+  remains provisional, not native identity/readiness or acknowledged restoration.
+  The next stretch binds STATUS FIRST acknowledgement to the resumed original
+  native process. Task/claim/profile action-time admission, survivor adoption,
+  automatic startup and notification timing remain open; neither the focused
+  slice nor the umbrella is Done, and no rollout is implied.
+
 - **2026-10-19** - Prepared the next explicit restart-owner increment under
   [machine restart recovery](machine-restart-recovery.md): exact-original
   Resume, current-owner fencing, durable prelaunch uncertainty, full interactive

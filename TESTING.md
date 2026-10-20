@@ -225,8 +225,17 @@ failed outcome publication, corrupt/indirect receipts, changed owner policy,
 unknown mux absence, typed staged seeds, exact UUID/full interactive STATUS
 FIRST argv and read-only frozen-attempt/outcome binding. The process tests keep
 the real locks and durable state; native epoch, process liveness and mux creation
-are synthetic. They do not launch Copilot, prove prompt readiness or acknowledge
-the seed, and do not qualify automatic startup/platform recovery.
+are synthetic. The explicit acknowledgement fixtures exercise actual owner
+policy/hosting reduction with synthetic process observations, retained original
+activation history and fresh invocation ancestry. Wrong native/ancestry/boot,
+head/incarnation changes, missing holds, intentional End, pruned sources,
+opaque/other claims and pending prompts must not publish an ACK. A real child
+exits after durable ACK publication; an exact repeat must retain the same
+receipt without another native invocation. Manager fixtures accept only the
+exact typed version-2 acknowledged binding, retaining false restored/automatic
+flags and a qualification blocker. They do not launch Copilot, prove prompt
+readiness or actual seed consumption, or qualify automatic startup/platform
+recovery.
 
 Frozen restart-attempt identities and historical owner bindings use:
 

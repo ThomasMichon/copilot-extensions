@@ -424,11 +424,39 @@ Adding `--restart-receipt` is strictly read-only, even when no receipt exists.
 The payload has exactly `schema: "native-restart-launch"`, integer `version: 1`,
 the exact typed `request`, `state` (`not-reserved`, `launch-uncertain` or
 `mux-created`) and false `seed_acknowledged`, `restored`, `automatic_eligible`.
-The launch response additionally has `ok` and `repeated`; `ok` means only mux
-invocation succeeded, not that native restoration completed. `not-reserved`
+The launch response additionally has `ok` and `repeated`; for these version-1
+outcomes `ok` means only mux invocation succeeded, not that native restoration completed. `not-reserved`
 cannot authorize launch. There is no unseeded, filesystem-latest, task-writer or
 fresh-conversation fallback. Platform notification/startup and actual original
 native identity/ready/seed acknowledgement remain separate qualification gates.
+
+`embody --worktree-id <exact-id> --restart-ack <request-uuid>
+--status-reconciled --json` is a mutually exclusive explicit acknowledgement
+intent. The original resumed agent calls it only after the seed's status
+reconciliation; neither Manager nor native registration emits it. No supplied
+session environment variable, launch argv or caller-provided source witness
+establishes this proof. Under the existing lifecycle/native-admission and strict
+record locks, it captures invoking ancestry and corroborates the original UUID's
+live native hold, mux PID/birth, unique current activation and exact target epoch.
+Current worktree incarnation/head revision must match the frozen request,
+owner/activation revisions must advance, and the frozen original source must
+remain unambiguous in retained history. Its inferred next-Start closure is
+allowed; explicit/reasoned closure is not. Current pending handoff/seed,
+pause/profile/dispatch policy and other/opaque/producer claims refuse. Only the
+canonical active self-session claim introduced by normal native Start is allowed.
+
+Successful publication advances either version-1 reserved state to integer
+`version: 2`, `state: "seed-acknowledged"`, `seed_acknowledged: true`, and adds
+exactly one `acknowledgement` object. Its exact fields are `native_session_id`,
+`target_epoch`, `source_identity`, `native_incarnation`, `session_incarnation`,
+`head_revision`, `owner_revision`, `activation_ordinal`, `status_reconciled`.
+The status field is exactly true; the identities/revisions bind the actual new
+execution to the frozen request. `restored` and `automatic_eligible` remain false.
+`--restart-receipt` returns that version-2 object unchanged; the ACK response
+adds `ok`, not launch/retry authority. An identical ACK revalidates current
+execution/policy without rewriting storage. Missing/mismatched receipts,
+changed executions and failed persistence refuse; no retry, clear or supersede
+operation is provided. These contracts are not actual native CLI qualification.
 
 `session-role --restart-check <expected-json> --json` checks a **single explicit
 frozen identity** against the current worktree owner. The bounded (8 KiB)

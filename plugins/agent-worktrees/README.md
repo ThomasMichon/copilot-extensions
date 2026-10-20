@@ -221,15 +221,35 @@ same request reads that outcome without another launch, even after native
 startup advances the owner revision. A different request cannot overwrite an
 unreconciled receipt. There is currently no receipt-clear/retry operation:
 uncertainty requires owner reconciliation, not deleting state or guessing that
-nothing launched. Neither outcome proves a ready original native process,
-seed acknowledgement or completed restoration; `restored`,
-`seed_acknowledged` and `automatic_eligible` remain false.
+nothing launched. Neither outcome proves a ready original native process or
+seed acknowledgement.
+
+The seed directs the resumed agent to use its attributable session-catalog
+command with `embody --worktree-id <exact-id> --restart-ack <request-uuid>
+--status-reconciled --json` **after** STATUS FIRST reconciliation. This is an
+explicit agent assertion, never a registration hook or Manager-generated ACK.
+The owner requires the original UUID's live open hold and exact mux/process
+birth, a fresh invoking-process ancestry containing that native source, the
+current target boot and unchanged worktree/head identity. The frozen original
+activation must remain unambiguous in history; only its ordinary
+`inferred:next-start` closure is accepted, not a reasoned intentional exit.
+Current holds, pending seeds/handoffs, task/dispatch/profile or opaque claims
+refuse. The exact producer-free active self-session claim created by normal
+native registration is allowed; it grants no permission for other claims.
+
+A durable version-2 `seed-acknowledged` receipt retains the exact newly observed
+source, mux incarnation and owner/activation revisions. It can reconcile
+`launch-uncertain` without retrying the launch, and an identical ACK is
+idempotent only while the same execution and current policy are still proven.
+There is no clear/supersede operation, including after ACK. `restored` and
+`automatic_eligible` remain false: this assertion does not qualify real native
+seed delivery, all recovery admission, or platform startup.
 
 Add `--restart-receipt` to read the exact request's receipt without launch
 configuration, admission, provisioning or writes. `not-reserved` means no owner
 reservation is present, not permission to launch. `--dry-run` performs a
 provisional current-owner check without reservation. Automatic recovery,
-startup enrollment and actual native seed-acknowledgement qualification remain
+startup enrollment and actual native seed-delivery qualification remain
 disabled/unresolved; Windows, macOS and container restart intents refuse.
 
 ## Static instruction preparation

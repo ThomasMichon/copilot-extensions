@@ -155,9 +155,10 @@ means of fulfilling the operator's request. They require normal source review.
   native cold Resume of the exact original conversation in its proper mux.
   Never substitute a new conversation, raw process spawn or a global repair
   command that mutates unrelated sessions.
-  The explicit restart-only owner increment now fences the original UUID,
-  old source process/epoch and current owner record through durable reservation
-  and mux invocation. It admits no task/claim/profile-bound worktree and is
+  [#7286](https://github.com/ThomasMichon/copilot-extensions/pull/7286)
+  fences the original UUID, old source process/epoch and current owner record
+  through durable reservation and mux invocation in the explicit restart-only
+  owner intent. It admits no task/claim/profile-bound worktree and is
   not wired to automatic startup. Actual native readiness/identity/seed
   acknowledgement and surviving-session adoption remain unresolved.
 - [ ] Persist recovery attempt and outcome; reconcile a crash between launch
@@ -165,11 +166,14 @@ means of fulfilling the operator's request. They require normal source review.
   retrying. Do not claim exactly-once delivery merely from a pre-launch flag.
   #7263 retains frozen candidate identity and pre-commit crash rollback, not
   launch reservation/outcome or acknowledged seed pickup.
-  The subsequent explicit owner increment persists `launch-uncertain` before
+  #7286 persists `launch-uncertain` before
   invocation and distinguishes `mux-created` without permitting retries.
   Manager read-only inspection composes this receipt with the immutable frozen
   attempt. Outcome reconciliation through actual native acknowledgement
-  remains open; a frozen Manager row no longer implies no invocation.
+  remains unqualified; a frozen Manager row no longer implies no invocation.
+  The next explicit acknowledgement increment binds retained original-source
+  history to fresh native hosting and invoking ancestry before durable seed
+  pickup; its fixtures are not actual native CLI qualification.
 - [ ] Apply bounded admission and concurrency. Authentication, dependency or
   ownership failures remain visible and resumable without busy retry loops.
 
@@ -179,12 +183,16 @@ means of fulfilling the operator's request. They require normal source review.
   prompt transport. Identify restart recovery, require current status and
   objective/claim/hold reconciliation, and prohibit interpreting the seed as
   renewed permission for physical or service operations.
-  The explicit owner increment builds the full interactive STATUS FIRST seed
+  #7286 builds the full interactive STATUS FIRST seed
   into exact-original Resume argv. This proves the construction/transport
   boundary, not actual native seed consumption or acknowledgement.
 - [ ] Verify expected native identity, ready CLI/prompt, fresh registration
   where that optional capability is available, and acknowledged seed pickup.
   Launch, registration and completed restoration are distinct outcomes.
+  The explicit STATUS FIRST acknowledgement operation and typed read-only
+  Manager outcome are implemented separately from native/registration hooks.
+  Real native delivery/readiness and complete recovery qualification remain
+  open, and acknowledged outcomes retain false restored/automatic flags.
 - [ ] Integrate with the existing daemon's platform lifecycle rather than a
   parallel scheduler. Provide the supported boot/logon startup path needed for
   automatic operation, with explicit enrollment and least necessary authority.
@@ -815,3 +823,59 @@ The umbrella effort remains Active independently of this slice's completion.
   76 Manager attempt/outcome contracts. High-signal lint, unchanged module
   ceilings and documentation consistency passed. Native process readiness and
   acknowledged seed pickup are still not qualified by these synthetic fixtures.
+
+### 2026-10-19 - Fenced owner launch landed; native acknowledgement next
+
+- [#7286](https://github.com/ThomasMichon/copilot-extensions/pull/7286)
+  squash-merged to `dev` as `63a1b1b7b5` after genuine exact-head Copilot
+  approval on `b5734729bf`, no inline findings and required green CI.
+  The source is merged, not proven promoted or installed.
+- Re-read this Plan, Validation Plan and completion gate after merge. The
+  exact-original launch, durable uncertainty, seed construction and read-only
+  outcome pieces are delivered. Their combined items remain open because
+  actual native proof/acknowledgement, retry reconciliation, survivor adoption,
+  task/claim/profile action-time policy and automatic startup are not yet
+  qualified. No host enrollment or running-state change occurred.
+- Next stretch: require seed pickup/status reconciliation acknowledgement from
+  the resumed original native process, binding fresh native UUID/mux/PID/birth/
+  activation evidence and original ancestry rather than trusting a receipt,
+  ambient session ID or bridge registration. Only a verified acknowledgement
+  may advance the durable outcome. Automatic recovery stays blocked while this
+  and platform/startup/timing obligations remain open.
+
+### 2026-10-19 - Explicit native STATUS FIRST acknowledgement
+
+- Added a distinct `embody --restart-ack <request-uuid> --status-reconciled`
+  intent to the existing owner boundary. The resumed original agent invokes it
+  only after status reconciliation; the restart seed names the operation through
+  the session's attributable command catalog. Neither launch, registration nor a
+  Manager caller can substitute for the invoking native source's proof.
+- Under existing lifecycle/native-admission and strict record-writer exclusion,
+  the owner verifies the frozen original activation is retained and unambiguous,
+  the exact worktree/head is unchanged, current policy has no hold/pending seed/
+  handoff/profile/task/opaque claim, and actual native hold/mux/PID birth matches
+  a fresh invoking-process ancestor. Native Start may infer closure of the old
+  interval; that is accepted only as `inferred:next-start` without an exit
+  reason, never an intentional End. Its canonical self-session claim is allowed.
+- A private durable version-2 `seed-acknowledged` outcome can reconcile either
+  reserved version-1 state without another launch. The exact newly observed
+  execution and status assertion are retained; repeat ACK revalidates and does
+  not rewrite. A real child dying after publication retains the acknowledged
+  receipt for the next call. No clear, supersede or retry operation is added.
+- The Manager validates the exact typed version-2 outcome against its immutable
+  frozen request. It reports the historical ACK distinctly but still returns a
+  qualification blocker, with `restored` and `automatic_eligible` false.
+- Initial isolated regressions failed before the acknowledgement existed.
+  The integrated disconnected lane passed 225 owner and 42 Manager contracts,
+  including actual durable ACK crash/repeat and unchanged current-owner checks.
+  Native holds/process/mux evidence in the acknowledgement fixtures is synthetic:
+  this is not actual native prompt readiness, seed consumption or reboot proof.
+- The focused and umbrella gates remain open. Actual native qualification,
+  task/claim/profile action-time admission, surviving-session adoption, receipt
+  retention/supersession, startup enrollment and resident notification timing
+  remain work under this same tracked objective. No live enrollment, rollout,
+  host mutation or operational permission is implied by the new assertion.
+- The final expanded disconnected lane passed 401 owner/Resume/admission/seed
+  contracts and 55 Manager outcome/capability contracts. High-signal Python
+  checks and documentation consistency passed; ordinary Resume/Bridge semantics
+  and the existing module ceilings are unchanged.

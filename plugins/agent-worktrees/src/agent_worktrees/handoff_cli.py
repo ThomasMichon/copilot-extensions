@@ -244,7 +244,7 @@ def cmd_embody(args: argparse.Namespace) -> int:
     Verification: ``agent-bridge live-sessions?worktree_id=<id>`` reports
     registration. ``--verify-timeout`` waits for mux existence, not native proof.
     """
-    if getattr(args, "restart_request", None) is not None or getattr(args, "restart_receipt", False):
+    if native_restart_launch.is_restart_intent(args):
         return native_restart_launch.cmd_embody(args)
     make_new = getattr(args, "new", False)
     raw_id = getattr(args, "worktree_id", None)
