@@ -197,6 +197,20 @@ remain outside this proposal's authority.
 
 ## Journal
 
+### 2026-10-19 - Pinning endpoint authority across worker environments
+
+- The next review confirmed the initial three corrections and exposed endpoint
+  edge cases. Azure legacy organization HTTPS URLs now normalize through the
+  existing shared identity comparator alongside modern HTTPS and secure SSH;
+  another organization and plaintext aliases remain different destinations.
+- Export pins GitHub's resolved host rather than allowing the worker's `GH_HOST`
+  to select a different authority. Scheme-less userinfo and query/fragment data
+  are rejected before an artifact can be written.
+- The contained worker, source-recovery and observation selection passes 240
+  cases. A fresh subprocess with a different `GH_HOST` accepts the pinned
+  enterprise destination and refuses the same slug on the worker's default host.
+  Release and installed consumer delivery remain open.
+
 ### 2026-10-19 - Worker-policy review corrections
 
 - The first review of #7323 identified three real policy-boundary gaps.

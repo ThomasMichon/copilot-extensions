@@ -58,6 +58,25 @@ def matches_remote(remote: str, repository: str, pr, workspace: str) -> bool:
     return same_repository(_identity(remote, workspace), _identity(expected, workspace), pr.provider)
 
 
+def _export_endpoint(pr) -> str:
+    from . import providers
+
+    raw = pr.api_base.strip()
+    parsed = urlsplit(raw if "://" in raw or raw.startswith("//") else "//" + raw)
+    if parsed.username or parsed.password or parsed.query or parsed.fragment:
+        raise ValueError("worker policy endpoint must not contain credentials or query data")
+    endpoint = providers.get_provider(pr.provider).authority_endpoint(raw)
+    resolved = urlsplit("//" + endpoint if pr.provider == "github" else endpoint)
+    if (
+        not resolved.hostname or any(character.isspace() for character in endpoint)
+        or resolved.username or resolved.password or resolved.query or resolved.fragment
+        or (pr.provider != "github" and resolved.scheme not in ("https", "http"))
+        or resolved.port == 0
+    ):
+        raise ValueError("worker policy needs a valid resolved provider endpoint")
+    return endpoint
+
+
 def export_config(
     repository: str, repo: RepoConfig, workspace: str, base: str | None, destination: Path,
 ) -> dict:
@@ -81,17 +100,15 @@ def export_config(
     publication = repo.pr.publication_checks
     if publication is None:
         raise ValueError("this repository has no configured publication checks")
-    endpoint = urlsplit(repo.pr.api_base)
-    if endpoint.username or endpoint.password or endpoint.query or endpoint.fragment:
-        raise ValueError("worker policy endpoint must not contain credentials or query data")
     pr = {
         key: getattr(repo.pr, key) for key in (
-            "provider", "api_base", "branch_update_strategy", "merge_strategy",
+            "provider", "branch_update_strategy", "merge_strategy",
             "review_blocking", "dismiss_stale_reviews",
         )
     }
     pr.update(
         repository=repository,
+        api_base=_export_endpoint(repo.pr),
         hold_labels=list(repo.pr.hold_labels),
         wip_title_prefixes=list(repo.pr.wip_title_prefixes),
         publication_checks=_publication(publication),

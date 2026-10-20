@@ -128,6 +128,20 @@ def test_export_refuses_endpoint_credentials_or_query_data(host, tmp_path, endpo
     assert not json.loads(capsys.readouterr().out)["ok"]
 
 
+@pytest.mark.parametrize("endpoint", [
+    "reader:fixture-value@forge.invalid", "//reader:fixture-value@forge.invalid",
+    "forge.invalid?private=value", "forge.invalid#private", "forge.invalid:invalid",
+])
+def test_github_export_rejects_schemeless_endpoint_data(host, tmp_path, capsys, endpoint):
+    data = json.loads(host.read_text("utf-8"))
+    data["repos"]["target"]["pr"].update(provider="github", api_base=endpoint)
+    host.write_text(json.dumps(data), "utf-8")
+    output = tmp_path / "worker.json"
+    assert export(host, output, "/worker/repo") == 2
+    assert not output.exists()
+    assert not json.loads(capsys.readouterr().out)["ok"]
+
+
 @pytest.mark.parametrize(("argv", "allowed"), [
     (["pr-watch", "checks", "project/repo", "lenses", "--config", "policy", "--workspace", "repo"], True),
     (["pr-watch", "checks", "project/repo", "lenses", "--config=policy", "--workspace=repo"], True),
@@ -260,6 +274,30 @@ def test_exported_config_runs_all_checks_from_fresh_worker_context(host, tmp_pat
         assert json.loads(result.stdout)["ok"]
 
 
+def test_export_pins_github_host_across_fresh_worker_environments(
+    host, tmp_path, worker, monkeypatch, capsys,
+):
+    data = json.loads(host.read_text("utf-8"))
+    data["repos"]["target"]["pr"].update(provider="github", api_base="")
+    host.write_text(json.dumps(data), "utf-8")
+    monkeypatch.setenv("GH_HOST", "forge.invalid")
+    output = tmp_path / "worker.json"
+    assert export(host, output, str(worker)) == 0
+    capsys.readouterr()
+    assert json.loads(output.read_text("utf-8"))["repos"]["pr-worker"]["pr"]["api_base"] == "forge.invalid"
+    home = tmp_path / "isolated-home"
+    home.mkdir()
+    for endpoint, expected in (("forge.invalid", 0), ("github.com", 2)):
+        git(worker, "remote", "set-url", "--push", "origin", f"https://{endpoint}/project/repo.git")
+        result = subprocess.run(
+            [sys.executable, "-m", "agent_worktrees", "pr-watch", "checks", "project/repo",
+             "lenses", "--workspace", str(worker), "--config", str(output), "--json"],
+            cwd=worker, env=dict(os.environ, AGENT_HOME=str(home), GH_HOST="github.com"),
+            capture_output=True, text=True, timeout=30, **no_window_kwargs(),
+        )
+        assert result.returncode == expected, result.stdout + result.stderr
+
+
 @pytest.mark.parametrize("mode", ["different", "additional", "organization", "host"])
 def test_worker_rejects_a_different_push_destination(host, tmp_path, worker, capsys, mode):
     git(worker, "remote", "set-url", "origin", "https://dev.azure.com/example/project/_git/repo")
@@ -290,6 +328,16 @@ def test_worker_rejects_a_different_push_destination(host, tmp_path, worker, cap
      "git@ssh.dev.azure.com:v3/example/project/repo", True),
     ("azure-devops", "https://dev.azure.com/example", "project/repo",
      "git@ssh.dev.azure.com:v3/another/project/repo", False),
+    ("azure-devops", "https://example.visualstudio.com", "project/repo",
+     "git@ssh.dev.azure.com:v3/example/project/repo", True),
+    ("azure-devops", "https://dev.azure.com/example", "project/repo",
+     "https://example.visualstudio.com/project/_git/repo", True),
+    ("azure-devops", "https://dev.azure.com/example", "project/repo",
+     "https://example.visualstudio.com/DefaultCollection/project/_git/repo", True),
+    ("azure-devops", "https://example.visualstudio.com", "project/repo",
+     "https://dev.azure.com/another/project/_git/repo", False),
+    ("azure-devops", "https://dev.azure.com/example", "project/repo",
+     "http://example.visualstudio.com/project/_git/repo", False),
     ("github", "", "example/repo", "git@github.com:example/repo.git", True),
     ("github", "", "example/repo", "https://other.invalid/example/repo.git", False),
     ("github", "https://forge.invalid", "example/repo", "ssh://git@forge.invalid/example/repo", True),

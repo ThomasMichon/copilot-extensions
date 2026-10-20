@@ -71,6 +71,8 @@ be omitted only when that binding already supplies a default branch. The new
 output file contains the selected provider/endpoint, publication checks,
 observation requirements, hold labels, WIP title prefixes and guidance, bound
 to that worker workspace/base.
+The resolved GitHub authority is pinned even when the host selected it through
+`GH_HOST`, so a different worker environment cannot redirect the policy.
 It does not copy host checkout/runtime configuration, machine identity, token commands, credentials or
 publication/merge grants. Missing publication policy, an ambiguous workspace,
 an endpoint containing credential/query data, or an existing output file
@@ -92,7 +94,8 @@ candidate checks still apply. Publication target matching uses the configured
 remote's push URL, so an optimized fetch mirror cannot replace the actual
 publication destination. Matching includes the provider endpoint (including
 the Azure organization), not just the repository slug, and preserves equivalent
-secure SSH/HTTPS destinations. Multiple push URLs refuse instead of validating only
+secure SSH/HTTPS destinations, including Azure's legacy organization URLs.
+Multiple push URLs refuse instead of validating only
 one destination of a multi-destination push.
 Missing, malformed or empty explicit configuration, including a non-mapping
 `repos` block or repository entry, refuses the read/check

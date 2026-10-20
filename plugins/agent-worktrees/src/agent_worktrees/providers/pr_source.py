@@ -17,6 +17,13 @@ def same_repository(source_identity: str, destination_identity: str, provider: s
             if ssh:
                 organization, project, repository = ssh.groups()
                 return f"dev.azure.com/{organization}/{project}/_git/{repository}"
+            legacy = re.fullmatch(
+                r"([^./:]+)\.visualstudio\.com/(?:DefaultCollection/)?([^/]+)/_git/([^/]+)",
+                identity, re.IGNORECASE,
+            )
+            if legacy:
+                organization, project, repository = legacy.groups()
+                return f"dev.azure.com/{organization}/{project}/_git/{repository}"
         return identity
 
     return bool(source_identity and destination_identity) and (
