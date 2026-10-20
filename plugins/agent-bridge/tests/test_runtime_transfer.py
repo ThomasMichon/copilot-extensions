@@ -25,6 +25,9 @@ from agent_bridge.runtime_transfer import (
 )
 from test_runtime_restore import captured as captured
 
+pytestmark = pytest.mark.timeout(60)
+_NATIVE_BOOTSTRAP_SECONDS = 15
+
 
 class MemoryChannel:
     def __init__(self, peer: PeerIdentity) -> None:
@@ -399,15 +402,21 @@ def native_child(
     custody = channel = None
     try:
         custody = OwnedChild(process, executable, Deadline(2))
-        channel = listener.accept(Deadline(5), expected=custody.peer)
+        channel = listener.accept(Deadline(_NATIVE_BOOTSTRAP_SECONDS), expected=custody.peer)
         yield channel, custody, namespace
     finally:
         if channel is not None:
             channel.close()
         if custody is not None:
             custody.close()
-        out, error = process.communicate(b"x", timeout=10)
-        listener.close()
+        try:
+            out, error = process.communicate(b"x", timeout=10)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.communicate(timeout=5)
+            raise
+        finally:
+            listener.close()
         assert process.returncode == 0, error.decode(errors="replace")
         assert out == b""
 

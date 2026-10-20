@@ -99,7 +99,14 @@ _FILES_PER_SUBSUITE_OVERRIDES = {"agent-pull-requests": 10}
 
 # Full native dev cycles and monitor drain cannot share one 300-second
 # aggregate under matrix load. Each keeps the same independently enforced cap.
+# Bridge's native transfer family also keeps cross-module fixture/import state separate.
 _INDEPENDENT_SUBSUITE_FILES = {
+    "agent-bridge": {
+        "test_auth_runtime.py", "test_live_runtime.py", "test_predecessor_runtime.py",
+        "test_relay_adoption.py", "test_runtime_controls.py", "test_runtime_serving.py",
+        "test_runtime_transfer.py", "test_startup_imports.py", "test_startup_performance.py",
+        "test_worktree_runtime.py",
+    },
     "agent-worktrees": {
         "test_python_runtime_dev_live.py",
         "test_python_runtime_install.py",

@@ -52,7 +52,7 @@ def test_cold_app_and_manager_defer_sdk_until_the_public_client_is_requested(tmp
     """)
     child = subprocess.run(
         [sys.executable, "-c", script, str(tmp_path)],
-        capture_output=True, text=True, timeout=5, **no_window_kwargs(),
+        capture_output=True, text=True, timeout=15, **no_window_kwargs(),
     )
     assert child.returncode == 0, child.stderr
     assert json.loads(child.stdout) == {"deferred": True, "public_client_identity": True}

@@ -202,6 +202,36 @@ before the proposal clears review.
 
 ## Journal
 
+### 2026-10-20 - Separate protocol timeouts from performance qualification
+
+- The operator approved greater protocol-test timeouts and separate performance
+  validation, superseding the earlier combined five-second cold-bootstrap gate.
+  Native bootstrap now has 15 seconds and its test module a 60-second item
+  watchdog. Existing post-connect shared deadlines and the deliberate deadline
+  refusal assertion are preserved; group and process containment are unchanged.
+- Added a separate five-sample real CLI startup flow, with fresh isolated state,
+  exact process identity, real HTTP readiness, source fingerprints and explicit
+  startup/cleanup watchdogs. No fixture-module import stands in for production
+  startup. Windows redirector identity and transient publication observation
+  conflicts are handled without relaxing owner identity or discarding samples.
+- The broader full-daemon boundary initially observed starts around 6-13 seconds
+  and one beyond 15 seconds, unlike the earlier import-plus-IPC boundary. The
+  operator selected measurement first, then a reviewed baseline on controlled
+  capacity. Report mode cannot claim qualification; explicit provisional budget
+  checking remains separate. No new required CI or release gate is introduced.
+- This source-test policy change does not authorize promotion, installed
+  updates, shared restarts, credential actions or live external requests.
+- The final report flow completes all five samples, with a 5.54-second median
+  and 13.21-second maximum, explicitly `target_met: false` and baseline
+  unestablished. Its measurement, refusal and observer unit cases pass.
+- A mixed native batch exceeded its existing 300-second aggregate before
+  producing complete failure diagnostics. The runner now uses its existing
+  independent-group mechanism for the ten affected native/startup files;
+  selection tests prove no selected file is lost or duplicated. The complete
+  default grouped run passes 230 cases with one deliberate opt-in benchmark
+  skip in 195.67 seconds, including the original 32 native transfer cases.
+  Six focused runner-selection tests pass; no group/plugin deadline is raised.
+
 ### 2026-10-20 - Reconcile independent generation and queue-removal race
 
 - Retained the upstream attention-boundary generation 42 and all its evidence.

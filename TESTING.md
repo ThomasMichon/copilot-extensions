@@ -106,6 +106,74 @@ full Main commit qualifies that control's admission shape, not live routing or
 promotion. See [required source metadata](docs/pipelines.md#required-dev-source-metadata)
 for trusted-default activation and measurement boundaries.
 
+## Bridge protocol validation and startup performance
+
+Protocol correctness and startup speed have separate on-demand flows. Run the
+native transfer and import-boundary contracts normally:
+
+```powershell
+python tools\run-plugin-tests.py agent-bridge --test-file tests\test_runtime_transfer.py --test-file tests\test_startup_imports.py
+```
+
+The native fixture permits 15 seconds for cold bootstrap, before its existing
+shared post-connect protocol deadlines begin. That module has a 60-second item
+watchdog; the 300-second group limit is unchanged. The child still shares its
+original ten-second protocol deadline, and the deliberate 100 ms refusal test
+still requires that deadline to expire. Import/export correctness has a separate
+15-second child watchdog, not a five-second speed assertion. A bootstrap or
+cleanup timeout fails; the fixture closes its listener and reaps its owned
+process rather than leaving cleanup to a later test.
+The runner gives the native runtime/transfer family and both startup files
+independent sequential groups. This retains every selected test and each
+unchanged group watchdog, avoids cross-module fixture/import state in the
+ordinary native flow, and preserves complete failure diagnostics instead of
+losing them when a mixed-process batch exhausts its aggregate deadline.
+Explicit filtered collection keeps the runner's existing selection semantics.
+
+The performance flow starts five fresh interpreters through the real
+`python -m agent_bridge start` CLI, with fresh empty databases, isolated config,
+no peers, a disabled credential relay and dynamically reserved loopback ports.
+It verifies the published process identity and observes real `/health`
+responses through full HTTP readiness. It does not import pytest fixtures in
+the measured child or replace readiness with an import-only proxy. Windows
+uses the actual executing interpreter rather than measuring a venv redirector;
+interpreter spawn is included, launcher overhead is not. OS filesystem caches
+are not purged.
+
+```powershell
+$env:AGENT_BRIDGE_STARTUP_PERF = 'report'
+try {
+    python tools\run-plugin-tests.py agent-bridge --test-file tests\test_startup_performance.py
+} finally {
+    Remove-Item Env:AGENT_BRIDGE_STARTUP_PERF
+}
+```
+
+`report` is explicitly measurement-only: it records `baseline: not-established`,
+`budget_gate_enabled: false` and whether the provisional target was met. A
+successful measurement is **not** performance qualification. Every sample is
+retained; no failed or slow sample is retried or dropped. `BRIDGE_STARTUP_PERF`
+JSON lines contain the complete timings, Python/platform identity, source
+fingerprint, observation-conflict count and final median/maximum. Recognized
+Windows publication sharing conflicts remain inside the same wall-clock sample
+and are counted; corrupt routes and other errors fail immediately. Incomplete
+samples, startup errors and unsuccessful cleanup fail even in report mode.
+
+For a separate explicit budget check, use `AGENT_BRIDGE_STARTUP_PERF=qualify`
+with the same command. Its provisional thresholds are a five-second median and
+15-second maximum across all five samples. Neither mode changes these
+thresholds. Both retain a 30-second startup watchdog per sample, a 210-second
+benchmark-item watchdog and the runner's unchanged group/process containment.
+Startup measurement stops at readiness; shutdown is outside that measurement
+and must succeed separately within its own bounded request and exit waits.
+
+Establish a reviewed blocking baseline on controlled capacity before making
+this a publication or promotion gate. A local `qualify` result alone does not
+prove controlled capacity or establish that baseline. The performance case is
+skipped unless explicitly selected by its environment variable; its budget and
+observer unit tests run normally. No required-PR job, matrix or release gate is
+added for this periodic/manual benchmark.
+
 ## The turn-key runner
 
 The local runner measures each plugin from dependency preparation through final

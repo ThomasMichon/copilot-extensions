@@ -841,6 +841,27 @@ def test_worktrees_native_runtime_files_have_independent_groups():
     } <= runner._INDEPENDENT_SUBSUITE_FILES["agent-worktrees"]
 
 
+def test_bridge_native_and_performance_files_have_independent_groups(tmp_path, monkeypatch):
+    native = {
+        "test_auth_runtime.py", "test_live_runtime.py", "test_predecessor_runtime.py",
+        "test_relay_adoption.py", "test_runtime_controls.py", "test_runtime_serving.py",
+        "test_runtime_transfer.py", "test_startup_imports.py", "test_startup_performance.py",
+        "test_worktree_runtime.py",
+    }
+    assert runner._INDEPENDENT_SUBSUITE_FILES["agent-bridge"] == native
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    for name in native | {"test_a.py", "test_z.py"}:
+        (tests / name).touch()
+    monkeypatch.setattr(runner, "_plugin_dir", lambda _name: tmp_path)
+    groups = runner._test_file_groups("agent-bridge", 25)
+    assert sorted(path.name for group in groups for path in group) == sorted(
+        native | {"test_a.py", "test_z.py"},
+    )
+    for name in native:
+        assert [tests / name] in groups
+
+
 @pytest.mark.parametrize("filtered", [False, True])
 def test_independent_native_groups_preserve_every_collected_file(tmp_path, monkeypatch, filtered):
     tests = tmp_path / "tests"
