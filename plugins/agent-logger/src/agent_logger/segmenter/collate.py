@@ -41,6 +41,7 @@ from typing import Any
 
 from agent_logger import sessions
 from agent_logger.config import load_config
+from agent_logger.secret_patterns import SECRET_PATTERNS, redact  # noqa: F401
 from agent_logger.segmenter.platform import detect_machine
 
 # ---------------------------------------------------------------------------
@@ -66,17 +67,6 @@ def _default_digest_root() -> str:
 DEFAULT_NAS_ROOT = _default_digest_root()
 COPILOT_STATE_DIR_NAME = ".copilot"
 SESSION_STATE_SUBDIR = "session-state"
-
-# Patterns that look like secrets — redact on sight
-SECRET_PATTERNS = [
-    re.compile(r'(?i)(token|secret|password|apikey|api_key|credential)\s*[:=]\s*\S+'),
-    re.compile(r'ghp_[A-Za-z0-9_]{36,}'),
-    re.compile(r'ghu_[A-Za-z0-9_]{36,}'),
-    re.compile(r'ghs_[A-Za-z0-9_]{36,}'),
-    re.compile(r'github_pat_[A-Za-z0-9_]{22,}'),
-    re.compile(r'Bearer\s+[A-Za-z0-9\-._~+/]+=*'),
-    re.compile(r'eyJ[A-Za-z0-9\-_]{20,}\.eyJ[A-Za-z0-9\-_]{20,}'),  # JWT
-]
 
 # Event types to skip entirely — no useful log content
 SKIP_EVENT_TYPES = {
@@ -184,13 +174,6 @@ def session_archive_stores() -> list[Path]:
         from agent_logger.config import home_dir
 
         return [home_dir() / "archived-sessions"]
-
-
-def redact(text: str) -> str:
-    """Replace secret-shaped strings with [REDACTED]."""
-    for pat in SECRET_PATTERNS:
-        text = pat.sub("[REDACTED]", text)
-    return text
 
 
 def truncate(text: str, limit: int) -> str:
