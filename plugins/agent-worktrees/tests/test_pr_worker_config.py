@@ -245,7 +245,15 @@ def worker(tmp_path):
     return worker
 
 
-def test_exported_config_runs_all_checks_from_fresh_worker_context(host, tmp_path, worker, capsys):
+@pytest.mark.parametrize("provider", ["azure-devops", "gitea"])
+def test_exported_config_runs_all_checks_from_fresh_worker_context(host, tmp_path, worker, capsys, provider):
+    if provider == "gitea":
+        data = json.loads(host.read_text("utf-8"))
+        policy = data["repos"]["target"]["pr"]
+        policy.update(provider="gitea", api_base="https://forge.invalid/gitea")
+        policy["publication_checks"]["ssh_url"] = "git@forge.invalid:project/repo.git"
+        host.write_text(json.dumps(data), "utf-8")
+        git(worker, "remote", "set-url", "--push", "origin", policy["publication_checks"]["ssh_url"])
     output = tmp_path / "worker.json"
     assert export(host, output, str(worker)) == 0
     capsys.readouterr()
