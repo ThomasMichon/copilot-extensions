@@ -23,9 +23,9 @@ fallback, and cross-platform policy producers:
 
 | Skill | Role |
 |-------|------|
-| **planning-efforts** | The workflow: start, plan, resume, and archive efforts. Governs the canonical effort pattern (folder layout, README schema, lifecycle, journal, the participants seam) and optionally binds a managed worktree to its declared active effort slice. Ships the reference guide and the effort README template as skill assets. |
-| **efforts-setup** | Adoption: how a repo takes on the efforts system — create the `efforts/` tree and write a short repo **addendum** that specializes the bindings. |
-| **driving-backlog-burndown** | Execution: charter a scoped backlog recovery, maintain the item/owner ledger, supervise original owners through verified outcomes, and preserve state across native rollover or explicit transfer. Ships charter, dashboard, checkpoint and handoff templates; no scheduler or runtime is started. |
+| [**planning-efforts**](skills/planning-efforts/SKILL.md) | The workflow: start, plan, resume, and archive efforts. Governs the canonical effort pattern (folder layout, README schema, lifecycle, journal, the participants seam) and optionally binds a managed worktree to its declared active effort slice. Ships the reference guide and the effort README template as skill assets. |
+| [**efforts-setup**](skills/efforts-setup/SKILL.md) | Adoption: how a repo takes on the efforts system — create the `efforts/` tree and write a short repo **addendum** that specializes the bindings. |
+| [**driving-backlog-burndown**](skills/driving-backlog-burndown/SKILL.md) | Execution: charter a scoped backlog recovery, maintain the item/owner ledger, supervise original owners through verified outcomes, and preserve state across native rollover or explicit transfer. Ships charter, dashboard, checkpoint and handoff templates; no scheduler or runtime is started. |
 
 An adopting repository commits
 `.copilot-extensions/efforts/config.json` with the exact version 1 policy:
