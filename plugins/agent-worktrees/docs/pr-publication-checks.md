@@ -100,6 +100,10 @@ remote's push URL, so an optimized fetch mirror cannot replace the actual
 publication destination. Matching includes the provider endpoint (including
 the Azure organization), not just the repository slug, and preserves equivalent
 secure SSH/HTTPS destinations, including Azure's legacy organization URLs.
+Azure path components are normalized individually, preserving encoded path
+separators as component data. Public GitHub also accepts its secure
+`ssh://git@ssh.github.com:443/...` clone alias; this does not apply to an
+enterprise authority, another host/port or an HTTPS URL using the SSH hostname.
 Multiple push URLs refuse instead of validating only
 one destination of a multi-destination push.
 For a Gitea SSH clone whose host, port or repository path differs from the

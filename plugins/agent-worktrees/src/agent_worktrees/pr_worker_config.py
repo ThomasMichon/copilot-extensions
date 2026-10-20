@@ -6,7 +6,7 @@ import hashlib
 import json
 from pathlib import Path, PurePosixPath, PureWindowsPath
 import re
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 from .config import RepoConfig
 from .pr_observation_config import ObservationConfig, parse_observation
@@ -53,12 +53,16 @@ def matches_remote(remote: str, repository: str, pr, workspace: str) -> bool:
         expected = f"https://{endpoint}/{repository}"
     elif pr.provider == "azure-devops":
         project, name = repository.split("/", 1)
-        expected = f"{endpoint.rstrip('/')}/{project}/_git/{name}"
+        expected = f"{endpoint.rstrip('/')}/{quote(project, safe='')}/_git/{quote(name, safe='')}"
     elif pr.provider == "gitea":
         expected = f"{endpoint.rstrip('/')}/{repository}"
     else:
         raise ValueError("publication checks need a supported provider")
     actual = _identity(remote, workspace)
+    if pr.provider == "github" and endpoint.removesuffix(":443") == "github.com":
+        parsed = urlsplit(remote)
+        if parsed.scheme == "ssh" and parsed.hostname == "ssh.github.com" and parsed.port == 443:
+            actual = _identity("https://github.com" + parsed.path, workspace)
     if same_repository(actual, _identity(expected, workspace), pr.provider):
         return True
     policy = pr.publication_checks

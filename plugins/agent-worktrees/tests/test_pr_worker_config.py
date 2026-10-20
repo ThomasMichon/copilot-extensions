@@ -62,9 +62,9 @@ def host(tmp_path, monkeypatch):
     return path
 
 
-def export(host, destination, workspace, base="origin/main"):
+def export(host, destination, workspace, base="origin/main", repository="project/repo"):
     return pr_cli.cmd_pr_watch_dispatch([
-        "checks", "project/repo", "export-config", "--config", str(host),
+        "checks", repository, "export-config", "--config", str(host),
         "--workspace", workspace, "--base", base, "--output", str(destination), "--json",
     ])
 
@@ -245,8 +245,9 @@ def worker(tmp_path):
     return worker
 
 
-@pytest.mark.parametrize("provider", ["azure-devops", "gitea"])
+@pytest.mark.parametrize("provider", ["azure-devops", "gitea", "azure-encoded", "github-ssh443"])
 def test_exported_config_runs_all_checks_from_fresh_worker_context(host, tmp_path, worker, capsys, provider):
+    repository = "project/repo"
     if provider == "gitea":
         data = json.loads(host.read_text("utf-8"))
         policy = data["repos"]["target"]["pr"]
@@ -254,14 +255,27 @@ def test_exported_config_runs_all_checks_from_fresh_worker_context(host, tmp_pat
         policy["publication_checks"]["ssh_url"] = "git@forge.invalid:project/repo.git"
         host.write_text(json.dumps(data), "utf-8")
         git(worker, "remote", "set-url", "--push", "origin", policy["publication_checks"]["ssh_url"])
+    elif provider == "azure-encoded":
+        repository = "My Project/My Repo"
+        data = json.loads(host.read_text("utf-8"))
+        data["repos"]["target"]["pr"]["repository"] = repository
+        host.write_text(json.dumps(data), "utf-8")
+        git(worker, "remote", "set-url", "--push", "origin",
+            "https://dev.azure.com/example/My%20Project/_git/My%20Repo")
+    elif provider == "github-ssh443":
+        data = json.loads(host.read_text("utf-8"))
+        data["repos"]["target"]["pr"].update(provider="github", api_base="github.com")
+        host.write_text(json.dumps(data), "utf-8")
+        git(worker, "remote", "set-url", "--push", "origin",
+            "ssh://git@ssh.github.com:443/project/repo.git")
     output = tmp_path / "worker.json"
-    assert export(host, output, str(worker)) == 0
+    assert export(host, output, str(worker), repository=repository) == 0
     capsys.readouterr()
     home = tmp_path / "worker-home"
     home.mkdir()
     env = dict(os.environ, AGENT_HOME=str(home))
     command = [
-        sys.executable, "-m", "agent_worktrees", "pr-watch", "checks", "project/repo",
+        sys.executable, "-m", "agent_worktrees", "pr-watch", "checks", repository,
     ]
     missing = subprocess.run(
         [*command, "lenses", "--workspace", str(worker), "--json"],
@@ -395,7 +409,28 @@ def test_worker_rejects_a_different_push_destination(host, tmp_path, worker, cap
      "https://dev.azure.com/another/project/_git/repo", False),
     ("azure-devops", "https://dev.azure.com/example", "project/repo",
      "http://example.visualstudio.com/project/_git/repo", False),
+    ("azure-devops", "https://dev.azure.com/example", "My Project/My Repo",
+     "https://dev.azure.com/example/My%20Project/_git/My%20Repo", True),
+    ("azure-devops", "https://example.visualstudio.com", "My Project/My Repo",
+     "git@ssh.dev.azure.com:v3/example/My Project/My%20Repo", True),
+    ("azure-devops", "https://dev.azure.com/example", "My%20Project/repo",
+     "https://dev.azure.com/example/My%2520Project/_git/repo", True),
+    ("azure-devops", "https://dev.azure.com/example", "My%20Project/repo",
+     "https://dev.azure.com/example/My%20Project/_git/repo", False),
+    ("azure-devops", "https://dev.azure.com/example", "project/repo",
+     "git@ssh.dev.azure.com:v3/example/project%2Frepo", False),
+    ("azure-devops", "https://dev.azure.com/example", "project/a%2Fb",
+     "https://dev.azure.com/example/project/_git/a%252Fb", True),
+    ("azure-devops", "https://dev.azure.com/example", "project/a%2Fb",
+     "https://dev.azure.com/example/project/_git/a%2Fb", False),
     ("github", "", "example/repo", "git@github.com:example/repo.git", True),
+    ("github", "github.com", "example/repo", "ssh://git@ssh.github.com:443/example/repo.git", True),
+    ("github", "github.com:443", "example/repo", "ssh://git@ssh.github.com:443/example/repo.git", True),
+    ("github", "github.com", "example/repo", "ssh://git@ssh.github.com:22/example/repo.git", False),
+    ("github", "github.com", "example/repo", "https://ssh.github.com:443/example/repo.git", False),
+    ("github", "forge.invalid", "example/repo", "ssh://git@ssh.github.com:443/example/repo.git", False),
+    ("github", "github.com", "example/repo", "ssh://git@other.invalid:443/example/repo.git", False),
+    ("github", "github.com", "example/repo", "ssh://git@ssh.github.com:443/example/other.git", False),
     ("github", "", "example/repo", "https://other.invalid/example/repo.git", False),
     ("github", "https://forge.invalid", "example/repo", "ssh://git@forge.invalid/example/repo", True),
     ("gitea", "https://forge.invalid/prefix", "example/repo",

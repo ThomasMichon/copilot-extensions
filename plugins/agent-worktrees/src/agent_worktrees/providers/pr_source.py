@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import re
-from urllib.parse import urlsplit
+from urllib.parse import quote, unquote, urlsplit
 
 from .base import ProviderError
 
@@ -13,6 +13,10 @@ def same_repository(source_identity: str, destination_identity: str, provider: s
     """Match Azure's secure SSH/HTTPS layouts without weakening other identities."""
     def canonical(identity: str) -> str:
         if provider == "azure-devops":
+            identity = "/".join(
+                quote(unquote(component, errors="strict").lower(), safe="")
+                for component in identity.split("/")
+            )
             ssh = re.fullmatch(r"ssh\.dev\.azure\.com/v3/([^/]+)/([^/]+)/([^/]+)", identity)
             if ssh:
                 organization, project, repository = ssh.groups()

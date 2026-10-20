@@ -197,6 +197,19 @@ remain outside this proposal's authority.
 
 ## Journal
 
+### 2026-10-20 - Equivalent encoded paths and public SSH transport
+
+- Review confirmed the previous three corrections and identified two remaining
+  supported URL forms. Azure compares individually normalized path components,
+  so project/repository spaces match their encoded clone URLs without treating
+  encoded separators as structural slashes or decoding twice.
+- The local checker recognizes only public GitHub's secure SSH-over-443 alias
+  for the selected public authority. Enterprise authorities, other hosts/ports,
+  HTTPS on the SSH hostname and unrelated repositories remain distinct.
+- The worker/source-recovery selection passes 233 cases, including all four
+  public commands in fresh-process encoded Azure and GitHub SSH-over-443
+  workspaces. No native provider mutation or auth fallback was used.
+
 ### 2026-10-20 - Explicit policy precedes a conflicting local registry
 
 - A real review case combined the supported optimized fetch URL with a
