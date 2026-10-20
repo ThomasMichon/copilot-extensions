@@ -31,6 +31,7 @@ consumer-specific review policy or a new background monitor.
 |-------------|------|-------------|
 | Contracts coordinator | Own reviewed plan, integration and completion | This isolated worktree |
 | Evidence reviewers | Bounded read-only source tracks and plan critique | Coordinator-mediated reports |
+| Windows census repair | Correct proven process-attribution defects and preserve native failure evidence; exact hosted cause remains open | Public issue #6266, source `tidy-rotor` |
 
 ## Coordination
 
@@ -39,6 +40,9 @@ unified updater result propagation, dispatch authority and Windows status-monito
 process tests. Before edits, claim relevant issues and reconcile active overlap,
 including #6266 and existing Windows launch efforts. No participant edits the
 anchor, deployed payload, another participant's worktree or runtime state.
+The Windows census participant owns only the existing status-monitor regression
+fixture and its focused documentation. Activation/readiness implementation and
+any production launch change retain their existing owners.
 
 ## Request
 
@@ -130,6 +134,24 @@ authority-readiness and Windows process boundaries for review before
 implementation.
 
 ## Journal
+
+### 2026-10-20 - Windows census attribution correction
+
+- Two fail-first controls reproduce false inclusion of a terminal host older
+  than its current numeric root or intermediate parent. Toolhelp parent PIDs
+  survive the original parent's exit and can name a later unrelated process.
+- The fixture now rejects only ancestry disproved by Windows creation times.
+  Unavailable identities remain conservatively included; a second real terminal
+  host still counts. Production launch flags, the one-hidden-host bound, zero
+  visible-window/focus assertions and all process deadlines remain unchanged.
+- A contained native run observed one hidden root console across all eight
+  existing psmux cycles. This does not establish the exact hosted seven-host
+  cause or close #6266. Recurrence evidence includes terminal birth/parent and
+  baseline observations plus the probe's actual console membership.
+- Hosted Windows integration is currently unenrolled in the reviewed periodic
+  portfolio. Do not reactivate a disabled workflow or treat relocated/skipped
+  tests as a repair. Exact hosted causality and native containing-lane evidence
+  remain open; publication/review of this bounded correction is still required.
 
 ### 2026-10-19 - Reviewed proposal and prerequisite source reconciled
 

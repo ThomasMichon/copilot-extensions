@@ -1,0 +1,9 @@
+{
+  "comment": "Reject proven stale parent-PID ancestry in the Windows console census and retain native failure evidence",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

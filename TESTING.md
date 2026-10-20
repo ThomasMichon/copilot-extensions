@@ -165,6 +165,16 @@ cases on Linux rather than only collecting them. POSIX GitHub Actions refuses
 missing tmux instead of silently skipping that proof. Local native cases skip
 when POSIX tmux is unavailable; this is not a live Copilot or Windows psmux test.
 
+The Windows status-monitor console regression keeps the at-most-one hidden
+terminal host and zero visible-window/focus assertions across eight psmux
+probes. Its process census rejects a parent edge only when readable Windows
+creation times prove the child predates that numeric parent; unavailable
+identities remain conservatively counted. Focused controls cover reused root
+and intermediate PIDs, unavailable identities and multiple real terminal
+hosts. A native failure records parent/birth/baseline observations and actual
+probe-console membership. These diagnostics do not by themselves establish the
+cause of the tracked hosted seven-host occurrence (#6266).
+
 Source-bound native lifecycle and restart-evidence contracts use the existing
 bounded runner:
 

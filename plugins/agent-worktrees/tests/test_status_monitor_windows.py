@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import ctypes
+import json
+import os
 import shutil
 import subprocess
 import sys
@@ -150,16 +152,37 @@ def _foreground_state(
     return int(hwnd), int(pid.value), process_name, class_name.value, title.value
 
 
+def _creation_time(pid: int) -> int | None:
+    """Read the Windows FILETIME used to order native process births."""
+    value = m.locks.process_start_time(pid)
+    return int(value) if value is not None else None
+
+
 def _descendants(
     root_pid: int,
     processes: dict[int, tuple[str, int]],
 ) -> set[int]:
     found = {root_pid}
+    creation: dict[int, int | None] = {}
+
+    def started(pid: int) -> int | None:
+        if pid not in creation:
+            creation[pid] = _creation_time(pid)
+        return creation[pid]
+
     changed = True
     while changed:
         changed = False
         for pid, (_, parent_pid) in processes.items():
             if parent_pid in found and pid not in found:
+                parent_start, child_start = started(parent_pid), started(pid)
+                # Toolhelp retains numeric parent PIDs after their owners exit.
+                if (
+                    parent_start is not None
+                    and child_start is not None
+                    and child_start < parent_start
+                ):
+                    continue
                 found.add(pid)
                 changed = True
     return found
@@ -175,7 +198,20 @@ def _is_terminal_window(state: tuple[int, int, str, str, str]) -> bool:
 
 
 def _run_psmux_probe(marker: Path, psmux: str) -> int:
+    observations = []
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.GetConsoleProcessList.argtypes = [
+        ctypes.POINTER(wintypes.DWORD), wintypes.DWORD,
+    ]
+    kernel32.GetConsoleProcessList.restype = wintypes.DWORD
     for _ in range(8):
+        attached = (wintypes.DWORD * 64)()
+        count = kernel32.GetConsoleProcessList(attached, len(attached))
+        observations.append({
+            "pid": os.getpid(),
+            "console_processes": list(attached[:min(count, len(attached))]),
+            "console_query_error": ctypes.get_last_error() if not count else 0,
+        })
         subprocess.run(
             [psmux, "list-sessions"],
             capture_output=True,
@@ -183,8 +219,54 @@ def _run_psmux_probe(marker: Path, psmux: str) -> int:
             timeout=5,
         )
         time.sleep(0.05)
-    marker.write_text("ok", encoding="utf-8")
+    marker.write_text(json.dumps(observations), encoding="utf-8")
     return 0
+
+
+@pytest.mark.parametrize("reused_parent", [100, 200])
+def test_census_rejects_reused_parent_pid(monkeypatch, reused_parent):
+    processes = {
+        100: ("python.exe", 50),
+        200: ("psmux.exe", 100),
+        300: ("conhost.exe", reused_parent),
+        400: ("conhost.exe", 100),
+    }
+    creation = {100: 1000, 200: 1100, 300: 900, 400: 1001}
+    monkeypatch.setattr(
+        sys.modules[__name__], "_creation_time", creation.get, raising=False,
+    )
+    assert _descendants(100, processes) == {100, 200, 400}
+
+
+@pytest.mark.parametrize("unavailable", [100, 200, 300])
+def test_census_retains_uncertain_ancestry(monkeypatch, unavailable):
+    processes = {
+        100: ("python.exe", 50),
+        200: ("psmux.exe", 100),
+        300: ("conhost.exe", 200),
+    }
+    creation = {100: 1000, 200: 1100, 300: 1200, unavailable: None}
+    monkeypatch.setattr(sys.modules[__name__], "_creation_time", creation.get)
+    assert _descendants(100, processes) == {100, 200, 300}
+
+
+def test_census_retains_multiple_real_terminal_hosts(monkeypatch):
+    processes = {
+        300: ("conhost.exe", 200),
+        400: ("conhost.exe", 100),
+        200: ("psmux.exe", 100),
+        100: ("python.exe", 50),
+    }
+    creation = {100: 1000, 200: 1100, 300: 1200, 400: 1001}
+    calls = []
+
+    def started(pid):
+        calls.append(pid)
+        return creation[pid]
+
+    monkeypatch.setattr(sys.modules[__name__], "_creation_time", started)
+    assert _descendants(100, processes) == {100, 200, 300, 400}
+    assert len(calls) == len(set(calls)) == 4
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows console integration")
@@ -225,6 +307,7 @@ def test_status_daemon_console_root_contains_psmux_descendants(
     openconsole_pids: set[int] = set()
     visible_terminal_windows: set[tuple[int, int, str, str, str]] = set()
     foreground_transitions: set[tuple[int, int, str, str, str]] = set()
+    terminal_evidence: dict[int, dict[str, object]] = {}
     observed_root = False
     try:
         deadline = time.monotonic() + 20
@@ -238,6 +321,16 @@ def test_status_daemon_console_root_contains_psmux_descendants(
                     conhost_pids.add(pid)
                 elif name == "openconsole.exe":
                     openconsole_pids.add(pid)
+                else:
+                    continue
+                terminal_evidence.setdefault(pid, {
+                    "entry": processes[pid],
+                    "creation": m.locks.process_start_time(pid),
+                    "baseline_entry": baseline_processes.get(pid),
+                    "parent_entry": processes.get(processes[pid][1]),
+                    "parent_creation": m.locks.process_start_time(processes[pid][1]),
+                    "root_creation": m.locks.process_start_time(process.pid),
+                })
 
             for hwnd, window in _window_snapshot(processes).items():
                 state = (hwnd, *window)
@@ -260,7 +353,11 @@ def test_status_daemon_console_root_contains_psmux_descendants(
         assert marker.exists(), f"probe did not complete (exit={process.poll()})"
         assert process.wait(timeout=5) == 0
         assert observed_root
-        assert len(conhost_pids | openconsole_pids) <= 1
+        assert len(conhost_pids | openconsole_pids) <= 1, {
+            "root_pid": process.pid,
+            "terminals": terminal_evidence,
+            "probe": json.loads(marker.read_text(encoding="utf-8")),
+        }
         assert visible_terminal_windows == set()
         assert foreground_transitions == set()
     finally:
