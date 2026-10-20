@@ -30,11 +30,14 @@ planning, release, and deployment scope. Installing a client does not itself
 establish a hosted controller or container manager.
 
 The standalone [agent-chat-service](../services/chat/README.md) currently
-provides a dependency-free conversation state and callable RPC core. It does
-provide an explicit store-owned drain/undrain boundary for an embedding
-lifecycle owner, preserving committed state and fencing held waits. It does
-not start a listener or daemon or supply a plugin, installed user-facing client
-or managed hosting lifecycle; those remain separate slices of the
+provides dependency-free conversation state and a callable RPC core, plus an
+explicit optional `service` role for independently installed foreground hosting.
+That role reuses canonical single-instance/endpoint ownership, authenticated
+bounded local HTTP and the store-owned drain boundary. POSIX uses a private
+Unix socket; Windows currently uses the documented OS-assigned loopback fallback.
+Default imports do not start a listener, and hosting supplies no installer,
+supervisor, plugin, installed user-facing client or managed cutover. Those
+remain separate slices of the
 [graduation effort](../efforts/active/agent-chat-graduation/README.md).
 
 ### Runtime plugins (installer-deployed runtime + payload-local commands)

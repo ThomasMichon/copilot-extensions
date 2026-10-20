@@ -5,17 +5,30 @@ build-backend = "setuptools.build_meta"
 [tool.uv]
 exclude-newer = "7 days"
 
+[tool.uv.sources]
+agent-single-instance-lease = { path = "../../libs/single-instance-lease", editable = true }
+agent-endpoint-rendezvous = { path = "../../libs/endpoint-rendezvous", editable = true }
+agent-procutil = { path = "../../libs/agent-procutil", editable = true }
+
 [project]
 name = "agent-chat-service"
 version = "0.1.0-dev1"
-description = "Portable, bounded conversation state and RPC core for agent-chat."
+description = "Bounded conversation core and explicit local hosting role for agent-chat."
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
 dependencies = []
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "setuptools>=83.0.0", "wheel"]
+service = ["agent-single-instance-lease>=0.1.0.dev1", "agent-endpoint-rendezvous>=0.1.0.dev6"]
+dev = [
+    "pytest>=8", "setuptools>=83.0.0", "wheel",
+    "agent-single-instance-lease>=0.1.0.dev1", "agent-endpoint-rendezvous>=0.1.0.dev6",
+    "agent-procutil>=0.1.0.dev7",
+]
+
+[project.scripts]
+agent-chat-service = "agent_chat_service.hosting:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

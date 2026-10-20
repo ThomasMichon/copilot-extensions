@@ -111,6 +111,9 @@ requirements.
   core, independent cursor and stable-request semantics with synthetic tests.
 - [ ] Package a dependency-light client and independently operable service;
   no source checkout, sibling venv or Copilot plugin is required to host it.
+  The current foreground `service`-role candidate supplies a bounded local
+  host artifact, not managed installation or activation; native platform
+  qualification remains explicit.
 - [ ] Publish bounded capabilities and errors, endpoint discovery and explicit
   setup. Preserve normal no-gap output/flush/CAS and uncertain-effect recovery.
 - [ ] Resolve trusted host-init session ID and CWD through the workspace owner:
@@ -226,6 +229,47 @@ use remains valuable while an unsupported native host seam is resolved; full
 graduation still requires the declared native and lifecycle guarantees.
 
 ## Journal
+
+### 2026-10-20 - Independent local host artifact
+
+- Added an explicit foreground `service` role to the existing distribution,
+  consuming canonical single-instance and endpoint-rendezvous libraries without
+  adding dependencies to the callable core. The role does not depend on the
+  held client transport or a process-provider helper.
+- The host serves authenticated bounded RPC on a private Unix socket, or the
+  explicitly documented temporary OS-assigned Windows loopback fallback.
+  Its existing store drain fence wakes held requests; the embedding lifecycle
+  owner retains process supervision, selection, update and cutover.
+- Actual native Windows qualification covers fresh offline wheels with fixture
+  sources removed, default-core refusal without service extras, installed
+  isolated host invocation and independently invoked participant processes.
+  It exercises authentication, repeated reads before cursor CAS, deduplication,
+  confirmed fixture-Job crash, restart persistence and leave, before outer
+  test cleanup. Direct contracts exercise absolute header/body deadlines,
+  aggregate header and worker admission bounds, health during several held
+  waits and bounded drain.
+- The initial Windows run exposed a fixture assumption: the venv redirector's
+  PID is not necessarily the serving Python PID. Readiness now uses the actual
+  published generation, and the canonical strictly contained fixture Job owns
+  and positively retires the full host tree. Two protocol/socket assertions
+  were also corrected against the real existing wire/platform behavior.
+- The exact refreshed full Windows portfolio passed 102 tests in 35.19 seconds
+  under the unchanged 120-second contained budget. Native POSIX execution is
+  not available in this local Windows venue; Unix-socket source/tests remain
+  unqualified until the existing native qualification owner exercises that
+  platform. Synthetic installed participants are not a live-adopter exchange.
+- No production install, external host activation, trusted release selection,
+  stable launcher, passive-candidate cutover, rollback or post-installer health
+  is claimed. Those remain the existing #6424/#6240 lifecycle boundary.
+  POSIX client consumption of the Unix endpoint also remains explicit work.
+  This slice does not take the plugin or process utility source, modify CI
+  enrollment or retire the working predecessor. The full parent remains Active.
+- Separately, the existing adopter's predecessor runtime now has actual
+  one-peer native idle-wake/read/primary correlation, quiet/self suppression,
+  mute/resume and busy admission with a higher pending watermark followed by
+  two correctly sequenced queued-primary runs. That is neither this new host's
+  adoption nor non-primary/steered qualification. Remaining native uncertainty,
+  gaps, succession and cleanup stay with the retained connection owner.
 
 ### 2026-10-19 - Conversation-owned safe drain boundary
 

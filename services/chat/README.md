@@ -1,15 +1,16 @@
 # agent-chat-service
 
-Dependency-free conversation state and callable RPC core for
+Dependency-free conversation state, a callable RPC core and an explicit local
+hosting role for
 [agent-chat graduation](../../efforts/active/agent-chat-graduation/README.md).
-This first distribution provides durable channels, membership, events,
-independent cursors and bounded notification metadata.
+The distribution provides durable channels, membership, events, independent
+cursors and bounded notification metadata.
 
-**It does not start a listener or daemon, acquire credentials, discover a
+**Default imports do not start a listener, acquire credentials, discover a
 foreground session, install a plugin or implement managed service lifecycle.**
-HTTP/Gateway hosting, the installed user-facing client, native attachment and
-fleet-manager integration remain separate implementation slices. A working
-core is not evidence of those capabilities.
+The optional `service` role provides the foreground host below. Managed
+installation/cutover, Gateway adaptation, the installed user-facing client,
+native attachment and fleet-manager integration remain separate slices.
 
 ## Use
 
@@ -46,6 +47,101 @@ finally:
 The path is illustrative: resolve an actual owned directory through the
 adopter's normal configuration. The library does not select a user home or
 create another ownership registry.
+
+## Explicit local host artifact
+
+The distribution's `service` extra adds only the canonical
+`agent-single-instance-lease` and `agent-endpoint-rendezvous` libraries. It
+requires neither Copilot, another service, a source checkout, a sibling runtime,
+Docker nor a process-provider helper. Installing the core without that extra
+does not acquire those dependencies; attempting to host reports
+`host_service_dependencies_missing` without creating data or provisioning them.
+
+The deployment owner installs that role through its selected artifact flow.
+Its **internal foreground entry point** is:
+
+```text
+<selected-interpreter> -I -m agent_chat_service.hosting --config <absolute-host.json>
+```
+
+The installed `agent-chat-service` console is equivalent. This is the executable
+an existing service lifecycle owner embeds or supervises, **not a replacement
+install/update/start/stop interface**. Package-manager installation and a
+running foreground process do not establish managed installation, survival of
+an installer's cleanup boundary or health-gated activation. The existing
+standard lifecycle and Worktree Manager owners retain those contracts;
+fleet-manager integration enhances them rather than becoming mandatory for
+standalone use. There is no new installer, scheduler, self-updater or HTTP
+administration route in this artifact.
+
+Configuration is strict bounded nonsecret JSON:
+
+```json
+{
+  "schema": "agent-chat.host",
+  "version": 1,
+  "data_dir": "/path/to/owned/chat-data",
+  "installation_id": "example-installation",
+  "token_file": "/path/to/owned/private-access-key"
+}
+```
+
+Supply actual absolute paths for the host platform. The deployment's existing
+credential owner supplies a private regular file containing 32-1024 printable
+ASCII bytes, with an optional surrounding newline. The host never generates,
+prints, acquires, persists or rotates a credential. POSIX key permissions must
+exclude group/other access; Windows requires the deployment owner's private
+file ACL. Treat key possession as access to this one cooperative conversation
+domain, not participant identity or permission to control native sessions.
+Actor metadata remains metadata. A cross-host Gateway adapter must retain its
+own real authentication/authorization; this local key is not a substitute for it.
+
+Local endpoints follow the existing transport ladder:
+
+- **POSIX:** HTTP over a Unix socket in an owner-private `data_dir/run`.
+  No network port is opened. The owned socket uses a fresh name, avoiding
+  deletion of a preexisting socket after a crash.
+- **Windows:** the temporary standard-library HTTP fallback binds
+  `127.0.0.1:0` only. A reusable named-pipe/HTTP bridge is not supplied by this
+  slice; the native pipe remains the target. No fixed port, remote bind, tunnel,
+  public listener or firewall change is supported.
+
+Both endpoints require the external key on **every** request, including health.
+The host publishes its actually bound endpoint through the canonical
+`endpoint-rendezvous` file at `data_dir/run/endpoint.json`, and emits one
+nonsecret `agent-chat.host-ready` descriptor on stdout. The existing lifecycle
+owner supplies discovery to clients; no PATH search or ambient endpoint fallback
+is introduced. The held client slice's HTTP-only endpoint selection still needs
+the explicit Unix-socket consumption seam before direct POSIX client adoption.
+
+Only `POST /api/v1/chat` and authenticated `GET /health` exist. RPC JSON and
+errors are the callable core's unchanged contract. There are at most 32 live
+request workers, including partial headers and bodies; excess connections close
+before creating another worker. Aggregate request line/headers are bounded to
+16 KiB and bodies to 64 KiB, with no chunking, ambiguous length or keep-alive.
+An absolute five-second ingress deadline closes slow-drip headers/bodies;
+socket inactivity alone is not the deadline. Output has its own five-second
+deadline and one-MiB cap. The store's existing 16-waiter pool and 300-second
+long-poll maximum remain unchanged. Held waits do not monopolize health or
+ordinary RPC admission. Request logs never reflect credentials or bodies.
+
+`HostedChat(config)` acquires the canonical single-instance lease **before**
+opening the store. Its `serve(stop_event)` has no child process or detached
+helper. The embedding owner must stop that serving loop before closing the
+host. `drain()` rejects new RPCs, releases held waits through the existing store
+generation fence and reports health as nonaccepting. `close()` drains, joins
+bounded request workers, closes storage, removes only the owned endpoint/socket
+and releases custody. The foreground entry handles normal SIGINT/SIGTERM this
+way where delivered by the platform. Forced Windows process termination is a
+crash, not graceful drain; the installed qualification checks durable recovery
+separately. No reader cursor, pending client request, data or membership is
+erased during stop/restart.
+
+This is one active writer, not overlapping active/passive data ownership.
+Passive candidate admission, compatible storage selection, stable launcher,
+health-gated route commit, rollback and post-caller health remain the existing
+managed-lifecycle integration under #6424/#6240. Do not infer those capabilities
+from the host's lease, health response or endpoint descriptor.
 
 ## RPC contract
 

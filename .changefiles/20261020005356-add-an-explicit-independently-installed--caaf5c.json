@@ -1,0 +1,9 @@
+{
+  "comment": "Add an explicit independently installed local host role with canonical endpoint and single-writer ownership, authenticated bounded RPC and drain/persistence qualification.",
+  "changes": [
+    {
+      "plugin": "agent-chat-service",
+      "type": "patch"
+    }
+  ]
+}
