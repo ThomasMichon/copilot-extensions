@@ -10,12 +10,17 @@ activation:
 - duplicate-key, malformed-shape, and wrong-type rejection before mutation.
 
 Canonical readers retain their opened snapshot during atomic publication.
-On Windows they share read, write and delete access; replacing an existing file
-uses native `ReplaceFileW`, since delete sharing alone does not make
-`MoveFileEx` replacement of an open target succeed. First publication and POSIX
-replacement retain `os.replace`. Native replacement errors remain explicit,
-without retrying an uncertain write. Strict managed metadata consumers can use
-`plugin_activation.fileio.open_binary_shared` while retaining their own
+On Windows they share read, write and delete access; publication uses native
+`FileRenameInfoEx` with replace-if-exists and POSIX retained-reader semantics.
+This avoids `ReplaceFileW`'s multi-step failure modes that can remove the old
+destination before failing. Unsupported atomic-rename capability fails explicitly
+before mutation; there is no unsafe fallback or uncertain-write retry. Native
+partial-replacement error codes retain the staged candidate for recovery rather
+than deleting it; the raised exception carries `staged_state_path`.
+POSIX publication retains `os.replace`. The existing `state.py` stays
+stdlib-only and directly loadable before package dependencies are installed.
+Strict managed metadata consumers can use
+`plugin_activation.state.open_binary_shared` while retaining their own
 inode, link, size and before/after integrity checks.
 
 Activation restoration retries an explicit Windows sharing or lock violation

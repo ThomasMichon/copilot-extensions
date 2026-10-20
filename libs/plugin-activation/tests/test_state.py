@@ -24,13 +24,84 @@ from plugin_activation import state
 IDENTITY = "optional-plugin@example-marketplace"
 
 
-def test_atomic_state_replace_preserves_an_open_reader_snapshot(tmp_path):
-    path = tmp_path / "state.json"
+@pytest.mark.parametrize("name", [
+    "state.json", f"state-{chr(0x1F680)}.json",
+] + ([f"state-{chr(0xD800)}.json"] if os.name == "nt" else []))
+def test_atomic_state_replace_preserves_an_open_reader_snapshot(tmp_path, name):
+    path = tmp_path / name
     write_json_object_atomic(path, {"generation": "old"})
     with state._open_state_text(path) as stream:
         write_json_object_atomic(path, {"generation": "new"})
         assert json.loads(stream.read()) == {"generation": "old"}
     assert read_json_object(path) == ("", {"generation": "new"})
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows partial replacement errors")
+@pytest.mark.parametrize("code", [1175, 1176, 1177])
+def test_native_partial_replacement_error_retains_staged_state(tmp_path, monkeypatch, code):
+    import ctypes
+    from types import SimpleNamespace
+
+    path = tmp_path / "state.json"
+    write_json_object_atomic(path, {"generation": "old"})
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    calls = []
+
+    def legacy_replace(destination, source, backup, *args):
+        calls.append("legacy")
+        assert backup is None
+        if code == 1176:
+            path.unlink()
+        elif code == 1177:
+            path.rename(tmp_path / "legacy-old.json")
+        ctypes.set_last_error(code)
+        return False
+
+    def atomic_rename(*args):
+        calls.append("atomic")
+        ctypes.set_last_error(code)
+        return False
+
+    injected = SimpleNamespace(
+        ReplaceFileW=legacy_replace, SetFileInformationByHandle=atomic_rename,
+        CreateFileW=kernel.CreateFileW, CloseHandle=kernel.CloseHandle,
+    )
+    monkeypatch.setattr(ctypes, "WinDLL", lambda *args, **kwargs: injected)
+    with pytest.raises(OSError) as raised:
+        write_json_object_atomic(path, {"generation": "new"})
+    assert raised.value.winerror == code
+    staged = list(tmp_path.glob("*.tmp"))
+    assert len(staged) == 1
+    assert raised.value.staged_state_path == staged[0]
+    assert json.loads(staged[0].read_text(encoding="utf-8")) == {"generation": "new"}
+    assert read_json_object(path) == ("", {"generation": "old"})
+    assert calls == ["atomic"]
+
+
+@pytest.mark.parametrize("source_kind", ["canonical", "shipped"])
+def test_state_source_first_touch_needs_only_isolated_stdlib(tmp_path, source_kind):
+    from pathlib import Path
+
+    source = Path(state.__file__)
+    if source_kind == "shipped":
+        source = (
+            Path(__file__).resolve().parents[3]
+            / "plugins/customizing-copilot/libs/plugin-activation/src/plugin_activation/state.py"
+        )
+    script = (
+        "import importlib.util,pathlib,sys;"
+        "s=importlib.util.spec_from_file_location('standalone_state',sys.argv[1]);"
+        "m=importlib.util.module_from_spec(s);sys.modules[s.name]=m;s.loader.exec_module(m);"
+        "p=pathlib.Path(sys.argv[2]);m.write_json_object_atomic(p,{'generation':'fresh'});"
+        "assert m.read_json_object(p)==('',{'generation':'fresh'});print('standalone-ok')"
+    )
+    result = subprocess.run(
+        [sys.executable, "-I", "-c", script, str(source), str(tmp_path / "state.json")],
+        cwd=tmp_path, capture_output=True, text=True, timeout=20,
+        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "standalone-ok"
 
 
 def _write_state(tmp_path, user_value=..., inventory_enabled=None):

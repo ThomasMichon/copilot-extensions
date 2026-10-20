@@ -947,7 +947,8 @@ def test_inventory_reader_cannot_retire_a_ready_selection_publication(harness, m
     import threading
     from contextlib import contextmanager
     from concurrent.futures import ThreadPoolExecutor
-    from plugin_activation import fileio, state
+    from plugin_activation import state
+    from agent_dispatch import managed_runtime
 
     h = harness
     assert h.daemon.reconcile_once().started == [h.rid]
@@ -955,7 +956,7 @@ def test_inventory_reader_cannot_retire_a_ready_selection_publication(harness, m
     selection = h.controller._selection_path(h.rid)
     entered, release = threading.Event(), threading.Event()
     reader_thread = []
-    open_state = state._open_state_text if stage == "parse" else fileio.open_binary_shared
+    open_state = state._open_state_text if stage == "parse" else managed_runtime.open_binary_shared
 
     @contextmanager
     def held_state(path):
@@ -970,7 +971,7 @@ def test_inventory_reader_cannot_retire_a_ready_selection_publication(harness, m
         return h.controller._receipt_metadata(selection)
 
     monkeypatch.setattr(
-        state if stage == "parse" else fileio,
+        state if stage == "parse" else managed_runtime,
         "_open_state_text" if stage == "parse" else "open_binary_shared", held_state,
     )
     wait_ready = h.controller._wait_ready

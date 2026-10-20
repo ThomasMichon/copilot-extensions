@@ -204,6 +204,86 @@ def test_submission_error_retains_a_running_execution_future(tmp_path, monkeypat
             release.set()
 
 
+@pytest.mark.parametrize("state", ["pending", "timeout"])
+def test_cancelled_queued_receipt_is_settled_only_as_unstarted(tmp_path, monkeypatch, state):
+    controller = DefaultCompanionController(tmp_path / "receipts", token_source=lambda pid: "owner")
+    receipt = _receipt(controller)
+    release = threading.Event()
+    retired = []
+    monkeypatch.setattr(controller, "_retire_receipt", lambda value, **kwargs: retired.append(value))
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        occupied = pool.submit(lambda: release.wait(3))
+        try:
+            controller.reconcile_receipts_bounded(set(), executor=pool, deadline=time.monotonic() + 2)
+            queued = controller._receipt_operations["withdrawn"]
+            assert queued.cancel()
+            if state == "timeout":
+                record = controller._operation_record("withdrawn")
+                controller._write_operation("withdrawn", {**record, "state": "timeout"})
+            controller.reconcile_receipts_bounded(
+                {"withdrawn"}, executor=pool, deadline=time.monotonic() + 2,
+            )
+            assert controller._operation_record("withdrawn")["state"] == "superseded"
+            assert controller._read_receipt("withdrawn") == receipt
+            assert retired == []
+            release.set()
+            occupied.result(1)
+            controller.reconcile_receipts_bounded(set(), executor=pool, deadline=time.monotonic() + 2)
+            controller._receipt_operations["withdrawn"].result(1)
+            assert retired == [receipt]
+            assert controller._operation_record("withdrawn")["state"] == "complete"
+        finally:
+            release.set()
+
+
+@pytest.mark.parametrize("committed", [False, True])
+def test_cancelled_receipt_retains_proof_until_settlement_is_read_back(tmp_path, monkeypatch, committed):
+    controller = DefaultCompanionController(tmp_path / "receipts", token_source=lambda pid: "owner")
+    receipt = _receipt(controller)
+    release = threading.Event()
+    write, attempts = controller._write_operation, []
+
+    def uncertain_settlement(rid, record):
+        if record["state"] == "superseded":
+            attempts.append(record["state"])
+            if len(attempts) == 1:
+                if committed:
+                    write(rid, record)
+                raise OSError("injected settlement response failure")
+        return write(rid, record)
+
+    monkeypatch.setattr(controller, "_write_operation", uncertain_settlement)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        occupied = pool.submit(lambda: release.wait(3))
+        try:
+            controller.reconcile_receipts_bounded(set(), executor=pool, deadline=time.monotonic() + 2)
+            queued = controller._receipt_operations["withdrawn"]
+            assert queued.cancel()
+            for _ in range(2):
+                controller.reconcile_receipts_bounded(
+                    {"withdrawn"}, executor=pool, deadline=time.monotonic() + 2,
+                )
+            assert controller._operation_record("withdrawn")["state"] == "superseded"
+            assert "withdrawn" not in controller._receipt_submission_records
+            assert controller._read_receipt("withdrawn") == receipt
+            assert len(attempts) == (1 if committed else 2)
+        finally:
+            release.set()
+            occupied.result(1)
+
+
+def test_unstarted_cancellation_cannot_supersede_a_newer_operation(tmp_path):
+    controller = DefaultCompanionController(tmp_path / "receipts", token_source=lambda pid: "owner")
+    _unknown_operation(controller, "unit")
+    captured = controller._operation_record("unit")
+    controller._write_operation("unit", {**captured, "started_at": captured["started_at"] + 1})
+    path = controller._operation_path("unit")
+    before = path.read_bytes()
+    controller._supersede_unstarted_receipt("unit", captured)
+    assert path.read_bytes() == before
+    assert controller._operation_record("unit")["state"] == "unknown"
+
+
 def test_receipt_only_managed_generation_withdraws_its_validated_root_pin(tmp_path, monkeypatch):
     h = RetentionHarness(tmp_path)
     snapshot = h.generation("1")

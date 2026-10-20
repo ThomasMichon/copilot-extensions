@@ -12,9 +12,7 @@ from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from time import sleep
-from typing import Any, TextIO
-
-from .fileio import open_binary_shared, replace_shared as _replace_state
+from typing import Any, BinaryIO, TextIO
 
 RESTORE_RETRY_DELAY_S = 1.0
 
@@ -85,6 +83,82 @@ def _split_jsonc_header(raw: str) -> tuple[str, str]:
     return "".join(lines[:body_start]), "".join(lines[body_start:])
 
 
+def open_binary_shared(path: Path) -> BinaryIO:
+    if os.name != "nt":
+        return path.open("rb")
+    import ctypes
+    import msvcrt
+    from ctypes import wintypes
+
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.CreateFileW.argtypes = [
+        wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.LPVOID,
+        wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE,
+    ]
+    kernel.CreateFileW.restype = wintypes.HANDLE
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel.CloseHandle.restype = wintypes.BOOL
+    handle = kernel.CreateFileW(str(path), 0x80000000, 0x7, None, 3, 0x80, None)
+    if handle == ctypes.c_void_p(-1).value:
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        fd = msvcrt.open_osfhandle(handle, os.O_RDONLY | os.O_BINARY)
+    except BaseException:
+        kernel.CloseHandle(handle)
+        raise
+    try:
+        return os.fdopen(fd, "rb")
+    except BaseException:
+        os.close(fd)
+        raise
+
+
+def _replace_state(source: str, destination: Path) -> None:
+    if os.name != "nt":
+        os.replace(source, destination)
+        return
+    import ctypes
+    from ctypes import wintypes
+
+    class RenameInfo(ctypes.Structure):
+        _fields_ = [
+            ("Flags", wintypes.DWORD), ("RootDirectory", wintypes.HANDLE),
+            ("FileNameLength", wintypes.DWORD), ("FileName", wintypes.WCHAR * 1),
+        ]
+
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.CreateFileW.argtypes = [
+        wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.LPVOID,
+        wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE,
+    ]
+    kernel.CreateFileW.restype = wintypes.HANDLE
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel.CloseHandle.restype = wintypes.BOOL
+    kernel.SetFileInformationByHandle.argtypes = [
+        wintypes.HANDLE, ctypes.c_int, wintypes.LPVOID, wintypes.DWORD,
+    ]
+    kernel.SetFileInformationByHandle.restype = wintypes.BOOL
+    # Rename the staged name itself rather than following a substituted source link.
+    handle = kernel.CreateFileW(source, 0x10000, 0x7, None, 3, 0x80 | 0x00200000, None)
+    if handle == ctypes.c_void_p(-1).value:
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        name = str(destination.absolute()).encode("utf-16-le", errors="surrogatepass")
+        offset = RenameInfo.FileName.offset
+        buffer = ctypes.create_string_buffer(max(ctypes.sizeof(RenameInfo), offset + len(name) + 2))
+        info = RenameInfo.from_buffer(buffer)
+        info.Flags = 0x1 | 0x2  # replace-if-exists plus POSIX retained-reader semantics
+        info.FileNameLength = len(name)
+        ctypes.memmove(ctypes.addressof(buffer) + offset, name, len(name))
+        if not kernel.SetFileInformationByHandle(handle, 22, buffer, len(buffer)):
+            error = ctypes.WinError(ctypes.get_last_error())
+            if error.winerror in {1175, 1176, 1177}:
+                error.retain_staged_state = True
+            raise error
+    finally:
+        kernel.CloseHandle(handle)
+
+
 def _open_state_text(path: Path) -> TextIO:
     return io.TextIOWrapper(open_binary_shared(path), encoding="utf-8")
 
@@ -150,11 +224,14 @@ def write_json_object_atomic(
             stream.flush()
             os.fsync(stream.fileno())
         _replace_state(temp_name, path)
-    except BaseException:
-        try:
-            os.unlink(temp_name)
-        except OSError:
-            pass
+    except BaseException as exc:
+        if getattr(exc, "retain_staged_state", False):
+            exc.staged_state_path = Path(temp_name)
+        else:
+            try:
+                os.unlink(temp_name)
+            except OSError:
+                pass
         raise
 
 

@@ -220,7 +220,7 @@ def test_real_install_restoration_never_replays_the_command(
                 raise subprocess.TimeoutExpired(argv, kwargs["timeout"])
         return subprocess.CompletedProcess(argv, 0, "", "")
     monkeypatch.setattr(subprocess, "run", install)
-    replace, writes = state.os.replace, []
+    replace, writes = state._replace_state, []
     def fail_restore(source, destination):
         if Path(destination) == settings:
             writes.append(destination)
@@ -229,7 +229,7 @@ def test_real_install_restoration_never_replays_the_command(
                 error.winerror = 32
                 raise error
         return replace(source, destination)
-    monkeypatch.setattr(state.os, "replace", fail_restore)
+    monkeypatch.setattr(state, "_replace_state", fail_restore)
     status = core._update_one_plugin_payload("agent-example", "copilot-extensions")
     if recover:
         assert status == ("timed out" if command_timeout else "OK (installed)")

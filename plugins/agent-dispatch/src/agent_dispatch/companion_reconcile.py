@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import fnmatch
 import math
 import os
 import threading
@@ -32,6 +33,7 @@ class ReceiptReconciliation:
 
     def _init_receipt_reconciliation(self) -> None:
         self._receipt_operations: dict[str, Future] = {}
+        self._receipt_submission_records: dict[str, tuple[Future, dict]] = {}
         self._receipt_adopted: set[str] = set()
         self._receipt_locks_guard = threading.Lock()
         self._receipt_metadata_locks = {}
@@ -319,12 +321,20 @@ class ReceiptReconciliation:
                         **current, "state": state, "observed_at": time.time(),
                     })
 
-    def receipt_operation_progress(self) -> list[dict]:
-        if not self.receipt_dir.exists():
+    def _receipt_paths(self, pattern: str) -> list[Path]:
+        try:
+            with os.scandir(self.receipt_dir) as entries:
+                return sorted(Path(entry.path) for entry in entries if fnmatch.fnmatch(entry.name, pattern))
+        except FileNotFoundError:
             return []
+        except OSError as exc:
+            log.warning("receipt directory observation unavailable: error_type=%s", type(exc).__name__)
+            raise lifecycle.CompanionIndeterminate("receipt directory observation is unavailable") from exc
+
+    def receipt_operation_progress(self) -> list[dict]:
         progress = []
         unavailable = None
-        for path in sorted(self.receipt_dir.glob("*.reconcile-operation.json")):
+        for path in self._receipt_paths("*.reconcile-operation.json"):
             try:
                 raw = self._receipt_metadata(path)
                 rid = raw.get("registration_id")
@@ -352,25 +362,32 @@ class ReceiptReconciliation:
         """One tracked operation per receipt; restart reads back rather than replays."""
         if not _inventory:
             self._receipt_adopted = set(adopted_registration_ids)
-        if not self.receipt_dir.exists():
-            return set()
         for rid, future in tuple(self._receipt_operations.items()):
             if future.done():
-                self._receipt_operations.pop(rid)
+                submission = self._receipt_submission_records.get(rid)
+                captured = submission[1] if submission is not None and submission[0] is future else None
                 try:
-                    future.result()
+                    if future.cancelled() and captured is not None:
+                        self._supersede_unstarted_receipt(rid, captured)
+                    else:
+                        future.result()
                 except (
                     lifecycle.CompanionError, lifecycle.CompanionIndeterminate,
-                    ManagedRuntimeError, OSError,
+                    ManagedRuntimeError, OSError, CancelledError,
                 ) as exc:
                     log.warning("receipt operation incomplete for %s: error_type=%s", rid, type(exc).__name__)
+                    if future.cancelled() and captured is not None:
+                        continue
+                self._receipt_operations.pop(rid)
+                if captured is not None:
+                    self._receipt_submission_records.pop(rid)
         ids: set[str] = set()
         for pattern, path_for in (
             ("*.companion.json", self._receipt_path),
             ("*.managed-launch.json", self._selection_path),
             ("*.reconcile-operation.json", self._operation_path),
         ):
-            for path in self.receipt_dir.glob(pattern):
+            for path in self._receipt_paths(pattern):
                 try:
                     record = self._receipt_metadata(path)
                     rid = record.get("registration_id")
@@ -455,19 +472,30 @@ class ReceiptReconciliation:
         try:
             future = executor.submit(execute)
         except RuntimeError as exc:
+            self._receipt_submission_records[rid] = (execution, record)
+            self._receipt_operations[rid] = execution
             if execution.cancel():
-                with self._receipt_metadata_lock(self._operation_path(rid)):
-                    current = self._operation_record(rid)
-                    if current == record:
-                        self._write_operation(rid, {
-                            **record, "state": "superseded", "observed_at": time.time(),
-                        })
-            else:
-                self._receipt_operations[rid] = execution
+                self._supersede_unstarted_receipt(rid, record)
             raise lifecycle.CompanionIndeterminate("receipt operation submission was rejected") from exc
+        self._receipt_submission_records[rid] = (future, record)
         self._receipt_operations[rid] = future
         self._receipt_last_scheduled = rid
         blocked.add(rid)
+
+    def _supersede_unstarted_receipt(self, rid: str, captured: dict) -> None:
+        with self._receipt_metadata_lock(self._operation_path(rid)):
+            current = self._operation_record(rid)
+            if (
+                current is not None
+                and captured["owner_pid"] == os.getpid()
+                and current["state"] in {"pending", "timeout", "unknown"}
+                and all(current[key] == captured[key] for key in (
+                    "generation_digest", "owner_pid", "owner_start_token", "started_at",
+                ))
+            ):
+                self._write_operation(rid, {
+                    **current, "state": "superseded", "observed_at": time.time(),
+                })
 
     def _reconcile_receipt_generation(self, rid: str, operation: dict) -> None:
         state = "unknown"

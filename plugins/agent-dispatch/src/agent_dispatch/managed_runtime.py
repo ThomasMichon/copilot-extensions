@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from plugin_activation import read_json_object
+from plugin_activation.state import open_binary_shared
 
 from .install_paths import install_dir, uses_legacy_install_dir
 from .managed_integrity import _integrity_budget, _tree_digest  # re-exported for existing consumers
@@ -729,8 +730,6 @@ def _hash_regular_file(path: Path, *, description: str, deadline: float | None =
     if not stat.S_ISREG(before.st_mode):
         raise ManagedRuntimeError(f"{description} must be a regular file")
     digest = hashlib.sha256()
-    from plugin_activation.fileio import open_binary_shared
-
     with open_binary_shared(path) as stream:
         opened = os.fstat(stream.fileno())
         if (

@@ -2283,3 +2283,46 @@ requested contract.
   future controls are additional to the preceding 650-case implementation proof.
   Fatal lint and whitespace pass. No production code changes in this follow-up,
   and fresh full resulting-head review and all hosted CI remain outstanding.
+
+### 2026-10-19 - Remove partial replacement and denied-scan ambiguity
+
+- Full predecessor review `5578929112` identifies two further real Medium
+  defects: documented `ReplaceFileW` error 1176 can remove the destination
+  before caller cleanup deletes the staged candidate, and `Path.glob` can turn
+  denied directory enumeration into a successful empty receipt observation.
+  Both failures reproduce before correction; missing/empty controls pass.
+- Windows publication now uses one `FileRenameInfoEx` atomic rename with
+  replace-if-exists and POSIX retained-reader semantics, not multi-step
+  `ReplaceFileW`. Refused native 1175/1176/1177 outcomes retain the candidate
+  and expose its path on the original exception, without retrying the write.
+  Unsupported atomic capability fails before mutation. Actual retained-reader
+  and UTF-16 path cases include supplementary and unpaired native code units.
+- Progress and inventory use directory enumeration that propagates scan errors.
+  Missing and empty remain known empty; denied access is indeterminate with
+  classified logging and unchanged operation bytes. The same contract applies
+  across every newly introduced receipt scan.
+- The coupled accepted-queue cancellation case also reproduces a raw
+  `CancelledError` and stranded pending record. A captured local execution
+  generation now survives until its proven-unstarted settlement is recorded.
+  Failed settlement retains that proof; a committed response loss is read back
+  without another write. A cancelled readback or newer operation cannot gain
+  unstarted authority. Abrupt owner loss still retains the unknown fence.
+- Direct updater consumers expose a real standalone-import regression in the
+  extracted native helper. The helpers remain in the existing stdlib-only
+  `state.py`, below its source cap; the two newly introduced helper modules are
+  removed. The original shipped-source loader test is unchanged and passes.
+  Its restoration fault fixture now injects at the actual replacement boundary,
+  retaining command non-replay, retry, timeout and permission assertions.
+- Complete affected Dispatch implementation passes 455 master/receipt cases,
+  205 managed/native/retention cases with three platform skips and three CLI
+  cases: 663 successful cases. All 74 direct updater consumers pass. After the
+  standalone relocation, cold import order and both actual held-reader phases
+  pass; the complete canonical library passes 146 cases on native Windows and
+  142 on native Ubuntu/WSL with three Windows-only skips.
+- Canonical and actually shipped state files also run in separate fresh
+  `python -I` processes from empty test-owned directories, with no package
+  dependencies available through the working directory or user site. Both
+  perform real first publication/readback under the original child bound.
+  This is isolated first-touch evidence, not a system installer or live rollout.
+  Fresh full resulting-head review, all current CI and actual merge remain
+  outstanding; #7020's independent native cause and adopter gates remain open.

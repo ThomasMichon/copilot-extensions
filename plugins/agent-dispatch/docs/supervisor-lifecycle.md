@@ -98,13 +98,23 @@ per-identity corruption fence.
 Generation receipt/selection values must likewise be objects or null, even
 when their recorded digest matches. A digest does not validate their shape.
 Canonical Windows JSON and metadata-hash readers use read/write/delete sharing,
-and their atomic writer uses native replacement of an existing target. A held
+and their writer uses native atomic rename with retained-reader semantics, not
+multi-step replacement that can remove the destination on failure. A held
 inventory reader cannot deny selection publication and retire a ready process;
 the reader still rejects metadata that changes during its strict observation.
 An executor submission failure cancels admission before marking an exact
 unstarted operation superseded. A late queued callback then cannot execute.
 If execution already started, its separate future stays tracked and its durable
 outcome is retained, not relabelled as unstarted.
+Accepted-but-cancelled queued mutations retain their captured generation until
+the same unstarted settlement is recorded. A failed settlement write retains
+that proof while this owner is alive; a committed response loss is read back
+without rewriting it. A cancelled readback or changed generation cannot confer
+unstarted-mutation authority. Abrupt owner loss still retains the durable
+unknown fence rather than permitting replay.
+Directory enumeration propagates access failures as indeterminate for both
+progress and inventory scheduling. Only genuinely missing or empty directories
+produce a confirmed empty observation; denied scans cannot silently hide records.
 Matching durable root selection pins must also be absent, including matching
 pins from another process-identity domain. Pin readback is non-mutating metadata
 inspection under the root lock and its deadline; a surviving pin keeps the

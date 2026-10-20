@@ -544,6 +544,54 @@ def test_receipt_progress_incomplete_inventory_is_not_published_as_empty(tmp_pat
         daemon.shutdown()
 
 
+@pytest.mark.parametrize("directory", ["missing", "empty", "denied"])
+@pytest.mark.parametrize("stage", ["progress", "inventory"])
+def test_receipt_directory_observation_is_not_false_empty(tmp_path, monkeypatch, caplog, directory, stage):
+    import os
+    from pathlib import Path
+    from tests.test_bounded_receipt_reconcile import _unknown_operation
+
+    controller = DefaultCompanionController(tmp_path / "receipts", token_source=lambda pid: "owner")
+    if directory != "missing":
+        controller.receipt_dir.mkdir()
+    if directory == "denied":
+        _unknown_operation(controller, "retained")
+        path = controller._operation_path("retained")
+        before = path.read_bytes()
+        scan = os.scandir
+
+        def denied(current):
+            if Path(current) == controller.receipt_dir:
+                raise PermissionError("private/denied/inventory")
+            return scan(current)
+
+        monkeypatch.setattr(os, "scandir", denied)
+    daemon = SupervisorDaemon(FakeClient([]), "host", companion_controller=controller, launcher=FakeLauncher())
+    frames = []
+    daemon._progress_callback = frames.append
+    daemon._progress_latest = {"phase": "complete", "cycle_id": 1}
+    try:
+        if stage == "progress":
+            daemon._publish_progress()
+            assert frames[-1]["receipt_operations"] == (None if directory == "denied" else [])
+            if directory == "denied":
+                assert frames[-1]["observation_error"] == "receipt-progress-unavailable"
+        else:
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                if directory == "denied":
+                    with pytest.raises(CompanionIndeterminate, match="directory observation"):
+                        controller.reconcile_receipts_bounded(set(), executor=pool, deadline=time.monotonic() + 1)
+                else:
+                    assert controller.reconcile_receipts_bounded(
+                        set(), executor=pool, deadline=time.monotonic() + 1,
+                    ) == set()
+        if directory == "denied":
+            assert path.read_bytes() == before
+        assert "private/denied/inventory" not in caplog.text
+    finally:
+        daemon.shutdown()
+
+
 @pytest.mark.parametrize("active_deadline", [None, 100.025, 0.0])
 def test_receipt_inventory_without_active_deadline_receives_forward_budget(monkeypatch, active_deadline):
     controller = FakeCompanionController()
