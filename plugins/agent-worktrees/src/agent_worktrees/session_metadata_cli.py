@@ -138,6 +138,10 @@ def add_parsers(sub) -> None:
         help="Read-only exact frozen worktree/head check; never launch permission "
         "(bounded JSON, no ambient session identity)",
     )
+    evidence.add_argument(
+        "--restart-survivor", metavar="REQUEST-JSON",
+        help="Read-only exact-original current hosting check; no reuse, launch or seed ACK",
+    )
     p.add_argument(
         "--session-id", default=None, help="Session id (default: COPILOT_AGENT_SESSION_ID)"
     )
@@ -285,6 +289,32 @@ def _effort_orientation(record) -> str:
 
 def cmd_session_role(args) -> int:
     """Report THIS session's role relative to its worktree's head (JSON out)."""
+    if getattr(args, "restart_survivor", None) is not None:
+        from . import native_restart_launch, native_restart_survivor
+        import yaml
+
+        try:
+            raw = args.restart_survivor
+            if len(raw.encode("utf-8")) > 8192:
+                raise ValueError("Restart survivor request exceeds its budget")
+            request = native_restart_launch.validate_request(native_restart_launch.decode_json(raw))
+            expected = request["expected"]
+            if getattr(args, "worktree_id", None) not in (None, expected["worktree_id"]) or (
+                getattr(args, "session_id", None) not in (None, expected["native_session_id"])
+            ) or getattr(args, "worktree_dir", None):
+                raise ValueError("Restart survivor request conflicts with extra selectors")
+
+            def load():
+                try:
+                    return tracking.load_record(cfg.tracking_dir() / f"{expected['worktree_id']}.yaml")
+                except FileNotFoundError:
+                    return None
+
+            result = native_restart_survivor.inspect(request, loader=load)
+        except (OSError, ValueError, IndexError, RecursionError, yaml.YAMLError) as exc:
+            return output._json_error(f"Could not inspect native restart survivor: {exc}")
+        output._json_output(result)
+        return 0
     if getattr(args, "restart_check", None) is not None:
         from . import native_restart_check
         import json

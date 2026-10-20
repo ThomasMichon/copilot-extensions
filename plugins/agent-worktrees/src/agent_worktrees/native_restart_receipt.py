@@ -17,8 +17,8 @@ _MAX_RECEIPTS = 16
 _STATES = {"launch-uncertain", "mux-created"}
 
 
-def validate_acknowledgement(request: dict, value: object) -> dict:
-    """Bind the explicit status attestation to the exact newly observed execution."""
+def validate_execution_binding(request: dict, value: object) -> dict:
+    """Bind fresh execution evidence to the exact original and target epoch."""
     from . import native_source_context, tracking
 
     expected = request["expected"]
@@ -26,11 +26,9 @@ def validate_acknowledgement(request: dict, value: object) -> dict:
         not isinstance(value, dict) or set(value) != {
             "native_session_id", "target_epoch", "source_identity", "native_incarnation",
             "session_incarnation", "head_revision", "owner_revision", "activation_ordinal",
-            "status_reconciled",
         }
         or value["native_session_id"] != expected["native_session_id"]
         or value["target_epoch"] != expected["target_epoch"]
-        or value["status_reconciled"] is not True
         or type(value["head_revision"]) is not int
         or value["head_revision"] != expected["head_revision"]
         or any(
@@ -49,6 +47,16 @@ def validate_acknowledgement(request: dict, value: object) -> dict:
         expected["native_session_id"], int(pid), birth, expected["target_epoch"],
     ) or value["source_identity"] == expected["source_identity"]:
         raise ValueError("Restart acknowledgement source is not the resumed execution")
+    return value
+
+
+def validate_acknowledgement(request: dict, value: object) -> dict:
+    """Require an explicit status attestation in addition to execution evidence."""
+    if not isinstance(value, dict) or value.get("status_reconciled") is not True:
+        raise ValueError("Invalid restart seed acknowledgement")
+    validate_execution_binding(
+        request, {key: item for key, item in value.items() if key != "status_reconciled"},
+    )
     return value
 
 

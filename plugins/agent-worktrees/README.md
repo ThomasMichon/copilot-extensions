@@ -550,6 +550,25 @@ and later saves. Malformed claim collections/items retain conservative opaque
 placeholders rather than becoming an empty ledger. Neither can qualify for
 restart inspection.
 
+`session-role --restart-survivor <request-json> --json` is a separate, explicit
+read-only observation of the original conversation's current hosting. It uses
+the full frozen restart request, not an ambient session ID. A positive snapshot
+requires the same current head, worktree incarnation and path; retained,
+unambiguous original activation history without an intentional End; a newer
+activation and owner revision; and a live native process that owns the exact
+hold and mux incarnation in the current target epoch. Changed owner/epoch,
+missing holds, stale source identity, pending seeds, task/mixed/inbound claims
+and recorded profile assignments refuse. The canonical original self-session
+claim may remain unchanged. Attachment count is not eligibility.
+
+The version-1 `native-restart-survivor` response is current evidence only,
+separate from retained launch receipts. `survivor_confirmed` never implies
+adoption, STATUS FIRST reconciliation or seed pickup: `reuse_authorized`,
+`launch_authorized`, `seed_acknowledged`, `restored` and `automatic_eligible`
+remain false. It neither writes state nor attaches, types a seed, launches,
+reserves or retries. A negative or unavailable observation is likewise not
+permission to launch.
+
 The bundled live-pulse extension writes `substatus.json` beside Copilot session
 state so the picker can show live intent/rest state. It is passive; durable
 worktree disposition still comes only from `agent-worktrees status`.

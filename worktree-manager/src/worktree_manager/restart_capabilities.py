@@ -40,6 +40,7 @@ def recovery_capabilities(config: RestartRecoveryConfig, platform: str | None) -
 
 def inspect_recovery(
     root: Path, *, check_attempt: str | None = None, check_launch: str | None = None,
+    check_survivor: str | None = None,
 ) -> dict:
     """Inspect evidence/configuration without creating state or contacting logind."""
     observer = RestartObserver(root)
@@ -77,6 +78,23 @@ def inspect_recovery(
                 "Seed pickup is acknowledged; native recovery qualification remains incomplete."
                 if result["launch_receipt"]["seed_acknowledged"] else
                 "Launch outcome is not acknowledged seed pickup or completed recovery."
+            )
+        except (EngineError, ValueError) as exc:
+            blocker = str(exc)
+        result["blocker"] = "; ".join(filter(None, [result.get("blocker"), blocker]))
+    if check_survivor is not None:
+        from .restart_owner_check import inspect_survivor
+
+        try:
+            if result.get("blocker"):
+                raise ValueError("Survivor inspection requires readable evidence and epoch.")
+            result["survivor_check"] = inspect_survivor(
+                check_survivor, result["attempts"], observer.epoch,
+            )
+            blocker = (
+                "Current original hosting is not adoption, reconciled status or seed acknowledgement."
+                if result["survivor_check"]["survivor_confirmed"] else
+                "An unconfirmed survivor is not permission to launch or retry."
             )
         except (EngineError, ValueError) as exc:
             blocker = str(exc)

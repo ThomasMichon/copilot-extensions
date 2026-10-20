@@ -23,15 +23,20 @@ def cmd_mux_daemon(rest: list[str]) -> int:
 
         check_attempt = None
         check_launch = None
+        check_survivor = None
         if len(args) == 2 and args[0] == "--check-attempt":
             check_attempt = args[1]
         elif len(args) == 2 and args[0] == "--check-launch":
             check_launch = args[1]
+        elif len(args) == 2 and args[0] == "--check-survivor":
+            check_survivor = args[1]
         elif args:
-            print("error: recovery-evidence accepts only --check-attempt or --check-launch <UUID>")
+            print("error: recovery-evidence accepts only --check-attempt, --check-launch "
+                  "or --check-survivor <UUID>")
             return 2
         result = inspect_recovery(
             default_root(), check_attempt=check_attempt, check_launch=check_launch,
+            check_survivor=check_survivor,
         )
         print(json.dumps(result))
         return 1 if result.get("blocker") else 0

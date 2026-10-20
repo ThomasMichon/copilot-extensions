@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from dataclasses import asdict
@@ -148,4 +149,72 @@ def inspect_launch(attempt_id: str, attempts: list[dict], epoch: HostEpoch | Non
         environment={"WORKTREE_NO_UPDATE": "1", "WORKTREE_NO_RECONCILE": "1"},
     )
     validate_launch_receipt(result, request)
+    return result
+
+
+def _survivor_binding(value: object, expected: dict) -> bool:
+    if (
+        not isinstance(value, dict) or set(value) != {
+            "native_session_id", "target_epoch", "source_identity", "native_incarnation",
+            "session_incarnation", "head_revision", "owner_revision", "activation_ordinal",
+        }
+        or value["native_session_id"] != expected["native_session_id"]
+        or value["target_epoch"] != expected["target_epoch"]
+        or type(value["head_revision"]) is not int
+        or value["head_revision"] != expected["head_revision"]
+        or any(
+            type(value[field]) is not int or not expected[field] < value[field] <= 2**63 - 1
+            for field in ("owner_revision", "activation_ordinal")
+        )
+        or not isinstance(value["native_incarnation"], str)
+        or re.fullmatch(r"[1-9][0-9]{0,9}:[0-9]{1,32}", value["native_incarnation"]) is None
+        or not isinstance(value["session_incarnation"], str)
+        or re.fullmatch(r"[A-Za-z0-9.$_:-]{1,128}", value["session_incarnation"]) is None
+    ):
+        return False
+    pid, birth = value["native_incarnation"].split(":")
+    source = [
+        expected["target_epoch"][field] for field in ("platform", "environment_id", "boot_id")
+    ] + [expected["native_session_id"], int(pid), birth]
+    token = "native-source-v1:" + hashlib.sha256(
+        json.dumps(source, separators=(",", ":")).encode("ascii"),
+    ).hexdigest()
+    return value["source_identity"] == token and token != expected["source_identity"]
+
+
+def inspect_survivor(attempt_id: str, attempts: list[dict], epoch: HostEpoch | None) -> dict:
+    """Read fresh exact-original hosting, not an adoption or recovery receipt."""
+    attempt, expected = _attempt(attempt_id, attempts, epoch)
+    request = launch_request(attempt)
+    payload = json.dumps(request, sort_keys=True, allow_nan=False)
+    if len(payload.encode("utf-8")) > 8192:
+        raise ValueError("Restart survivor request exceeds its budget")
+    result = engine_client.run_json(
+        expected["project"], ["session-role", "--restart-survivor", payload, "--json"],
+        timeout=4,
+        environment={"WORKTREE_NO_UPDATE": "1", "WORKTREE_NO_RECONCILE": "1"},
+    )
+    if (
+        set(result) != {
+            "schema", "version", "request", "survivor_confirmed", "reason",
+            "launch_authorized", "reuse_authorized", "seed_acknowledged",
+            "restored", "automatic_eligible",
+        } | ({"hosting"} if result.get("survivor_confirmed") is True else set())
+        or result["schema"] != "native-restart-survivor"
+        or type(result["version"]) is not int or result["version"] != 1
+        or json.dumps(result["request"], sort_keys=True, allow_nan=False) != payload
+        or type(result["survivor_confirmed"]) is not bool
+        or any(result[field] is not False for field in (
+            "launch_authorized", "reuse_authorized", "seed_acknowledged", "restored", "automatic_eligible",
+        ))
+        or not isinstance(result["reason"], str) or not 1 <= len(result["reason"]) <= 256
+        or not result["survivor_confirmed"] and result["reason"] == "original-native-survivor-confirmed"
+        or (
+            result["survivor_confirmed"] and (
+                result["reason"] != "original-native-survivor-confirmed"
+                or not _survivor_binding(result["hosting"], expected)
+            )
+        )
+    ):
+        raise ValueError("Restart inspection received an unconfirmed survivor response")
     return result

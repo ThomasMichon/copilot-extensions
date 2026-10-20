@@ -1,0 +1,13 @@
+{
+  "comment": "Inspect exact-original native survivors without adoption, launch or acknowledgement authority",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

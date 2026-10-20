@@ -1247,6 +1247,24 @@ claiming discipline alone.
 
 ## Journal
 
+- **2026-10-20** - Implemented explicit exact-original survivor inspection in
+  the owner and Manager for the [focused recovery slice](machine-restart-recovery.md).
+  Fresh hosting remains distinct from launch/seed receipts; no adoption,
+  launch, prompt delivery, state mutation or automatic permission is added.
+  The final isolated owner/Manager lane passed 384 contracts without skips,
+  including inconsistent-response refusal. Source awaits review/merge;
+  the full focused gate and umbrella remain active, with actual native
+  qualification and platform startup/enrollment still unresolved.
+
+- **2026-10-20** - Durable Manager outcome observation merged in
+  [#7355](https://github.com/ThomasMichon/copilot-extensions/pull/7355) after
+  exact-head approval, the actual-capacity starvation fix and required green
+  checks. Re-read the [focused recovery gate](machine-restart-recovery.md);
+  the objective remains open. Next is owner-confirmed exact-original survivor
+  inspection before any recovery launch. Actual native qualification,
+  task/profile policy and platform startup/enrollment remain unresolved; no
+  installation, fixture launch or live rollout is implied.
+
 - **2026-10-20** - Implemented bounded durable Manager observations for
   [restart recovery](machine-restart-recovery.md), preserving immutable frozen
   identities, launch uncertainty and historical ACK bindings. The existing

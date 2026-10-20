@@ -172,6 +172,9 @@ means of fulfilling the operator's request. They require normal source review.
   owner intent. Task/profile-bound worktrees and unqualified claims refuse; it is
   not wired to automatic startup. Actual native readiness/identity/seed
   acknowledgement and surviving-session adoption remain unresolved.
+  An explicit source-only survivor inspection now binds fresh owner hosting
+  to the retained exact original without attachment, launch or seed authority;
+  it awaits review/merge and does not complete adoption or native qualification.
 - [ ] Persist recovery attempt and outcome; reconcile a crash between launch
   and receipt, concurrent startup, seed timeout and delayed registration before
   retrying. Do not claim exactly-once delivery merely from a pre-launch flag.
@@ -190,8 +193,10 @@ means of fulfilling the operator's request. They require normal source review.
   retains acknowledged later-boot history without eviction or retry authority,
   reserves future ACK/counter capacity before invocation, and preserves frozen
   historical target identity during explicit read-only inspection.
-  The next Manager increment retains bounded monotonic owner observations
-  separately from immutable frozen identities under the existing daemon lease.
+  [#7355](https://github.com/ThomasMichon/copilot-extensions/pull/7355)
+  retains bounded monotonic Manager observations separately from immutable
+  frozen identities under the existing daemon lease, including readable prior
+  attempts when capacity refuses a new candidate.
   Synthetic owner responses and durable process fixtures do not resolve actual
   native recovery qualification or authorize retry.
 - [ ] Apply bounded admission and concurrency. Authentication, dependency or
@@ -1151,3 +1156,56 @@ The umbrella effort remains Active independently of this slice's completion.
   preserving the freeze blocker. Unconfirmed startup still makes no owner call.
   The corrected final integrated recovery/mux lane passed 435 contracts with
   the same seven explicit native/platform skips.
+
+### 2026-10-20 - Durable outcome observations merged; survivor seam next
+
+- [#7355](https://github.com/ThomasMichon/copilot-extensions/pull/7355)
+  squash-merged to `dev` as `387152609a` after genuine approval of exact head
+  `de1e40f76f`, the capacity finding resolved and all required checks green.
+  The final bounded disconnected recovery/mux lane passed 435 contracts with
+  seven native/platform skips; no skipped or synthetic response is native
+  Copilot qualification.
+- Re-read this focused Plan, Validation Plan and completion gate immediately
+  after merge. Immutable Manager attempts, monotonic durable outcomes and the
+  existing-daemon lease/drain observation seam are delivered. Actual native
+  original-conversation readiness/seed consumption, surviving-session adoption,
+  task/producer/profile action-time policy and platform startup/enrollment
+  remain open; no combined Plan/Validation item is declared complete.
+- Next permitted source-only stretch is the exact-original survivor seam:
+  trace and extend the existing owner's current native identity/hold/head
+  inspection before considering any recovery launch. Keep positive survivor
+  evidence separate from launch/seed receipts, and retain unknown observations
+  as blockers. Reuse only through the actual owner; do not inject a turn or
+  substitute a new native conversation.
+- Actual native qualification still needs a separately approved isolated
+  venue/profile/authentication boundary. This merge enables no fixture,
+  installation, enrollment, host startup change or live rollout. The full
+  focused gate and umbrella remain open while permitted source work continues.
+
+### 2026-10-20 - Explicit original-survivor inspection; adoption still open
+
+- Added an explicit owner snapshot using the full frozen request and an
+  explicit Manager `--check-survivor` composition through the existing
+  no-update/no-reconcile engine boundary. Current target epoch, original UUID,
+  unchanged head/path/incarnation, retained original history, fresh native
+  hold/mux/source and increasing owner/activation revisions must agree.
+  The record and epoch are rechecked after observation.
+- Shared original-history and typed execution-binding checks with the
+  acknowledgement path without inventing a status attestation. Current
+  hosting stays separate from durable launch/seed receipts. Every reuse,
+  launch, seed-ACK, restored and automatic flag remains false; negative or
+  unavailable hosting is not launch or retry authority. No ordinary daemon
+  polling, attachment, seed injection, state mutation or enrollment was added.
+- The final bounded disconnected regression lane passed 384 owner/Manager
+  contracts without skips, including inconsistent-negative-response refusal.
+  Real child processes exercise persisted owner reads and the Manager
+  engine boundary without modifying YAML or frozen SQLite bytes. Native
+  process, mux and epoch observations remain synthetic; no real CLI fixture or
+  native qualification is claimed.
+- Documentation-impact review updates the owner API, Manager behavior and
+  configuration reference, and focused testing flow. The increment closes
+  part of session-hosting's current-reality/provisional-evidence intent using
+  existing owner process boundaries; it adds no resident lifecycle or new
+  architectural authority. Source awaits review and merge. Actual adoption,
+  STATUS FIRST pickup, action-time task/profile policy, platform
+  startup/enrollment and the full focused gate remain open.

@@ -269,6 +269,23 @@ both an empty ledger and the original self claim with real locks and durable
 uncertainty. The provisional check makes no self-claim provider callback;
 task-policy snapshots still cannot authorize a launch.
 
+Exact-original survivor inspection uses:
+
+```text
+python tools/run_tests_in_devcontainer.py agent-worktrees worktree-manager -k 'test_native_restart_survivor or test_restart_survivor_inspection or test_native_restart_launch or test_native_restart_ack_platform'
+```
+
+These fixtures distinguish fresh exact-original native hosting from historical
+launch/ACK receipts. Stale or missing holds, unknown/dead hosting, wrong
+head/path/incarnation/epoch, intentional End, pruned/ambiguous original history,
+non-increasing activation/revision, pending seeds and task/inbound/profile
+policy cannot confirm a survivor. Current owner/epoch changes during the read
+invalidate the snapshot. Real child processes exercise persisted owner reads
+and the Manager's engine JSON boundary without changing YAML or frozen SQLite
+bytes; process/epoch/mux facts remain synthetic. Ordinary default-off inspection
+makes no owner call. No case grants adoption or seed-ACK authority, launches a
+native CLI, or qualifies automatic recovery.
+
 Receipt-history fixtures retain the original ACK while launching and
 acknowledging a separately frozen next-boot request. They refuse different
 requests after either unacknowledged state, changed head/source/activation,

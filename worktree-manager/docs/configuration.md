@@ -68,6 +68,14 @@ attempt identities and acknowledged receipts are never discarded to permit a
 retry. Retained receipts appear as each attempt's optional `outcome`; ordinary
 inspection neither contacts their owners nor migrates the legacy database.
 
+The explicit report-only `recovery-evidence --check-survivor <attempt-uuid>`
+operation can inspect one frozen attempt's exact-original current hosting
+without enabling either preference. It requires the target epoch to remain
+current, uses the existing no-update/no-reconcile engine boundary and retains
+false reuse/launch/seed-ACK/restored/automatic flags. It neither changes these
+preferences nor enrolls automatic survivor polling or adoption. A missing,
+unknown or unavailable survivor is not permission to launch or retry.
+
 ## Picker logical machine roster
 
 The production Picker reads the project's existing `machines.yaml` registry

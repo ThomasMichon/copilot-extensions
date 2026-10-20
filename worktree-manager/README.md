@@ -651,6 +651,24 @@ rebinding it to the current boot. The owner returns the exact retained request
 from its bounded history, not just the latest outcome. `--check-attempt` remains
 strictly current-boot-only. Neither historical read establishes current liveness.
 
+`worktree-manager mux-daemon recovery-evidence --check-survivor <attempt-uuid>`
+explicitly requests a **current** original-session hosting snapshot through
+agent-worktrees `session-role --restart-survivor`. Like `--check-attempt`, it
+requires the frozen target boot to remain current; it never rebinds historical
+attempts. The exact request and typed response bind current native UUID,
+PID/birth, source, mux incarnation and newer owner/activation revisions to the
+frozen original. The owner requires retained original history, a current native
+hold, unchanged head/path/incarnation and qualified claim/profile facts.
+
+The optional `survivor_check` stays distinct from `launch_receipt` and retained
+`outcome`. A confirmed survivor is not adoption or STATUS FIRST reconciliation;
+all reuse, launch, seed-ACK, restored and automatic flags remain false.
+Unconfirmed hosting, old owners and timeouts remain explicit blockers, not cold
+Resume or retry permission. This command returns nonzero while recovery is
+unqualified. It performs no attachment, prompt delivery, launch, attempt write,
+configuration change or daemon enrollment; ordinary inspection still makes no
+owner call.
+
 For an acknowledged receipt the blocker identifies remaining native recovery
 qualification, rather than incorrectly reporting missing seed acknowledgement.
 The receipt is durable historical pickup evidence, not a new live status probe:

@@ -11,7 +11,6 @@ from . import bridge_acquisition_launch, launch_seed_state, native_hosting_evide
 from . import native_restart_check, native_restart_launch, native_restart_receipt
 from . import native_restart_claims
 from . import native_source_context, output, tracking
-from .tracking_session_activations import source_end_authoritative
 from .worktree_status_daemon import _is_safe_identity_token
 
 
@@ -34,18 +33,7 @@ def _proof(path: Path, receipt: dict, witness: object) -> dict:
         raise ValueError("Restart acknowledgement claim policy is unqualified")
     if launch_seed_state.peek(path, read_only=True) is not None:
         raise ValueError("pending-seed")
-    entry = record.session_entry(expected["native_session_id"])
-    original = [
-        item for item in entry.activations
-        if item.ordinal == expected["activation_ordinal"]
-        and item.source_identity == expected["source_identity"]
-    ] if entry is not None else []
-    if (
-        len(original) != 1 or original[0].source_ambiguous
-        or original[0].end_reason is not None
-        or original[0].ended_at is not None and original[0].end_source != "inferred:next-start"
-        or not source_end_authoritative(entry, expected["source_identity"])
-    ):
+    if not native_restart_check.original_activation_confirmed(record, expected):
         raise ValueError("Restart original activation history is unconfirmed")
     observed = native_hosting_evidence.observe(
         record.worktree_id, loader=lambda: tracking.load_record(path),

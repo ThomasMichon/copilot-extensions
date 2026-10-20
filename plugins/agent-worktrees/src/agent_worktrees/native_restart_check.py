@@ -103,6 +103,23 @@ def policy_refusal(record: tracking.WorktreeRecord, expected: dict) -> str | Non
     return None
 
 
+def original_activation_confirmed(record: tracking.WorktreeRecord, expected: dict) -> bool:
+    """Require retained, unambiguous original history without an intentional end."""
+    entry = record.session_entry(expected["native_session_id"])
+    original = [
+        item for item in entry.activations
+        if item.ordinal == expected["activation_ordinal"]
+        and item.source_identity == expected["source_identity"]
+    ] if entry is not None else []
+    return bool(
+        len(original) == 1 and not original[0].source_ambiguous
+        and original[0].end_reason is None
+        and (original[0].ended_at is None or original[0].end_source == "inferred:next-start")
+        and sum(item.source_identity == expected["source_identity"] for item in entry.activations) == 1
+        and source_end_authoritative(entry, expected["source_identity"])
+    )
+
+
 def _refusal(record: tracking.WorktreeRecord, expected: dict, task_policies: list[dict]) -> str | None:
     if reason := policy_refusal(record, expected):
         return reason
