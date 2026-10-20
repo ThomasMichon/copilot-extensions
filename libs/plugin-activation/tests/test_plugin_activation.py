@@ -177,6 +177,134 @@ def test_explicit_project_retains_directory_marketplace_identity_validation(tmp_
     assert not refused.active
 
 
+@pytest.mark.parametrize("source_kind", ["directory", "local"])
+def test_local_manifest_mapping_preserves_registered_source_identity(tmp_path, source_kind):
+    from plugin_resolve import marketplace_manifest_name, read_repo_settings
+
+    home = tmp_path / "home"
+    repo = tmp_path / "current"
+    root = _plugin(repo, "canonical-catalog", "demo")
+    path = _settings(repo, "local-alias", "demo")
+    settings = json.loads(path.read_text(encoding="utf-8"))
+    settings["extraKnownMarketplaces"]["local-alias"]["source"].update(
+        source=source_kind, manifestName="canonical-catalog", stableId="installation-id",
+    )
+    _write_json(path, settings)
+    assert marketplace_manifest_name("local-alias", read_repo_settings(repo)) == "canonical-catalog"
+
+    report = resolve_active_plugins(home=home, project_root=repo, include_projects=False)
+
+    assert "demo@local-alias" in report.active, report.findings
+    selected = report.active["demo@local-alias"]
+    assert selected.source == "demo@local-alias"
+    assert selected.marketplace == "local-alias"
+    assert selected.root_for_scope("project:current") == root
+    assert "demo@canonical-catalog" not in report.active
+
+
+@pytest.mark.parametrize("mapping", [
+    {},
+    {"stableId": "local-alias"},
+    {"manifestName": "different-catalog"},
+    {"manifestName": None},
+    {"manifestName": ""},
+    {"manifestName": False},
+])
+def test_local_manifest_mapping_refuses_unmapped_wrong_or_invalid_identity(tmp_path, mapping):
+    repo = tmp_path / "current"
+    _plugin(repo, "canonical-catalog", "demo")
+    path = _settings(repo, "local-alias", "demo")
+    settings = json.loads(path.read_text(encoding="utf-8"))
+    settings["extraKnownMarketplaces"]["local-alias"]["source"].update(mapping)
+    _write_json(path, settings)
+
+    report = resolve_active_plugins(
+        home=tmp_path / "home", project_root=repo, include_projects=False,
+    )
+
+    assert not report.active
+    assert any(f.reason == "identity-mismatch" for f in report.findings)
+
+
+@pytest.mark.parametrize("failure", [
+    "foreign-plugin", "missing-plugin", "escaping-source", "linked-manifest",
+])
+def test_mapped_local_catalog_retains_payload_owner_refusals(tmp_path, failure):
+    repo = tmp_path / "current"
+    plugin = _plugin(repo, "canonical-catalog", "demo")
+    path = _settings(repo, "local-alias", "demo")
+    settings = json.loads(path.read_text(encoding="utf-8"))
+    settings["extraKnownMarketplaces"]["local-alias"]["source"]["manifestName"] = "canonical-catalog"
+    _write_json(path, settings)
+    catalog = repo / ".ai" / ".claude-plugin" / "marketplace.json"
+    if failure == "foreign-plugin":
+        _write_json(plugin / ".claude-plugin" / "plugin.json", {"name": "foreign"})
+    elif failure == "missing-plugin":
+        (plugin / ".claude-plugin" / "plugin.json").unlink()
+    elif failure == "escaping-source":
+        _write_json(repo / "foreign" / "plugin.json", {"name": "demo"})
+        document = json.loads(catalog.read_text(encoding="utf-8"))
+        document["plugins"][0]["source"] = "../foreign"
+        _write_json(catalog, document)
+    else:
+        target = tmp_path / "linked-catalog.json"
+        target.write_bytes(catalog.read_bytes())
+        catalog.unlink()
+        try:
+            catalog.symlink_to(target)
+        except (OSError, NotImplementedError) as exc:
+            pytest.skip(f"native symlink creation unavailable: {exc}")
+
+    report = resolve_active_plugins(
+        home=tmp_path / "home", project_root=repo, include_projects=False,
+    )
+
+    assert not report.active
+    assert any(f.reason in {"identity-mismatch", "missing-target"} for f in report.findings)
+
+
+def test_local_manifest_mapping_is_checked_per_source_with_a_shared_cache(tmp_path):
+    repo = tmp_path / "current"
+    plugin = _plugin(repo, "canonical-catalog", "demo")
+    _write_json(repo / ".github" / "copilot" / "settings.json", {
+        "extraKnownMarketplaces": {
+            alias: {"source": {
+                "source": "directory", "path": "./.ai", "manifestName": expected,
+            }}
+            for alias, expected in (
+                ("correct-alias", "canonical-catalog"), ("wrong-alias", "foreign"),
+            )
+        },
+        "enabledPlugins": {"demo@correct-alias": True, "demo@wrong-alias": True},
+    })
+
+    report = resolve_active_plugins(
+        home=tmp_path / "home", project_root=repo, include_projects=False,
+    )
+
+    assert report.active["demo@correct-alias"].root == plugin
+    assert "demo@wrong-alias" not in report.active
+
+
+def test_remote_source_cannot_use_manifest_mapping_to_select_a_local_root(tmp_path):
+    repo = tmp_path / "current"
+    _plugin(repo, "canonical-catalog", "demo")
+    _write_json(repo / ".github" / "copilot" / "settings.json", {
+        "extraKnownMarketplaces": {"local-alias": {"source": {
+            "source": "github", "repo": "example/catalog", "path": "./.ai",
+            "manifestName": "canonical-catalog",
+        }}},
+        "enabledPlugins": {"demo@local-alias": True},
+    })
+
+    report = resolve_active_plugins(
+        home=tmp_path / "home", project_root=repo, include_projects=False,
+    )
+
+    assert not report.active
+    assert any(f.reason == "missing-target" for f in report.findings)
+
+
 @pytest.mark.parametrize("local_override", [False, True])
 def test_explicit_project_false_overrides_global_activation_without_changing_global_scan(
     tmp_path, local_override,

@@ -95,6 +95,17 @@ an installed payload to shadow a project-local directory that the host loads
 live. It retains prior values when registry or source evidence is indeterminate
 and returns structured findings for missing, mismatched, or ambiguous evidence.
 Consumers decide how often to refresh and how to render findings.
+
+For a local marketplace, an explicit `source.manifestName` selects the expected
+catalog name through `plugin_resolve.settings.marketplace_manifest_name`.
+Both manifest checks use that exact expected name; the registered
+`name@marketplace` identity and activation scopes are not renamed. Without a
+mapping the registration key remains the expected name. Invalid or mismatched
+mappings still fail identity validation, and `stableId` alone never authorizes
+a different catalog name. Remote sources cannot use this local mapping to
+redirect activation. Plugin identity, containment, duplicate detection and
+installed-fallback/reconciliation behavior remain unchanged.
+
 Callers needing only machine-global scope can pass
 `resolve_active_plugins(include_projects=False)`: this preserves global
 identity verification but skips registered-project discovery and Git checks.

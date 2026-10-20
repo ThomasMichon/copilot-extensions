@@ -11,6 +11,7 @@ from plugin_resolve import (
     MarketplaceSourceKind,
     load_marketplace,
     local_marketplace_path,
+    marketplace_manifest_name,
     marketplace_source_kind,
     plugin_dir,
     split_source,
@@ -204,7 +205,8 @@ def _local_root(
             ],
             indeterminate=manifest_indeterminate,
         )
-    if manifest.get("name") != marketplace:
+    expected_name = marketplace_manifest_name(marketplace, loaded_settings.settings)
+    if expected_name is None or manifest.get("name") != expected_name:
         return _Candidate(
             findings=[
                 _finding(
@@ -220,7 +222,7 @@ def _local_root(
         _memo.marketplaces if _memo else None, canonical_marketplace,
         lambda: load_marketplace(canonical_marketplace),
     )
-    if loaded_marketplace is None or loaded_marketplace.name != marketplace:
+    if loaded_marketplace is None or loaded_marketplace.name != expected_name:
         return _Candidate(
             findings=[
                 _finding(

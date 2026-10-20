@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import json
+from functools import partial
 from pathlib import Path
 
 import pytest
@@ -190,3 +191,45 @@ def test_effort_driver_alias_rejects_repository_issue_only_fields(field, owners)
     path = _write(consumer / SURFACE / "bounded.json", document)
     with pytest.raises(RegistrarError, match=f"unknown key.*{field}"):
         discovery.read_declaration_file_set(path, repo_root=consumer)
+
+
+def test_file_chain_resolves_plugin_through_real_local_manifest_mapping(tmp_path, monkeypatch):
+    from plugin_activation import resolve_active_plugins
+
+    consumer = tmp_path / "consumer"
+    execution = tmp_path / "execution"
+    execution.mkdir()
+    roots = {"consumer": consumer, "execution": execution}
+
+    def registered(name, *, timeout):
+        return roots[name], "worktree"
+
+    _write(consumer / ".github" / "copilot" / "settings.json", {
+        "extraKnownMarketplaces": {"local-alias": {"source": {
+            "source": "directory", "path": str(PLUGIN.parents[1]),
+            "manifestName": "copilot-extensions", "stableId": "fixture-installation",
+        }}},
+        "enabledPlugins": {"agent-dispatch@local-alias": True},
+    })
+    relative = SURFACE / "templates" / "goal-driven.json"
+    _write(consumer / relative, {
+        "extends": "plugin:agent-dispatch@local-alias:"
+                   ".agent-dispatch/registrar/templates/goal-driven.json",
+    })
+    leaf = _write(consumer / SURFACE / "bounded.json", {
+        "extends": f"repo:consumer:{relative.as_posix()}",
+        **_leaf("goal-driven", execution),
+    })
+    monkeypatch.setattr(resources, "_registered_repository", registered)
+    monkeypatch.setattr(recipes, "resolve_active_plugins", partial(
+        resolve_active_plugins, home=tmp_path / "home", project_root=consumer,
+        include_projects=False, plugin_names=("agent-dispatch",),
+    ))
+    recipes._reset_active_plugins_cache()
+    try:
+        declarations = discovery.read_declaration_file_set(leaf, repo_root=consumer)
+        assert recipes._active_plugins().active["agent-dispatch@local-alias"].root == PLUGIN
+        assert [item.name for item in declarations] == ["bounded-work-source", "bounded-work-workers"]
+        assert declarations[1].filters.permit["machine"] == frozenset({"example-machine"})
+    finally:
+        recipes._reset_active_plugins_cache()
