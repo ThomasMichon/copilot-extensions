@@ -39,12 +39,15 @@ A consumer-owned file can use the existing plugin-qualified reference:
 
 A further leaf can extend that file using
 `repo:<registered-repo>:.agent-dispatch/registrar/templates/<base>.json`.
-Supply the ordinary loop's name, repo/source/task label, cadence, forge and
-reservation inputs, plus `pool.body.agent` and placement filters; effort
-driving additionally needs its state root and selected effort slugs. Nested
-mappings deep-merge; lists replace. `params` supplies scalar substitution-only inputs when an intermediate
-base uses placeholders. No commands or scripts need appear in a placement-only
-leaf.
+All five bases need their ordinary name, repo/source/task label, cadence,
+`pool.body.agent`, and consumer placement. The four repository-issue-loop
+bases also need forge and reservation inputs. **Effort-driver instead needs
+its state root and selected effort slugs; it rejects `forge` and
+`reservation` as unknown fields.**
+
+Nested mappings deep-merge; lists replace. `params` supplies scalar
+substitution-only inputs when an intermediate base uses placeholders. No
+commands or scripts need appear in a placement-only leaf.
 
 Use explicit `repo:` resources for execution paths rather than relying on
 relative cross-owner paths. Existing origin tracking covers an emitter's

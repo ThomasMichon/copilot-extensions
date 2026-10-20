@@ -176,3 +176,17 @@ def test_disabled_flag_is_not_invented_by_base_aliases(owners):
     })
     with pytest.raises(RegistrarError, match="unknown key"):
         discovery.read_declaration_file_set(path, repo_root=consumer)
+
+
+@pytest.mark.parametrize("field", ["forge", "reservation"])
+def test_effort_driver_alias_rejects_repository_issue_only_fields(field, owners):
+    consumer, execution = owners
+    document = {
+        "extends": "plugin:agent-dispatch@copilot-extensions:"
+                   ".agent-dispatch/registrar/templates/effort-driver.json",
+        **_leaf("effort-driver", execution),
+        field: {},
+    }
+    path = _write(consumer / SURFACE / "bounded.json", document)
+    with pytest.raises(RegistrarError, match=f"unknown key.*{field}"):
+        discovery.read_declaration_file_set(path, repo_root=consumer)
