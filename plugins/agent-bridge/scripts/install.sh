@@ -2126,7 +2126,26 @@ do_start() {
     fi
 }
 
+_listener_pid() {
+    local port="$1" listeners
+    if ! command -v ss >/dev/null 2>&1; then
+        _fail "Cannot inspect TCP listeners: ss is unavailable"
+        return 1
+    fi
+    if ! listeners="$(ss -tlnp)"; then
+        _fail "Cannot inspect TCP listeners with ss"
+        return 1
+    fi
+    printf '%s\n' "$listeners" | awk -v port="$port" '
+        !found && $4 ~ (":" port "$") && match($0, /pid=[0-9]+/) {
+            print substr($0, RSTART + 4, RLENGTH - 4)
+            found = 1
+        }
+    '
+}
+
 do_stop() {
+    local stopped=false
     # Try systemd first
     if command -v systemctl &>/dev/null; then
         if systemctl --user is-active "$SYSTEMD_UNIT" &>/dev/null; then
@@ -2145,16 +2164,16 @@ do_stop() {
         kill "$pid" 2>/dev/null || true
         _wait_port_free || _warn "Port $PORT still in use after stop"
         rm -f "$PID_FILE"
-        _ok "agent-bridge stopped"
+        stopped=true
     else
         # Last resort: find orphan by port binding (PID file lost)
         local port_pid
-        port_pid="$(ss -tlnp 2>/dev/null | grep ":${PORT} " | sed -n 's/.*pid=\([0-9]*\).*/\1/p' | head -1)"
+        port_pid="$(_listener_pid "$PORT")" || return 1
         if [[ -n "$port_pid" ]]; then
             _step "Stopping orphaned agent-bridge (pid=$port_pid, found by port)..."
             kill "$port_pid" 2>/dev/null || true
             _wait_port_free || _warn "Port $PORT still in use after stop"
-            _ok "agent-bridge stopped"
+            stopped=true
         else
             _skip "agent-bridge is not running"
         fi
@@ -2163,10 +2182,13 @@ do_stop() {
     # Also ensure the integrated credential relay is down. It runs in-process
     # with the bridge, but free its port explicitly to catch an orphaned relay.
     local relay_pid
-    relay_pid="$(ss -tlnp 2>/dev/null | grep ":${RELAY_PORT} " | sed -n 's/.*pid=\([0-9]*\).*/\1/p' | head -1)"
+    relay_pid="$(_listener_pid "$RELAY_PORT")" || return 1
     if [[ -n "$relay_pid" ]]; then
         _warn "Credential relay port $RELAY_PORT still in use -- killing (pid=$relay_pid)"
         kill "$relay_pid" 2>/dev/null || true
+    fi
+    if $stopped; then
+        _ok "agent-bridge stopped"
     fi
 }
 

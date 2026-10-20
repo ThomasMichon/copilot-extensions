@@ -1,0 +1,9 @@
+{
+  "comment": "Treat absent POSIX stop listeners as successful inspection while reporting missing or failing listener tools before stop success.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

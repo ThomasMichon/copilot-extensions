@@ -444,6 +444,12 @@ agent-bridge service restart    # zero-downtime cutover to a fresh daemon genera
 agent-bridge service status     # running state + bound port + PID -- marketplace-isolation: allow service-management
 ```
 
+The POSIX installer's direct-PID/orphan `stop` path requires `ss` to inspect
+TCP listeners. An absent relay listener is a successful inspection; a missing
+or failing inspection tool returns nonzero without printing stop success.
+The daemon may already have received its stop signal when that later check
+fails, so a nonzero result alone does not establish that it is still running.
+
 > **Never bypass `service restart` with the platform service manager
 > directly** -- `systemctl --user restart agent-bridge.service` on Linux, or
 > ending and rerunning the Windows scheduled task (`schtasks /End` then
