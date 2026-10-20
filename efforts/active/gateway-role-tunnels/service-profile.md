@@ -104,9 +104,12 @@ Unsupported upgrades, generic TCP and arbitrary proxy targets refuse explicitly.
 
 Public HTTP/UX requests require the selected authenticated caller policy.
 Do not make the route unauthenticated to simplify a fixture, accept a connector
-as an administrator or trust an arbitrary forwarding header. The Cloudflare
-adapter may later supply a verified caller identity only through a reviewed
-trust contract; the protected proxy path remains unsupported until proven.
+as an administrator or trust an arbitrary forwarding header. The optional
+Cloudflare adapter supplies transport, not Fleet authentication. A verified
+proxy path can preserve the existing caller proof without implementing provider
+login. Gateway-owned application authentication with selected providers such
+as Entra or Authelia is a separate retained-provider integration contract;
+edge access does not implicitly satisfy it.
 
 ## Required witness and limits
 

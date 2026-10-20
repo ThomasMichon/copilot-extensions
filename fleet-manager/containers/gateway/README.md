@@ -37,6 +37,9 @@ Deployments must select their own probes; the isolated witness independently
 verifies the TLS challenge and authenticated service requests.
 See the [service profile](../../docs/gateway-service-profile.md)
 for policy, TLS, trust and restart limitations.
+The installed [Cloudflare fragment renderer](../../docs/gateway-cloudflare.md)
+supports opt-in external-origin binding; cloudflared and identity-provider login
+are not included in the image.
 
 A service image may derive from this base, add its own application, override
 the entrypoint, and embed the installed SDK with an async token refresh callback

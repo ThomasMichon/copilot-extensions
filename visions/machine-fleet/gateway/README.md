@@ -62,10 +62,14 @@ require a binary update or restart are distinguished from ordinary configuration
 ### portable-protected-ingress
 
 Clients use one protected API and UX surface while the origin remains private.
-An optional Cloudflare adapter can provide outbound edge reach and protected
-client admission without being required for direct, local or other protected
-deployments. Edge authentication, service-connector identity, route permission
-and fleet administration remain separate grants. Proxy and external-origin
+An optional Cloudflare Tunnel adapter can provide outbound edge reach, with
+optional Zero Trust access protection, without being required for direct, local
+or other protected deployments. Tunnel transport and edge admission do not
+authenticate a caller to the Fleet. The Gateway owns its application
+authentication independently of the chosen tunnel, composing explicitly selected
+identity providers such as Entra or Authelia without making either mandatory.
+Gateway caller authentication, edge authentication, service-connector identity,
+route permission and fleet administration remain separate grants. Proxy and external-origin
 handling preserve authenticated target identity rather than trusting
 caller-supplied forwarding headers.
 

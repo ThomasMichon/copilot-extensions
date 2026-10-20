@@ -1,4 +1,4 @@
-"""Opt-in direct end-to-end TLS service profile, not a trusted-proxy adapter."""
+"""Opt-in TLS service profile with explicitly selected public proof authority."""
 
 from __future__ import annotations
 
@@ -11,7 +11,6 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit
 
 from aiohttp import HttpVersion11, WSMsgType, web
 
@@ -59,7 +58,7 @@ class ServiceRuntime:
         check(type(reload_interval) in (int, float) and 0.05 <= reload_interval <= 60,
               "invalid-reload-interval")
         self.authority, self.listener = authority, listener
-        self.origin = listener.origin
+        self.origin = listener.external_origin or listener.origin
         self.interval = reload_interval
         self.context: ServiceContext | None = None
         self.channels: dict[str, Channel] = {}
@@ -364,6 +363,7 @@ async def guarded(
     try:
         state.admit_request()
         check(request.secure, "tls-required", 400)
+        state.listener.check_host(request.headers.getall("Host", []))
         target(request.raw_path)
         check(not request.path.startswith("/_fleet/") or not request.query_string,
               "invalid-control-query")
@@ -471,12 +471,8 @@ async def start(listener: Listener, policy_path: Path, **kwargs: Any) -> Serving
         await site.start()
         addresses = runner.addresses
         check(len(addresses) == 1 or listener.port != 0, "ambiguous-test-listener")
-        actual = listener.origin
-        if listener.port == 0:
-            parsed = urlsplit(actual)
-            host = f"[{parsed.hostname}]" if ":" in parsed.hostname else parsed.hostname
-            actual = f"https://{host}:{addresses[0][1]}"
-        app[STATE].origin = actual
+        actual = listener.bound_origin(addresses[0][1])
+        app[STATE].origin = listener.external_origin or actual
         return Serving(runner, app, actual)
     except BaseException:
         await runner.cleanup()

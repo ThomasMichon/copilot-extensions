@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ipaddress
+import re
 import ssl
 from dataclasses import dataclass
 from pathlib import Path
@@ -13,6 +14,27 @@ from cryptography import x509
 from . import planning
 from .gateway_service_channel import TransportError, check, origin, shape
 from .gateway_service_context import identifier
+
+
+def external_origin(value: object) -> str:
+    """Require one canonical, non-ephemeral HTTPS authority for public PoP."""
+    selected = origin(value)
+    parsed = urlsplit(selected)
+    host = parsed.hostname
+    assert host is not None
+    try:
+        address = ipaddress.ip_address(host)
+        authority = f"[{address}]" if address.version == 6 else str(address)
+    except ValueError:
+        check(len(host) <= 253 and all(
+            re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", label)
+            for label in host.split(".")), "invalid-external-origin")
+        authority = host
+    check(parsed.port != 0, "invalid-external-origin")
+    if parsed.port not in (None, 443):
+        authority += f":{parsed.port}"
+    check(selected == "https://" + authority, "invalid-external-origin")
+    return selected
 
 
 def read_bounded(path: Path) -> bytes:
@@ -32,6 +54,7 @@ class Listener:
     certificate: str
     key: str
     remote: bool = False
+    external_origin: str | None = None
 
     @classmethod
     def load(cls, path: Path) -> Listener:
@@ -42,16 +65,34 @@ class Listener:
             raise TransportError("invalid-listener") from None
         check(isinstance(value, dict), "invalid-listener")
         shape(value, {"schema", "version", "fleet", "gateway", "host", "port",
-                      "origin", "certificate", "key", "remote"})
+                      "origin", "certificate", "key", "remote"}
+              | ({"external_origin"} if "external_origin" in value else set()))
         check(value["schema"] == "fleet-manager.gateway-service-listener"
               and type(value["version"]) is int and value["version"] == 1,
               "invalid-listener")
+        public = external_origin(value["external_origin"]) if "external_origin" in value else None
         return cls(identifier(value["fleet"]), identifier(value["gateway"]),
                    value["host"], value["port"], value["origin"],
-                   value["certificate"], value["key"], value["remote"])
+                   value["certificate"], value["key"], value["remote"], public)
+
+    def check_host(self, values: list[str]) -> None:
+        """Explicit proxy mode accepts only its fixed authority, never forwarded identity."""
+        if self.external_origin is not None:
+            check(values == [urlsplit(self.external_origin).netloc], "origin-host-mismatch")
+
+    def bound_origin(self, port: int) -> str:
+        """Resolve the SDK's private ephemeral port, not the public proof target."""
+        if self.port != 0:
+            return self.origin
+        parsed = urlsplit(self.origin)
+        assert parsed.hostname is not None
+        host = f"[{parsed.hostname}]" if ":" in parsed.hostname else parsed.hostname
+        return f"https://{host}:{port}"
 
     def tls(self) -> ssl.SSLContext:
         origin(self.origin)
+        if self.external_origin is not None:
+            external_origin(self.external_origin)
         check(type(self.port) is int and 0 <= self.port <= 65535
               and type(self.remote) is bool and isinstance(self.host, str),
               "invalid-listener")
@@ -75,9 +116,9 @@ class Listener:
                 matches = selected in names.get_values_for_type(x509.IPAddress)
             except ValueError:
                 matches = parsed.hostname in names.get_values_for_type(x509.DNSName)
-            check(matches, "origin-certificate-mismatch")
         except (ValueError, x509.ExtensionNotFound):
             raise TransportError("invalid-certificate") from None
+        check(matches, "origin-certificate-mismatch")
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         context.minimum_version = ssl.TLSVersion.TLSv1_2
         context.load_cert_chain(self.certificate, self.key)

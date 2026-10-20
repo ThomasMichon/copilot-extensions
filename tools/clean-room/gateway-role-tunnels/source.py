@@ -16,7 +16,7 @@ PROOF = "tools/clean-room/gateway-role-tunnels/"
 IMAGE = "fleet-manager/containers/gateway/"
 PACKAGE_MODULES = frozenset("""
 __init__ __main__ allocation artifact_staging artifacts client_diagnostics
-gateway_auth gateway_broker gateway_client gateway_contract gateway_controller
+gateway_auth gateway_broker gateway_client gateway_cloudflare gateway_contract gateway_controller
 gateway_index gateway_manifest gateway_reconcile gateway_server
 gateway_service_channel gateway_service_connector gateway_service_context
 gateway_service_listener gateway_service_policy gateway_service_server

@@ -23,7 +23,15 @@ Certificate/private-key values are external file references, not secret bytes.
 The origin is explicit HTTPS with no path, credentials, query or fragment; it
 must agree with the selected port and certificate's exact SAN. TLS is at least
 1.2. Non-loopback binding requires `remote: true`. Wildcard SAN matching and
-proxy termination are not supported in this first profile.
+plaintext proxy-to-origin hops are not supported.
+
+Optional `external_origin` selects a separate canonical public HTTPS proof
+authority. Omission preserves direct-TLS behavior. When selected, all requests,
+including service admission and channel attachment, require one exact public
+Host; forwarded headers never choose that authority. The private `origin` still
+matches the listener's port and certificate. See the
+[transport-only Cloudflare adapter](gateway-cloudflare.md) for configuration,
+private-origin restrictions and the separate application-authentication boundary.
 
 SDK tests may call `await start(Listener(...), policy_path)` with port zero;
 the returned handle supplies the actual origin, app and asynchronous `close()`.
@@ -101,9 +109,9 @@ are not identity or origin authority.
 
 This is a common-profile SDK/direct-TLS implementation. Synthetic issuer tests
 do not establish live Cloudflare, GitHub, Entra or broker interoperability.
-Browser edge-login integration is not yet supplied; there is no anonymous UX
-workaround. The later Cloudflare adapter must close the proxy/origin and caller
-identity gates before production exposure.
+Gateway-owned Entra/Authelia login integration is not yet supplied; there is no
+anonymous UX workaround. Tunnel access and optional edge login never substitute
+for the existing caller proof and explicit Fleet grant.
 
 ## Routes, streams and explicit limits
 
@@ -206,7 +214,12 @@ The [isolated container witness](../../tools/clean-room/gateway-role-tunnels/REA
 qualifies exact committed source on a native amd64 engine; its mechanical
 guards alone do not prove an assembled run.
 
-Cloudflare/protected-origin interoperability, native architecture qualification
+The ingress portfolio additionally exercises actual verified TLS on both proxy
+hops, outbound channel attachment, API/HTML/query routing and unfinished SSE;
+wrong public Host, private-target proofs and forwarded-only identity refuse.
+This verifies the generic proxy contract, not a live cloudflared deployment.
+
+Live Cloudflare/provider interoperability, native architecture qualification
 and live adoption remain in
 [Gateway Role Tunnels](../../efforts/active/gateway-role-tunnels/README.md).
 No provider-account, DNS, access-policy, production-key, firewall or running

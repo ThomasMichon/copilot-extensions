@@ -115,17 +115,20 @@ particular edge vendor. The Cloudflare adapter supplies supported connector/
 edge configuration and trust references, not automatic provider-account changes.
 It must not create DNS, Access applications, shared credentials or broad bypasses.
 
-Human edge login, automation edge access, connector identity, route permissions
-and fleet administration are separate grants. Receiving a request through an
-edge tunnel is not authorization to supply a service or manage the fleet.
-Validate the selected external origin and authenticated proxy/identity boundary;
-do not trust arbitrary Host or forwarded headers or disable TLS verification.
+Human edge login, automation edge access, Gateway-owned application
+authentication, connector identity, route permissions and fleet administration
+are separate grants. The tunnel supplies transport, not Fleet authentication.
+Gateway-selected providers such as Entra or Authelia remain independent of
+Cloudflare Tunnel/Zero Trust or another transport. Receiving a request through
+an edge tunnel is not authorization to call a service, supply a role or manage
+the fleet. Validate the selected external origin and application identity
+boundary; do not trust arbitrary Host or forwarded headers or disable TLS verification.
 
-Current Gateway documentation explicitly says proxy termination is unsupported.
-The implementation must close or clearly gate that limitation before claiming
-the Cloudflare path is ready. An isolated edge fixture can prove forwarding,
-cryptographic assertions and origin binding; it cannot prove a real account,
-provider policy, public DNS or production reach.
+The transport-only adapter must preserve a verified private TLS hop and the
+existing caller proof at the selected public origin before claiming a supported
+generic proxy contract. An isolated edge fixture can prove forwarding,
+cryptographic assertions and origin binding; it cannot prove cloudflared, a real
+account, provider policy, public DNS, provider login or production reach.
 
 ## Container and deployment contract
 
@@ -166,8 +169,9 @@ identity for one Gateway plus two independently isolated service connectors:
    generations. Disconnect and Gateway replacement remain truthful.
 5. A real response stream, slow consumer, cancellation and policy withdrawal
    exercise the stated bounds without abandoning accepted work.
-6. Trusted ingress metadata and the configured external origin are enforced;
-   direct or forged identity cannot obtain the selected protected capability.
+6. The configured external origin is enforced; forged proxy identity cannot
+   obtain the selected protected capability. Adopter-owned network isolation,
+   not Host validation alone, restricts direct origin reach.
 7. Current static/index/credential regression cases still pass unchanged.
 
 Only after that evidence should the adopter receive exact rollout,

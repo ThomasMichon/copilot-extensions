@@ -149,7 +149,7 @@ This settles that source-scope decision, not production trust or deployment.
 - [x] Supply the base Gateway and connector container specification using the
   selected package/runtime closure, non-root execution and explicit state/config
   mounts; preserve thin client installation defaults.
-- [ ] Add the optional generic Cloudflare ingress adapter and external-origin
+- [x] Add the optional generic Cloudflare ingress adapter and external-origin
   contract without creating DNS, Access policies or provider credentials.
 - [x] Prove one Gateway and two independently isolated service instances:
   expected-but-absent slots, actual routing, valid hot updates, denied hijacking,
@@ -182,7 +182,7 @@ This settles that source-scope decision, not production trust or deployment.
   stay bounded; revocation/cancellation is not mistaken for successful work.
 - [x] **Compatibility:** current real static/index/credential tests remain
   green without changing deadlines or replacing authentication with fixtures.
-- [ ] **Ingress:** external-origin/TLS/forwarded-identity rules are verified;
+- [x] **Ingress:** external-origin/TLS/forwarded-identity rules are verified;
   edge admission never replaces role or fleet authorization.
 - [x] **Containers:** separate Gateway/service containers prove routing and
   live configuration with synthetic secrets and no production mounts, host
@@ -301,3 +301,44 @@ provider credentials and production placement with their existing owners.
 - This qualifies native amd64 direct-TLS behavior, not ARM64, Cloudflare,
   durable restart revision authority, managed deployment or adopter readiness.
   The next slice closes the generic ingress/external-origin contract.
+
+### 2026-10-19 - Packaging reviewed and merged
+- Packaging PR #7318 merged as
+  `662a62eacbe252a07253da605e257accda490fe0` after exact-head Copilot
+  approval and successful required CI.
+- Review corrections cover failing diagnostic writes, exact network-ID custody
+  before logging, repeated/mixed termination during actual retry actions,
+  implicit promisor fetches, Docker build-context exclusions and strict HTML
+  response qualification. The final bounded runner/probe portfolio passed
+  forty-three cases; the corrected committed candidate passed all ten native
+  amd64 assembled stages with complete exact-ID cleanup.
+- An independent scratch-stage Docker context export admitted the nine
+  selected synthetic inputs and excluded all seven unrelated-tree canaries.
+  This checks ordinary image-build filtering separately from the witness's
+  Git-only materialization.
+- The next slice is transport-only ingress: an explicitly configured external
+  HTTPS origin, verified private TLS and a generic Cloudflare configuration
+  adapter. Forwarded/Access identity will not create fleet caller grants;
+  real caller PoP remains required. Provider accounts, DNS, Access policy,
+  production credentials and live deployment remain outside this authorization.
+
+### 2026-10-19 - Independent ingress and application identity
+- Added optional canonical external-origin bootstrap and exact public Host
+  enforcement without weakening private TLS or changing the direct-TLS default.
+  Caller and service proofs bind the configured public origin; forwarding
+  metadata cannot change it.
+- Added a generic cloudflared ingress-fragment renderer with verified private
+  TLS, a fixed Host, streaming-compatible HTTP/1.1 and a catchall refusal.
+  Actual dual-TLS proxy witnesses cover outbound WebSocket service channels,
+  two-service API/HTML/query routing, unfinished SSE and coherent hot policy.
+  Wrong/private-target proofs, wrong/duplicate Host and forwarded-only identity
+  refuse. This is generic transport evidence, not a live vendor deployment.
+- Clarified the canonical vision: tunnel transport, optional Zero Trust edge
+  access and Gateway-owned Fleet authentication are independent. Entra and
+  Authelia are intended Gateway provider options. Actual provider login/token
+  interoperability remains a separate follow-on tracked in #7257, coordinated
+  with retained #5789/#6804 owners; this transport slice does not implement it.
+- The focused ingress portfolio passes twenty-seven cases. The final standard
+  bounded portfolio passes 1,678 cases with two platform skips and fourteen
+  documented full-portfolio exclusions; packaging guards pass forty-three cases.
+  Architecture qualification and adopter readiness remain the next gates.
