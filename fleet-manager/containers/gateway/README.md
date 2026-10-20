@@ -7,9 +7,9 @@ the outbound `ServiceConnector` SDK for services that embed it; there is no
 connector executable or installer API.
 
 The build context is the repository root. `Dockerfile.dockerignore` admits only
-package metadata/direct Python sources and the five canonical
+package metadata/direct Python sources and the canonical
 `libs/versioned-runtime` build inputs. `setup.py` selects `standalone_build.py`,
-which adds the four canonical runtime resource modules to the wheel. No Git
+which adds the maintained runtime resource closure to the wheel. No Git
 directory, tests, test environment, host HOME or synthetic keys enter the image.
 The multi-stage Python 3.13 slim build uses uv 0.11.7 with a seven-day cutoff
 for both isolated wheel build dependencies and extra/transitive dependencies.
@@ -51,9 +51,11 @@ demonstrate that composition separately; they are not production image content.
 
 `linux/amd64` and `linux/arm64` are intended build targets, not an assertion that
 either was built or run by adding this specification. The explicit witness
-currently requires an existing native amd64 Linux engine and records the image's
-inspected architecture. ARM64 build, emulation and native execution remain
-separate evidence. Do not install privileged emulation to make that gate pass.
+accepts an explicit native amd64 or ARM64 Linux engine selection, preserving
+amd64 as its default. It requires the engine, inspected image and actual
+installed-process architecture to agree before reporting native execution.
+Build, emulation and native execution remain separate evidence. Do not install
+privileged emulation to make that gate pass.
 This is not Cloudflare compatibility, managed installation or live deployment.
 The [adoption-readiness record](../../docs/gateway-adoption-readiness.md)
 separates the completed native amd64 proof from open architecture, provider,

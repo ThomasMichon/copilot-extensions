@@ -10,6 +10,7 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
+from architecture import NativeArchitecture
 from source import ProofError, save
 
 ID = re.compile(r"[0-9a-f]{64}")
@@ -29,7 +30,8 @@ IDENTITY_CODE = (
 
 
 class Engine:
-    def __init__(self, root: Path, receipt: dict) -> None:
+    def __init__(self, root: Path, receipt: dict, architecture: str = "amd64") -> None:
+        self.architecture = NativeArchitecture(architecture)
         self.root, self.receipt = root, receipt
         self.deadline = time.monotonic() + 300
         self.sequence = 0
@@ -93,13 +95,12 @@ class Engine:
         facts = json.loads(self.call("info", "--format",
                                     '{"os":"{{.OSType}}","arch":"{{.Architecture}}",'
                                     '"version":"{{.ServerVersion}}"}'))
-        if facts["os"] != "linux" or facts["arch"] not in ("x86_64", "amd64"):
-            raise ProofError("native-amd64-engine-required", "repo-config")
+        self.architecture.require_engine(facts)
         self.receipt["engine"] = facts
 
     def build(self, sha: str, timeout: int) -> str:
         iid = self.root / "image-id"
-        self.call("build", "--pull", "--no-cache", "--platform", "linux/amd64",
+        self.call("build", "--pull", "--no-cache", "--platform", self.architecture.platform,
                   "--iidfile", str(iid), "--build-arg", "SOURCE_COMMIT=" + sha,
                   "-f", str(self.root / "context/fleet-manager/containers/gateway/Dockerfile"),
                   str(self.root / "context"), timeout=timeout, build=True)
@@ -108,12 +109,12 @@ class Engine:
             raise ProofError("invalid-image-receipt")
         self.deadline = time.monotonic() + 300
         metadata = json.loads(self.call("image", "inspect", image))[0]
-        if (metadata["Architecture"] != "amd64" or metadata["Os"] != "linux"
+        if (metadata["Architecture"] != self.architecture.name or metadata["Os"] != "linux"
                 or metadata["Config"]["Labels"]["org.opencontainers.image.revision"] != sha):
             raise ProofError("image-source-or-architecture-mismatch")
         self.receipt.update(image_id=image, architecture={
-            "image": "amd64", "execution": "UNRUN",
-            "arm64": "UNRUN: native engine/capability qualification remains open",
+            "selected": self.architecture.name, "image": metadata["Architecture"],
+            "execution": "UNRUN", "process": "UNRUN",
         })
         self.journal()
         return image

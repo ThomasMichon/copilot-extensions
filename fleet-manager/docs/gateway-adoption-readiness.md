@@ -36,13 +36,15 @@ public examples do not contain provider credentials or deployment inventory.
 
 The qualified engine is Linux x86_64/amd64. Its builders advertise additional
 platforms, including ARM64; advertisement is neither an ARM64 image build nor
-native execution evidence. The current witness deliberately accepts only a
-native amd64 local engine. It does not select a remote target or invoke QEMU.
+native execution evidence. The witness now accepts explicit native amd64/ARM64
+selection, preserving amd64 as its default. It does not select a remote target,
+invoke QEMU or turn runner support into successful architecture qualification.
 
 Native ARM64 qualification is **blocked and transferred to #7257**: supply an
-explicitly admitted native ARM64 venue and a reviewed runner extension that
-preserves exact-source/image/architecture receipts, non-root resource limits,
-internal networking and exact-ID cleanup. Build and run the real installed
+explicitly admitted native ARM64 venue and run the selected exact-source witness
+with architecture receipts, non-root resource limits, internal networking and
+exact-ID cleanup. The [native qualification effort](../../efforts/active/gateway-native-qualification/README.md)
+owns that follow-on. Build and run the real installed
 Gateway plus service connectors there, exercising the same assembled contract
 before claiming that architecture supported. Record emulated execution
 separately if independently selected; never install privileged emulation or

@@ -29,7 +29,7 @@ standalone_build.py versioned_runtime.py versioned_runtime_leases.py
 versioned_runtime_construction.py versioned_runtime_publication.py versioned_runtime_source.py
 """.split())
 RUNNER_FILES = frozenset({
-    "run.py", "source.py", "engine.py", "witness.py",
+    "run.py", "source.py", "architecture.py", "engine.py", "witness.py",
     "fixture_auth.py", "fixture_service.py", "probe.py",
 })
 REQUIRED = frozenset({

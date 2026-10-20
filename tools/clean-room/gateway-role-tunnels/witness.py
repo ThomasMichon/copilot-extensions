@@ -90,9 +90,9 @@ class Witness:
         state = json.loads(self.engine.call("inspect", "--format", "{{json .State}}", prep))
         if state["ExitCode"] != 0 or prepared.get("result") != "pass":
             raise ProofError("synthetic-fixture-preparation-failed")
-        if prepared.get("machine") != "x86_64" or prepared.get("platform") != "linux":
-            raise ProofError("native-image-execution-not-observed")
-        self.receipt["architecture"]["execution"] = "native-amd64"
+        execution = self.engine.architecture.execution(prepared)
+        self.receipt["architecture"].update(
+            execution=execution, process=prepared["machine"])
         self.receipt["initial_policy_sha256"] = digest(
             (self.fixture / "gateway/policy.json").read_bytes())
         self.passed("Installed noneditable wheel; offline synthetic fixture preparation", prepared)

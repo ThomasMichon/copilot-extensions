@@ -23,7 +23,7 @@ PROOF = ROOT / "tools/clean-room/gateway-role-tunnels"
 def load() -> tuple:
     loaded = {}
     with patch.dict(sys.modules):
-        for name in ("source", "engine", "witness", "run"):
+        for name in ("source", "architecture", "engine", "witness", "run"):
             spec = importlib.util.spec_from_file_location(name, PROOF / (name + ".py"))
             module = importlib.util.module_from_spec(spec)
             sys.modules[name] = module
@@ -370,7 +370,7 @@ import run as subject
 root = Path(sys.argv[2])
 eventually = subject.Witness.eventually
 class Engine:
-    def __init__(self, root, receipt):
+    def __init__(self, root, receipt, architecture="amd64"):
         self.deadline = 0
     def journal(self):
         pass

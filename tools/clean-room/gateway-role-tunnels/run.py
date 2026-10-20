@@ -37,7 +37,8 @@ def report_template() -> dict:
     }
 
 
-def run(repository: Path, ref: str, root: Path, build_timeout: int = 900) -> dict:
+def run(repository: Path, ref: str, root: Path, build_timeout: int = 900,
+        architecture: str = "amd64") -> dict:
     previous = {number: signal.getsignal(number) for number in TERMINATION_SIGNALS}
 
     def terminated(signum: int, frame: object) -> None:
@@ -47,13 +48,14 @@ def run(repository: Path, ref: str, root: Path, build_timeout: int = 900) -> dic
     for number in TERMINATION_SIGNALS:
         signal.signal(number, terminated)
     try:
-        return _run(repository, ref, root, build_timeout)
+        return _run(repository, ref, root, build_timeout, architecture)
     finally:
         for number, handler in previous.items():
             signal.signal(number, handler)
 
 
-def _run(repository: Path, ref: str, root: Path, build_timeout: int) -> dict:
+def _run(repository: Path, ref: str, root: Path, build_timeout: int,
+         architecture: str) -> dict:
     report = report_template()
     receipt = {
         "version": 1, "result": "fail", "cleanup": "pending",
@@ -61,6 +63,7 @@ def _run(repository: Path, ref: str, root: Path, build_timeout: int) -> dict:
         "host_socket_granted": False, "privileged_nested_target": False,
         "host_ports_published": False, "credentials": "synthetic-files-only",
         "build_timeout_seconds": build_timeout, "witness_budget_seconds": 300,
+        "requested_architecture": architecture,
         "scope": "native isolated synthetic direct-TLS witness; no provider/live adoption",
     }
     engine = None
@@ -68,13 +71,13 @@ def _run(repository: Path, ref: str, root: Path, build_timeout: int) -> dict:
         receipt.update(materialize(repository, ref, root))
         if shutil.which("docker") is None:
             raise ProofError("docker-unavailable")
-        engine = Engine(root, receipt)
+        engine = Engine(root, receipt, architecture)
         engine.journal()
         engine.preflight()
         image = engine.build(receipt["source_commit"], build_timeout)
         engine.deadline = time.monotonic() + 300
         witness = Witness(engine, image, report, receipt)
-        witness.passed("Pinned canonical source closure built for inspected amd64 image", {
+        witness.passed(f"Pinned canonical source closure built for inspected {architecture} image", {
             key: receipt[key] for key in ("source_commit", "source_manifest_sha256",
                                          "image_id", "architecture")
         })
@@ -121,6 +124,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--results-root", type=Path, required=True,
                         help="Existing owner-private directory outside repositories/session state")
     parser.add_argument("--build-timeout", type=int, default=900)
+    parser.add_argument("--architecture", choices=("amd64", "arm64"), default="amd64",
+                        help="Required native engine/image architecture (default: amd64)")
     args = parser.parse_args(argv)
     if sys.platform != "linux":
         parser.error("Requires a native Linux/WSL host with an existing Linux Docker engine")
@@ -135,7 +140,7 @@ def main(argv: list[str] | None = None) -> int:
     except (ProofError, OSError) as exc:
         parser.error(str(exc) if isinstance(exc, ProofError) else "results-root-unavailable")
     receipt = run(args.repository, args.source_commit or args.source_ref,
-                  run_root, args.build_timeout)
+                  run_root, args.build_timeout, args.architecture)
     print(json.dumps({"results": str(run_root), "result": receipt["result"],
                       "cleanup": receipt["cleanup"]}))
     return 0 if receipt["result"] == "pass" else 1

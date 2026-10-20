@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify explicit native amd64 and ARM64 Gateway container witness architectures",
+  "changes": [
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    }
+  ]
+}

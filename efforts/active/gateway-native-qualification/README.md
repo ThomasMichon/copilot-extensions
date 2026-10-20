@@ -86,22 +86,22 @@ Detailed design, sequence and validation below are **agent-recommended**.
 ## Plan
 
 ### Phase 0 - Review the finite qualification contract
-- [ ] Land this plan through ordinary current-head review and merge.
-- [ ] Preserve the completed predecessor and record the admitted native venue
+- [x] Land this plan through ordinary current-head review and merge.
+- [x] Preserve the completed predecessor and record the admitted native venue
   and exact source ownership without publishing private inventory.
 
 ### Phase 1 - Explicit native architecture selection
-- [ ] Add explicit bounded amd64/ARM64 selection to the existing runner,
+- [x] Add explicit bounded amd64/ARM64 selection to the existing runner,
   retaining amd64 as its unchanged default and refusing unknown selections.
-- [ ] Require selected architecture, native Linux engine, built image and actual
+- [x] Require selected architecture, native Linux engine, built image and actual
   installed-process architecture agreement. Normalize documented aliases only;
   do not infer native execution from Buildx platform advertisement or image tags.
-- [ ] Make build platform, source/image receipts, pre-execution state and final
-  report truthful for either architecture. Mismatch fails without a PASS or
+- [x] Make build platform, source/image receipts, pre-execution state and final
+  report truthful for either architecture. Mismatch fails without a native-execution PASS or
   network/service composition; failed cleanup cannot become successful proof.
-- [ ] Keep any new helper in the exact Git source closure, preserving canonical
+- [x] Keep any new helper in the exact Git source closure, preserving canonical
   build resources and the existing command/resource/credential boundaries.
-- [ ] Add focused regression coverage and update the existing witness/image/
+- [x] Add focused regression coverage and update the existing witness/image/
   readiness documentation without growing unconditional CI integration lanes.
 
 ### Phase 2 - Actual native qualification
@@ -125,13 +125,13 @@ Detailed design, sequence and validation below are **agent-recommended**.
 
 ## Validation Plan
 
-- [ ] **Selection:** default amd64 compatibility, explicit amd64/ARM64 and
+- [x] **Selection:** default amd64 compatibility, explicit amd64/ARM64 and
   supported aliases, unsupported platforms/OS and wrong-engine refusal.
-- [ ] **Build:** selected native platform reaches the Docker build; wrong
+- [x] **Build:** selected native platform reaches the Docker build; wrong
   image architecture, OS or source revision refuses before service composition.
-- [ ] **Execution:** installed process machine/platform must match the selected
+- [x] **Execution:** installed process machine/platform must match the selected
   native architecture before native execution is reported.
-- [ ] **Custody:** exact-source helpers and canonical resources remain complete;
+- [x] **Custody:** exact-source helpers and canonical resources remain complete;
   existing source/argv/private-results/deadline/termination/cleanup guards pass.
 - [ ] **Native amd64:** actual assembled API/HTML/SSE, policy, role/caller denial,
   replacement, restart/reconnect and revocation pass under stable Gateway identity.
@@ -167,3 +167,16 @@ revision custody and real adoption remain separately tracked.
   operator approved the canonical slug and bounded synthetic execution scope.
 - Reused and synchronized the owned source worktree. Native witness code and
   proof execution remain pending this plan's review; no runtime was deployed.
+
+### 2026-10-20 - Plan reviewed; native selection implementation
+- Plan PR #7390 merged as `f3d585d79d0955bd788f14501e81e74b1bc5424b`
+  after exact-head Copilot approval and successful required CI.
+- Re-read the canonical effort and selected Phase 1. Extend only the existing
+  witness's native architecture contract and its exact-source closure; real
+  amd64/ARM64 proof and implementation review remain pending.
+- Added explicit selection and engine/image/installed-process agreement with
+  pre-execution `UNRUN` receipts and value-free wrong-architecture refusals.
+  The new helper is part of the fixed Git-only witness source closure.
+- The focused native-selection and retained runner/probe portfolio passes
+  eighty-eight cases. Lint, install-contract and documentation consistency
+  guards pass. These are mechanical guards, not native execution evidence.

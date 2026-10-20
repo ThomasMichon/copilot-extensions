@@ -9,7 +9,9 @@ host port, cloud credential, provider account, Copilot or live adopter change.
 ## Prerequisites and invocation
 
 Use Linux/WSL, Python 3.10+, Git, and an existing ordinary Linux Docker engine
-reporting native x86_64/amd64. Engine access must already work through its default
+reporting native x86_64/amd64 or aarch64/arm64. Select the architecture explicitly
+with `--architecture amd64` or `--architecture arm64`; omission retains the
+existing amd64 default. Engine access must already work through its default
 local endpoint. The runner deliberately supplies an empty private Docker
 configuration and does not inherit `DOCKER_HOST`, credential variables or host
 configuration. Remote contexts, implicit dependencies, host Python crypto
@@ -26,6 +28,14 @@ the runner from that source:
 ```text
 python tools/clean-room/gateway-role-tunnels/run.py --source-commit <full-Git-SHA> --results-root <existing-absolute-private-directory>
 ```
+
+For an explicitly admitted native ARM64 venue, add `--architecture arm64`.
+This does not select a remote machine or grant execution permission. Run the
+same committed source on that venue's own native local engine. Unknown choices
+and cross-architecture engines refuse; the runner never installs emulation.
+The engine's architecture aliases may be `x86_64`/`amd64` or `aarch64`/`arm64`,
+but CLI selections and inspected image architectures are canonical `amd64` or
+`arm64`.
 
 `--source-ref <available-local-ref>` is an alternative; it resolves once to an
 exact full commit. `--repository <absolute-checkout>` selects a local Git object
@@ -90,6 +100,13 @@ the run directory for investigation; normal owner retention policy applies.
 stage PASS/FAIL and classified failure evidence. `receipt.json` records source
 SHA, canonical-source manifest hash, image ID/architecture, candidate policy
 revision/hash, exact resource IDs, Gateway PID/start samples and cleanup status.
+The receipt records `requested_architecture`, observed engine facts and
+`architecture.selected`/`image`/`process`/`execution`. Image build/inspection
+leaves process and execution `UNRUN`. Only successful installed-wheel fixture
+execution with matching Linux machine architecture sets `native-amd64` or
+`native-arm64`; a build-only stage PASS is not native execution evidence.
+Engine or image mismatch refuses before fixture/service composition, and
+process mismatch refuses before creating the service network.
 `source-manifest.json` hashes every admitted blob; `cr-logs/` retains bounded
 command evidence. No ambient environment dump or credential values are collected.
 Missing Docker/source is a reported failure, not a skipped successful proof.
@@ -109,8 +126,9 @@ backend state, and only then release/read the final chunk. A buffered whole
 response cannot satisfy this handshake. The fixture stream has a finite
 12-second release deadline.
 
-The focused `tools/tests/test_gateway_role_tunnels.py` suite covers mechanical
-argv, ownership, source/results-root, report and cleanup boundaries only.
+The focused `tools/tests/test_gateway_role_tunnels.py` and
+`tools/tests/test_gateway_role_architecture.py` suites cover mechanical argv,
+ownership, source/results-root, architecture/refusal, report and cleanup boundaries only.
 Run it through the repository's bounded tools runner; mocked Docker tests are
 **not** a substitute for executing this lane.
 
@@ -118,9 +136,10 @@ This lane does not independently qualify every late-frame, slow-consumer,
 cancellation or uncertain-effect case from the in-process runtime portfolio.
 It does not prove a live identity provider, protected proxy/Cloudflare origin,
 production TLS/key custody, restart-safe accepted revision authority, managed
-install/update/rollback, ARM64 build/run, or live adoption. Successful inspected
-amd64 native execution must be reported as exactly that. ARM64 and live vendor
-ingress qualification remain open; the separate generic proxy tests do not
+install/update/rollback or live adoption. Every architecture needs its own
+actual native run; success on one never qualifies another. Native architecture
+and live vendor ingress evidence remain separately recorded in the readiness
+document; the separate generic proxy tests do not
 change this lane's boundary. Container proof is a prerequisite, never deployment
 consent. See the [base image](../../../fleet-manager/containers/gateway/README.md),
 [service profile](../../../fleet-manager/docs/gateway-service-profile.md) and
