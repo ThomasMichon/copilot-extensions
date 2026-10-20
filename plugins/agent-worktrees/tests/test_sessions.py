@@ -2270,6 +2270,65 @@ def test_a_stale_box_above_a_shell_prompt_is_not_ready():
     assert pane_readiness.ready_signature(_BOXED_INPUT) == "boxed-input"
 
 
+#: Footer of a newer CLI build, captured from a real Windows pane: mode labels
+#: among the key hints, and a right-aligned model/context column.
+_STATUS_FOOTER = (
+    " ← open sidebar · Interactive · Manual Approval · / commands · ? help · tab next tab"
+    "         GPT-6.1 Sol · 922K context\n"
+)
+_STATUS_BOXED_INPUT = (
+    " Q:\\repos\\product                       Create on: This computer ctrl+e change\n"
+    "╻▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄\n"
+    "┃\n"
+    "╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀\n"
+    + _STATUS_FOOTER
+)
+
+
+@pytest.mark.parametrize("footer", [
+    _STATUS_FOOTER,
+    " ← open sidebar · Plan · / commands · ? help          Claude Opus 5.5 · 1M context\n",
+    " ← open sidebar · Autopilot · / commands\n",
+    " / commands · ? help            1.5M context\n",
+])
+def test_boxed_input_with_mode_labels_and_status_column_is_ready(footer):
+    from agent_worktrees import pane_readiness
+
+    capture = _STATUS_BOXED_INPUT.replace(_STATUS_FOOTER, footer)
+    assert pane_readiness.ready_signature(capture) == "boxed-input"
+
+
+def test_seed_pane_status_footer_input_is_ready_and_submits():
+    seed = "Continue: do the thing"
+    driver = _SeedDriver(
+        ready_caps=[_STATUS_BOXED_INPUT, _STATUS_BOXED_INPUT],
+        echo_caps=[_STATUS_BOXED_INPUT.replace("┃\n", f"┃ {seed}\n")],
+    )
+    result = _run_seed(driver, seed=seed)
+    assert result["ready"] is True
+    assert result["submitted"] is True
+
+
+@pytest.mark.parametrize("tail", [
+    # Busy: a working status, not key hints.
+    " ◉ Working · 31.9 KiB esc esc interrupt            Claude Opus 5.5 · 1M context\n",
+    # Only labels or only a status column: no key hint proves it is Copilot's footer.
+    " Interactive · Manual Approval\n",
+    "          GPT-6.1 Sol · 922K context\n",
+    # A status column that is not a model/context pair.
+    " ← open sidebar · / commands          rm -rf build · 922K context\n",
+    " ← open sidebar · / commands          GPT-6.1 Sol · lots of context\n",
+    # Prose or a shell after the box.
+    " ← open sidebar · Connection closed; press Enter to reconnect\n",
+    " ← open sidebar · / commands\nuser@host:/tmp$ \n",
+])
+def test_status_footer_grammar_still_rejects_non_footer_tails(tail):
+    from agent_worktrees import pane_readiness
+
+    capture = _STATUS_BOXED_INPUT.replace(_STATUS_FOOTER, tail)
+    assert pane_readiness.ready_signature(capture) is None
+
+
 def test_a_stale_interrupt_footer_above_a_shell_is_not_ready():
     from agent_worktrees import pane_readiness
 

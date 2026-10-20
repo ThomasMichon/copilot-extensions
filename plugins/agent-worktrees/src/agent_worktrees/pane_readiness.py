@@ -116,10 +116,33 @@ _FOOTER_SEGMENT = re.compile(
     r"^(?:[←→↑↓/?@!#]|esc|tab|enter|space|(?:ctrl|shift|alt|cmd)\+\S+)"
     r"\s+[a-z][a-z' -]*$"
 )
+#: A mode/permission label newer builds put among the key hints ("Interactive",
+#: "Manual Approval"): one to three capitalized words, nothing else.
+_MODE_SEGMENT = re.compile(r"^[A-Z][a-z]+(?: [A-Z][a-z]+){0,2}$")
+#: The right-aligned status column newer builds draw after a wide gap: the
+#: model, then its context window ("GPT-6.1 Sol · 922K context").
+_STATUS_COLUMN = re.compile(r"\s{3,}")
+#: Words of a model name ("GPT-6.1 Sol", "Claude Opus 5.5"): never a
+#: leading-dash option.
+_MODEL_SEGMENT = re.compile(r"^[A-Za-z][\w.+-]*(?: [A-Za-z0-9][\w.+-]*){0,4}$")
+_CONTEXT_SEGMENT = re.compile(r"^\d+(?:\.\d+)?[KM] context$")
 
 
 def _is_footer_row(line: str) -> bool:
-    return all(_FOOTER_SEGMENT.match(seg.strip()) for seg in line.split("·"))
+    """A row of Copilot's footer: key hints joined by " · " (at least one), with
+    optional mode labels among them and an optional right-aligned model/context
+    column. Anything else -- typed text, a prompt, a busy status -- is not."""
+    left, *right = _STATUS_COLUMN.split(line.strip(), maxsplit=1)
+    segs = [seg.strip() for seg in left.split("·")]
+    if not any(_FOOTER_SEGMENT.match(s) for s in segs):
+        return False
+    if not all(_FOOTER_SEGMENT.match(s) or _MODE_SEGMENT.match(s) for s in segs):
+        return False
+    if not right:
+        return True
+    status = [seg.strip() for seg in right[0].split("·")]
+    return (len(status) <= 2 and bool(_CONTEXT_SEGMENT.match(status[-1]))
+            and all(_MODEL_SEGMENT.match(s) for s in status[:-1]))
 
 
 def _live_box(capture: str) -> bool:

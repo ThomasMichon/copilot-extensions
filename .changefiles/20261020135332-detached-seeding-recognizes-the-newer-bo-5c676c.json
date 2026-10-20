@@ -1,0 +1,9 @@
+{
+  "comment": "Detached seeding recognizes the newer boxed-input footer with mode labels and a right-aligned model/context column, so Windows embody no longer times out with not-ready-timeout at a live prompt.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
