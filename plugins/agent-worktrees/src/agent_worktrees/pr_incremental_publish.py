@@ -50,10 +50,10 @@ def push_refspec(
 
     from .providers.attribution import BranchLeakError, validate_effective_head
     try:
-        # Both the live config machine and the worktree's recorded machine.
+        # Physical metadata and execution owners are independently private.
         validate_effective_head(
             feature, worktree_id=worktree_id,
-            machine=(config.machine, record.execution_machine),
+            machine=(config.machine, record.machine, record.execution_machine),
             source_attribution=repo.pr.source_attribution,
         )
     except BranchLeakError as exc:

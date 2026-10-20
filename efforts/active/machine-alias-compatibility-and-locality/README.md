@@ -379,6 +379,11 @@ unrelated service changes or a second machine registry.
   packet independently passes 25 cases with four platform-conditional skips.
   These are bounded source results, not complete-suite, release or installed
   acceptance. Cross-plugin adapters and new-record production remain next.
+- Consumer review exposed four gaps now covered by regressions: unregistered
+  tuple authorization, physical-name publication privacy at all four guards,
+  exact legacy terminal receipts and tuple-backed reciprocal pair ownership.
+  The corrected affected packet passes 575 cases in the disconnected runner;
+  creation and installed acceptance remain gated.
 
 ### 2026-10-20 - Tuple-first contract reviewed; non-operational codec foundation
 - #7385 merged after exact-head approval and required checks. The reviewed

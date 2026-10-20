@@ -150,6 +150,24 @@ def test_record_json_contains_physical_metadata_and_explicit_owner(tmp_path: Pat
             assert "machine_identity_version" not in result
 
 
+def test_tuple_requires_registered_owner_even_when_legacy_fallback_matches(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = cfg.Config(
+        srcroot=str(tmp_path), machine="desk-wsl", platform="wsl", repo_name="project",
+    )
+    monkeypatch.setattr(execution_spaces, "registry_for_config", lambda config: {})
+    monkeypatch.setattr(cfg, "detect_platform", lambda: "wsl")
+    monkeypatch.setattr(cfg, "project_dir", lambda project: tmp_path / project)
+    record = _record(tmp_path / "owned.yaml", versioned=False)
+    execution_spaces.require_record_mutation(record, config)
+
+    record.machine = "desk"
+    record.machine_identity = WorktreeMachineIdentity("desk", "wsl", "desk-wsl")
+    with pytest.raises(execution_spaces.ExecutionSpaceError, match="registered execution identity"):
+        execution_spaces.require_record_mutation(record, config)
+
+
 def test_owner_refs_and_native_session_claims_use_execution_key(tmp_path: Path) -> None:
     from agent_worktrees import claims_owner, native_restart_claims
     from agent_worktrees import tracking_producer_write, tracking_relationship_write

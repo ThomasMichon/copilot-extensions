@@ -624,15 +624,14 @@ def create_pr(
     )
     try:
         from .providers.attribution import validate_effective_head
-        # Check both the LIVE config machine and the worktree's originally
-        # RECORDED execution owner -- a renamed/migrated machine
-        # can otherwise leave an old identifying branch name (e.g. a reused
-        # existing-PR head from before the rename) unchecked against the
-        # live config alone.
+        # Both physical metadata and execution owners can identify the source.
         validate_effective_head(
             feature_branch,
             worktree_id=worktree_id,
-            machine=(config.machine, record.execution_machine if record else ""),
+            machine=(
+                config.machine, record.machine if record else "",
+                record.execution_machine if record else "",
+            ),
             source_attribution=effective_attribution,
         )
     except ValueError as exc:

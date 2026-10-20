@@ -74,6 +74,11 @@ identity. Concurrent changes to environment, execution owner or identity version
 invalidate a loaded writer even when its physical host is unchanged. Mutation
 still requires the receiving project's shared registry and actual execution
 platform; sharing a physical host does not make native and guest owners equal.
+Versioned records require an actual receiving-registry entry even when an
+unregistered execution spelling would match the legacy configuration fallback.
+Publication privacy guards check both physical and execution names. Terminal
+pair receipts preserve the exact legacy identity shape; versioned receipts
+retain the full tuple while reciprocal references use the execution owner.
 
 **Producer gate:** ordinary create, anchor admission and externally adopted
 checkout producers still emit legacy records. The optional typed factory input

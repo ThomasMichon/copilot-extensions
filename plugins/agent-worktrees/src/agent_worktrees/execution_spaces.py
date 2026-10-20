@@ -253,9 +253,10 @@ def require_record_mutation(record: Any, config: Any) -> None:
         except ValueError as exc:
             raise ExecutionSpaceError(str(exc)) from exc
         if (
-            selected.target.machine != identity.machine
+            selected.entry is None
+            or selected.target.machine != identity.machine
             or selected.target.environment != identity.environment
-            or (selected.entry is not None and selected.entry.key != identity.execution_machine)
+            or selected.entry.key != identity.execution_machine
         ):
             raise ExecutionSpaceError("record tuple conflicts with its registered execution identity")
         if (

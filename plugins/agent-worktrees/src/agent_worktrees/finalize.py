@@ -830,11 +830,10 @@ def _push_changes_pr(
     # create-pr's attribution guard and must not republish a leaking branch.
     from .providers.attribution import BranchLeakError, validate_effective_head
     try:
-        # Both the LIVE config machine and the worktree's originally
-        # RECORDED machine -- see the matching comment in pr_ops.create_pr.
+        # Physical metadata and execution owners are independently private.
         validate_effective_head(
             feature, worktree_id=worktree_id,
-            machine=(config.machine, record.execution_machine),
+            machine=(config.machine, record.machine, record.execution_machine),
             source_attribution=repo.pr.source_attribution,
         )
     except BranchLeakError as exc:

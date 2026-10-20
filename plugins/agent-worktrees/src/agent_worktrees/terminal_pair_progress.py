@@ -14,6 +14,7 @@ from pathlib import Path
 import yaml
 
 from . import tracking
+from .worktree_machine_identity import execution_machine_from_fields
 
 _PAIR_FIELDS = ("pair_id", "pair_role", "pair_ref", "pair_kind")
 
@@ -52,7 +53,8 @@ def _digest(path: Path) -> str:
 
 def primary_identity(record):
     return {
-        **record.machine_fields, "repo": record.repo,
+        **(record.machine_fields if record.machine_identity is not None else {"machine": record.machine}),
+        "repo": record.repo,
         "worktree_id": record.worktree_id, "worktree_path": record.worktree_path,
         "branch": record.branch, "pair": {name: getattr(record, name) for name in _PAIR_FIELDS},
         "dispatch_attempt": asdict(record.dispatch_attempt) if record.dispatch_attempt else None,
@@ -83,7 +85,12 @@ def reciprocal_identity_valid(primary: dict, sibling: dict) -> bool:
                     or current["branch"] != f"worktree/{current['worktree_id']}"):
                 return False
             ref = tracking.parse_claim_ref(current["pair"]["pair_ref"])
-            expected = tracking.format_claim_ref(other["machine"], other["repo"], other["worktree_id"])
+            execution_owner = execution_machine_from_fields(other)
+            if execution_owner is None:
+                return False
+            expected = tracking.format_claim_ref(
+                execution_owner, other["repo"], other["worktree_id"],
+            )
             if ref is None or not ref.is_qualified or ref.canonical() != expected:
                 return False
         return True
