@@ -1,6 +1,6 @@
 {
   "captured_from": {
-    "commit": "de009d2ba250b1a107f093dea9d8597893547cce",
+    "commit": "25a5685be6ab272691609bde32c4209eb4b1649d",
     "plugin_version": "0.4.1-dev3",
     "protocol_generation": 1,
     "source_path": "plugins/agent-bridge/src/agent_bridge/preference_exec.py",

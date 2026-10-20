@@ -266,6 +266,30 @@ or a reason to create a daemon.
 
 ## Journal
 
+### 2026-10-20 - Preserve published remote ACP ownership and advance readiness to 44
+
+- A further upstream merge published managed remote ACP ownership at HTTP 43
+  during review. Replayed the owned slice onto the new base, preserving that
+  capability at 43, attention boundaries at 42, direct targets at 41 and the
+  supported minimum at 1. Only readiness-bound task/mode delivery requires 44;
+  ordinary older operations retain their sliding-range compatibility.
+- Preserved all 344 published HTTP fixtures byte-for-byte and all upstream
+  ownership assertions. Re-attested 45 independent generation-43 expectations
+  and eight readiness vectors at 44. All 406 registered fixtures and the three
+  authority vectors reproduced from committed source pass.
+- Full Bridge guards pass 337 cases with eight explicit platform/tier skips.
+  The protocol, registry, target, ownership, provider and reconciliation
+  selection passes 224 cases, including old-daemon capability refusal before
+  submission and current-reader tolerance of older ordinary packets.
+- Authenticated native Codespace acceptance passes against committed source
+  `25a5685be6ab272691609bde32c4209eb4b1649d` and the real HTTP-44 boundary.
+  Exactly one task invoked the selected skill; retry retained message 3.
+  Productive preferences stayed unchanged and the owned mux, authentication
+  scope, forward and HTTP fixture were cleaned up. This remains source-only
+  acceptance, not release promotion or shared runtime rollout.
+- The integrated head still owes fresh review, required CI and authorized
+  role-scoped merge. Earlier one-head merge consent does not transfer to it.
+
 ### 2026-10-20 - Retain newly published attention boundaries and advance readiness to 43
 
 - While the reconciled head was in review, #7272 published attention boundaries
