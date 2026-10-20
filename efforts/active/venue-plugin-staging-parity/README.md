@@ -266,6 +266,24 @@ or a reason to create a daemon.
 
 ## Journal
 
+### 2026-10-20 - Retain newly published attention boundaries and advance readiness to 43
+
+- While the reconciled head was in review, #7272 published attention boundaries
+  at HTTP 42. Replayed this owned branch again, retaining direct remote ACP
+  targets at 41, attention boundaries at 42 and the supported minimum at 1.
+  Readiness alone now requires 43; ordinary receipt delivery through 42 remains
+  supported. Preserved all 299 upstream HTTP fixtures and deferred-reference
+  metadata, and re-attested 50 current vectors without rewriting history.
+- The integrated protocol, target, attention and admission selection passes 281
+  tests. Full Bridge guards pass 299 with eight explicit platform/tier skips;
+  all 358 immutable fixtures and the reproduced authority vectors pass.
+- Authenticated native Codespace acceptance passes against committed runtime
+  `a2b7b5c976e2bfd474150c50243678916b7b8517` and the real HTTP-43 boundary.
+  Exactly one SDK task invoked the selected skill and retry retained message 3.
+  Existing auth, mode-0700 scope, unchanged productive settings and owned
+  process/forward cleanup retain their verified behavior. The final publication
+  still owes current-head review, CI and role-scoped merge authority.
+
 ### 2026-10-20 - Reconcile the upstream protocol generation without narrowing compatibility
 
 - New `dev` changes assigned HTTP generation 41 to direct remote ACP targets
