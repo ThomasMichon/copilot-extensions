@@ -312,6 +312,54 @@ graduation still requires the declared native and lifecycle guarantees.
   Manager baseline, and existing Gateway/SSH, Vault and lifecycle owners.
   No runtime API, new process, deployment or permission grant is supplied.
 
+### 2026-10-20 - Released caller-owned API consumed by the retained client
+
+- Integrated the actually published #7372 `run_caller_owned` API in the existing
+  client transport, without changing the canonical library or its other
+  consumers. RPC, HTTP-worker and credential stdout have separate raw-byte
+  budgets; stderr has its own 64-KiB budget. Overflow refuses after canonical
+  cleanup, without partial output or replay. `OwnedCleanupError` propagates
+  unchanged with exact process/Job custody rather than becoming an ordinary
+  recoverable provider failure.
+- Removed the blanket native POSIX refusal, not the separate cross-OS refusal.
+  Missing capability still refuses before the legacy helper or target can run.
+  The finite HTTP worker remains isolated and receives credentials on stdin,
+  with the same total operation deadline and no automatic retry. Native Linux
+  prerequisites and cleanup remain owned by the canonical utility.
+- Six new cases and the renamed missing-capability control are assessed below.
+  Call times are the terminal report's hundredth-second precision; `0.00` is
+  below that resolution, not zero cost. Keep these inexpensive contract guards
+  with transport changes rather than counting them as redundant cases.
+
+| Case/family | Cases | Windows call time | Value and distinct evidence |
+| --- | ---: | ---: | --- |
+| Separate capture budgets and stdin | 1 | 0.00s | Exact canonical API forwarding; small mocked contract, not native lifetime proof |
+| Real provider overflow | 2 | 0.12s each | Real stdout and stderr overflow must beat a blocked provider's deadline, without exposing content |
+| Exact unconfirmed-cleanup custody | 1 | 0.00s | The same typed exception/process/Job must escape, not be discarded or retried |
+| Credential-specific raw budget | 1 | 0.00s | Credential and internal HTTP capture limits differ; isolated worker and stdin-only credential preserved |
+| Source-removed installed transport | 1 | 1.61s | Actual offline wheel interpreter exercises UTF-8 stdin, separate streams, both overflows, raw CRLF-before-normalization and strict UTF-8 refusal |
+| Renamed missing-capability control | 1 existing | 0.00s | An older helper refuses before legacy execution; not positive Linux evidence |
+
+- The full current Windows matrix, including the broad CLI integration case and
+  fresh core/client/service role wheels after fixture source removal, passed
+  **228 tests in111.620s** (terminal111.71s) under the unchanged120s supervisor,
+  with no failures, errors or skips. The installed-console-death call was5.22s,
+  below its existing10s hold watchdog. Shared first-use wheel/role setup was
+  16.97s; do not charge it solely to that case.
+- The earlier222-case CSV and42/221-case candidate measurements remain a
+  historical pre-consumption comparison, not timings or complete selectors for
+  this new matrix. Neither candidate was redefined, enrolled in CI or credited
+  as current full acceptance. No test was deleted or process deadline widened.
+- Qualification tiers: changed-unit contracts passed; real CLI/provider/HTTP
+  and source-removed offline-wheel checks passed on Windows. Fresh temporary
+  installations prove the artifact path, not a managed machine installer.
+  Positive native Linux installed-consumer qualification is still pending with
+  the existing platform owner; no alternative venue or new worker was assumed.
+  Live external deployment was not performed: this is a source-only candidate,
+  not authority to alter selected clients, credentials or services. Review,
+  required CI and the positive platform gate still precede merge. The full
+  parent, standard lifecycle and public native-plugin adoption remain open.
+
 ### 2026-10-20 - Per-test value and smaller local portfolio evaluation
 
 - At the operator's direction, evaluated the entire expanded portfolio with the

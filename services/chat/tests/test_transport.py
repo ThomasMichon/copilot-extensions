@@ -60,20 +60,84 @@ def test_real_owned_provider_has_a_deadline():
     assert caught.value.code == "provider_timeout"
 
 
-def test_posix_without_caller_death_capability_refuses_before_helper_execution(tmp_path, monkeypatch):
-    import agent_chat_service.transport as transport
-
+def test_missing_caller_death_capability_refuses_before_legacy_helper_execution(tmp_path, monkeypatch):
     def unexpected(*args, **kwargs):
         raise AssertionError("Unsupported provider execution reached the helper")
 
-    monkeypatch.setattr(transport, "os", SimpleNamespace(name="posix"))
     monkeypatch.setitem(
         sys.modules, "agent_procutil.owned_process", SimpleNamespace(run_owned=unexpected),
     )
     with pytest.raises(ClientError) as caught:
         run_command([str(tmp_path / "native-provider")], timeout=1)
     assert caught.value.code == "provider_unsupported"
-    assert "caller-death" in caught.value.message
+    assert "run_caller_owned" in caught.value.message
+
+
+def test_owned_provider_passes_separate_capture_budgets_and_stdin(monkeypatch):
+    import agent_procutil.owned_process as owned
+
+    calls = []
+
+    def bounded(argv, **kwargs):
+        calls.append((argv, kwargs))
+        return SimpleNamespace(returncode=0, stdout="reply")
+
+    monkeypatch.setattr(owned, "run_caller_owned", bounded)
+    assert run_command([sys.executable], timeout=2, payload=b"request") == b"reply"
+    assert calls == [([sys.executable], {
+        "timeout": 2, "input_text": "request",
+        "max_stdout_bytes": 1048576, "max_stderr_bytes": 65536,
+    })]
+
+
+@pytest.mark.parametrize("stream", ["stdout", "stderr"])
+def test_real_provider_overflow_refuses_before_its_deadline_without_disclosing_output(stream):
+    with pytest.raises(ClientError) as caught:
+        run_command([
+            sys.executable, "-c",
+            f"import sys,time; sys.{stream}.buffer.write(b'private' * 200000); "
+            f"sys.{stream}.flush(); time.sleep(30)",
+        ], timeout=5)
+    assert caught.value.code == "invalid_response"
+    assert stream in caught.value.message and "private" not in caught.value.message
+
+
+def test_unconfirmed_cleanup_retains_exact_typed_custody(monkeypatch):
+    import agent_procutil.owned_process as owned
+
+    process, job = object(), object()
+    failure = owned.OwnedCleanupError(process, job)
+
+    def unconfirmed(*args, **kwargs):
+        raise failure
+
+    monkeypatch.setattr(owned, "run_caller_owned", unconfirmed)
+    with pytest.raises(owned.OwnedCleanupError) as caught:
+        run_command([sys.executable], timeout=1)
+    assert caught.value is failure
+    assert caught.value.process is process and caught.value.job is job
+
+
+def test_credential_provider_has_its_own_raw_byte_budget(monkeypatch):
+    import agent_chat_service.transport as transport
+
+    calls = []
+
+    def execute(argv, **kwargs):
+        calls.append((argv, kwargs))
+        if len(calls) == 1:
+            return b"fixture\n"
+        return b'{"schema":"agent-chat.http-result","version":1,"status":200}\n{}'
+
+    monkeypatch.setattr(transport, "_execute", execute)
+    assert GatewayTransport(config()).call({"op": "members", "channel": "room"}) == {}
+    assert calls[0][1] == {"timeout": 30, "payload": None, "max_capture": 32770}
+    assert calls[1][1]["max_capture"] == 1048576 + 512
+    assert calls[1][0][1:] == [
+        "-I", "-m", "agent_chat_service.transport", "--http-worker",
+    ]
+    assert b'"credential":"fixture"' in calls[1][1]["payload"]
+    assert "fixture" not in calls[1][0]
 
 
 def test_owned_provider_exit_status_is_visible_without_its_stderr():

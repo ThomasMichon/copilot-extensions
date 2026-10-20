@@ -156,22 +156,22 @@ Install the selected distribution's `client` extra through the adopter's normal
 verified artifact/role flow. It adds the standalone `agent-chat` console command
 and the canonical `agent-procutil` dependency; it does not provide an installer
 or change an existing selected client. No Copilot, source checkout or sibling
-runtime is required. An older helper without `owned_process.run_owned` reports
+runtime is required. An older helper without `owned_process.run_caller_owned` reports
 an explicit unsupported capability rather than falling back to unowned execution.
 
-**Current transport limitation:** native POSIX provider and HTTP-worker execution
-refuses with `provider_unsupported` before launch because the published canonical
-helper does not yet supply the required caller-death lifetime guarantee.
-Offline catalog/status/capability operations and the callable core are separate
-from that transport limitation. Windows qualification does not establish a
-portable client release; the remaining execution gate must be resolved before
-the client is merge-ready.
+Provider and HTTP-worker execution uses the published caller-owned utility on
+Windows and supported native Linux. Unsupported OS/custody prerequisites refuse
+visibly; no legacy or unowned fallback is used. Windows evidence alone is not
+positive Linux client qualification. Offline catalog/status/capability operations
+and the callable core do not invoke that utility.
 
-The provider response byte checks currently happen after canonical capture
-completes; they are not streaming stdout/stderr memory limits. Integrating
-canonical bounded capture with owned-tree cleanup on overflow is an additional
-open merge gate. Wire-size validation and finite deadlines do not substitute
-for that process-output bound.
+Separate streaming raw-byte limits apply before decoding: RPC stdout is 1 MiB,
+HTTP-worker stdout is 1 MiB plus its 512-byte control allowance, credential
+stdout is 32 KiB plus a possible CRLF, and each stderr is 64 KiB. Overflow
+returns no partial result and never retries. The canonical utility confirms
+owned-tree cleanup before reporting an output limit. An `OwnedCleanupError`
+instead propagates unchanged with its exact process/Job custody; it is not
+translated into an ordinary recoverable provider failure or permission to replay.
 
 All network operations require an explicit nonsecret configuration:
 
@@ -209,8 +209,8 @@ loopback route to an existing owned stdio provider, using the version-1
 provider modes cannot be mixed. Provider processes use the canonical native
 owned execution helper, never a daemon or sibling-runtime import. Cross-OS
 provider execution is unsupported in this slice; direct Windows executables
-on POSIX and `wsl.exe` refuse before launch. The separate canonical opt-in
-utility work must be published and integrated before that capability is offered.
+on POSIX and `wsl.exe` refuse before launch. Native caller ownership does not
+establish cross-kernel descendant cleanup; that remains separate utility work.
 
 ```text
 agent-chat --config client.json join room

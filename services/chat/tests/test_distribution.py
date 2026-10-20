@@ -5,6 +5,56 @@ import subprocess
 import pytest
 
 
+def test_source_removed_installed_transport_enforces_raw_budgets_and_strict_text(
+    tmp_path, installed_chat,
+):
+    probe = r"""
+import json,sys
+from agent_chat_service.client import ClientError
+from agent_chat_service.transport import run_command
+argv=[sys.executable,"-I","-c"]
+assert run_command(
+    [*argv,"import sys; data=sys.stdin.read(); sys.stderr.write('diagnostic'); print(data,end='')"],
+    timeout=5,payload="Unicode \u2603".encode(),
+).decode()=="Unicode \u2603"
+checks=[]
+for stream in ("stdout","stderr"):
+    try:
+        run_command(
+            [*argv,f"import sys,time; sys.{stream}.buffer.write(b'private'*200000); "
+             f"sys.{stream}.flush(); time.sleep(30)"],timeout=5,
+        )
+    except ClientError as error:
+        assert error.code=="invalid_response" and stream in error.message
+        assert "private" not in error.message
+        checks.append(stream)
+    else:
+        raise AssertionError("installed transport accepted unbounded output")
+try:
+    run_command([*argv,"import sys; sys.stdout.buffer.write(b'\\r\\n'*33)"],
+                timeout=5,max_capture=64)
+except ClientError as error:
+    assert error.code=="invalid_response"
+    checks.append("raw-before-newline-normalization")
+else:
+    raise AssertionError("raw-byte limit was checked only after decoding")
+try:
+    run_command([*argv,"import sys; sys.stdout.buffer.write(b'\\xff')"],timeout=5)
+except ClientError as error:
+    assert error.code=="provider_unavailable" and "Unicode" in error.message
+    checks.append("strict-utf8")
+else:
+    raise AssertionError("installed transport accepted invalid UTF-8")
+print(json.dumps({"installed_transport":checks}),flush=True)
+"""
+    result = json.loads(installed_chat.run(
+        [str(installed_chat.interpreter), "-I", "-c", probe], cwd=tmp_path,
+    ))
+    assert result == {"installed_transport": [
+        "stdout", "stderr", "raw-before-newline-normalization", "strict-utf8",
+    ]}
+
+
 def test_source_independent_wheel(tmp_path, rpc_endpoint, installed_chat):
     run = installed_chat.run
     probe = """

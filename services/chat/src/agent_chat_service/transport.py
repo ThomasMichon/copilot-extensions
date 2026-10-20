@@ -22,6 +22,8 @@ STDIO_RESPONSE = "agent-chat.gateway-response"
 HTTP_RESULT = "agent-chat.http-result"
 HTTP_ALLOWANCE = 15
 MAX_HTTP_INPUT = 3 * MAX_BODY_BYTES
+MAX_STDERR_BYTES = 64 * 1024
+MAX_CREDENTIAL_BYTES = 32768 + 2
 
 
 def command(value: object) -> list[str]:
@@ -39,20 +41,17 @@ def command(value: object) -> list[str]:
 
 def _execute(argv: list[str], *, timeout: float, payload: bytes | None, max_capture: int) -> bytes:
     argv = command(argv)
-    if os.name != "nt":
-        raise ClientError(
-            "provider_unsupported",
-            "Native POSIX caller-death ownership requires the canonical utility capability.",
-        )
     try:
-        from agent_procutil.owned_process import run_owned
+        from agent_procutil.owned_process import OutputLimitExceeded, run_caller_owned
     except ImportError:
         raise ClientError(
-            "provider_unsupported", "The client role requires the published canonical run_owned capability.",
+            "provider_unsupported",
+            "The client role requires the published canonical run_caller_owned capability.",
         ) from None
     try:
-        result = run_owned(
+        result = run_caller_owned(
             argv, timeout=timeout, input_text=payload.decode("utf-8") if payload is not None else None,
+            max_stdout_bytes=max_capture, max_stderr_bytes=MAX_STDERR_BYTES,
         )
         if result.returncode:
             raise ClientError("provider_failed", f"The owned provider exited with status {result.returncode}.")
@@ -62,6 +61,10 @@ def _execute(argv: list[str], *, timeout: float, payload: bytes | None, max_capt
         if len(raw) > max_capture:
             raise ClientError("invalid_response", "Provider output exceeds the response byte bound.")
         return raw
+    except OutputLimitExceeded as error:
+        raise ClientError(
+            "invalid_response", f"Provider {error.stream} exceeds its raw byte bound; no automatic replay.",
+        ) from None
     except subprocess.TimeoutExpired:
         raise ClientError("provider_timeout", "The owned provider exceeded its deadline.") from None
     except (OSError, RuntimeError, UnicodeError) as error:
@@ -70,8 +73,11 @@ def _execute(argv: list[str], *, timeout: float, payload: bytes | None, max_capt
         ) from None
 
 
-def run_command(argv: list[str], *, timeout: float, payload: bytes | None = None) -> bytes:
-    return _execute(argv, timeout=timeout, payload=payload, max_capture=MAX_PAGE_BYTES)
+def run_command(
+    argv: list[str], *, timeout: float, payload: bytes | None = None,
+    max_capture: int = MAX_PAGE_BYTES,
+) -> bytes:
+    return _execute(argv, timeout=timeout, payload=payload, max_capture=max_capture)
 
 
 def authorization(token: str) -> dict[str, str]:
@@ -153,7 +159,9 @@ class GatewayTransport:
                 raise ClientError("invalid_response", "Invalid provider response; no automatic replay.")
             return self._result(value["status"], value["result"])
         try:
-            token = self.runner(self.token_command, timeout=30).decode("utf-8").strip()
+            token = self.runner(
+                self.token_command, timeout=30, max_capture=MAX_CREDENTIAL_BYTES,
+            ).decode("utf-8").strip()
         except UnicodeError:
             raise ClientError("invalid_credential", "Credential provider returned invalid UTF-8.") from None
         authorization(token)

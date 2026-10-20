@@ -1180,9 +1180,10 @@ selection. Use pytest's built-in JUnit call-duration reporting plus
 Windows output paths inside `PYTEST_ADDOPTS` so its argument parser preserves
 backslashes. Shared artifact setup must not be charged solely to its first user.
 Record the exercised platform and artifact separately. The retained client
-candidate still refuses native POSIX execution until it actually consumes and
-qualifies the now-published caller-death API; source release alone does not
-update its resolved installation. Portable-core or unsupported-mode
+candidate consumes the published caller-death API with separate raw capture
+budgets. Source release alone does not update a resolved installation.
+Qualify fresh installed consumers on both Windows and native Linux;
+portable-core or unsupported-mode
 control results are not positive native Linux client qualification.
 
 The index-service smoke lane includes offline container-context and explicit
