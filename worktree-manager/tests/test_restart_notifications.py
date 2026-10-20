@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib
 import os
 import sys
+import threading
 from dataclasses import replace
 from types import SimpleNamespace
 
@@ -115,6 +116,77 @@ def pump_until(adapter, predicate):
             return
         time.sleep(0.001)
     pytest.fail(f"adapter did not settle: {adapter.status}")
+
+
+@pytest.mark.parametrize("phase", ["pump", "close"])
+@pytest.mark.parametrize("unclaimed", [False, True], ids=["inhibitor", "unclaimed"])
+def test_runtime_retains_real_adapter_descriptor_cleanup_failure(
+    tmp_path, notification_module, monkeypatch, phase, unclaimed,
+):
+    from worktree_manager import source_config
+    from worktree_manager.restart_notification_runtime import RestartNotificationRuntime
+    from worktree_manager.restart_observer import RestartObserver
+
+    watching = threading.Event()
+    failed = threading.Event()
+    bus = FakeLogindBus()
+    real_adapter = notification_module.LogindShutdownAdapter
+    instances = []
+
+    class ObservedAdapter(real_adapter):
+        def __init__(self, journal, epoch):
+            super().__init__(journal, epoch, bus_factory=lambda: bus)
+            instances.append(self)
+
+        def pump(self, **kwargs):
+            super().pump(**kwargs)
+            if self.status["status"] == "watching":
+                watching.set()
+
+    monkeypatch.setattr(notification_module, "LogindShutdownAdapter", ObservedAdapter)
+    source_config.config_path(tmp_path).write_text(
+        "[restart_recovery]\nshutdown_notifications = true\n", encoding="utf-8",
+    )
+    observer = RestartObserver(
+        tmp_path, epoch=HostEpoch("linux", "environment-one", "boot-one"),
+    )
+    runtime = RestartNotificationRuntime(tmp_path, observer)
+    close_fd = os.close
+    target = None
+
+    def fail_target(fd):
+        if fd == target:
+            failed.set()
+            raise OSError("synthetic actual descriptor release failure")
+        close_fd(fd)
+
+    try:
+        runtime.activate()
+        runtime.pump(admitted=True)
+        assert watching.wait(2)
+        target = bus.fds[-1]
+        if unclaimed:
+            reader, target = os.pipe()
+            bus.readers.append(reader)
+            instances[0]._received_fds.add(target)
+        monkeypatch.setattr(notification_module.os, "close", fail_target)
+        if phase == "pump":
+            bus.connected = False
+            assert failed.wait(2), "actual adapter pump did not reach descriptor cleanup"
+        runtime.pause()
+        assert failed.is_set() and instances[0]._loop.is_closed()
+        assert not runtime.drained
+        assert "descriptor release failure" in runtime.status["blocker"]
+        with pytest.raises(RuntimeError, match="descriptor release failure"):
+            runtime.close()
+        runtime.pump(admitted=True)
+        assert len(instances) == 1
+    finally:
+        runtime.pause()
+        monkeypatch.setattr(notification_module.os, "close", close_fd)
+        if target is not None:
+            close_fd(target)
+        bus.close()
 
 
 @pytest.fixture

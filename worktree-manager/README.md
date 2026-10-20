@@ -510,6 +510,8 @@ Clean drain includes every admitted callback, journal write and native resource
 cleanup; pause/shutdown join that owner before the active lease can end.
 Undrain can admit a new owner only after the previous thread has stopped.
 I/O/startup failures stay visible, and cleanup failure cannot report clean drain.
+Descriptor-release failures remain sticky even when adapter cleanup returns
+normally or its event loop has already closed; thread exit is not cleanup proof.
 Disposable private-bus coverage proves a shutdown checkpoint and inhibitor
 release within a one-second native delay while ordinary work blocks longer.
 This does not establish hard real-time filesystem/OS bounds or real host

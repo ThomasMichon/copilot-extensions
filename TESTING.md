@@ -228,6 +228,10 @@ and its event loop are closed before the actual daemon lease is released.
 Thread fixtures prove exclusive adapter ownership, stale-admission refusal,
 drain waiting through cleanup, safe undrain and visible startup/I/O/cleanup
 failures without busy retry. Default-off/passive paths create no native owner.
+Actual adapter pipe-descriptor failures cover both the active inhibitor and
+unclaimed reply descriptors, during pump-time and shutdown cleanup. Failure
+must survive later adapter state changes and keep runtime drain/close unclean,
+even when adapter cleanup records the error without raising.
 These contracts do not prove hard real-time OS/filesystem bounds, real host
 shutdown/startup coverage, automatic enrollment or acknowledged Resume.
 

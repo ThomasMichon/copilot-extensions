@@ -66,20 +66,31 @@ class LogindShutdownAdapter:
         self._notification_ids: set[str] = set()
         self._signal_sequence = 0
         self._delay_seconds = 0.0
+        self.cleanup_error: str | None = None
         self.status: dict = {"status": "inactive", "qualified": False}
 
     def _state(self, status: str, **detail) -> None:
         self.status = {"status": status, "qualified": False, **detail}
+        if self.cleanup_error is not None:
+            self.status["cleanup_error"] = self.cleanup_error
+
+    def _close_fd(self, fd: int) -> None:
+        try:
+            os.close(fd)
+        except OSError as exc:
+            if self.cleanup_error is None:
+                self.cleanup_error = f"Native notification descriptor release failed: {exc}"
+            raise
 
     def _release(self) -> None:
         fd, self._fd = self._fd, None
         if fd is not None:
             self._received_fds.discard(fd)
-            os.close(fd)
+            self._close_fd(fd)
 
     def _release_unclaimed(self) -> None:
         while self._received_fds:
-            os.close(self._received_fds.pop())
+            self._close_fd(self._received_fds.pop())
 
     def _block(self, error: object) -> None:
         error = str(error) or type(error).__name__
@@ -114,7 +125,7 @@ class LogindShutdownAdapter:
             if reply is not None:
                 for fd in reply.unix_fds:
                     self._received_fds.discard(fd)
-                    os.close(fd)
+                    self._close_fd(fd)
             name = getattr(reply, "error_name", None) or "incompatible response"
             raise NotificationError(f"logind {member}: {name}")
         return reply
@@ -143,7 +154,7 @@ class LogindShutdownAdapter:
         ):
             for fd in reply.unix_fds:
                 self._received_fds.discard(fd)
-                os.close(fd)
+                self._close_fd(fd)
             raise NotificationError("logind did not return one negotiated inhibitor FD.")
         fd = reply.unix_fds[0]
         self._received_fds.add(fd)
@@ -151,7 +162,7 @@ class LogindShutdownAdapter:
             os.set_inheritable(fd, False)
         except OSError:
             self._received_fds.discard(fd)
-            os.close(fd)
+            self._close_fd(fd)
             raise
         self._fd = fd
 
@@ -293,7 +304,7 @@ class LogindShutdownAdapter:
             if message.signature != "b" or len(message.body) != 1 or message.unix_fds:
                 for fd in message.unix_fds:
                     self._received_fds.discard(fd)
-                    os.close(fd)
+                    self._close_fd(fd)
                 self._block("Malformed native shutdown notification.")
             else:
                 self._signal_sequence += 1

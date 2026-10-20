@@ -1064,3 +1064,11 @@ The umbrella effort remains Active independently of this slice's completion.
   surviving-session adoption and task/producer/profile action-time admission
   remain unresolved. Transport qualification and automatic eligibility remain
   false; no combined Plan/Validation item is declared complete.
+- Provider review found that the real adapter can record descriptor-release
+  failure without raising, bypassing the runtime's exception-only cleanup flag.
+  Two actual-adapter/pipe regressions first failed for pump-time and shutdown
+  cleanup. Descriptor closure now publishes one sticky cleanup-error result
+  across every close path and later adapter state transition; runtime drain and
+  close consume that result even after the event loop has closed. The focused
+  private-bus/runtime/adapter lane passed 45 tests before the additional
+  unclaimed-reply-descriptor variants. No native recovery authority changed.

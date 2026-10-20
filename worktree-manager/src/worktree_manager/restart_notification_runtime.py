@@ -153,6 +153,13 @@ class RestartNotificationRuntime:
                     log.exception("Restart notification cleanup failed")
                 if not failed:
                     self._transport_status = previous if previous["status"] == "blocked" else dict(adapter.status)
+                if adapter.cleanup_error is not None:
+                    self._cleanup_failed = True
+                    self._blocker = adapter.cleanup_error
+                    self._transport_status = {
+                        "status": "blocked", "qualified": False, "blocker": self._blocker,
+                        "cleanup_error": adapter.cleanup_error,
+                    }
 
     def pump(self, *, admitted: bool) -> None:
         """Admit one native I/O owner; ordinary daemon work never pumps its loop."""

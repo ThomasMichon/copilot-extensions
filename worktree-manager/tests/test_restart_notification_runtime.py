@@ -43,6 +43,7 @@ def test_adapter_is_pumped_and_closed_on_owning_thread(tmp_path, monkeypatch):
 
     class Adapter:
         status = {"status": "watching", "qualified": False}
+        cleanup_error = None
 
         def __init__(self, journal, epoch):
             events.append(("construct", threading.get_ident()))
