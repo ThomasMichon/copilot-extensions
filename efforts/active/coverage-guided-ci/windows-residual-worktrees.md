@@ -87,7 +87,54 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Mechanical move mapping: preserved, not conflated with fixtures
 
+### Fifth admitted move: remaining attribution and tracking leaf classes
+
+Baseline: Dev `f90914e793cae7c729f7bf293ccb083529f9d066`, the actual #7405
+merge. This M-MOVE partition relocates eight complete leaf classes, leaving
+only `TestCreatePRRoleResolution` and the setup-bearing
+`TestPRFinalizeAndPush` in the monolith. No class is split in this partition.
+
+For every method, only the module component changes:
+`tests/test_pr_ops.py::<class>::<method><parameters>` ->
+`tests/<destination>::<class>::<method><parameters>`.
+
+| Destination under `tests/` | Whole classes | Expanded nodes |
+|----------------------------|---------------|---------------:|
+| `test_pr_attribution.py` | `TestAuditAttributionRisk`, `TestAttributionAuditCLI` | 10 |
+| `test_pr_tracking.py` | `TestSetPRAndStatus`, `TestMultiPR`, `TestWorktreeToDictPRs`, `TestWorktreeToDictClaimsSummary`, `TestWorktreeToDictState`, `TestClassifyRecordsConvo` | 36 |
+
+Real before/after collection proves the exact 317-node bijection: 46 moved
+and 271 unchanged, with identical resolved fixture bodies/scopes/closures,
+parameter values and effective marks. Every original top-level definition
+remains exactly once with an identical AST. Only unused imports and orphan
+section headings are removed from the retained module. No shared fixture,
+native Git operation, assertion, test tier, production authority or CI
+admission changes. B-ROLE and finalize/push helper extraction remain separate.
+
+Native Windows with exactly two work-stealing workers passes every moved
+case without skips: ten attribution cases in 19.12 seconds (23.09 inclusive),
+and 36 tracking/listing cases in 73.12 seconds (78.64 inclusive). Unchanged
+30-second item and 240-second diagnostic group limits apply. The nine
+existing real-Git/contained selection controls pass without skips in
+26.16 seconds (28.70 inclusive), retaining conservative whole-file
+selection and strict unknown-node refusal outside those files. The
+install-contract guard reports thirteen plugins and zero violations.
+
+Clean-room provisioning is inapplicable to this test-only whole-class move.
+No unavailable Linux/external result or dependency/service installation is
+claimed. Five mechanical partitions now move 221 original expanded nodes,
+leaving 96 in the two retained classes. Fixture semantics, setup-bearing
+class decomposition, root-policy compatibility and repeated complete
+same-head Windows qualification remain open; these focused passes do not
+qualify the parent.
+
 ### Fourth admitted move: fork confirmation and identity flow
+
+**Actually merged:** #7405 as
+`f90914e793cae7c729f7bf293ccb083529f9d066`, after exact-head full Copilot
+approval and green required CI. Its child is finalized. Subsequent
+mechanical moves preserve those merged bodies; the parent qualification
+remains open.
 
 Baseline: Dev `de3652abbe3da7c0bd5c11299a0a7da0a84dc97d`, including the
 actual #7402 merge. This M-MOVE partition moves only the complete

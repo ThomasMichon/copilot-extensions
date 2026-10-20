@@ -1,0 +1,9 @@
+{
+  "comment": "Mechanically relocate complete attribution and tracking leaf test classes with unchanged fixtures and assertions.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
