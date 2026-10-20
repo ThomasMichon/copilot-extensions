@@ -246,6 +246,14 @@ exact typed version-2 acknowledged binding, retaining false restored/automatic
 flags and a qualification blocker. They do not launch Copilot, prove prompt
 readiness or actual seed consumption, or qualify automatic startup/platform
 recovery.
+Canonical self-session claim regressions cover the actual native Start
+transaction's persisted claim, unchanged owner bytes through exact-original
+Resume, wrong machine/project/worktree/UUID, released/producer/opaque/duplicate
+or mixed claims, inbound/dispatch/released-ledger fences, and replacement during
+preflight. Concurrent owner processes and post-invocation owner death exercise
+both an empty ledger and the original self claim with real locks and durable
+uncertainty. The provisional check makes no self-claim provider callback;
+task-policy snapshots still cannot authorize a launch.
 Positive owner/Manager ACK fixtures use the mux producer's actual `$1:100`
 incarnation shape, including the leading dollar sign, rather than a
 synthetic token alphabet. Newline and delimiter-bearing tokens remain refused.

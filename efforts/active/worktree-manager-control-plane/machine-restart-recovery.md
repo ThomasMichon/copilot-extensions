@@ -78,8 +78,12 @@ means of fulfilling the operator's request. They require normal source review.
 
 ### 1. Reconcile the contract
 
-- [ ] Trace current launch, head/session acquisition, teardown and daemon-start
+- [x] Trace current launch, head/session acquisition, teardown and daemon-start
   paths against current source. Record the minimum owner-protocol additions.
+  The owner hosting/lifecycle, frozen identity, current-policy, fenced Resume
+  and explicit acknowledgement boundaries are recorded through
+  [#7292](https://github.com/ThomasMichon/copilot-extensions/pull/7292).
+  Their runtime implementations do not themselves qualify automatic startup.
 - [ ] Define recovery eligibility, intentional closure, shutdown interruption
   and unknown evidence separately. Include detached but genuinely live agents;
   attachment count is presentation evidence, not eligibility.
@@ -158,7 +162,7 @@ means of fulfilling the operator's request. They require normal source review.
   [#7286](https://github.com/ThomasMichon/copilot-extensions/pull/7286)
   fences the original UUID, old source process/epoch and current owner record
   through durable reservation and mux invocation in the explicit restart-only
-  owner intent. It admits no task/claim/profile-bound worktree and is
+  owner intent. Task/profile-bound worktrees and unqualified claims refuse; it is
   not wired to automatic startup. Actual native readiness/identity/seed
   acknowledgement and surviving-session adoption remain unresolved.
 - [ ] Persist recovery attempt and outcome; reconcile a crash between launch
@@ -171,7 +175,8 @@ means of fulfilling the operator's request. They require normal source review.
   Manager read-only inspection composes this receipt with the immutable frozen
   attempt. Outcome reconciliation through actual native acknowledgement
   remains unqualified; a frozen Manager row no longer implies no invocation.
-  The next explicit acknowledgement increment binds retained original-source
+  [#7292](https://github.com/ThomasMichon/copilot-extensions/pull/7292)
+  binds retained original-source
   history to fresh native hosting and invoking ancestry before durable seed
   pickup; its fixtures are not actual native CLI qualification.
 - [ ] Apply bounded admission and concurrency. Authentication, dependency or
@@ -190,7 +195,7 @@ means of fulfilling the operator's request. They require normal source review.
   where that optional capability is available, and acknowledged seed pickup.
   Launch, registration and completed restoration are distinct outcomes.
   The explicit STATUS FIRST acknowledgement operation and typed read-only
-  Manager outcome are implemented separately from native/registration hooks.
+  Manager outcome landed in #7292 separately from native/registration hooks.
   Real native delivery/readiness and complete recovery qualification remain
   open, and acknowledged outcomes retain false restored/automatic flags.
 - [ ] Integrate with the existing daemon's platform lifecycle rather than a
@@ -892,3 +897,50 @@ The umbrella effort remains Active independently of this slice's completion.
   delimiter-bearing variants remain refused. Three owner and one Manager
   regressions failed before this correction; the integrated disconnected
   acknowledgement lane then passed 64 owner and 28 Manager contracts.
+
+### 2026-10-19 - Native acknowledgement source merged; admission next
+
+- [#7292](https://github.com/ThomasMichon/copilot-extensions/pull/7292)
+  squash-merged to `dev` as `43cb482f80` after exact-head Copilot approval of
+  `7b14d3b49d`, no remaining findings and all required checks passing. The
+  original source history is retained; this is merged source, not release,
+  installed-state or actual native-recovery proof.
+- Re-read the focused Plan, Validation Plan and completion gate after merge.
+  The trace/minimum-owner-protocol item is resolved and the durable explicit
+  acknowledgement pieces are delivered. The combined recovery/seed items remain
+  open because actual native qualification, surviving-session adoption,
+  action-time admission and startup/notification guarantees are not complete.
+- Next stretch: admit only the exact existing canonical self-session claim
+  during fenced original Resume. Normal native registration creates that claim,
+  so the current blanket claim refusal prevents an otherwise eligible previously
+  live conversation from reaching native qualification. This is not permission
+  for task, producer, inbound, historical released, mixed or opaque claims;
+  their action-time protocols remain separate. Automatic restoration stays off.
+
+### 2026-10-19 - Canonical original self-session claim admission
+
+- Normal native Start records an active self-session claim. Blanket resource
+  refusal therefore excluded otherwise eligible original conversations before
+  fenced Resume. The first disconnected regressions reproduced both the
+  provisional-check and launch refusal.
+- A shared owner predicate now accepts only an empty ledger or one exact
+  active, producer-free, nonopaque self-session claim for the original UUID and
+  the current machine/project/worktree. Provisional inspection, fenced launch
+  and explicit acknowledgement use that same rule without releasing,
+  reacquiring or rewriting the claim. Other, mixed, task, producer, inbound,
+  opaque and retained released claims remain blocked; a task-generation
+  snapshot still grants no action-time authority.
+- The initial disconnected owner lane passed 216 contracts. The expanded
+  compatibility run passed 310 owner contracts and 56 unchanged Manager
+  contracts. Its additional native Start fixture initially created a second
+  activation by replaying a changed timestamp; after using the actual initial
+  registration transaction, that focused regression passed separately. Real
+  owner concurrency and post-invocation death cover both an empty ledger and
+  the canonical self claim, preserving durable uncertainty and no retry.
+- Documentation-impact review updated the owner's behavior/engine contract and
+  the focused test flow; the owner payload has a patch changefile. This closes
+  an admission gap under the existing session-hosting intent and owner fences,
+  not a new authority or platform guarantee. The implementation is not yet
+  reviewed or merged. Full native/platform qualification, surviving-session
+  adoption, task/producer/profile action-time policy, receipt lifecycle,
+  enrollment and blocking-work notification guarantees remain unresolved.

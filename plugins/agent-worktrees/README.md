@@ -201,10 +201,14 @@ explicit Linux/WSL restart intent, not the ordinary Resume or Bridge acquisition
 mode. The bounded typed request binds the original UUID, frozen owner/head/source
 revisions, old native PID/birth and old/current environment epochs. The old
 process identity must hash to the recorded activation; same-boot, foreign,
-changed, ended, live or unknown targets refuse. All task/resource claims,
-historical released claims, inbound ownership, dispatch provenance and profile
-assignment remain blocked: a read-only task-policy snapshot is not action-time
-permission. Custom launch templates and legacy setup launchers are unqualified.
+changed, ended, live or unknown targets refuse. The only admitted existing
+resource is one exact, active, producer-free, nonopaque self-session claim for
+the original UUID and this machine/project/worktree, as normal native Start
+creates. Launch and explicit acknowledgement share that predicate; neither
+releases, reacquires or rewrites the claim. Other, mixed, task or historical
+released claims, inbound ownership, dispatch provenance and profile assignment
+remain blocked: a read-only task-policy snapshot is not action-time permission.
+Custom launch templates and legacy setup launchers are unqualified.
 
 This mode reuses the lifecycle and per-worktree launch-admission fences, with a
 strict record-writer lock spanning final validation and mux invocation. The

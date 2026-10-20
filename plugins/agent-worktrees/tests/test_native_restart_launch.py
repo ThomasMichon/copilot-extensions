@@ -121,6 +121,107 @@ def test_exact_original_resume_has_durable_reservation_and_full_status_first_see
     assert native_restart_receipt.read(subject.path)["state"] == "mux-created"
 
 
+def test_canonical_original_self_claim_survives_exact_fenced_resume(subject, capfd):
+    claim = tracking.ResourceClaim(
+        kind="session", ref=tracking.format_claim_ref(
+            subject.record.machine, subject.record.repo, subject.record.worktree_id,
+            session=NATIVE,
+        ),
+    )
+    tracking.save_record(replace(subject.record, resources=[claim]), subject.path)
+    before = subject.path.read_bytes()
+    rc, result = invoke(subject, capfd)
+    assert rc == 0, result
+    assert result["state"] == "mux-created"
+    assert result["restored"] is False and result["automatic_eligible"] is False
+    assert subject.launches[0][2][1] == "--resume=" + NATIVE
+    assert subject.path.read_bytes() == before
+    assert invoke(subject, capfd)[0] == 0
+    assert len(subject.launches) == 1
+
+
+def test_native_start_transaction_claim_is_retained_by_restart_resume(monkeypatch_config, subject, capfd):
+    from agent_worktrees.tracking_session_registration_write import apply_session_register
+
+    tracking.save_record(
+        replace(subject.record, head_session=None, head_transitions=[], sessions=[]),
+        subject.path,
+    )
+    result = apply_session_register({
+        "worktree_id": subject.record.worktree_id, "yaml_path": str(subject.path),
+        "session_id": NATIVE, "source_identity": subject.request["expected"]["source_identity"],
+        "source": "hook", "started_at": "2026-01-01T00:00:00+00:00",
+    })
+    assert result["ok"] is True, result
+    record = tracking.load_record(subject.path)
+    assert len(record.resources) == 1 and record.resources[0].kind == "session"
+    subject.request["expected"].update(
+        owner_revision=record.lifecycle_revision, head_revision=record.head_revision,
+        activation_ordinal=record.sessions[0].activations[0].ordinal,
+    )
+    before = subject.path.read_bytes()
+    rc, result = invoke(subject, capfd)
+    assert rc == 0 and result["state"] == "mux-created", result
+    assert subject.path.read_bytes() == before
+    assert subject.launches[0][2][1] == "--resume=" + NATIVE
+
+
+@pytest.mark.parametrize("damage", [
+    "other-session", "other-machine", "other-project", "other-worktree",
+    "released", "at-rest", "producer", "opaque", "duplicate", "task-mixed",
+    "inbound", "dispatch", "released-ledger", "action-time-replacement",
+])
+def test_self_claim_admission_never_relaxes_other_owner_policy(subject, capfd, monkeypatch, damage):
+    claim = tracking.ResourceClaim(
+        kind="session", ref=tracking.format_claim_ref(
+            subject.record.machine, subject.record.repo, subject.record.worktree_id,
+            session=NATIVE,
+        ),
+    )
+    changes = {"resources": [claim]}
+    if damage.startswith("other-"):
+        fields = dict(machine=subject.record.machine, project=subject.record.repo,
+                      worktree_id=subject.record.worktree_id, session=NATIVE)
+        field = {"other-session": "session", "other-machine": "machine",
+                 "other-project": "project", "other-worktree": "worktree_id"}[damage]
+        fields[field] = "00000000-0000-4000-8000-000000000002" if field == "session" else "other"
+        claim.ref = tracking.format_claim_ref(**fields)
+    elif damage in {"released", "at-rest"}:
+        claim.state = damage
+    elif damage == "opaque":
+        claim.metadata_opaque = True
+    elif damage == "duplicate":
+        changes["resources"].append(replace(claim))
+    elif damage == "task-mixed":
+        changes["resources"].append(tracking.ResourceClaim(kind="task", ref="dispatch-local-task:t"))
+    elif damage == "inbound":
+        changes["owner_ref"] = "other/project/worktree"
+    elif damage == "dispatch":
+        changes["dispatch_attempt_raw_present"] = True
+    elif damage == "released-ledger":
+        changes["last_finalize_released"] = [claim]
+    elif damage == "action-time-replacement":
+        def preflight(*_):
+            tracking.save_record(
+                replace(subject.record, resources=[replace(claim, state="released")]),
+                subject.path,
+            )
+            return core.LaunchPreflight()
+        monkeypatch.setattr(core, "_preflight_launch", preflight)
+    tracking.save_record(replace(subject.record, **changes), subject.path)
+    if damage == "producer":
+        import yaml
+
+        raw = yaml.safe_load(subject.path.read_text())
+        raw["resources"][0]["producer"] = None
+        subject.path.write_text(yaml.safe_dump(raw))
+    rc, result = invoke(subject, capfd)
+    assert rc != 0 and "action-time-claim-policy-unqualified" in result["error"]
+    assert subject.launches == []
+    from agent_worktrees import native_restart_receipt
+    assert native_restart_receipt.read(subject.path) is None
+
+
 @pytest.mark.parametrize("change,reason", [
     ({"head_revision": 6}, "head-changed"),
     ({"head_session": "00000000-0000-4000-8000-000000000002", "sessions": [
@@ -349,7 +450,16 @@ sys.exit(cli.cmd_embody(args))
 """
 
 
-def test_two_actual_cli_processes_share_one_durable_launch(subject):
+@pytest.mark.parametrize("self_claim", [False, True])
+def test_two_actual_cli_processes_share_one_durable_launch(subject, self_claim):
+    if self_claim:
+        subject.record.resources = [tracking.ResourceClaim(
+            kind="session", ref=tracking.format_claim_ref(
+                subject.record.machine, subject.record.repo, subject.record.worktree_id,
+                session=NATIVE,
+            ),
+        )]
+        tracking.save_record(subject.record, subject.path)
     argv = [sys.executable, "-c", _CHILD, json.dumps(subject.request), str(subject.path), "normal"]
     first = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     second = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -367,7 +477,16 @@ def test_two_actual_cli_processes_share_one_durable_launch(subject):
             process.wait(timeout=5)
 
 
-def test_actual_owner_crash_after_native_call_is_never_retried(subject):
+@pytest.mark.parametrize("self_claim", [False, True])
+def test_actual_owner_crash_after_native_call_is_never_retried(subject, self_claim):
+    if self_claim:
+        subject.record.resources = [tracking.ResourceClaim(
+            kind="session", ref=tracking.format_claim_ref(
+                subject.record.machine, subject.record.repo, subject.record.worktree_id,
+                session=NATIVE,
+            ),
+        )]
+        tracking.save_record(subject.record, subject.path)
     argv = [sys.executable, "-c", _CHILD, json.dumps(subject.request), str(subject.path)]
     crashed = subprocess.run([*argv, "crash"], capture_output=True, text=True, timeout=20)
     assert crashed.returncode == 42, crashed.stderr

@@ -9,7 +9,7 @@ from pathlib import Path
 from uuid import UUID
 
 from . import bridge_acquisition_launch, embody_resume, launch_seed_state
-from . import native_restart_check, native_restart_receipt, native_source_context
+from . import native_restart_check, native_restart_claims, native_restart_receipt, native_source_context
 from . import output, sessions, tracking
 
 
@@ -112,11 +112,7 @@ def _refusal(request: dict, path: Path) -> str | None:
     record = tracking.load_record(path)
     # Task snapshots are deliberately not generation reservations. Do not use
     # their provisional task_qualified bit to authorize an action-time launch.
-    if (
-        record.resources or record.last_finalize_released or record.owner_ref
-        or record.dispatch_attempt is not None or record.dispatch_attempt_opaque
-        or record.dispatch_attempt_raw_present
-    ):
+    if not native_restart_claims.original_session_only(record, request["expected"]["native_session_id"]):
         return "action-time-claim-policy-unqualified"
     result = native_restart_check.check(request["expected"], loader=lambda: tracking.load_record(path))
     if result["worktree_qualified"] is not True:

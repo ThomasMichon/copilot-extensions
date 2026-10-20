@@ -9,6 +9,7 @@ from uuid import UUID
 
 from . import bridge_acquisition_launch, launch_seed_state, native_hosting_evidence
 from . import native_restart_check, native_restart_launch, native_restart_receipt
+from . import native_restart_claims
 from . import native_source_context, output, tracking
 from .tracking_session_activations import source_end_authoritative
 from .worktree_status_daemon import _is_safe_identity_token
@@ -29,20 +30,7 @@ def _proof(path: Path, receipt: dict, witness: object) -> dict:
         raise ValueError(reason)
     if Path(record.worktree_path).resolve(strict=True) != Path(record.worktree_path):
         raise ValueError("worktree-path-indirect")
-    self_ref = tracking.format_claim_ref(
-        record.machine, record.repo, record.worktree_id,
-        session=expected["native_session_id"],
-    )
-    if (
-        record.last_finalize_released or record.owner_ref
-        or record.dispatch_attempt is not None or record.dispatch_attempt_opaque
-        or record.dispatch_attempt_raw_present
-        or len(record.resources) > 1 or any(
-            claim.kind != "session" or claim.ref != self_ref or claim.state != "active"
-            or claim.has_producer or claim.metadata_opaque
-            for claim in record.resources
-        )
-    ):
+    if not native_restart_claims.original_session_only(record, expected["native_session_id"]):
         raise ValueError("Restart acknowledgement claim policy is unqualified")
     if launch_seed_state.peek(path, read_only=True) is not None:
         raise ValueError("pending-seed")

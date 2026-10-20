@@ -1230,6 +1230,23 @@ claiming discipline alone.
 
 ## Journal
 
+- **2026-10-19** - Implemented narrowly fenced canonical original self-session
+  claim admission for [machine restart recovery](machine-restart-recovery.md).
+  The provisional check, exact Resume and explicit ACK share one predicate;
+  other/mixed/task/producer/inbound/opaque or released claims remain blocked.
+  Source fixtures preserve the existing ownership ledger and durable launch
+  uncertainty. This increment still awaits review and merge; full recovery
+  qualification and the umbrella remain open, with no rollout or enrollment.
+
+- **2026-10-19** - Source-bound native STATUS FIRST acknowledgement landed in
+  [#7292](https://github.com/ThomasMichon/copilot-extensions/pull/7292) after
+  exact-head provider approval and required green checks. Reconciled the
+  [focused recovery Plan/Validation gate](machine-restart-recovery.md);
+  actual native qualification and automatic recovery are still open. Next
+  stretch is narrowly fenced canonical self-session claim admission, preserving
+  refusal of unqualified task/producer/mixed/inbound/opaque policy. No release,
+  enrollment or rollout is implied; the umbrella remains Active.
+
 - **2026-10-19** - Implemented the explicit source-bound STATUS FIRST
   acknowledgement increment for [machine restart recovery](machine-restart-recovery.md).
   Durable seed pickup requires the original conversation's actual live native

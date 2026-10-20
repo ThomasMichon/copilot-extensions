@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from . import claim_providers, tracking
+from . import claim_providers, native_restart_claims, tracking
 
 
 _FIELDS = {
@@ -25,8 +25,10 @@ def check(record: tracking.WorktreeRecord, expected: dict) -> tuple[str | None, 
         record.dispatch_attempt_raw_present and record.dispatch_attempt is None
     ):
         return "task-policy-unqualified", []
-    if record.owner_ref:
+    if record.owner_ref or record.last_finalize_released:
         return "claim-policy-unqualified", []
+    if native_restart_claims.original_session_only(record, expected["native_session_id"]):
+        return None, []
     if not record.resources:
         return ("task-policy-unqualified" if record.dispatch_attempt is not None else None), []
     # One bounded callback. Mixed claims, producer claims and historical/released

@@ -62,6 +62,69 @@ def test_exact_current_owner_check_is_not_launch_permission(subject):
     assert asdict(record) == before
 
 
+def test_canonical_self_claim_is_provisional_not_task_or_launch_authority(subject, monkeypatch):
+    from agent_worktrees import claim_providers
+
+    owner, record, expected = subject
+    record.resources.append(tracking.ResourceClaim(
+        kind="session", ref=tracking.format_claim_ref(
+            record.machine, record.repo, record.worktree_id, session=NATIVE,
+        ),
+    ))
+    monkeypatch.setattr(
+        claim_providers, "resolve_claim_status", lambda *a, **kw: pytest.fail("self-claim callback"),
+    )
+    before = asdict(record)
+    result = owner.check(expected, loader=lambda: record)
+    assert result["worktree_qualified"] is True
+    assert result["launch_authorized"] is False and result["automatic_eligible"] is False
+    assert "task_policies" not in result
+    assert asdict(record) == before
+
+
+@pytest.mark.parametrize("damage", [
+    "other-session", "legacy-ref", "producer", "opaque", "released", "unknown",
+    "duplicate", "task-mixed", "inbound", "released-ledger", "missing-machine",
+])
+def test_noncanonical_self_claim_never_reaches_task_or_process_probe(subject, monkeypatch, damage):
+    from agent_worktrees import claim_providers
+
+    owner, record, expected = subject
+    claim = tracking.ResourceClaim(
+        kind="session", ref=tracking.format_claim_ref(
+            record.machine, record.repo, record.worktree_id, session=NATIVE,
+        ),
+    )
+    record.resources = [claim]
+    if damage == "other-session":
+        claim.ref = claim.ref.replace(NATIVE, "00000000-0000-4000-8000-000000000002")
+    elif damage == "legacy-ref":
+        claim.ref = tracking.format_claim_ref(None, None, record.worktree_id, session=NATIVE)
+    elif damage == "producer":
+        claim.producer_present = True
+    elif damage == "opaque":
+        claim.metadata_opaque = True
+    elif damage in {"released", "unknown"}:
+        claim.state = damage
+    elif damage == "duplicate":
+        record.resources.append(replace(claim))
+    elif damage == "task-mixed":
+        record.resources.append(tracking.ResourceClaim(kind="task", ref="dispatch-local-task:t"))
+    elif damage == "inbound":
+        record.owner_ref = "other/project/worktree"
+    elif damage == "released-ledger":
+        record.last_finalize_released = [claim]
+    else:
+        record.machine = ""
+    monkeypatch.setattr(
+        claim_providers, "resolve_claim_status", lambda *a, **kw: pytest.fail("claim callback"),
+    )
+    monkeypatch.setattr(owner, "session_liveness", lambda *a: pytest.fail("process probe"))
+    result = owner.check(expected, loader=lambda: record)
+    assert result["reason"] == "claim-policy-unqualified"
+    assert result["worktree_qualified"] is False and result["launch_authorized"] is False
+
+
 @pytest.mark.parametrize("change,reason", [
     ({"repo": "different-project"}, "project-changed"),
     ({"creation_nonce": "fedcba9876543210"}, "worktree-incarnation-changed"),

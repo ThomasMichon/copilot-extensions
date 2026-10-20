@@ -406,8 +406,12 @@ The old epoch must be different-boot/same-environment, and the old UUID/PID/birt
 hash must match the recorded source activation. Current owner policy, dead
 native process, absent mux and no staged typed/legacy seed are rechecked under
 the existing lifecycle/native-admission guards and strict record lock before
-invocation. All claims, dispatch provenance and profile assignment remain
-unqualified; no task snapshot is promoted to an action-time reservation.
+invocation. Only an empty claim ledger or one canonical active producer-free,
+nonopaque self-session claim for the exact original UUID and current
+machine/project/worktree is admitted. The claim is retained unchanged. Mixed,
+other or released claims, inbound ownership, dispatch provenance and profile
+assignment remain unqualified; no task snapshot is promoted to an action-time
+reservation. The same claim predicate governs explicit native acknowledgement.
 
 The request ID is the Manager's existing frozen attempt UUID, not a replacement
 conversation ID. Normalized native launch uses the exact original `--resume`
@@ -478,6 +482,10 @@ history, pending handoffs/seeds, indirect/missing paths, ended or ambiguous
 activations and uncertain/live processes refuse with a reason.
 Mux listing errors/timeouts remain `mux-state-unknown`, not confirmed absence;
 an empty successful listing is distinct from a failed probe.
+The exact original self-session claim is also accepted by this provisional
+check without a provider callback or new authority. Unknown/opaque,
+producer-bearing, released, duplicate or foreign self claims refuse, as do
+inbound ownership and a retained released-claim ledger.
 Task provenance is not current task policy. A single active, producer-free task
 claim with an exact `dispatch-local-task:` or `dispatch-central-task:` ref can
 request `claim-status <id> --native-restart-policy` through its existing verified
