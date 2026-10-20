@@ -640,14 +640,8 @@ def test_posix_lean_provision_installs_resolver_and_launchers_reenter_runtime(
     if shutil.which("uv") is None:
         pytest.skip("native package construction requires uv")
     home, payload = _materialized_payload(tmp_path)
-    env = os.environ.copy()
-    env.update(
-        {
-            "HOME": str(home),
-            "USERPROFILE": str(home),
-            "COPILOT_PLUGIN_INSTALL_DEADLINE_SEC": "0",
-        }
-    )
+    env = _offline_bootstrap_env(tmp_path, home)
+    env["COPILOT_PLUGIN_INSTALL_DEADLINE_SEC"] = "0"
     provision = subprocess.run(
         ["bash", str(payload / "scripts" / "install.sh"), "provision"],
         cwd=home,
@@ -679,6 +673,57 @@ def test_posix_lean_provision_installs_resolver_and_launchers_reenter_runtime(
         assert launched.returncode == 0, launched.stderr
         version = json.loads((payload / "plugin.json").read_text())["version"]
         assert launched.stdout.startswith(f"agent-worktrees {version} "), launched.stdout
+
+
+def _offline_bootstrap_env(tmp_path: Path, home: Path) -> dict[str, str]:
+    prepared_cache = Path(sys.prefix) / ".bootstrap-uv-cache"
+    assert prepared_cache.is_dir(), (
+        "native bootstrap prerequisites are missing; prepare with "
+        "tools/run-plugin-tests.py agent-worktrees --prepare-only"
+    )
+    cache = tmp_path / "uv-cache"
+    shutil.copytree(prepared_cache, cache)
+    return {
+        **os.environ,
+        "HOME": str(home),
+        "USERPROFILE": str(home),
+        "UV_CACHE_DIR": str(cache),
+        "UV_OFFLINE": "1",
+    }
+
+
+def test_offline_bootstrap_env_isolates_the_prepared_cache(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    prefix = tmp_path / "prepared-venv"
+    prepared_cache = prefix / ".bootstrap-uv-cache"
+    prepared_cache.mkdir(parents=True)
+    (prepared_cache / "metadata").write_text("prepared")
+    monkeypatch.setattr(sys, "prefix", str(prefix))
+    monkeypatch.setenv("UV_CACHE_DIR", str(tmp_path / "unrelated-cache"))
+    monkeypatch.setenv("UV_OFFLINE", "0")
+    fixture = tmp_path / "fixture"
+    fixture.mkdir()
+    home = fixture / "home"
+
+    env = _offline_bootstrap_env(fixture, home)
+
+    assert env["HOME"] == env["USERPROFILE"] == str(home)
+    assert env["UV_OFFLINE"] == "1"
+    cache = Path(env["UV_CACHE_DIR"])
+    assert cache == fixture / "uv-cache"
+    assert (cache / "metadata").read_text() == "prepared"
+    (cache / "metadata").write_text("fixture-only")
+    assert (prepared_cache / "metadata").read_text() == "prepared"
+
+
+def test_offline_bootstrap_env_requires_prepared_cache(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(sys, "prefix", str(tmp_path / "unprepared-venv"))
+
+    with pytest.raises(AssertionError, match="native bootstrap prerequisites are missing"):
+        _offline_bootstrap_env(tmp_path, tmp_path / "home")
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX installer integration")
@@ -728,21 +773,10 @@ os.execv(str(real), [str(real), *sys.argv[1:]])
     )
     fake_uv.chmod(0o755)
 
-    env = os.environ.copy()
-    prepared_cache = Path(sys.prefix) / ".bootstrap-uv-cache"
-    assert prepared_cache.is_dir(), (
-        "native bootstrap prerequisites are missing; prepare with "
-        "tools/run-plugin-tests.py agent-worktrees --prepare-only"
-    )
-    cache = tmp_path / "uv-cache"
-    shutil.copytree(prepared_cache, cache)
+    env = _offline_bootstrap_env(tmp_path, home)
     env.update(
         {
-            "HOME": str(home),
-            "USERPROFILE": str(home),
             "PATH": f"{fake_bin}{os.pathsep}{env['PATH']}",
-            "UV_CACHE_DIR": str(cache),
-            "UV_OFFLINE": "1",
             "AGENT_WORKTREES_INSTALL_DEADLINE_SEC": "60",
             "NAMESPACE_HEALTH_STALL": "1" if stall_health_gate else "0",
             "HEALTH_REACHED": str(tmp_path / "health-reached"),

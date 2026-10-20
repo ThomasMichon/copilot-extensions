@@ -1,0 +1,9 @@
+{
+  "comment": "Share isolated offline prerequisites across all real native bootstrap fixtures",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
