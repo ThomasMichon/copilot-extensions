@@ -46,6 +46,13 @@ class Engine:
         self.receipt["network_id"] = self.network
         save(self.root / "receipt.json", self.receipt)
 
+    @staticmethod
+    def write_log(path: Path, data: bytes) -> None:
+        try:
+            path.write_bytes(data)
+        except OSError:
+            raise ProofError("docker-log-write-failed") from None
+
     def call(self, *args: str, timeout: float = 20, build: bool = False,
              cleanup: bool = False) -> str:
         remaining = self.deadline - time.monotonic()
@@ -64,16 +71,16 @@ class Engine:
                 timeout=timeout, check=False,
             )
         except FileNotFoundError:
-            log.write_text("docker executable unavailable\n", encoding="utf-8")
+            self.write_log(log, b"docker executable unavailable\n")
             raise ProofError("docker-unavailable") from None
         except OSError:
-            log.write_text("Docker command could not be launched\n", encoding="utf-8")
+            self.write_log(log, b"Docker command could not be launched\n")
             raise ProofError("docker-command-unavailable") from None
         except subprocess.TimeoutExpired:
-            log.write_text("bounded Docker command timed out\n", encoding="utf-8")
+            self.write_log(log, b"bounded Docker command timed out\n")
             raise ProofError("docker-command-timeout") from None
         # Fixture processes print only classified outcomes; never credential contents.
-        log.write_bytes(result.stdout + result.stderr)
+        self.write_log(log, result.stdout + result.stderr)
         if result.returncode:
             raise ProofError("docker-command-failed")
         return result.stdout.decode("utf-8").strip()

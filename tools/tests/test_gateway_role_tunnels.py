@@ -221,6 +221,39 @@ def test_cleanup_failure_is_explicit_and_does_not_skip_network_cleanup(tmp_path:
     assert ("network", "rm", NETWORK) in calls
 
 
+@pytest.mark.parametrize("failure", [
+    None, FileNotFoundError(), OSError(), subprocess.TimeoutExpired("docker", 1),
+], ids=["completed", "missing-command", "launch-error", "timeout"])
+def test_log_write_failure_cannot_abort_owned_resource_cleanup(
+    tmp_path: Path, failure: Exception | None,
+) -> None:
+    engine = ENGINE.Engine(tmp_path, {})
+    engine.containers = [CID_A, CID_B]
+    engine.network = NETWORK
+    calls = []
+
+    def launch(argv: list[str], **kwargs: object) -> SimpleNamespace:
+        calls.append(tuple(argv[1:]))
+        if failure is not None:
+            raise failure
+        return SimpleNamespace(returncode=0, stdout=b"synthetic-output", stderr=b"")
+
+    with patch.object(ENGINE.subprocess, "run", side_effect=launch), \
+            patch.object(Path, "write_bytes", side_effect=OSError("synthetic log failure")):
+        errors = engine.cleanup()
+    for cid in (CID_A, CID_B):
+        assert ("logs", "--tail", "160", cid) in calls
+        assert ("stop", "--time", "5", cid) in calls
+        assert ("rm", cid) in calls
+    assert ("network", "rm", NETWORK) in calls
+    assert errors == [
+        "container-log-capture-failed", "owned-container-cleanup-failed",
+        "container-log-capture-failed", "owned-container-cleanup-failed",
+        "owned-network-cleanup-failed",
+    ]
+    assert json.loads((tmp_path / "receipt.json").read_text())["cleanup_errors"] == errors
+
+
 def test_uncertain_creation_without_receipt_is_not_clean_success(tmp_path: Path) -> None:
     engine = ENGINE.Engine(tmp_path, {})
     engine.pending = [tmp_path / "missing.cid"]
