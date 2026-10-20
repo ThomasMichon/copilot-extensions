@@ -87,6 +87,64 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Mechanical move mapping: preserved, not conflated with fixtures
 
+### First admitted move: naming, body and patch-identity helpers
+
+Baseline: current Dev `422b4827e9b58d3bf04699415c0b3845a99d8e3c`.
+This is the M-MOVE helper partition only: seven whole classes move from
+`tests/test_pr_ops.py` into `tests/test_pr_helpers.py`; `_git` moves
+unchanged into `tests/pr_test_helpers.py`, imported by both consumers.
+No production behavior, fixture, class setup, parameter, test assertion or
+test mark changes. In particular, the historical informational contract mark
+is not added in this strictly mechanical slice. The native Git cases remain
+native Git cases, not units admitted to required Source CI.
+
+The bijection is literal: for **every** `test_*` method in each class below,
+`tests/test_pr_ops.py::<class>::<method>` becomes
+`tests/test_pr_helpers.py::<class>::<method>`. Class and method names,
+signatures, decorators, parameter values, helper methods and assertions are
+unchanged. Every other node remains under its original identity.
+
+| Class | Moved collected nodes |
+|-------|----------------------:|
+| `TestSlugify` | 5 |
+| `TestRequiredBodySections` | 8 |
+| `TestFeatureBranchName` | 2 |
+| `TestWorktreeSuffixHelper` | 2 |
+| `TestResolveHeadPattern` | 4 |
+| `TestPRHeadName` | 11 |
+| `TestPatchId` | 3 |
+
+AST comparison against the baseline requires exactly one identical
+class/function body for every original top-level definition across the three
+resulting modules. Real pytest collection before and after requires the same
+317 parameter-expanded nodes after this explicit 35-node mapping, with
+identical fixture closure, parameters and effective marks for every node.
+This is stronger than the historical census's unexpanded 308-name count.
+Contained native Windows execution of all 35 moved cases and the 11 remaining
+`TestExistingFeaturePush`/`TestCreatePRRefspec` consumers passes with exactly
+two workers and unchanged 30-second item and 240-second diagnostic group
+limits (46 passes, 63.36 seconds). This is not parent qualification.
+
+Conservative coverage selection retains both changed test modules as whole
+files; it does not rewrite old measured node identities or award new-node
+coverage. The real-Git partial-split regression in
+`tools/test_coverage_selected_execution.py` checks those exact boundaries.
+The real contained partial-split consumer regression in
+`tools/test_plugin_test_selection.py` executes both moved and remaining cases
+through whole-file selection, while its existing unknown-node controls still
+refuse nodes outside those explicitly selected files. Whole-file execution
+replaces stale node evidence; it never credits the old node as collected.
+The later COVERAGE batch owns upstream-drift reconciliation.
+Shared fixtures, publication stubs, observation/role changes,
+all remaining class moves and the full Windows qualification remain excluded.
+The two focused producer cases and seven real contained consumer cases pass
+on native Windows (nine passes, no skips, 17.61 seconds); unchanged install
+contract validation reports zero violations across thirteen plugins.
+Clean-room provisioning is inapplicable to this test-only relocation.
+No Linux or external-venue result is claimed: the available Linux host has
+no pytest environment, and the Docker engine is unavailable. No service or
+dependency was installed for this slice.
+
 AST-only inspection of the historical `test_pr_ops.py` and the twelve
 destination modules finds **308 old test method/function names and 308 new,
 no missing names, no duplicate names and no new names**. Of those, 220

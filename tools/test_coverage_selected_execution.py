@@ -107,6 +107,39 @@ def test_changed_new_test_files_and_out_of_scope_changes_remain_visible(history)
     }
 
 
+def test_partial_test_split_keeps_both_files_and_does_not_invent_moved_node_credit(history):
+    root, _, baseline = history
+    tests = root / "plugins/fixture/tests"
+    tests.mkdir()
+    old = tests / "test_app.py"
+    old.write_text(
+        "def test_implicated(): pass\n\ndef test_smoke(): pass\n", encoding="utf-8",
+    )
+    _git(root, "add", ".")
+    _git(root, "commit", "-qm", "original test module")
+    base = _git(root, "rev-parse", "HEAD")
+    baseline["measured_commit"] = base
+    old.write_text("def test_smoke(): pass\n", encoding="utf-8")
+    (tests / "test_helpers.py").write_text(
+        "def test_implicated(): pass\n", encoding="utf-8",
+    )
+    _git(root, "add", "-A")
+    _git(root, "commit", "-qm", "mechanical partial split")
+
+    payload = _plan(root, base, smoke_budget_s=20)
+
+    assert payload["mode"] == "fallback"
+    assert payload["changed_test_files"] == [
+        "tests/test_app.py", "tests/test_helpers.py",
+    ]
+    assert payload["selection"]["files"] == payload["changed_test_files"]
+    assert "tests/test_app.py::test_implicated" in payload["selection"]["nodes"]
+    assert "tests/test_helpers.py::test_implicated" not in payload["selection"]["nodes"]
+    assert {reason["file"] for reason in payload["selection_fallback_reasons"]} == {
+        "plugins/fixture/tests/test_app.py", "plugins/fixture/tests/test_helpers.py",
+    }
+
+
 @pytest.mark.parametrize("change", ["insertion", "deletion", "new", "binary", "rename"])
 def test_unusual_diff_shapes_do_not_disappear(history, change: str):
     root, base, _ = history

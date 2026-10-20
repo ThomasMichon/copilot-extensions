@@ -167,6 +167,30 @@ def test_whole_changed_file_executes_all_replacements_for_retired_baseline_nodes
     ) == 0
     assert "4 passed, 2 deselected" in capfd.readouterr().out
 
+
+def test_partial_split_executes_moved_and_remaining_cases_without_stale_node_credit(
+    selection_fixture, capfd,
+):
+    root, path = selection_fixture
+    (root / "tests/test_split.py").write_text(
+        "def test_remaining(): pass\n", encoding="utf-8",
+    )
+    (root / "tests/test_moved.py").write_text(
+        "def test_moved(): pass\n", encoding="utf-8",
+    )
+    payload = json.loads(path.read_text())
+    payload["nodes"].append("tests/test_split.py::test_moved")
+    payload["files"] = ["tests/test_split.py", "tests/test_moved.py"]
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    assert runner.run_plugin(
+        "fixture", "unused", reinstall=False, kexpr=None, limits=runner.Limits(),
+        plugin_timeout=60, test_timeout=10, max_files_per_subsuite=25,
+        selection_file=path,
+    ) == 0
+    assert "4 passed, 3 deselected" in capfd.readouterr().out
+
+
 def test_selected_node_cannot_be_silently_deselected_by_ambient_options(selection_fixture, monkeypatch):
     root, path = selection_fixture
     (root / "pytest.ini").write_text("[pytest]\naddopts=-k test_guard\n", encoding="utf-8")

@@ -1,0 +1,9 @@
+{
+  "comment": "Split PR helper tests into an independent module without changing fixtures or case semantics.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
