@@ -50,17 +50,20 @@ def _acknowledged(result: dict, request: dict) -> bool:
     )
 
 
-def _attempt(attempt_id: str, attempts: list[dict], epoch: HostEpoch | None) -> tuple[dict, dict]:
+def _attempt(
+    attempt_id: str, attempts: list[dict], epoch: HostEpoch | None, *, historical: bool = False,
+) -> tuple[dict, dict]:
     if str(UUID(attempt_id)) != attempt_id:
         raise ValueError("Current owner inspection requires a canonical attempt UUID")
     attempt = next((item for item in attempts if item["attempt_id"] == attempt_id), None)
     if attempt is None:
         raise ValueError("Frozen restart attempt not found")
-    if epoch is None or attempt["target_epoch"] != asdict(epoch):
+    fields = ("platform", "environment_id") if historical else ("platform", "environment_id", "boot_id")
+    if epoch is None or any(attempt["target_epoch"][key] != asdict(epoch)[key] for key in fields):
         raise ValueError("Frozen restart attempt target epoch no longer matches")
     evidence = attempt["last_positive"]
     expected = {field: evidence[field] for field in _EXPECTED_FIELDS}
-    expected["target_epoch"] = asdict(epoch)
+    expected["target_epoch"] = attempt["target_epoch"]
     return attempt, expected
 
 
@@ -96,7 +99,7 @@ def inspect_launch(attempt_id: str, attempts: list[dict], epoch: HostEpoch | Non
     No Manager attempt is reset or advanced by this inspection. An absent or
     uncertain owner receipt cannot authorize a retry.
     """
-    attempt, expected = _attempt(attempt_id, attempts, epoch)
+    attempt, expected = _attempt(attempt_id, attempts, epoch, historical=True)
     evidence = attempt["last_positive"]
     request = {
         "request_id": attempt_id, "expected": expected,

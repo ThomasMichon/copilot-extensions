@@ -155,6 +155,10 @@ means of fulfilling the operator's request. They require normal source review.
   active-claim proof. These are provisional reads, not action-time admission
   or generation reservations; mixed/producer/inbound claims and profile policy
   remain unqualified. A matching snapshot cannot authorize launch.
+  [#7333](https://github.com/ThomasMichon/copilot-extensions/pull/7333)
+  admits only the exact original active producer-free, nonopaque self-session
+  claim through the existing owner fences, retaining the claim unchanged.
+  It does not qualify other claim or task-bound restoration.
 - [ ] Reuse a proven surviving session first. Otherwise request supported
   native cold Resume of the exact original conversation in its proper mux.
   Never substitute a new conversation, raw process spawn or a global repair
@@ -950,3 +954,54 @@ The umbrella effort remains Active independently of this slice's completion.
   a cold owner read; the dispatch fixture explicitly preserves and asserts both
   raw-present and opaque flags after YAML serialization. This changes fixture
   evidence, not launch policy or the owner codec.
+
+### 2026-10-19 - Canonical self-session admission merged; receipt lifecycle next
+
+- [#7333](https://github.com/ThomasMichon/copilot-extensions/pull/7333)
+  squash-merged to `dev` as `f7910c76a5` after genuine Copilot approval of exact
+  head `fdbad88ad92`, no remaining findings and required green checks.
+  The final disconnected launch/ACK lane passed 82 contracts with cold persisted
+  owner reads; the unchanged Manager compatibility receipt remains 56 contracts.
+- Re-read the focused Plan, Validation Plan and completion gate after merge.
+  The exact self-session admission piece is delivered, but no combined recovery
+  or qualification item is complete. The original tracker and umbrella stay
+  open; merged source is not release promotion, installation or enrollment.
+- Next source-only stretch: retain acknowledged request history across a later
+  boot without discarding an uncertain launch, permitting same-request retries
+  or confusing historical acknowledgement with current liveness. The current
+  single durable receipt permanently refuses every different request, including
+  an independently frozen later-boot candidate. Preserve that conservative
+  refusal until a bounded owner-mediated receipt lifecycle is qualified.
+- Actual native readiness/seed acknowledgement, surviving-session adoption,
+  task/producer/profile action-time admission, platform startup/enrollment and
+  blocking-work notification qualification remain under this same objective.
+  No live CLI, service, host startup or automatic restoration was changed.
+
+### 2026-10-19 - Bounded retained receipt history; source-only implementation
+
+- Added owner-mediated append admission for a separately frozen later-boot
+  request only after the latest exact execution explicitly acknowledged pickup.
+  Original UUID, worktree/head/incarnation and acknowledged source/activation
+  continuity are mandatory, alongside the existing current-owner launch fences.
+  Every earlier outcome remains immutable; unacknowledged launches, reused
+  request identities, boot cycles and malformed history refuse.
+- The private store retains at most 16 entries and 32 KiB aggregate, with no
+  eviction/reset/retry API. Reservation accounts for maximum future ACK growth
+  and advancing owner/activation counters before native invocation. Existing
+  single-entry wire/storage contracts remain compatible.
+- Explicit owner/Manager outcome inspection can read a retained older target
+  boot in the same platform/environment without rebinding the frozen attempt
+  or inferring current liveness. Current-owner checks, launch and ACK stay
+  current-boot-strict; restored and automatic eligibility remain false.
+- Disconnected validation passed 235 owner and 46 Manager contracts before the
+  additional ACK-capacity cases; the final launch/ACK/platform lane passed 107
+  owner contracts. Real owner processes exercise serialization and death on
+  either side of synthetic mux invocation. Native epoch/process/mux evidence
+  remains synthetic, not real CLI readiness, seed consumption or reboot proof.
+- Documentation-impact review updates owner behavior/engine contracts, Manager
+  inspection scope and the focused test flow. This closes part of the existing
+  session-hosting recovery intent under the established ownership/durable-state
+  patterns, not a new authority or rollout. Source is not yet reviewed/merged.
+  Full native/platform qualification, surviving-session adoption,
+  task/producer/profile action-time admission, startup/enrollment and blocking
+  notification timing remain open under the original objective.

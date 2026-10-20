@@ -162,12 +162,13 @@ def cmd_embody(args: argparse.Namespace) -> int:
         expected = request["expected"]
         path = cli.cfg.tracking_dir() / f"{expected['worktree_id']}.yaml"
         # Epoch qualification precedes Linux-only private-state primitives.
-        if native_source_context.epoch() != expected["target_epoch"]:
+        epoch = native_source_context.epoch()
+        inspecting = getattr(args, "restart_receipt", False)
+        fields = ("platform", "environment_id") if inspecting else ("platform", "environment_id", "boot_id")
+        if epoch is None or any(epoch[key] != expected["target_epoch"][key] for key in fields):
             raise ValueError("Restart target has a foreign-environment")
-        if getattr(args, "restart_receipt", False):
-            receipt = native_restart_receipt.read(path)
-            if receipt is not None and receipt["request"] != request:
-                raise ValueError("unreconciled-restart receipt belongs to a different request")
+        if inspecting:
+            receipt = native_restart_receipt.find(path, request)
             output._json_output(receipt or {
                 "schema": "native-restart-launch", "version": 1, "request": request,
                 "state": "not-reserved", "seed_acknowledged": False,
@@ -199,11 +200,12 @@ def cmd_embody(args: argparse.Namespace) -> int:
             })
             return 0
         with bridge_acquisition_launch.launch_fence(repo, path):
-            receipt = native_restart_receipt.read(path)
+            receipt = native_restart_receipt.find(path, request)
             if receipt is not None:
-                if receipt["request"] != request:
-                    raise ValueError("unreconciled-restart receipt belongs to a different request")
                 return _emit(receipt, repeated=True)
+            previous = native_restart_receipt.read(path)
+            if previous is not None:
+                native_restart_receipt.validate_successor(previous, request)
             if reason := _refusal(request, path):
                 raise ValueError(reason)
             preflight = cli._preflight_launch(config, args, expected["worktree_path"])

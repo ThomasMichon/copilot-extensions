@@ -92,9 +92,12 @@ def test_malformed_or_authority_shaped_response_never_becomes_recovery(subject, 
     assert "launch_receipt" not in result
 
 
-def test_foreign_attempt_target_never_contacts_owner(subject, capsys):
+@pytest.mark.parametrize("change", [
+    {"environment_id": "d" * 32}, {"platform": "wsl"},
+])
+def test_foreign_attempt_target_never_contacts_owner(subject, capsys, change):
     _, row, calls = subject
-    row["target_epoch"] = {**vars(EPOCH), "boot_id": "different"}
+    row["target_epoch"] = {**vars(EPOCH), **change}
     assert main(["mux-daemon", "recovery-evidence", "--check-launch", ATTEMPT]) == 1
     assert calls == []
     assert "target epoch" in json.loads(capsys.readouterr().out)["blocker"]
@@ -115,7 +118,8 @@ def acknowledged(original):
     return {
         **original, "version": 2, "state": "seed-acknowledged", "seed_acknowledged": True,
         "acknowledgement": {
-            "native_session_id": NATIVE, "target_epoch": vars(EPOCH),
+            "native_session_id": NATIVE,
+            "target_epoch": original["request"]["expected"]["target_epoch"],
             "source_identity": "native-source-v1:" + "c" * 64,
             "native_incarnation": "99:456", "session_incarnation": "$1:100",
             "head_revision": 5, "owner_revision": 9, "activation_ordinal": 3,
@@ -134,6 +138,27 @@ def test_manager_composes_ack_without_claiming_automatic_or_completed_recovery(s
     assert result["launch_receipt"]["restored"] is False
     assert result["automatic_eligible"] is False
     assert "qualification" in result["blocker"]
+
+
+def test_historical_launch_inspection_keeps_frozen_target_not_current_boot(subject, monkeypatch, capsys):
+    root, row, calls = subject
+    original = engine_client.run_json
+    monkeypatch.setattr(
+        restart_observer, "native_epoch",
+        lambda: restart_observer.HostEpoch("linux", EPOCH.environment_id, "later-boot"),
+    )
+    monkeypatch.setattr(engine_client, "run_json", lambda *a, **k: acknowledged(original(*a, **k)))
+    before = json.dumps(row, sort_keys=True)
+    assert main(["mux-daemon", "recovery-evidence", "--check-launch", ATTEMPT]) == 1
+    result = json.loads(capsys.readouterr().out)
+    assert result["launch_receipt"]["seed_acknowledged"] is True
+    request = json.loads(calls[0][1][4])
+    assert request["expected"]["target_epoch"] == vars(EPOCH)
+    assert result["launch_receipt"]["acknowledgement"]["target_epoch"] == vars(EPOCH)
+    assert result["automatic_eligible"] is False
+    assert "qualification" in result["blocker"]
+    assert json.dumps(row, sort_keys=True) == before
+    assert list(root.iterdir()) == []
 
 
 @pytest.mark.parametrize("mutation", [

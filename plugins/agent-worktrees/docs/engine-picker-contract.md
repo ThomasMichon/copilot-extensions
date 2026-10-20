@@ -419,12 +419,16 @@ and full `--interactive` STATUS FIRST seed. Before mux invocation the owner
 durably publishes `state: "launch-uncertain"`; only a successful mux return can
 advance it to `mux-created`. Crashes, timeouts and failed outcome publication
 never release the request for retry. An exact repeat returns the saved result;
-a different request cannot overwrite it. The receipt contains identities and
-outcome only, no transcript, seed text or executable command. It is bounded to
-32 KiB and private per worktree. No automatic caller or receipt-clearing command
-is introduced.
+a different request cannot overwrite an unacknowledged outcome. The receipts
+contain identities and outcomes only, no transcript, seed text or executable
+command. The private per-worktree store retains at most 16 receipts within
+32 KiB aggregate, without eviction. No automatic caller or receipt-clearing
+command is introduced.
 
 Adding `--restart-receipt` is strictly read-only, even when no receipt exists.
+It selects an exact retained request, including an older target boot in the
+same platform/environment, without changing that frozen target or probing
+current liveness. Launch and ACK still require their exact current boot.
 The payload has exactly `schema: "native-restart-launch"`, integer `version: 1`,
 the exact typed `request`, `state` (`not-reserved`, `launch-uncertain` or
 `mux-created`) and false `seed_acknowledged`, `restored`, `automatic_eligible`.
@@ -463,8 +467,24 @@ mux producer's token, including tmux's leading dollar sign (for example `$1:100`
 `--restart-receipt` returns that version-2 object unchanged; the ACK response
 adds `ok`, not launch/retry authority. An identical ACK revalidates current
 execution/policy without rewriting storage. Missing/mismatched receipts,
-changed executions and failed persistence refuse; no retry, clear or supersede
-operation is provided. These contracts are not actual native CLI qualification.
+changed executions and failed persistence refuse; no retry, clear or destructive
+supersede operation is provided.
+
+A new later-boot request can append only after the latest receipt is
+acknowledged, with the same project/worktree/path/incarnation/head and original
+native UUID. Its source epoch must equal that ACK's target epoch, and its source
+PID/birth/identity and activation must match the ACK, with owner revision at
+least the acknowledged revision. Existing current-owner fences still apply.
+The entire history is validated on every read/write: request UUIDs and target
+epochs are unique, no target revisits the initial source boot, and every
+predecessor is acknowledged. Existing single-entry version-1/2 files remain
+readable; multiple entries use an internal `native-restart-launch-history`
+version-1 envelope without changing the individual public response schemas.
+Reservation checks the 16-entry/32-KiB bounds, including maximum future ACK
+growth and owner/activation counter capacity, before invocation. A failed
+publication never authorizes clearing or retrying a launch. Historical ACKs
+remain immutable while the latest request advances; ACK intent addresses only
+that latest request. These contracts are not actual native CLI qualification.
 
 `session-role --restart-check <expected-json> --json` checks a **single explicit
 frozen identity** against the current worktree owner. The bounded (8 KiB)

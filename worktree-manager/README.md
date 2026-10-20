@@ -605,6 +605,12 @@ It does not rewrite the immutable frozen attempt, acquire a daemon lease,
 reserve or launch, or turn an absent/uncertain receipt into retry authority.
 Ordinary inspection still performs no owner call.
 
+`--check-launch` can inspect an older frozen target boot in the same
+platform/environment; it preserves the attempt's original target rather than
+rebinding it to the current boot. The owner returns the exact retained request
+from its bounded history, not just the latest outcome. `--check-attempt` remains
+strictly current-boot-only. Neither historical read establishes current liveness.
+
 For an acknowledged receipt the blocker identifies remaining native recovery
 qualification, rather than incorrectly reporting missing seed acknowledgement.
 The receipt is durable historical pickup evidence, not a new live status probe:
@@ -616,7 +622,12 @@ The explicit owner restart-launch increment holds its existing lifecycle,
 native-admission and strict record-writer fences through final validation and
 mux creation. It durably records uncertainty before invocation and supplies the
 original UUID plus full interactive STATUS FIRST seed. It currently admits no
-task/resource/profile-bound worktree and has no automatic caller in the Manager.
+task/producer/profile-bound worktree and has no automatic caller in the Manager;
+only an empty claim ledger or the exact canonical original self-session claim
+is admitted. A different later-boot request can proceed only from the latest
+acknowledged execution, retaining every prior outcome within the owner's
+16-entry/32-KiB bounds and reserved ACK/counter capacity. Unacknowledged launches
+and exhausted history remain blockers, not permission to reset or evict state.
 Persisted owner launch outcomes are independent of Manager process lifetime;
 `frozen` in the Manager database is historical candidate state, not evidence
 that no native invocation has occurred.

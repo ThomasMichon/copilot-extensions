@@ -245,12 +245,25 @@ A durable version-2 `seed-acknowledged` receipt retains the exact newly observed
 source, mux incarnation and owner/activation revisions. It can reconcile
 `launch-uncertain` without retrying the launch, and an identical ACK is
 idempotent only while the same execution and current policy are still proven.
-There is no clear/supersede operation, including after ACK. `restored` and
+After acknowledgement, a separately frozen later-boot request may append a new
+receipt only for that exact acknowledged execution: the same original UUID,
+worktree incarnation/head, source PID/birth/identity and activation, with an
+unchanged-or-later owner revision and the preceding target epoch as its source.
+Current launch admission is still required. Every prior receipt is retained
+unchanged; a reused request UUID with different contents or a repeated boot
+refuses. An unacknowledged latest launch always blocks a different request.
+History is bounded to 16 receipts and 32 KiB in aggregate, without eviction.
+Admission reserves space for the largest valid future ACK and requires room
+for owner/activation counters to advance before any native invocation.
+Exhaustion refuses, rather than deleting outcomes or launching without ACK room.
+There is no clear, destructive supersede or retry operation. `restored` and
 `automatic_eligible` remain false: this assertion does not qualify real native
 seed delivery, all recovery admission, or platform startup.
 
 Add `--restart-receipt` to read the exact request's receipt without launch
-configuration, admission, provisioning or writes. `not-reserved` means no owner
+configuration, admission, provisioning or writes, including for a retained
+older target boot in the same platform/environment. Historical acknowledgement
+is not current liveness or permission to launch again. `not-reserved` means no owner
 reservation is present, not permission to launch. `--dry-run` performs a
 provisional current-owner check without reservation. Automatic recovery,
 startup enrollment and actual native seed-delivery qualification remain

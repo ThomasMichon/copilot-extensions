@@ -1,0 +1,13 @@
+{
+  "comment": "Retain bounded acknowledged restart receipts across later boots without retrying uncertain launches",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

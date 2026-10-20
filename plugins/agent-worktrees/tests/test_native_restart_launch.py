@@ -6,6 +6,7 @@ import json
 import os
 import subprocess
 import sys
+from copy import deepcopy
 from dataclasses import replace
 from types import SimpleNamespace
 from uuid import uuid4
@@ -431,6 +432,14 @@ def spawn(*args):
     time.sleep(0.15)
     return {"ok": True}
 sessions.mux_new_session = spawn
+if mode == "reservation-crash":
+    from agent_worktrees import native_restart_receipt
+    real_write = native_restart_receipt.write
+    def crash_after_reservation(*args, **kwargs):
+        real_write(*args, **kwargs)
+        if kwargs["reserve"]:
+            os._exit(41)
+    native_restart_receipt.write = crash_after_reservation
 if mode.startswith("ack"):
     from agent_worktrees import native_hosting_evidence as hosting, native_restart_receipt
     cli.cfg.detect_platform = lambda: "linux"
@@ -653,6 +662,358 @@ def test_ack_requires_status_reconciliation_and_cannot_be_dry_run(resumed, capfd
     assert handoff_cli.cmd_embody(args) != 0
     capfd.readouterr()
     assert acknowledge(resumed, capfd, "--dry-run")[0] != 0
+
+
+@pytest.fixture
+def later_boot(resumed, capfd, monkeypatch):
+    rc, receipt = acknowledge(resumed, capfd)
+    assert rc == 0
+    previous = resumed.request
+    ack = receipt["acknowledgement"]
+    target = {**TARGET, "boot_id": "boot-third"}
+    resumed.request = {
+        "request_id": str(uuid4()), "source_epoch": TARGET,
+        "native_incarnation": ack["native_incarnation"],
+        "expected": {
+            **previous["expected"], "target_epoch": target,
+            **{key: ack[key] for key in (
+                "source_identity", "owner_revision", "activation_ordinal",
+            )},
+        },
+    }
+    monkeypatch.setattr(native_source_context, "epoch", lambda: dict(target))
+    return resumed, previous, {key: value for key, value in receipt.items() if key != "ok"}
+
+
+def test_later_boot_retains_acknowledged_history_without_reusing_launch(later_boot, capfd):
+    resumed, previous, acknowledged = later_boot
+    current_request = resumed.request
+    rc, result = invoke(resumed, capfd)
+    assert rc == 0, result
+    assert result["request"] == current_request and result["state"] == "mux-created"
+    assert len(resumed.launches) == 2
+    assert invoke(resumed, capfd)[0] == 0
+    assert len(resumed.launches) == 2
+    resumed.request = previous
+    rc, historical = invoke(resumed, capfd, "--restart-receipt")
+    assert rc == 0 and historical == acknowledged
+    assert historical["restored"] is False and historical["automatic_eligible"] is False
+    assert len(resumed.launches) == 2
+
+
+@pytest.mark.parametrize("state", ["launch-uncertain", "mux-created"])
+def test_later_boot_never_supersedes_an_unacknowledged_launch(later_boot, capfd, state):
+    from agent_worktrees import native_restart_receipt
+
+    resumed, previous, acknowledged = later_boot
+    unresolved = {
+        key: value for key, value in acknowledged.items() if key != "acknowledgement"
+    }
+    unresolved.update(version=1, state=state, seed_acknowledged=False)
+    path = native_restart_receipt._path(resumed.path)
+    path.write_text(json.dumps(unresolved))
+    before = path.read_bytes()
+    rc, result = invoke(resumed, capfd)
+    assert rc != 0 and "unreconciled-restart" in result["error"]
+    assert path.read_bytes() == before
+    assert len(resumed.launches) == 1
+
+
+@pytest.mark.parametrize("change", [
+    "head", "source", "source-boot", "activation", "owner", "original", "cycled-boot",
+])
+def test_later_boot_requires_continuity_with_the_acknowledged_execution(later_boot, capfd, monkeypatch, change):
+    from agent_worktrees import native_restart_receipt
+
+    resumed, previous, acknowledged = later_boot
+    expected = resumed.request["expected"]
+    if change == "head":
+        expected["head_revision"] += 1
+    elif change == "activation":
+        expected["activation_ordinal"] += 1
+    elif change == "owner":
+        expected["owner_revision"] -= 1
+    elif change == "cycled-boot":
+        expected["target_epoch"] = SOURCE
+        monkeypatch.setattr(native_source_context, "epoch", lambda: dict(SOURCE))
+    else:
+        if change == "source":
+            resumed.request["native_incarnation"] = "100:789"
+        elif change == "source-boot":
+            resumed.request["source_epoch"] = {**TARGET, "boot_id": "skipped-boot"}
+        else:
+            expected["native_session_id"] = str(uuid4())
+        pid, birth = resumed.request["native_incarnation"].split(":")
+        expected["source_identity"] = native_source_context.identity(
+            expected["native_session_id"], int(pid), birth, resumed.request["source_epoch"],
+        )
+    path = native_restart_receipt._path(resumed.path)
+    before = path.read_bytes()
+    rc, result = invoke(resumed, capfd)
+    assert rc != 0 and result["error"]
+    assert path.read_bytes() == before
+    assert len(resumed.launches) == 1
+
+
+def test_later_boot_native_ack_preserves_both_original_execution_outcomes(later_boot, capfd, monkeypatch):
+    from agent_worktrees import native_restart_receipt
+    from agent_worktrees.tracking_session_registry import _start_session_activation
+
+    resumed, previous, acknowledged = later_boot
+    assert invoke(resumed, capfd)[0] == 0
+    target = resumed.request["expected"]["target_epoch"]
+    source = native_source_context.identity(NATIVE, 100, "789", target)
+    record = tracking.load_record(resumed.path)
+    assert _start_session_activation(
+        record.sessions[0], event_at="third", recorded_at="third",
+        source="hook", source_identity=source,
+    )
+    record.lifecycle_revision += 1
+    tracking.save_record(record, resumed.path)
+    monkeypatch.setattr(sessions, "mux_binding_for_session", lambda *a, **k: {
+        "session_name": sessions.mux_session_name(record.worktree_id),
+        "pane_id": "%2", "pane_start_time": "788", "session_incarnation": "$2:200",
+        "copilot_pid": 100, "copilot_start_time": "789",
+    })
+    monkeypatch.setattr(native_source_context, "capture", lambda: {
+        "version": 1, "qualified": True, **target,
+        "ancestors": [{"pid": 100, "start_time": "789"}],
+    })
+    rc, result = acknowledge(resumed, capfd)
+    assert rc == 0 and result["state"] == "seed-acknowledged", result
+    assert result["acknowledgement"]["source_identity"] == source
+    assert native_restart_receipt.find(resumed.path, previous) == acknowledged
+    before = native_restart_receipt._path(resumed.path).read_bytes()
+    assert acknowledge(resumed, capfd)[0] == 0
+    assert native_restart_receipt._path(resumed.path).read_bytes() == before
+    assert len(resumed.launches) == 2
+
+
+def _next_receipts(previous, ordinal):
+    ack = previous["acknowledgement"]
+    source_epoch = previous["request"]["expected"]["target_epoch"]
+    target = {**source_epoch, "boot_id": f"history-{ordinal}"}
+    request = {
+        "request_id": str(uuid4()), "source_epoch": source_epoch,
+        "native_incarnation": ack["native_incarnation"],
+        "expected": {
+            **previous["request"]["expected"], "target_epoch": target,
+            **{key: ack[key] for key in (
+                "source_identity", "owner_revision", "activation_ordinal",
+            )},
+        },
+    }
+    reserved = {
+        "schema": "native-restart-launch", "version": 1, "request": request,
+        "state": "launch-uncertain", "seed_acknowledged": False,
+        "restored": False, "automatic_eligible": False,
+    }
+    acknowledged = {
+        **reserved, "version": 2, "state": "seed-acknowledged", "seed_acknowledged": True,
+        "acknowledgement": {
+            **ack, "target_epoch": target,
+            "source_identity": native_source_context.identity(NATIVE, 100 + ordinal, "456", target),
+            "native_incarnation": f"{100 + ordinal}:456",
+            "owner_revision": ack["owner_revision"] + 1,
+            "activation_ordinal": ack["activation_ordinal"] + 1,
+        },
+    }
+    return reserved, acknowledged
+
+
+def test_history_count_capacity_preserves_every_acknowledged_request(later_boot):
+    from agent_worktrees import native_restart_receipt
+
+    resumed, previous, acknowledged = later_boot
+    expected = [acknowledged]
+    for ordinal in range(2, 17):
+        reserved, acknowledged = _next_receipts(acknowledged, ordinal)
+        native_restart_receipt.write(resumed.path, reserved, reserve=True)
+        native_restart_receipt.write(resumed.path, acknowledged, reserve=False)
+        expected.append(acknowledged)
+    path = native_restart_receipt._path(resumed.path)
+    before = path.read_bytes()
+    assert len(before) <= 32768
+    assert native_restart_receipt._MAX_RECEIPTS == 16
+    reserved, _ = _next_receipts(acknowledged, 17)
+    with pytest.raises(ValueError, match="capacity"):
+        native_restart_receipt.write(resumed.path, reserved, reserve=True)
+    assert path.read_bytes() == before
+    for receipt in expected:
+        assert native_restart_receipt.find(resumed.path, receipt["request"]) == receipt
+
+
+def test_history_aggregate_byte_capacity_refuses_without_evicting(later_boot):
+    from agent_worktrees import native_restart_receipt
+
+    resumed, previous, acknowledged = later_boot
+    acknowledged = deepcopy(acknowledged)
+    acknowledged["request"]["expected"]["project"] = "p" * 4096
+    path = native_restart_receipt._path(resumed.path)
+    path.write_text(json.dumps(acknowledged))
+    receipts = [acknowledged]
+    for ordinal in range(2, 17):
+        reserved, acknowledged = _next_receipts(acknowledged, ordinal)
+        maximum = deepcopy(acknowledged)
+        maximum["acknowledgement"].update(
+            native_incarnation="9999999999:" + "9" * 32, session_incarnation="x" * 128,
+            source_identity=native_source_context.identity(
+                NATIVE, 9999999999, "9" * 32, reserved["request"]["expected"]["target_epoch"],
+            ),
+            owner_revision=tracking.MAX_PERSISTED_COUNTER,
+            activation_ordinal=tracking.MAX_PERSISTED_COUNTER,
+        )
+        native_restart_receipt.validate_acknowledgement(
+            reserved["request"], maximum["acknowledgement"],
+        )
+        candidate = {
+            "schema": "native-restart-launch-history", "version": 1,
+            "receipts": [*receipts, maximum],
+        }
+        size = len((json.dumps(candidate, sort_keys=True) + "\n").encode("utf-8"))
+        if size > 32768:
+            before = path.read_bytes()
+            assert len(before) <= 32768
+            with pytest.raises(ValueError, match="exceeds its budget"):
+                native_restart_receipt.write(resumed.path, reserved, reserve=True)
+            assert path.read_bytes() == before
+            return
+        native_restart_receipt.write(resumed.path, reserved, reserve=True)
+        native_restart_receipt.write(resumed.path, acknowledged, reserve=False)
+        receipts.append(acknowledged)
+    pytest.fail("The aggregate byte limit was not exercised before the count limit")
+
+
+def test_history_reservation_requires_room_for_acknowledgement(later_boot):
+    from agent_worktrees import native_restart_receipt
+
+    resumed, previous, acknowledged = later_boot
+    receipts = [deepcopy(acknowledged)]
+    receipts[0]["request"]["expected"]["project"] = "p"
+    for ordinal in range(2, 7):
+        _, acknowledged = _next_receipts(receipts[-1], ordinal)
+        receipts.append(acknowledged)
+    reserved, _ = _next_receipts(receipts[-1], 7)
+    candidate = {
+        "schema": "native-restart-launch-history", "version": 1,
+        "receipts": [*receipts, reserved],
+    }
+    overhead = len((json.dumps(candidate, sort_keys=True) + "\n").encode("utf-8"))
+    padding = 1 + (32768 - overhead) // 7
+    assert 1 <= padding <= 4096
+    for receipt in candidate["receipts"]:
+        receipt["request"]["expected"]["project"] = "p" * padding
+    assert len((json.dumps(candidate, sort_keys=True) + "\n").encode("utf-8")) <= 32768
+    path = native_restart_receipt._path(resumed.path)
+    path.write_text(json.dumps({**candidate, "receipts": receipts}, sort_keys=True) + "\n")
+    before = path.read_bytes()
+    with pytest.raises(ValueError, match="acknowledgement.*budget"):
+        native_restart_receipt.write(resumed.path, reserved, reserve=True)
+    assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize("field", ["owner_revision", "activation_ordinal"])
+def test_reservation_refuses_exhausted_acknowledgement_counters(subject, capfd, field):
+    from agent_worktrees import native_restart_receipt
+
+    record = tracking.load_record(subject.path)
+    subject.request["expected"][field] = tracking.MAX_PERSISTED_COUNTER
+    if field == "owner_revision":
+        record.lifecycle_revision = tracking.MAX_PERSISTED_COUNTER
+        tracking.save_record(record, subject.path)
+    else:
+        import yaml
+
+        raw = yaml.safe_load(subject.path.read_text())
+        raw["sessions"][0]["activations"][0]["ordinal"] = tracking.MAX_PERSISTED_COUNTER
+        subject.path.write_text(yaml.safe_dump(raw))
+    record_cache.clear()
+    rc, result = invoke(subject, capfd)
+    assert rc != 0 and "acknowledgement counter capacity" in result["error"]
+    assert subject.launches == []
+    assert native_restart_receipt.read(subject.path) is None
+
+
+@pytest.mark.parametrize("mode", ["normal", "crash", "reservation-crash"])
+def test_actual_owner_processes_preserve_history_and_new_attempt_uncertainty(later_boot, mode):
+    from agent_worktrees import native_restart_receipt
+
+    resumed, previous, acknowledged = later_boot
+    argv = [sys.executable, "-c", _CHILD, json.dumps(resumed.request), str(resumed.path)]
+    if mode == "normal":
+        children = [
+            subprocess.Popen([*argv, mode], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            for _ in range(2)
+        ]
+        try:
+            results = [(child, child.communicate(timeout=20)) for child in children]
+            assert any(child.returncode == 0 for child, _ in results), results
+        finally:
+            for child in children:
+                if child.poll() is None:
+                    child.kill()
+                child.wait(timeout=5)
+    else:
+        crashed = subprocess.run([*argv, mode], capture_output=True, text=True, timeout=20)
+        assert crashed.returncode == (42 if mode == "crash" else 41), crashed.stderr
+        repeated = subprocess.run([*argv, "normal"], capture_output=True, text=True, timeout=20)
+        assert repeated.returncode == 4, repeated.stderr
+        assert json.loads(repeated.stdout)["state"] == "launch-uncertain"
+    launches = resumed.path.with_suffix(".launches")
+    if mode == "reservation-crash":
+        assert not launches.exists()
+    else:
+        assert launches.read_text() == "launch\n"
+    assert native_restart_receipt.find(resumed.path, previous) == acknowledged
+
+
+@pytest.mark.parametrize("damage", ["duplicate", "reordered", "broken-link", "unknown-version"])
+def test_corrupt_history_is_never_partially_read_or_replaced(later_boot, capfd, damage):
+    from agent_worktrees import native_restart_receipt
+
+    resumed, previous, acknowledged = later_boot
+    assert invoke(resumed, capfd)[0] == 0
+    path = native_restart_receipt._path(resumed.path)
+    value = json.loads(path.read_text())
+    if damage == "duplicate":
+        value["receipts"][1] = deepcopy(value["receipts"][0])
+    elif damage == "reordered":
+        value["receipts"].reverse()
+    elif damage == "broken-link":
+        value["receipts"][1]["request"]["expected"]["owner_revision"] = 0
+    else:
+        value["version"] = True
+    path.write_text(json.dumps(value))
+    before = path.read_bytes()
+    resumed.request = previous
+    assert invoke(resumed, capfd, "--restart-receipt")[0] != 0
+    assert path.read_bytes() == before
+    assert len(resumed.launches) == 2
+
+
+@pytest.mark.parametrize("phase", ["reservation", "outcome"])
+def test_history_publication_failure_retains_prior_ack_and_new_uncertainty(later_boot, capfd, monkeypatch, phase):
+    from agent_worktrees import native_restart_receipt
+
+    resumed, previous, acknowledged = later_boot
+    original = os.replace
+    calls = []
+
+    def replace_receipt(*args):
+        calls.append(True)
+        if len(calls) == (1 if phase == "reservation" else 2):
+            raise OSError("simulated failed history publication")
+        return original(*args)
+
+    monkeypatch.setattr(native_restart_receipt.os, "replace", replace_receipt)
+    assert invoke(resumed, capfd)[0] != 0
+    assert native_restart_receipt.find(resumed.path, previous) == acknowledged
+    if phase == "reservation":
+        assert native_restart_receipt.find(resumed.path, resumed.request) is None
+        assert len(resumed.launches) == 1
+    else:
+        assert invoke(resumed, capfd)[1]["state"] == "launch-uncertain"
+        assert len(resumed.launches) == 2
 
 
 @pytest.mark.parametrize("incarnation", ["$1:100\n", "$1:100;extra"])

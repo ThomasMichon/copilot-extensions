@@ -256,6 +256,20 @@ Concurrent owner processes and post-invocation owner death exercise
 both an empty ledger and the original self claim with real locks and durable
 uncertainty. The provisional check makes no self-claim provider callback;
 task-policy snapshots still cannot authorize a launch.
+
+Receipt-history fixtures retain the original ACK while launching and
+acknowledging a separately frozen next-boot request. They refuse different
+requests after either unacknowledged state, changed head/source/activation,
+reused UUIDs, boot cycles, malformed history and exhausted counter capacity.
+The exact 16-entry limit and aggregate 32-KiB boundary are checked independently,
+including a pending receipt that fits but whose maximum valid future ACK would
+not. Publication failures before/after the native boundary retain either the
+prior acknowledged history or durable uncertainty without retry authority.
+Read-only owner/Manager checks retrieve older frozen targets only within the
+same platform/environment; current-owner inspection remains boot-strict.
+Real owner processes cover concurrent reservation and crashes both before and
+after synthetic mux invocation. No fixture qualifies a real native recovery.
+
 Positive owner/Manager ACK fixtures use the mux producer's actual `$1:100`
 incarnation shape, including the leading dollar sign, rather than a
 synthetic token alphabet. Newline and delimiter-bearing tokens remain refused.

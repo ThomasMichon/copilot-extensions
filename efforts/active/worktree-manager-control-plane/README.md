@@ -1255,6 +1255,24 @@ claiming discipline alone.
   restart-recovery, Bridge transport and sibling-runtime owners retain their
   scopes. No implementation, installation or completed-update claim is made.
 
+- **2026-10-19** - Implemented bounded acknowledged receipt history for
+  [machine restart recovery](machine-restart-recovery.md). A separately frozen
+  later-boot request must continue the latest acknowledged exact execution;
+  all prior outcomes remain immutable within 16-entry/32-KiB bounds, with
+  future ACK/counter capacity reserved before invocation. Historical
+  owner/Manager reads preserve the original target without proving liveness.
+  Disconnected owner and Manager contracts pass; source still awaits review
+  and merge. Full native/platform qualification and the focused gate remain
+  open, with no automatic startup, enrollment or live rollout.
+
+- **2026-10-19** - Canonical original self-session claim admission merged in
+  [#7333](https://github.com/ThomasMichon/copilot-extensions/pull/7333) after
+  exact-head approval and required green checks. Re-read and reconciled the
+  [focused recovery gate](machine-restart-recovery.md), which remains open.
+  Next is bounded, owner-mediated receipt history across later boots without
+  erasing uncertainty or granting retries. Actual native/platform qualification
+  and automatic startup remain owed; no release or rollout is implied.
+
 - **2026-10-19** - Implemented narrowly fenced canonical original self-session
   claim admission for [machine restart recovery](machine-restart-recovery.md).
   The provisional check, exact Resume and explicit ACK share one predicate;
