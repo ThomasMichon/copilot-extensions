@@ -2348,3 +2348,28 @@ requested contract.
   changes, so no additional installation clean-room or external rollout is
   claimed; native library first-touch evidence remains unchanged. Fresh full
   resulting-head review, current hosted CI and actual merge remain required.
+
+### 2026-10-20 - Invalidate selection observations before changed provider resolution
+
+- Full exact-head review `5579673540` identifies a further body-only Medium:
+  pending managed selection A can survive inactive provider B because B never
+  asks for a selection. Returning to indeterminate A then consumes the pre-B
+  result. Four desired-state regressions reproduce stale recovery through the
+  actual provider/future path, covering inactive and invalid B plus read
+  completion before and after returning to A.
+- Declaration processing now invalidates changed-authority selection reads
+  before provider resolution, independent of its result. Cancellation never
+  implies that a running read stopped; unfinished futures retain shutdown
+  accounting. A later fallback waits for the old read to finish and requires a
+  fresh observation. No deadline, restart or ownership authority is broadened.
+- The complete blocking-boundary, bounded-recovery, supervisor-daemon and
+  managed-companion cohort passes 254 cases with one platform skip. This is an
+  incremental correction, not an installer or provisioning change. Fresh full
+  resulting-head review, current CI and managed merge remain required.
+- The bounded #7020 physical-home test/diagnostic repair handoff is now
+  explicitly accepted by `greased-cylinder` in issue comment `6280945017`,
+  before edits. That work excludes this PR's supervisor/state/receipt hunks.
+  Native workspace commands and actual phase evidence are recorded in comment
+  `6281119961` after direct and relay transport refused delivery. Acceptance
+  names the separate repair owner; it does not claim the native cause fixed,
+  permit a timeout increase or waive any failing check.

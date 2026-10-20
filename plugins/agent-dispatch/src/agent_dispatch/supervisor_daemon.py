@@ -437,6 +437,10 @@ class SupervisorDaemon(BoundedReconciliation):
         for rid in present:
             registration = desired[rid]
             authority = companion_authority_fingerprint(registration)
+            selection = self._selection_futures.get(rid)
+            if selection is not None and selection[0] != authority:
+                selection[1].cancel()
+                self._selection_futures[rid] = (None, selection[1])
             try:
                 resolution = self._resolve_companion(rid, registration, authority)
                 if (

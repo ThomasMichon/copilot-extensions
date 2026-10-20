@@ -3,10 +3,13 @@
 import threading
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
+from types import SimpleNamespace
 
 import pytest
 
-from agent_dispatch.companion import CompanionIndeterminate, DefaultCompanionController
+from agent_dispatch.companion import (
+    CompanionError, CompanionIndeterminate, DefaultCompanionController, companion_authority_fingerprint,
+)
 from agent_dispatch.supervisor_daemon import SupervisorDaemon
 from tests.test_supervisor_daemon import FakeClient, FakeCompanionController, FakeLauncher, _companion_reg, _reg
 
@@ -262,6 +265,65 @@ def test_authority_reversal_cannot_reuse_an_uncancellable_observation(monkeypatc
         daemon._reconcile_deadline = time.monotonic() + 1
         assert invoke("A") == "fresh"
         assert calls == [observation, observation]
+    finally:
+        release.set()
+        daemon.shutdown()
+
+
+@pytest.mark.parametrize("inactive", [None, CompanionError("invalid changed declaration")])
+@pytest.mark.parametrize("completion", ["before-return", "after-return"])
+def test_desired_authority_reversal_invalidates_selection_even_when_provider_inactive(
+    monkeypatch, inactive, completion,
+):
+    controller = FakeCompanionController()
+    entered, release = threading.Event(), threading.Event()
+    calls = []
+    original = _companion_reg("unit")
+    original["spec"]["managed_runtime"] = {"pending": True}
+    changed = {**original, "plugin": {**original["plugin"], "version": "2"}}
+    authority = companion_authority_fingerprint(original)
+
+    def resolve(registration, **kwargs):
+        if companion_authority_fingerprint(registration) != authority:
+            if isinstance(inactive, Exception):
+                raise inactive
+            return inactive
+        raise CompanionIndeterminate("provider unavailable")
+
+    def selected(rid):
+        calls.append(rid)
+        observation = "stale" if len(calls) == 1 else "fresh"
+        if observation == "stale":
+            entered.set()
+            assert release.wait(3)
+        return SimpleNamespace(
+            authority=authority,
+            resolution=lambda: SimpleNamespace(registration={**original, "selection_observation": observation}),
+        )
+
+    monkeypatch.setattr(controller, "resolve", resolve)
+    monkeypatch.setattr(controller, "selected_managed", selected, raising=False)
+    daemon = SupervisorDaemon(FakeClient([]), "host", companion_controller=controller)
+
+    def desired(registration):
+        values = {"unit": registration}
+        daemon._reconcile_deadline = time.monotonic() + 0.05
+        daemon._resolve_companion_desired(values)
+        return values
+
+    try:
+        assert desired(original) == {}
+        assert entered.wait(1)
+        pending = daemon._selection_futures["unit"][1]
+        assert desired(changed) == {}
+        assert pending in daemon._probe_inflight and not pending.done()
+        assert calls == ["unit"]
+        if completion == "after-return":
+            assert desired(original) == {}
+        release.set()
+        assert pending.result(1).resolution().registration["selection_observation"] == "stale"
+        assert desired(original)["unit"]["selection_observation"] == "fresh"
+        assert calls == ["unit", "unit"]
     finally:
         release.set()
         daemon.shutdown()

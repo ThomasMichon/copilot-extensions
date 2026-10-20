@@ -144,6 +144,10 @@ remaining cycle deadline as provider resolution. Pending reads remain tracked
 and indeterminate; withdrawal or changed declaration authority invalidates
 their eventual result. Corrupt selection metadata withholds that companion
 without aborting unrelated units or changing its evidence.
+Declaration-authority changes invalidate pending selection observations before
+provider resolution, even when the changed provider is inactive or invalid.
+Returning to an earlier authority cannot reuse a pre-change result; unfinished
+reads remain in shutdown accounting until they actually finish.
 Managed recovery consumes that accepted persisted snapshot rather than reading
 the same selection again on the master. A later cold lookup also uses the
 bounded observation path.
