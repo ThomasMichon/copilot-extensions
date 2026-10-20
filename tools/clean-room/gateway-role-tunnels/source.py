@@ -26,7 +26,7 @@ release_selection runtime_admission runtime_identity staging_cleanup
 """.split())
 RESOURCES = frozenset("""
 standalone_build.py versioned_runtime.py versioned_runtime_leases.py
-versioned_runtime_construction.py versioned_runtime_source.py
+versioned_runtime_construction.py versioned_runtime_publication.py versioned_runtime_source.py
 """.split())
 RUNNER_FILES = frozenset({
     "run.py", "source.py", "engine.py", "witness.py",

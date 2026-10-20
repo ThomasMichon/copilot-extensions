@@ -17,4 +17,5 @@ libs/versioned-runtime/**
 !libs/versioned-runtime/versioned_runtime.py
 !libs/versioned-runtime/versioned_runtime_leases.py
 !libs/versioned-runtime/versioned_runtime_construction.py
+!libs/versioned-runtime/versioned_runtime_publication.py
 !libs/versioned-runtime/versioned_runtime_source.py

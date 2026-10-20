@@ -6,7 +6,7 @@ COPY --from=uv /uv /usr/local/bin/uv
 WORKDIR /build
 COPY fleet-manager/pyproject.toml fleet-manager/setup.py fleet-manager/README.md ./fleet-manager/
 COPY fleet-manager/src/fleet_manager/*.py ./fleet-manager/src/fleet_manager/
-COPY libs/versioned-runtime/standalone_build.py libs/versioned-runtime/versioned_runtime.py libs/versioned-runtime/versioned_runtime_leases.py libs/versioned-runtime/versioned_runtime_construction.py libs/versioned-runtime/versioned_runtime_source.py ./libs/versioned-runtime/
+COPY libs/versioned-runtime/standalone_build.py libs/versioned-runtime/versioned_runtime.py libs/versioned-runtime/versioned_runtime_leases.py libs/versioned-runtime/versioned_runtime_construction.py libs/versioned-runtime/versioned_runtime_publication.py libs/versioned-runtime/versioned_runtime_source.py ./libs/versioned-runtime/
 RUN uv build --no-cache --exclude-newer "7 days" --wheel --out-dir /wheels ./fleet-manager \
     && uv venv /opt/gateway \
     && for wheel in /wheels/fleet_manager-*.whl; do \
