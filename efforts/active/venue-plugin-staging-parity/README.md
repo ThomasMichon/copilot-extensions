@@ -266,6 +266,35 @@ or a reason to create a daemon.
 
 ## Journal
 
+### 2026-10-19 - Validate detached source startup with existing inference authentication
+
+- A source-bound Codespace consumer exercised canonical emitted preparation,
+  the detached owned-command builder, real Worktrees `embody`, the full Bridge
+  extension, and HTTP-41/SQLite/client/CLI admission. A no-skill local selection
+  and a non-default Git revision with a nested plugin location registered at
+  their expected versions before one SDK-delivered task successfully invoked
+  the selected skill. A missing selection was refused before admission;
+  identical retries returned the same message without another task.
+- Reused the existing clean-room host-token borrowing strategy for the native
+  selected identity and the existing process-only Copilot launcher. The
+  credential travelled over stdin into guarded tmpfs and was consumed once by
+  native Copilot with the documented `--secret-env-vars` isolation enabled. No interactive
+  login, global activation, productive-profile switch or shared runtime
+  deployment was needed. Productive configuration and settings stayed
+  byte-identical; the native mux, authentication scope, forward and source
+  HTTP fixture were cleaned up.
+- The live lane exposed an existing launch-directory defect: inherited default
+  ACLs can override umask and widen a plain `mkdir`. Executable scopes now
+  specify mode 0700 at creation. A real POSIX default-ACL regression covers the
+  source shell command, and the live consumer confirmed mode 0700 and guarded
+  cleanup. The contained Windows process-auth file passes 35 tests with its
+  POSIX-only ACL case skipped; final Linux CI still gates merge.
+- This is composed source-consumer evidence with the existing completed native
+  bootstrap runtime as a read-only dependency, not fresh-machine provisioning,
+  a production Connection Owner rollout or a live ambiguous-admission recovery
+  proof. Those remaining validation and release obligations stay open in
+  Phase 2/3; this journal is not an effort-completion claim.
+
 ### 2026-10-19 - Bind executable lookup to the real execution context
 
 - Full review found eager native executable lookup using the daemon's cwd for

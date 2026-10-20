@@ -471,6 +471,8 @@ in a separate private `/tmp/agent-containers-<user>/launch` directory because
 Linux commonly mounts `/dev/shm` with `noexec`. Wrapper content contains only
 the RAM credential path and variable name, never credential bytes. Cleanup
 and the abandoned-input reaper cover both directories together.
+Executable scopes are created explicitly with mode 0700 rather than relying on
+umask, so inherited default ACLs cannot widen their permissions.
 Existing launch inputs in the former home-directory location are not migrated
 or swept by the new RAM-only reaper.
 Successful CLI startup must confirm the native child consumed its file before
