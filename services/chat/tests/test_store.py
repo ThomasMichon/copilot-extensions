@@ -377,7 +377,8 @@ def test_drain_freezes_all_rpc_without_mutating_conversation(store, payload):
 
 @pytest.mark.parametrize("op", ["wait", "scan"])
 @pytest.mark.parametrize("rollback", [False, True])
-def test_drain_fences_held_waits_even_after_immediate_undrain(store, monkeypatch, op, rollback):
+def test_drain_fences_held_waits_even_after_immediate_undrain(tmp_path, monkeypatch, op, rollback):
+    store = ChatStore(tmp_path / "data", "example-installation", max_waiters=1)
     join(store)
     entered = threading.Event()
     original_wait = store._changed.wait
@@ -404,6 +405,10 @@ def test_drain_fences_held_waits_even_after_immediate_undrain(store, monkeypatch
         with store._changed:
             state = store.drain()
             assert state["state"] == "draining" and state["active_waiters"] == 1
+            fields = {"channel": "room"} if op == "wait" else {
+                "epoch": None, "after": [{"channel": "room", "event_id": 0}],
+            }
+            expect("draining", rpc, store, op, codename="agent-a", timeout=0, **fields)
             if rollback:
                 assert store.undrain()["state"] == "active"
                 post(store)

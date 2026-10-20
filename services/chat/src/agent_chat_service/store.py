@@ -366,22 +366,19 @@ class ChatStore:
 
     @contextmanager
     def _waiter(self):
-        if not self._waiters.acquire(blocking=False):
-            raise ChatError("busy", "Waiter capacity reached.")
-        admitted = False
+        with self._locked():
+            self._check_serving()
+            if not self._waiters.acquire(blocking=False):
+                raise ChatError("busy", "Waiter capacity reached.")
+            generation = self._service_generation
+            self._active_waiters += 1
         try:
-            with self._locked():
-                self._check_serving()
-                generation = self._service_generation
-                self._active_waiters += 1
-                admitted = True
             yield generation
         finally:
-            if admitted:
-                with self._changed:
-                    self._active_waiters -= 1
-                    self._changed.notify_all()
-            self._waiters.release()
+            with self._changed:
+                self._active_waiters -= 1
+                self._waiters.release()
+                self._changed.notify_all()
 
     def _lifecycle_state(self):
         return {

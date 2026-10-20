@@ -234,11 +234,15 @@ graduation still requires the declared native and lifecycle guarantees.
   after committed/rolled-back transactions and wakes/fences held wait/scan
   generations, including immediate undrain. Stable requests, memberships,
   semantic cursors and the durable epoch are preserved.
-- The local native Windows core portfolio passed 78 contracts in 6.25 seconds
+- The final local native Windows core portfolio passed 78 contracts in 5.71 seconds
   within the unchanged 120-second contained budget. Seventeen focused
   lifecycle/artifact cases passed separately, including an actual wheel after
   fixture-source removal, a held transaction barrier, waiter cleanup and
   restart preservation. Touched Python lint and whitespace checks passed.
+- Review identified a saturated-pool precedence defect. A real one-slot held
+  wait/scan reproduced all four drain/rollback failures before the correction.
+  Serving-state checks, capacity admission and waiter bookkeeping now share
+  the store lock, so frozen admission remains explicit even while full.
 - This is a domain storage boundary, not a listener, transport flush receipt,
   overlapping-writer/schema-migration contract, authenticated management route
   or lifecycle installer. Current health remains local open-store liveness.
