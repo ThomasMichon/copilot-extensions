@@ -279,7 +279,7 @@ _(Agent-recommended realization of the operator's explicit model clarification.)
 - [x] Reuse the shared map's physical-machine/environment selection; identify
       compact execution-ID boundaries explicitly, without another registry or
       suffix-derived authority.
-- [ ] Review the [tuple-first new-record contract](physical-machine-environment-boundary.md#tuple-first-new-record-contract)
+- [x] Review the [tuple-first new-record contract](physical-machine-environment-boundary.md#tuple-first-new-record-contract)
       and one-term WSL reference equivalence before changing durable creation
       semantics.
 - [ ] Make runtime admission, structured machine guidance and prospective
@@ -354,6 +354,23 @@ operator's all-alias/all-worktree acceptance requirement, not authorization for
 unrelated service changes or a second machine registry.
 
 ## Journal
+
+### 2026-10-20 - Tuple-first contract reviewed; non-operational codec foundation
+- #7385 merged after exact-head approval and required checks. The reviewed
+  contract separates the new physical tuple from its one-term execution owner
+  and keeps `<machine>-wsl` available at appropriate reference interfaces.
+- The first bounded implementation is a pure, explicitly versioned tuple codec
+  and a prospective formatter that preserves the whole physical name. Missing
+  version metadata stays legacy; unsupported or conflicting explicit tuples
+  raise rather than becoming guessed authority.
+- Existing tracking loaders and creation producers do not opt in in this slice.
+  Consumer, relationship and replay wiring must be complete before any producer
+  emits tuple-first durable records. Historical allocation formatting and
+  records remain unchanged.
+- This foundation is not installed acceptance or Phase 3d completion. The
+  remaining integration must cover actual creation/paired records, identity
+  projections, ownership and refs, one-term reference equivalence, retained
+  repair, qualified release and authorized rollout.
 
 ### 2026-10-19 - Guidance merged; tuple-first creation selected
 - #7334 merged after exact-head approval and required Source checks. Guidance

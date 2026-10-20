@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import re
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .worktree_machine_identity import WorktreeMachineIdentity
 
 
 def session_worktree_prefix(
-    machine: str, platform: str, *, legacy: bool = False,
+    machine: str, platform: str, *, legacy: bool = False, physical_machine: bool = False,
 ) -> str:
     """Include the environment once, or preserve the historical prefix."""
     platform = platform.casefold()
@@ -14,17 +18,32 @@ def session_worktree_prefix(
     environment_suffixes = (f"-{tag}", f"-{platform}")
     return (
         machine
-        if not tag or (not legacy and machine.casefold().endswith(environment_suffixes))
+        if not tag or (
+            not legacy and not physical_machine
+            and machine.casefold().endswith(environment_suffixes)
+        )
         else f"{machine}-{tag}"
     )
 
 
 def session_worktree_id(
     machine: str, platform: str, timestamp: str, suffix: str, *, legacy: bool = False,
+    physical_machine: bool = False,
 ) -> str:
     """Include the platform once; retain exact historical allocations on replay."""
-    prefix = session_worktree_prefix(machine, platform, legacy=legacy)
+    prefix = session_worktree_prefix(
+        machine, platform, legacy=legacy, physical_machine=physical_machine,
+    )
     return f"{prefix}-{timestamp}-{suffix}"
+
+
+def prospective_session_worktree_id(
+    identity: WorktreeMachineIdentity, timestamp: str, suffix: str,
+) -> str:
+    """Name a new physical/environment tuple without stripping the physical name."""
+    return session_worktree_id(
+        identity.machine, identity.environment, timestamp, suffix, physical_machine=True,
+    )
 
 
 def parse_session_worktree_id(worktree_id: str) -> tuple[str, str, str] | None:

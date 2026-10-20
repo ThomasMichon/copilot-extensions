@@ -1,0 +1,9 @@
+{
+  "comment": "Add pure tuple-first identity codec and prospective physical-tuple naming foundation",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
