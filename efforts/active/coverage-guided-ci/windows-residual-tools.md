@@ -1,10 +1,12 @@
 # Windows residual census: tools, Fleet, and published-only workflows
 
-Read-only evidence for the reviewed #7338 wave plan, not implementation,
+The original census is read-only evidence for the reviewed #7338 wave plan, not implementation,
 publication authorization, performance evidence, or a model-routing evaluation.
 The coordinator owns integration and the parent #5694/#5682 completion gate.
 No source, preserved WIP, Git refs, or workflow configuration was changed;
 no tests, installation, network operations, or native qualification were run.
+Later landed dispositions below identify actual merges without changing the
+immutable census inputs, hunk hashes or historical observations.
 
 ## Immutable inputs and census rules
 
@@ -54,6 +56,13 @@ the specific already-merged findings below.
   control uses `SilentlyContinue`, verifies attempted autoload without
   incorrectly depending on an exit failure, and preserves the absent/loaded/
   autoload controls. Do not reintroduce the source's older negative control.
+- **PowerShell module isolation:** C-MODULE merged in #7353 as
+  `5500e756bd0add8a028d116aa97228d5bbe1c046`. S036 and the exact S081
+  module-discovery/S080 import partition are no longer residual. The merged
+  native cases retain both hosts and both tier settings and additionally
+  check real application lookup and the actual parent environment; six
+  portable cases cover absent/inherited paths and explicit-tier boundaries.
+  This does not settle the other contracts in S081.
 - **Required Source CI:** actual Dev `ci.yml` is unit-only, from #7269
   `ce77da58017442f83bf3d82a5f80b111b63b9737`, followed by source-evidence reuse
   #7281 `6e2e59ceed9a5cb822bd02906f5d4e1173aeae71`; both are Dev ancestors.
@@ -81,7 +90,7 @@ Commands name future validation targets only; none was executed for this census.
 | B-GUARD-SPLIT | **Blocked: #5694 integration coordinator must partition mixed import/function hunks S027/S029.** Assign only the explicit G-PS-SCAN and G-RETENTION subspans below to their respective independent contracts. Do not extract either whole hunk or use common file ownership to combine them. No new behavioral dependency is established. |
 | G-BASH | **Retained: native Bash fixture admission.** `_working_bash` and its two added tests in `tools/test_check_install_contract.py`; reject System32/WindowsApps WSL launchers without probing them, preserve an explicit supported native override, and require headless real shell behavior. Imports S064 are owned here. Validate focused native-Bash admission and existing shipped helper tests on a real supported shell; unavailable native coverage is not a pass. Independent of traversal optimization. |
 | G-WRITER | **Retained: prove shipped shell writer ran.** S067's marker-existence assertion in `test_every_shipped_shell_helper_reports_its_writer_status`; retain failure/return-status and hash-failure checks. Depends on a genuinely working admitted Bash (G-BASH if required on the validation host), not a mock passing past the helper. |
-| C-MODULE | **Retained: PowerShell module-path isolation.** S036 only; host module discovery is detached by default and restored only with existing explicit host-state tier semantics. Depends on the applicable tests partitioned from S081. Validate `test_native_powershell_module_discovery_is_host_detached` for both supported PowerShell hosts and both tier settings, including available core commands and unchanged parent environment. Not Windows storage accounting. |
+| C-MODULE | **Actually merged:** S036 and its exact S080/S081 module-discovery partition via #7353 `5500e756bd0add8a028d116aa97228d5bbe1c046`; see the landed-foundation entry above. Do not replay it with Windows storage accounting or the remainder of mixed S081. |
 | C-STORAGE | **Retained: fresh bounded Windows storage accounting.** S035/S038/S039; cached directory entries, at most two concurrent readers, bounded directory batches, exact fresh totals after growth/removal, no symlink traversal, no stale accounting cache, unexpected reader failure propagation. Depends on the relevant S081 test partition; preserve incoming #7119 scandir/storage-limit regressions. Validate the six added `test_tree_size_*`/`test_parallel_tree_size_*` cases and real `test_native_temp_budget_still_terminates_the_process_tree`; cancellation must not leave readers owning a removable sandbox. No budget relaxation. |
 | C-TEARDOWN | **Retained: verified process ownership through teardown.** S037/S040-S051, S053-S055, S083; POSIX controller remains allocated until owned identity checks and post-signal live-member proof; status pipe errors explicit, inherited control env removed, zombies still count for process admission but not file-holding teardown. Windows Job close terminates and waits for every member; uncertain reaping retains sandbox. Depends on separately partitioned S081/S084 cases; shared process utility/native ownership prerequisites remain with their existing owner. Validate real file-holding descendants for normal exit/timeout, stale identity before each signal, SIGKILL follow-up, control-pipe protocol, Windows member-zero proof and failure retention, existing cancellation/stdio contracts. No reader/sandbox cleanup merely on parent exit. |
 | C-CLEANUP | **Retained: reaped-group cleanup with honest aggregate accounting.** S052/S056-S059; one cleanup worker, only after verified reaping, preserve shared immutable seed outside group directories, await cleanup and include it in aggregate elapsed/timeout result. Depends on C-TEARDOWN and partitioned S084 tests. Validate `test_plugin_budget_includes_final_sandbox_cleanup`, `test_budget_exhausted_between_groups_still_reports_final_cleanup`, `test_reaped_group_cleanup_overlaps_the_next_group`, and unreaped-tree negative case; retain private-parent #6116 regression. Preparation is still part of the parent qualification even though this change specifically extends cleanup accounting. |

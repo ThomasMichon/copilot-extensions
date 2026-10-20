@@ -4,7 +4,9 @@ import os
 import shutil
 import subprocess
 import sys
+import threading
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -39,6 +41,218 @@ def test_tree_size_does_not_follow_file_or_directory_links(tmp_path):
     except OSError as error:
         pytest.skip(f"Symbolic link creation is unavailable: {error}")
     assert plugin_test_containment._tree_size(root) == len(b"counted")
+
+
+def test_tree_size_counts_nested_files_once(tmp_path):
+    (tmp_path / "empty").mkdir()
+    nested = tmp_path / "nested"
+    nested.mkdir()
+    (tmp_path / "first.bin").write_bytes(b"first")
+    (nested / "second.bin").write_bytes(b"second")
+
+    assert plugin_test_containment._tree_size(tmp_path) == 11
+    assert plugin_test_containment._tree_size(tmp_path / "missing") == 0
+
+
+def test_tree_size_uses_cached_entries_without_following_links(tmp_path, monkeypatch):
+    calls = []
+
+    class Entry:
+        path = str(tmp_path / "file")
+
+        def is_symlink(self):
+            return False
+
+        def is_dir(self, *, follow_symlinks):
+            assert follow_symlinks is False
+            return False
+
+        def is_file(self, *, follow_symlinks):
+            assert follow_symlinks is False
+            return True
+
+        def stat(self, *, follow_symlinks):
+            assert follow_symlinks is False
+            calls.append("stat")
+            return SimpleNamespace(st_size=7)
+
+    class Link(Entry):
+        def is_symlink(self):
+            return True
+
+        def is_file(self, *, follow_symlinks):
+            assert follow_symlinks is False
+            return False
+
+    class Removed(Entry):
+        def is_dir(self, *, follow_symlinks):
+            raise FileNotFoundError(self.path)
+
+    class Entries:
+        def __enter__(self):
+            return iter((Link(), Removed(), Entry()))
+
+        def __exit__(self, *args):
+            pass
+
+    monkeypatch.setattr(plugin_test_containment.os, "scandir", lambda path: Entries())
+
+    assert plugin_test_containment._tree_size(tmp_path) == 7
+    assert calls == ["stat"]
+
+
+def test_parallel_tree_size_overlaps_reads_with_two_threads(tmp_path, monkeypatch):
+    children = [str(tmp_path / name) for name in ("one", "two")]
+    barrier = threading.Barrier(2)
+    lock = threading.Lock()
+    counts = {"active": 0, "peak": 0}
+
+    def read(directories):
+        if directories == [tmp_path]:
+            return 1, children
+        assert len(directories) == 1
+        with lock:
+            counts["active"] += 1
+            counts["peak"] = max(counts["peak"], counts["active"])
+        try:
+            barrier.wait(timeout=2)
+            return (7 if directories[0] == children[0] else 11), []
+        finally:
+            with lock:
+                counts["active"] -= 1
+
+    monkeypatch.setattr(plugin_test_containment, "_directory_sizes", read)
+    assert plugin_test_containment._tree_size_parallel(tmp_path) == 19
+    assert counts == {"active": 0, "peak": 2}
+
+
+def test_parallel_tree_size_rechecks_growth_and_removal(tmp_path):
+    nested = tmp_path / "nested"
+    nested.mkdir()
+    first, second = tmp_path / "first.bin", nested / "second.bin"
+    first.write_bytes(b"first")
+    second.write_bytes(b"second")
+    assert plugin_test_containment._tree_size_parallel(tmp_path) == 11
+    first.write_bytes(b"x" * 31)
+    second.unlink()
+    assert plugin_test_containment._tree_size_parallel(tmp_path) == 31
+
+
+def test_parallel_tree_size_counts_across_multiple_batches(tmp_path, monkeypatch):
+    for index in range(80):
+        directory = tmp_path / str(index)
+        directory.mkdir()
+        (directory / "data.bin").write_bytes(b"x" * (index + 1))
+    read = plugin_test_containment._directory_sizes
+    batches = []
+
+    def bounded_read(directories):
+        batches.append(tuple(directories))
+        return read(directories)
+
+    monkeypatch.setattr(plugin_test_containment, "_directory_sizes", bounded_read)
+    assert plugin_test_containment._tree_size_parallel(tmp_path) == sum(range(1, 81))
+    assert all(1 <= len(batch) <= 32 for batch in batches)
+    assert sorted(str(path) for batch in batches for path in batch) == sorted(
+        [str(tmp_path), *(str(tmp_path / str(index)) for index in range(80))]
+    )
+
+
+def test_parallel_tree_size_propagates_unexpected_read_failure(tmp_path, monkeypatch):
+    def read(directories):
+        raise RuntimeError("unexpected scan failure")
+
+    monkeypatch.setattr(plugin_test_containment, "_directory_sizes", read)
+    with pytest.raises(RuntimeError, match="unexpected scan failure"):
+        plugin_test_containment._tree_size_parallel(tmp_path)
+
+
+@pytest.mark.parametrize("platform", ["nt", "posix"])
+def test_tree_size_uses_parallel_readers_only_on_windows(tmp_path, monkeypatch, platform):
+    calls = []
+
+    def parallel(path):
+        calls.append(path)
+        return 17
+
+    monkeypatch.setattr(plugin_test_containment, "_tree_size_parallel", parallel)
+    monkeypatch.setattr(plugin_test_containment, "_directory_sizes", lambda directories: (11, []))
+    monkeypatch.setattr(plugin_test_containment, "os", SimpleNamespace(name=platform))
+    assert plugin_test_containment._tree_size(tmp_path) == (17 if platform == "nt" else 11)
+    assert calls == ([tmp_path] if platform == "nt" else [])
+
+
+@pytest.mark.parametrize("fault", ["reader-failure", "cancel"])
+def test_parallel_tree_size_joins_file_holding_readers_before_return(
+    tmp_path, monkeypatch, fault,
+):
+    root = tmp_path / "scan"
+    root.mkdir()
+    held_file = root / "held"
+    held_file.write_bytes(b"data")
+    opened = threading.Event()
+    release = threading.Event()
+    shutdown = threading.Event()
+    returned = threading.Event()
+    observations = []
+    errors = []
+    executor = plugin_test_containment.ThreadPoolExecutor
+    wait = plugin_test_containment.wait
+
+    class ObservedExecutor(executor):
+        def shutdown(self, *args, **kwargs):
+            shutdown.set()
+            return super().shutdown(*args, **kwargs)
+
+    def read(directories):
+        if directories == [root]:
+            return 0, ["held-reader", "failing-reader"]
+        if directories == ["failing-reader"]:
+            assert opened.wait(3)
+            if fault == "reader-failure":
+                raise RuntimeError("unexpected scan failure")
+            return 0, []
+        assert directories == ["held-reader"]
+        with held_file.open("rb") as stream:
+            assert stream.read() == b"data"
+            opened.set()
+            assert release.wait(3)
+        observations.append("reader-closed")
+        return 4, []
+
+    def cancellable_wait(active, **kwargs):
+        if fault == "cancel" and opened.is_set():
+            raise KeyboardInterrupt("cancel scan")
+        return wait(active, **kwargs)
+
+    def scan():
+        try:
+            plugin_test_containment._tree_size_parallel(root)
+        except (RuntimeError, KeyboardInterrupt) as error:
+            errors.append(error)
+        finally:
+            observations.append("caller-returned")
+            returned.set()
+
+    monkeypatch.setattr(plugin_test_containment, "ThreadPoolExecutor", ObservedExecutor)
+    monkeypatch.setattr(plugin_test_containment, "_directory_sizes", read)
+    monkeypatch.setattr(plugin_test_containment, "wait", cancellable_wait)
+    caller = threading.Thread(target=scan)
+    caller.start()
+    try:
+        assert opened.wait(3)
+        assert shutdown.wait(3)
+        assert not returned.is_set()
+    finally:
+        release.set()
+        caller.join(timeout=3)
+    assert not caller.is_alive()
+    assert len(errors) == 1
+    expected = RuntimeError if fault == "reader-failure" else KeyboardInterrupt
+    assert isinstance(errors[0], expected)
+    assert observations == ["reader-closed", "caller-returned"]
+    held_file.unlink()
+    root.rmdir()
 
 
 def test_native_temp_budget_still_terminates_the_process_tree(tmp_path, capfd):

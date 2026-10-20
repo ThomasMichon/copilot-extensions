@@ -741,6 +741,36 @@ _Pending review of this plan._
 
 ## Journal
 
+### 2026-10-20 - Land module isolation and admit fresh bounded storage accounting
+- C-MODULE #7353 actually merged as
+  `5500e756bd0add8a028d116aa97228d5bbe1c046`, this batch's baseline.
+  Current-head full Copilot approval, green required CI and no findings,
+  threads, holds or draft state preceded managed completion. Its published
+  head passed all 24 containment/environment cases without skips after the
+  publication rebase. The residual tools ledger now records that actual
+  disposition without rewriting the original census inputs.
+- C-STORAGE owns only S035/S038/S039 and its six S081 definitions with
+  required imports. Existing cached-DirEntry and symlink/storage-limit
+  assertions remain; the extracted fake entries now implement the real
+  `is_symlink` contract. Additional assertions prove exact-once directory
+  coverage, the 32-directory batch ceiling, Windows-only parallel dispatch,
+  and active file-holding readers joined before return on both a scan
+  failure and cancellation. No teardown or cleanup-scheduling hunk is
+  imported.
+- Four concurrency regression cases fail before the implementation because
+  the parallel reader contract is absent. After extraction, the complete
+  containment module and focused runner containment/environment/temp/budget
+  consumers pass: 35 cases, zero skips, 13.18 seconds pytest / 15.89 seconds
+  including supervision and cleanup. Native Windows exercises the actual
+  storage-limit kill and removable file handles; the portable branch test
+  is not native Linux qualification.
+- No installation/bootstrap or external-venue behavior changes. Fresh
+  synthetic trees exercise first-touch accounting; no separate applicable
+  external venue was used. Source CI remains unit-only, and no test
+  selection, deadline or resource limit changes. Required CI and fresh full
+  review remain outstanding publication gates. The parent complete Windows
+  acceptance is still open.
+
 ### 2026-10-20 - Admit the first Wave 1 module-discovery contract
 - The census merged in #7350 as
   `6d555ff315aabecfbfc85b7a6785e31b62ff2ad7`, this batch's baseline.

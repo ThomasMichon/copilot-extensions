@@ -15,6 +15,7 @@ import signal
 import subprocess
 import sys
 import time
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Sequence, TypeVar
@@ -265,11 +266,10 @@ def isolated_environment(
     return env
 
 
-def _tree_size(path: Path) -> int:
+def _directory_sizes(directories: Sequence[str | Path]) -> tuple[int, list[str]]:
     total = 0
-    pending: list[Path | str] = [path]
-    while pending:
-        directory = pending.pop()
+    nested: list[str] = []
+    for directory in directories:
         try:
             with os.scandir(directory) as entries:
                 for entry in entries:
@@ -277,13 +277,44 @@ def _tree_size(path: Path) -> int:
                         if entry.is_symlink():
                             continue
                         if entry.is_dir(follow_symlinks=False):
-                            pending.append(entry.path)
+                            nested.append(entry.path)
                         elif entry.is_file(follow_symlinks=False):
                             total += entry.stat(follow_symlinks=False).st_size
                     except OSError:
                         continue
         except OSError:
             continue
+    return total, nested
+
+
+def _tree_size_parallel(path: Path) -> int:
+    total = 0
+    pending: list[str | Path] = [path]
+    active: set[Future[tuple[int, list[str]]]] = set()
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        while pending or active:
+            while pending and len(active) < 2:
+                slots = 2 - len(active)
+                count = min(32, (len(pending) + slots - 1) // slots)
+                batch = [pending.pop() for _ in range(count)]
+                active.add(pool.submit(_directory_sizes, batch))
+            done, active = wait(active, return_when=FIRST_COMPLETED)
+            for future in done:
+                size, nested = future.result()
+                total += size
+                pending.extend(nested)
+    return total
+
+
+def _tree_size(path: Path) -> int:
+    if os.name == "nt":
+        return _tree_size_parallel(path)
+    total = 0
+    pending: list[str | Path] = [path]
+    while pending:
+        size, nested = _directory_sizes([pending.pop()])
+        total += size
+        pending.extend(nested)
     return total
 
 

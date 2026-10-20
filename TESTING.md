@@ -1246,6 +1246,11 @@ CI. This scheduling adds no new policy exception or scanner allowlist.
 
 Temporary-storage accounting uses a fresh `scandir` walk per check and retains
 each entry's native metadata instead of issuing repeated path-stat calls.
+On Windows, each check has at most two readers and at most 32 directories
+per submitted batch; POSIX traversal remains serial. Each invocation measures
+growth and removal afresh, without caching totals between checks. Reader
+failures propagate, and cancellation or failure waits for active readers to
+close before returning so the caller can safely clean up its sandbox.
 Symlinks remain excluded; counting and process-tree termination at the storage
 ceiling are covered by native containment tests.
 

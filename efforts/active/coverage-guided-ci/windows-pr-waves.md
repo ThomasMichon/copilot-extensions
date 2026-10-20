@@ -2,8 +2,9 @@
 
 **Status:** Reviewed and merged in #7338 as
 `5a6f4e374893999fb1176408acfa6b8e44b5aabb`. The
-[pinned residual census](windows-residual-ledger.md) is the next entry gate;
-plan approval alone does not admit an implementation batch.
+[pinned residual census](windows-residual-ledger.md) completed the ownership
+entry gate in #7350; each implementation batch still needs its own admission,
+review and validation.
 
 **Owner:** the Primary maintainer in the [canonical effort](README.md).
 **Tracking:** #5694, #5682 and umbrella #4453. This document is a sequencing
