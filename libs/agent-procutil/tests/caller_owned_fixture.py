@@ -73,6 +73,15 @@ def _gate(root: Path) -> None:
         time.sleep(0.01)
 
 
+def pidfd_exited(fd: int) -> bool:
+    observer = select.poll()
+    observer.register(fd, select.POLLIN)
+    events = observer.poll(0)
+    if any(mask & (select.POLLERR | select.POLLNVAL) for _fd, mask in events):
+        raise RuntimeError("test pidfd exit observation failed")
+    return any(mask & select.POLLIN for _fd, mask in events)
+
+
 def _exited(expected: dict) -> bool:
     pid = expected["pid"]
     if os.name == "nt":
@@ -103,7 +112,7 @@ def _exited(expected: dict) -> bool:
                 return True
         except FileNotFoundError:
             return True
-        return bool(select.select([fd], [], [], 0)[0])
+        return pidfd_exited(fd)
     finally:
         os.close(fd)
 

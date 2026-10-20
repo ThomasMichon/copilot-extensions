@@ -7,13 +7,13 @@ import ctypes
 import json
 import os
 from pathlib import Path
-import select
 import shutil
 import signal
 import subprocess
 import sys
 import time
 import venv
+from types import SimpleNamespace
 
 import psutil
 import pytest
@@ -98,7 +98,7 @@ class PinnedProcess:
             if result not in (0, 0x102):
                 raise ctypes.WinError(ctypes.get_last_error())
             return result == 0
-        return bool(select.select([self.fd], [], [], 0)[0])
+        return fixture.pidfd_exited(self.fd)
 
     def kill(self, signum=None):
         if self.gone():
@@ -447,3 +447,50 @@ def test_installed_console_refuses_nul_before_target_effect(tmp_path, installed_
     result = _command([str(python), "-I", "-c", code])
     assert result.stdout.strip() == "refused"
     assert not marker.exists()
+
+
+@pytest.mark.parametrize("backend", ["windows", "linux"])
+@pytest.mark.parametrize("identity_state", ["matching", "mismatch", "unreadable"])
+def test_pinned_observer_refuses_foreign_identity_before_termination(
+    monkeypatch, backend, identity_state,
+):
+    closed = []
+    terminated = []
+
+    def birth(*args):
+        if identity_state == "unreadable":
+            raise OSError("synthetic unreadable birth")
+        return 100 if identity_state == "matching" else 200
+
+    kernel = SimpleNamespace(
+        OpenProcess=lambda *args: 7,
+        CloseHandle=lambda handle: closed.append(handle),
+        WaitForSingleObject=lambda *args: 0x102,
+        TerminateProcess=lambda handle, code: terminated.append((handle, code)) or True,
+    )
+    monkeypatch.setattr(fixture, "windows_kernel", lambda: kernel)
+    monkeypatch.setattr(fixture, "handle_birth", birth)
+    monkeypatch.setattr(fixture, "identity", lambda pid: {"pid": pid, "birth": birth()})
+    monkeypatch.setattr(fixture, "pidfd_exited", lambda fd: False)
+    monkeypatch.setattr(sys.modules[__name__], "os", SimpleNamespace(
+        name="nt" if backend == "windows" else "posix",
+        pidfd_open=lambda pid: 7, close=lambda fd: closed.append(fd),
+    ))
+    monkeypatch.setattr(sys.modules[__name__], "signal", SimpleNamespace(
+        SIGKILL=9, pidfd_send_signal=lambda fd, signum: terminated.append((fd, signum)),
+    ))
+    if identity_state != "matching":
+        with pytest.raises(OSError if identity_state == "unreadable" else AssertionError):
+            PinnedProcess({"pid": 41, "birth": 100})
+        assert closed == [7]
+        assert terminated == []
+        return
+    pin = PinnedProcess({"pid": 41, "birth": 100})
+    try:
+        assert not pin.gone()
+        pin.kill()
+        assert terminated == [(7, 137 if backend == "windows" else 9)]
+        assert closed == []
+    finally:
+        pin.close()
+    assert closed == [7]

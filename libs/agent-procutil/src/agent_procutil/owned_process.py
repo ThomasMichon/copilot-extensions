@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import math
 import os
 import selectors
@@ -284,10 +285,10 @@ def _communicate_windows_bounded(
                 if not written:
                     raise OSError("native child stdin write made no progress")
                 offset += written
-        except BrokenPipeError:
-            pass
         except (OSError, ValueError) as error:
-            if not retiring.is_set():
+            if not retiring.is_set() and not (
+                isinstance(error, OSError) and error.errno in (errno.EPIPE, errno.EINVAL)
+            ):
                 fail(error)
         except BaseException as error:
             fail(error)
@@ -295,7 +296,9 @@ def _communicate_windows_bounded(
             try:
                 process.stdin.close()
             except (OSError, ValueError) as error:
-                if not retiring.is_set():
+                if not retiring.is_set() and not (
+                    isinstance(error, OSError) and error.errno in (errno.EPIPE, errno.EINVAL)
+                ):
                     fail(error)
 
     workers = [

@@ -69,6 +69,15 @@ def _require_posix_support() -> None:
         os.close(fd)
 
 
+def _pidfd_exited(fd: int) -> bool:
+    observer = select.poll()
+    observer.register(fd, select.POLLIN)
+    events = observer.poll(0)
+    if any(mask & (select.POLLERR | select.POLLNVAL) for _fd, mask in events):
+        raise RuntimeError("native pidfd exit observation failed")
+    return any(mask & select.POLLIN for _fd, mask in events)
+
+
 def _confirm_group(process: subprocess.Popen) -> None:
     deadline = time.monotonic() + 2.0
     empty = 0
@@ -91,7 +100,7 @@ def _confirm_group(process: subprocess.Popen) -> None:
                             if _pidfd_pid(fd) != pid:
                                 active = True
                             elif os.getpgid(pid) == process.pid:
-                                active |= not bool(select.select([fd], [], [], 0)[0])
+                                active |= not _pidfd_exited(fd)
                         finally:
                             os.close(fd)
                     except ProcessLookupError:

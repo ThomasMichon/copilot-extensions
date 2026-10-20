@@ -97,6 +97,8 @@ cannot leave an unassigned suspended target.
 Input writing and bounded output draining remain deadline-supervised together;
 the Job must report zero active processes and pipe workers must settle before
 completion or an output-limit error.
+Normal early stdin closure preserves the target's result; unexpected input
+errors remain explicit.
 
 Native POSIX caller-death execution currently requires Linux `pidfd_open`,
 readable `/proc` pidfd identity, and the existing unreaped-child/default-SIGCHLD
@@ -106,7 +108,7 @@ scope. A dedicated lifetime writer belongs only to the caller; EOF, including
 caller `SIGTERM`/`SIGKILL`, retires that group. Synchronized fork callbacks close
 active lifetime writers in unrelated fork children as well as excluding them
 from exec inheritance. The caller retains unreaped custody
-of the helper through the final group sweep and pidfd-based exit confirmation
+of the helper through the final group sweep and poll-based pidfd exit confirmation
 before reporting completion. No caller pre-wrapping, persistent daemon,
 per-session subscription worker, network endpoint or sibling runtime is needed.
 The helper imports only the caller's selected canonical package under isolated
