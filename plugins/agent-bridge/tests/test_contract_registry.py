@@ -55,7 +55,7 @@ def _fixture(relative: str) -> dict:
 
 
 def test_http_declared_generation_matches_current_fixture() -> None:
-    fixture = _fixture("fixtures/http/current/startup-plugin-readiness-generation-41.json")
+    fixture = _fixture("fixtures/http/current/startup-plugin-readiness-generation-42.json")
     body = fixture["response"]
     assert body["protocol_version"] == bridge_protocol.HTTP_PROTOCOL_VERSION
     assert (
@@ -68,8 +68,9 @@ def test_native_resume_does_not_reuse_the_published_receipt_generation() -> None
     assert bridge_protocol.REMOTE_ACP_PROTOCOL_VERSION == 38
     assert bridge_protocol.LIVE_MESSAGE_RECEIPT_PROTOCOL_VERSION == 39
     assert bridge_protocol.WORKTREE_NATIVE_RESUME_PROTOCOL_VERSION == 40
-    assert bridge_protocol.PLUGIN_READINESS_PROTOCOL_VERSION == 41
-    assert bridge_protocol.HTTP_PROTOCOL_VERSION == 41
+    assert bridge_protocol.REMOTE_ACP_TARGETS_PROTOCOL_VERSION == 41
+    assert bridge_protocol.PLUGIN_READINESS_PROTOCOL_VERSION == 42
+    assert bridge_protocol.HTTP_PROTOCOL_VERSION == 42
     assert bridge_protocol.HTTP_PROTOCOL_MIN_SUPPORTED == 1
 
 
@@ -83,7 +84,7 @@ def test_startup_readiness_fixture_matches_typed_wire_and_legacy_omission() -> N
         READINESS_CONTROL, PluginReadinessRequest, PluginReadinessResult,
     )
 
-    fixture = _fixture("fixtures/http/current/startup-plugin-readiness-generation-41.json")
+    fixture = _fixture("fixtures/http/current/startup-plugin-readiness-generation-42.json")
     capability = fixture["capability"]
     assert capability["required_protocol_version"] == bridge_protocol.PLUGIN_READINESS_PROTOCOL_VERSION
     assert capability["readiness_control"] == READINESS_CONTROL
@@ -117,7 +118,7 @@ def test_startup_readiness_fixture_matches_typed_wire_and_legacy_omission() -> N
 def test_startup_readiness_fixture_does_not_report_failure_as_ready(status) -> None:
     from agent_bridge.plugin_readiness import PluginReadinessResult
 
-    fixture = _fixture("fixtures/http/current/startup-plugin-readiness-generation-41.json")
+    fixture = _fixture("fixtures/http/current/startup-plugin-readiness-generation-42.json")
     response = {**fixture["readiness_response"], "status": status, "cwd": None}
     assert PluginReadinessResult.model_validate(response).status == status
     with pytest.raises(ValueError):
@@ -131,7 +132,7 @@ def test_startup_readiness_fixture_does_not_report_failure_as_ready(status) -> N
 def test_startup_readiness_wire_ignores_future_fields_without_relaxing_ownership() -> None:
     from agent_bridge.plugin_readiness import PluginReadinessRequest, PluginReadinessResult
 
-    fixture = _fixture("fixtures/http/current/startup-plugin-readiness-generation-41.json")
+    fixture = _fixture("fixtures/http/current/startup-plugin-readiness-generation-42.json")
     expected = fixture["request"]["plugin_readiness"]
     future = {
         **expected, "future_observation": "optional",
@@ -150,7 +151,7 @@ def test_startup_readiness_wire_ignores_future_fields_without_relaxing_ownership
 @pytest.mark.parametrize(
     "name",
     sorted(path.name for path in (CONTRACT / "fixtures/http/current").glob(
-        "startup-plugin-readiness*-generation-41.json",
+        "startup-plugin-readiness*-generation-42.json",
     )),
 )
 async def test_startup_golden_replays_through_public_http_and_durable_inbox(

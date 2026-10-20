@@ -48,7 +48,7 @@ async def test_library_stdin_to_real_send_cli_http_and_native_bound_queue_once(
     lost = []
     def request(method, path, payload=None, **kwargs):
         if path == "/health":
-            return {"protocol_version": 41}
+            return {"protocol_version": 42}
         response = http.request(method, path, json=payload)
         if response.status_code >= 400:
             raise BridgeClientError(response.status_code, response.json().get("detail"))
@@ -154,10 +154,11 @@ async def test_failed_or_cancelled_readiness_never_admits_owned_prompt(tmp_db, t
     assert len(tmp_db.execute_read("SELECT id FROM live_messages WHERE kind NOT LIKE 'control:%'")) == 1
 
 
-def test_typed_client_old_peer_is_rejected_without_posting_and_legacy_schema_stays_plain():
+@pytest.mark.parametrize("generation", [40, 41])
+def test_typed_client_old_peer_is_rejected_without_posting_and_legacy_schema_stays_plain(generation):
     client = BridgeClient("http://fixture", "fixture", connect_grace=0)
     calls = []
-    client._request = lambda method, path, *args, **kwargs: calls.append((method, path)) or {"protocol_version": 40}
+    client._request = lambda method, path, *args, **kwargs: calls.append((method, path)) or {"protocol_version": generation}
     with pytest.raises(BridgeClientError) as failure:
         client.send_live_message(
             "native", sender="venue", body="owned", delivery="queue", idempotency_key="operation",
