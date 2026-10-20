@@ -87,7 +87,40 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Mechanical move mapping: preserved, not conflated with fixtures
 
+### B-ROLE prerequisite: current provider-result and review-exception contract
+
+The unchanged five-case `TestCreatePRRoleResolution` class in
+`tests/test_pr_ops.py` reproduced four passes and one failure on native
+Windows: its auto-open double returned a `SimpleNamespace` without
+`head_sha`, so the real publication consumer raised `AttributeError`.
+The double also retained the retired two-value `pull_review_gate` API.
+
+This independent compatibility correction returns the actual `PullResult`
+type with a distinct provider-reported head, implements the current
+three-value `pull_review_exception` API, and asserts the exact
+`(repo, number, expected_head_sha)` observation. The existing effective-role,
+single-policy-read and bypass-note assertions remain. No production code,
+class location, fixture seed, test tier, assertion removal or merge
+permission changes.
+
+Native Windows passes all five role cases and eight existing bypass-note
+controls without skips: 13 passed in 28.15 seconds (32.03 including sandbox
+preparation and cleanup), with exactly two work-stealing workers and the
+unchanged 30-second item and 240-second diagnostic group limits.
+Provisioning clean-room validation is inapplicable to a test-double-only
+correction; Linux/external execution is unavailable and receives no credit.
+The separate mechanical role-class move and complete same-head Windows
+qualification remain open.
+
 ### Fifth admitted move: remaining attribution and tracking leaf classes
+
+**Actually merged:** #7411 as
+`5b466ebe68b0440e5c044118bdb3d5c7cffa29a9`, after exact-head full Copilot
+approval and green required CI. Its child is finalized. The publication
+rebase was followed by exact-head native reruns of all 46 cases without
+skips: ten attribution cases in 16.16 seconds (22.11 inclusive), and 36
+tracking cases in 75.92 seconds (82.02 inclusive). The parent qualification
+remains open.
 
 Baseline: Dev `f90914e793cae7c729f7bf293ccb083529f9d066`, the actual #7405
 merge. This M-MOVE partition relocates eight complete leaf classes, leaving

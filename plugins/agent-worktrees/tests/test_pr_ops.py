@@ -34,12 +34,15 @@ class TestCreatePRRoleResolution:
 
     def _fake_permission_provider(self, viewer_permission: str, *, supported=True):
         from types import SimpleNamespace
+        from agent_worktrees.providers import PullResult
 
         class _FakeProvider:
             name = "github"
 
             def __init__(self):
                 self.policy_calls = 0
+                self.created_head = "a" * 40
+                self.exception_calls = []
 
             def authority_endpoint(self, api_base=""):
                 return "github.com"
@@ -51,17 +54,19 @@ class TestCreatePRRoleResolution:
                 )
 
             def create_pull(self, scope, *, token=None):
-                return SimpleNamespace(
+                return PullResult(
                     url="https://example/pulls/17",
                     number=17,
                     state="open",
-                    label_error="",
+                    head_sha=self.created_head,
                 )
 
-            def pull_review_gate(
-                self, repo, number, *, api_base="", token=None,
+            def pull_review_exception(
+                self, repo, number, *, expected_head_sha, hold_labels=(),
+                wip_title_prefixes=(), api_base="", token=None,
             ):
-                return True, True
+                self.exception_calls.append((repo, number, expected_head_sha))
+                return True, False, ""
 
         return _FakeProvider()
 
@@ -156,6 +161,7 @@ class TestCreatePRRoleResolution:
         assert res["pr_opened"] is True
         assert "Maintainer bypass" in res["self_merge_note"]
         assert fake.policy_calls == 1
+        assert fake.exception_calls == [("acme/ext", 17, fake.created_head)]
 
     def test_live_permission_with_no_matching_role_is_unaffected(
         self, pr_repo, monkeypatch,
