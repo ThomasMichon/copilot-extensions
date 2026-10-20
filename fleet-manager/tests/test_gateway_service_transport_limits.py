@@ -254,6 +254,33 @@ def test_backend_not_modified_is_not_rejected_as_redirect(tmp_path):
     asyncio.run(scenario())
 
 
+@pytest.mark.parametrize("status", [302, 307, 304])
+def test_gateway_enforces_redirect_restriction_for_raw_connector_frames(tmp_path, status):
+    async def scenario():
+        async with running(tmp_path) as rig:
+            ticket = await admitted(rig)
+            async with rig.session.ws_connect(rig.origin + "/_fleet/service-channel") as ws:
+                await send(ws, {"ticket": ticket})
+                assert json.loads((await ws.receive()).data) == {"type": "attached"}
+                task = asyncio.create_task(rig.request("/api"))
+                response = None
+                try:
+                    forwarded = json.loads((await ws.receive()).data)
+                    await send(ws, {"type": "headers", "id": forwarded["id"],
+                                    "status": status, "headers": {}})
+                    if status == 304:
+                        await send(ws, {"type": "end", "id": forwarded["id"]})
+                    response = await asyncio.wait_for(task, 3)
+                    assert response.status == (304 if status == 304 else 502)
+                    await response.read()
+                finally:
+                    if response is not None:
+                        response.close()
+                    task.cancel()
+                    await asyncio.gather(task, return_exceptions=True)
+    asyncio.run(scenario())
+
+
 @pytest.mark.parametrize("values", [
     ["identity", "gzip"], ["gzip", "identity"], ["identity", "identity"],
 ])

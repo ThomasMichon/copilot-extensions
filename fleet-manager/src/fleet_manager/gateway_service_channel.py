@@ -124,6 +124,12 @@ def wire_headers(value: object, allowed: frozenset[str]) -> dict[str, str]:
     return headers(value.items(), allowed, strict=True)
 
 
+def response_status(value: object) -> None:
+    check(type(value) is int and 200 <= value <= 599, "invalid-backend-response", 502)
+    assert isinstance(value, int)
+    check(not 300 <= value <= 399 or value == 304, "invalid-backend-response", 502)
+
+
 def unpack(raw: object) -> dict:
     check(isinstance(raw, str) and len(raw.encode("utf-8")) <= FRAME_BYTES)
     assert isinstance(raw, str)
@@ -246,8 +252,8 @@ class Channel:
         self.authority.revalidate_caller(pending.caller)
         if kind == "headers":
             shape(value, {"type", "id", "status", "headers"})
-            check(pending.phase == "initial" and type(value["status"]) is int
-                  and 200 <= value["status"] <= 599)
+            check(pending.phase == "initial")
+            response_status(value["status"])
             wire_headers(value["headers"], RESPONSE_HEADERS)
             pending.phase = "body"
         elif kind == "chunk":

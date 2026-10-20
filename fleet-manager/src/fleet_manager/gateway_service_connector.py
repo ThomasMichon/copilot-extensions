@@ -23,7 +23,8 @@ from .gateway_auth import make_proof
 from .gateway_service_channel import (
     BODY_BYTES, CHANNEL_REQUESTS, CHUNK_BYTES, DEADLINE, FRAME_BYTES,
     REQUEST_HEADERS, RESPONSE_BYTES, RESPONSE_HEADERS, TransportError,
-    binary, check, close_socket, headers, origin, send, shape, target, unpack, wire_headers,
+    binary, check, close_socket, headers, origin, response_status, send, shape, target,
+    unpack, wire_headers,
 )
 from .gateway_service_context import METHODS
 
@@ -167,9 +168,7 @@ class ServiceConnector:
                 "User-Agent", "Accept", "Accept-Encoding", "Content-Type",
             },
         ) as response:
-            check(200 <= response.status <= 599, "invalid-backend-response")
-            check(not 300 <= response.status <= 399 or response.status == 304,
-                  "invalid-backend-response")
+            response_status(response.status)
             check(response.headers.getall("Content-Encoding", ["identity"]) == ["identity"],
                   "invalid-backend-response")
             selected = headers(response.headers.items(), RESPONSE_HEADERS)

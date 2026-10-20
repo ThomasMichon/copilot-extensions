@@ -122,6 +122,8 @@ cookies are not passed through.
 Backend 3xx responses other than `304 Not Modified` refuse before downstream
 headers: namespace-aware redirect destinations are not supported or silently
 stripped into apparently successful redirects. The connector never follows them.
+The Gateway applies the same status restriction to raw channel frames; an
+alternative connector cannot bypass the SDK's check.
 Cacheable responses preserve `Vary`, `Date`, `Age` and `Expires` alongside
 `Cache-Control` and validators. Hop-by-hop nomination of cache metadata refuses
 rather than stripping a variant key or restarting freshness.
