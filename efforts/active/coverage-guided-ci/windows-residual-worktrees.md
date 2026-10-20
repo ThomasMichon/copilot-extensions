@@ -89,7 +89,7 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ### Tenth admitted move: push-changes method family
 
-Baseline: Dev `c3bfeb88e56c70a671c109c82ee1bde24d5c0c21`, the actual
+Baseline: Dev `6177f31efc216f723e16a4d8670b01cb40b812c6`, after the actual
 #7450 record reassignment partition merge. Thirteen methods move unchanged
 from `test_pr_ops.py::TestPRFinalizeAndPush` to
 `test_push_changes.py::TestPushChanges`: all `test_push_changes_*` methods
