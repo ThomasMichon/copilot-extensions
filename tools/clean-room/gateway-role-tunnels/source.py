@@ -88,7 +88,8 @@ def fresh_run(root: Path) -> Path:
 def git(repository: Path, *args: str) -> bytes:
     env = {"PATH": os.environ.get("PATH", os.defpath), "HOME": str(repository),
            "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull,
-           "GIT_TERMINAL_PROMPT": "0", "GIT_NO_REPLACE_OBJECTS": "1"}
+           "GIT_TERMINAL_PROMPT": "0", "GIT_NO_REPLACE_OBJECTS": "1",
+           "GIT_NO_LAZY_FETCH": "1", "GIT_ALLOW_PROTOCOL": ""}
     try:
         result = subprocess.run(
             ["git", "-C", str(repository), *args], capture_output=True, env=env,

@@ -169,6 +169,44 @@ def test_materialization_never_copies_live_checkout_or_unallowlisted_blobs(tmp_p
     assert len(facts["source_manifest_sha256"]) == 64
 
 
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux-only host runner")
+@pytest.mark.parametrize("legacy", [False, True], ids=["no-lazy-fetch", "transport-fallback"])
+def test_missing_promisor_blob_never_invokes_remote_transport(tmp_path: Path, legacy: bool) -> None:
+    repo, helper, marker = tmp_path / "repo", tmp_path / "remote.py", tmp_path / "attempts"
+    helper.write_text(
+        "import pathlib,sys\n"
+        "with pathlib.Path(sys.argv[1]).open('a') as out: out.write('attempt\\n')\n"
+        "sys.exit(1)\n")
+    subprocess.run(["git", "init", "-q", str(repo)], check=True, capture_output=True)
+    for key, value in {
+        "remote.origin.url": f"ext::{sys.executable} {helper} {marker}",
+        "remote.origin.promisor": "true", "remote.origin.partialclonefilter": "blob:none",
+        "protocol.ext.allow": "always",
+    }.items():
+        subprocess.run(["git", "-C", str(repo), "config", key, value],
+                       check=True, capture_output=True)
+    missing = "1" * 40
+    control = subprocess.run(
+        ["git", "-C", str(repo), "cat-file", "blob", missing], capture_output=True,
+        env={key: value for key, value in os.environ.items() if not key.startswith("GIT_")},
+        timeout=5)
+    attempts = marker.read_bytes()
+    assert control.returncode != 0 and attempts
+    launch = subprocess.run
+
+    def bounded(*args, **kwargs):
+        assert kwargs["env"]["GIT_NO_LAZY_FETCH"] == "1"
+        assert kwargs["env"]["GIT_ALLOW_PROTOCOL"] == ""
+        if legacy:
+            kwargs["env"].pop("GIT_NO_LAZY_FETCH")
+        return launch(*args, **kwargs)
+
+    with patch.object(SOURCE.subprocess, "run", side_effect=bounded):
+        with pytest.raises(SOURCE.ProofError, match="git-source-unavailable"):
+            SOURCE.git(repo, "cat-file", "blob", missing)
+    assert marker.read_bytes() == attempts
+
+
 def test_commands_have_finite_timeouts_and_do_not_inherit_credentials(tmp_path: Path) -> None:
     engine = ENGINE.Engine(tmp_path, {})
     with patch.dict(os.environ, {"GH_TOKEN": "must-not-propagate",
