@@ -186,6 +186,56 @@ def test_nonzero_exit_is_failure_even_with_success_body(manager, monkeypatch):
     assert m._refresh_terminal_profiles() is False
 
 
+@pytest.mark.parametrize("response", ["", "old manager help", "[]", "{}"])
+@pytest.mark.parametrize("exit_code", [0, 1])
+def test_invalid_profile_response_preserves_startup_stderr(
+    manager, monkeypatch, capsys, response, exit_code,
+):
+    monkeypatch.setattr(
+        m.subprocess, "run",
+        lambda *a, **k: SimpleNamespace(
+            returncode=exit_code, stdout=response,
+            stderr="  dependency resolution failed under configured policy\n",
+        ),
+    )
+    assert m._refresh_terminal_profiles() is False
+    warning = capsys.readouterr().out
+    assert f"Manager exited {exit_code}" in warning
+    assert "stderr: dependency resolution failed under configured policy" in warning
+    assert "profiles refreshed" not in warning
+
+
+def test_profile_failure_retains_protocol_error_and_bounded_redacted_stderr(
+    manager, monkeypatch, capsys,
+):
+    monkeypatch.setattr(
+        m.subprocess, "run",
+        lambda *a, **k: SimpleNamespace(
+            returncode=2,
+            stdout=json.dumps({**SUCCESS, "status": "blocked", "error": "profile write denied"}),
+            stderr="https://fixture-user:fixture-password@example.invalid/ " + "x" * 1000,
+        ),
+    )
+    assert m._refresh_terminal_profiles() is False
+    warning = capsys.readouterr().out
+    assert "Manager exited 2: profile write denied; stderr:" in warning
+    assert "example.invalid" in warning
+    assert "fixture-user" not in warning and "fixture-password" not in warning
+    assert len(warning.split("Could not refresh Windows Terminal profiles: ", 1)[1].strip()) <= 400
+
+
+def test_real_manager_startup_failure_preserves_diagnostics(manager, capsys):
+    manager.command = (
+        sys.executable, "-c",
+        "import sys; print('startup dependency refused', file=sys.stderr); sys.exit(7)",
+    )
+    assert m._refresh_terminal_profiles() is False
+    warning = capsys.readouterr().out
+    assert "Manager exited 7" in warning
+    assert "invalid profile JSON" in warning
+    assert "stderr: startup dependency refused" in warning
+
+
 @pytest.mark.parametrize("error", [
     OSError("cannot launch manager"), subprocess.TimeoutExpired("manager", 60),
 ])

@@ -11,6 +11,8 @@ from pathlib import Path
 
 import pytest
 
+from agent_procutil import no_window_kwargs
+
 
 PLUGIN = Path(__file__).resolve().parents[1]
 INSTALLER = PLUGIN / "scripts" / "install.ps1"
@@ -377,6 +379,96 @@ def test_venv_install_invokes_resolved_uv_path():
     assert "--reinstall-package $PkgName" in body
     assert "& $uvPath pip install" not in body
     assert "& uv pip install" not in body
+
+
+@pytest.mark.parametrize("host", list(dict.fromkeys(
+    path for name in ("powershell", "pwsh") if (path := shutil.which(name))
+)) or [None])
+@pytest.mark.parametrize("complete", [False, True])
+@pytest.mark.parametrize("exit_code", [0, 7])
+def test_python_runtime_resolves_one_uv_application(
+    tmp_path: Path, host: str | None, complete: bool, exit_code: int,
+):
+    if os.name != "nt" or host is None:
+        pytest.skip("native Windows PowerShell application discovery")
+    for name in ("first", "second"):
+        directory = tmp_path / name
+        directory.mkdir()
+        shutil.copyfile(sys.executable, directory / "uv.exe")
+    slot = tmp_path / "root" / "versions" / "fixture"
+    slot.mkdir(parents=True)
+    if complete:
+        (slot / ".install-complete.json").write_text("{}", encoding="utf-8")
+    script = r"""
+$ErrorActionPreference = 'Stop'
+$source = Get-Content -LiteralPath $env:INSTALLER -Raw
+$tokens = $null; $errors = $null
+$ast = [Management.Automation.Language.Parser]::ParseInput(
+    $source, [ref]$tokens, [ref]$errors)
+foreach ($name in @('Get-ApplicationPath', 'Resolve-WinGetPackageExecutable', 'Deploy-PythonRuntime')) {
+    $node = $ast.Find({
+        param($n)
+        $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name
+    }, $true)
+    if (-not $node) { throw "Missing function: $name" }
+    Invoke-Expression $node.Extent.Text
+}
+$InstallDir = $env:FIXTURE_ROOT
+$VenvDir = Join-Path $InstallDir 'versions\fixture'
+$PluginDir = Get-Item -LiteralPath $env:FIXTURE_PLUGIN
+$ScriptDir = Join-Path $PluginDir 'scripts'
+$Action = 'update'
+$before = @((Get-Command uv -CommandType Application).Source)
+if ($before.Count -lt 2) { throw 'Fixture did not expose multiple uv applications' }
+function Get-SignedBasePython { $env:FIXTURE_PYTHON }
+function Ensure-Uv { $script:ensured = $true; return $true }
+function Ensure-UvIndex { $script:indexed = $true }
+function Ensure-InstallDir { param($Path) [void][IO.Directory]::CreateDirectory($Path) }
+function Assert-SourceRuntime { }
+function Write-ServiceOk { }
+function Invoke-Hidden {
+    param($FilePath, $ArgList, $ErrorOutput)
+    $uvIndex = [Array]::IndexOf($ArgList, '--uv')
+    if ($uvIndex -lt 0 -or $ArgList[$uvIndex + 1] -ne $before[0] -or
+        $ArgList[$uvIndex + 2] -ne '--base-python') { throw 'uv argument is not scalar' }
+    $resultIndex = [Array]::IndexOf($ArgList, '--result')
+    $result = @{
+        runtime_version = 'fixture'; runtime_python = $env:FIXTURE_PYTHON
+        deployment_manifest_published = $true; reused = $true
+    } | ConvertTo-Json -Compress
+    [IO.File]::WriteAllText($ArgList[$resultIndex + 1], $result)
+    $ErrorOutput.Value = 'fixture construction diagnostic'
+    $global:LASTEXITCODE = [int]$env:FIXTURE_EXIT
+}
+Deploy-PythonRuntime
+if ($env:FIXTURE_COMPLETE -eq '0' -and (-not $script:ensured -or -not $script:indexed)) {
+    throw 'Missing preparation'
+}
+if ($env:FIXTURE_COMPLETE -eq '1' -and ($script:ensured -or $script:indexed)) {
+    throw 'Unexpected preparation'
+}
+if (@((Get-Command uv -CommandType Application).Source).Count -ne $before.Count) {
+    throw 'Application discovery changed'
+}
+"""
+    result = subprocess.run(
+        [host, "-NoProfile", "-NonInteractive", "-Command", script],
+        capture_output=True, encoding="utf-8", errors="replace", timeout=20,
+        env={
+            **os.environ, "INSTALLER": str(INSTALLER),
+            "FIXTURE_ROOT": str(tmp_path / "root"), "FIXTURE_PLUGIN": str(PLUGIN),
+            "FIXTURE_PYTHON": sys.executable, "FIXTURE_EXIT": str(exit_code),
+            "FIXTURE_COMPLETE": str(int(complete)), "COPILOT_PLUGIN_STAGED_FROM": "",
+            "PATH": os.pathsep.join([str(tmp_path / "first"), str(tmp_path / "second"),
+                                    os.environ.get("PATH", "")]),
+        },
+        **no_window_kwargs(),
+    )
+    assert result.returncode == (1 if exit_code else 0), result.stdout + result.stderr
+    assert "fixture construction diagnostic" in result.stderr
+    if exit_code:
+        assert "Python runtime lifecycle failed (exit 7)" in result.stderr
+    assert not list((tmp_path / "root" / ".installer-inputs").glob("result-*.json"))
 
 
 def test_slot_clean_reports_failure_instead_of_silently_downgrading_signed_venv():

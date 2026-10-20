@@ -230,15 +230,22 @@ def _refresh_terminal_profiles(project: str | None = None, *, machine: str | Non
             timeout=60,
             **no_window_kwargs(),
         )
-        response = json.loads(result.stdout)
+        try:
+            response = json.loads(result.stdout)
+        except json.JSONDecodeError:
+            response = None
         if (result.returncode != 0 or not isinstance(response, dict)
                 or response.get("schema") != "copilot-extensions.terminal-profile-refresh"
                 or type(response.get("version")) is not int
                 or response.get("version") != 1
                 or response.get("status") != "verified_current"):
-            detail = (response.get("error") if isinstance(response, dict) else result.stderr)
+            detail = (response.get("error") if isinstance(response, dict)
+                      else "Manager returned invalid profile JSON")
             detail = detail or "Manager did not verify current profiles; update or repair Manager"
-            output.warn(f"Could not refresh Windows Terminal profiles: {bounded(str(detail), 400)}")
+            detail = f"Manager exited {result.returncode}: {bounded(str(detail), 120)}"
+            if result.stderr.strip():
+                detail += f"; stderr: {bounded(result.stderr.strip(), 250)}"
+            output.warn(f"Could not refresh Windows Terminal profiles: {bounded(detail, 400)}")
             return False
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
         output.warn(f"Could not refresh Windows Terminal profiles: {bounded(str(error), 400)}")

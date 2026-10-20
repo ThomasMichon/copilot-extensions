@@ -124,7 +124,9 @@ incomplete, not an advisory success. Preserved unrelated foreign inventory
 does not authorize overwriting it or make it a target of this installation.
 On Windows, profile refresh uses the Manager's narrow `refresh-profiles`
 JSON contract rather than entering the plugin installer. It repairs local
-integration even when the runtime version is already current.
+integration even when the runtime version is already current. A failed or invalid
+response reports the Manager exit code and bounded, credential-redacted startup
+stderr instead of hiding the cause behind a JSON parser error.
 
 The plugin installs via the Copilot CLI marketplace. The runtime installs
 via init/install scripts (or first-use provisioning from the global binstub)

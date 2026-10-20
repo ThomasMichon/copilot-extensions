@@ -2742,15 +2742,13 @@ function Deploy-PythonRuntime {
     if (-not $base) {
         throw 'The Python-owned installer requires a base Python 3.11+ outside the target slot.'
     }
-    $uvCommand = Get-Command uv -CommandType Application -ErrorAction SilentlyContinue
+    $uvPath = Get-ApplicationPath -Name @('uv')
     if ($Action -in @('repair', 'dev', 'dev-release') -or -not (Test-Path -LiteralPath (Join-Path $VenvDir '.install-complete.json'))) {
         if (-not (Ensure-Uv)) { throw 'Runtime construction requires uv.' }
         Ensure-UvIndex
-        $uvCommand = Get-Command uv -CommandType Application -ErrorAction SilentlyContinue
+        $uvPath = Get-ApplicationPath -Name @('uv')
     }
-    $uvPath = if ($uvCommand) { $uvCommand.Source } else {
-        Join-Path $InstallDir 'tool\uv.exe'
-    }
+    if (-not $uvPath) { $uvPath = Join-Path $InstallDir 'tool\uv.exe' }
     $originPayload = if ($env:COPILOT_PLUGIN_STAGED_FROM) {
         $env:COPILOT_PLUGIN_STAGED_FROM
     } else { $PluginDir.ToString() }
