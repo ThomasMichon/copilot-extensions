@@ -6,6 +6,8 @@ import argparse
 import json
 import types
 
+import pytest
+
 import agent_worktrees.__main__ as m
 from agent_worktrees import claim_history, state_root, tracking
 from agent_worktrees import config as cfg
@@ -72,6 +74,33 @@ def test_run_success_replaces_pending_with_real_claim(
     assert m.cmd_run(_args()) == 0
     rec = tracking.load_record(path)
     assert [claim.ref for claim in rec.resources] == ["m/p/child"]
+
+
+@pytest.mark.parametrize("wrapped", [False, True])
+@pytest.mark.parametrize("version", [1, 2])
+def test_run_settles_only_a_valid_execution_qualified_tuple(
+    tmp_path, monkeypatch, wrapped, version,
+):
+    path = _seed_owner(tmp_path, monkeypatch)
+    row = {
+        "id": "child", "repo": "p", "machine_identity_version": version,
+        "machine": "desk", "environment": "wsl", "platform": "wsl",
+        "execution_machine": "guest-space",
+    }
+    payload = json.dumps({"worktree": row} if wrapped else row)
+    monkeypatch.setattr(
+        m.subprocess, "run",
+        lambda *a, **k: types.SimpleNamespace(returncode=0, stdout=payload),
+    )
+
+    assert m.cmd_run(_args()) == (0 if version == 1 else 1)
+    claims = tracking.load_record(path).resources
+    assert len(claims) == 1
+    if version == 1:
+        assert claims[0].ref == "guest-space/p/child"
+    else:
+        assert claims[0].ref.startswith("pending-run:")
+
 
 
 def test_run_success_feeds_claim_history_for_a_pr_claim(

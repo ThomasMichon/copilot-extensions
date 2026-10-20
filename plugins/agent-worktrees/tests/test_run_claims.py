@@ -37,6 +37,35 @@ class TestClaimFromRunOutput:
         claim = m._claim_from_run_output(out)
         assert claim is not None and claim.ref == "m/p/wt-C"
 
+    @pytest.mark.parametrize("wrapped", [False, True])
+    @pytest.mark.parametrize("defect", [None, "version", "machine", "environment", "execution", "platform"])
+    def test_tuple_output_uses_execution_owner_or_declines_invalid_identity(
+        self, wrapped, defect, capsys,
+    ):
+        row = {
+            "id": "child", "repo": "project", "machine_identity_version": 1,
+            "machine": "desk", "environment": "wsl", "platform": "wsl",
+            "execution_machine": "guest-space",
+        }
+        if defect == "version":
+            row["machine_identity_version"] = 2
+        elif defect == "execution":
+            del row["execution_machine"]
+        elif defect == "platform":
+            row["platform"] = "windows"
+        elif defect:
+            del row[defect]
+        data = {"worktree": row} if wrapped else row
+        data["pr"] = {"ref": "https://example.com/o/r/pull/1"}
+
+        claim = m._claim_from_run_output(json.dumps(data))
+
+        if defect:
+            assert claim is None
+            assert "invalid worktree identity" in capsys.readouterr().out
+        else:
+            assert claim is not None and claim.ref == "guest-space/project/child"
+
     def test_missing_repo_falls_back_to_bare_ref(self):
         out = json.dumps({"worktree": {"id": "wt-D", "machine": "m"}})
         claim = m._claim_from_run_output(out)

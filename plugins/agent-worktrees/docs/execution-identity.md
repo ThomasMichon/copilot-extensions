@@ -79,6 +79,8 @@ unregistered execution spelling would match the legacy configuration fallback.
 Publication privacy guards check both physical and execution names. Terminal
 pair receipts preserve the exact legacy identity shape; versioned receipts
 retain the full tuple while reciprocal references use the execution owner.
+The `run` JSON recognizer also uses that owner; invalid explicit tuple output
+is reported and leaves the pending resource claim unsettled.
 
 **Producer gate:** ordinary create, anchor admission and externally adopted
 checkout producers still emit legacy records. The optional typed factory input
