@@ -108,6 +108,17 @@ for trusted-default activation and measurement boundaries.
 
 ## The turn-key runner
 
+The local runner measures each plugin from dependency preparation through final
+sandbox removal. Its aggregate timeout cannot turn a slow cleanup into a pass.
+After containment verifies that a group's processes are gone, one cleanup worker
+removes that group's private pytest directory while the next group runs. Shared
+environment roots and immutable fixture seeds outside those directories remain
+available until the plugin finishes. Every queued removal is joined, including
+failure and cancellation paths; cleanup failures are explicit. Unverified
+process teardown retains the current sandbox, even if an earlier group's
+cleanup also failed. The process, storage and per-item/group limits are unchanged.
+These focused runner contracts do not qualify a complete suite's timing budget.
+
 The source and candidate Linux full-suite declarations use exactly two
 work-stealing pytest workers for Worktrees only. Both workers remain inside the
 same runner-owned containment boundary and unchanged 30-second item,

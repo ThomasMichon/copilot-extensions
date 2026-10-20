@@ -53,6 +53,9 @@ import sys
 import tempfile
 import time
 import tomllib
+from collections.abc import Iterator
+from concurrent.futures import Future, ThreadPoolExecutor
+from contextlib import contextmanager
 from pathlib import Path
 
 from seasoned_uv import run_uv_install
@@ -401,6 +404,28 @@ def _test_file_groups(
     return groups or [[]]
 
 
+@contextmanager
+def _group_cleanup_worker() -> Iterator[tuple[ThreadPoolExecutor, list[Future[None]]]]:
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        cleanups: list[Future[None]] = []
+        try:
+            yield pool, cleanups
+        finally:
+            pending = sys.exception()
+            failure: Exception | None = None
+            for cleanup in cleanups:
+                try:
+                    cleanup.result()
+                except Exception as exc:
+                    print(f"[FAIL] Group sandbox cleanup failed: {exc}", file=sys.stderr)
+                    if failure is None:
+                        failure = exc
+            # Never replace an unreaped-tree error: TestSandbox must retain
+            # the current group even when an earlier group's removal failed.
+            if failure is not None and pending is None:
+                raise failure
+
+
 def run_plugin(
     name: str,
     uv: str,
@@ -452,6 +477,7 @@ def run_plugin(
     label = "collect-only" if collect_only else ("guard tests" if guards else "pytest")
     state_mode = "host state (explicit opt-in)" if allow_host_state else "isolated state"
     print(f"[RUN ] {name}: preparing venv + {label} [{state_mode}] ...")
+    plugin_started = time.monotonic()
     py = _ensure_venv(name, uv, reinstall=reinstall)
     sandbox_parent = Path(os.environ.get("TEMP", tempfile.gettempdir()))
     sandbox_parent.mkdir(parents=True, exist_ok=True)
@@ -465,8 +491,7 @@ def run_plugin(
         # per-run temp dir, never read by anything outside this process.
         prefix=f"ce-{name[:4]}-",
         dir=sandbox_parent,
-        ignore_cleanup_errors=True,
-    ) as raw_sandbox:
+    ) as raw_sandbox, _group_cleanup_worker() as (cleanup_pool, cleanups):
         sandbox = Path(raw_sandbox)
         basetemp = sandbox / "t"
         env = isolated_environment(
@@ -481,7 +506,6 @@ def run_plugin(
             env.pop("PYTEST_ADDOPTS", None)
             snapshot = sandbox / "selection.json"
             snapshot.write_text(json.dumps(selection.as_dict()), encoding="utf-8")
-        plugin_started = time.monotonic()
         for index, group in enumerate(groups, start=1):
             remaining = plugin_timeout - (time.monotonic() - plugin_started)
             if remaining <= 0:
@@ -490,7 +514,8 @@ def run_plugin(
                     f"({plugin_timeout:g}s)",
                     file=sys.stderr,
                 )
-                return 124
+                returncode = 124
+                break
             group_limits = Limits(
                 wall_seconds=min(limits.wall_seconds, remaining),
                 max_processes=limits.max_processes,
@@ -500,6 +525,7 @@ def run_plugin(
             )
             group_temp = basetemp / f"g{index}"
             group_temp.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            group_temp.mkdir(mode=0o700, exist_ok=True)
             cmd = [
                 str(py),
                 "-m",
@@ -535,17 +561,32 @@ def run_plugin(
                 sandbox=sandbox,
                 limits=group_limits,
             )
+            # Only this group's pytest files are disposable after verified
+            # reaping; shared seeds and environment roots outlive every group.
+            cleanups.append(cleanup_pool.submit(
+                tempfile.TemporaryDirectory._rmtree, group_temp,
+            ))
             if returncode == 5 and (guards or kexpr) and not test_files:
                 continue
             if returncode != 0:
                 break
+    elapsed = time.monotonic() - plugin_started
+    if elapsed > plugin_timeout:
+        print(
+            f"[LIMIT] {name}: plugin aggregate timeout exceeded "
+            f"({plugin_timeout:g}s), including sandbox cleanup: {elapsed:.2f}s elapsed "
+            "(preparation included)",
+            file=sys.stderr,
+        )
+        return 124
     # pytest exit code 5 == "no tests collected"; in --guards mode that just
     # means the plugin declares no guard-marked tests -- not a failure.
     if guards and returncode == 5 and not test_files:
         print(f"[SKIP] {name}: no guard-marked tests")
         return 0
     status = "PASS" if returncode == 0 else "FAIL"
-    print(f"[{status}] {name} (exit {returncode})")
+    print(f"[{status}] {name} (exit {returncode}) "
+          f"[{elapsed:.2f}s including preparation and cleanup]")
     return returncode
 
 

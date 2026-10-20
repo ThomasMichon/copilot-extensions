@@ -57,11 +57,255 @@ def test_unreaped_tree_retains_sandbox_without_cleanup(monkeypatch, tmp_path, ca
     try:
         assert (sandbox / "still-owned.txt").read_text() == "preserve"
         assert (sandbox / "t").is_dir()
+        assert (sandbox / "t" / "g1").is_dir()
         if os.name != "nt":
             assert (sandbox / "t").stat().st_mode & 0o077 == 0
         assert "[KEEP] Unreaped process tree: sandbox retained at" in capsys.readouterr().err
     finally:
         shutil.rmtree(sandbox)
+
+
+@pytest.fixture
+def cleanup_runner(monkeypatch, tmp_path):
+    plugin = tmp_path / "alpha"
+    monkeypatch.setenv("TEMP", str(tmp_path))
+    monkeypatch.setattr(runner, "_has_suite", lambda name: True)
+    monkeypatch.setattr(runner, "_plugin_dir", lambda name: plugin)
+    monkeypatch.setattr(runner, "_ensure_venv", lambda *a, **k: Path("fake-python"))
+    monkeypatch.setattr(runner, "_test_file_groups", lambda *a, **k: [
+        [plugin / "tests" / "test_one.py"], [plugin / "tests" / "test_two.py"],
+    ])
+    monkeypatch.setattr(runner, "run_contained", lambda *a, **k: 0)
+
+    def run():
+        return runner.run_plugin(
+            "alpha", "uv", reinstall=False, kexpr=None, limits=runner.Limits(),
+            plugin_timeout=60, test_timeout=30, max_files_per_subsuite=25,
+        )
+
+    return run
+
+
+def test_plugin_budget_includes_final_sandbox_cleanup(
+    monkeypatch, capsys, cleanup_runner,
+):
+    clock = [0.0]
+    original_directory = runner._TestSandbox
+
+    class Directory(original_directory):
+        def __exit__(self, *args):
+            result = super().__exit__(*args)
+            clock[0] = 61.0
+            return result
+
+    monkeypatch.setattr(runner.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(runner, "_TestSandbox", Directory)
+    assert cleanup_runner() == 124
+    assert "including sandbox cleanup: 61.00s elapsed" in capsys.readouterr().err
+
+
+def test_budget_exhausted_between_groups_still_reports_final_cleanup(
+    monkeypatch, capsys, cleanup_runner,
+):
+    clock = [0.0]
+    calls = []
+    original_directory = runner._TestSandbox
+
+    class Directory(original_directory):
+        def __exit__(self, *args):
+            result = super().__exit__(*args)
+            clock[0] = 65.0
+            return result
+
+    def run(*args, **kwargs):
+        calls.append(args)
+        clock[0] = 61.0
+        return 0
+
+    monkeypatch.setattr(runner, "run_contained", run)
+    monkeypatch.setattr(runner.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(runner, "_TestSandbox", Directory)
+    assert cleanup_runner() == 124
+    assert len(calls) == 1
+    assert "including sandbox cleanup: 65.00s elapsed" in capsys.readouterr().err
+
+
+def test_preparation_uses_the_same_aggregate_budget(
+    monkeypatch, capsys, cleanup_runner,
+):
+    clock = [0.0]
+    calls = []
+
+    def prepare(*args, **kwargs):
+        clock[0] = 61.0
+        return Path("fake-python")
+
+    monkeypatch.setattr(runner, "_ensure_venv", prepare)
+    monkeypatch.setattr(runner, "run_contained", lambda *a, **k: calls.append(a))
+    monkeypatch.setattr(runner.time, "monotonic", lambda: clock[0])
+    assert cleanup_runner() == 124
+    assert calls == []
+    assert "(preparation included)" in capsys.readouterr().err
+
+
+def test_reaped_group_cleanup_overlaps_the_next_group(
+    monkeypatch, tmp_path, capsys, cleanup_runner,
+):
+    started = threading.Event()
+    release = threading.Event()
+    removed = []
+    workers = set()
+    original_remove = runner.tempfile.TemporaryDirectory._rmtree
+    calls = []
+
+    def remove(name, *args, **kwargs):
+        if Path(name).name in {"g1", "g2"}:
+            workers.add(threading.get_ident())
+        if Path(name).name == "g1":
+            started.set()
+            assert release.wait(5), "next group never released cleanup"
+        original_remove(name, *args, **kwargs)
+        removed.append(Path(name))
+
+    def run_contained(command, **kwargs):
+        calls.append(command)
+        group = Path(next(arg.split("=", 1)[1] for arg in command
+                          if arg.startswith("--basetemp=")))
+        assert group.is_dir()
+        (group / "owned.txt").write_text("disposable")
+        cache = kwargs["sandbox"] / "s" / "example" / "data"
+        if len(calls) == 1:
+            cache.parent.mkdir(parents=True)
+            cache.write_bytes(b"immutable shared seed")
+            assert containment._tree_size(kwargs["sandbox"]) >= cache.stat().st_size
+        else:
+            try:
+                assert started.wait(5), "cleanup did not overlap the next group"
+                assert cache.read_bytes() == b"immutable shared seed"
+            finally:
+                release.set()
+        return 0
+
+    monkeypatch.setattr(runner, "run_contained", run_contained)
+    monkeypatch.setattr(runner.tempfile.TemporaryDirectory, "_rmtree", staticmethod(remove))
+    try:
+        assert cleanup_runner() == 0
+    finally:
+        release.set()
+    assert len(calls) == 2
+    assert [path.name for path in removed[:2]] == ["g1", "g2"]
+    assert len(workers) == 1
+    assert not list(tmp_path.glob("ce-alph-*"))
+    assert "including preparation and cleanup" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("interruption", [None, KeyboardInterrupt, runner.UnreapedProcessError])
+def test_cleanup_failure_is_explicit_and_cannot_mask_unreaped_tree(
+    monkeypatch, tmp_path, capsys, cleanup_runner, interruption,
+):
+    original_remove = runner.tempfile.TemporaryDirectory._rmtree
+    roots = []
+    groups = []
+
+    def remove(name, *args, **kwargs):
+        if Path(name).name == "g1":
+            raise OSError("group removal refused")
+        return original_remove(name, *args, **kwargs)
+
+    def run(command, **kwargs):
+        roots.append(kwargs["sandbox"])
+        group = Path(next(arg.split("=", 1)[1] for arg in command
+                          if arg.startswith("--basetemp=")))
+        groups.append(group)
+        (group / "owned.txt").write_text("preserve")
+        if len(groups) == 2 and interruption is not None:
+            raise interruption("second group interrupted")
+        return 0
+
+    monkeypatch.setattr(runner, "run_contained", run)
+    monkeypatch.setattr(runner.tempfile.TemporaryDirectory, "_rmtree", staticmethod(remove))
+    try:
+        with pytest.raises(interruption or OSError):
+            cleanup_runner()
+        assert "Group sandbox cleanup failed: group removal refused" in capsys.readouterr().err
+        if interruption is runner.UnreapedProcessError:
+            assert (groups[1] / "owned.txt").read_text() == "preserve"
+        else:
+            assert not roots[0].exists()
+    finally:
+        if roots and roots[0].exists():
+            shutil.rmtree(roots[0])
+
+
+@pytest.mark.parametrize("returncode", [1, 5])
+def test_failed_group_is_cleaned_without_starting_another(
+    monkeypatch, cleanup_runner, returncode,
+):
+    roots = []
+
+    def run(*args, **kwargs):
+        roots.append(kwargs["sandbox"])
+        return returncode
+
+    monkeypatch.setattr(runner, "run_contained", run)
+    assert cleanup_runner() == returncode
+    assert len(roots) == 1
+    assert not roots[0].exists()
+
+
+def test_final_sandbox_cleanup_failure_cannot_report_pass(
+    monkeypatch, tmp_path, capsys, cleanup_runner,
+):
+    original_remove = runner.tempfile.TemporaryDirectory._rmtree
+
+    def remove(name, *args, **kwargs):
+        if Path(name).name.startswith("ce-alph-"):
+            assert not kwargs.get("ignore_errors", False)
+            raise OSError("final sandbox removal refused")
+        return original_remove(name, *args, **kwargs)
+
+    monkeypatch.setattr(runner.tempfile.TemporaryDirectory, "_rmtree", staticmethod(remove))
+    try:
+        with pytest.raises(OSError, match="final sandbox removal refused"):
+            cleanup_runner()
+        assert "[PASS]" not in capsys.readouterr().out
+    finally:
+        for root in tmp_path.glob("ce-alph-*"):
+            shutil.rmtree(root)
+
+
+def test_real_group_processes_release_readonly_files_before_cleanup(
+    monkeypatch, tmp_path, cleanup_runner,
+):
+    plugin = tmp_path / "alpha"
+    tests = plugin / "tests"
+    tests.mkdir(parents=True)
+    body = (
+        "import stat\n"
+        "def test_owned_file(tmp_path):\n"
+        "    owned = tmp_path / 'readonly.txt'\n"
+        "    owned.write_text('owned')\n"
+        "    owned.chmod(stat.S_IREAD)\n"
+    )
+    for name in ("test_one.py", "test_two.py"):
+        (tests / name).write_text(body, encoding="utf-8")
+    monkeypatch.setattr(runner, "_ensure_venv", lambda *a, **k: Path(sys.executable))
+    roots = []
+    groups = []
+
+    def run(command, **kwargs):
+        roots.append(kwargs["sandbox"])
+        group = Path(next(arg.split("=", 1)[1] for arg in command
+                          if arg.startswith("--basetemp=")))
+        groups.append(group)
+        rc = containment.run_contained(command, **kwargs)
+        assert list(group.rglob("readonly.txt"))
+        return rc
+
+    monkeypatch.setattr(runner, "run_contained", run)
+    assert cleanup_runner() == 0
+    assert len(groups) == 2 and groups[0] != groups[1]
+    assert not roots[0].exists()
 
 
 @pytest.mark.parametrize("reinstall", [False, True])
