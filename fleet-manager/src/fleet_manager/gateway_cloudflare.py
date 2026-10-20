@@ -15,9 +15,9 @@ from .gateway_service_listener import Listener, external_origin
 
 def ingress(listener: Listener, *, ca_pool: str | None = None) -> dict:
     """Render a JSON-compatible YAML fragment for an owner-managed tunnel."""
+    listener.tls()
     public = urlsplit(external_origin(listener.external_origin))
     private = urlsplit(listener.origin)
-    listener.tls()
     check(listener.port != 0 and public.port is None, "cloudflare-port-unsupported")
     assert public.hostname is not None and private.hostname is not None
     try:
