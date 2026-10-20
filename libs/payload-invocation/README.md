@@ -112,6 +112,11 @@ source-ownership bypass. The lock owner's additive `runtimeDeployment` record
 binds version, origin and publication/teardown operation. Borrowed children
 derive their purpose from that live durable owner and revalidate it; a plugin
 lease cannot upgrade itself by passing the flag or an environment hint.
+Every borrower also declares its expected operation: publication is the
+default; native uninstall passes `--lifecycle-operation teardown` to
+`--check-lifecycle`. The native installers check this before staging and again
+before dispatch, so a valid teardown ticket cannot admit a stamping or helper
+publication action.
 Management admits a valid managed policy but still requires the original
 installation, source and environment ownership. Teardown remains available
 independently of deployment policy, and its lease cannot publish a manifest.

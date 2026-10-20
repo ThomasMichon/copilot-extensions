@@ -103,8 +103,11 @@ if [[ -z "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
                 --legacy-root "$__aw_admission_root"
                 --source-payload-root "$__aw_admission_source"
             )
+            __aw_admission_operation=publish
+            [[ "$__aw_action" != uninstall ]] || __aw_admission_operation=teardown
             if [[ -n "${COPILOT_EXTENSIONS_COMMAND_LIFECYCLE:-}" ]]; then
-                "$__aw_admission_python" "${__aw_admission_args[@]}" --check-lifecycle || exit $?
+                "$__aw_admission_python" "${__aw_admission_args[@]}" \
+                    --check-lifecycle --lifecycle-operation "$__aw_admission_operation" || exit $?
             else
                 __aw_admission_bash="$(type -P -- bash)" || exit 1
                 __aw_admission_bash="$(cd "$(dirname "$__aw_admission_bash")" && pwd -P)/$(basename "$__aw_admission_bash")"
@@ -3217,7 +3220,8 @@ _assert_source_runtime || exit 1
 if ! $CONTEXTUAL_INSTALL; then
     case "$ACTION" in
         install|update|provision|stamp|uninstall|repair|dev|dev-release|publish-runtime-helpers)
-            "$__aw_admission_python" "${__aw_admission_args[@]}" --check-lifecycle || exit $?
+            "$__aw_admission_python" "${__aw_admission_args[@]}" \
+                --check-lifecycle --lifecycle-operation "$__aw_admission_operation" || exit $?
             ;;
     esac
 fi

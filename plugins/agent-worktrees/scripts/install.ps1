@@ -244,8 +244,9 @@ if (-not $ContextualInstall -and $Action -in @('install', 'update', 'provision',
         '--payload-root', $admissionPayload, '--plugin-id', 'agent-worktrees',
         '--legacy-root', $InstallDir, '--source-payload-root', $admissionSource
     )
+    $admissionOperation = if ($Action -eq 'uninstall') { 'teardown' } else { 'publish' }
     if ($env:COPILOT_EXTENSIONS_COMMAND_LIFECYCLE) {
-        & $admissionPython @admissionArgs --check-lifecycle
+        & $admissionPython @admissionArgs --check-lifecycle --lifecycle-operation $admissionOperation
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     } else {
         $admissionForward = @()
@@ -4010,7 +4011,7 @@ Initialize-SourceRuntime
 Assert-SourceRuntime
 
 if (-not $ContextualInstall -and $Action -in @('install', 'update', 'provision', 'stamp', 'uninstall', 'repair', 'dev', 'dev-release', 'publish-runtime-helpers')) {
-    & $admissionPython @admissionArgs --check-lifecycle
+    & $admissionPython @admissionArgs --check-lifecycle --lifecycle-operation $admissionOperation
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }
 

@@ -155,13 +155,13 @@ def test_command_binding_deployment_teardown_retains_policy_independence(
         **binding_fixture["arguments"],
     ) as lease:
         lease.assert_owned()
-        with pytest.raises(binding.CommandOwnershipConflict, match="cannot change purpose"):
+        with pytest.raises(binding.CommandOwnershipConflict, match="does not authorize publish"):
             with lifecycle.legacy_lifecycle(
                 binding, binding_fixture["primitive"], reserve=False,
                 **binding_fixture["arguments"],
             ):
                 pytest.fail("Teardown lease admitted publication")
-        with pytest.raises(binding.CommandOwnershipConflict, match="teardown lease"):
+        with pytest.raises(binding.CommandOwnershipConflict, match="does not authorize publish"):
             binding.write_legacy_manifest(
                 binding_fixture["primitive"], {"schema_version": 3, "service": "agent-worktrees"},
                 **binding_fixture["arguments"],
@@ -349,3 +349,68 @@ def test_command_binding_deployment_explicit_cli_native_reentry(
     assert smoke["staged"] is True
     assert Path(smoke["staged_from"]) == payload
     assert not _lifecycle_lock_path(binding_fixture["legacy"]).exists()
+
+
+@pytest.mark.parametrize("shell", [
+    pytest.param("bash", marks=pytest.mark.skipif(os.name == "nt", reason="POSIX installer")),
+    pytest.param("powershell", marks=pytest.mark.skipif(POWERSHELL is None, reason="PowerShell unavailable")),
+])
+def test_command_binding_deployment_native_teardown_ticket_cannot_publish(
+    binding_fixture: dict, shell: str, powershell_host,
+) -> None:
+    installer, environment = _real_installer(binding_fixture, shell, "installed")
+    _policy(binding_fixture)
+    binding = binding_fixture["binding"]
+    lifecycle = binding._load_lifecycle()
+    with lifecycle.legacy_lifecycle(
+        binding, binding_fixture["primitive"], reserve=False, teardown=True,
+        **binding_fixture["arguments"],
+    ) as lease:
+        environment[lifecycle.TICKET_ENV] = json.dumps(lease.ticket)
+        host = powershell_host(binding_fixture, environment) if shell == "powershell" else None
+        before = _snapshot(binding_fixture["home"])
+        for action in ("stamp", "install", "update", "provision", "publish-runtime-helpers"):
+            command = (
+                ["bash", str(installer), action] if shell == "bash" else
+                [POWERSHELL, "-NoLogo", "-NoProfile", "-File", str(installer), action]
+            )
+            result = host.run(command) if host else subprocess.run(
+                command, env=environment, cwd=binding_fixture["home"],
+                capture_output=True, text=True, timeout=30,
+            )
+            assert result.returncode != 0, result.stdout + result.stderr
+            assert "does not authorize publish" in result.stdout + result.stderr
+            assert _snapshot(binding_fixture["home"]) == before
+        if host:
+            host.close()
+            assert _snapshot(binding_fixture["home"]) == before
+
+
+@pytest.mark.parametrize("shell", [
+    pytest.param("bash", marks=pytest.mark.skipif(os.name == "nt", reason="POSIX installer")),
+    pytest.param("powershell", marks=pytest.mark.skipif(POWERSHELL is None, reason="PowerShell unavailable")),
+])
+def test_command_binding_deployment_native_teardown_ticket_admits_uninstall(
+    binding_fixture: dict, shell: str,
+) -> None:
+    installer, environment = _real_installer(binding_fixture, shell, "installed")
+    _policy(binding_fixture)
+    binding = binding_fixture["binding"]
+    lifecycle = binding._load_lifecycle()
+    with lifecycle.legacy_lifecycle(
+        binding, binding_fixture["primitive"], reserve=False, teardown=True,
+        **binding_fixture["arguments"],
+    ) as lease:
+        command = (
+            ["bash", str(installer), "uninstall"] if shell == "bash" else
+            [POWERSHELL, "-NoLogo", "-NoProfile", "-File", str(installer), "uninstall"]
+        )
+        result = subprocess.run(
+            command, env={**environment, lifecycle.TICKET_ENV: json.dumps(lease.ticket)},
+            cwd=binding_fixture["home"], capture_output=True, text=True, timeout=30,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        smoke = json.loads((binding_fixture["legacy"] / "smoke.json").read_text())
+        assert smoke["staged"] is True
+        lease.assert_owned()

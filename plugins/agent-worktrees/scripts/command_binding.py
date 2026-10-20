@@ -159,8 +159,6 @@ def write_legacy_manifest(
     lifecycle = _load_lifecycle()
     lease = lifecycle.borrowed_lease(_rules(), primitive, **arguments)
     purpose = lease.purpose if lease is not None else lifecycle._purpose(_rules(), {})
-    if purpose["operation"] != "publish":
-        raise CommandOwnershipConflict("A teardown lease cannot publish a runtime manifest.")
     lifecycle._publication(_rules(), primitive, arguments, purpose)
     if lease is None:
         lifecycle._reservation(
@@ -391,6 +389,7 @@ def main() -> int:
     parser.add_argument("--write-manifest", action="store_true")
     parser.add_argument("--run-lifecycle", action="store_true")
     parser.add_argument("--check-lifecycle", action="store_true")
+    parser.add_argument("--lifecycle-operation", choices=("publish", "teardown"))
     parser.add_argument("--deferred-runtime", action="store_true")
     parser.add_argument("--managed-deployment", action="store_true")
     parser.add_argument("--teardown", action="store_true")
@@ -407,6 +406,8 @@ def main() -> int:
         parser.error("--deferred-runtime requires --run-lifecycle.")
     if arguments.managed_deployment and (not arguments.run_lifecycle or arguments.teardown):
         parser.error("--managed-deployment requires --run-lifecycle without --teardown.")
+    if arguments.lifecycle_operation is not None and not arguments.check_lifecycle:
+        parser.error("--lifecycle-operation requires --check-lifecycle.")
     if arguments.lifecycle_timeout is not None and not arguments.run_lifecycle:
         parser.error("--lifecycle-timeout requires --run-lifecycle.")
     if arguments.human_operation and (not arguments.run_lifecycle or arguments.teardown):
@@ -429,7 +430,10 @@ def main() -> int:
             if lifecycle_action:
                 lifecycle = _load_lifecycle()
                 if arguments.check_lifecycle:
-                    if lifecycle.borrowed_lease(_rules(), primitive, **publication_arguments) is None:
+                    if lifecycle.borrowed_lease(
+                        _rules(), primitive, operation=arguments.lifecycle_operation or "publish",
+                        **publication_arguments,
+                    ) is None:
                         raise CommandOwnershipConflict("Runtime lifecycle ticket is missing.")
                     return 0
                 command = arguments.command

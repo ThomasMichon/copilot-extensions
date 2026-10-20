@@ -151,6 +151,12 @@ class LifecycleLease:
         _reservation(self.binding, self.primitive, Path(self.arguments["legacy_root"]), self.owner)
         _publication(self.binding, self.primitive, self.arguments, self.purpose)
 
+    def assert_operation(self, operation: str) -> None:
+        if self.purpose["operation"] != operation:
+            raise self.binding.CommandOwnershipConflict(
+                f"Runtime lifecycle lease does not authorize {operation}."
+            )
+
 
 def _lock(primitive: Any, arguments: dict[str, Any]) -> Any:
     root = Path(arguments["legacy_root"]).resolve()
@@ -161,8 +167,12 @@ def _lock(primitive: Any, arguments: dict[str, Any]) -> Any:
     )
 
 
-def borrowed_lease(binding: Any, primitive: Any, **arguments: Any) -> LifecycleLease | None:
+def borrowed_lease(
+    binding: Any, primitive: Any, *, operation: str = "publish", **arguments: Any,
+) -> LifecycleLease | None:
     """An inherited ticket is valid only against its live durable lock owner."""
+    if operation not in {"publish", "teardown"}:
+        raise ValueError("Runtime lifecycle operation must be publish or teardown.")
     current = _CURRENT.get()
     if current is not None:
         if Path(arguments["legacy_root"]) != Path(current.arguments["legacy_root"]):
@@ -170,6 +180,7 @@ def borrowed_lease(binding: Any, primitive: Any, **arguments: Any) -> LifecycleL
         if _owner(binding, primitive, arguments) != current.owner:
             raise binding.CommandOwnershipConflict("Runtime lifecycle source changed.")
         current.assert_owned()
+        current.assert_operation(operation)
         return current
     raw = os.environ.get(TICKET_ENV)
     if raw is None:
@@ -194,6 +205,7 @@ def borrowed_lease(binding: Any, primitive: Any, **arguments: Any) -> LifecycleL
     lock.acquired = True
     lease = LifecycleLease(binding, primitive, arguments, lock, owner, ticket)
     lease.assert_owned()
+    lease.assert_operation(operation)
     return lease
 
 
@@ -207,12 +219,11 @@ def legacy_lifecycle(
         raise ValueError("Managed deployment cannot authorize teardown.")
     if teardown and reserve:
         raise ValueError("Teardown must not reserve an unfinished runtime build.")
-    borrowed = borrowed_lease(binding, primitive, **arguments)
+    borrowed = borrowed_lease(
+        binding, primitive, operation="teardown" if teardown else "publish", **arguments,
+    )
     if borrowed is not None:
-        if (
-            (managed_deployment and borrowed.purpose["origin"] != "management")
-            or teardown != (borrowed.purpose["operation"] == "teardown")
-        ):
+        if managed_deployment and borrowed.purpose["origin"] != "management":
             raise binding.CommandOwnershipConflict("Runtime deployment lease cannot change purpose.")
         yield borrowed
         if teardown:
