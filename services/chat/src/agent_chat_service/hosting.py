@@ -173,9 +173,13 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         elif self.path != "/health":
             self._json(404, {"error": "not_found"})
         else:
-            value = self.server.store.health()
-            value["accepting"] = not self.server.draining
-            self._json(503 if self.server.draining else 200, value)
+            try:
+                value = self.server.store.health()
+            except ChatError as error:
+                self._json(error.status, error.as_dict())
+            else:
+                value["accepting"] = not self.server.draining
+                self._json(503 if self.server.draining else 200, value)
 
     def do_POST(self):
         if not self._authorized():
@@ -202,7 +206,10 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             return
         self._cancel_deadline()
         try:
-            value = self.server.store.dispatch(strict_json(raw))
+            request = strict_json(raw)
+            value = self.server.store.dispatch(request)
+            if request["op"] == "members" and len(json_bytes(value)) > MAX_RESPONSE_BYTES:
+                raise ChatError("capacity", "Membership reply is too large; use members limit/after.")
         except ChatError as error:
             self._json(error.status, error.as_dict())
         else:

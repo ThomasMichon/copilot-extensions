@@ -12,6 +12,7 @@ import pytest
 
 from agent_chat_service import hosting
 from agent_chat_service import ChatError
+from agent_chat_service import json_bytes
 
 
 TOKEN = "synthetic-local-key-" + "x" * 32
@@ -354,3 +355,83 @@ def test_close_retains_custody_until_held_transaction_and_workers_retire(tmp_pat
     with running(config) as replacement:
         page = rpc(replacement, {"op": "read", "channel": "room", "codename": "agent-a"})[1]
         assert page["messages"] == [posted["event"]]
+
+
+def test_busy_health_is_structured_and_recovers_after_transaction(tmp_path, monkeypatch):
+    entered, release = threading.Event(), threading.Event()
+    with running(configuration(tmp_path)) as host:
+        assert rpc(host, {"op": "join", "channel": "room",
+                          "actor": {"codename": "agent-a"}})[0] == 200
+        original = host.store._post
+
+        def held_post(request):
+            entered.set()
+            assert release.wait(5)
+            return original(request)
+
+        monkeypatch.setattr(host.store, "_post", held_post)
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            post = pool.submit(rpc, host, {
+                "op": "post", "channel": "room", "codename": "agent-a",
+                "request_id": "health-held", "text": "health remains a usable error",
+            })
+            client = connection(host)
+            try:
+                assert entered.wait(3)
+                client.request("GET", "/health", headers={"Authorization": SCHEME + TOKEN})
+                response = client.getresponse()
+                assert response.status == 503 and json.loads(response.read())["error"] == "busy"
+            finally:
+                client.close()
+                release.set()
+            assert post.result(5)[0] == 200
+        client = connection(host)
+        try:
+            client.request("GET", "/health", headers={"Authorization": SCHEME + TOKEN})
+            response = client.getresponse()
+            assert response.status == 200 and json.loads(response.read())["accepting"]
+        finally:
+            client.close()
+
+
+def test_complete_valid_membership_is_retrievable_with_wire_bounded_pages(tmp_path):
+    with running(configuration(tmp_path)) as host:
+        names = [f"member-{index:03}" for index in range(256)]
+        for name in names:
+            actor = {"codename": name, "machine": "m" * 1024, "repo": "r" * 1024,
+                     "session_id": "s" * 1024, "bridge_handle": ""}
+            actor["bridge_handle"] = "b" * (4096 - len(json_bytes(actor)))
+            assert len(json_bytes(actor)) == 4096
+            assert rpc(host, {"op": "join", "channel": "room", "actor": actor})[0] == 200
+        assert rpc(host, {"op": "join", "channel": "room",
+                          "actor": {"codename": "overflow"}})[0] == 409
+        legacy = host.store.dispatch({"op": "members", "channel": "room"})
+        assert len(legacy["members"]) == 256 and len(json_bytes(legacy)) > hosting.MAX_RESPONSE_BYTES
+        status, refused = rpc(host, {"op": "members", "channel": "room"})
+        assert status == 409 and refused["error"] == "capacity"
+        collected, after = [], None
+        for _ in range(3):
+            request = {"op": "members", "channel": "room", "limit": 100}
+            if after is not None:
+                request["after"] = after
+            status, page = rpc(host, request)
+            assert status == 200 and len(json_bytes(page)) < hosting.MAX_RESPONSE_BYTES
+            assert len(page["members"]) <= 100
+            collected.extend(page["members"])
+            after = page["next_after"]
+            if not page["more"]:
+                assert after is None
+                break
+            assert after == page["members"][-1]["codename"]
+        assert [member["codename"] for member in collected] == names
+        assert collected == legacy["members"]
+
+
+@pytest.mark.parametrize("controls", [
+    {"limit": 0}, {"limit": 101}, {"limit": True},
+    {"after": ""}, {"after": "invalid space"}, {"after": 1},
+])
+def test_members_page_controls_are_validated_before_lookup(tmp_path, controls):
+    with running(configuration(tmp_path)) as host:
+        status, value = rpc(host, {"op": "members", "channel": "missing", **controls})
+        assert status == 400 and value["error"] == "invalid"

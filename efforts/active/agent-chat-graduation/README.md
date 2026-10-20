@@ -266,6 +266,18 @@ graduation still requires the declared native and lifecycle guarantees.
   The focused case passes with real competing-host refusal during cleanup and
   preserved committed data after replacement. The refreshed full Windows
   portfolio passes 103 tests in 51.25 seconds under the same 120-second bound.
+- The next actual review reported two additional Medium findings in its body,
+  despite having no new inline threads: busy health disconnected instead of
+  returning structured 503, and a valid full 256-member channel with 4096-byte
+  metadata exceeded the wire response limit. Both reproduced against real HTTP.
+  Health now maps the core error and recovers after transaction release.
+  Explicit `members limit/after` pages retrieve every record within the wire
+  bound; the callable core's ordinary full response and normal-sized legacy
+  HTTP replies remain unchanged. Oversized unpaged HTTP calls now refuse with
+  actionable capacity/409 rather than 500. The exact 256-member fixture,
+  257th-member refusal, paging controls and full metadata preservation pass.
+  Eight focused cases and the refreshed full 111-case Windows portfolio
+  passed, the latter in 48.74 seconds under the unchanged 120-second bound.
 - No production install, external host activation, trusted release selection,
   stable launcher, passive-candidate cutover, rollback or post-installer health
   is claimed. Those remain the existing #6424/#6240 lifecycle boundary.

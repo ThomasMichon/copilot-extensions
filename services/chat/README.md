@@ -114,8 +114,9 @@ owner supplies discovery to clients; no PATH search or ambient endpoint fallback
 is introduced. The held client slice's HTTP-only endpoint selection still needs
 the explicit Unix-socket consumption seam before direct POSIX client adoption.
 
-Only `POST /api/v1/chat` and authenticated `GET /health` exist. RPC JSON and
-errors are the callable core's unchanged contract. There are at most 32 live
+Only `POST /api/v1/chat` and authenticated `GET /health` exist. Busy health
+probes return the core's structured HTTP 503, not a disconnected connection.
+There are at most 32 live
 request workers, including partial headers and bodies; excess connections close
 before creating another worker. Aggregate request line/headers are bounded to
 16 KiB and bodies to 64 KiB, with no chunking, ambiguous length or keep-alive.
@@ -163,7 +164,7 @@ HTTP server. `strict_json` bounds and validates untrusted serialized input;
 | `cursor` | `channel`, `codename`, `expected_cursor`, `next_cursor` | none |
 | `wait` | `channel`, `codename` | `timeout`, `batch_ms` |
 | `scan` | `codename`, `epoch`, `after` | `limit`, `timeout`, `batch_ms` |
-| `members` | `channel` | none |
+| `members` | `channel` | `limit`, `after` |
 | `resolve` | `codename` | none |
 
 Actor metadata includes `codename` and optional `machine`, `environment`,
@@ -173,6 +174,20 @@ A transport must enforce its real access boundary before dispatching a request.
 Credentials do not belong in the store. A workspace-aware client must establish
 and settle real native membership obligations; this library does not simulate
 those claims.
+
+An ordinary `members` call retains the original `{"channel", "members"}` full
+enumeration in the callable core. For wire-bounded enumeration, explicitly
+provide `limit` (1-100) and/or `after` (the last returned codename). A paged
+response adds boolean `more` and nullable `next_after`; continue only with
+that returned codename until `more` is false. The default paged limit is 100.
+These pages bound even all 256 channel members with 4096-byte actor metadata
+inside the one-MiB HTTP budget. An oversized unpaged HTTP reply refuses with
+`capacity`/409 and directs the caller to pagination; it never silently truncates
+or returns a generic 500. Normal-sized legacy replies are unchanged.
+Membership pages are ordered current metadata, not a snapshot, semantic viewer
+cursor, read receipt or native authority. Concurrent membership changes may
+require a fresh enumeration. Existing clients need explicit page controls and
+the paged response shape before consuming that optional contract.
 
 Posts deduplicate by codename/request ID, binding the channel and text.
 Identical replay returns the original immutable event with `duplicate: true`;

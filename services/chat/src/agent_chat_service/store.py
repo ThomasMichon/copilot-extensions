@@ -31,7 +31,7 @@ FIELDS = {
     "cursor": ({"channel", "codename", "expected_cursor", "next_cursor"}, set()),
     "wait": ({"channel", "codename"}, {"timeout", "batch_ms"}),
     "scan": ({"codename", "epoch", "after"}, {"limit", "timeout", "batch_ms"}),
-    "members": ({"channel"}, set()),
+    "members": ({"channel"}, {"limit", "after"}),
     "resolve": ({"codename"}, set()),
 }
 STATUS = {
@@ -179,6 +179,11 @@ def validate_request(request):
         _printable(request["request_id"], "request_id", 128)
     elif op == "read":
         _integer(request.get("limit", 50), "limit", 1, 100)
+    elif op == "members":
+        if "limit" in request:
+            _integer(request["limit"], "limit", 1, 100)
+        if "after" in request:
+            _identifier(request["after"], "after")
     elif op == "cursor":
         for name in ("expected_cursor", "next_cursor"):
             _integer(request[name], name, 0, 2**63 - 1)
@@ -704,18 +709,34 @@ class ChatStore:
             "SELECT 1 FROM channels WHERE name=?", (channel,)
         ).fetchone():
             raise ChatError("missing", "Channel does not exist.")
-        rows = self._db.execute(
-            """SELECT actors.metadata, memberships.joined_at
+        paged = "limit" in request or "after" in request
+        query = """SELECT actors.metadata, memberships.joined_at
             FROM memberships JOIN actors USING(codename)
-            WHERE channel=? AND active=1 ORDER BY codename""", (channel,),
-        )
-        return {
+            WHERE channel=? AND active=1"""
+        parameters = (channel,)
+        if paged:
+            query += " AND codename>?"
+            parameters += (request.get("after", ""),)
+        query += " ORDER BY codename"
+        if paged:
+            limit = request.get("limit", 100)
+            query += " LIMIT ?"
+            parameters += (limit + 1,)
+        members = [
+            {**json.loads(row["metadata"]), "joined_at": row["joined_at"]}
+            for row in self._db.execute(query, parameters)
+        ]
+        result = {
             "channel": channel,
-            "members": [
-                {**json.loads(row["metadata"]), "joined_at": row["joined_at"]}
-                for row in rows
-            ],
+            "members": members[:limit] if paged else members,
         }
+        if paged:
+            more = len(members) > limit
+            result.update(
+                more=more,
+                next_after=result["members"][-1]["codename"] if more else None,
+            )
+        return result
 
     def _resolve(self, request):
         codename = request["codename"]
