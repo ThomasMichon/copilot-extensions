@@ -184,12 +184,13 @@ async def start(
                     or creation.get("status") != "complete" or not isinstance(saved, dict)
                 ):
                     raise AcquisitionRefused("creation_unproven", "ground owner did not prove keyed allocation")
-            if (
-                not isinstance(saved.get("id"), str) or not saved["id"]
-                or saved.get("repo") != target.project or not saved.get("path")
-                or not saved.get("creation_nonce")
-            ):
-                raise AcquisitionRefused("creation_unproven", "allocation lacks authoritative owner identity")
+        if (
+            not isinstance(saved.get("id"), str) or not saved["id"]
+            or saved.get("repo") != target.project or not saved.get("path")
+            or not isinstance(saved.get("creation_nonce"), str) or not saved["creation_nonce"].strip()
+        ):
+            raise AcquisitionRefused("creation_unproven", "allocation lacks authoritative owner identity")
+        if operation["worktree_json"] is None:
             _update(db, digest, worktree_json=json.dumps(saved), state="allocated")
             operation["state"] = "allocated"
         worktree_id = saved["id"]

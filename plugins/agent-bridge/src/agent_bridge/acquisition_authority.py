@@ -86,7 +86,6 @@ async def read_worktree_record(
     if (
         row.get("id") != worktree_id
         or not isinstance(row.get("repo"), str) or not row["repo"].strip()
-        or project is not None and row["repo"] != project
         or not isinstance(row.get("path"), str) or not row["path"].strip()
     ):
         raise AcquisitionRefused("owner_response_invalid", "owner did not resolve the exact workspace identity")
@@ -105,11 +104,16 @@ async def read_worktree_record(
     count = row.get("session_count")
     if count is not None and (type(count) is not int or count < 0):
         raise AcquisitionRefused("owner_response_invalid", "owner returned invalid recorded session history")
-    for field in ("last_session_id", "creation_nonce"):
-        if row.get(field) is not None and (
-            not isinstance(row[field], str) or not row[field].strip()
-        ):
-            raise AcquisitionRefused("owner_response_invalid", f"owner returned invalid {field}")
+    last_session = row.get("last_session_id")
+    if last_session is not None and (
+        not isinstance(last_session, str) or not last_session.strip()
+    ):
+        raise AcquisitionRefused("owner_response_invalid", "owner returned invalid last_session_id")
+    nonce = row.get("creation_nonce")
+    if nonce is not None and (
+        not isinstance(nonce, str) or nonce != "" and not nonce.strip()
+    ):
+        raise AcquisitionRefused("owner_response_invalid", "owner returned invalid creation_nonce")
     for field in ("sessions_indexed", "execution_leg_opaque", "session_backend_opaque"):
         if type(row[field]) is not bool:
             raise AcquisitionRefused("owner_response_invalid", f"owner returned invalid {field}")

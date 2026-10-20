@@ -8,6 +8,12 @@
     "source_sha256": "109fb934c134206c8d07432734ad4872e79a708bd2ca55db707a93af23f4237a"
   },
   "evidence_kind": "independently-authored exact-owner admission vectors; not a native or HTTP body capture",
+  "legacy_metadata_cases": [
+    ["companion-repo", "original-allocation"],
+    ["project-a", ""],
+    ["project-a", null]
+  ],
+  "invalid_keyed_nonces": [null, "", " ", 123, false],
   "record": {
     "id": "worktree-a",
     "repo": "project-a",

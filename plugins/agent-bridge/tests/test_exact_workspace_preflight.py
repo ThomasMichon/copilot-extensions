@@ -17,6 +17,11 @@ from test_workspace_creation import creation_rig as _creation_rig, rig as _conne
 creation_rig = _creation_rig
 rig = _connected_rig
 
+_VECTORS = json.loads((
+    Path(__file__).resolve().parents[1]
+    / "contract/fixtures/http/current/workspace-exact-owner-generation-41.json"
+).read_text(encoding="utf-8"))
+
 
 @pytest.fixture
 def exact_owner(creation_rig, monkeypatch):
@@ -113,6 +118,45 @@ async def test_exact_owner_uncertainty_is_not_sessionless(exact_owner, changes):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("nonce", _VECTORS["invalid_keyed_nonces"])
+@pytest.mark.parametrize("stage", ["fresh", "retained-allocated", "retained-terminal"])
+async def test_keyed_creation_refuses_nonpositive_allocation_nonce(
+    exact_owner, monkeypatch, nonce, stage,
+):
+    rig = exact_owner
+    command = workspace_creation.worktree_command
+    if stage != "fresh":
+        async def unavailable_record(args, project):
+            if args[0] == "record":
+                raise AcquisitionRefused("owner_refused", "retained allocation awaits owner")
+            return await command(args, project)
+
+        monkeypatch.setattr(workspace_creation, "worktree_command", unavailable_record)
+        with pytest.raises(AcquisitionRefused, match="awaits owner"):
+            await workspace_creation.start(rig.manager, rig.target, key="one-allocation")
+        operation = dict(rig.db.execute_read("SELECT * FROM workspace_embodiments")[0])
+        saved = json.loads(operation["worktree_json"])
+        saved["creation_nonce"] = nonce
+        rig.db.execute_write(
+            "UPDATE workspace_embodiments SET worktree_json=?,state=?",
+            (json.dumps(saved), stage.removeprefix("retained-")),
+        )
+        monkeypatch.setattr(workspace_creation, "worktree_command", command)
+    rig.row["creation_nonce"] = nonce
+    before = len(rig.calls)
+    for _ in range(1 if stage == "fresh" else 2):
+        with pytest.raises(AcquisitionRefused) as refused:
+            await workspace_creation.start(rig.manager, rig.target, key="one-allocation")
+        assert refused.value.code == "creation_unproven"
+    assert not rig.manager.list_sessions()
+    assert not rig.db.execute_read("SELECT * FROM turns")
+    assert not rig.db.execute_read("SELECT * FROM acquisition_launch_gates")
+    assert sum(args[0] == "create" for args, _ in rig.calls) == 1
+    if stage != "fresh":
+        assert len(rig.calls) == before
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("boundary", ["allocation-response", "exact-record"])
 async def test_lost_owner_response_reuses_one_allocation_and_first_turn(
     exact_owner, monkeypatch, boundary,
@@ -175,12 +219,6 @@ async def test_exact_reader_refuses_invalid_cli_envelopes(mutation):
 
     with pytest.raises(AcquisitionRefused):
         await acquisition_authority.read_worktree_record("worktree-a", "project-a", command=command)
-
-
-_VECTORS = json.loads((
-    Path(__file__).resolve().parents[1]
-    / "contract/fixtures/http/current/workspace-exact-owner-generation-41.json"
-).read_text(encoding="utf-8"))
 
 
 @pytest.mark.asyncio

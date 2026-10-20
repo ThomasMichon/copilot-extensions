@@ -35,8 +35,8 @@ The ground request uses `--no-owner --interface acp --origin delegate`, plus
 an explicitly supplied caller owner reference. A direct ground caller using the
 same key must supply the same effective allocation facts. Alternatively,
 `--worktree-id <id>` embodies an existing allocation without running create.
-That first-conversation path requires an owner-returned creation nonce, an
-explicit zero-session history, an authoritative empty head, and no represented,
+That first-conversation path requires a nonblank string owner-returned creation
+nonce, an explicit zero-session history, an authoritative empty head, and no represented,
 owned or uncertain execution leg. Missing legacy proof and foreign/live holders
 refuse; this path is not takeover or dispatch fresh-recovery authorization.
 That complete holder check runs again after awaited owner revalidation, before
@@ -54,9 +54,13 @@ not fresh-create. Standalone embodiment grants no task/claim authority.
 Known-workspace preflight reads the ground owner's exact version-1 `record`
 response, not the resident inventory roster. Roster publication may lag a new
 allocation or be unavailable without preventing an exact current owner read.
-The record must identify the requested project/worktree, absolute path, creation
-nonce, lifecycle state and explicit session/history opacity. These metadata
-facts do not grant launch authority: native-head, holder and launch-gate checks
+The record must identify the requested worktree in the selected project's
+tracking scope, its configured repository, absolute path, creation nonce,
+lifecycle state and explicit session/history opacity. Version-1 acquisition
+accepts configured companion repositories and legacy null/empty nonce metadata;
+version 2 still checks its exact repository/path. Keyed creation and retained
+replay additionally require a nonblank string nonce and exact allocation identity.
+These metadata facts do not grant launch authority: native-head, holder and launch-gate checks
 remain independent. Missing, malformed or unavailable exact records refuse
 while retaining the allocation and creation key; they do not establish disposal
 or authorize another create. A changed path/nonce conflicts before lifecycle
@@ -213,8 +217,8 @@ their existing reconciliation requirement. No acquisition wire capability or
 protocol change is introduced by installed-owner resolution.
 
 Worktree identity preflight reads the exact current tracking record with
-`list --json --cache-only --worktree-id <id>`, avoiding global transcript scans
-and cached full-list results. Only tracking identity, path and terminal status
+`record --worktree-id <id> --json`, avoiding global transcript scans
+and cached full-list results. Only tracking identity, path and lifecycle state
 are used from this row; cached display/session enrichment grants no authority.
 The separate `head-session` read still verifies current native-head and
 handoff state. Missing, duplicate, mismatched or terminal records refuse, as
