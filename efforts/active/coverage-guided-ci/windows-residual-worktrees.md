@@ -87,7 +87,63 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Mechanical move mapping: preserved, not conflated with fixtures
 
+### Third admitted move: snapshot creation, refspec and head privacy
+
+Baseline: Dev `7c5b1631026e01a6f45cd73b61517475287f7aba`, the actual #7395
+merge. This M-MOVE partition relocates four complete classes and changes no
+class/function AST, fixture, parameter, assertion or effective mark.
+
+For every method below, the mapping is
+`tests/test_pr_ops.py::<class>::<method><parameters>` ->
+`tests/<destination>::<class>::<method><parameters>`. Every other original
+node remains unchanged, including all previously moved modules.
+
+| Destination under `tests/` | Whole classes | Expanded nodes |
+|----------------------------|---------------|---------------:|
+| `test_create_pr.py` | `TestExistingFeaturePush`, `TestCreatePR` | 31 |
+| `test_create_pr_refspec.py` | `TestCreatePRRefspec`, `TestCreatePRBranchLeakGuard` | 16 |
+
+Real before/after collection proves the exact 317-node bijection: 47 moved,
+270 unchanged, with identical resolved fixture bodies/scopes/closures,
+parameter values and effective marks. Every original top-level definition
+remains exactly once with an identical AST. No fixture seed, production
+decision, test tier or Source-CI admission changes. The stale role-resolution
+provider double remains in its separately owned B-ROLE prerequisite rather
+than being silently repaired in a mechanical move.
+
+Native Windows execution passes every moved case without skips using exactly
+two workers: 31 snapshot/push cases in 131.10 seconds (136.47 including
+sandbox preparation/removal), and 16 refspec/privacy cases in 73.36 seconds
+(78.23 inclusive). The 30-second item and 240-second diagnostic group bounds
+remain unchanged. The nine existing real-Git/contained split-selection
+controls also pass without skips in 17.35 seconds (19.69 inclusive);
+whole-file selection retains both old and new modules without inventing
+measured-node credit, and unknown nodes elsewhere still fail.
+The install-contract guard reports thirteen plugins and zero violations.
+
+An accidentally broader root-module diagnostic additionally reports
+75 passes, 18 existing tier skips and one failure:
+`tools/test_coverage_selected_execution.py::test_ci_pilot_is_pr_only_and_does_not_increase_job_deadline`
+still indexes the retired `smoke` job. This is the current-policy
+compatibility residual already assigned to wave 5 and #6237, not a reason
+to restore integration CI, add skips, change this partition's selection
+controls or claim the root modules passed. The diagnostic is retained with
+that owner separately from the nine focused selection results.
+
+This test-only move has no fresh-install behavior to exercise. Linux and
+external-venue results are not claimed: the available Linux environment has
+no pytest installation and Docker is unavailable. No dependency or service
+was installed. Remaining mechanical moves, fixture semantics, root-policy
+compatibility and repeated complete same-head Windows qualification remain
+open; these focused passes are not the parent performance proof.
+
 ### Second admitted move: CLI, claims and live status
+
+**Actually merged:** #7395 as
+`7c5b1631026e01a6f45cd73b61517475287f7aba`. The child worktree was
+finalized after the exact-head full Copilot approval and required CI.
+The following mechanical partition starts from those merged test bodies;
+the complete same-head Windows qualification remains open.
 
 Baseline: Dev `54c7879cfe9680dd87a02242a846081065a82cea`, including the
 separately merged #7394 fixture correction. This M-MOVE partition relocates
