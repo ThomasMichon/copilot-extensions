@@ -1,0 +1,41 @@
+{
+  "captured_from": {
+    "commit": "1d527942d774bc9da23ad878ba8eac62ea10c40e",
+    "plugin_version": "0.4.1-dev3",
+    "protocol_generation": 42,
+    "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktree_probe.py",
+    "source_git_blob": "ea0cd4f31b2938ba6c674cee18867c192a24b151",
+    "source_sha256": "fac4bc5486b3095c28fb1a747822f2c108a9179e1b707070163c48afb418a865"
+  },
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/worktrees/example-worktree/resume/{mode}"
+  },
+  "owner_query": [
+    "record",
+    "--worktree-id",
+    "example-worktree",
+    "--json"
+  ],
+  "required_owner_record": {
+    "ok": true,
+    "worktree": {
+      "id": "example-worktree",
+      "path": "example-workspace",
+      "branch": "example-branch",
+      "status": "active"
+    }
+  },
+  "lookup": {
+    "cached_fast_path": true,
+    "single_flight": true,
+    "requires_roster_publication": false,
+    "warms_inventory": false,
+    "metadata_is_execution_admission": false
+  },
+  "reattested_from": {
+    "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-owner-record-generation-41.json",
+    "sha256": "82ca1aca60cb917ae5716ef71600f9a44041f5bdc0aacd3c1af383dda1392403",
+    "method": "Retain the independently authored historical expected semantics and capability floors; only protocol_version advertisements advance to 42. Re-attest against exact committed source bytes, not a producer-generated expected snapshot. test_contract_registry.py and test_http_targets_contract.py verify the retained model, client, route and provenance expectations; test_attention_current.py separately covers the additive attention-row boundary fields."
+  }
+}

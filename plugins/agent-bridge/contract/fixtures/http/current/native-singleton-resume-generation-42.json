@@ -1,0 +1,46 @@
+{
+  "captured_from": {
+    "commit": "1d527942d774bc9da23ad878ba8eac62ea10c40e",
+    "plugin_version": "0.4.1-dev3",
+    "protocol_generation": 42,
+    "source_path": "plugins/agent-bridge/src/agent_bridge/singleton_resume.py",
+    "source_git_blob": "44ae0445dae3347199a200f8d119e8ffb75eeaa5",
+    "source_sha256": "1f0ee4f1599af18cdf3f1184af115eb660a2f8d1ff23db812cfac342667132f5"
+  },
+  "response": {
+    "protocol_version": 42,
+    "min_protocol_version": 1
+  },
+  "capability": {
+    "required_protocol_version": 40,
+    "native_history_replacement": false,
+    "owner_native_admission_version": 1
+  },
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/worktrees/example-worktree/resume/{mode}",
+    "modes": [
+      "acp",
+      "cli"
+    ]
+  },
+  "identity": {
+    "durable_session_id": "native-example-head",
+    "acp_session_id": "native-example-head"
+  },
+  "refusals": [
+    "head_unavailable",
+    "live_holder",
+    "owner_capability_missing"
+  ],
+  "singleton": {
+    "mode": "acp",
+    "first_initialization_only_without_history": true,
+    "strict_refuses_initialization": true
+  },
+  "reattested_from": {
+    "path": "plugins/agent-bridge/contract/fixtures/http/current/native-singleton-resume-generation-41.json",
+    "sha256": "6fd3fac44579da18ebac26b392144e5401b481a05957ad5369e1f88244d61e9d",
+    "method": "Retain the independently authored historical expected semantics and capability floors; only protocol_version advertisements advance to 42. Re-attest against exact committed source bytes, not a producer-generated expected snapshot. test_contract_registry.py and test_http_targets_contract.py verify the retained model, client, route and provenance expectations; test_attention_current.py separately covers the additive attention-row boundary fields."
+  }
+}

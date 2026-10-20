@@ -26,7 +26,7 @@ pytestmark = pytest.mark.contract("agent_bridge.provider_creation")
 
 def _current_refresh_fixture():
     path = Path(__file__).resolve().parents[1] / "contract" / "fixtures" / "http" / "current"
-    return json.loads((path / "provider-creation-refresh-generation-41.json").read_text(encoding="utf-8"))
+    return json.loads((path / "provider-creation-refresh-generation-42.json").read_text(encoding="utf-8"))
 
 
 async def create(manager, target, **options):
@@ -405,7 +405,7 @@ def test_http_keyed_provider_creation_has_no_fabricated_worktree(provider_rig):
 
 
 @pytest.mark.guard
-def test_current_generation41_refresh_fixture_matches_real_http_producer_and_consumer(
+def test_current_generation42_refresh_fixture_matches_real_http_producer_and_consumer(
     provider_rig, monkeypatch,
 ):
     from agent_bridge import protocol, provider_creation, session_start
@@ -437,7 +437,7 @@ def test_current_generation41_refresh_fixture_matches_real_http_producer_and_con
     assert consumed.protocol_version == expected["protocol_version"]
     assert consumed.min_protocol_version == expected["min_protocol_version"]
     capability = fixture["capability"]
-    assert protocol.HTTP_PROTOCOL_VERSION == fixture["captured_from"]["protocol_generation"] == 41
+    assert protocol.HTTP_PROTOCOL_VERSION == fixture["captured_from"]["protocol_generation"] == 42
     assert protocol.PROVIDER_CREATION_PROTOCOL_VERSION == capability["provider_creation"]
     assert protocol.WORKSPACE_CREATION_PROTOCOL_VERSION == capability["workspace_creation"]
     assert StartSessionRequest(creation_key="ordinary").provider_instance == capability["ordinary_provider_instance_default"]

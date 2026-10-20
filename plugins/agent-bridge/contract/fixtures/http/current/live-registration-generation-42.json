@@ -1,0 +1,42 @@
+{
+  "captured_from": {
+    "commit": "1d527942d774bc9da23ad878ba8eac62ea10c40e",
+    "plugin_version": "0.4.1-dev3",
+    "protocol_generation": 42,
+    "source_path": "plugins/agent-bridge/src/agent_bridge/cli_mode_models.py",
+    "source_git_blob": "9941f066986c7b1427c4bfa70401412ac9789512",
+    "source_sha256": "212ba2f30dfc0c1cdfe788b379f473620b48a1e5a4f6fd5b20fb211074e1f88d"
+  },
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/live-sessions",
+    "json": {
+      "session_id": "cli-clear",
+      "clear_targeting_metadata": true,
+      "machine": null,
+      "repo": null,
+      "worktree_id": null,
+      "pid": 4242,
+      "process_started_at": 123.0
+    }
+  },
+  "compatibility": {
+    "clear_targeting_metadata_default": false,
+    "ordinary_null_heartbeat_retains_metadata": true
+  },
+  "response_projection": {
+    "status_code": 200,
+    "json": {
+      "session_id": "cli-clear",
+      "machine": null,
+      "repo": null,
+      "worktree_id": null,
+      "pid": 4242
+    }
+  },
+  "reattested_from": {
+    "path": "plugins/agent-bridge/contract/fixtures/http/current/live-registration-generation-41.json",
+    "sha256": "1966e02761b231fb391fdc0c2bcd1c577de76881cdd433d2f2135ffb41191862",
+    "method": "Retain the independently authored historical expected semantics and capability floors; only protocol_version advertisements advance to 42. Re-attest against exact committed source bytes, not a producer-generated expected snapshot. test_contract_registry.py and test_http_targets_contract.py verify the retained model, client, route and provenance expectations; test_attention_current.py separately covers the additive attention-row boundary fields."
+  }
+}

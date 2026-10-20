@@ -1,0 +1,83 @@
+{
+  "captured_from": {
+    "commit": "1d527942d774bc9da23ad878ba8eac62ea10c40e",
+    "plugin_version": "0.4.1-dev3",
+    "protocol_generation": 42,
+    "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktree_entry.py",
+    "source_git_blob": "ae794db6b2223ecee04abf4c0280875883c1314c",
+    "source_sha256": "8c07a9783129cccd9ba2e19d7de84e89b4c4b9e49f8d0f4febb84be5bea5a68e"
+  },
+  "response": {
+    "protocol_version": 42,
+    "min_protocol_version": 1
+  },
+  "capability": {
+    "required_protocol_version": 37,
+    "metadata_version": 1,
+    "render_wall_goal_seconds": 2,
+    "live_wall_wait_seconds": 10,
+    "legacy_cold_request_blocks": true,
+    "caller_expiry_releases_holder": false,
+    "source_live_option": "--fresh",
+    "queued_live_native_overlap": false
+  },
+  "requests": {
+    "render": {
+      "method": "GET",
+      "path": "/api/v1/worktrees",
+      "params": {
+        "render": "true"
+      }
+    },
+    "refresh": {
+      "method": "GET",
+      "path": "/api/v1/worktrees",
+      "params": {
+        "refresh": "true"
+      }
+    }
+  },
+  "cold_projection": {
+    "groups": {},
+    "discovery": {
+      "version": 1,
+      "freshness": "unknown",
+      "completeness": "unknown",
+      "refresh_pending": true,
+      "warming": true
+    }
+  },
+  "rendered_row": {
+    "id": "w1",
+    "agent_name": "local",
+    "machine": "local",
+    "path": "/sample",
+    "branch": "topic",
+    "status": "active",
+    "title": null,
+    "started_at": null,
+    "resume_count": 0,
+    "session_count": 0,
+    "turn_count": 0,
+    "mux_session": true,
+    "mux_clients": null,
+    "mux_attached": false,
+    "interactive_cli": "at-rest",
+    "interface": null,
+    "origin": null,
+    "picker_hidden": false,
+    "follow_up": false,
+    "summary": null,
+    "status_note_at": null,
+    "live_intent": null,
+    "live_intent_at": null,
+    "live_intent_idle": false,
+    "closure": null,
+    "bound_agent": null
+  },
+  "reattested_from": {
+    "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-worktree_entry-generation-41.json",
+    "sha256": "1dbe632838408989d1d13a5e9b9f848fe5d66111b34b1dab1f2b706b03b4434c",
+    "method": "Retain the independently authored historical expected semantics and capability floors; only protocol_version advertisements advance to 42. Re-attest against exact committed source bytes, not a producer-generated expected snapshot. test_contract_registry.py and test_http_targets_contract.py verify the retained model, client, route and provenance expectations; test_attention_current.py separately covers the additive attention-row boundary fields."
+  }
+}

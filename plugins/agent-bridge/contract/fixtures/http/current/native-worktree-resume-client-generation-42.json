@@ -1,0 +1,46 @@
+{
+  "captured_from": {
+    "commit": "1d527942d774bc9da23ad878ba8eac62ea10c40e",
+    "plugin_version": "0.4.1-dev3",
+    "protocol_generation": 42,
+    "source_path": "plugins/agent-bridge/src/agent_bridge/client.py",
+    "source_git_blob": "4cc342a43aa7c4b648150ebf3a8be30379577ba2",
+    "source_sha256": "5baf0775e49aebd69bb67e734b19d07f7e6fbdc5a0d7485c1ab6577da5994ef9"
+  },
+  "response": {
+    "protocol_version": 42,
+    "min_protocol_version": 1
+  },
+  "capability": {
+    "required_protocol_version": 40,
+    "native_history_replacement": false,
+    "owner_native_admission_version": 1
+  },
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/worktrees/example-worktree/resume/{mode}",
+    "modes": [
+      "acp",
+      "cli"
+    ]
+  },
+  "identity": {
+    "durable_session_id": "native-example-head",
+    "acp_session_id": "native-example-head"
+  },
+  "refusals": [
+    "head_unavailable",
+    "live_holder",
+    "owner_capability_missing"
+  ],
+  "singleton": {
+    "mode": "acp",
+    "first_initialization_only_without_history": true,
+    "strict_refuses_initialization": true
+  },
+  "reattested_from": {
+    "path": "plugins/agent-bridge/contract/fixtures/http/current/native-worktree-resume-client-generation-41.json",
+    "sha256": "a0db58e42ce353570f7d146b2bbb2a8eed476ed6427f3c8d140a1e9c44dd4119",
+    "method": "Retain the independently authored historical expected semantics and capability floors; only protocol_version advertisements advance to 42. Re-attest against exact committed source bytes, not a producer-generated expected snapshot. test_contract_registry.py and test_http_targets_contract.py verify the retained model, client, route and provenance expectations; test_attention_current.py separately covers the additive attention-row boundary fields."
+  }
+}

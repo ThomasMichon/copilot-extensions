@@ -1,4 +1,4 @@
-"""Independent HTTP-41 target expectations, with no live endpoint or secrets."""
+"""Independent HTTP-41 target expectations, re-attested at 42, with no live endpoint or secrets."""
 
 from __future__ import annotations
 
@@ -30,11 +30,15 @@ from agent_bridge.routes import health as health_route
 pytestmark = pytest.mark.guard
 CONTRACT = Path(__file__).resolve().parents[1] / "contract"
 REPO = Path(__file__).resolve().parents[3]
-VECTOR = json.loads(
-    (CONTRACT / "fixtures/http/current/remote-acp-targets-generation-41.json").read_text(
-        encoding="utf-8",
+def _targets_vector(generation):
+    return json.loads(
+        (CONTRACT / f"fixtures/http/current/remote-acp-targets-generation-{generation}.json").read_text(
+            encoding="utf-8",
+        )
     )
-)
+
+
+VECTOR = _targets_vector(42)
 
 
 def _request(**state):
@@ -49,7 +53,7 @@ def _target():
 
 
 @pytest.mark.asyncio
-async def test_health_41_matches_independent_expected_vector(monkeypatch):
+async def test_health_42_matches_independent_expected_vector(monkeypatch):
     monkeypatch.setattr(
         health_route, "get_default_manager",
         lambda: SimpleNamespace(carrier_diagnostics=lambda: {}),
@@ -60,7 +64,7 @@ async def test_health_41_matches_independent_expected_vector(monkeypatch):
     assert {key: body[key] for key in VECTOR["health"]} == VECTOR["health"]
 
 
-@pytest.mark.parametrize("generation", [37, 38, 39, 40, 41])
+@pytest.mark.parametrize("generation", [37, 38, 39, 40, 41, 42])
 @pytest.mark.parametrize("address", ["url", "named"])
 def test_client_target_negotiation_precedes_request(generation, address):
     client = BridgeClient.__new__(BridgeClient)
@@ -79,7 +83,7 @@ def test_client_target_negotiation_precedes_request(generation, address):
         assert request.call_count == 1
         assert request.call_args.args == (
             expected["method"], expected["path"],
-            {"agent": VECTOR["client"][address], "protocol_version": 41},
+            {"agent": VECTOR["client"][address], "protocol_version": 42},
         )
 
 
@@ -188,23 +192,26 @@ def test_source_approval_matches_exact_policy_without_resolving_secrets():
     assert source.resolve.call_count == VECTOR["endpoint_policy"]["discovery_secret_reads"]
 
 
-def _wire_generation(value):
+def _wire_generation(value, generation):
     if isinstance(value, dict):
         return {
-            key: 41 if key == "protocol_version" and item == 40 else _wire_generation(item)
+            key: generation if key == "protocol_version" and item == generation - 1
+            else _wire_generation(item, generation)
             for key, item in value.items()
         }
     if isinstance(value, list):
-        return [_wire_generation(item) for item in value]
+        return [_wire_generation(item, generation) for item in value]
     return value
 
 
-def test_reattestations_retain_independent_historical_expectations():
+@pytest.mark.parametrize(("generation", "reattested"), [(41, 40), (42, 42)])
+def test_reattestations_retain_independent_historical_expectations(generation, reattested):
     registry = json.loads((CONTRACT / "registry.json").read_text(encoding="utf-8"))
     contract = next(item for item in registry["contracts"] if item["id"] == "agent-bridge.http-wire")
+    vector = _targets_vector(generation)
     count = 0
     for registered in contract["fixtures"]:
-        if registered["generation"] != 41:
+        if registered["generation"] != generation:
             continue
         current = json.loads((REPO / registered["path"]).read_text(encoding="utf-8"))
         if "reattested_from" not in current:
@@ -214,11 +221,12 @@ def test_reattestations_retain_independent_historical_expectations():
         previous_bytes = previous_path.read_bytes().replace(b"\r\n", b"\n")
         assert hashlib.sha256(previous_bytes).hexdigest() == current["reattested_from"]["sha256"]
         previous = json.loads(previous_bytes)
-        expected = _wire_generation(previous)
+        expected = _wire_generation(previous, generation)
         actual = copy.deepcopy(current)
         actual.pop("captured_from")
         actual.pop("reattested_from")
         expected.pop("captured_from")
+        expected.pop("reattested_from", None)
         assert actual == expected
-        assert current["captured_from"]["commit"] == VECTOR["captured_from"]["commit"]
-    assert count == 40
+        assert current["captured_from"]["commit"] == vector["captured_from"]["commit"]
+    assert count == reattested

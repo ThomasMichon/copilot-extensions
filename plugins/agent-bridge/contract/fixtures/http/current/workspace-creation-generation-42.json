@@ -1,0 +1,53 @@
+{
+  "captured_from": {
+    "commit": "1d527942d774bc9da23ad878ba8eac62ea10c40e",
+    "plugin_version": "0.4.1-dev3",
+    "protocol_generation": 42,
+    "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
+    "source_git_blob": "75bea784140e7214bbd79a98954db59ed0184298",
+    "source_sha256": "249253fa9cb50fd224bb516c6660b9dbf21b1915e23164a2ba91921c3cde41a2"
+  },
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/sessions/workspace-creations",
+    "json": {
+      "agent": "example@local",
+      "creation_key": "logical-work"
+    }
+  },
+  "response": {
+    "session_id": "bridge-a",
+    "name": "example-session",
+    "status": "idle",
+    "creation": {
+      "version": 1,
+      "status": "complete",
+      "worktree": {
+        "id": "worktree-a",
+        "repo": "example",
+        "path": "synthetic-worktree-path",
+        "creation_nonce": "allocation-a"
+      },
+      "native_session_id": "native-a",
+      "turn_index": null,
+      "replayed": false
+    }
+  },
+  "health": {
+    "protocol_version": 42,
+    "min_protocol_version": 1
+  },
+  "capability": {
+    "owner_qualified_acquisition": 34,
+    "workspace_creation": 34,
+    "native_bound_prompt": 33,
+    "older_route_status": 404,
+    "client_floor_refusal_status": 426,
+    "required_protocol_version": 34
+  },
+  "reattested_from": {
+    "path": "plugins/agent-bridge/contract/fixtures/http/current/workspace-creation-generation-41.json",
+    "sha256": "49880fb803468a628c0b2a3f9eb9cd01c319488d4b558ff0ce6eb4ffe80ddfaf",
+    "method": "Retain the independently authored historical expected semantics and capability floors; only protocol_version advertisements advance to 42. Re-attest against exact committed source bytes, not a producer-generated expected snapshot. test_contract_registry.py and test_http_targets_contract.py verify the retained model, client, route and provenance expectations; test_attention_current.py separately covers the additive attention-row boundary fields."
+  }
+}

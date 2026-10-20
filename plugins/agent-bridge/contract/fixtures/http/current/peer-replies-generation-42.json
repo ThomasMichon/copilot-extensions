@@ -1,0 +1,40 @@
+{
+  "captured_from": {
+    "commit": "1d527942d774bc9da23ad878ba8eac62ea10c40e",
+    "plugin_version": "0.4.1-dev3",
+    "protocol_generation": 42,
+    "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
+    "source_git_blob": "75bea784140e7214bbd79a98954db59ed0184298",
+    "source_sha256": "249253fa9cb50fd224bb516c6660b9dbf21b1915e23164a2ba91921c3cde41a2"
+  },
+  "response": {
+    "protocol_version": 42,
+    "min_protocol_version": 1
+  },
+  "capability": {
+    "required_protocol_version": 39,
+    "required_carrier_operation_version": 5,
+    "address": "live:host-a:project-a:wt-a",
+    "unavailable_peer_creates_agent": false
+  },
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/remote/host-b/live-sessions/live:host-b:project-a:wt-b/messages",
+    "json": {
+      "qualified_peer": true,
+      "sender": "wt-a",
+      "message": "status?",
+      "reply_to": "live:host-a:project-a:wt-a",
+      "kind": "status-check",
+      "delivery": "steer",
+      "wait": true,
+      "wait_timeout": 120.0,
+      "timeout": 135.0
+    }
+  },
+  "reattested_from": {
+    "path": "plugins/agent-bridge/contract/fixtures/http/current/peer-replies-generation-41.json",
+    "sha256": "44c3b851a9bcab2888e8d86d23b3bdb457f2d9eb5c113177029cefda383c2bde",
+    "method": "Retain the independently authored historical expected semantics and capability floors; only protocol_version advertisements advance to 42. Re-attest against exact committed source bytes, not a producer-generated expected snapshot. test_contract_registry.py and test_http_targets_contract.py verify the retained model, client, route and provenance expectations; test_attention_current.py separately covers the additive attention-row boundary fields."
+  }
+}

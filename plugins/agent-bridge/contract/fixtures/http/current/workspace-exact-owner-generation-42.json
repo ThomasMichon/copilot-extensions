@@ -1,0 +1,123 @@
+{
+  "captured_from": {
+    "commit": "1d527942d774bc9da23ad878ba8eac62ea10c40e",
+    "plugin_version": "0.4.1-dev3",
+    "protocol_generation": 42,
+    "source_path": "plugins/agent-bridge/src/agent_bridge/workspace_creation.py",
+    "source_git_blob": "7eae54d09a321567bca551daa899c6fd73cdc526",
+    "source_sha256": "6ccf7f7a685ed260ce5c4e80c3ef192d2f25f4c665ecb50d8cccc22c2bf07228"
+  },
+  "evidence_kind": "independently-authored exact-owner admission vectors; not a native or HTTP body capture",
+  "legacy_metadata_cases": [
+    [
+      "companion-repo",
+      "original-allocation"
+    ],
+    [
+      "project-a",
+      ""
+    ],
+    [
+      "project-a",
+      null
+    ],
+    [
+      "project-a",
+      " "
+    ],
+    [
+      "companion-repo",
+      " "
+    ]
+  ],
+  "invalid_keyed_nonces": [
+    null,
+    "",
+    " ",
+    123,
+    false
+  ],
+  "record": {
+    "id": "worktree-a",
+    "repo": "project-a",
+    "path": "/fixture",
+    "status": "active",
+    "creation_nonce": "allocation-a",
+    "session_count": 0,
+    "last_session_id": null,
+    "execution_leg": null,
+    "execution_leg_opaque": false,
+    "session_backend": null,
+    "session_backend_opaque": false,
+    "sessions_indexed": true
+  },
+  "head": {
+    "tracked": true,
+    "head_session": null,
+    "active": false,
+    "occupied": false,
+    "state": null
+  },
+  "cases": [
+    {
+      "name": "cold-roster-with-exact-owner",
+      "record_changes": {},
+      "head_changes": {},
+      "expected_error": null,
+      "expected_sessionless": true
+    },
+    {
+      "name": "finalizing-owner",
+      "record_changes": {
+        "status": "finalizing"
+      },
+      "head_changes": {},
+      "expected_error": "transition_pending"
+    },
+    {
+      "name": "replacement-allocation",
+      "record_changes": {
+        "creation_nonce": "replacement-allocation"
+      },
+      "head_changes": {},
+      "expected_error": "creation_conflict"
+    },
+    {
+      "name": "opaque-execution-history",
+      "record_changes": {
+        "execution_leg_opaque": true
+      },
+      "head_changes": {},
+      "expected_error": null,
+      "expected_sessionless": false
+    },
+    {
+      "name": "unindexed-session-history",
+      "record_changes": {
+        "sessions_indexed": false
+      },
+      "head_changes": {},
+      "expected_error": null,
+      "expected_sessionless": false
+    },
+    {
+      "name": "foreign-native-head",
+      "record_changes": {
+        "last_session_id": "foreign-native"
+      },
+      "head_changes": {
+        "head_session": "foreign-native",
+        "active": true,
+        "occupied": true,
+        "state": "active"
+      },
+      "expected_error": null,
+      "expected_sessionless": false
+    }
+  ],
+  "reattested_from": {
+    "path": "plugins/agent-bridge/contract/fixtures/http/current/workspace-exact-owner-generation-41.json",
+    "sha256": "abe31cc2517a16dbbe19a654549fca526b4045b7b22d4b05f471fdebf32d6eae",
+    "method": "Retain the independently authored historical expected semantics and capability floors; only protocol_version advertisements advance to 42. Re-attest against exact committed source bytes, not a producer-generated expected snapshot. test_contract_registry.py and test_http_targets_contract.py verify the retained model, client, route and provenance expectations; test_attention_current.py separately covers the additive attention-row boundary fields."
+  }
+}
