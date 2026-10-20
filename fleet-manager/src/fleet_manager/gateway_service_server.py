@@ -18,8 +18,9 @@ from aiohttp import HttpVersion11, WSMsgType, web
 from .gateway_service_channel import (
     DEADLINE, FRAME_BYTES, GLOBAL_REQUESTS, REQUEST_HEADERS, RESPONSE_BYTES,
     BODY_BYTES,
-    Channel, Pending, TransportError, ValueFreeLogger, binary, check, headers,
-    close_socket, encode_frame, send, send_encoded, shape, target, unpack,
+    Channel, Pending, REQUEST_BURST, REQUEST_RATE, TransportError, ValueFreeLogger,
+    binary, check, headers, close_socket, encode_frame, no_store_response,
+    send, send_encoded, shape, target, unpack,
 )
 from .gateway_service_context import ServiceContext, ServicePolicyError
 from .gateway_service_listener import Listener, read_bounded
@@ -67,7 +68,7 @@ class ServiceRuntime:
         self.active = 0
         self.pending = 0
         self.budget, self.sampled = 32.0, time.monotonic()
-        self.request_budget, self.request_sampled = 256.0, time.monotonic()
+        self.request_budget, self.request_sampled = float(REQUEST_BURST), time.monotonic()
         self.stopping = False
         self.last_error: str | None = None
 
@@ -99,7 +100,7 @@ class ServiceRuntime:
     def admit_request(self) -> None:
         now = time.monotonic()
         self.request_budget = min(
-            256, self.request_budget + max(0, now - self.request_sampled) * 128)
+            REQUEST_BURST, self.request_budget + max(0, now - self.request_sampled) * REQUEST_RATE)
         self.request_sampled = now
         check(self.request_budget >= 1, "request-rate-limit", 429)
         self.request_budget -= 1
@@ -319,7 +320,8 @@ class ServiceRuntime:
                 self.checkpoint(channel, pending)
                 pending.unacknowledged = False
                 await send(channel.ws, {"type": "ack", "id": pending.id, "seq": frame["seq"]})
-        except (TransportError, ServicePolicyError, OSError, asyncio.CancelledError):
+        except (TransportError, ServicePolicyError, OSError,
+                asyncio.TimeoutError, asyncio.CancelledError):
             if response is not None and response.prepared and request.transport is not None:
                 request.transport.close()
             raise
@@ -412,6 +414,7 @@ async def build_app(listener: Listener, policy_path: Path, *, reload_interval: f
         "max_field_size": 12288, "auto_decompress": False,
     })
     app[STATE] = state
+    app.on_response_prepare.append(no_store_response)
     app.router.add_route("*", "/_fleet/challenge", state.challenge)
     app.router.add_route("*", "/_fleet/service-admit", state.admit)
     app.router.add_route("*", "/_fleet/service-channel", state.attach)

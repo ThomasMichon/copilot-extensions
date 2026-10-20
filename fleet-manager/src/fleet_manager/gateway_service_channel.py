@@ -22,6 +22,7 @@ from aiohttp import ClientWebSocketResponse, WSMsgType, web
 from . import planning
 from .gateway_service_policy import CallerGrant, ServiceAuthority, ServiceGrant
 from .gateway_service_context import ServicePolicyError
+from .runtime_identity import CLOCK_SKEW, MAX_REPLAYS, PROOF_AGE
 
 FRAME_BYTES = 65536
 BODY_BYTES = 32768
@@ -32,6 +33,8 @@ CHANNEL_REQUESTS = 8
 GLOBAL_REQUESTS = 32
 DEADLINE = 60
 SEND_TIMEOUT = 5
+REQUEST_BURST = 128
+REQUEST_RATE = (MAX_REPLAYS - REQUEST_BURST) // (PROOF_AGE + 2 * CLOCK_SKEW + 1)
 REQUEST_HEADERS = frozenset({
     "accept", "accept-language", "content-type", "if-none-match", "if-modified-since",
     "if-match", "if-unmodified-since",
@@ -181,6 +184,10 @@ async def close_socket(
         await asyncio.wait_for(ws.close(code=code, message=message), SEND_TIMEOUT)
     except asyncio.TimeoutError:
         logging.getLogger(__name__).warning("service-channel-closed code=close-timeout")
+
+
+async def no_store_response(_request: web.Request, response: web.StreamResponse) -> None:
+    response.headers["Cache-Control"] = "no-store"
 
 
 @dataclass(eq=False)

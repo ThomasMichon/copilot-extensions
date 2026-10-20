@@ -211,7 +211,7 @@ def test_buffered_head_omits_unknown_representation_length(tmp_path):
     asyncio.run(scenario())
 
 
-def test_cacheable_variants_retain_backend_freshness_and_variation(tmp_path):
+def test_backend_cache_directives_cannot_make_protected_responses_cacheable(tmp_path):
     async def scenario():
         async with running(tmp_path) as rig:
             await rig.connect()
@@ -221,11 +221,14 @@ def test_cacheable_variants_retain_backend_freshness_and_variation(tmp_path):
                 ) as response:
                     assert response.status == 200
                     assert await response.text() == language
-                    assert response.headers["Cache-Control"] == "public, max-age=300"
+                    assert response.headers["Cache-Control"] == "no-store"
                     assert response.headers["Vary"] == "Accept-Language"
                     assert response.headers["Date"] == "Wed, 21 Oct 2015 07:28:00 GMT"
                     assert response.headers["Age"] == "290"
                     assert response.headers["Expires"] == "Wed, 21 Oct 2015 07:33:00 GMT"
+            async with rig.session.get(rig.origin + "/api/cacheable") as response:
+                assert response.status == 401
+                assert response.headers["Cache-Control"] == "no-store"
     asyncio.run(scenario())
 
 

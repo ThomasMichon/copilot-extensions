@@ -14,6 +14,7 @@ from fleet_manager.gateway_service_channel import (
 )
 from fleet_manager.gateway_service_connector import ServiceConnector, verified_tls
 from fleet_manager.gateway_service_server import STATE
+from fleet_manager import gateway_service_server as server
 from gateway_service_transport_fixtures import eventually, running
 
 
@@ -74,6 +75,45 @@ def test_client_disconnect_cancels_fixed_backend_and_releases_request(tmp_path):
             await eventually(lambda: not connector.active and rig.state.pending == 0)
             await asyncio.wait_for(rig.backends[0].stopped.wait(), 3)
             assert rig.state.channels["service-a"].pending == {}
+    asyncio.run(scenario())
+
+
+def test_ack_timeout_aborts_prepared_stream_before_json_fallback(tmp_path, monkeypatch):
+    async def scenario():
+        prepare, send, json_response = web.StreamResponse.prepare, server.send, web.json_response
+        transports, unsafe_fallbacks = [], []
+
+        async def observe_prepare(response, request):
+            if STATE in request.app and request.path == "/api/events":
+                transports.append(request.transport)
+            return await prepare(response, request)
+
+        async def timed_out_ack(ws, frame):
+            if frame.get("type") == "ack":
+                raise asyncio.TimeoutError
+            await send(ws, frame)
+
+        def observe_json(value, **kwargs):
+            if value.get("error") == "request-timeout" and transports:
+                if not transports[0].is_closing():
+                    unsafe_fallbacks.append(True)
+            return json_response(value, **kwargs)
+
+        monkeypatch.setattr(web.StreamResponse, "prepare", observe_prepare)
+        monkeypatch.setattr(server, "send", timed_out_ack)
+        monkeypatch.setattr(web, "json_response", observe_json)
+        async with running(tmp_path) as rig:
+            connector = await rig.connect()
+            response = await rig.request("/api/events")
+            try:
+                assert response.status == 200
+                with pytest.raises((aiohttp.ClientError, ConnectionError)):
+                    await asyncio.wait_for(response.read(), 3)
+                await eventually(lambda: not connector.active and rig.state.pending == 0)
+                assert transports and transports[0].is_closing()
+                assert not unsafe_fallbacks
+            finally:
+                response.close()
     asyncio.run(scenario())
 
 

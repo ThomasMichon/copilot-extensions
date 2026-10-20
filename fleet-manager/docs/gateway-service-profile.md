@@ -124,9 +124,12 @@ headers: namespace-aware redirect destinations are not supported or silently
 stripped into apparently successful redirects. The connector never follows them.
 The Gateway applies the same status restriction to raw channel frames; an
 alternative connector cannot bypass the SDK's check.
-Cacheable responses preserve `Vary`, `Date`, `Age` and `Expires` alongside
-`Cache-Control` and validators. Hop-by-hop nomination of cache metadata refuses
-rather than stripping a variant key or restarting freshness.
+The Gateway sets `Cache-Control: no-store` at the final response-preparation
+boundary, including errors, regardless of backend cache directives. Protected
+content must not be reusable without current caller admission. Backend `Vary`,
+`Date`, `Age`, `Expires` and validators remain metadata, not permission to cache;
+hop-by-hop nomination of that metadata refuses. Public caching needs a separate
+Gateway-owned policy and is not enabled by this profile.
 Conditional request headers (`If-Match`, `If-Unmodified-Since`, `If-None-Match`
 and `If-Modified-Since`) reach the backend unchanged. Nominating a condition as
 hop-by-hop refuses rather than silently turning conditional work unconditional.
@@ -135,7 +138,7 @@ reporting the empty transmitted body's length as the corresponding asset size.
 
 | Resource | Bound |
 |---|---|
-| All-request admission | Burst 256, refill 128/s; at most 128 active handlers |
+| All-request admission | Burst 128, refill 32/s; at most 128 active handlers |
 | Control admission | Burst 32, refill 16/s |
 | Pending attachment tickets / unverified sockets | 64 / 8 |
 | WebSocket message / request body | 64 KiB / 32 KiB |
@@ -147,6 +150,11 @@ reporting the empty transmitted body's length as the corresponding asset size.
 The combined JSON envelope must also fit the frame bound, including base64
 and header escaping. Preflight rejection occurs before dispatch, so an
 oversized local envelope is a known refusal, not an uncertain mutation.
+The global admission rate is derived from the common verifier's 4,096-entry
+replay fence and full future-inclusive proof lifetime (120 seconds plus one
+integer-expiry boundary second), including the initial burst. Caller and
+service admission share this budget; live replay entries are never evicted to
+admit more work.
 
 `response-stream` routes send chunks before backend completion; ordinary `http`
 routes buffer within the separate response bound. Acknowledgment follows
@@ -163,6 +171,9 @@ Withdrawal, token expiry, disconnect, replacement and cancellation
 cannot become a successful stream EOF. Lost-channel mutations report
 `outcome-unknown` instead of being retried. A local checkpoint cannot fence an
 already performed external effect.
+An ACK-send timeout after response preparation aborts the downstream transport
+before the middleware's error response, including Python 3.10's distinct
+`asyncio.TimeoutError` hierarchy.
 
 Connector `connect_once()` owns one connection and every request it starts.
 Cancellation retires a correlation even if its worker task never began running.
