@@ -50,6 +50,7 @@ from . import (
 from . import config as cfg
 from .launch_progress import step
 from .worktree_naming import session_worktree_id
+from .worktree_machine_identity import WorktreeMachineIdentity
 
 
 class LaunchSeedStagingFailure(RuntimeError):
@@ -152,6 +153,7 @@ def _carve_paired_knowledge(
     suffix: str,
     plat: str,
     plat_short: str,
+    machine_identity: WorktreeMachineIdentity | None = None,
 ) -> dict | None:
     """Carve/stamp the citadel knowledge-repo PAIR for a stateless harness (#957).
 
@@ -337,8 +339,9 @@ def _carve_paired_knowledge(
             branch=knowledge_branch,
             worktree_path=knowledge_wt_path,
             repo=knowledge_name,
-            machine=config.machine,
+            machine=machine_identity.machine if machine_identity is not None else config.machine,
             platform_name=plat,
+            machine_identity=machine_identity,
             tracking_path=knowledge_tracking_path,
             pair_id=pair_id,
             pair_role="knowledge",

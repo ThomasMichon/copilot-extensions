@@ -96,6 +96,7 @@ def _candidate_prs(repo: str, state: str) -> list[dict]:
                 "project": project,
                 "worktree_id": record.worktree_id,
                 "machine": record.machine,
+                **(record.machine_fields if record.machine_identity is not None else {}),
                 "platform": record.platform,
                 "status": record.status,
                 "owner_ref": record.owner_ref,

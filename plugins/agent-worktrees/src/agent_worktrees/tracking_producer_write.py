@@ -21,7 +21,7 @@ from .execution_spaces import (
 def _response(record, claim) -> dict:
     return {
         "schema": producer.SCHEMA, "version": producer.VERSION, "ok": True,
-        "owner": tracking.format_claim_ref(record.machine, record.repo, record.worktree_id),
+        "owner": tracking.format_claim_ref(record.execution_machine, record.repo, record.worktree_id),
         "creator": claim.producer["creator"], "token": claim.producer["token"],
         "ref": claim.ref, "phase": claim.producer["phase"],
         "producer": copy.deepcopy(claim.producer),
@@ -69,12 +69,12 @@ def _owned_record(args: dict, path: Path, *, mutable: bool = True):
     record = tracking.load_record(path)
     authority = project_record_config(record)
     require_record_mutation(record, authority)
-    if not require_owner_identity(record.machine, authority):
+    if not require_owner_identity(record.execution_machine, authority):
         raise ValueError("producer record belongs to a different local execution-space authority")
     owner = tracking.parse_claim_ref(args["owner_ref"])
     if owner is None or not owner.is_qualified or owner.session or (
         owner.machine, owner.project, owner.worktree_id
-    ) != (record.machine, record.repo, record.worktree_id):
+    ) != (record.execution_machine, record.repo, record.worktree_id):
         raise ValueError("producer owner does not match the current record authority")
     resolved_path, resolved_id, error = resolve_owner_record_path(owner.canonical(), authority)
     if error or resolved_path is None or resolved_id != owner.worktree_id:
@@ -221,7 +221,7 @@ def apply_resource_producer(args: dict) -> dict:
         )
         claim_history.record_event(
             kind=claim.kind, ref=claim.ref, worktree_id=record.worktree_id,
-            machine=record.machine, event="claimed" if operation == "reserve" else operation,
+            machine=record.execution_machine, event="claimed" if operation == "reserve" else operation,
             project=record.repo,
         )
         response = _response(record, claim)

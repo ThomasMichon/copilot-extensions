@@ -55,12 +55,12 @@ def parse_session_worktree_id(worktree_id: str) -> tuple[str, str, str] | None:
 
 
 def session_worktree_allocation(
-    worktree_id: str, machine: str, platform: str,
+    worktree_id: str, machine: str, platform: str, *, physical_machine: bool = False,
 ) -> tuple[str, str] | None:
     """Recognize a complete native allocation, never a partial machine prefix."""
     allocation = parse_session_worktree_id(worktree_id)
     if allocation is None or allocation[0] not in {
-        session_worktree_prefix(machine, platform, legacy=legacy)
+        session_worktree_prefix(machine, platform, legacy=legacy, physical_machine=physical_machine)
         for legacy in (False, True)
     }:
         return None

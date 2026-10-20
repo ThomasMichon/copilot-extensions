@@ -46,7 +46,7 @@ def _validate(config: cfg.Config, path: Path, seed_id: str | None):
     execution_spaces.require_record_mutation(record, config)
     if (
         record.worktree_id != path.stem or record.repo != config.repo_name
-        or record.machine != config.machine or record.platform != config.platform
+        or record.execution_machine != config.machine or record.platform != config.platform
         or record.kind != "session"
         or record.status != "active"
         or getattr(config.default_repo, "knowledge_only", False)
@@ -109,6 +109,7 @@ def _allocation(record: tracking.WorktreeRecord) -> tuple[str, str, str]:
     platform = "win" if record.platform == "windows" else record.platform
     allocation = session_worktree_allocation(
         record.worktree_id, record.machine, record.platform,
+        physical_machine=record.machine_identity is not None,
     )
     if allocation is None:
         raise ValueError("retained New has no verifiable native creation allocation")
@@ -135,7 +136,7 @@ def _retained_sibling(
     timestamp: str, suffix: str, platform: str,
 ):
     knowledge_id = f"{record.worktree_id}-k"
-    harness_ref = tracking.format_claim_ref(record.machine, record.repo, record.worktree_id)
+    harness_ref = tracking.format_claim_ref(record.execution_machine, record.repo, record.worktree_id)
     projects = installer.read_projects_registry(strict=True).get("projects", {})
     if not isinstance(projects, dict):
         raise ValueError("project registry cannot verify retained paired allocations")
@@ -158,6 +159,7 @@ def _retained_sibling(
             raise ValueError("retained paired allocation conflicts with the current binding")
         expected = {
             "worktree_id": knowledge_id, "repo": root.repo, "machine": record.machine,
+            "machine_identity": record.machine_identity,
             "platform": record.platform, "kind": "session", "branch": f"worktree/{knowledge_id}",
             "pair_id": f"{timestamp}-{suffix}", "pair_role": "knowledge",
             "pair_kind": "worktree",
@@ -240,6 +242,7 @@ def _prepare_pair(
             stamp = worktree_creation._carve_paired_knowledge(
                 config, harness_id=record.worktree_id, timestamp=timestamp, suffix=suffix,
                 plat=record.platform, plat_short=platform,
+                machine_identity=record.machine_identity,
             )
             if stamp is None:
                 raise ValueError("paired creation did not establish its required companion")
@@ -265,7 +268,7 @@ def _prepare_pair(
         _prepare_permissions(root.path, child.worktree_path)
         stamp = {
             "pair_id": child.pair_id, "pair_role": "harness",
-            "pair_ref": tracking.format_claim_ref(child.machine, child.repo, child.worktree_id),
+            "pair_ref": tracking.format_claim_ref(child.execution_machine, child.repo, child.worktree_id),
             "pair_kind": "worktree",
         }
     if existing is not None:

@@ -89,9 +89,9 @@ def require_handoff_record(record: tracking.WorktreeRecord, error_type: type[Exc
             or not legacy_wsl_record_locality.record_namespace_matches(record, config)
         ):
             raise ExecutionSpaceError("handoff record has unproven execution platform or namespace")
-        if record.machine != config.machine:
+        if record.execution_machine != config.machine:
             ref = tracking.parse_claim_ref(
-                tracking.format_claim_ref(record.machine, record.repo, record.worktree_id),
+                tracking.format_claim_ref(record.execution_machine, record.repo, record.worktree_id),
             )
             if legacy_wsl_record_locality.resolve_legacy_wsl_owner_ref(ref, config) is None:
                 raise ExecutionSpaceError("handoff record has no verified local legacy WSL authority")
@@ -203,7 +203,7 @@ def load_handoff_record(
     if record.status in {"finalizing", "orphaned"}:
         raise error_type(
             f"{role} worktree "
-            f"{tracking.format_claim_ref(record.machine, record.repo, record.worktree_id)} "
+            f"{tracking.format_claim_ref(record.execution_machine, record.repo, record.worktree_id)} "
             f"is {record.status}"
         )
     return record

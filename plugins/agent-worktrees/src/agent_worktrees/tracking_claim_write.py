@@ -114,7 +114,7 @@ def apply_claim_add(args: dict) -> dict:
         reopened=reopened,
     )
     claim_history.record_event(
-        kind=kind, ref=ref, worktree_id=worktree_id, machine=record.machine,
+        kind=kind, ref=ref, worktree_id=worktree_id, machine=record.execution_machine,
         event="claimed", session_id=args.get("session_id"), project=record.repo,
     )
     return {
@@ -165,7 +165,7 @@ def apply_claim_release(args: dict) -> dict:
         "claim_released", worktree_id=worktree_id, kind=kind, ref=ref, action=action
     )
     claim_history.record_event(
-        kind=kind, ref=ref, worktree_id=worktree_id, machine=record.machine,
+        kind=kind, ref=ref, worktree_id=worktree_id, machine=record.execution_machine,
         event=action, session_id=args.get("session_id"), project=record.repo,
     )
     return {"ok": True, "action": action}
@@ -240,7 +240,7 @@ def apply_claim_settle(args: dict) -> dict:
         disposition=disposition,
     )
     claim_history.record_event(
-        kind=settled.kind, ref=ref, worktree_id=worktree_id, machine=record.machine,
+        kind=settled.kind, ref=ref, worktree_id=worktree_id, machine=record.execution_machine,
         event="settled", note=disposition, session_id=args.get("session_id"),
         project=record.repo,
     )

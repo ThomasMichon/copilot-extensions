@@ -293,7 +293,7 @@ def cross_machine_claim_count(rec: tracking.WorktreeRecord) -> int:
     :func:`assemble_closure_descriptor` caller shares.
     """
     return _count_cross_machine_worktree_claims(
-        [c for c in rec.resources if c.is_live or c.is_unsettled], rec.machine)
+        [c for c in rec.resources if c.is_live or c.is_unsettled], rec.execution_machine)
 
 
 def cleanup_disposition(
@@ -382,7 +382,7 @@ def cleanup_disposition(
         # kind of claim (see _count_cross_machine_worktree_claims's
         # docstring) -- this bucket only names WHERE the target lives, not
         # that it needs no further look.
-        xm = _count_cross_machine_worktree_claims(held_claims, rec.machine)
+        xm = _count_cross_machine_worktree_claims(held_claims, rec.execution_machine)
         if xm == len(held_claims):
             return CleanupDisposition(
                 False, "held-claims-cross-machine",

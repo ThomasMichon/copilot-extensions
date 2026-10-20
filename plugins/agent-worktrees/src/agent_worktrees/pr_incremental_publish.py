@@ -53,7 +53,7 @@ def push_refspec(
         # Both the live config machine and the worktree's recorded machine.
         validate_effective_head(
             feature, worktree_id=worktree_id,
-            machine=(config.machine, record.machine),
+            machine=(config.machine, record.execution_machine),
             source_attribution=repo.pr.source_attribution,
         )
     except BranchLeakError as exc:

@@ -478,7 +478,7 @@ def cmd_register_session(args: argparse.Namespace) -> int:
             session_id,
             wt_id,
             worktree_dir=binding_record.worktree_path,
-            machine=binding_record.machine,
+            machine=binding_record.execution_machine,
         )
     except Exception:
         pass

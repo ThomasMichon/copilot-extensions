@@ -834,7 +834,7 @@ def _push_changes_pr(
         # RECORDED machine -- see the matching comment in pr_ops.create_pr.
         validate_effective_head(
             feature, worktree_id=worktree_id,
-            machine=(config.machine, record.machine),
+            machine=(config.machine, record.execution_machine),
             source_attribution=repo.pr.source_attribution,
         )
     except BranchLeakError as exc:
@@ -1085,7 +1085,7 @@ def _settle_current_session_claim(
     if record is None or not current_session_id:
         return record, None
     current_session_ref = tracking.format_claim_ref(
-        record.machine, record.repo, record.worktree_id,
+        record.execution_machine, record.repo, record.worktree_id,
         session=current_session_id,
     )
     from . import locks as _locks
@@ -1533,7 +1533,7 @@ def validate_and_finalize(
                 try:
                     from . import claim_handoffs
                     source_ref = tracking.format_claim_ref(
-                        record.machine, record.repo, record.worktree_id)
+                        record.execution_machine, record.repo, record.worktree_id)
                     active_handoffs = (
                         claim_handoffs.active_bundle_ids_for_source(source_ref))
                 except Exception as exc:
@@ -1809,7 +1809,7 @@ def validate_and_finalize(
                     label = f"  · {c.kind}: {c.ref}" + (f" ({c.note})" if c.note else "")
                     print(label)
                     claim_history.record_claim_released(
-                        c, worktree_id=worktree_id, machine=record.machine, note="finalized",
+                        c, worktree_id=worktree_id, machine=record.execution_machine, note="finalized",
                         project=record.repo)
 
             # Finalization is committed; a fresh parent-authority refusal cannot

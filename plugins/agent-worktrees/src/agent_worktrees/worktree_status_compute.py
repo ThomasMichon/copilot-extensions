@@ -209,6 +209,7 @@ def compute(project: str, worktree_id: str) -> dict:
         "worktree_id": worktree_id,
         "project": project,
         "machine": record.machine,
+        **(record.machine_fields if record.machine_identity is not None else {}),
         "started_at": started_at,
         "as_of": time.time(),
         "facts": facts,

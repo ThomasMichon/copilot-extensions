@@ -62,7 +62,7 @@ def _matches(record, payload):
 def _response(record, claim):
     return {
         "schema": relationship.SCHEMA, "version": relationship.VERSION, "ok": True,
-        "owner": tracking.format_claim_ref(record.machine, record.repo, record.worktree_id),
+        "owner": tracking.format_claim_ref(record.execution_machine, record.repo, record.worktree_id),
         **{key: claim.producer[key] for key in ("creator", "request_id", "token", "phase")},
         "ref": claim.ref, "producer": copy.deepcopy(claim.producer),
     }
@@ -178,7 +178,7 @@ def apply_resource_relationship(args: dict) -> dict:
             kind=claim.kind, ref=claim.ref, phase=claim.producer["phase"],
         )
         claim_history.record_event(
-            kind=claim.kind, ref=claim.ref, worktree_id=record.worktree_id, machine=record.machine,
+            kind=claim.kind, ref=claim.ref, worktree_id=record.worktree_id, machine=record.execution_machine,
             event="claimed" if operation == "reserve" else operation, project=record.repo,
         )
         return _response(record, claim)

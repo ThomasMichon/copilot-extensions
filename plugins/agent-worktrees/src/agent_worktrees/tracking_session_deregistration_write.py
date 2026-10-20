@@ -127,7 +127,7 @@ def apply_session_deregister(args: dict) -> dict:
                     tracking._next_lifecycle_revision(record, session_id)
                     if retires_current:
                         self_session_ref = tracking.format_claim_ref(
-                            record.machine, record.repo, record.worktree_id,
+                            record.execution_machine, record.repo, record.worktree_id,
                             session=session_id,
                         )
                         tracking.release_resource_claim(record, self_session_ref, save=False)

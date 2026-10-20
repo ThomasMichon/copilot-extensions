@@ -86,7 +86,7 @@ def _validate(worktree_id: str, config: Config, record: tracking.WorktreeRecord 
     if not recovery:
         pr_authority.assert_exclusive(config, record, pr, identity=pr.rewrite_identity or legacy_identity(pr, cwd))
     validate_effective_head(
-        pr.branch, worktree_id=worktree_id, machine=(config.machine, record.machine),
+        pr.branch, worktree_id=worktree_id, machine=(config.machine, record.execution_machine),
         source_attribution=repo.pr.source_attribution,
     )
     return pr

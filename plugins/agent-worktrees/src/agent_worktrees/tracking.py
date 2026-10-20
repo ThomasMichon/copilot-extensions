@@ -25,6 +25,8 @@ from . import config as cfg
 from . import disposition_history, record_cache
 from .effort_focus import ActiveEffort, active_effort_from_mapping
 from .record_io import load_record_uncached as _load_record_uncached
+from . import record_machine_identity
+from .worktree_machine_identity import WorktreeMachineIdentity, parse_machine_identity
 from .tracking_session_activations import SessionActivation as SessionActivation
 from . import tracking_session_activations as session_activations
 
@@ -638,7 +640,7 @@ def _owning_tracking_dir(worktree_id: str, repo: str | None = None) -> Path:
 
 
 @dataclass
-class WorktreeRecord:
+class WorktreeRecord(record_machine_identity.RecordMachineIdentityView):
     """Parsed worktree tracking record."""
 
     worktree_id: str
@@ -918,7 +920,9 @@ class WorktreeRecord:
     # explicit, per-record operator edit ever promotes it). Emitted only
     # when set, so a legacy/pre-Phase-1 YAML stays byte-identical.
     codename_source: str | None = None
+    machine_identity: WorktreeMachineIdentity | None = None
     _loaded_machine: str | None = field(default=None, repr=False, compare=False)
+    _loaded_machine_identity: tuple[object, ...] | None = field(default=None, repr=False, compare=False)
 
     @property
     def owner_claim_ref(self) -> ClaimRef | None:
@@ -1526,11 +1530,13 @@ def load_record(path: Path, *, copy_result: bool = True) -> WorktreeRecord:
     if copy_result:
         record = loaded(record)
         record._loaded_machine = record.machine  # Read-time CAS evidence, never serialized.
+        record._loaded_machine_identity = record_machine_identity.identity_fence(record)
     return record
 
 
 def parse_record_data(data: dict, *, path: Path) -> WorktreeRecord:
     """Parse an already-read tracking mapping without filesystem effects."""
+    identity = parse_machine_identity(data)
     title = data.get("title")
     if title == "null" or title is None:
         title = None
@@ -2018,6 +2024,7 @@ def parse_record_data(data: dict, *, path: Path) -> WorktreeRecord:
         title=title,
         status=data.get("status", "active"),
         completed_at=str(completed_raw) if completed_raw else None,
+        machine_identity=identity,
         sessions=sessions_list,
         session_backend=session_backend,
         session_backend_opaque=session_backend_opaque,
@@ -2105,6 +2112,7 @@ def parse_record_data(data: dict, *, path: Path) -> WorktreeRecord:
                          if data.get("codename_source") else None),
     )
     record._loaded_from, record._loaded_machine = path, record.machine
+    record._loaded_machine_identity = record_machine_identity.identity_fence(record)
     return record
 
 
@@ -2512,9 +2520,8 @@ def _save_record_unlocked(
         f"branch: {_yaml_scalar(record.branch)}\n"
         f"worktree_path: {record.worktree_path}\n"
         f"repo: {record.repo}\n"
-        f"machine: {record.machine}\n"
-        f"platform: {record.platform}\n"
-        f"started_at: {record.started_at}\n"
+        + record_machine_identity.serialized_fields(record)
+        + f"started_at: {record.started_at}\n"
         f"last_resumed_at: {record.last_resumed_at}\n"
         f"resume_count: {record.resume_count}\n"
         f"title: {title_val}\n"
@@ -3072,7 +3079,7 @@ def find_paired_record(record: WorktreeRecord) -> WorktreeRecord | None:
     ref = record.pair_claim_ref
     if ref is None:
         return None
-    if ref.is_qualified and ref.machine == record.machine and ref.project:
+    if ref.is_qualified and ref.machine == record.execution_machine and ref.project:
         return load_record_by_id(
             ref.worktree_id,
             tracking_path=cfg.project_dir(ref.project) / "worktrees",

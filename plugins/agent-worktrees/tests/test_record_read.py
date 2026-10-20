@@ -56,6 +56,26 @@ def invoke(*args):
     return rc, json.loads(captured.getvalue())
 
 
+@pytest.mark.parametrize("version", [1, True, 2])
+def test_exact_record_read_preserves_or_refuses_explicit_tuple(record_fixture, version):
+    from agent_worktrees.worktree_machine_identity import WorktreeMachineIdentity
+
+    data, path = record_fixture
+    fields = WorktreeMachineIdentity("physical-host", "wsl", "custom-guest").to_record_fields()
+    data.update(fields)
+    data["machine_identity_version"] = version
+    path.write_text(yaml.safe_dump(data))
+    before = path.read_bytes()
+    rc, result = invoke(data["worktree_id"])
+    if type(version) is int and version == 1:
+        assert rc == 0 and result["ok"] is True
+        assert {key: result["worktree"][key] for key in fields} == fields
+    else:
+        assert rc != 0 and result["ok"] is False
+        assert result["error"]["code"] == "record-malformed"
+    assert path.read_bytes() == before
+
+
 def test_record_read_exact_unpublished_record_and_unchanged_list(record_fixture, monkeypatch):
     data, path = record_fixture
     requests = []

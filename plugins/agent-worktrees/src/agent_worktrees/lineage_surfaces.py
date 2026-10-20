@@ -386,8 +386,7 @@ def worktree_lineage(
         "surface_version": 1,
         "project": record.repo,
         "worktree_id": record.worktree_id,
-        "machine": record.machine,
-        "platform": record.platform,
+        **record.machine_fields,
         "status": record.status,
         "revisions": {
             "lifecycle": record.lifecycle_revision,
@@ -637,8 +636,7 @@ def session_lineage(
         item["worktree"] = {
             "project": record.repo,
             "worktree_id": record.worktree_id,
-            "machine": record.machine,
-            "platform": record.platform,
+            **record.machine_fields,
             "status": record.status,
             "revisions": {
                 "lifecycle": record.lifecycle_revision,

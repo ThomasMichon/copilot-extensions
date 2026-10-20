@@ -33,7 +33,8 @@ MAX_TEXT_BYTES = 4096
 MAX_COLLECTION_ITEMS = 128
 MAX_DEPTH = 6
 ROW_FIELDS = frozenset("""
-id branch path repo machine platform status started_at title resume_count
+id branch path repo machine platform machine_identity_version environment execution_machine
+status started_at title resume_count
 last_resumed_at codename creation_nonce session_count last_session_id head_yielded execution_leg
 execution_leg_live completed_at kind owner interface origin checkout_managed checkout_present
 picker_hidden bound_agent dispatch_attempt active_effort follow_up paused
@@ -59,7 +60,7 @@ delegate_finalizable
 """.split())
 _INT_FIELDS = frozenset("""
 resume_count session_count controller_revision ahead behind dirty mux_clients
-turn_count pr_count claims_link_count
+turn_count pr_count claims_link_count machine_identity_version
 """.split())
 _OBJECT_FIELDS = frozenset("""
 execution_leg dispatch_attempt active_effort reciprocal_relation
@@ -142,6 +143,12 @@ def _encode_row(row: dict) -> tuple[str, str]:
     if not isinstance(row, dict) or set(row) - ROW_FIELDS:
         raise ProjectionError("current row contains undeclared fields")
     wid = _identity(row.get("id"), name="worktree id")
+    from .worktree_machine_identity import WorktreeMachineIdentityError, parse_machine_identity
+
+    try:
+        parse_machine_identity(row)
+    except WorktreeMachineIdentityError as exc:
+        raise ProjectionError(str(exc)) from exc
     for field, value in row.items():
         expected = (
             bool if field in _BOOL_FIELDS else

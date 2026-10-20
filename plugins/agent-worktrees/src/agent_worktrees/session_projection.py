@@ -1952,12 +1952,12 @@ def recovery_report(
                 if (
                     relation_status != "controller-terminal"
                     and effective_local_machine
-                    and record.machine != effective_local_machine
+                    and record.execution_machine != effective_local_machine
                 ):
                     relation_status = "controlled-remote"
                 elif relation_status != "controller-terminal":
                     relation_status = "controlled-elsewhere"
-                item["machine"] = record.machine
+                item.update(record.execution_reference_fields)
                 item["worktree_path"] = record.worktree_path
         item["status"] = relation_status
         validated.append(item)

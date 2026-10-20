@@ -47,3 +47,37 @@ Consumers must recognize the schema/version and positive configured provenance.
 An unknown command/schema/version is not authority. The older `get machine`
 scalar remains unchanged and is not a substitute for this stronger contract.
 No sibling is required to install or operate Worktrees.
+
+## Versioned tracking identity
+
+Tracking readers also recognize an explicitly versioned physical/environment
+tuple. This is record metadata, not the configured-authority response above:
+
+```yaml
+machine_identity_version: 1
+machine: sample-host
+environment: wsl
+execution_machine: custom-guest-space
+platform: wsl
+```
+
+`machine` names the physical host. `execution_machine` supplies the one-term
+owner in qualified worktree, session, pair, controller and resource references.
+The same fields are retained in exact-record, list, lineage and resident-row
+JSON. `platform` must agree with `environment`; missing version metadata keeps
+the original legacy machine/platform interpretation. Unsupported, partial or
+conflicting explicit tuples are errors, never fallback execution authority.
+
+The typed tracking accessor preserves the exact historical machine label for
+legacy records. Ordinary saves do not migrate their format or alter a versioned
+identity. Concurrent changes to environment, execution owner or identity version
+invalidate a loaded writer even when its physical host is unchanged. Mutation
+still requires the receiving project's shared registry and actual execution
+platform; sharing a physical host does not make native and guest owners equal.
+
+**Producer gate:** ordinary create, anchor admission and externally adopted
+checkout producers still emit legacy records. The optional typed factory input
+and tuple-aware retained-pair handling prepare those boundaries, but are not a
+producer rollout. Cross-plugin adapters, prospective creation and retained
+request replay must be integrated before changing that default. No historical
+ID, path, stored reference or session is rewritten.

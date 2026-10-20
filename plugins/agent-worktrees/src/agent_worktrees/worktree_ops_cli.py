@@ -556,7 +556,7 @@ def _journal_run_claim(owner_ref: str, stdout: str) -> tracking.ResourceClaim | 
         # and the daemon claim verbs already feed, after the save above
         # is durably confirmed (never before).
         claim_history.record_pr_event(
-            claim.ref, worktree_id=record.worktree_id, machine=record.machine,
+            claim.ref, worktree_id=record.worktree_id, machine=record.execution_machine,
             event="claimed", project=record.repo,
         )
     return claim
@@ -679,7 +679,7 @@ def cmd_run(args: argparse.Namespace) -> int:
                 # confirmed.
                 claim_history.record_pr_event(
                     claim.ref, worktree_id=owner_record.worktree_id,
-                    machine=owner_record.machine, event="claimed",
+                    machine=owner_record.execution_machine, event="claimed",
                     project=owner_record.repo,
                 )
             return True

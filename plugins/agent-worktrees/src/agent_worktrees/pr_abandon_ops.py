@@ -211,7 +211,7 @@ def _abandon_pr_settle_locked(
 
     if ref and settled is not None:
         claim_history.record_pr_event(
-            ref, worktree_id=record.worktree_id, machine=record.machine,
+            ref, worktree_id=record.worktree_id, machine=record.execution_machine,
             event="abandoned", note=reason, project=record.repo,
         )
 

@@ -725,7 +725,7 @@ def _claims_sweep(args: argparse.Namespace) -> int:
                     for c in flipped:
                         claim_history.record_event(
                             kind=c.kind, ref=c.ref, worktree_id=rec.worktree_id,
-                            machine=rec.machine, event="released",
+                            machine=rec.execution_machine, event="released",
                             # A `pr`-kind claim swept this way is a clean,
                             # provably-merged hand-back (RELEASED), never
                             # an involuntary reclaim -- only a non-pr kind
@@ -798,7 +798,7 @@ def _claims_reconcile_at_rest(args: argparse.Namespace) -> int:
                     for c in flipped:
                         claim_history.record_event(
                             kind=c.kind, ref=c.ref, worktree_id=rec.worktree_id,
-                            machine=rec.machine, event="released",
+                            machine=rec.execution_machine, event="released",
                             note="at-rest-reconciled", project=rec.repo,
                         )
         else:
@@ -934,7 +934,7 @@ def _claims_show(args: argparse.Namespace, worktree_id: str | None) -> int:
         for c in rec.resources
     ]
     inbound = _core_helper("_dispatch_assigned_tasks", _dispatch_assigned_tasks)(
-        rec.machine or config.machine,
+        rec.execution_machine or config.machine,
         wt_id,
         rec.worktree_path,
     )
@@ -943,6 +943,7 @@ def _claims_show(args: argparse.Namespace, worktree_id: str | None) -> int:
         "worktree_id": wt_id,
         "repo": rec.repo,
         "machine": rec.machine,
+        **(rec.machine_fields if rec.machine_identity is not None else {}),
         "owner_ref": rec.owner_ref,
         "outbound": outbound,
         "inbound": inbound,

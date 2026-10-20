@@ -12,6 +12,7 @@ from pathlib import Path
 import yaml
 
 from . import config as cfg, pr_publication_state, pr_publish, publication_deadline, tracking
+from . import record_machine_identity
 
 _held = threading.local()
 
@@ -114,12 +115,14 @@ def write_record(record: tracking.WorktreeRecord, path: Path, content: str) -> N
     expected_machine = record.machine if loaded_machine is None else loaded_machine
     if current is not None and current.machine != expected_machine:
         raise ValueError("record owner machine changed; reload the record")
+    record_machine_identity.require_unchanged_identity(record, current)
     if _projection(current) == _projection(record):
         tracking._atomic_write(path, content)
     else:
         with guard(timeout=0):
             tracking._atomic_write(path, content)
     record._loaded_machine = record.machine
+    record._loaded_machine_identity = record_machine_identity.identity_fence(record)
 
 
 def write_registry(path: Path, content: str) -> None:

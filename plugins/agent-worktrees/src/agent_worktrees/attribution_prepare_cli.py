@@ -27,14 +27,16 @@ def prepare(body: str, record, config, *, head: str, omit: bool = False, tag: st
     if tag is not None:
         if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]{0,63}", tag):
             raise ValueError("fallback tag must be a public 1-64 character label")
-        if any(value and value.lower() in tag.lower() for value in (record.machine, record.worktree_id)):
+        if any(value and value.lower() in tag.lower() for value in (
+            record.machine, record.execution_machine, record.worktree_id,
+        )):
             raise ValueError("fallback tag contains a private source identifier")
     if not omit and mode is True:
         sessions = record.sessions
         live = [item for item in sessions if not item.ended_at]
         session = (live[-1] if live else sessions[-1]).session_id if sessions else ""
         marker = attribution.build_marker(
-            record.worktree_id, machine=record.machine, session=session, head=head,
+            record.worktree_id, machine=record.execution_machine, session=session, head=head,
         )
     elif not omit and mode == "codename":
         if not record.codename or not codename.is_valid_handle(record.codename):

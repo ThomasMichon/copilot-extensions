@@ -467,7 +467,7 @@ def claim_handoff_reservation(
     try:
         from . import claim_handoffs
 
-        source = format_claim_ref(record.machine, record.repo, record.worktree_id)
+        source = format_claim_ref(record.execution_machine, record.repo, record.worktree_id)
         return claim_handoffs.active_bundle_for_claim(source, claim.ref)
     except Exception:
         return "unverified-handoff-registry"

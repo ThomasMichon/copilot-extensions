@@ -731,12 +731,12 @@ def resolve_pair(config: cfg.Config | None, *, cwd: str | None = None) -> StateP
             )
 
         current_identity = (
-            record.machine,
+            record.execution_machine,
             record.repo,
             record.worktree_id,
         )
         sibling_identity = (
-            sibling_record.machine,
+            sibling_record.execution_machine,
             sibling_record.repo,
             sibling_record.worktree_id,
         )

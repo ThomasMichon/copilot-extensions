@@ -41,7 +41,7 @@ def resolve_origin_identity(
             return None
         root, root_project, chain = walked
         fingerprint = root_chain._chain_identity_key(chain)
-        if fingerprint is None or not root_project or root.machine != this_machine:
+        if fingerprint is None or not root_project or root.execution_machine != this_machine:
             return None
         root_config = cfg.load_project_config(root_project)
         if root_config.default_repo.pr.source_attribution not in (True, "codename"):
@@ -56,7 +56,7 @@ def resolve_origin_identity(
             log.warning("Private PR origin omitted: ownership changed during capture.")
             return None
         return OriginIdentity(
-            worktree_id=root.worktree_id, machine=root.machine, project=root_project,
+            worktree_id=root.worktree_id, machine=root.execution_machine, project=root_project,
         )
     except (OSError, ValueError, AttributeError, KeyError, TypeError, TimeoutError):
         log.warning("Private PR origin omitted: ownership or policy unavailable.")

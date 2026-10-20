@@ -46,7 +46,7 @@ def _owner_dict(
     claim: tracking.ResourceClaim,
 ) -> dict:
     qualified_ref = tracking.format_claim_ref(
-        record.machine,
+        record.execution_machine,
         project,
         record.worktree_id,
     )

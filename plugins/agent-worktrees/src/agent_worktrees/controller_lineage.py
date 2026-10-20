@@ -215,7 +215,7 @@ def controller_findings(
                 include_control_plane_related_pr=False
             ).machine
         except Exception:
-            local_machine = child.machine
+            local_machine = child.execution_machine
 
     findings: list[dict[str, object]] = []
     record_cache: dict[

@@ -766,7 +766,7 @@ def _settle_predecessor_session_claim(wt_id: str | None, session_id: str) -> dic
             return
         record = tracking.load_record(yaml_path)
         predecessor_ref = tracking.format_claim_ref(
-            record.machine, record.repo, record.worktree_id, session=session_id,
+            record.execution_machine, record.repo, record.worktree_id, session=session_id,
         )
         return _dispatch_handoff_repair(
             "claim_settle",

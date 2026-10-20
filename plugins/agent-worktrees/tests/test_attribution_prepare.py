@@ -6,7 +6,9 @@ from pathlib import Path
 import pytest
 
 from agent_worktrees import attribution_prepare_cli as cli
+from agent_worktrees import tracking
 from agent_worktrees.providers import attribution
+from agent_worktrees.worktree_machine_identity import WorktreeMachineIdentity
 
 pytestmark = [
     pytest.mark.guard,
@@ -15,13 +17,25 @@ pytestmark = [
 
 
 def fixture(mode="codename", source="built-in", explicit=False):
-    record = SimpleNamespace(worktree_id="private-tree", machine="private-machine",
-                             codename="bolted-circuit", codename_source=source,
-                             worktree_path="fixture-root", sessions=[])
+    record = tracking.parse_record_data({
+        "worktree_id": "private-tree", "branch": "worktree/private-tree", "repo": "fixture",
+        "machine": "private-machine", "platform": "linux",
+        "codename": "bolted-circuit", "codename_source": source,
+        "worktree_path": "fixture-root", "sessions": [],
+    }, path=Path("fixture-root.yaml"))
     config = SimpleNamespace(default_repo=SimpleNamespace(pr=SimpleNamespace(
         source_attribution=mode, source_attribution_configured=explicit,
     )))
     return record, config
+
+
+@pytest.mark.parametrize("tag", ["physical-host", "custom-guest"])
+def test_tuple_tag_privacy_covers_both_physical_and_execution_names(tag):
+    record, config = fixture()
+    record.machine, record.platform = "physical-host", "wsl"
+    record.machine_identity = WorktreeMachineIdentity("physical-host", "wsl", "custom-guest")
+    with pytest.raises(ValueError, match="private source"):
+        cli.prepare("", record, config, head="", tag=tag)
 
 
 def test_external_body_uses_existing_root_identity_builder(monkeypatch):

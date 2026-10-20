@@ -108,7 +108,7 @@ def _dispatch_ownership_confirmed(
         allocation is not None
         and reservation_key is not None
         and allocation.reservation_key == reservation_key
-        and allocation.creator_machine.casefold() == record.machine.casefold()
+        and allocation.creator_machine.casefold() == record.execution_machine.casefold()
         and allocation.driver == owner
     )
 
@@ -157,7 +157,7 @@ def _release_dispatch_session_claims(
     # released when its machine, project, AND worktree id all match this
     # record too, not just an incidental session-id substring collision.
     expected_ref = tracking.format_claim_ref(
-        record.machine, record.repo, record.worktree_id, session=session_id,
+        record.execution_machine, record.repo, record.worktree_id, session=session_id,
     )
     released = [
         claim for claim in record.resources
@@ -267,7 +267,7 @@ def _resolve_pair_sibling(
     and persist the sibling.
     """
     ref = record.pair_claim_ref
-    if ref is None or not ref.is_qualified or ref.machine != record.machine or not ref.project:
+    if ref is None or not ref.is_qualified or ref.machine != record.execution_machine or not ref.project:
         return None
     path = cfg.project_dir(ref.project) / "worktrees" / f"{ref.worktree_id}.yaml"
     if not path.exists():
@@ -622,7 +622,7 @@ def conclude_disposable_worktree(
                         reason="reservation-mismatch",
                     )
                     return result
-                if allocation.creator_machine.casefold() != record.machine.casefold():
+                if allocation.creator_machine.casefold() != record.execution_machine.casefold():
                     result.update(
                         action="skipped",
                         reason="creator-machine-mismatch",

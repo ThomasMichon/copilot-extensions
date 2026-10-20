@@ -117,9 +117,13 @@ def resolve_legacy_wsl_owner_ref(ref: "ClaimRef", config: cfg.Config) -> Path | 
         record = tracking.load_record(path)
         if record.worktree_id != ref.worktree_id or record.repo != ref.project:
             return None
-        from .execution_spaces import project_record_config
+        from .execution_spaces import project_record_config, require_owner_identity, require_record_mutation
 
         receiving_config = project_record_config(record)
+        if record.machine_identity is not None:
+            require_record_mutation(record, receiving_config)
+            if not require_owner_identity(ref.machine, receiving_config):
+                return None
         receiver_entries = registry_for_config(receiving_config)
         receiving = resolve_machine_selection(receiver_entries, receiving_config.machine, actual)
         caller_key = current.entry.key if current.entry is not None else current.target.logical_machine
@@ -135,14 +139,14 @@ def resolve_legacy_wsl_owner_ref(ref: "ClaimRef", config: cfg.Config) -> Path | 
         if record.platform != actual:
             return None
         requested = resolve_machine_selection(receiver_entries, ref.machine, record.platform)
-        stored = resolve_machine_selection(receiver_entries, record.machine or "", record.platform)
+        stored = resolve_machine_selection(receiver_entries, record.execution_machine or "", record.platform)
         if observed_ref and is_observed_local_name(
             ref.machine, config_machine=receiving_config.machine,
             entries=receiver_entries, environment=record.platform,
         ):
             requested = receiving
         if is_observed_local_name(
-            record.machine or "", config_machine=receiving_config.machine,
+            record.execution_machine or "", config_machine=receiving_config.machine,
             entries=receiver_entries, environment=record.platform,
         ):
             stored = receiving

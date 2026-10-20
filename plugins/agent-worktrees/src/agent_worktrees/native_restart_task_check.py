@@ -57,7 +57,7 @@ def check(record: tracking.WorktreeRecord, expected: dict) -> tuple[str | None, 
         policy["schema"] != "native-restart-task-policy"
         or type(policy["version"]) is not int or policy["version"] != 1
         or policy["task_id"] != split[1] or policy["repo"] != record.repo
-        or policy["owner"] != f"{record.machine}/{record.worktree_id}"
+        or policy["owner"] != f"{record.execution_machine}/{record.worktree_id}"
         or policy["owner_session_id"] != expected["native_session_id"]
         or policy["state"] != "started"
         or type(policy["generation"]) is not int or not 1 <= policy["generation"] <= 2**63 - 1

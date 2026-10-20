@@ -1,8 +1,4 @@
-"""Pure tuple-first identity codec, not a tracking-format or authority opt-in.
-
-Tracking loaders and creation producers remain unchanged until their consumers
-and retained-allocation paths support the tuple representation.
-"""
+"""Pure tuple-first identity codec; metadata alone grants no authority."""
 
 from __future__ import annotations
 
@@ -76,3 +72,19 @@ def parse_machine_identity(data: Mapping[str, object]) -> WorktreeMachineIdentit
     if _environment(data.get("platform"), "platform") != identity.environment:
         raise WorktreeMachineIdentityError("machine identity environment conflicts with platform")
     return identity
+
+
+def execution_machine_from_fields(data: Mapping[str, object]) -> str | None:
+    """Read an execution slot without treating malformed tuple metadata as legacy."""
+    identity = parse_machine_identity(data)
+    if identity is not None:
+        return identity.execution_machine
+    machine = data.get("machine")
+    return machine if isinstance(machine, str) else None
+
+
+def projected_machine_fields(data: Mapping[str, object]) -> dict[str, object]:
+    identity = parse_machine_identity(data)
+    return identity.to_record_fields() if identity is not None else {
+        "machine": data.get("machine"), "platform": data.get("platform"),
+    }

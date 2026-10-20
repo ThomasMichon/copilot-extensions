@@ -355,6 +355,31 @@ unrelated service changes or a second machine registry.
 
 ## Journal
 
+### 2026-10-20 - Consumer-first tracking integration; creation remains gated
+- #7389 merged after exact-head approval and required checks. Its pure tuple
+  codec and physical-name formatter are the foundation, not completed creation.
+- Added strict versioned tracking reads/writes, execution-owner accessors and
+  full identity compare-and-swap fencing. Ordinary legacy saves do not convert
+  representation, and versioned owner metadata cannot be silently relabeled.
+- Adapted Worktrees' one-term references, claims, controllers, session/native
+  flows, publication identity and producer envelopes to the execution owner.
+  Record/list/lineage/resident metadata retains the explicit physical tuple;
+  mutation still checks receiving-project registry and actual execution space.
+- Optional typed factories and retained-pair propagation prepare the next
+  producer change. Normal create, anchor and external-adoption producers remain
+  legacy until cross-plugin consumers and retained request replay are complete.
+  Phase 3d and installed acceptance remain open; no live records or runtimes
+  are changed by this source integration.
+- Native bootstrap prerequisites landed separately in #7400 and #7409 after
+  exact-head approvals and required checks. All real native fixtures now use
+  prepared, isolated offline dependencies; production installers are unchanged.
+- The broader consumer packet passes 2,508 cases with three conditional skips.
+  Naming-repair fixtures use real tracking records and retain the upstream
+  test split and stronger status-provider assertions. The complete bootstrap
+  packet independently passes 25 cases with four platform-conditional skips.
+  These are bounded source results, not complete-suite, release or installed
+  acceptance. Cross-plugin adapters and new-record production remain next.
+
 ### 2026-10-20 - Tuple-first contract reviewed; non-operational codec foundation
 - #7385 merged after exact-head approval and required checks. The reviewed
   contract separates the new physical tuple from its one-term execution owner

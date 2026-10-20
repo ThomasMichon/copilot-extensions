@@ -77,7 +77,7 @@ def _record_matches_ref(record: tracking.WorktreeRecord, ref: tracking.ClaimRef)
     return (
         (record.repo, record.worktree_id) == (ref.project, ref.worktree_id)
         and handoffs._same_worktree(
-            tracking.format_claim_ref(record.machine, record.repo, record.worktree_id),
+            tracking.format_claim_ref(record.execution_machine, record.repo, record.worktree_id),
             handoffs._canonical_ref(ref),
         )
     )
@@ -180,7 +180,7 @@ def accept_producers(bundle_id: str, *, actor: str, machine: str | None = None):
                 ):
                     handoffs.claim_history.record_bundle_transfer(
                         snapshot, event=event, worktree_id=record.worktree_id,
-                        machine=record.machine, bundle_id=bundle.bundle_id,
+                        machine=record.execution_machine, bundle_id=bundle.bundle_id,
                         direction=direction, counterpart=counterpart, project=record.repo,
                     )
             return accepted

@@ -118,7 +118,7 @@ def create_foreign_pr_from_branch(
     # one, the latest recorded) from `record.sessions` -- never
     # `parent_session`, which identifies whatever session originally
     # SPAWNED the worktree and may not be the one driving this PR at all.
-    machine = getattr(pre_record, "machine", "") if pre_record else ""
+    machine = pre_record.execution_machine if pre_record else ""
     session = ""
     if pre_record and pre_record.sessions:
         live = [s for s in pre_record.sessions if not s.ended_at]
@@ -274,7 +274,7 @@ def create_foreign_pr_from_branch(
             claimed_ref = _ensure_pr_claim(record, target_pr)
             tracking.save_record(record)
             claim_worktree_id, claim_machine, claim_project = (
-                record.worktree_id, record.machine, record.repo,
+                record.worktree_id, record.execution_machine, record.repo,
             )
             is_claimed = any(
                 c.ref == pull.url and c.kind == "pr" and c.state == obligations.ACTIVE

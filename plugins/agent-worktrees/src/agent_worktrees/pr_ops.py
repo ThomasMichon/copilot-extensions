@@ -625,14 +625,14 @@ def create_pr(
     try:
         from .providers.attribution import validate_effective_head
         # Check both the LIVE config machine and the worktree's originally
-        # RECORDED machine (`record.machine`) -- a renamed/migrated machine
+        # RECORDED execution owner -- a renamed/migrated machine
         # can otherwise leave an old identifying branch name (e.g. a reused
         # existing-PR head from before the rename) unchecked against the
         # live config alone.
         validate_effective_head(
             feature_branch,
             worktree_id=worktree_id,
-            machine=(config.machine, record.machine if record else ""),
+            machine=(config.machine, record.execution_machine if record else ""),
             source_attribution=effective_attribution,
         )
     except ValueError as exc:
@@ -1126,7 +1126,7 @@ def _open_via_provider(
     from . import providers
     from .providers import attribution as attr
 
-    machine = record.machine if record else ""
+    machine = record.execution_machine if record else ""
     session = ""
     if record and record.sessions:
         live = [s for s in record.sessions if not s.ended_at]
@@ -1246,7 +1246,7 @@ def _open_via_provider(
         if claimed_ref:
             claim_history.record_pr_event(
                 claimed_ref, worktree_id=record.worktree_id,
-                machine=record.machine, event="claimed", project=record.repo)
+                machine=record.execution_machine, event="claimed", project=record.repo)
     else:
         target_pr.url, target_pr.number = pull.url, pull.number
         target_pr.state = pull.state or target_pr.state
@@ -1362,7 +1362,7 @@ def refresh_source_attribution(
     elif target_pr.attribution_mode == "true":
         marker = attribution.build_marker(
             worktree_id,
-            machine=record.machine,
+            machine=record.execution_machine,
             session=session,
             head=head_sha,
         )
@@ -1694,7 +1694,7 @@ def _reconcile_active_pr(
             record.resources = fresh.resources
         if released_ref:
             claim_history.record_pr_event(
-                released_ref, worktree_id=record.worktree_id, machine=record.machine,
+                released_ref, worktree_id=record.worktree_id, machine=record.execution_machine,
                 event="released", note="merged", project=record.repo)
         return
     else:
@@ -1725,7 +1725,7 @@ def _reconcile_active_pr(
             if persisted and claimed_ref:
                 claim_history.record_pr_event(
                     claimed_ref, worktree_id=record.worktree_id,
-                    machine=record.machine, event="claimed", project=record.repo)
+                    machine=record.execution_machine, event="claimed", project=record.repo)
 
 
 def _live_pr_state(

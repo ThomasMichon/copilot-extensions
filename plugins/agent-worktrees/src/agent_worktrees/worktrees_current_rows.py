@@ -23,9 +23,9 @@ def populate_claims(
     resources = claims_rank.claims_with_pr_backfill(record.resources, active_pr)
     unresolved = []
     if any(claim.kind == "worktree" and claim.is_unsettled for claim in record.resources):
-        if record.machine:
+        if record.execution_machine:
             found, unresolved = claims_transitive_cli.transitive_obligations(
-                record.worktree_id, record.repo, machine=record.machine,
+                record.worktree_id, record.repo, machine=record.execution_machine,
                 _record=record, _records=claim_records,
             )
         else:
@@ -110,7 +110,7 @@ def materialize(
     rows = []
     records = list(records)
     claim_records: dict[tuple[str, str, str], WorktreeRecord] = {
-        (record.machine, record.repo, record.worktree_id): record
+        (record.execution_machine, record.repo, record.worktree_id): record
         for record in records
         if hasattr(record, "machine") and hasattr(record, "repo")
     }

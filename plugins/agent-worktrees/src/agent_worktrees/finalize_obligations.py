@@ -63,8 +63,10 @@ def assert_obligations_settled(
         return False
     try:
         from . import claim_handoffs
+        from .record_machine_identity import execution_machine
+
         source_ref = format_ref(
-            record.machine, record.repo, record.worktree_id)
+            execution_machine(record), record.repo, record.worktree_id)
         active_handoffs = claim_handoffs.active_bundle_ids_for_source(
             source_ref)
     except Exception as exc:

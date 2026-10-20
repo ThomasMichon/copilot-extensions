@@ -26,6 +26,7 @@ from agent_procutil import no_window_kwargs
 from . import config as cfg
 from . import list_views_cli
 from . import tracking
+from .worktree_machine_identity import execution_machine_from_fields, projected_machine_fields
 from .worktree_naming import parse_session_worktree_id, session_worktree_prefix
 
 _HOST_TERMINAL_STATUSES = frozenset({"complete", "completed", "finalized"})
@@ -93,7 +94,7 @@ def annotate_delegate_graph(
         if not isinstance(worktree_id, str) or not worktree_id:
             continue
         id_index[worktree_id].append(row)
-        machine = row.get("machine")
+        machine = execution_machine_from_fields(row)
         project = row.get("repo")
         if isinstance(machine, str) and machine and isinstance(project, str) and project:
             qualified_index[(machine, project, worktree_id)] = row
@@ -140,8 +141,7 @@ def annotate_delegate_graph(
             caller_state = {
                 "state": "resolved",
                 "worktree_id": caller_id,
-                "machine": host.get("machine"),
-                "platform": host.get("platform"),
+                **projected_machine_fields(host),
                 "repo": host.get("repo"),
                 "path": host.get("path"),
                 "status": host.get("status"),
@@ -157,8 +157,7 @@ def annotate_delegate_graph(
                 )
             delegate = {
                 "worktree_id": row.get("id"),
-                "machine": row.get("machine"),
-                "platform": row.get("platform"),
+                **projected_machine_fields(row),
                 "path": row.get("path"),
                 "status": row.get("status"),
                 "finalizable": bool(row.get("delegate_finalizable")),
@@ -171,8 +170,7 @@ def annotate_delegate_graph(
             caller_state["candidates"] = [
                 {
                     "worktree_id": candidate.get("id"),
-                    "machine": candidate.get("machine"),
-                    "platform": candidate.get("platform"),
+                    **projected_machine_fields(candidate),
                     "repo": candidate.get("repo"),
                     "path": candidate.get("path"),
                     "status": candidate.get("status"),
@@ -318,7 +316,7 @@ def _finalize_target(
     host_index: dict[tuple[str, str], tuple[str, str, bool]],
 ) -> dict[str, Any]:
     worktree_id = str(target.get("id") or "")
-    machine = str(target.get("machine") or "")
+    machine = execution_machine_from_fields(target) or ""
     platform = str(target.get("platform") or "")
     result: dict[str, Any] = {
         "worktree_id": worktree_id,

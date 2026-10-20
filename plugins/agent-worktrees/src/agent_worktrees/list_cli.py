@@ -217,8 +217,7 @@ def _cmd_list_stream(args: argparse.Namespace, records) -> int:
     delegate_overlay = delegate_cli.delegate_graph_overlays([
         {
             "id": rec.worktree_id,
-            "machine": rec.machine,
-            "platform": rec.platform,
+            **rec.machine_fields,
             "repo": rec.repo,
             "path": rec.worktree_path,
             "status": rec.status,

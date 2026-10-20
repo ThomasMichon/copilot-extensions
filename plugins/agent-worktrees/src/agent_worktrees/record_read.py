@@ -224,6 +224,8 @@ def read_exact_record(worktree_id: str) -> dict[str, object]:
             "checkout_managed",
         ):
             worktree[key] = data.get(key)
+        if record.machine_identity is not None:
+            worktree.update(record.machine_fields)
         return json.loads(json.dumps(_json_value(worktree), allow_nan=False))
     except RecordReadError:
         raise

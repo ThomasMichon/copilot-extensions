@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from . import tracking
+    from .worktree_machine_identity import WorktreeMachineIdentity
 
 
 def _tracking():
@@ -85,7 +86,7 @@ def record_pr_claims_reassigned(
             kind="pr",
             ref=ref,
             worktree_id=record.worktree_id,
-            machine=record.machine,
+            machine=record.execution_machine,
             event="reassigned",
             session_id=successor_session_id,
             note=f"{note}: {predecessor_session_id} -> {successor_session_id}",
@@ -579,6 +580,7 @@ def create_new_record(
     codename_source: str | None = None,
     bound_agent: str | None = None,
     pending_seed: str | None = None,
+    machine_identity: WorktreeMachineIdentity | None = None,
 ) -> tracking.WorktreeRecord:
     tracking = _tracking()
     from .tracking_controller_relations import (
@@ -593,7 +595,7 @@ def create_new_record(
     normalized_bound_agent = bound_agent if bound_agent and bound_agent.strip() else None
     try:
         controllers, controller_revision = _derive_initial_controller_relations(
-            machine=machine,
+            machine=machine_identity.execution_machine if machine_identity is not None else machine,
             project=repo,
             owner_ref=normalized_owner_ref,
             caller_worktree=normalized_caller_worktree,
@@ -609,6 +611,7 @@ def create_new_record(
         repo=repo,
         machine=machine,
         platform=platform_name,
+        machine_identity=machine_identity,
         started_at=now,
         last_resumed_at=now,
         resume_count=0,
@@ -658,6 +661,7 @@ def create_new_record_if_absent(
     interface: tracking.WorktreeInterface | None = None,
     origin: tracking.WorktreeOrigin | None = None,
     checkout_managed: bool = True,
+    machine_identity: WorktreeMachineIdentity | None = None,
 ) -> tuple[tracking.WorktreeRecord, bool]:
     tracking = _tracking()
     path = tracking_path / f"{worktree_id}.yaml"
@@ -673,6 +677,7 @@ def create_new_record_if_absent(
             repo=repo,
             machine=machine,
             platform=platform_name,
+            machine_identity=machine_identity,
             started_at=now,
             last_resumed_at=now,
             resume_count=0,

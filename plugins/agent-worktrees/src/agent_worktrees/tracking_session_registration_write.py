@@ -211,7 +211,7 @@ def _apply_session_register_locked(args: dict) -> dict:
         observed_at = recorded_at or tracking._now_iso()
         tracking._ensure_head_ledger(record)
         self_session_ref = tracking.format_claim_ref(
-            record.machine, record.repo, record.worktree_id, session=session_id
+            record.execution_machine, record.repo, record.worktree_id, session=session_id
         )
         tracking.add_resource_claim(
             record,

@@ -407,6 +407,7 @@ def identity_marker_field_for_record(
     """
     try:
         from .origin_identity import resolve_origin_identity
+        from .record_machine_identity import execution_machine
 
         origin = resolve_origin_identity(record, project=project, this_machine=this_machine)
         session = ""
@@ -415,7 +416,7 @@ def identity_marker_field_for_record(
             session = (live[-1] if live else record.sessions[-1]).session_id
         return identity_marker_field(
             worktree_id=record.worktree_id,
-            machine=record.machine,
+            machine=execution_machine(record),
             session=session,
             head=head,
             project=project,

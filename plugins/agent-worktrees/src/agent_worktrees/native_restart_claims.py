@@ -17,10 +17,10 @@ def original_session_only(record: tracking.WorktreeRecord, native_session_id: st
         return True
     claim = record.resources[0]
     return bool(
-        record.machine and record.repo
+        record.execution_machine and record.repo
         and claim.kind == "session" and claim.state == "active"
         and not claim.has_producer and not claim.metadata_opaque
         and claim.ref == tracking.format_claim_ref(
-            record.machine, record.repo, record.worktree_id, session=native_session_id,
+            record.execution_machine, record.repo, record.worktree_id, session=native_session_id,
         )
     )

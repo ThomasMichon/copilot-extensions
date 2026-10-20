@@ -52,7 +52,7 @@ def _digest(path: Path) -> str:
 
 def primary_identity(record):
     return {
-        "machine": record.machine, "repo": record.repo,
+        **record.machine_fields, "repo": record.repo,
         "worktree_id": record.worktree_id, "worktree_path": record.worktree_path,
         "branch": record.branch, "pair": {name: getattr(record, name) for name in _PAIR_FIELDS},
         "dispatch_attempt": asdict(record.dispatch_attempt) if record.dispatch_attempt else None,

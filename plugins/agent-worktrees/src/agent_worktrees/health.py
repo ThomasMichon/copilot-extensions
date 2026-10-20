@@ -112,7 +112,7 @@ def find_record_by_cwd_across_projects(
             if _same_path(cwd, record.worktree_path):
                 matches.append(record)
     identities = {
-        (record.machine, record.repo, record.worktree_id): record
+        (record.execution_machine, record.repo, record.worktree_id): record
         for record in matches
     }
     return next(iter(identities.values())) if len(identities) == 1 else None
@@ -146,7 +146,7 @@ def audit_pair_integrity(
             if not (
                 ref
                 and ref.is_qualified
-                and ref.machine == record.machine
+                and ref.machine == record.execution_machine
                 and ref.project
                 and ref.project in records_by_project
             ):
@@ -164,7 +164,7 @@ def audit_pair_integrity(
                 for candidate in project_records
                 if (
                     candidate.worktree_id == ref.worktree_id
-                    and candidate.machine == ref.machine
+                    and candidate.execution_machine == ref.machine
                     and candidate.repo == ref.project
                 )
             ]

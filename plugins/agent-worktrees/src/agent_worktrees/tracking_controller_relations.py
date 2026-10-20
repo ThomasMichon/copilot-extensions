@@ -405,7 +405,7 @@ def derive_legacy_controller_relations(
     if not (record.owner_ref or record.caller_worktree or record.parent_session):
         return []
     relations, _revision = _derive_initial_controller_relations(
-        machine=record.machine,
+        machine=record.execution_machine,
         project=record.repo,
         owner_ref=record.owner_ref,
         caller_worktree=record.caller_worktree,

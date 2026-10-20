@@ -1292,7 +1292,7 @@ def test_session_register_deregister_fence_raced_fresh_foreign_record(
         server.start()
         try:
             fields = tracking_write.rendezvous_fields(server)
-            assert fields["tracking_write_verb_versions"][verb] == 2
+            assert fields["tracking_write_verb_versions"][verb] == 3
             result = tracking_write.dispatch(
                 verb, args, read_lock_data=lambda: fields,
                 ensure_monitor=None, min_version=2,
@@ -1418,6 +1418,7 @@ def test_finalize_session_settlement_propagates_authority_rejection(
 
     record = SimpleNamespace(
         machine=scoped_config.machine, platform="windows", repo="project",
+        execution_machine=scoped_config.machine,
         worktree_id="wt-owner", owner_ref=None,
     )
     monkeypatch.setattr(
