@@ -195,7 +195,7 @@ class ServiceRuntime:
         candidate = None
         try:
             await ws.prepare(request)
-            message = await ws.receive(timeout=5)
+            message = await asyncio.wait_for(ws.receive(), 5)
             check(message.type == WSMsgType.TEXT and len(message.data) <= 256,
                   "invalid-ticket")
             value = unpack(message.data)

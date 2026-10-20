@@ -65,6 +65,31 @@ def test_expired_attachment_ticket_never_becomes_channel(tmp_path):
     asyncio.run(scenario())
 
 
+def test_unverified_keepalives_cannot_extend_absolute_attachment_deadline(tmp_path):
+    async def scenario():
+        async with running(tmp_path) as rig:
+            async with rig.session.ws_connect(rig.origin + "/_fleet/service-channel") as ws:
+                async def keepalive():
+                    while True:
+                        await ws.ping(b"unverified")
+                        await asyncio.sleep(0.2)
+
+                pings = asyncio.create_task(keepalive())
+                started = time.monotonic()
+                try:
+                    message = await asyncio.wait_for(ws.receive(), 6.5)
+                    assert message.type in (aiohttp.WSMsgType.CLOSE, aiohttp.WSMsgType.CLOSED)
+                    assert time.monotonic() - started < 6.5
+                finally:
+                    pings.cancel()
+                    await asyncio.gather(pings, return_exceptions=True)
+            await eventually(lambda: rig.state.unverified == 0)
+            await rig.connect()
+            async with await rig.request() as response:
+                assert response.status == 200
+    asyncio.run(scenario())
+
+
 @pytest.mark.parametrize("mode", ["unknown", "oversize", "sequence", "frame-limit"])
 def test_malformed_real_response_frames_close_generation(tmp_path, mode):
     async def scenario():

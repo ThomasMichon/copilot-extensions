@@ -203,7 +203,7 @@ class ServiceConnector:
                 autoclose=True, timeout=aiohttp.ClientWSTimeout(ws_close=2),
             ) as ws:
                 await send(ws, {"ticket": ticket})
-                attached = await ws.receive(timeout=5)
+                attached = await asyncio.wait_for(ws.receive(), 5)
                 check(attached.type == aiohttp.WSMsgType.TEXT, "channel-refused")
                 confirmation = unpack(attached.data)
                 check(confirmation == {"type": "attached"}, "channel-refused")

@@ -76,6 +76,9 @@ PoP target is the configured HTTPS origin and actual POST path. It returns a
 30-second one-use attachment ticket, never placed in a query string.
 The connector opens `/_fleet/service-channel` and submits the ticket as its
 first bounded WebSocket message within five seconds.
+That is an absolute attachment deadline, not an idle receive timeout;
+unauthenticated PING/PONG keepalives cannot extend it. The connector applies
+the same absolute bound while waiting for attachment confirmation.
 
 Ticket preparation does not withdraw a healthy active channel. Promotion occurs
 only after attachment confirmation is written, before the channel becomes
