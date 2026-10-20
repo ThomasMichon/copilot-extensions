@@ -682,6 +682,8 @@ def native_owner(monkeypatch, tmp_path):
         ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
          "commit", "--allow-empty", "-qm", "fixture"],
         ["remote", "add", "origin", str(anchor)],
+        ["fetch", "-q", "origin"],
+        ["remote", "set-head", "origin", "-a"],
     ):
         subprocess.run(
             ["git", "-C", str(anchor), *args], check=True, capture_output=True,

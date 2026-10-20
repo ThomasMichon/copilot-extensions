@@ -1,0 +1,9 @@
+{
+  "comment": "Fetch the local synthetic origin and discover its advertised HEAD before native owner fixture registration.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}
