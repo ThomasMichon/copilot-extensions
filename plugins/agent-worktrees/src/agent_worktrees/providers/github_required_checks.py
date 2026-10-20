@@ -177,7 +177,7 @@ def review_exception_evidence(
     hold_labels: tuple[str, ...] = (), wip_title_prefixes: tuple[str, ...] = (),
     requested_merge_method: str = "squash",
 ) -> ReviewExceptionEvidence:
-    """Prove the narrow missing-CODEOWNER-approval admin exception.
+    """Prove the missing-CODEOWNER exception across actor-authorized review layers.
 
     The final merge still uses GitHub's expected-head CAS. GitHub exposes no
     atomic review-version CAS, so this re-read minimizes but cannot eliminate a
@@ -290,6 +290,7 @@ def review_exception_evidence(
         raise ReviewSafetyError("effective branch rules are unavailable")
     rules_fingerprint = _fingerprint(pages)
     codeowner_rulesets: set[int] = set()
+    review_rulesets: set[int] = set()
     for page in pages:
         if not isinstance(page, list):
             raise ReviewSafetyError("effective branch rules page is invalid")
@@ -335,20 +336,33 @@ def review_exception_evidence(
                 or not isinstance(threads, bool) or not isinstance(last_push, bool)
             ):
                 raise ReviewSafetyError("pull-request rule requirements are incomplete")
+            required_reviewers = params.get("required_reviewers", [])
+            if not isinstance(required_reviewers, list):
+                raise ReviewSafetyError("required reviewer declarations are incomplete")
+            if required_reviewers:
+                raise ReviewExceptionIneligible(
+                    "additional required reviewers are not a CODEOWNER-only exception"
+                )
             if not codeowner:
-                if count or threads or last_push:
+                if count not in (0, 1) or threads or last_push:
                     raise ReviewExceptionIneligible(
                         "another pull-request review requirement is active"
                     )
-                continue
-            if count not in (0, 1) or threads or last_push:
+                if not count:
+                    continue
+                # A separate one-vote layer needs its own actor-scoped authority;
+                # CODEOWNER bypass alone must not waive an independent approval.
+            elif count not in (0, 1) or threads or last_push:
                 raise ReviewExceptionIneligible(
                     "CODEOWNER approval is not the only remaining review requirement"
                 )
             ruleset_id = rule.get("ruleset_id")
             if type(ruleset_id) is not int or ruleset_id <= 0:
-                raise ReviewSafetyError("CODEOWNER review rule has no ruleset identity")
-            codeowner_rulesets.add(ruleset_id)
+                requirement = "CODEOWNER" if codeowner else "approval"
+                raise ReviewSafetyError(f"{requirement} review rule has no ruleset identity")
+            review_rulesets.add(ruleset_id)
+            if codeowner:
+                codeowner_rulesets.add(ruleset_id)
     if not codeowner_rulesets:
         raise ReviewExceptionIneligible(
             "a missing CODEOWNER approval rule was not positively identified"
@@ -403,13 +417,14 @@ def review_exception_evidence(
             raise ReviewExceptionIneligible(
                 "classic branch protection adds a review requirement without actor-scoped evidence"
             )
-    for ruleset_id in codeowner_rulesets:
+    for ruleset_id in sorted(review_rulesets):
         ruleset = obj(read_json([
             "api", f"/repos/{repo}/rulesets/{ruleset_id}",
         ]), "ruleset")
         if ruleset.get("current_user_can_bypass") not in ("always", "pull_requests_only"):
+            requirement = "CODEOWNER" if ruleset_id in codeowner_rulesets else "approval"
             raise ReviewExceptionIneligible(
-                f"acting identity is not authorized to bypass CODEOWNER ruleset {ruleset_id}"
+                f"acting identity is not authorized to bypass {requirement} ruleset {ruleset_id}"
             )
     if identity() != (head, base):
         raise ReviewSafetyError("PR head/base or mutation gates changed during review verification")

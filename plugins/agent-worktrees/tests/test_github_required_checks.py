@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import subprocess
 
@@ -70,6 +71,7 @@ class GitHubFixture:
         }]
         self.review_decision = "REVIEW_REQUIRED"
         self.bypass = "pull_requests_only"
+        self.ruleset_bypasses: dict[int, str | None] = {}
         self.labels = []
         self.draft = False
         self.title = "Ready"
@@ -129,8 +131,12 @@ class GitHubFixture:
             kind, data = "runs", self.run_pages if self.run_pages is not None else [{
                 "total_count": len(self.runs), "check_runs": self.runs,
             }]
-        elif argv[2].endswith("/rulesets/42"):
-            kind, data = "ruleset", {"current_user_can_bypass": self.bypass}
+        elif "/rulesets/" in argv[2]:
+            ruleset_id = int(argv[2].rsplit("/", 1)[1])
+            assert ruleset_id == 42 or ruleset_id in self.ruleset_bypasses
+            kind, data = "ruleset", {
+                "current_user_can_bypass": self.ruleset_bypasses.get(ruleset_id, self.bypass),
+            }
         else:
             raise AssertionError(f"Unexpected command: {argv}")
         if kind == self.fail:
@@ -382,6 +388,184 @@ def test_review_exception_requires_complete_clean_codeowner_evidence():
         expected_head_sha=HEAD,
     )
     assert evidence.head_sha == HEAD and evidence.base_ref == "dev"
+
+
+def _layered_review_fixture() -> GitHubFixture:
+    fixture = GitHubFixture()
+    fixture.rules[1]["parameters"]["required_approving_review_count"] = 0
+    approval = copy.deepcopy(fixture.rules[1])
+    approval["ruleset_id"] = 43
+    approval["parameters"]["require_code_owner_review"] = False
+    approval["parameters"]["required_approving_review_count"] = 1
+    fixture.rules.append(approval)
+    fixture.ruleset_bypasses[43] = "pull_requests_only"
+    return fixture
+
+
+def test_layered_review_exception_requires_authority_on_both_layers() -> None:
+    fixture = _layered_review_fixture()
+    evidence = review_exception_evidence(
+        "owner/project", 7, invoke=fixture.invoke, host="github.com",
+        expected_head_sha=HEAD,
+    )
+    assert evidence.head_sha == HEAD
+    for ruleset_id in (42, 43):
+        assert any(argv[2].endswith(f"/rulesets/{ruleset_id}") for argv in fixture.calls)
+
+
+def test_layered_authorized_merge_preserves_required_checks_and_expected_head(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_worktrees.providers import github
+
+    fixture = _layered_review_fixture()
+    fixture.normal_merge_fails = True
+    monkeypatch.setattr(github, "run_cli", fixture.invoke)
+    result = github.GitHubProvider().merge_pull(
+        "owner/project", 7, admin=True, expected_head_sha=HEAD,
+    )
+    assert result == ""
+    merges = [argv for argv in fixture.calls if argv[:3] == ["gh", "pr", "merge"]]
+    assert len(merges) == 2
+    assert "--admin" not in merges[0] and "--admin" in merges[1]
+    assert all(argv[argv.index("--match-head-commit") + 1] == HEAD for argv in merges)
+
+
+def test_layered_zero_vote_general_rule_needs_no_review_bypass() -> None:
+    fixture = _layered_review_fixture()
+    general = copy.deepcopy(fixture.rules[2])
+    general["ruleset_id"] = 44
+    general["parameters"]["required_approving_review_count"] = 0
+    fixture.rules.append(general)
+    fixture.ruleset_bypasses[44] = "never"
+    evidence = review_exception_evidence(
+        "owner/project", 7, invoke=fixture.invoke, host="github.com",
+    )
+    assert evidence.head_sha == HEAD
+    assert not any(argv[2].endswith("/rulesets/44") for argv in fixture.calls)
+
+
+def test_layered_approval_authority_lookup_failure_is_not_permission() -> None:
+    fixture = _layered_review_fixture()
+    original = fixture.invoke
+
+    def unavailable(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        if argv[2].endswith("/rulesets/43"):
+            return subprocess.CompletedProcess(argv, 1, "", "permission denied")
+        return original(argv, **kwargs)
+
+    with pytest.raises(RequiredChecksError, match="permission denied"):
+        review_exception_evidence(
+            "owner/project", 7, invoke=unavailable, host="github.com",
+        )
+
+
+@pytest.mark.parametrize("bypass", ["never", "unknown", None])
+def test_layered_codeowner_only_actor_cannot_waive_independent_approval(
+    monkeypatch: pytest.MonkeyPatch, bypass: str | None,
+) -> None:
+    from agent_worktrees.providers import github
+
+    fixture = _layered_review_fixture()
+    fixture.normal_merge_fails = True
+    fixture.ruleset_bypasses[43] = bypass
+    monkeypatch.setattr(github, "run_cli", fixture.invoke)
+    result = github.GitHubProvider().merge_pull(
+        "owner/project", 7, admin=True, expected_head_sha=HEAD,
+    )
+    assert "not authorized" in result and "43" in result
+    assert not any("--admin" in argv for argv in fixture.calls)
+
+
+@pytest.mark.parametrize("field,value", [
+    ("required_approving_review_count", 2),
+    ("required_review_thread_resolution", True),
+    ("require_last_push_approval", True),
+])
+def test_layered_review_cannot_hide_additional_requirements(field: str, value: object) -> None:
+    fixture = _layered_review_fixture()
+    fixture.rules[2]["parameters"][field] = value
+    with pytest.raises(RequiredChecksError, match="another pull-request review"):
+        review_exception_evidence(
+            "owner/project", 7, invoke=fixture.invoke, host="github.com",
+        )
+
+
+@pytest.mark.parametrize("layer", [1, 2])
+@pytest.mark.parametrize("reviewers", [
+    [{"reviewer": {"id": 99, "type": "Team"}}], "unavailable",
+])
+def test_layered_review_does_not_waive_specific_or_unknown_reviewers(
+    layer: int, reviewers: object,
+) -> None:
+    fixture = _layered_review_fixture()
+    fixture.rules[layer]["parameters"]["required_reviewers"] = reviewers
+    with pytest.raises(RequiredChecksError, match="required reviewer"):
+        review_exception_evidence(
+            "owner/project", 7, invoke=fixture.invoke, host="github.com",
+        )
+
+
+def test_zero_vote_rule_cannot_hide_a_specific_required_reviewer() -> None:
+    fixture = _layered_review_fixture()
+    fixture.rules[2]["parameters"].update(
+        required_approving_review_count=0,
+        required_reviewers=[{"reviewer": {"id": 99, "type": "Team"}}],
+    )
+    with pytest.raises(RequiredChecksError, match="required reviewer"):
+        review_exception_evidence(
+            "owner/project", 7, invoke=fixture.invoke, host="github.com",
+        )
+
+
+def test_layered_review_authority_never_overrides_a_human_veto() -> None:
+    fixture = _layered_review_fixture()
+    fixture.reviews.insert(0, {
+        "id": 0, "state": "CHANGES_REQUESTED", "user": {"login": "human"},
+        "submitted_at": "2026-10-17T00:00:00Z", "commit_id": "b" * 40,
+    })
+    with pytest.raises(RequiredChecksError, match="active change request"):
+        review_exception_evidence(
+            "owner/project", 7, invoke=fixture.invoke, host="github.com",
+        )
+
+
+def test_layered_review_authority_never_overrides_required_ci(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_worktrees.providers import github
+
+    fixture = _layered_review_fixture()
+    fixture.normal_merge_fails = True
+    fixture.runs[0]["conclusion"] = "failure"
+    monkeypatch.setattr(github, "run_cli", fixture.invoke)
+    result = github.GitHubProvider().merge_pull(
+        "owner/project", 7, admin=True, expected_head_sha=HEAD,
+    )
+    assert "required check" in result and "15368" in result
+    assert not any("--admin" in argv for argv in fixture.calls)
+
+
+def test_layered_approval_without_codeowner_requirement_is_not_an_exception() -> None:
+    fixture = _layered_review_fixture()
+    fixture.rules.pop(1)
+    with pytest.raises(RequiredChecksError, match="not positively identified"):
+        review_exception_evidence(
+            "owner/project", 7, invoke=fixture.invoke, host="github.com",
+        )
+
+
+def test_layered_review_policy_changes_invalidate_the_merge_evidence() -> None:
+    fixture = _layered_review_fixture()
+    evidence = review_exception_evidence(
+        "owner/project", 7, invoke=fixture.invoke, host="github.com",
+    )
+    fixture.rules[2]["parameters"]["required_approving_review_count"] = 2
+    with pytest.raises(RequiredChecksError, match="effective branch rules changed"):
+        fixture.verify(
+            expected_head_sha=HEAD, expected_rules_fingerprint=evidence.rules_fingerprint,
+            expected_classic_fingerprint=evidence.classic_fingerprint,
+        )
 
 
 @pytest.mark.parametrize("base_ref_rules", [

@@ -411,6 +411,11 @@ regressions, retained-owner seams and the completion gate.
   existing human actors, CI and Main protections. The
   [completion contract](maintainer-pr-completion.md#codeowner-only-exception-preserve-the-independent-approval-rule)
   owns create-first application, restore-first rollback and canary obligations.
+  The October 20 application passed provider readback but exposed a managed
+  client compatibility refusal. The original combined rule was restored and
+  the added layer disabled. Actor-scoped layered-policy compatibility and
+  caller qualification must pass before reapplication; no bypass of the
+  independent approval requirement is licensed by this failure.
 - [x] Prove external rebase compatibility with the owning managed worktree:
   stale local publication refuses, unpublished work/backups survive, and a
   later verified squash merge supports `pr-complete` and claim settlement.

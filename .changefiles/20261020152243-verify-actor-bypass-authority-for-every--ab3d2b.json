@@ -1,0 +1,9 @@
+{
+  "comment": "Verify actor bypass authority for every layered review requirement before a CODEOWNER exception",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

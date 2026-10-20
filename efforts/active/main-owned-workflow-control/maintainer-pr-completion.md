@@ -231,6 +231,20 @@ Keep their other review parameters unchanged, including unattributed-change
 handling. The App is not added to the general approval rule, required-check
 rules, classic protection or Main policy.
 
+**Current live state: rolled back.** The initial October 20 application passed
+configuration readback but caused the managed merge helper to reject the
+independent approval layer before checking actor-scoped authority. The original
+combined rule was restored and verified first; the added layer was then disabled,
+not deleted. Existing human bypasses, required CI and Main remained unchanged.
+Do not reapply the topology until the affected callers are qualified.
+
+Compatibility must distinguish a human already authorized on both layers from
+an App authorized only on CODEOWNERS. Every nontrivial review layer considered
+for a managed exception needs its own positive provider authorization evidence.
+An actor lacking bypass authority on the independent approval layer cannot use
+that exception to waive its requirement. Reviewer vetoes, unknown requirements,
+extra approvals, required CI and head/base freshness remain separate gates.
+
 [GitHub rule layering](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/about-rulesets#about-rule-layering)
 aggregates applicable protections using the most restrictive requirements.
 The [REST rules schema](https://docs.github.com/en/rest/repos/rules#create-a-repository-ruleset)
@@ -248,6 +262,8 @@ resulting layers and unchanged CI/classic/Main boundaries afterward.
 Rollback restores and verifies the original combined review rule first, then
 disables the added CODEOWNER-only rule. It does not delete a rule, reset other
 policy, revoke unrelated App permissions or restart a controller.
+An accepted retry must reconcile the exact retained disabled layer and its
+ownership rather than create a duplicate or reactivate it from name alone.
 
 The separately authorized canary must prove current-head approval admission,
 missing-approval rejection and a persistent reviewer veto using the actual App
