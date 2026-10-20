@@ -87,7 +87,48 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Mechanical move mapping: preserved, not conflated with fixtures
 
+### Eighth admitted move: finalization and reconciliation method family
+
+Baseline: Dev `07b22c1f5f8b4ba114de3241756565431e2cf3bc`.
+Eighteen methods move unchanged from
+`test_pr_ops.py::TestPRFinalizeAndPush` to
+`test_finalize_pr.py::TestPRFinalize`: all `test_precondition_*`,
+`test_finalize_*` and `test_reconcile_*` methods, plus
+`test_push_changes_refuses_direct_to_master` and
+`test_create_pr_path_still_works_when_required`. Both classes retain the
+identical merged `PRWorkflowSetup` base.
+
+Real before/after collection proves the complete 317-node bijection:
+18 module/class-only moves and 299 unchanged identities. Every collected
+method/decorator AST, inherited base body, resolved fixture body/scope/closure,
+parameter value and effective mark is identical. Both complete collection
+passes include sandbox preparation and removal: 17.38 and 11.84 seconds.
+Only now-empty section headings and their inert class-body string are removed
+from the retained module.
+
+All eighteen moved cases pass on native Windows without skips in 120.07
+seconds (124.30 including sandbox preparation and removal), exactly two
+work-stealing workers with unchanged 30-second item and 240-second diagnostic
+group limits. The two existing real-Git/contained partial-split selection
+controls pass without skips in 4.17 seconds (6.67 inclusive), preserving both
+changed whole files without invented moved-node coverage credit.
+Ruff F/E9 passes; install-contract checks cover thirteen plugins with zero
+violations.
+
+No production decision, helper, provider double, fixture, seed, assertion,
+parameter, mark, test-tier or CI-admission change enters this partition.
+Clean-room provisioning is inapplicable to unchanged test-method relocation;
+unavailable Linux/external execution receives no credit. Eight mechanical
+partitions now move 254 original expanded cases, leaving 63 publication/push
+cases. Their independent partitions, fixture contracts and repeated complete
+same-head Windows qualification remain open.
+
 ### Seventh admitted move: source-attribution refresh method family
+
+**Actually merged:** #7435 as
+`d936b46029ba8b25bd91f755d7966e2fd38287f4`. The remaining mechanical
+partitions start from these merged bodies; fixture semantics and complete
+parent Windows qualification remain separate.
 
 Baseline: Dev `039208cd6022e3cedb42b76f69a5d5ddb28dcb6c`, the actual
 #7427 setup-helper merge. Ten methods move unchanged from
