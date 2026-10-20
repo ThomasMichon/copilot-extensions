@@ -741,6 +741,52 @@ _Pending review of this plan._
 
 ## Journal
 
+### 2026-10-20 - Land storage accounting and admit verified process teardown
+- C-STORAGE #7371 actually merged as
+  `9ad401dd8c4827a44e2ca5ed1e3bcbd13f94eca8`, this batch's baseline,
+  after fresh full current-head Copilot approval, green required CI and no
+  findings, threads, holds or draft state. The residual tools ledger records
+  the actual disposition without changing its immutable census inputs.
+- C-TEARDOWN owns only S037/S040-S051/S053-S055/S083 and the admitted
+  S081/S084 teardown definitions. POSIX command status travels through a
+  private pipe while the controller retains its PID; teardown checks group
+  and session identity before each signal and verifies no live members
+  remain. Zombie processes still count toward admission. Windows teardown
+  explicitly terminates the Job Object and waits for zero active members.
+  Controller assignment/reap failures and interrupted/uncertain teardown
+  surface as `UnreapedProcessError`, so the runner retains and reports the
+  sandbox instead of deleting potentially owned files.
+- Focused native/portable cases first passed on both Windows and Ubuntu:
+  48 cases each, zero skips, 26.35 and 20.64 seconds respectively. Expanded
+  whole-module checks then passed on Windows (121 passed, one existing
+  POSIX-only skip, two POSIX-only cases deselected; 35.61 seconds) and Ubuntu
+  (113 passed, five existing Windows-only skips, six Windows-native cases
+  deselected; 20.73 seconds). These cover real file-holding descendants on
+  normal exit/deadline/cancellation, windowless Windows stdio, private POSIX
+  parent permissions, identity refusal, status protocol and failure retention.
+  Platform selection is diagnostic validation, not parent qualification.
+- After bounding the fallback `ps` query and tightening fixture-readiness
+  synchronization, the final focused partition passes 54 cases with zero skips
+  on each OS: Windows 23.89 seconds pytest / 26.14 seconds inclusive, Ubuntu
+  19.63 / 22.46 seconds. Unavailable or malformed membership observations
+  refuse cleanup rather than imply an empty group.
+- **Vision/pattern reconciliation:** closes the existing test-portfolio
+  isolation/resource-hygiene contract and follows
+  `ephemeral-process-reaping`'s ownership-before-cleanup discipline.
+  **Documentation impact:** `TESTING.md` describes verified termination and
+  retained-sandbox failure behavior; the effort/ledger record batch scope.
+  **Graceful cutover impact:** no resident daemon or deployment changes;
+  these are attached, per-invocation test workers.
+- Simple end-to-end coverage uses fresh synthetic trees and real native
+  subprocesses on both OSes. No installer/bootstrap is changed; separate
+  installation clean-room coverage is inapplicable. Ubuntu is the available
+  second native venue; Docker was unavailable and was not repaired or
+  bypassed. No separate external service/remote product is involved.
+  Required CI and fresh full current-head review remain publication gates.
+  C-CLEANUP stays separate: no cleanup executor, overlap or aggregate-budget
+  change is imported. Source CI remains unit-only, every existing test and
+  resource budget remains intact, and complete Windows acceptance stays open.
+
 ### 2026-10-20 - Land module isolation and admit fresh bounded storage accounting
 - C-MODULE #7353 actually merged as
   `5500e756bd0add8a028d116aa97228d5bbe1c046`, this batch's baseline.

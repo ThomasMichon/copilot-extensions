@@ -64,6 +64,7 @@ from plugin_test_selection import (
 from plugin_test_containment import (
     ContainmentError,
     Limits,
+    UnreapedProcessError,
     isolated_environment,
     partition,
     run_contained,
@@ -80,6 +81,18 @@ EXTERNAL_TEST_DEPENDENCIES = {
 }
 LEASE_LIB = REPO / "libs" / "single-instance-lease" / "src"
 TOOLS_DIR = REPO / "tools"
+
+
+class _TestSandbox(tempfile.TemporaryDirectory):
+    def __exit__(self, exc_type, exc_value, traceback):
+        if isinstance(exc_value, UnreapedProcessError):
+            self._finalizer.detach()
+            print(
+                f"[KEEP] Unreaped process tree: sandbox retained at {self.name}",
+                file=sys.stderr,
+            )
+            return False
+        return super().__exit__(exc_type, exc_value, traceback)
 
 # Plugins whose OWN test suites assert properties about OTHER plugins (a
 # repo-wide contract, not something scoped to their own diff) -- see
@@ -452,7 +465,7 @@ def run_plugin(
     py = _ensure_venv(name, uv, reinstall=reinstall)
     sandbox_parent = Path(os.environ.get("TEMP", tempfile.gettempdir()))
     sandbox_parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(
+    with _TestSandbox(
         # Deliberately short: this sandbox root sits at the top of a path
         # whose depth (home/.agent-logger/snapshots/<ver>/libs/<lib>/
         # build/bdist.win-amd64/wheel/...) can approach Windows' 260-char

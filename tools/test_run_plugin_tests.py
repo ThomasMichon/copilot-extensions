@@ -32,6 +32,38 @@ finally:
     sys.path[:] = _previous_path
 
 
+def test_unreaped_tree_retains_sandbox_without_cleanup(monkeypatch, tmp_path, capsys):
+    plugin = tmp_path / "alpha"
+    sandbox_paths = []
+
+    def run_contained(*args, **kwargs):
+        sandbox_paths.append(kwargs["sandbox"])
+        (kwargs["sandbox"] / "still-owned.txt").write_text("preserve")
+        raise runner.UnreapedProcessError("forced teardown failure")
+
+    monkeypatch.setenv("TEMP", str(tmp_path))
+    monkeypatch.setattr(runner, "_has_suite", lambda name: True)
+    monkeypatch.setattr(runner, "_plugin_dir", lambda name: plugin)
+    monkeypatch.setattr(runner, "_ensure_venv", lambda *a, **k: Path("fake-python"))
+    monkeypatch.setattr(runner, "_test_file_groups",
+                        lambda *a, **k: [[plugin / "tests" / "test_one.py"]])
+    monkeypatch.setattr(runner, "run_contained", run_contained)
+    with pytest.raises(runner.UnreapedProcessError, match="forced teardown failure"):
+        runner.run_plugin(
+            "alpha", "uv", reinstall=False, kexpr=None, limits=runner.Limits(),
+            plugin_timeout=60, test_timeout=30, max_files_per_subsuite=25,
+        )
+    sandbox = sandbox_paths[0]
+    try:
+        assert (sandbox / "still-owned.txt").read_text() == "preserve"
+        assert (sandbox / "t").is_dir()
+        if os.name != "nt":
+            assert (sandbox / "t").stat().st_mode & 0o077 == 0
+        assert "[KEEP] Unreaped process tree: sandbox retained at" in capsys.readouterr().err
+    finally:
+        shutil.rmtree(sandbox)
+
+
 @pytest.mark.parametrize("reinstall", [False, True])
 @pytest.mark.parametrize("cached", [False, True])
 def test_explicit_reinstall_invalidates_uv_cached_path_dependency_wheels(
@@ -557,6 +589,9 @@ def test_containment_owner_launch_preserves_process_contract(monkeypatch, tmp_pa
         def poll(self):
             return 17
 
+        def wait(self, *, timeout):
+            return 17
+
     def popen(command, **kwargs):
         captured.update(kwargs)
         assert command == containment._worker_command(
@@ -577,14 +612,22 @@ def test_containment_owner_launch_preserves_process_contract(monkeypatch, tmp_pa
     monkeypatch.setattr(containment, "no_window_kwargs", lambda: {"creationflags": 123})
     monkeypatch.setattr(containment.subprocess, "Popen", popen)
     monkeypatch.setattr(containment, "_WindowsJob", Job)
-    monkeypatch.setattr(containment, "_terminate_posix_group", lambda pid: None)
+    monkeypatch.setattr(containment, "_terminate_posix_group", lambda *args: None)
+    monkeypatch.setattr(containment, "_posix_group_identity", lambda pid: (pid, pid))
+    monkeypatch.setattr(containment, "_posix_exit_code", lambda fd: 17)
     assert containment._run_contained_process(
         ["command"], cwd=tmp_path, env={"TEST": "value"}, sandbox=tmp_path,
         limits=containment.Limits(),
     ) == 17
     assert captured["creationflags"] == 123
     assert captured["cwd"] == str(tmp_path)
-    assert captured["env"] == {"TEST": "value"}
+    expected_environment = {"TEST": "value"}
+    if os.name != "nt":
+        assert len(captured["pass_fds"]) == 1
+        expected_environment["COPILOT_EXTENSIONS_CONTAINMENT_RESULT_FD"] = str(
+            captured["pass_fds"][0]
+        )
+    assert captured["env"] == expected_environment
     assert {
         name: captured[name] for name in containment._windows_stdio_kwargs()
     } == containment._windows_stdio_kwargs()

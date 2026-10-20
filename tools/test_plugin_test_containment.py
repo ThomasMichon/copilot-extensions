@@ -348,6 +348,389 @@ def test_native_powershell_module_discovery_is_host_detached(tmp_path, host, all
     assert os.environ.get("PSModulePath") == parent_module_path
 
 
+def test_exited_process_cannot_hide_an_elapsed_wall_limit(tmp_path, capfd, monkeypatch):
+    class Process:
+        pid = 12345
+
+        def poll(self):
+            return 0
+
+        def wait(self, *, timeout):
+            return 0
+
+    class Job:
+        def __init__(self, limits):
+            pass
+
+        def assign(self, pid):
+            pass
+
+        def close(self):
+            pass
+
+    clock = iter((0.0, 6.0))
+    monkeypatch.setattr(plugin_test_containment.time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(plugin_test_containment.subprocess, "Popen", lambda *a, **k: Process())
+    monkeypatch.setattr(plugin_test_containment, "_WindowsJob", Job)
+    monkeypatch.setattr(plugin_test_containment, "_posix_exit_code", lambda fd: 0)
+    monkeypatch.setattr(plugin_test_containment, "_posix_group_identity", lambda pid: (pid, pid))
+    monkeypatch.setattr(plugin_test_containment, "_terminate_posix_group", lambda *args: None)
+
+    rc = plugin_test_containment._run_contained_process(
+        ["fake"], cwd=tmp_path, env={}, sandbox=tmp_path,
+        limits=Limits(wall_seconds=5),
+    )
+    assert rc == 124
+    assert "wall-clock limit exceeded (5s)" in capfd.readouterr().err
+
+
+def test_windows_job_waits_for_every_member_before_closing_handle(monkeypatch):
+    events = []
+    job = object.__new__(plugin_test_containment._WindowsJob)
+    job._handle = 7
+    counts = iter((2, 1, 0))
+
+    def active():
+        count = next(counts)
+        events.append(("active", count))
+        return count
+
+    job.active_processes = active
+    job._kernel32 = SimpleNamespace(
+        TerminateJobObject=lambda handle, code: events.append(("terminate", handle)) or 1,
+        CloseHandle=lambda handle: events.append(("close", handle)),
+    )
+    monkeypatch.setattr(plugin_test_containment.time, "sleep", lambda seconds: None)
+    job.close()
+    assert events == [
+        ("active", 2), ("terminate", 7), ("active", 1), ("active", 0), ("close", 7),
+    ]
+    assert job._handle is None
+
+
+@pytest.mark.parametrize("fault", ["timeout", "terminate", "query", "cancel"])
+def test_windows_job_reports_unproven_termination_instead_of_claiming_reaped(monkeypatch, fault):
+    job = object.__new__(plugin_test_containment._WindowsJob)
+    job._handle = 7
+
+    def active():
+        if fault == "query":
+            raise plugin_test_containment.ContainmentError("query failed")
+        if fault == "cancel":
+            raise KeyboardInterrupt
+        return 1
+
+    job.active_processes = active
+    closed = []
+    job._kernel32 = SimpleNamespace(
+        TerminateJobObject=lambda handle, code: int(fault != "terminate"),
+        CloseHandle=lambda handle: closed.append(handle),
+    )
+    clock = iter((0.0, 6.0))
+    monkeypatch.setattr(plugin_test_containment.time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(plugin_test_containment.ctypes, "get_last_error", lambda: 5, raising=False)
+    with pytest.raises(plugin_test_containment.UnreapedProcessError):
+        job.close()
+    assert closed == [7]
+    assert job._handle is None
+
+
+def test_posix_group_waits_until_no_live_members_remain(monkeypatch):
+    signals = []
+    monkeypatch.setattr(
+        plugin_test_containment.os, "killpg",
+        lambda pid, sig: signals.append((pid, sig)), raising=False,
+    )
+    usage = iter(((2, 0), (1, 0), (0, 0)))
+    monkeypatch.setattr(plugin_test_containment, "_posix_live_group_usage", lambda pid: next(usage))
+    monkeypatch.setattr(plugin_test_containment.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(plugin_test_containment, "_posix_group_identity", lambda pid: (pid, pid))
+    plugin_test_containment._terminate_posix_group(12345, (12345, 12345))
+    assert signals == [(12345, plugin_test_containment.signal.SIGTERM)]
+
+
+def test_posix_usage_does_not_treat_zombies_as_file_holding_members(monkeypatch):
+    monkeypatch.setattr(plugin_test_containment.shutil, "which", lambda command: "ps")
+    monkeypatch.setattr(
+        plugin_test_containment.subprocess, "run",
+        lambda *a, **k: SimpleNamespace(returncode=0, stdout="7 4 S\n7 0 Z\n8 9 S\n"),
+    )
+    assert plugin_test_containment._ps_group_usage(7) == (2, 4096)
+    assert plugin_test_containment._ps_group_usage(7, live_only=True) == (1, 4096)
+
+
+def test_linux_empty_group_does_not_require_ps(monkeypatch):
+    monkeypatch.setattr(plugin_test_containment, "_linux_group_usage", lambda pid: (0, 0))
+    monkeypatch.setattr(
+        plugin_test_containment, "_ps_group_usage",
+        lambda pid: pytest.fail("native empty-group measurement is authoritative"),
+    )
+    assert plugin_test_containment._posix_group_usage(7) == (0, 0)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX process-budget accounting")
+def test_zombie_heavy_group_exceeds_process_budget(tmp_path, capfd, monkeypatch):
+    class Process:
+        pid = 12345
+
+        def wait(self, *, timeout):
+            return 0
+
+    monkeypatch.setattr(plugin_test_containment.subprocess, "Popen", lambda *a, **k: Process())
+    monkeypatch.setattr(plugin_test_containment, "_posix_exit_code", lambda fd: None)
+    monkeypatch.setattr(plugin_test_containment, "_posix_group_identity", lambda pid: (pid, pid))
+    monkeypatch.setattr(plugin_test_containment, "_terminate_posix_group", lambda *args: None)
+    monkeypatch.setattr(plugin_test_containment, "_linux_group_usage", lambda pid: (130, 0))
+    monkeypatch.setattr(plugin_test_containment, "_tree_size", lambda path: 0)
+    rc = plugin_test_containment._run_contained_process(
+        ["fake"], cwd=tmp_path, env={}, sandbox=tmp_path,
+        limits=Limits(wall_seconds=5, max_processes=128),
+    )
+    assert rc == 124
+    assert "process-count limit exceeded (128)" in capfd.readouterr().err
+
+
+def test_posix_group_verifies_members_after_sigkill(monkeypatch):
+    signals = []
+    monkeypatch.setattr(plugin_test_containment.signal, "SIGKILL", 9, raising=False)
+    monkeypatch.setattr(
+        plugin_test_containment.os, "killpg",
+        lambda pid, sig: signals.append(sig), raising=False,
+    )
+    usage = iter(((2, 0), (1, 0), (0, 0)))
+    clock = iter((0.0, 3.0, 3.0, 3.0))
+    monkeypatch.setattr(plugin_test_containment, "_posix_live_group_usage", lambda pid: next(usage))
+    monkeypatch.setattr(plugin_test_containment.time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(plugin_test_containment.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(plugin_test_containment, "_posix_group_identity", lambda pid: (pid, pid))
+    plugin_test_containment._terminate_posix_group(12345, (12345, 12345))
+    assert signals == [plugin_test_containment.signal.SIGTERM, 9]
+
+
+@pytest.mark.parametrize("changed_before_kill", [False, True])
+def test_posix_teardown_refuses_stale_identity_before_each_signal(monkeypatch, changed_before_kill):
+    signals = []
+    identities = iter(
+        [(12345, 12345), (12345, 54321)] if changed_before_kill else [(12345, 54321)]
+    )
+    monkeypatch.setattr(plugin_test_containment, "_posix_group_identity", lambda pid: next(identities))
+    monkeypatch.setattr(plugin_test_containment.os, "killpg",
+                        lambda pid, sig: signals.append(sig), raising=False)
+    monkeypatch.setattr(plugin_test_containment, "_posix_live_group_usage", lambda pid: (1, 0))
+    clock = iter((0.0, 3.0))
+    monkeypatch.setattr(plugin_test_containment.time, "monotonic", lambda: next(clock))
+    with pytest.raises(plugin_test_containment.UnreapedProcessError, match="stale or reused"):
+        plugin_test_containment._terminate_posix_group(12345, (12345, 12345))
+    assert signals == ([plugin_test_containment.signal.SIGTERM] if changed_before_kill else [])
+
+
+def test_posix_exit_observation_does_not_reap_controller(monkeypatch):
+    calls = []
+    monkeypatch.setattr(plugin_test_containment.os, "read",
+                        lambda *args: calls.append(args) or b"7\n", raising=False)
+    assert plugin_test_containment._posix_exit_code(12) == 7
+    assert calls == [(12, 64)]
+
+
+@pytest.mark.parametrize("result", [b"", b"not-an-exit-code\n"])
+def test_posix_control_pipe_failure_is_explicit(monkeypatch, result):
+    monkeypatch.setattr(plugin_test_containment.os, "read", lambda *args: result)
+    with pytest.raises(plugin_test_containment.ContainmentError):
+        plugin_test_containment._posix_exit_code(12)
+
+
+@pytest.mark.parametrize("failure", [None, PermissionError("unreadable process")])
+def test_posix_teardown_refuses_unknown_membership(monkeypatch, failure):
+    monkeypatch.setattr(plugin_test_containment, "_posix_group_identity", lambda pid: (pid, pid))
+    monkeypatch.setattr(plugin_test_containment.os, "killpg", lambda *args: None, raising=False)
+
+    def usage(pid):
+        if failure is not None:
+            raise failure
+        return None
+
+    monkeypatch.setattr(plugin_test_containment, "_posix_live_group_usage", usage)
+    with pytest.raises(plugin_test_containment.UnreapedProcessError, match="Cannot verify"):
+        plugin_test_containment._terminate_posix_group(12345, (12345, 12345))
+
+
+@pytest.mark.parametrize("row", ["unparseable", "wrong 0 S"])
+def test_posix_teardown_rejects_malformed_ps_membership(monkeypatch, row):
+    monkeypatch.setattr(plugin_test_containment.shutil, "which", lambda command: "ps")
+    monkeypatch.setattr(plugin_test_containment.subprocess, "run",
+                        lambda *a, **k: SimpleNamespace(returncode=0, stdout=row))
+    with pytest.raises(ValueError):
+        plugin_test_containment._ps_group_usage(7, live_only=True)
+
+
+def test_controller_reports_status_then_stays_alive_without_leaking_control_env(
+    monkeypatch, tmp_path,
+):
+    ready = tmp_path / "ready"
+    ready.touch()
+    events = []
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTAINMENT_RESULT_FD", "12")
+
+    def command(*args, **kwargs):
+        assert "COPILOT_EXTENSIONS_CONTAINMENT_RESULT_FD" not in os.environ
+        assert "pass_fds" not in kwargs
+        events.append("command")
+        return SimpleNamespace(returncode=7)
+
+    monkeypatch.setattr(plugin_test_containment.subprocess, "run", command)
+    monkeypatch.setattr(plugin_test_containment.os, "write",
+                        lambda fd, data: events.append(("status", fd, data)))
+    monkeypatch.setattr(plugin_test_containment.os, "close",
+                        lambda fd: events.append(("close", fd)))
+
+    def waiting(seconds):
+        events.append("waiting-for-owner")
+        raise RuntimeError("owner teardown")
+
+    monkeypatch.setattr(plugin_test_containment.time, "sleep", waiting)
+    with pytest.raises(RuntimeError, match="owner teardown"):
+        plugin_test_containment._worker_main([str(ready), "command"])
+    assert events == [
+        "command", ("status", 12, b"7\n"), ("close", 12), "waiting-for-owner",
+    ]
+
+
+@pytest.mark.parametrize("hang_controller", [False, True])
+def test_file_holding_descendant_is_reaped_before_return(tmp_path, hang_controller):
+    held = tmp_path / "held.txt"
+    program = (
+        "import os,pathlib,subprocess,sys,time;"
+        "p=pathlib.Path(sys.argv[1]);"
+        "child='import sys,time;f=open(sys.argv[1],\"w\");"
+        "f.write(\"ready\");f.flush();time.sleep(60)';"
+        "subprocess.Popen([sys.executable,'-c',child,str(p)],"
+        "stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,"
+        "creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0));\n"
+        "if os.name != 'nt': "
+        "pathlib.Path(str(p)+'.pgid').write_text(str(os.getpgrp()))\n"
+        "while not p.exists() or p.stat().st_size < 5: time.sleep(0.01)\n"
+        + ("time.sleep(60)\n" if hang_controller else "")
+    )
+    rc = plugin_test_containment.run_contained(
+        [sys.executable, "-c", program, str(held)],
+        cwd=tmp_path, env=isolated_environment(os.environ, tmp_path),
+        sandbox=tmp_path,
+        limits=Limits(wall_seconds=8, max_processes=8, max_memory_mb=256, max_temp_mb=32),
+    )
+    assert rc == (124 if hang_controller else 0)
+    assert held.read_text() == "ready"
+    if os.name != "nt":
+        pgid = int(Path(str(held) + ".pgid").read_text())
+        assert plugin_test_containment._posix_live_group_usage(pgid) == (0, 0)
+    held.unlink()
+    assert not held.exists()
+
+
+@pytest.mark.parametrize("fault", ["wait", "kill", "cancel"])
+def test_controller_reaping_failure_is_explicit(fault):
+    class Process:
+        def wait(self, *, timeout):
+            if fault == "cancel":
+                raise KeyboardInterrupt
+            raise subprocess.TimeoutExpired("controller", timeout)
+
+        def kill(self):
+            if fault == "kill":
+                raise OSError("kill failed")
+
+    with pytest.raises(plugin_test_containment.UnreapedProcessError, match="could not be reaped"):
+        plugin_test_containment._reap_controller(Process())
+
+
+@pytest.mark.parametrize("failure", ["assignment", "terminate", "wait"])
+def test_windows_assignment_failure_cannot_claim_unreaped_controller_is_safe(
+    tmp_path, monkeypatch, failure,
+):
+    events = []
+
+    class Process:
+        pid = 12345
+
+        def terminate(self):
+            events.append("terminate")
+            if failure == "terminate":
+                raise OSError("terminate failed")
+
+        def wait(self, *, timeout):
+            events.append("wait")
+            if failure == "wait":
+                raise subprocess.TimeoutExpired("controller", timeout)
+            return 1
+
+        def kill(self):
+            events.append("kill")
+
+    class Job:
+        def __init__(self, limits):
+            pass
+
+        def assign(self, pid):
+            raise plugin_test_containment.ContainmentError("assignment failed")
+
+        def close(self):
+            events.append("job-close")
+
+    monkeypatch.setattr(plugin_test_containment, "os", SimpleNamespace(name="nt"))
+    monkeypatch.setattr(plugin_test_containment, "_windows_stdio_kwargs", lambda: {})
+    monkeypatch.setattr(plugin_test_containment.subprocess, "Popen", lambda *a, **k: Process())
+    monkeypatch.setattr(plugin_test_containment, "_WindowsJob", Job)
+    expected = (
+        plugin_test_containment.ContainmentError if failure == "assignment"
+        else plugin_test_containment.UnreapedProcessError
+    )
+    with pytest.raises(expected) as raised:
+        plugin_test_containment._run_contained_process(
+            ["fake"], cwd=tmp_path, env={}, sandbox=tmp_path, limits=Limits(),
+        )
+    assert type(raised.value) is expected
+    assert "terminate" in events
+    assert "job-close" in events
+    assert "wait" in events
+    assert not (tmp_path / ".containment-ready").exists()
+
+
+def test_native_cancellation_reaps_file_holding_descendant(tmp_path, monkeypatch):
+    held = tmp_path / "cancel-held.txt"
+    original_sleep = plugin_test_containment.time.sleep
+
+    def cancel_after_child_ready(seconds):
+        if held.exists() and held.read_text() == "ready":
+            raise KeyboardInterrupt
+        original_sleep(seconds)
+
+    monkeypatch.setattr(plugin_test_containment.time, "sleep", cancel_after_child_ready)
+    # Restore ordinary sleeps for teardown after the injected cancellation.
+    terminate_posix = plugin_test_containment._terminate_posix_group
+
+    def terminate(*args):
+        monkeypatch.setattr(plugin_test_containment.time, "sleep", original_sleep)
+        return terminate_posix(*args)
+
+    monkeypatch.setattr(plugin_test_containment, "_terminate_posix_group", terminate)
+    job_close = plugin_test_containment._WindowsJob.close
+
+    def close(job):
+        monkeypatch.setattr(plugin_test_containment.time, "sleep", original_sleep)
+        return job_close(job)
+
+    monkeypatch.setattr(plugin_test_containment._WindowsJob, "close", close)
+    result = plugin_test_containment.run_contained(
+        [sys.executable, "-c",
+         "import sys,time; f=open(sys.argv[1],'w'); f.write('ready'); "
+         "f.flush(); time.sleep(60)", str(held)],
+        cwd=tmp_path, env=isolated_environment(os.environ, tmp_path), sandbox=tmp_path,
+        limits=Limits(wall_seconds=10, max_processes=8, max_memory_mb=256, max_temp_mb=32),
+    )
+    assert result == 130
+    assert held.read_text() == "ready"
+    held.unlink()
+
+
 def test_run_contained_detects_and_fails_on_persistent_environment_drift(
     tmp_path, capfd, monkeypatch
 ):
