@@ -741,6 +741,29 @@ _Pending review of this plan._
 
 ## Journal
 
+### 2026-10-20 - Admit the first Wave 1 module-discovery contract
+- The census merged in #7350 as
+  `6d555ff315aabecfbfc85b7a6785e31b62ff2ad7`, this batch's baseline.
+  This batch owns only C-MODULE: S036's `PSModulePath` entry and S081's
+  native module-discovery regression with its required S080 imports. The
+  test additionally checks native application lookup and the actual parent
+  environment; six portable cases cover missing/inherited paths and both
+  explicit-tier boundaries.
+- Before the production fix, both real Windows PowerShell hosts load the
+  synthetic host module in the detached tier: two failures; both explicit
+  host-state controls pass. After redirecting module discovery to the
+  existing sandbox-root map, the complete containment module and the
+  runner's environment/host-state consumers pass: 24 cases, no skips,
+  18.43 seconds in pytest and 21.14 seconds including supervision/cleanup.
+  Existing item/resource limits remain unchanged.
+- This is a contained native/simple end-to-end check against fresh synthetic
+  modules and fresh test homes, not installation or external-venue
+  qualification. No installer, bootstrap, dependency, plugin payload,
+  process ownership, storage accounting, cleanup scheduling or Source CI
+  eligibility changes belong to this batch. Required CI and current-head
+  review remain separate publication gates. The parent Windows performance
+  acceptance remains open.
+
 ### 2026-10-20 - Reviewed wave plan and pinned residual census
 - Plan-only #7338 received a fresh full Copilot approval on
   `01ed1aa9542d1e302f1581705ee161a44fdffc0f`, green required CI and no

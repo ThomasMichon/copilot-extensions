@@ -1173,6 +1173,11 @@ and 900 seconds across the plugin. Each sub-suite also defaults to 128
 processes, 4096 MiB of process-tree memory, and 2048 MiB of temporary storage.
 The pytest group parent is created with mode `0700` on POSIX, so an inherited
 shared-write umask cannot expose the fixture namespace.
+PowerShell module discovery uses a sandbox-owned `PSModulePath` by default,
+so inherited host modules cannot autoload into a test. Core PowerShell commands
+and native application lookup remain available. Only the existing explicit
+host-state tier preserves the caller's module path; ordinary contained runs
+do not modify the parent environment.
 Changed-plugin selection always includes both `copilot-extensions-harness` and
 `customizing-copilot`, whose suites inspect other plugins' session-context
 contracts. An admission-wrapper change must therefore pass the real whole-suite

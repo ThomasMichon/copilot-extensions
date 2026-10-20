@@ -39,6 +39,7 @@ _ROOT_ENV = {
     "APPDATA": "home/AppData/Roaming",
     "LOCALAPPDATA": "home/AppData/Local",
     "PROGRAMDATA": "program-data",
+    "PSModulePath": "powershell-modules",
     "XDG_CONFIG_HOME": "home/.config",
     "XDG_CACHE_HOME": "home/.cache",
     "XDG_DATA_HOME": "home/.local/share",
