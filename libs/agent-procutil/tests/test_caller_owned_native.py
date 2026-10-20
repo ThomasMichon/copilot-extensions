@@ -355,7 +355,7 @@ def test_installed_caller_death_before_resume_keeps_atomic_custody(tmp_path, ins
 
 
 @pytest.mark.skipif(os.name != "nt", reason="native atomic Windows spawn failures")
-@pytest.mark.parametrize("stage", ["job-attribute", "resume", "create-interrupt"])
+@pytest.mark.parametrize("stage", ["pipe-open", "job-attribute", "resume", "create-interrupt"])
 def test_atomic_spawn_failures_do_not_release_live_processes(tmp_path, monkeypatch, stage):
     from agent_procutil import _windows_caller_owned as native
     from agent_procutil.owned_process import run_caller_owned
@@ -363,6 +363,7 @@ def test_atomic_spawn_failures_do_not_release_live_processes(tmp_path, monkeypat
     kernel = native._api()
     marker = tmp_path / "must-not-run"
     pins = []
+    descriptors = []
     initialize = native._Process.__init__
 
     def record(process, argv, info, streams):
@@ -370,7 +371,20 @@ def test_atomic_spawn_failures_do_not_release_live_processes(tmp_path, monkeypat
         pins.append(PinnedProcess(fixture.identity(info.dwProcessId)))
 
     monkeypatch.setattr(native._Process, "__init__", record)
-    if stage == "job-attribute":
+    if stage == "pipe-open":
+        pipe = os.pipe
+
+        def record_pipe():
+            pair = pipe()
+            descriptors.extend(pair)
+            return pair
+
+        def refuse(*args, **kwargs):
+            raise OSError("synthetic pipe wrapping failure")
+
+        monkeypatch.setattr(os, "pipe", record_pipe)
+        monkeypatch.setattr(os, "fdopen", refuse)
+    elif stage == "job-attribute":
         update = kernel.UpdateProcThreadAttribute
 
         def refuse(*args):
@@ -400,7 +414,14 @@ def test_atomic_spawn_failures_do_not_release_live_processes(tmp_path, monkeypat
             )
         assert not marker.exists()
         assert all(pin.gone() for pin in pins), "spawn failure released a live native target"
-        assert bool(pins) == (stage != "job-attribute")
+        assert bool(pins) == (stage in ("resume", "create-interrupt"))
+        if stage == "pipe-open":
+            import msvcrt
+
+            assert len(descriptors) == 2
+            for fd in descriptors:
+                with pytest.raises(OSError):
+                    msvcrt.get_osfhandle(fd)
     finally:
         with ExitStack() as cleanup:
             for pin in pins:

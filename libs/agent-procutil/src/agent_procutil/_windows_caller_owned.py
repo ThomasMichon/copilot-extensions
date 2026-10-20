@@ -135,20 +135,25 @@ def spawn(argv: list[str], **kwargs):
             handle, 9, ctypes.byref(limit), ctypes.sizeof(limit),
         ):
             raise ctypes.WinError(ctypes.get_last_error())
-        with ExitStack() as resources:
+        with ExitStack() as resources, ExitStack() as parent_streams:
             child_fds = []
             for index, name in enumerate(("stdin", "stdout", "stderr")):
                 if kwargs[name] == subprocess.PIPE:
                     reader, writer = os.pipe()
                     child, parent = (reader, writer) if index == 0 else (writer, reader)
-                    stream = os.fdopen(parent, "wb" if index == 0 else "rb", buffering=0)
-                    resources.callback(stream.close)
+                    resources.callback(os.close, child)
+                    try:
+                        stream = os.fdopen(parent, "wb" if index == 0 else "rb", buffering=0)
+                    except BaseException:
+                        os.close(parent)
+                        raise
+                    parent_streams.callback(stream.close)
                 else:
                     child = os.open(
                         os.devnull, (os.O_RDONLY if index == 0 else os.O_WRONLY) | os.O_BINARY,
                     )
+                    resources.callback(os.close, child)
                     stream = None
-                resources.callback(os.close, child)
                 child_fds.append(child)
                 streams.append(stream)
             handles = (wintypes.HANDLE * 3)(*(msvcrt.get_osfhandle(fd) for fd in child_fds))
@@ -190,10 +195,7 @@ def spawn(argv: list[str], **kwargs):
                 if info.hThread:
                     kernel.CloseHandle(info.hThread)
             # Transfer only parent streams and native custody, never inheritable child handles.
-            resources.pop_all()
-            kernel.DeleteProcThreadAttributeList(attributes)
-            for fd in child_fds:
-                os.close(fd)
+            parent_streams.pop_all()
             return process, job
     except BaseException:
         if process is None and info.hProcess:
