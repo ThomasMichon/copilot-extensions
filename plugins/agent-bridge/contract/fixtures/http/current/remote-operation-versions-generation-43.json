@@ -1,0 +1,34 @@
+{
+  "captured_from": {
+    "commit": "1d527942d774bc9da23ad878ba8eac62ea10c40e",
+    "plugin_version": "0.4.1-dev3",
+    "protocol_generation": 43,
+    "source_path": "plugins/agent-bridge/src/agent_bridge/remote_operation_versions.py",
+    "source_git_blob": "e44bca130d16fdda753cbae074d2863a8cec26bf",
+    "source_sha256": "17d5d8c5c054feeb080000b77bdb33dacd255160c24b1bab16a46f71dd844cf1"
+  },
+  "capability": {
+    "required_protocol_version": 39,
+    "required_operation_version": 5,
+    "qualified_no_wait_operation_version": 4,
+    "unsupported_operation_status": 426,
+    "unsupported_operation_code": "unsupported_version"
+  },
+  "request": {
+    "version": 5,
+    "operation": "live_session.send",
+    "target": "live:host-b:project-a:wt-b",
+    "sender": "peer",
+    "message": "hello",
+    "kind": "prompt",
+    "delivery": "queue",
+    "wait": true,
+    "wait_timeout": 120.0,
+    "qualified_peer": true
+  },
+  "transport_boundary": "Bridge-owned operation fields only; the carrier transport envelope remains externally owned.",
+  "reattested_from": {
+    "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-operation-versions-generation-42.json",
+    "sha256": "f120210b9a8514389c0c9592188952b811ab4cf52ef6a3a0b57a58ad8290061f"
+  }
+}

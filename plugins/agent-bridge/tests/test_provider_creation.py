@@ -429,7 +429,7 @@ def test_current_generation42_refresh_fixture_matches_real_http_producer_and_con
     assert response.status_code == 200, response.text
     observed = response.json()
     # These pre-existing optional null fields are outside the frozen projection.
-    for field in ("caller_session_id", "parity_fault_result"):
+    for field in ("caller_session_id", "parity_fault_result", "remote_relationship"):
         assert observed.pop(field) is None
     assert observed == expected
     consumed = StartSessionResponse.model_validate(response.json())

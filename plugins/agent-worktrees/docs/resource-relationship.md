@@ -48,6 +48,19 @@ Transactions return `ok`, current record `owner`, original `creator`,
 `request_id`, `token`, full `ref`, `phase` and `producer` metadata. Errors have
 `error`/`message` and exit nonzero. Capabilities resolve no owner or stdin.
 
+Capabilities advertise `inspect_absence: true` for an optional read-only query:
+`{"request_id":"relationship-one","allow_missing":true}`. An existing reservation
+returns its normal complete receipt. If the exact, locally authoritative ledger
+has no matching reservation, inspection returns only schema/version, `ok: true`,
+the canonical `owner`, exact `request_id` and `absent: true`. This query remains
+available on frozen/finalized owners and never reserves or changes a claim.
+Opaque claim collections/items, malformed protected metadata, ambiguous matches
+and unresolved/foreign owners refuse instead of proving absence. New reservation
+also refuses opaque storage rather than appending into an unreadable ledger.
+Ordinary inspection without `allow_missing`
+still refuses a missing handle; unsupported authorities reject the extra field.
+Neither a timeout nor a generic refusal is absence evidence.
+
 ## Replay and obligation
 
 Reserve persists pending responsibility before returning. Exact request-ID

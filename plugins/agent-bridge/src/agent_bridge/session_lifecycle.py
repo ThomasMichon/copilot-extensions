@@ -61,11 +61,14 @@ class _SessionLifecycleMixin:
             with contextlib.suppress(BaseException):
                 await task
         if session.client:
+            from .remote_relationships import client_quiescent, owned
             client = session.client
             accepted_sid = client.acp_session_id if session.target.type == "remote-acp" else None
+            shutdown_failed = False
             try:
                 await client.shutdown()
             except Exception:
+                shutdown_failed = True
                 log.warning(
                     "ACP client shutdown failed while tearing down session %s",
                     session.session_id, exc_info=True,
@@ -77,7 +80,13 @@ class _SessionLifecycleMixin:
                         session.acp_session_id = accepted_sid
                         self._db.update_session_acp_id(session.session_id, accepted_sid)
                         session.event_log.set_telemetry_identity(acp_session_id=accepted_sid)
-                session.client = None
+                if not owned(session) or not shutdown_failed and client_quiescent(client):
+                    session.client = None
+                else:
+                    log.warning(
+                        "Managed remote teardown remains pending for session %s; retaining client",
+                        session.session_id,
+                    )
         # Clean up unused worktrees (0-turn sessions from crash-loops)
         try:
             await _cleanup_worktree(session.target, session.turn_count)
@@ -160,6 +169,8 @@ class _SessionLifecycleMixin:
             raise KeyError(f"Session {session_id} not found")
         if session.client is None:
             raise ValueError(f"Session {session_id} has no live ACP client")
+        from .remote_relationships import assert_admission
+        await assert_admission(self, session)
         return session.client.resolve_elicitation(
             tool_call_id, content, action=action,
             **({"request_id": request_id} if request_id is not None else {}),
@@ -175,6 +186,8 @@ class _SessionLifecycleMixin:
             raise KeyError(f"Session {session_id} not found")
         if session.client is None:
             raise ValueError(f"Session {session_id} has no live ACP client")
+        from .remote_relationships import assert_admission
+        await assert_admission(self, session)
         return session.client.resolve_permission(request_id, option_id)
 
     async def stop_session(
@@ -280,6 +293,12 @@ class _SessionLifecycleMixin:
                 raise ValueError(f"Session {session_id} is not idle")
             if self._db.count_pending_prompts(session_id) > 0:
                 raise ValueError(f"Session {session_id} has queued prompts")
+            from .remote_relationships import owned, end as end_relationship
+            if owned(session):
+                if not force and session.has_active_background_tasks:
+                    raise SessionBusyError(session_id, session.active_background_tasks)
+                await end_relationship(self, session, turn_locked=True)
+                return
             await self.end_session(session_id, force=force)
 
     async def end_session(self, session_id: str, *, force: bool = False) -> None:
@@ -321,6 +340,11 @@ class _SessionLifecycleMixin:
 
         if not force and session.has_active_background_tasks:
             raise SessionBusyError(session_id, session.active_background_tasks)
+
+        from .remote_relationships import owned, end as end_relationship
+        if owned(session):
+            await end_relationship(self, session)
+            return
 
         container = (
             session.target.container

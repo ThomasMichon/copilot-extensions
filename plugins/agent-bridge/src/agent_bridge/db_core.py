@@ -13,7 +13,7 @@ from typing import Any
 
 log = logging.getLogger("agent-bridge")
 
-SCHEMA_VERSION = 26
+SCHEMA_VERSION = 27
 
 # Post-base ``sessions`` columns ensured idempotently on every init, independent
 # of ``schema_version``. Version-gated ``ALTER TABLE ... ADD COLUMN`` migrations
@@ -158,6 +158,26 @@ CREATE TABLE IF NOT EXISTS provider_embodiments (
     session_id TEXT NOT NULL,
     native_session_id TEXT
 );
+
+CREATE TABLE IF NOT EXISTS remote_acp_relationships (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL UNIQUE,
+    owner TEXT NOT NULL,
+    recovery_json TEXT NOT NULL,
+    requested_native_id TEXT,
+    native_id TEXT,
+    claim_json TEXT,
+    phase TEXT NOT NULL,
+    uncertain INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS remote_acp_relationship_authority (
+    singleton INTEGER PRIMARY KEY CHECK (singleton=1),
+    id TEXT NOT NULL
+);
+INSERT OR IGNORE INTO remote_acp_relationship_authority VALUES (1, lower(hex(randomblob(16))));
+CREATE INDEX IF NOT EXISTS idx_remote_acp_relationship_ref
+    ON remote_acp_relationships(json_extract(claim_json, '$.ref'));
 
 CREATE TABLE IF NOT EXISTS turns (
     session_id TEXT NOT NULL,

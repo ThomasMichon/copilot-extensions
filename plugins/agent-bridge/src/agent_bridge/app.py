@@ -18,7 +18,6 @@ from fastapi import FastAPI
 from . import telemetry
 from .agent_registry import AgentResolver, daemon_resolver
 from .app_agent_roster import start_agent_roster_cache, stop_agent_roster_cache
-from .app_routes import configure_serving_app
 from .app_worktree_cache import start_worktree_cache, stop_worktree_cache
 from .config import load_config, load_or_create_auth_token
 from .db import Database
@@ -1094,6 +1093,8 @@ def create_app(
         if config is not None or token is not None:
             raise PrivateIPCError(Refusal.AUTHORITY)
         return create_restored_app(restored_runtime)
+    from .app_routes import configure_serving_app
+
     cfg = config or load_config()
     auth_token = token or load_or_create_auth_token()
 

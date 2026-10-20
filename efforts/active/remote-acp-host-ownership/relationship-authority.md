@@ -200,7 +200,7 @@ not a falsely completed handoff.
 The effort's Phase 2 includes the following ordered, **agent-recommended**
 source slices. Merge this proposal before starting them.
 
-- [ ] Implement Worktrees metadata/transaction capability and preservation
+- [x] Implement Worktrees metadata/transaction capability and preservation
   guards, exact request replay and non-bypassable finalization. Keep both
   lifetime validators and disposable regressions explicit.
 - [ ] Integrate Bridge owner forwarding and durable acquisition/reconciliation,

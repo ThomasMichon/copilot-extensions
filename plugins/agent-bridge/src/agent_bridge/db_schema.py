@@ -655,3 +655,10 @@ class _SchemaMixin:
             conn.execute("UPDATE schema_version SET version=?", (26,))
             conn.commit()
             log.info("Schema migrated to version 26: live-message consumption receipts")
+
+        if from_version < 27:
+            # Bootstrap created the additive relationship tables and authority
+            # identity before this migration; passive adoption never does so.
+            conn.execute("UPDATE schema_version SET version=?", (27,))
+            conn.commit()
+            log.info("Schema migrated to version 27: retained remote relationships")

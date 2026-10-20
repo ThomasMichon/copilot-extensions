@@ -76,6 +76,7 @@ _DEFERRED_KEYS = {
     "reference_sha256",
 }
 _HTTP_CAPABILITY_CONSTANTS = {
+    "remote_acp_ownership": "REMOTE_ACP_OWNERSHIP_PROTOCOL_VERSION",
     "remote_acp": "REMOTE_ACP_PROTOCOL_VERSION",
     "remote_acp_targets": "REMOTE_ACP_TARGETS_PROTOCOL_VERSION",
     "worktree_native_resume": "WORKTREE_NATIVE_RESUME_PROTOCOL_VERSION",

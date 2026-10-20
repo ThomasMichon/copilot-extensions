@@ -8,9 +8,9 @@
       "kind": "wire-protocol",
       "normative": true,
       "declared_range": {
-        "current": 42,
+        "current": 43,
         "minimum": 1,
-        "previous_generation": 41,
+        "previous_generation": 42,
         "previous_absent_reason": null
       },
       "evidence_window": {
@@ -48,7 +48,8 @@
           39,
           40,
           41,
-          42
+          42,
+          43
         ],
         "runtimes": [
           "0.4.0-dev423",
@@ -108,21 +109,22 @@
         "live_message_receipt": 39,
         "worktree_native_resume": 40,
         "remote_acp_targets": 41,
-        "attention_boundary": 42
+        "attention_boundary": 42,
+        "remote_acp_ownership": 43
       },
       "durable_records": [],
       "source_paths": [
         {
           "path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
-          "sha256": "249253fa9cb50fd224bb516c6660b9dbf21b1915e23164a2ba91921c3cde41a2",
+          "sha256": "47c121fc7699f22a7258bb335d89ca73268bf48c45ad4e513528a3a15d595cfd",
           "semantic": true,
           "non_semantic_reason": null
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/models.py",
-          "sha256": "24dd0ac828d603050d4a31cdc0dba444b31956e42297370041f5f62a4c0e0150",
-          "semantic": false,
-          "non_semantic_reason": "Only local remote instance bindings and exact credential-source approvals are added; HTTP request/response field shapes remain unchanged. The generation-41 model re-attestation preserves the independent named-remote vector."
+          "sha256": "9f40173a7e58e995b16dd592175aa0fa10c748a3fd5aefe145230c0c91780e5a",
+          "semantic": true,
+          "non_semantic_reason": null
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/routes/health.py",
@@ -132,7 +134,7 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/routes/sessions.py",
-          "sha256": "c894959a7b76990ad0bbd1affcb064be235fac53cbf651bdbd4f2244c183d111",
+          "sha256": "bbefb32975022523860d5d1d172e5e5ad40b511275443f63e8fce494eb144362",
           "semantic": true,
           "non_semantic_reason": null
         },
@@ -198,13 +200,13 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/session_resume.py",
-          "sha256": "3b848128648297a1a0e79bd3c55fae5981f9b81375a10070c8a5765107c74363",
+          "sha256": "bc62b07c43e8b0e702433398bd24871891ac963ba6406b8b34e1bff54b3628f4",
           "semantic": true,
           "non_semantic_reason": null
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/session_core.py",
-          "sha256": "59e17e5bf559e09c63c88a2aab5100c5e5900422d0dc4c51384cedda04a4f955",
+          "sha256": "8305b4c9c3afd7e8870f2931ffe9ce6e7bebad3ca771605673c306e05d5f4709",
           "semantic": true,
           "non_semantic_reason": null
         },
@@ -234,7 +236,7 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/client_session_start.py",
-          "sha256": "6efbf3e29014cd964b677059f752909640b8441b1aa851fbd02b5d837672b808",
+          "sha256": "10730505d61c8568dde96983dce498ff05aced58fc511496a774d0a46a12e759",
           "semantic": true,
           "non_semantic_reason": null
         },
@@ -252,7 +254,7 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/remote_acp_sessions.py",
-          "sha256": "32b02a91924538ac07bc7ba98d2fd98df91fee299f498a8c4f57ff6ce4470a56",
+          "sha256": "8e46f2713647ff7fc626e1db28c0402d1d236017581709df949c2fe450169ecf",
           "semantic": true,
           "non_semantic_reason": null
         },
@@ -321,6 +323,90 @@
           "sha256": "2acfba87cca0cd6c08dbc42765a5b1cfe048e402ed8c088b784c7c9b5eadb8ec",
           "semantic": false,
           "non_semantic_reason": "Local native provider manifest discovery validates attribution, activation and the http_credentials_version opt-in. These on-disk/native-command declarations are not agent-bridge HTTP payload fields. Pin the actual adapter discovery dependency without presenting unchanged HTTP fixtures as native provider protocol captures."
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/remote_relationships.py",
+          "sha256": "e53882344d73fea5c1334bc280d4db253e34b7773d7c790a6da4af81c0dcfd2a",
+          "semantic": true,
+          "non_semantic_reason": null
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/routes/relationships.py",
+          "sha256": "89c1680f6e8e7a295a64b07524b7e1823287fdeb614bdc8b7a85f268a77240fa",
+          "semantic": true,
+          "non_semantic_reason": null
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/db_maintenance.py",
+          "sha256": "24fd30181a3b74b682686125e0ecd0f66fa9be9f144704d74622800c6bc80b28",
+          "semantic": false,
+          "non_semantic_reason": "Source-only retention dependency: nonclosed relationship handles are excluded from garbage collection; HTTP field shapes are unchanged. Aging and settlement recovery are tested separately."
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/session_lifecycle_cli.py",
+          "sha256": "a4d9dc1e436632adafa5e7a29ddc2d962f1a3e7099fc48b77bc124e23942237b",
+          "semantic": false,
+          "non_semantic_reason": "Source-only command discovery dependency: retained callers disable ambient PATH fallback while legacy callers retain their default. This is not an HTTP request or response field."
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/relationship_authority.py",
+          "sha256": "2675cbc71ae17706952e43f2c1c05590936bccdcef1b85ac133f18f1578ba5a4",
+          "semantic": false,
+          "non_semantic_reason": "Source-only retained claim command adapter dependency: strict owning-installation discovery and bounded command receipts are exercised by adapter and actual-command tests, not represented as HTTP payload captures."
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/db_relationships.py",
+          "sha256": "81cb9945bc8f999e515cbe6b0470d4f1c7b1a24994c15acac0bc623990fce8bf",
+          "semantic": false,
+          "non_semantic_reason": "Source-only durable journal dependency: retain a read-only absence authority receipt separately from a confirmed claim in the existing serialized authority-result slot; no HTTP payload is produced here."
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/session_lifecycle.py",
+          "sha256": "f248d3d7bf00aa5b91e9c8767d16bc51254cbc06b523aedd6866152edb51a1f0",
+          "semantic": false,
+          "non_semantic_reason": "Source-only local teardown dependency: retain a managed client until shutdown and transport tasks quiesce; public verification projection remains owned by remote_relationships.py."
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/session_start_cli.py",
+          "sha256": "f8e83dcff3405dbe319981ebb5189358dd91278b5a53233e5ce82f9bd7ab3701",
+          "semantic": false,
+          "non_semantic_reason": "Source-only CLI ownership dependency: a declared managed caller cannot become unowned when resolution probes fail; HTTP request and response field shapes remain unchanged."
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/session_prompts.py",
+          "sha256": "83876d3d126b78187fd3d1ba486355f2b97f08adb28805ae66ffdddf06c51a49",
+          "semantic": true,
+          "non_semantic_reason": null
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/db_core.py",
+          "sha256": "f4f919f02cbc3a691e93996dfb8032aa0c0577727166a76a6d77d6a57c4a351f",
+          "semantic": false,
+          "non_semantic_reason": "Source-only schema boundary: schema 27 distinguishes prepared retained-relationship tables and authority identity from the preceding schema 26; HTTP fields and capability floors are unchanged."
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/local_cache_refresh.py",
+          "sha256": "e40a6816e9d75b5b956d848377b5be58a831f11bc86617c11b924cf2c68f511b",
+          "semantic": false,
+          "non_semantic_reason": "Source-only reused native process-group retirement primitive: authority commands use its identity-checked group cleanup; rendering behavior and HTTP wire shapes are unchanged."
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/db_schema.py",
+          "sha256": "42813fe5515a0c31783f27e2391f5b43d50b0c5596dc341637a64f468b2e35b0",
+          "semantic": false,
+          "non_semantic_reason": "Source-only schema preparation: ordinary writable bootstrap prepares and stamps the additive relationship schema; passive preparation and writable adoption remain migration-free."
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/db_events.py",
+          "sha256": "7aa2649108f82897809a09b5ad59c8a4aa9111cf47841945ee8b99cab3e9a788",
+          "semantic": false,
+          "non_semantic_reason": "Source-only durable admission dependency: exact queued-row consumption and turn insertion commit atomically, with rollback on refusal; HTTP field shapes remain unchanged."
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/db_prompts.py",
+          "sha256": "18054c7452d16523ea37e303c72bad47396f63a2e4d9cb78581cac269dc12122",
+          "semantic": false,
+          "non_semantic_reason": "Source-only durable queue dependency: admission peeks without deleting work before an authority await; queue IDs, caller attribution and FIFO order remain durable through process exit."
         }
       ],
       "fixtures": [
@@ -2117,6 +2203,276 @@
           "sha256": "077eeeaa01db68b4c332692fb3b658a74575dfdf4a18cb968ca42fbad9aea667",
           "role": "Generation-42 independent expected-vector re-attestation: workspace-exact-owner-generation-42.json",
           "generation": 42
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/acquisition-protocol-generation-43.json",
+          "sha256": "e46c6d5e5b61efe3e13f62f8501c96bf62150fffed72606b9fffa90d6d3d9e5e",
+          "role": "Generation-42 independent expected-vector re-attestation: acquisition-protocol-generation-42.json",
+          "generation": 43
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/live-message-receipt-generation-43.json",
+          "sha256": "c7c1e590d90045b81a2344cc58c704913106f689d7004710a5c6761bdbe44646",
+          "role": "Generation-42 independent expected-vector re-attestation: live-message-receipt-generation-42.json",
+          "generation": 43
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/peer-replies-generation-43.json",
+          "sha256": "b7525817151d8d86395eb5a7d4f3989d9901fb3562d8f6e17fbe38deebc45b66",
+          "role": "Generation-42 independent expected-vector re-attestation: peer-replies-generation-42.json",
+          "generation": 43
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/workspace-creation-generation-43.json",
+          "sha256": "2642f00eeecd788594ad122501633d9958300082f419540c086786fa9b95dfdf",
+          "role": "Generation-42 independent expected-vector re-attestation: workspace-creation-generation-42.json",
+          "generation": 43
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-message-receipt-generation-43.json",
+          "sha256": "33b544e00ad616d5475dbed7ea08e777080f6c2509f881ff590d6df77fc15ebb",
+          "role": "Generation-42 independent expected-vector re-attestation: remote-message-receipt-generation-42.json",
+          "generation": 43
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-zero-reply-generation-43.json",
+          "sha256": "870bb31f28bd8fc64e29687615f4aaa8b78a3f2c3db2f7546f240acb65aa9032",
+          "role": "Generation-42 independent expected-vector re-attestation: remote-zero-reply-generation-42.json",
+          "generation": 43
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-generation-43.json",
+          "sha256": "515526fac655851d235f8aa0465019f00452a02ea713e7afaa93a68f279411be",
+          "role": "Generation-42 independent expected-vector re-attestation: provider-creation-generation-42.json",
+          "generation": 43
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/workspace-creation-routes-generation-43.json",
+          "sha256": "84c80b0a774f24ba9a225c42293cef1bf9775a988fc9b8de8009379edf1a5cc5",
+          "role": "Generation-42 independent expected-vector re-attestation: workspace-creation-routes-generation-42.json",
+          "generation": 43
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-peer-generation-43.json",
+          "sha256": "0c4cf4f29a7779e5018efbb0ded6a1ade56856303d19e52b4eedc803264acb98",
+          "role": "Generation-42 independent expected-vector re-attestation: remote-peer-generation-42.json",
+          "generation": 43
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/agents-list-generation-43.json",
+          "sha256": "033d4d34d6d0820bbd44cc8f5e560b0482f70098b9c26350dbae39de3afa6b13",
+          "role": "Generation-42 independent expected-vector re-attestation: agents-list-generation-42.json",
+          "generation": 43
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-bound-extracted-prompt_models-generation-43.json",
+          "sha256": "69064f913c599ed69f0c3efdbbeb0623a65ad00bddeb9be01d5ebc6927c11871",
+          "role": "Generation-42 independent expected-vector re-attestation: native-bound-extracted-prompt_models-generation-42.json",
+          "generation": 43
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-models-generation-43.json",
+          "sha256": "a4de1e764c89c76ccf5943470db547ba9ee71ea16e54e58f32056a4b524fe84e",
+          "role": "Generation-42 independent expected-vector re-attestation: provider-creation-models-generation-42.json",
+          "generation": 43
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-bound-extracted-routes-prompts-generation-43.json",
+          "sha256": "bc0082024282c61feaa088b1879f84ebea1d4316e04896855cc92da6824a3250",
+          "role": "Generation-42 independent expected-vector re-attestation: native-bound-extracted-routes-prompts-generation-42.json",
+          "generation": 43
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/live-registration-generation-43.json",
+          "sha256": "02cf5a52ff601a9f0c14d941f4af03c6cab53d760bb51010ea23b9e5bbb85720",
+          "role": "Generation-42 independent expected-vector re-attestation: live-registration-generation-42.json",
+          "generation": 43
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-admission-generation-43.json",
+          "sha256": "3cda9bfcdb7123d721db1e23f046a0296d5c4abee65da4916da8459d4445f527",
+          "role": "Generation-42 independent expected-vector re-attestation: provider-creation-admission-generation-42.json",
+          "generation": 43
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-native-generation-43.json",
+          "sha256": "a4c7f7b737f85d6e4334f6f324493031f72cf95de6bff62796d206f72d2f1684",
+          "role": "Generation-42 independent expected-vector re-attestation: provider-creation-native-generation-42.json",
+          "generation": 43
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-resume-generation-43.json",
+          "sha256": "73f632abc6e2f9e04325f42d1322a8b2743f613bfe339968f44d07e36db7f127",
+          "role": "Generation-42 independent expected-vector re-attestation: provider-creation-resume-generation-42.json",
+          "generation": 43
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-refresh-generation-43.json",
+          "sha256": "7e1e0fa50a16c8b4e164954a693065dbaeacee8b6f856c26f2f5da3803627038",
+          "role": "Generation-42 independent expected-vector re-attestation: provider-creation-refresh-generation-42.json",
+          "generation": 43
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-generation-43.json",
+          "sha256": "1a0852c79f04814330c291a9011f2db703e61d08799e3843712ae179b231ca27",
+          "role": "Generation-42 independent expected-vector re-attestation: worktree-render-generation-42.json",
+          "generation": 43
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/workspace-creation-models-generation-43.json",
+          "sha256": "ee30fa51c091e5769d6bfeb8b7582be6ac5c718a0aacb82e533c4748c44a26e8",
+          "role": "Generation-42 independent expected-vector re-attestation: workspace-creation-models-generation-42.json",
+          "generation": 43
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-worktrees-generation-43.json",
+          "sha256": "e86803ff2a89043c3b2dfdb20a75ad6fb45871b83dd81920e2bbec68dc897980",
+          "role": "Generation-42 independent expected-vector re-attestation: worktree-render-worktrees-generation-42.json",
+          "generation": 43
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-worktree_refresh-generation-43.json",
+          "sha256": "2de5837404dd7f9801d0cd40e44546ed8315db0783620b7b3eedd04aad9c653b",
+          "role": "Generation-42 independent expected-vector re-attestation: worktree-render-worktree_refresh-generation-42.json",
+          "generation": 43
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-client_worktrees-generation-43.json",
+          "sha256": "5a68b894d86ae973482e2d036a31aa57e534592d24b934dde913e6530541ace2",
+          "role": "Generation-42 independent expected-vector re-attestation: worktree-render-client_worktrees-generation-42.json",
+          "generation": 43
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-worktree_entry-generation-43.json",
+          "sha256": "81bab11adffd7bac3c82cebd0097444df784ab89e99393e20090a0df2ada3923",
+          "role": "Generation-42 independent expected-vector re-attestation: worktree-render-worktree_entry-generation-42.json",
+          "generation": 43
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-acp-models-generation-43.json",
+          "sha256": "89a10a7c1e74faa1be8f1013e5d78af5e3adb8eabd1539c75304e97d489afc9d",
+          "role": "Generation-42 independent expected-vector re-attestation: remote-acp-models-generation-42.json",
+          "generation": 43
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-acp-client_session_start-generation-43.json",
+          "sha256": "23f8f36bc182516c5a25acdcdf1f43419eaa3eb1d9761fdf20dfba9007b4bb37",
+          "role": "Generation-42 independent expected-vector re-attestation: remote-acp-client_session_start-generation-42.json",
+          "generation": 43
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-acp-client_answers-generation-43.json",
+          "sha256": "3653071a78f7f20ae42d69ba85168988a7c08fa284e208e62ca0974854f7268a",
+          "role": "Generation-42 independent expected-vector re-attestation: remote-acp-client_answers-generation-42.json",
+          "generation": 43
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-acp-routes-answers-generation-43.json",
+          "sha256": "e81899cfaca41a88288a1d3bb4c8c0f5a211867077b0dacda58bf7d0d56a3531",
+          "role": "Generation-42 independent expected-vector re-attestation: remote-acp-routes-answers-generation-42.json",
+          "generation": 43
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-acp-remote_acp_sessions-generation-43.json",
+          "sha256": "f6eacc7e3d741cfd52f7d34aabae4bb31068d1350ccac6bc43c056a4e2b10176",
+          "role": "Generation-42 independent expected-vector re-attestation: remote-acp-remote_acp_sessions-generation-42.json",
+          "generation": 43
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-acp-progress-generation-43.json",
+          "sha256": "a6361997624b54e59e5213563abf1e56062d51d30fcf902eaae5cb039ca6bd54",
+          "role": "Generation-42 independent expected-vector re-attestation: remote-acp-progress-generation-42.json",
+          "generation": 43
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-operation-versions-generation-43.json",
+          "sha256": "a4c4e18d86113f85dc24caf5c0af0bb1d3906ed2d886f78435eb6c2fa186a365",
+          "role": "Generation-42 independent expected-vector re-attestation: remote-operation-versions-generation-42.json",
+          "generation": 43
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-worktree-resume-generation-43.json",
+          "sha256": "236d43060af3a723192e30a75ae7344a94147803b5311bd72c3126500e30065d",
+          "role": "Generation-42 independent expected-vector re-attestation: native-worktree-resume-generation-42.json",
+          "generation": 43
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-worktree-resume-client-generation-43.json",
+          "sha256": "333562a594371ca40dfc829cddfaa88b0a73ae48484530c97d1bbee9ea7f4c82",
+          "role": "Generation-42 independent expected-vector re-attestation: native-worktree-resume-client-generation-42.json",
+          "generation": 43
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-singleton-resume-generation-43.json",
+          "sha256": "0c3ebac199c1a009e76e8b3e626f2cf0aa5007be24d6bc16ae5eecca23ab7cef",
+          "role": "Generation-42 independent expected-vector re-attestation: native-singleton-resume-generation-42.json",
+          "generation": 43
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-worktree-confirmation-generation-43.json",
+          "sha256": "4b40fbb37c7da336344b55562377c9499c70463b1bb1302402bff8bc012896d6",
+          "role": "Generation-42 independent expected-vector re-attestation: native-worktree-confirmation-generation-42.json",
+          "generation": 43
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-owner-record-generation-43.json",
+          "sha256": "3cf3c473d40bd016bac552f71f579e89c3992cf8edc5fc174726cfdb7d2c14e8",
+          "role": "Generation-42 independent expected-vector re-attestation: worktree-owner-record-generation-42.json",
+          "generation": 43
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-worktree-reconciliation-generation-43.json",
+          "sha256": "bfc81a2fbc01561b1bcdd8368f5ebd904e6f2088183c0744f9a884dcbd7f797e",
+          "role": "Generation-42 independent expected-vector re-attestation: native-worktree-reconciliation-generation-42.json",
+          "generation": 43
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-singleton-liveness-generation-43.json",
+          "sha256": "c3ad96ad5de091d7747b553ae0062472b26f177eb75affd73119813284da7637",
+          "role": "Generation-42 independent expected-vector re-attestation: native-singleton-liveness-generation-42.json",
+          "generation": 43
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-worktrees-ssh-profile-generation-43.json",
+          "sha256": "4c9e59574e6e115296372da08de638de52f4198ae347d4b9e07f70fd5ae6c6f8",
+          "role": "Generation-42 independent expected-vector re-attestation: worktree-render-worktrees-ssh-profile-generation-42.json",
+          "generation": 43
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-message-receipt-ssh-profile-generation-43.json",
+          "sha256": "c37059c38b5435264e65ddf6508a511a19ffee6c432496145fabdb0410552d65",
+          "role": "Generation-42 independent expected-vector re-attestation: remote-message-receipt-ssh-profile-generation-42.json",
+          "generation": 43
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-acp-targets-generation-43.json",
+          "sha256": "09105bc48dbe8b5749f638073784e188211096f053bce953c68653096750ca21",
+          "role": "Generation-42 independent expected-vector re-attestation: remote-acp-targets-generation-42.json",
+          "generation": 43
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/workspace-exact-owner-generation-43.json",
+          "sha256": "7fda02c52bcfdc0f98152c8c91f0bd31173316822e6042cfeb88f6bc659e4b65",
+          "role": "Generation-42 independent expected-vector re-attestation: workspace-exact-owner-generation-42.json",
+          "generation": 43
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/owned-remote-generation-43.json",
+          "sha256": "93e0cec3ea23c6cb3dec3583290757808a2aaa8ffb3f1d87d1a70609ee41b85c",
+          "role": "Independent managed remote ownership client and inspection expectations",
+          "generation": 43
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/owned-remote-routes-generation-43.json",
+          "sha256": "a75bdcefe7f40129ed51977cd8e101166cdc0d26d92ed1039a34065dbc69ab3a",
+          "role": "Retained ownership HTTP adapter expectations",
+          "generation": 43
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/managed-drain-generation-43.json",
+          "sha256": "0a7f23f1457b022e9117fca3652521a7c7807fa3673e488e0b2bff3b0908f832",
+          "role": "Independent managed inspection versus clean drain admission expectations",
+          "generation": 43
         }
       ],
       "provenance": [
@@ -5129,7 +5485,7 @@
           "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification of the generation-42 producers, where current attention rows gain optional since/position behind attention_boundary 42. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots; only protocol_version advertisements advance to 42. Contained HTTP contract tests exercise model, client and route entry points, health 42, URL target floor 41, named remote ACP floor 38, receipt floor 39 and exact-native worktree resume floor 40 without live network or secret access. Historical generations and capability floors are unchanged."
         }
       ],
-      "support_window": "HTTP generations 1 through 42 remain supported. Attention-row boundaries (since and position) begin at generation 42; direct URL endpoint targets retain floor 41, named remote ACP retains floor 38, receipts retain 39, and exact-native worktree resume retains 40. Historical independent fixtures remain immutable; generation-42 re-attestations retain their original capability floors.",
+      "support_window": "HTTP generations 1 through 43 remain supported. Managed remote ACP owner admission requires generation 43; attention boundary retains floor 42, direct URL targets 41, named remote ACP 38, receipts 39, and exact-native worktree resume 40. Generation-43 re-attestations retain independent generation-42 expectations.",
       "bridge_contract_rollback_window": "Retain the generation 11 fixture, the older generation 9 fixture, and a generation 10 prior-runtime fixture until the live and recoverable reference census permits retirement.",
       "mixed_version_scenarios": [
         "new-client_old-daemon",

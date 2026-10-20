@@ -59,6 +59,13 @@ class SessionStartClientMixin(_Base):
             if not self.daemon_supports(REMOTE_ACP_TARGETS_PROTOCOL_VERSION):
                 raise BridgeClientError(426, "daemon does not support remote ACP endpoint targets")
         if is_remote_address(agent or "") or remote_session_id is not None:
+            if caller_owner_ref is not None:
+                from .relationship_authority import canonical_owner
+                from .protocol import REMOTE_ACP_OWNERSHIP_PROTOCOL_VERSION
+
+                canonical_owner(caller_owner_ref)
+                if not self.daemon_supports(REMOTE_ACP_OWNERSHIP_PROTOCOL_VERSION):
+                    raise BridgeClientError(426, "daemon does not support retained remote host ownership")
             from .protocol import REMOTE_ACP_PROTOCOL_VERSION
             if not self.daemon_supports(REMOTE_ACP_PROTOCOL_VERSION):
                 raise BridgeClientError(426, "daemon does not support qualified remote ACP")

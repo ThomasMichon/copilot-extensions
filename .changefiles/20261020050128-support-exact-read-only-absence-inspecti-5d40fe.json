@@ -1,0 +1,9 @@
+{
+  "comment": "Support exact read-only absence inspection for retained relationship cleanup without creating a reservation",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

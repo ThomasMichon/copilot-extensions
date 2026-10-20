@@ -8,6 +8,10 @@ import time
 from typing import Any
 
 
+class PendingPromptRemovedError(ValueError):
+    """The selected queue row was removed before atomic turn admission."""
+
+
 class _EventsMixin:
     """Event-log, turn, and delivery-cursor helpers."""
 
@@ -77,12 +81,38 @@ class _EventsMixin:
     def create_turn(
         self, session_id: str, turn_index: int, prompt: str, now: float,
         *, delivery_id: str | None = None,
+        pending_prompt_id: int | None = None,
     ) -> None:
-        self.execute_write(
+        sql = (
             "INSERT INTO turns (session_id, turn_index, prompt, started_at, acquisition_delivery_id) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (session_id, turn_index, prompt, now, delivery_id),
+            "VALUES (?, ?, ?, ?, ?)"
         )
+        params = (session_id, turn_index, prompt, now, delivery_id)
+        if pending_prompt_id is None:
+            self.execute_write(sql, params)
+            return
+        if self.read_only:
+            raise PermissionError("Read-only database cannot execute writes")
+        with self._write_lock:
+            conn = self._get_conn()
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                removed = conn.execute(
+                    "DELETE FROM pending_prompts WHERE session_id=? AND id=? AND prompt=?",
+                    (session_id, pending_prompt_id, prompt),
+                )
+                if removed.rowcount != 1:
+                    if conn.execute(
+                        "SELECT 1 FROM pending_prompts WHERE session_id=? AND id=?",
+                        (session_id, pending_prompt_id),
+                    ).fetchone() is None:
+                        raise PendingPromptRemovedError("Queued prompt removed before turn admission")
+                    raise ValueError("Queued prompt changed before turn admission")
+                conn.execute(sql, params)
+                conn.commit()
+            except BaseException:
+                conn.rollback()
+                raise
 
     def update_turn(
         self,

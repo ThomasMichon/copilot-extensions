@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from dataclasses import dataclass
 
@@ -266,6 +267,13 @@ def _start_agent_session(
         print("[FAIL] Prepared sender preference belongs to a different target.", file=sys.stderr)
         raise SystemExit(2)
     caller_id = core._get_caller_id()
+    caller_owner_ref = core._worktrees_get("owner-ref") if is_remote_address(agent_name) else None
+    if is_remote_address(agent_name):
+        from .protocol import REMOTE_ACP_OWNERSHIP_PROTOCOL_VERSION
+        if (caller_id or "AGENT_WORKTREES_OWNER_REF" in os.environ) and not caller_owner_ref:
+            raise BridgeClientError(422, "Managed remote request has no qualified host owner")
+        if caller_owner_ref is not None and not client.daemon_supports(REMOTE_ACP_OWNERSHIP_PROTOCOL_VERSION):
+            raise BridgeClientError(426, "daemon does not support retained remote host ownership")
 
     daemon_reuse = is_remote_address(agent_name) and (
         not agent_name.startswith("remote-acp:")
@@ -310,7 +318,7 @@ def _start_agent_session(
             caller_session_id=core._get_caller_session_id(),
             sender_repo=sender_preference.project,
             force_new=force_new,
-            caller_owner_ref=core._worktrees_get("owner-ref"),
+            caller_owner_ref=caller_owner_ref if is_remote_address(agent_name) else core._worktrees_get("owner-ref"),
             worktree_id=worktree_id,
             model=model,
             effort=effort,

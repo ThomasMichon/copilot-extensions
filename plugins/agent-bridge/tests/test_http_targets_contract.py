@@ -1,4 +1,4 @@
-"""Independent HTTP-41 target expectations, re-attested at 42, with no live endpoint or secrets."""
+"""Independent HTTP target and owner expectations, with no live endpoint or secrets."""
 
 from __future__ import annotations
 
@@ -38,7 +38,7 @@ def _targets_vector(generation):
     )
 
 
-VECTOR = _targets_vector(42)
+VECTOR = _targets_vector(43)
 
 
 def _request(**state):
@@ -53,7 +53,7 @@ def _target():
 
 
 @pytest.mark.asyncio
-async def test_health_42_matches_independent_expected_vector(monkeypatch):
+async def test_health_43_matches_independent_expected_vector(monkeypatch):
     monkeypatch.setattr(
         health_route, "get_default_manager",
         lambda: SimpleNamespace(carrier_diagnostics=lambda: {}),
@@ -64,7 +64,7 @@ async def test_health_42_matches_independent_expected_vector(monkeypatch):
     assert {key: body[key] for key in VECTOR["health"]} == VECTOR["health"]
 
 
-@pytest.mark.parametrize("generation", [37, 38, 39, 40, 41, 42])
+@pytest.mark.parametrize("generation", [37, 38, 39, 40, 41, 42, 43])
 @pytest.mark.parametrize("address", ["url", "named"])
 def test_client_target_negotiation_precedes_request(generation, address):
     client = BridgeClient.__new__(BridgeClient)
@@ -83,7 +83,7 @@ def test_client_target_negotiation_precedes_request(generation, address):
         assert request.call_count == 1
         assert request.call_args.args == (
             expected["method"], expected["path"],
-            {"agent": VECTOR["client"][address], "protocol_version": 42},
+            {"agent": VECTOR["client"][address], "protocol_version": 43},
         )
 
 
@@ -204,7 +204,7 @@ def _wire_generation(value, generation):
     return value
 
 
-@pytest.mark.parametrize(("generation", "reattested"), [(41, 40), (42, 42)])
+@pytest.mark.parametrize(("generation", "reattested"), [(41, 40), (42, 42), (43, 42)])
 def test_reattestations_retain_independent_historical_expectations(generation, reattested):
     registry = json.loads((CONTRACT / "registry.json").read_text(encoding="utf-8"))
     contract = next(item for item in registry["contracts"] if item["id"] == "agent-bridge.http-wire")
@@ -230,3 +230,75 @@ def test_reattestations_retain_independent_historical_expectations(generation, r
         assert actual == expected
         assert current["captured_from"]["commit"] == vector["captured_from"]["commit"]
     assert count == reattested
+
+
+def test_generation_43_capture_matches_current_registered_sources():
+    registry = json.loads((CONTRACT / "registry.json").read_text(encoding="utf-8"))
+    contract = next(item for item in registry["contracts"] if item["id"] == "agent-bridge.http-wire")
+    sources = {item["path"]: item["sha256"] for item in contract["source_paths"]}
+    captures = {
+        (item["commit"], item["plugin_version"], item["generation"], item["source_path"], item["source_git_blob"])
+        for item in contract["provenance"]
+    }
+    for registered in contract["fixtures"]:
+        if registered["generation"] != 43:
+            continue
+        current = json.loads((REPO / registered["path"]).read_text(encoding="utf-8"))
+        captured = current["captured_from"]
+        assert captured["source_sha256"] == sources[captured["source_path"]]
+        assert (
+            captured["commit"], captured["plugin_version"], captured["protocol_generation"],
+            captured["source_path"], captured["source_git_blob"],
+        ) in captures
+
+
+OWNED = json.loads(
+    (CONTRACT / "fixtures/http/current/owned-remote-generation-43.json").read_text(encoding="utf-8")
+)
+
+
+@pytest.mark.parametrize("generation", [38, 39, 40, 41, 42, 43])
+@pytest.mark.parametrize("address", ["remote-acp:example-agent", "https://example.com/acp"])
+def test_owned_remote_client_refuses_before_sending_to_older_daemon(generation, address):
+    from agent_bridge import protocol
+
+    assert protocol.REMOTE_ACP_OWNERSHIP_PROTOCOL_VERSION == OWNED["capability"]["remote_acp_ownership"]
+    client = BridgeClient.__new__(BridgeClient)
+    client._daemon_proto = (generation, 1)
+    client._request = Mock(return_value={})
+    payload = {**OWNED["request"]["json"], "agent": address}
+    payload.pop("protocol_version")
+    if generation < OWNED["capability"]["remote_acp_ownership"]:
+        with pytest.raises(BridgeClientError) as refused:
+            client.start_session(**payload)
+        assert refused.value.status == OWNED["capability"]["unsupported_status"]
+        client._request.assert_not_called()
+    else:
+        client.start_session(**payload)
+        client._request.assert_called_once_with(
+            OWNED["request"]["method"], OWNED["request"]["path"],
+            {**OWNED["request"]["json"], "agent": address},
+            request_timeout=None,
+        )
+
+
+@pytest.mark.parametrize("phase", ["bound", "attempting", "retired", "closed"])
+def test_owned_remote_inspection_preserves_retained_terminal_identity(phase):
+    from agent_bridge.remote_relationships import inspect_row
+
+    row = {**OWNED["journal"], "phase": phase}
+    expected = {**OWNED["inspection"], "ownership": "owned" if phase == "bound" else phase}
+    assert inspect_row(row) == expected
+
+
+def test_unreserved_retirement_reports_its_confirmed_absence():
+    from agent_bridge.relationship_authority import confirm_absence
+    from agent_bridge.remote_relationships import inspect_row
+
+    expected = OWNED["unreserved_retirement"]
+    row = {
+        **OWNED["journal"], "phase": "closed", "claim": None, "native_id": None,
+        "absence": expected["authority"],
+    }
+    assert confirm_absence(row["absence"], owner=row["owner"], request_id=row["id"])
+    assert inspect_row(row) == expected["inspection"]

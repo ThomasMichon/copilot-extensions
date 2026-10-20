@@ -20,6 +20,29 @@ The registry is repository-side evidence; no runtime component reads it.
    python tools/run-plugin-tests.py agent-bridge --guards
    ```
 
+HTTP generation 43 retains every generation-42 fixture unchanged. Its
+re-attestations identify each original vector by path and LF-normalized hash,
+advance only `protocol_version` advertisements and record the exact committed
+source, Git blob and source hash. `test_http_targets_contract.py` checks that
+relationship for all 42 vectors and keeps the separate generation-40 to
+generation-41 and generation-41 to generation-42 checks. The hand-authored
+`owned-remote-generation-43.json` vector
+adds managed-owner negotiation and retained relationship inspection expectations;
+it does not claim that source capture proves live deployment or accepted
+cross-worktree transfer.
+Current re-attestations can identify different exact commits for different
+changed source files. Their hashes must match each current registered source
+and their complete capture identity must match registered provenance; an
+unrelated file does not require recapture solely to share a commit number.
+The ownership generation records the durable database dependencies alongside
+the source capture for its current vectors. Queue consumption and turn persistence
+are atomic, schema 26 requires ordinary preparation before passive adoption,
+and production import deferral preserves the native five-second gate. The
+expected wire bytes, prior-generation fixtures and capability floors do not
+change. Removing the selected queue row during authority inspection advances
+to the next durable row; changed rows, database failures and authority failures
+are not mistaken for removal or retried.
+
 ## Re-attesting the current preference-authority vectors
 
 After committing the authority source, run from the repository root:

@@ -8,7 +8,6 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from zdd.private_protocol import PrivateIPCError, Refusal
 
-from .app_routes import configure_serving_app
 from .auth import BearerAuthMiddleware
 from .db import Database
 from .runtime_restore import RestoredRuntime
@@ -23,6 +22,8 @@ class CandidateServing:
     """
 
     def __init__(self, app: FastAPI, runtime: RestoredRuntime) -> None:
+        from .app_routes import configure_serving_app
+
         if (
             runtime.roster is None or not runtime.roster.ready()
             or (runtime.sessions is not None and runtime.sessions.sessions)

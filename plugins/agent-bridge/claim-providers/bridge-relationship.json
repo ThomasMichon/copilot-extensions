@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "namespace": "bridge-relationship",
+  "status_command": ["agent-bridge"],
+  "no_self_provision_env": "AGENT_BRIDGE_NO_SELFPROVISION",
+  "description": "Provider-confirmed local retirement of retained external ACP relationships"
+}

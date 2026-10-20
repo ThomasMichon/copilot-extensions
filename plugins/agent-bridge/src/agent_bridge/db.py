@@ -18,6 +18,7 @@ from .db_maintenance import _MaintenanceMixin
 from .db_prompts import _PromptsMixin
 from .db_schema import _SchemaMixin
 from .db_sessions import _SessionsMixin
+from .db_relationships import _RelationshipsMixin
 
 __all__ = [
     "Database",
@@ -34,6 +35,7 @@ class Database(
     _CoreMixin,
     _SchemaMixin,
     _SessionsMixin,
+    _RelationshipsMixin,
     _LiveSessionsMixin,
     _LiveMessageReceiptsMixin,
     _EventsMixin,

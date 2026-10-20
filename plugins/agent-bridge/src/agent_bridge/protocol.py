@@ -209,7 +209,9 @@ REMOTE_ACP_TARGETS_PROTOCOL_VERSION = 41
 # attention ``position`` (``null`` without one). Below this the keys are absent,
 # so a reader can tell an unsupported daemon from one that has no boundary.
 ATTENTION_BOUNDARY_PROTOCOL_VERSION = 42
-HTTP_PROTOCOL_VERSION = 42
+# Managed remote ownership is independent of the attention boundary capability.
+REMOTE_ACP_OWNERSHIP_PROTOCOL_VERSION = 43
+HTTP_PROTOCOL_VERSION = 43
 
 # Oldest client HTTP-contract version this daemon still serves (the low end of
 # the supported range). Only ever raised after a deprecation window.

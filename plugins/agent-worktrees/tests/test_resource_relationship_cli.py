@@ -28,6 +28,7 @@ def test_actual_lazy_cli_capabilities_and_registered_reservation(owner, monkeypa
     capabilities = json.loads(captured.getvalue())
     assert capabilities["schema"] == relationship.SCHEMA
     assert capabilities["metadata_version"] == 2 and capabilities["handoff"] is False
+    assert capabilities["inspect_absence"] is True
     payload = {"kind": "bridge", "namespace": "bridge-remote", "request_id": "cli-one", "recovery": {}}
     monkeypatch.setattr(family.sys, "stdin", SimpleNamespace(buffer=io.BytesIO(json.dumps(payload).encode())))
     with output.capture_json_output() as captured:
@@ -106,6 +107,10 @@ sys.exit(main.main(argv))
     before = path.read_bytes()
     assert execute("reserve", payload) == pending and path.read_bytes() == before
     assert execute("inspect", {"request_id": "child-one"}) == pending
+    assert execute("inspect", {"request_id": "never-reserved", "allow_missing": True}) == {
+        "schema": relationship.SCHEMA, "version": 1, "ok": True,
+        "owner": "m/p/owner", "request_id": "never-reserved", "absent": True,
+    }
     bound = execute("bind", {"token": pending["token"], "identity": {"native_id": "conversation"}})
     assert bound["phase"] == "bound"
     assert tracking.load_record(path).resources[0].producer == bound["producer"]

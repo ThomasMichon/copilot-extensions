@@ -8,9 +8,6 @@ from __future__ import annotations
 
 import logging
 
-from .agent_registry import AgentResolver
-from .agent_registry_cache import AgentRosterCache
-
 log = logging.getLogger("agent-bridge")
 
 
@@ -29,6 +26,9 @@ async def start_agent_roster_cache(app, resolver, cfg) -> None:
     initialization never leaks a duplicate, still-scanning background loop
     that shutdown could then only ever stop the newest of.
     """
+    from .agent_registry import AgentResolver
+    from .agent_registry_cache import AgentRosterCache
+
     if not isinstance(resolver, AgentResolver):
         return
     await stop_agent_roster_cache(app)

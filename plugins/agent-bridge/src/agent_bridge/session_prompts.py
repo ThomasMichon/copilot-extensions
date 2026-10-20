@@ -9,6 +9,7 @@ import json
 import time
 from typing import Any
 
+from .db_events import PendingPromptRemovedError
 from .models import SessionStatus
 from .session_manager import DaemonDrainingError, Session, log
 from .session_stop import SESSION_NOT_RUNNING, SESSION_STOPPED
@@ -56,6 +57,8 @@ class _SessionPromptMixin:
     async def _submit_prompt_locked(
         self, session_id: str, prompt: str, *, no_resume: bool = False,
         delivery_id: str | None = None,
+        pending_prompt_id: int | None = None,
+        pending_prompt_caller_id: str | None = None,
     ) -> int:
         """Submit a prompt to a session, returning the turn index.
 
@@ -108,15 +111,29 @@ class _SessionPromptMixin:
             )
             # resume_session sets status to IDLE and attaches a new client
 
+        from .remote_relationships import assert_admission
+        await assert_admission(self, session)
+        if self._draining:
+            raise DaemonDrainingError("turn")
         turn_index = session.turn_count
-        session.turn_count += 1
         now = time.time()
 
         # Persist turn skeleton
-        if delivery_id is None:
+        if pending_prompt_id is not None:
+            self._db.create_turn(
+                session_id, turn_index, prompt, now, delivery_id=delivery_id,
+                pending_prompt_id=pending_prompt_id,
+            )
+        elif delivery_id is None:
             self._db.create_turn(session_id, turn_index, prompt, now)
         else:
             self._db.create_turn(session_id, turn_index, prompt, now, delivery_id=delivery_id)
+        session.turn_count += 1
+        if pending_prompt_id is not None and session.event_log:
+            session.event_log.append("prompt_dequeued", {
+                "queue_id": pending_prompt_id,
+                "caller_id": pending_prompt_caller_id,
+            })
 
         # Cancel any pending out-of-turn content bracket (#2835) synchronously,
         # BEFORE this new turn's `running` is written and the prompt task is
@@ -351,11 +368,11 @@ class _SessionPromptMixin:
         """Deliver the next durable queued prompt, if the session can run it.
 
         Called from the turn-settle tail and the resume idle-tail. Atomically
-        pops one row and submits it; the follow-up's own settle re-invokes this,
+        admits one queued row; the follow-up's own settle re-invokes this,
         so the queue drains one-per-turn in FIFO order. Only drains an IDLE
         session with a live client -- if the process is dead, a later resume
         drains instead, so a queued message is never lost to a dead process, and
-        pop-then-submit stays exactly-once (no loss, no dup).
+        queue consumption and turn persistence commit atomically.
         """
         async with session._turn_start_lock:
             if self._sessions.get(session.session_id) is not session:
@@ -363,35 +380,38 @@ class _SessionPromptMixin:
             await self._drain_pending_prompts_locked(session)
 
     async def _drain_pending_prompts_locked(self, session: Session) -> None:
-        """Pop and submit one queued prompt while teardown is excluded."""
+        """Submit one queued prompt while teardown is excluded."""
         if session.status != SessionStatus.IDLE:
             return
         if not (session.client and session.client.is_running):
             return
-        row = self._db.pop_pending_prompt(session.session_id)
-        if row is None:
+        while True:
+            row = self._db.peek_pending_prompt(session.session_id)
+            if row is None:
+                return
+            prompt = row["prompt"]
+            turn_index = session.turn_count
+            try:
+                await self._submit_prompt_locked(
+                    session.session_id, prompt, pending_prompt_id=row["id"],
+                    pending_prompt_caller_id=row.get("caller_id"),
+                )
+            except PendingPromptRemovedError:
+                log.info(
+                    "Queued prompt %d for session %s removed before admission; checking next",
+                    row["id"], session.session_id,
+                )
+                continue
+            except (Exception, asyncio.CancelledError) as exc:
+                persisted = self._db.get_turn(session.session_id, turn_index) is not None
+                log.error(
+                    "Dequeued prompt for session %s interrupted: %s: %s -- %s",
+                    session.session_id, type(exc).__name__, exc,
+                    "turn already persisted" if persisted else "queue not consumed by admission",
+                )
+                if isinstance(exc, asyncio.CancelledError):
+                    raise
             return
-        prompt = row["prompt"]
-        if session.event_log:
-            session.event_log.append("prompt_dequeued", {
-                "queue_id": row["id"],
-                "caller_id": row.get("caller_id"),
-            })
-        try:
-            await self._submit_prompt_locked(session.session_id, prompt)
-        except Exception as exc:
-            # Defensive: an unexpected submit failure must not drop the message.
-            # Re-enqueue (at the tail -- a rare reorder is better than a loss);
-            # a later settle/resume retries delivery.
-            log.error(
-                "Dequeued prompt for session %s failed to submit: %s "
-                "-- re-enqueuing",
-                session.session_id, exc,
-            )
-            self._db.enqueue_prompt(
-                session.session_id, prompt, time.time(),
-                caller_id=row.get("caller_id"),
-            )
 
     def _clear_pending_queue(self, session: Session, *, reason: str) -> int:
         """Drop a session's whole durable queue; emit ``queue_cleared`` if any.
@@ -493,7 +513,7 @@ class _SessionPromptMixin:
 
         # Deliver the next durable queued follow-up now that the turn settled.
         # One-per-turn FIFO: this drains a single row and submits it; that turn's
-        # own settle re-enters here for the next. Exactly-once (atomic pop), and
+        # own settle re-enters here for the next. Atomic queue-to-turn commit, and
         # a no-op when the queue is empty or the process has since died.
         await self._drain_pending_prompts(session)
 

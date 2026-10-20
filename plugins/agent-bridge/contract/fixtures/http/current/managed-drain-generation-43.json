@@ -1,0 +1,23 @@
+{
+  "during_claim_inspection": {
+    "session_status": "idle",
+    "active_acquisitions": 0
+  },
+  "drain_result": {
+    "clean": true
+  },
+  "released_inspection": {
+    "refusal": "DaemonDrainingError",
+    "turn_count": 0,
+    "persisted_turns": []
+  },
+  "independent_expectations": "A clean drain may finish while a managed claim inspection is pending, but releasing that inspection cannot admit or persist a new turn. The existing turn-drain refusal remains distinct from answers that settle already-admitted work.",
+  "captured_from": {
+    "commit": "2a150b33ee33c1caf758f3a498149a27ff286e2c",
+    "plugin_version": "0.4.1-dev3",
+    "protocol_generation": 43,
+    "source_path": "plugins/agent-bridge/src/agent_bridge/session_prompts.py",
+    "source_git_blob": "8d97b34c3092e833850dd7c09204991c77375b7b",
+    "source_sha256": "83876d3d126b78187fd3d1ba486355f2b97f08adb28805ae66ffdddf06c51a49"
+  }
+}

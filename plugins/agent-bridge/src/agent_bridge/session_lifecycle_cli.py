@@ -205,7 +205,7 @@ def _agent_bridge_installation_context() -> str:
     return explicit_context
 
 
-def _agent_worktrees_launch_prefix() -> list[str] | None:
+def _agent_worktrees_launch_prefix(*, allow_path_fallback: bool = True) -> list[str] | None:
     core = _core()
     explicit_context = _agent_bridge_installation_context()
     own_root = _agent_bridge_owner_root()
@@ -213,6 +213,8 @@ def _agent_worktrees_launch_prefix() -> list[str] | None:
         prefix = _legacy_worktrees_launch_prefix(own_root)
         if prefix:
             return prefix
+        if not allow_path_fallback:
+            return None
         exe = shutil.which("agent-worktrees")  # marketplace-isolation: allow legacy-compatibility
         return [exe] if exe else None
     try:

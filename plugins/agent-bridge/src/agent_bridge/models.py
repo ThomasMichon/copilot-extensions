@@ -145,6 +145,7 @@ class SessionInfo(BaseModel):
     last_heartbeat_at: str | None = None
     liveness: str | None = None
     at_rest: bool = False
+    remote_relationship: dict[str, Any] | None = None
 
 
 class WorktreeHandoffRequest(BaseModel):
@@ -255,6 +256,7 @@ class StartSessionResponse(PreferencePolicyFields):
     name: str
     status: SessionStatus
     caller_session_id: str | None = None  # recorded creating Copilot session (v24+)
+    remote_relationship: dict[str, Any] | None = None
     # The responding daemon's HTTP wire-contract version + supported range, so a
     # (cross-host) caller can gate capabilities across version skew (dotfiles
     # #632). Defaulted to this build's constants at every construction site.

@@ -6,13 +6,27 @@ from __future__ import annotations
 class _MaintenanceMixin:
     """Garbage collection and size-management helpers."""
 
+    def gc_retained_relationship_session_ids(self) -> set[str]:
+        """Keep original handles until their relationship closeout is confirmed."""
+        if not self.execute_read(
+            "SELECT 1 FROM sqlite_master "
+            "WHERE type='table' AND name='remote_acp_relationships'"
+        ):
+            return set()
+        return {
+            row["session_id"] for row in self.execute_read(
+                "SELECT session_id FROM remote_acp_relationships WHERE phase != 'closed'"
+            )
+        }
+
     def gc_eligible_session_ids(
         self, statuses: list[str], cutoff_ts: float
     ) -> list[str]:
         """Return ids of sessions in ``statuses`` last updated before ``cutoff_ts``.
 
         Used by the GC sweep to find terminal/disconnected sessions whose
-        relay metadata is past the retention window.
+        relay metadata is past the retention window, excluding relationships
+        that still need their original handle for recovery or settlement.
         """
         if not statuses:
             return []
@@ -22,7 +36,8 @@ class _MaintenanceMixin:
             "AND updated_at < ? ORDER BY updated_at",
             (*statuses, cutoff_ts),
         )
-        return [r["id"] for r in rows]
+        retained = self.gc_retained_relationship_session_ids()
+        return [r["id"] for r in rows if r["id"] not in retained]
 
     def gc_status_summary(self, statuses: list[str]) -> dict[str, float | int | None]:
         """Summarize the retained population for the configured GC statuses."""

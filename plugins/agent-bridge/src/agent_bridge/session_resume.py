@@ -8,9 +8,8 @@ import json
 import time
 import uuid
 from dataclasses import replace
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from .acp_client import AcpClient
 from .session_preferences import client_preferences
 from .models import SessionStatus
 from .transport import SpawnTarget
@@ -21,6 +20,9 @@ from .session_manager import (
     Session,
     log,
 )
+
+if TYPE_CHECKING:
+    from .acp_client import AcpClient
 
 _NATIVE_OWNER_CALLER_PREFIX = "native-owner-resume:"
 
@@ -141,6 +143,16 @@ class _SessionResumeMixin:
 
         if session.target.type == "remote-acp":
             from .remote_acp_sessions import connect_remote_session
+            from .remote_relationships import owned
+            if owned(session):
+                resumed = await connect_remote_session(
+                    self, session.agent_name.removeprefix("remote-acp:"),
+                    cwd=session.target.cwd or "/", remote_session_id=session.acp_session_id,
+                    session=session, project=session.target.project, reuse=True,
+                )
+                if drain:
+                    await self._drain_pending_prompts(resumed)
+                return resumed
             async with session._lifecycle_lock:
                 if session.status != SessionStatus.STOPPED or not session.acp_session_id:
                     raise ValueError("Remote resume requires a stopped durable session")

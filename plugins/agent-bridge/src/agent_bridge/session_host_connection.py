@@ -7,13 +7,15 @@ import contextlib
 import os
 import time
 from dataclasses import is_dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from .acp_client import AcpClient
 from .acp_diagnostics import capture_acp_parse_errors, describe_truncated_child
 from .connect import ConnectError, ConnectStage
 from .models import SessionStatus
 from .session_manager import Session, _AcpLaunchTiming, _default_cwd, log
+
+if TYPE_CHECKING:
+    from .acp_client import AcpClient
 from .transport import SpawnTarget
 from .session_preferences import client_preferences
 

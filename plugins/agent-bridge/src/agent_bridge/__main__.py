@@ -513,6 +513,8 @@ def build_parser() -> argparse.ArgumentParser:
     register_session_lifecycle_commands(sub)
     from .acquisition_cli import register as register_acquisition
     register_acquisition(sub)
+    from .relationship_cli import register as register_relationship
+    register_relationship(sub)
     return parser
 
 

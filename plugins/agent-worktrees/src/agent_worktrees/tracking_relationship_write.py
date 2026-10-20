@@ -19,7 +19,7 @@ from .tracking_producer_write import _owned_record, _require_mutable_owner
 def _input(operation: str, payload: object) -> dict:
     keys = {
         "reserve": ({"kind", "namespace", "request_id", "recovery"},),
-        "inspect": ({"token"}, {"request_id"}),
+        "inspect": ({"token"}, {"request_id"}, {"request_id", "allow_missing"}),
         "bind": ({"token", "identity"},),
         "close": ({"token"},),
     }
@@ -32,6 +32,8 @@ def _input(operation: str, payload: object) -> dict:
         raise ValueError("invalid relationship token")
     if "request_id" in payload and not relationship.valid_request_id(payload["request_id"]):
         raise ValueError("invalid relationship request_id")
+    if "allow_missing" in payload and payload["allow_missing"] is not True:
+        raise ValueError("relationship absence inspection requires allow_missing=true")
     if operation == "reserve":
         for key in ("kind", "namespace"):
             if not isinstance(payload[key], str) or not claim_providers.is_safe_argument(payload[key]):
@@ -51,6 +53,13 @@ def _matches(record, payload):
         and claim.producer.get("lifetime") == relationship.LIFETIME
         and claim.producer.get(field) == payload[field]
     ]
+    if not matches and payload.get("allow_missing") is True:
+        if any(
+            claim.metadata_opaque or claim.has_producer and not producer.valid_metadata(claim.producer)
+            for claim in record.resources
+        ):
+            raise ValueError("opaque or malformed claim storage prevents relationship absence inspection")
+        return None
     if len(matches) != 1:
         raise ValueError("relationship handle is missing or ambiguous in this owner's ledger")
     claim = matches[0]
@@ -72,8 +81,8 @@ def _reserve(record, owner, payload):
     from . import claims_cli, config as cfg
 
     for claim in record.resources:
-        if claim.has_producer and not producer.valid_metadata(claim.producer):
-            raise ValueError("malformed protected obligation prevents relationship reservation")
+        if claim.metadata_opaque or claim.has_producer and not producer.valid_metadata(claim.producer):
+            raise ValueError("opaque or malformed claim storage prevents relationship reservation")
     existing = [
         claim for claim in record.resources
         if claim.has_producer and isinstance(claim.producer, dict)
@@ -146,6 +155,11 @@ def apply_resource_relationship(args: dict) -> dict:
                     return _response(record, claim)
             else:
                 claim = _matches(record, payload)
+                if claim is None:
+                    return {
+                        "schema": relationship.SCHEMA, "version": relationship.VERSION, "ok": True,
+                        "owner": owner.canonical(), "request_id": payload["request_id"], "absent": True,
+                    }
                 if operation == "inspect" or operation == "close" and claim.producer["phase"] == "closed":
                     return _response(record, claim)
                 _require_mutable_owner(record)

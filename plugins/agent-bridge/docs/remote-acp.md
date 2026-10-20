@@ -90,8 +90,8 @@ after resolving the selected project's current canonical target and policy.
 Reuse requires the same project, server-side cwd and complete binding snapshot;
 a stopped conversation loads its retained remote ID. Another project's binding
 never reuses or takes over that session. A changed binding refuses reuse until
-an explicit new attachment (`force_new: true`); anonymous starts always create
-a new conversation. Concurrent starts share the reserved starting session,
+an explicit new attachment (`force_new: true`); unowned anonymous starts always create
+a new conversation. Concurrent unowned starts share the reserved starting session,
 including an explicit native ID whose load has not yet completed. Stopped
 caller reuse serializes with explicit resume/stop through the session's
 lifecycle lock and revalidates state and policy after acquiring it.
@@ -107,6 +107,131 @@ Endpoint targeting/contributions are advertised by HTTP generation 41
 sending it to an older daemon; named remote ACP retains its generation-38 floor.
 For named targets, generation-38 through generation-40 daemons retain legacy
 CLI caller reuse; binding-aware daemon reuse applies from generation 41.
+
+### Durable host-worktree responsibility
+
+HTTP generation 43 adds retained host ownership, independently of generation 42's
+attention boundaries. The ordinary CLI forwards its
+qualified host owner; `BridgeClient.start_session` and the session API accept
+`caller_owner_ref`, such as `local/example/host`. A session-qualified reference
+normalizes to its worktree: a successor caller session retains the same owner.
+Caller affinity, caller-session provenance, the Bridge handle and the
+target-scoped native conversation ID remain separate identities.
+An owner declaration in `AGENT_WORKTREES_OWNER_REF` is not authority by itself:
+if the CLI cannot resolve its qualified owner, it refuses rather than silently
+starting unowned, even when its caller-ID probe also failed.
+
+Managed requests require the compatible Worktrees
+[`resource-relationship` authority](../../agent-worktrees/docs/resource-relationship.md)
+in the same resolved installation, including its explicit read-only reservation
+absence capability. Missing/incompatible authority, unresolved or frozen owners
+and conflicting ownership refuse before remote creation. There is no
+legacy-claim, private-store or unowned fallback. A managed CLI request also
+refuses if its qualified owner cannot be obtained. Clients refuse managed
+remote requests to older daemons before the CLI's legacy caller-reuse path.
+The finite authority command must establish native custody before receiving
+transaction stdin: a Windows Job or Linux identity-checked process group.
+Timeout/cancellation retires that scope and bounds pipe collection; unconfirmed
+cleanup stays an explicitly unknown outcome and cancellation still propagates.
+macOS daemon-host authority is not qualified without that identity backend;
+ordinary clients and standalone unowned requests are unchanged.
+The production startup path defers ACP SDK/client construction until an ACP
+operation needs it. The public `session_manager.AcpClient` export still resolves
+to the exact client class, not a substitute. Passive candidate preparation also
+avoids constructing ordinary serving routes and starting cache machinery;
+those remain owned by the existing serving and readiness boundaries.
+
+Bridge atomically persists its pending acquisition and session, then confirms a
+protected claim before connecting to the peer. The stable relationship ID is the
+reservation's replay key. Lost claim responses reconcile that same key, not a
+second reservation. If read-back is also unavailable, the original commit remains
+unknown rather than becoming a definite refusal. An unknown `session/new`
+outcome retains an explicitly
+uncertain obligation and is never replayed automatically. A known native ID is
+saved before binding; recovery reconciles that claim and loads the known
+conversation instead of creating another. Matching includes the journal's
+requested and accepted native IDs after a failed load or restart. If interruption
+occurs after the session row records an accepted ID but before journal binding,
+recovery reconciles that persisted ID before admitting another attachment.
+If startup is cancelled after the SDK knows its accepted native ID, Bridge
+persists that ID before awaiting transport cleanup. Repeated cancellation
+cannot turn a known conversation into an unidentifiable remote outcome.
+The approved binding appears once in claim recovery; bound identity adds a
+fixed-size SHA-256 fingerprint of the opaque native ID. The full ID remains in
+the Bridge journal and inspection. This keeps the exact subject within the
+Worktrees callback limit without duplicating a potentially long binding or ID.
+After reservation, Bridge checks capacity for the eventual bound subject before
+connecting to the peer. Insufficient capacity retains the pending claim for
+explicit local retirement; it never creates an unusably large remote attachment.
+
+By default, managed starts reuse the owner's conversation in the same canonical
+binding and server-side cwd, even without a caller ID. `force_new` explicitly
+requests another conversation, but cannot fork an already-known owned native
+ID. A different worktree cannot take over an existing owned conversation, and
+an existing unowned record is not implicitly adopted.
+
+Stop, connection loss, daemon restart and same-worktree succession preserve the
+claim. Active or uncertain claims block worktree finalization. Explicit end
+closes local admission, drains local operations and durably retires the local
+relationship before settling the claim through the registered
+`bridge-relationship` provider. The provider verifies the exact current subject;
+peer absence is neither required nor asserted. Disconnected idle relationships
+can retire locally. This does not terminate the peer service, delete remote
+history, or establish that uncertain remote work was cancelled.
+
+Inspection is available in `remote_relationship` on ordinary start/list/detail
+responses, and after local retirement through:
+
+```text
+agent-bridge relationship-inspect <bridge-session-id>
+GET /api/v1/sessions/<bridge-session-id>/relationship
+```
+
+These report the owner, relationship ID, claim ref, native ID and uncertainty.
+Settlement failure retains the retired journal and Bridge handle for an explicit
+end retry; unknown remote outcomes remain in the terminal audit. Provider status
+reads never ensure a daemon or self-provision a runtime.
+Failed local shutdown retains the managed client until all its local transport
+tasks quiesce. Stop does not discard that teardown reference, resume cannot
+replace it prematurely, and end/provider verification cannot claim quiescence
+merely because the session is marked stopped.
+Turn admission rechecks daemon drain after claim inspection, before counting or
+persisting a turn. An inspection released after a clean drain cannot start new
+work across the cutover boundary.
+Queued follow-ups remain durably queued, with their original ID, FIFO position
+and caller attribution, throughout claim inspection. Queue consumption and
+turn creation commit in one transaction. Cancellation, admission failure or
+daemon exit before that commit leaves the original queue row recoverable;
+an interruption afterward does not enqueue a duplicate. Cancellation still
+propagates to the stopping task.
+Nonclosed relationships retain their original session handles through ordinary
+garbage collection and startup cleanup, regardless of age. Closed and unowned
+sessions keep the normal retention policy; terminal relationship audit remains
+independent of session pruning.
+Direct retirement also recovers an accepted native ID persisted in the session
+row before journal binding, so terminal audit does not depend on resuming first.
+For an unconfirmed reservation, end performs exact read-only reconciliation,
+not another reserve. Only authoritative absence, with no accepted native ID or
+uncertain remote attempt, permits an unreserved local close; its receipt remains
+in the terminal journal and inspection reports `reservation_absent: true`.
+Unknown, malformed or unavailable absence evidence retains the pending handle.
+
+Relationship tables require database schema 27. Passive preparation and
+migration-free writable adoption refuse a preceding schema-26 database rather
+than promoting it without those tables. The ordinary writable database startup
+prepares the additive schema and authority identity before passive adoption is
+possible; adoption itself never creates tables, migrates or starts a writer.
+An upgrade across this schema boundary therefore needs separately authorized
+schema preparation through ordinary startup, not an implicit candidate-side
+migration or restart.
+
+Acknowledged cross-worktree transfer is not implemented by this slice.
+Worktrees continues advertising `handoff: false` and refusing retained offers
+and acceptances. Do not substitute generic claim release or disposable resource
+deletion. Before activating retained relationships, qualify every participating
+ledger writer; a source merge or one compatible command is not a rollout grant.
+Standalone programmatic requests with no supplied owner remain explicitly
+unowned and do not require Worktrees.
 
 ### Enabled-plugin target requirements
 

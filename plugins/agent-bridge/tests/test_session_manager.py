@@ -4990,7 +4990,7 @@ class TestDurablePromptQueue:
         submitting = asyncio.Event()
         release_submit = asyncio.Event()
 
-        async def delayed_submit(session_id: str, prompt: str) -> int:
+        async def delayed_submit(session_id: str, prompt: str, **kwargs) -> int:
             submitting.set()
             await release_submit.wait()
             session.status = SessionStatus.RUNNING

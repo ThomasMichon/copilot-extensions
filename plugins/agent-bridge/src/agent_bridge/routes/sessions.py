@@ -66,6 +66,10 @@ from .prompts import (  # noqa: F401 -- preserved public route imports
 from .answers import (  # noqa: F401 -- preserved public route imports
     answer_ask_user, answer_permission, router as answer_router,
 )
+from .relationships import (  # noqa: F401 -- preserved public route imports
+    inspect_relationship, relationship_verification, start_remote_session,
+    router as relationship_router,
+)
 
 if TYPE_CHECKING:
     from ..session_manager import Session, SessionManager
@@ -75,6 +79,7 @@ log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/sessions", tags=["sessions"])
 router.include_router(prompt_router)
 router.include_router(answer_router)
+router.include_router(relationship_router)
 
 # Sentinel cursor key for callers with no caller_id -- keeps delivery_cursors'
 # primary key non-null while giving anonymous callers a shared resume point.
@@ -371,9 +376,10 @@ async def _sse_event_stream(  # noqa: ANN001
             mgr.remove_subscriber(session.session_id)
 
 
-def _session_info(s) -> SessionInfo:  # noqa: ANN001
+def _session_info(s, manager=None) -> SessionInfo:  # noqa: ANN001
     """Convert an internal Session to the public SessionInfo model."""
     from datetime import datetime, timezone
+    from ..remote_relationships import inspection
 
     status, at_rest, liveness = s.public_state()
     return SessionInfo(
@@ -390,6 +396,10 @@ def _session_info(s) -> SessionInfo:  # noqa: ANN001
         worktree_id=s.target.worktree_id,
         elevated=s.target.elevated,
         read_only=False,
+        remote_relationship=(
+            inspection(manager, s)
+            if manager is not None and s.target.type == "remote-acp" else None
+        ),
         status=status,
         pid=s.pid,
         turn_count=s.turn_count,
@@ -637,25 +647,7 @@ async def start_session(req: StartSessionRequest, request: Request):
             )
 
     if agent_name and is_remote_address(agent_name):
-        from .. import remote_acp_sessions as remote_api
-        if remote_api.has_local_launch_options(req):
-            raise HTTPException(422, "Remote ACP target does not launch local resources")
-        try:
-            remote = await remote_api.connect_remote_session(
-                mgr, agent_name.removeprefix("remote-acp:"),
-                cwd=req.target_dir or "/", caller_id=req.caller_id,
-                caller_session_id=req.caller_session_id, remote_session_id=req.remote_session_id,
-                **({"reuse": True} if req.caller_id and not req.force_new else {}),
-                **({"project": req.sender_repo} if req.sender_repo is not None else {}),
-            )
-        except remote_api.RemoteSessionBusy as exc:
-            raise HTTPException(409, exc.detail) from None
-        except (ValueError, PermissionError, ConnectionError):
-            raise HTTPException(422, "Remote ACP target/connection refused") from None
-        return StartSessionResponse(
-            session_id=remote.session_id, name=remote.name, status=remote.status,
-            caller_session_id=remote.caller_session_id,
-        )
+        return await start_remote_session(mgr, req, agent_name)
     if req.remote_session_id is not None:
         raise HTTPException(422, "remote_session_id requires a configured remote ACP target")
 
@@ -798,7 +790,7 @@ async def list_sessions(request: Request, status: str | None = None):
     mgr: SessionManager = request.app.state.session_manager
     status = status or None
     primary_sessions = mgr.list_sessions()
-    infos = [_session_info(session) for session in primary_sessions]
+    infos = [_session_info(session, mgr) for session in primary_sessions]
     if status is not None:
         infos = [info for info in infos if info.status.value == status]
 
@@ -833,7 +825,7 @@ async def get_session(session_id: str, request: Request):
     mgr: SessionManager = request.app.state.session_manager
     session = mgr.get_session(session_id)
     if session:
-        return _session_info(session)
+        return _session_info(session, mgr)
     # Nothing live -- ask a registered cold-store provider before giving up.
     cold = await mgr.fetch_cold_store_session(session_id)
     if cold is not None:

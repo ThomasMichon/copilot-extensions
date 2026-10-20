@@ -17,11 +17,10 @@ import shlex
 import shutil
 import subprocess
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from agent_procutil import no_window_flags
 
-from .acp_client import AcpClient
 from .events import EventLog
 from .models import SessionStatus
 from .session_host_liveness import _HostLivenessMixin
@@ -33,6 +32,19 @@ from .session_recovery_dormancy import (
 )
 from .session_lifecycle_cli import _agent_worktrees_environment, _agent_worktrees_launch_prefix
 from .transport import SpawnTarget, spawn
+
+if TYPE_CHECKING:
+    from .acp_client import AcpClient
+
+
+def __getattr__(name: str) -> type[AcpClient]:
+    if name == "AcpClient":
+        from .acp_client import AcpClient
+
+        globals()[name] = AcpClient
+        return AcpClient
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 log = logging.getLogger("agent-bridge")
 

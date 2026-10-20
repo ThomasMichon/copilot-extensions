@@ -35,6 +35,15 @@ class _PromptsMixin:
         )
         return [dict(r) for r in rows]
 
+    def peek_pending_prompt(self, session_id: str) -> dict[str, Any] | None:
+        """Read the oldest prompt without consuming its durable queue entry."""
+        rows = self.execute_read(
+            "SELECT id, session_id, caller_id, prompt, created_at "
+            "FROM pending_prompts WHERE session_id=? ORDER BY id ASC LIMIT 1",
+            (session_id,),
+        )
+        return dict(rows[0]) if rows else None
+
     def pop_pending_prompt(self, session_id: str) -> dict[str, Any] | None:
         """Atomically remove and return the oldest queued prompt (or None).
 

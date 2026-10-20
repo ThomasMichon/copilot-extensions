@@ -616,20 +616,21 @@ class _SessionCoreMixin(_SessionDrainGateMixin):
 
         Running processes are gone after a restart, so any session that
         was RUNNING/IDLE/STARTING gets marked STOPPED (resumable).
-        Sessions that were ENDED get cleaned up. Incomplete turns are
-        marked as interrupted.
+        Sessions that were ENDED get cleaned up unless relationship closeout
+        is still pending. Incomplete turns are marked as interrupted.
 
         A passive successor uses read-only hydration: the predecessor and
         independent hosts may still own live turns. Preserve status/cursors,
         do not append restart events, delete sessions or run startup GC.
         """
         rows = self._db.list_sessions()
+        retained = self._db.gc_retained_relationship_session_ids()
         now = time.time()
         for row in rows:
             sid = row["id"]
             status = row["status"]
 
-            if status == SessionStatus.ENDED.value:
+            if status == SessionStatus.ENDED.value and sid not in retained:
                 if read_only:
                     continue
                 # Defense-in-depth: a single session's cleanup must never brick
@@ -772,8 +773,10 @@ class _SessionCoreMixin(_SessionDrainGateMixin):
         ``RetentionConfig.statuses``) whose last update is older than the
         retention window, then optionally VACUUMs to return freed pages to the
         OS. Live sessions -- and any whose ACP client is still running -- are
-        never touched. The canonical Copilot session history lives outside
-        this DB and is unaffected.
+        never touched. Nonclosed relationships also retain both the persisted
+        session and its in-memory handle for recovery and settlement retries.
+        The canonical Copilot session history lives outside this DB and is
+        unaffected.
 
         Returns a summary dict: ``enabled``, ``pruned`` (ids), ``pruned_count``,
         ``vacuumed`` (bool), ``reclaimed_bytes``.

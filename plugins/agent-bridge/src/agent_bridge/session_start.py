@@ -8,9 +8,8 @@ import json
 import time
 import uuid
 from dataclasses import replace
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from .acp_client import AcpClient
 from .caller_session import normalize_caller_session_id
 from .connect import ConnectError, ConnectStage, ConnectTracker
 from .events import EventLog
@@ -39,6 +38,9 @@ from .session_manager import (
 from .transport import AgentProcess, SpawnTarget
 from .session_preferences import client_preferences
 from .venue_launch_policy import LaunchRefusedError
+
+if TYPE_CHECKING:
+    from .acp_client import AcpClient
 
 _CFG = ".agent-bridge/config.yaml"  # marketplace-isolation: allow deployed-runtime-diagnostics
 

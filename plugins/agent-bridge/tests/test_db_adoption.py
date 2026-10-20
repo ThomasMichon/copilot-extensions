@@ -11,6 +11,62 @@ from agent_bridge.db import Database, SCHEMA_VERSION
 from agent_bridge.db_adoption import open_existing_writable
 
 
+def test_pre_relationship_v26_requires_preparation_before_passive_adoption(tmp_path):
+    path = tmp_path / "sessions.db"
+    # Frozen v26 core projection, not a database bootstrapped by today's schema.
+    with sqlite3.connect(path) as conn:
+        conn.executescript("""
+            PRAGMA journal_mode=WAL;
+            CREATE TABLE schema_version (version INTEGER NOT NULL);
+            INSERT INTO schema_version VALUES (26);
+            CREATE TABLE sessions (
+                id TEXT PRIMARY KEY, name TEXT NOT NULL, agent_name TEXT,
+                caller_id TEXT, caller_session_id TEXT, target_dir TEXT,
+                target_type TEXT NOT NULL DEFAULT 'local', target_json TEXT,
+                status TEXT NOT NULL DEFAULT 'created', pid INTEGER,
+                acp_session_id TEXT, config_json TEXT, context_size INTEGER,
+                context_used INTEGER, usage_model TEXT, last_usage_at REAL,
+                predecessor_id TEXT, successor_id TEXT, handoff_at REAL,
+                background_recovery_enabled INTEGER NOT NULL DEFAULT 1,
+                created_at REAL NOT NULL, updated_at REAL NOT NULL
+            );
+            INSERT INTO sessions (id,name,status,created_at,updated_at)
+                VALUES ('retained','retained','stopped',1,1);
+        """)
+    before = path.read_bytes()
+    with pytest.raises(ValueError, match="current schema"):
+        Database(path, read_only=True)
+    assert path.read_bytes() == before
+    with sqlite3.connect(path) as conn:
+        assert conn.execute("SELECT version FROM schema_version").fetchone()[0] == 26
+        assert conn.execute(
+            "SELECT name FROM sqlite_master WHERE name LIKE 'remote_acp_relationship%'"
+        ).fetchall() == []
+
+    prepared = Database(path)
+    try:
+        assert SCHEMA_VERSION == 27
+        assert prepared.get_session("retained")["status"] == "stopped"
+        identity = prepared.execute_read(
+            "SELECT id FROM remote_acp_relationship_authority WHERE singleton=1"
+        )[0]["id"]
+        assert len(identity) == 32
+        assert prepared.execute_read("SELECT * FROM remote_acp_relationships") == []
+    finally:
+        prepared.close()
+    passive = Database(path, read_only=True)
+    writable = open_existing_writable(passive)
+    try:
+        assert writable.execute_read(
+            "SELECT id FROM remote_acp_relationship_authority WHERE singleton=1"
+        )[0]["id"] == identity
+        assert writable.get_session("retained")["status"] == "stopped"
+        assert writable._writer_thread is None
+    finally:
+        writable.close()
+        passive.close()
+
+
 def test_existing_writable_owner_never_migrates_or_starts_writer(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

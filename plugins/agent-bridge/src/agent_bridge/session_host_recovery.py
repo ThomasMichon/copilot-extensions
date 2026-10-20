@@ -6,9 +6,8 @@ import asyncio
 import contextlib
 import os
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from .acp_client import AcpClient
 from .connect import ConnectTracker
 from .models import SessionStatus
 from .session_manager import (
@@ -18,6 +17,9 @@ from .session_manager import (
     RemoteHostRecoveryPendingError,
     log,
 )
+
+if TYPE_CHECKING:
+    from .acp_client import AcpClient
 
 
 def _core() -> Any:

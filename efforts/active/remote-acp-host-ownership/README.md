@@ -202,6 +202,332 @@ before the proposal clears review.
 
 ## Journal
 
+### 2026-10-20 - Reconcile independent generation and queue-removal race
+
+- Retained the upstream attention-boundary generation 42 and all its evidence.
+  The unpublished ownership capability moves to generation 43, explicitly
+  refusing attention-only daemons. Current re-attestations derive from the
+  independent upstream generation-42 vectors, not the divergent unpublished
+  ownership vectors.
+- Atomic turn admission distinguishes a removed queue row from a changed row
+  or other database failure. Drain advances only after a typed missing-row
+  refusal, so deleting the selected prompt during authority inspection does
+  not strand a second queued prompt. Cancellation and authority failures
+  retain their existing non-retry behavior.
+- This is source reconciliation and a review correction, not release,
+  deployment or live acceptance. The effort and transfer work remain open.
+
+### 2026-10-20 - Optimize production cold startup, not the native deadline
+
+- Broader validation found cold native transfer deadline failures. Failure-side
+  child stacks showed eager ACP SDK/model imports before native connection;
+  subsequent profiles also found ordinary route/cache imports in passive
+  preparation. The source optimization lane was selected explicitly over a
+  separate fixture-bootstrap allowance.
+- Production import changes defer ACP construction to real ACP use, preserve
+  the exact public client class through its lazy facade, and keep annotation
+  imports out of the startup path. Ordinary serving route composition and
+  roster/worktree cache dependencies now load at their existing factory or
+  lifecycle boundary, not merely by importing passive runtime support.
+- The native transfer fixture and every timeout remain unchanged. Its full
+  32-case native portfolio now passes. A separate cold subprocess checks real
+  app/manager/passive import composition, ordinary factory construction and
+  exact public client identity within five seconds. Required snapshot access
+  to the existing worktree locks is retained; it is not replaced with a
+  parallel cache/lock owner.
+- Temporary import profiling and child-stack probes have been removed.
+  No installed payload, service, fixture setup allowance, protocol deadline,
+  item/group budget or activation behavior is changed.
+- The integrated queue/schema/session/native/startup portfolio passes all 394
+  cases in 136.77 seconds. The additional first-use ACP client, authenticated
+  WebSocket, roster, restored serving/control and ordinary startup consumers
+  pass 173 cases in 46.40 seconds. This includes another complete pass of the
+  original native transfer suite, not a filtered retry or timeout waiver.
+- Source commit `2a150b33ee33c1caf758f3a498149a27ff286e2c` qualifies the repair.
+  Only three affected current contract vectors are re-attested; exact database
+  admission/preparation dependencies are registered without changing historical
+  expected bytes. Registry validation passes two contracts/311 fixtures, the
+  current/historical HTTP contract tests pass 33, full Bridge guards pass 304
+  with eight existing platform/optional skips, and all 13 install contracts
+  pass. The 16 changed source modules retain their existing size ceilings.
+
+### 2026-10-20 - Atomic queue recovery and an explicit schema boundary
+
+- The next current-head review identified the abrupt-exit boundary left by
+  cancellation-only repair: process death cannot run a recovery handler after
+  queue deletion. Admission now peeks without consuming; exact queue deletion
+  and turn creation commit in one SQLite transaction. Insert failure rolls back
+  queue consumption, an explicitly removed prompt cannot be admitted, and the
+  dequeue event follows the commit. Ordinary cancellation no longer re-enqueues
+  or changes FIFO position.
+- A real separate daemon process exits directly during managed claim
+  inspection, bypassing every exception/finalization handler. Before the fix
+  the queued follow-up disappears. After the fix a fresh manager/connection
+  recovers the original queue ID, caller and prompt, resumes the known native
+  conversation and persists exactly one turn with one claim and no new
+  conversation. Transaction refusal cases cover duplicate turn insertion and
+  explicit queue removal; passive connections cannot consume work.
+- Database schema 27 distinguishes the additive relationship tables/authority
+  from the preceding schema 26. A frozen prior-schema core projection is
+  refused without migration by passive preparation. Ordinary writable startup
+  preserves its session, creates the relationship structures/authority and
+  stamps schema 27; subsequent migration-free adoption preserves that identity
+  and starts no writer. No candidate-side bootstrap or fallback is added.
+- Initial focused validation passes 22 cases, including the actual child exit,
+  prior-schema preparation and existing queue behavior. The two reported
+  behaviors fail before their repairs. Release, rollout and live requests
+  remain separately held.
+
+### 2026-10-20 - Cancellation-safe queued prompt admission
+
+- Re-reading the complete review overview identified a separate concrete
+  cancellation defect: queue drain removes its row before awaiting managed
+  claim inspection. Cancellation bypassed the ordinary exception recovery,
+  losing the follow-up before a turn existed.
+- Queue recovery now handles cancellation and checks the durable prospective
+  turn before restoring a prompt. A failure after turn persistence, including
+  host notification, cannot enqueue an already-admitted duplicate. Cancellation
+  propagates after synchronous recovery; turn numbering advances only after
+  successful persistence.
+- Four bounded managed-session cases pause real claim admission or post-turn
+  notification, then cancel or raise an ordinary error. Before the fix, the
+  cancellation-before-persistence and error-after-persistence cases fail.
+  Afterward all four pass, preserve caller attribution and one claim, and
+  recover exactly one turn. The focused queue and prompt regression selection
+  passes 19 cases.
+- The combined session-manager, managed relationship, remote-session and
+  reconciliation suites pass 293 cases; the full Bridge guard portfolio passes
+  304 with eight existing platform/optional skips. Python lint and diff checks
+  pass. Exact-source contract evidence is refreshed after the source commit.
+- This source correction does not authorize release, rollout or live requests.
+
+### 2026-10-20 - Persist accepted identity before cancellable cleanup
+
+- A current-head review again reported no posted issues while describing an
+  unresolved cancellation defect. Direct tracing found the concrete boundary:
+  the SDK sets its accepted native ID before awaiting remote adoption, but the
+  attachment failure path previously waited for shutdown before persisting it.
+  Cancellation during that cleanup could lose a known identity on restart.
+- Accepted identity is now persisted before that await. Failed managed startup
+  transitions to stopped in its finalization path even after another cancel,
+  retaining its client reference for verified teardown. The ordinary standalone
+  state transition remains after cleanup.
+- Two fail-first cases pause cleanup after ordinary cancellation, verify both
+  durable identity copies before releasing it, exercise repeated cancellation,
+  then restart and load the original conversation with one claim and no new
+  conversation. Both pass after the ordering fix.
+- Current-generation re-attestation checks retain every independent historical
+  expected byte and capability floor while validating each exact source hash
+  and registered capture identity, rather than requiring unrelated captures to
+  have one common commit. Earlier-generation evidence remains untouched.
+
+### 2026-10-20 - Preserve unknown outcomes and bound command retirement
+
+- Reconciliation refusal no longer converts a lost reserve/bind/close response
+  into definite refusal. Tests apply each transaction, lose its reply, refuse
+  read-back, then recover and settle the original claim.
+- Exact subject lookup uses a SQLite JSON-expression index and still refuses
+  ambiguous matches. The query-plan regression requires index use, not a
+  timing estimate. Relationship inspection uses the existing public DB accessor.
+- The authority subprocess now establishes native custody before receiving
+  transaction stdin, reuses the plugin's identity-checked group primitive and
+  native Job retirement, and bounds subsequent pipe collection. Cancellation
+  waits for the intrinsically bounded native retirement before closing its
+  handle; unknown cleanup is logged and remains unknown, never successful.
+- A bounded delegate found that the general async spawn API alone does not
+  promise strict custody. The finite Worktrees front door's stdin barrier
+  provides the narrower integration point: unavailable custody refuses before
+  owner resolution or mutation, without a shared-library change or thread-
+  abandoned command. Linux and Windows are the supported authority hosts;
+  macOS lacks the required identity backend and is explicitly refused.
+- Native Windows cases verify Job membership, zero remaining processes and
+  inherited-pipe cleanup both with a live parent and after parent exit. Parent
+  and console descendant each report no console or acquired foreground across
+  two observation cycles. Deterministic cases cover hung cleanup, native
+  retirement failure and repeated cancellation without premature handle close.
+- The command/receipt/reconciliation/index selection passes 54 cases. The
+  suggested dictionary normalization is not an implemented transport case:
+  both supported transports use the declared task set, so no speculative
+  alternate task-container adapter was added.
+- The complete ownership/native/drain portfolio passes 127 cases, with its
+  Linux-native companion explicitly skipped on Windows. The added pre-input
+  incompatible-Job-API case and focused portfolio pass 55 cases plus that same
+  platform skip. No shared process library or unrelated renderer behavior changed.
+
+### 2026-10-20 - Opaque claim storage cannot prove absence
+
+- A further review found that malformed collections/items become conservative
+  `metadata_opaque` claims without producer metadata. Checking only malformed
+  producers could therefore report authoritative absence from unreadable
+  storage. Explicit absence inspection now rejects either condition; new
+  reservation uses the same refusal rather than appending into that storage.
+- Six fail-first cases cover malformed mappings/scalars, non-mapping items,
+  invalid states and explicitly opaque released entries. Each verifies that
+  neither absence nor a new reservation is reported and original bytes remain
+  unchanged. This does not relax existing protected-claim or teardown rules.
+- The complete retained-authority and claim-codec selection passes 98 cases,
+  including native CLI/provider and finalization checks. The Bridge ownership,
+  native consumer and ordinary drain selection passes 116 cases; its full
+  guards pass 304 cases with eight optional/platform skips. The independent
+  managed-drain capture brings the registry to 311 fixtures.
+
+### 2026-10-20 - Recheck turn drain after claim inspection
+
+- The current-head review found one remaining admission race: an idle session
+  awaiting claim inspection is not an active acquisition, so drain can finish
+  cleanly before that inspection returns. Turn admission now rechecks the
+  existing drain gate immediately afterward, before turn-count or storage
+  changes. Answers that settle already-admitted work keep their existing path.
+- The fail-first regression pauses real authority inspection, runs actual
+  manager drain to a clean result, then releases inspection and requires the
+  existing drain refusal with zero new turns. It and the existing drain
+  portfolio pass 33 cases. An independently authored generation-42 vector
+  records this boundary; unrelated current-source captures remain unchanged.
+
+### 2026-10-20 - Bound callback capacity and preserve teardown authority
+
+- The next current-head review identified three remaining boundary defects.
+  The claim's recovery already retains the complete approved binding, so bound
+  identity now adds only a fixed-size fingerprint of the opaque native ID.
+  Bridge checks the eventual bound subject's size against the unchanged callback
+  limit after confirmed reservation and before contacting the peer. Full native
+  identity remains in its journal; capacity failure leaves a closable pending
+  claim rather than an accepted but unusable remote conversation.
+- Failed managed stop retains the original client. Resume cannot replace it
+  before local transport quiescence, and end/provider verification still sees
+  that retained teardown reference. No parallel task tracker or reaper was added.
+- A CLI owner declaration now prevents an unowned fallback when both caller-ID
+  and owner probes fail, including empty or malformed declarations. Truly
+  standalone callers retain explicit unowned behavior.
+- Seven fail-first cases reproduced the three defects. The deterministic
+  callback-limit, CLI ownership, teardown, recovery and retention selection
+  passes 94 cases; local-session/caller-selection/remote compatibility passes
+  297 cases. The actual command/provider/TLS matrix passes five cases under
+  unchanged limits. Current-source contract re-attestation remains required
+  before publication.
+
+### 2026-10-20 - Retire without losing native or reservation evidence
+
+- The next current-head review confirmed the earlier five fixes and identified
+  two retirement variants. Direct end now reconciles the persisted accepted
+  native ID before retiring, rather than requiring resume to preserve it.
+  The restart regression checks both resume and direct end and then deletes
+  the closed session row to prove terminal audit remains complete.
+- End no longer tries to reserve when the original reservation was unconfirmed.
+  Worktrees offers an explicit read-only missing-request mode under its exact
+  owner-record lock; existing claims return complete receipts and malformed,
+  ambiguous or foreign authority cannot establish absence. Older commands
+  reject the extra field, and ordinary missing inspection keeps its refusal.
+- Bridge retains an exact absence receipt only after local quiescence and when
+  neither an accepted native ID nor an uncertain remote attempt exists. This
+  uses the existing journal authority-result slot, not another ledger or a
+  schema migration. Unknown reservation outcomes remain retryable and blocking.
+- The real finalized-owner case now covers failed start followed by successful
+  local end without a reservation or peer request. The complete native matrix
+  passes five cases under unchanged limits. An earlier combined run timed out
+  while another plugin's native suite ran concurrently; isolated deterministic
+  cases and the complete serial native run pass. No timeout was widened and
+  the concurrent timing cause is not claimed fixed.
+- The final integrated Bridge repair selection passes 91 cases. Retained
+  Worktrees authority tests pass 61 existing cases plus twelve explicit
+  absence cases, including actual CLI inspection; strict receipt tests reject
+  numeric booleans and wrong identity, and new acquisitions require the
+  advertised absence capability. Install and documentation gates remain green.
+
+### 2026-10-20 - Preserve recovery across aging and interrupted admission
+
+- PR #7364's current-head review identified five concrete recovery/authority
+  gaps. Nonclosed relationships now preserve the original session handle
+  through aging and startup cleanup, so pending settlement remains retryable
+  rather than leaving only an unreachable journal and blocking obligation.
+- The retained authority adapter disables the legacy PATH fallback while
+  preserving it for older unrelated callers. A missing owning runtime must
+  refuse even when a foreign compatible command is available.
+- Native collision and reuse checks include the journal's requested/accepted
+  identities after failed load and restart. Recovery reconciles the native ID
+  committed in the session row before validating a journal-bound retry.
+- Admission captures the live client and status around authority I/O and
+  refuses if stop/replacement changed either before a prompt or answer acts.
+  The fail-first cases reproduced duplicate attachment, lost recovery and
+  post-stop prompt/answer admission rather than merely testing helper output.
+- The combined strict adapter, retained aging, native reconciliation, managed
+  lifecycle and actual-command/provider/TLS selection passes 75 cases.
+  Local-session, caller selection, remote attachment and retained aging
+  compatibility passes 316 cases. The module ceilings and touched Python lint
+  pass unchanged. Current-source re-attestation and another current-head review
+  are required before delivery; no operational hold changed.
+
+### 2026-10-20 - Generation-42 compatibility evidence
+
+- Captured the exact Bridge source commit
+  `f6af0cce96f262cbffa22465df5384c24bd5135a`, preserving all historical
+  generation-41 and earlier evidence. Re-attested its 42 independent vectors
+  with only advertised-version changes; added independently authored managed
+  owner negotiation and retained inspection expectations.
+- The complete Bridge guard selection passes 303 cases with eight platform or
+  optional-path skips. Contract-checker regressions pass 29 cases. The affected
+  provider response and ordinary catalog/native transport selection passes
+  49 cases, including both named and URL transport paths.
+- Contract failures exposed outdated synthetic session shapes and current
+  response projections. Corrected those consumers to assert the additive
+  relationship field explicitly while retaining frozen historical expectations.
+  No item, group or containment limits were increased.
+- The module-size check rejected growth in the session route registry.
+  Extracted the cohesive relationship HTTP adapters without changing route
+  order or public imports, then re-attested generation 42 to that committed
+  source. The extracted route, managed lifecycle and contract selection passes
+  380 cases with two platform skips; the module ceiling remains unchanged.
+- Publication rebasing encountered the concurrently merged exact-workspace
+  owner evidence. Preserved that source and immutable generation-41 vector,
+  included its unchanged expectations in generation 42, and re-attested
+  against the combined committed source instead of retaining a stale capture.
+- Documentation impact covers remote ownership operating guidance and immutable
+  contract evidence. Existing transport, authentication, install and lifecycle
+  ownership remain unchanged. Publication and review remain pending; release,
+  runtime and live external acceptance are not authorized by these results.
+
+### 2026-10-20 - Bridge acquisition and retirement source
+
+- Implemented ordinary owner forwarding, a durable Bridge acquisition journal,
+  exact Worktrees command receipts and registered local-retirement verification.
+  The source retains uncertain remote outcomes and refuses blind creation replay.
+  Stop and restart retain responsibility; explicit end retires only the local
+  relationship and keeps terminal evidence available for inspection.
+- The managed recovery selection passes 25 cases, and the strict command adapter
+  passes 15. The five complementary native cases pass through actual Worktrees
+  commands, the registered Bridge callback and a synthetic TLS peer; they retain
+  the existing item/group limits. Separate database, protocol, session and
+  transport selections pass, as do the ordinary HTTP routes.
+- Instrumentation located the combined native case's poor deadline margin in
+  repeated command/process boundaries. Removed redundant confirmed-bind
+  round trips, then separated admission/retirement and send/resume scenarios
+  without removing assertions or replacing the native boundaries. HTTP/2
+  transport coverage remains separate from the integrated TLS WebSocket lane.
+- The new HTTP generation requires independently recorded generation-42 contract
+  evidence. That evidence and the publication gates are still pending; the
+  source is not a merged delivery. Acknowledged cross-worktree transfer remains
+  unsupported and explicitly refused. Runtime, credential and live-request
+  holds are unchanged.
+
+### 2026-10-20 - Worktrees authority source merged; Bridge integration next
+
+- #7356 merged as `1e1c929caa1766ff1ca75f9d48e6287916f33d2b` after a clean
+  current-head Copilot approval, resolved feedback and green required checks.
+  The normal managed merge used no review bypass. The reviewed typed-JSON
+  correction had already been pushed when the initial old-head finding
+  arrived; the subsequent review confirmed it resolved.
+- Re-read the effort after merge. The first authority-proposal source slice is
+  complete; owner forwarding, Bridge acquisition/retirement, acknowledged
+  transfer and the integrated synthetic peer matrix remain open.
+- The ordinary sync helper aborted its multi-commit squash rebase unchanged.
+  Preserved a backup, verified all twenty owned paths were byte-identical to
+  the confirmed merge, then rebased away only those already-merged commits
+  onto the current contribution branch. No source work was discarded.
+- Next is the ordinary Bridge CLI/client/API owner path and durable relationship
+  acquisition/retirement integration against this authority, retaining the
+  explicit refusal of unimplemented transfer. No runtime deployment or live
+  external acceptance is inferred from the source merge.
+
 ### 2026-10-20 - Retained authority design reviewed; first source slice
 
 - #7345 merged as `18c88f1e6b2fb213c8bbf906c89beb5133f363ec` after a clean
