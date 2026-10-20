@@ -14,7 +14,8 @@ session status, or the latest settled boundary of an idle session, is the
 reason; a running session with nothing open has none (``null``).
 
 Represented sessions reuse the represented result snapshot's attention, which
-is derived from the event tail the interactive CLI pushed (reduced fidelity).
+is derived from the event tail the interactive CLI pushed (reduced fidelity);
+its boundary is read from the same captured window of that tail.
 
 Since HTTP protocol 42 a reason also names its boundary: ``since`` is when the
 event that produced it was recorded and ``position`` is that event's opaque
@@ -39,7 +40,7 @@ from pydantic import BaseModel
 
 from .attention_wait import _event_reason, _input_correlation, _input_is_live, _position_token
 from .models import AttentionReason, SessionStatus
-from .result_snapshot import represented_attention_boundary
+from .represented_pending import represented_boundary_event
 
 #: Request events: ``(family, correlation key, reason)``.
 _REQUESTS = {
@@ -221,13 +222,17 @@ def current_owned_attention(session: Any, requested_ref: str) -> CurrentAttentio
 
 
 def current_represented_attention(snapshot: Any, registration: dict[str, Any],
-                                  requested_ref: str, *, event_log: Any = None,
+                                  requested_ref: str, *,
+                                  tail: tuple[str | None, list[Any]] | None = None,
                                   replayed_before: float | None = None) -> CurrentAttention:
     """The current reason of a represented session, from its result snapshot.
 
-    With *event_log* (the represented history the snapshot was built from) the
-    reason also names its boundary; an event older than *replayed_before* (this
-    daemon generation's start) came from a history replay and gets no position.
+    With *tail* -- the ``(continuity, events)`` window the snapshot was built
+    from -- the reason also names its boundary, read from that same window so
+    the detail and the position name the same event. A request that resolves,
+    or a newer one that arrives, after the window was captured is the next
+    read's. An event older than *replayed_before* (this daemon generation's
+    start) came from a history replay and gets no position.
     """
     value = snapshot.state.attention.value
     detail = None
@@ -241,8 +246,9 @@ def current_represented_attention(snapshot: Any, registration: dict[str, Any],
     session_id = str(registration["session_id"])
     worktree_id = registration.get("worktree_id")
     found: dict[str, str | None] = {"since": None, "position": None}
-    if reason is not None and event_log is not None:
-        continuity, event = represented_attention_boundary(event_log, reason.value)
+    if reason is not None and tail is not None:
+        continuity, events = tail
+        event = represented_boundary_event(events, reason.value)
         replayed = (event is not None and replayed_before is not None
                     and event.timestamp < replayed_before)
         found = _boundary(event, None if replayed else continuity,

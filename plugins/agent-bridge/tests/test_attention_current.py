@@ -366,3 +366,75 @@ def test_a_represented_boundary_from_before_this_generation_has_no_position(clie
     body = _current(client, "live-1")
     assert (body["reason"], body["position"]) == ("input_required", None)
     assert _epoch(body["since"]) == pytest.approx(asked_at)
+
+
+def _land_after_the_first_tail_read(monkeypatch, app, *events, session_id: str = "live-1") -> list[int]:
+    """Ingest *events* into the represented history right after a reader's first
+    tail read, as live ingestion racing that read would: a later read sees a
+    newer tail. Returns how many log events landed (once)."""
+    store = app.state.live_event_store
+    log = store.get(session_id)
+    read = log.snapshot_window
+    landed: list[int] = []
+
+    def racing(**window):
+        found = read(**window)
+        if not landed and window.get("after") is None:
+            landed.append(store.ingest(session_id, list(events)))
+        return found
+
+    monkeypatch.setattr(log, "snapshot_window", racing)
+    return landed
+
+
+#: A request, what resolves it and the next request of the same reason; the
+#: field their detail comes from and the two details.
+_REPLACED = {
+    "question": ("input_required", "message", ("Choose", "Choose again"), _QUESTION,
+                 {"id": "2", "type": "tool.execution_complete", "data": {"toolCallId": "ask-1", "success": True}},
+                 {"id": "3", "type": "tool.execution_start", "data": {
+                     "toolCallId": "ask-2", "toolName": "ask_user", "arguments": {"message": "Choose again"}}}),
+    "permission": ("permission_required", "intention", ("run it", "run it again"),
+                   {"id": "1", "type": "permission.requested", "data": {"permissionRequest": {
+                       "kind": "shell", "intention": "run it", "toolCallId": "tc-1"}}},
+                   {"id": "2", "type": "tool.execution_start", "data": {"toolCallId": "tc-1", "toolName": "shell"}},
+                   {"id": "3", "type": "permission.requested", "data": {"permissionRequest": {
+                       "kind": "shell", "intention": "run it again", "toolCallId": "tc-2"}}}),
+}
+
+
+@pytest.mark.parametrize("kind", sorted(_REPLACED))
+def test_a_represented_row_never_pairs_one_request_with_the_next_ones_position(client, app, monkeypatch, kind):
+    """Request A resolves and B, of the same reason, arrives while a row is read:
+    the row's detail and its boundary still name the same request. A's detail
+    with B's position would let a consumer mark B delivered without seeing it."""
+    reason, field, details, first, resolved, second = _REPLACED[kind]
+    _register_live(client)
+    _ingest_live(client, first)
+    landed = _land_after_the_first_tail_read(monkeypatch, app, resolved, second)
+    row = _current(client, "live-1")
+    assert landed == [2]  # A resolved and B arrived mid-read
+    following = _current(client, "live-1")
+    events = {event.id: event for event in app.state.live_event_store.get("live-1").get_events()}
+    named = [events[_token(body["position"])["event_id"]] for body in (row, following)]
+    assert [(body["reason"], body["detail"]) for body in (row, following)] == [
+        (reason, details[0]), (reason, details[1])]
+    assert [event.data[field] for event in named] == list(details)  # each position names its own request
+    assert named[1].id > named[0].id
+
+
+def test_a_represented_turn_completion_row_names_the_completion_it_read(client, app, monkeypatch):
+    """The same holds for a turn completion: one landing mid-read is the next
+    read's boundary, not this row's."""
+    _register_live(client)
+    _ingest_live(client, {"id": "1", "type": "user.message", "data": {"content": "go"}},
+                 {"id": "2", "type": "assistant.turn_end", "data": {}})
+    landed = _land_after_the_first_tail_read(
+        monkeypatch, app, {"id": "3", "type": "user.message", "data": {"content": "more"}},
+        {"id": "4", "type": "assistant.turn_end", "data": {}})
+    row = _current(client, "live-1")
+    assert landed == [2]
+    completions = [event.id for event in app.state.live_event_store.get("live-1").get_events()
+                   if event.event == "turn_complete"]
+    assert (row["reason"], _token(row["position"])["event_id"]) == ("turn_complete", completions[0])
+    assert _token(_current(client, "live-1")["position"])["event_id"] == completions[-1]

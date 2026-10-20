@@ -31,7 +31,7 @@ from .result_tokens import (  # noqa: F401 (ResultTokenError/ResultHistoryChange
     _turn_ref,
 )
 from .live_message_receipts import project_inbox
-from .represented_pending import represented_boundary_event, represented_pending_events
+from .represented_pending import represented_pending_events
 
 if TYPE_CHECKING:
     from .db import Database
@@ -528,7 +528,9 @@ def build_owned_result_snapshot(
     )
 
 
-def _represented_tail(event_log: EventLog) -> tuple[str | None, list[Any]]:
+def represented_tail(event_log: EventLog) -> tuple[str | None, list[Any]]:
+    """One captured window of the represented event tail, ``(continuity,
+    events)``: everything derived from it describes the same events."""
     continuity, _head, events = event_log.snapshot_window(
         after=None, limit=_MAX_SCAN_EVENTS, durable=False
     )
@@ -536,9 +538,9 @@ def _represented_tail(event_log: EventLog) -> tuple[str | None, list[Any]]:
 
 
 def _represented_latest_result(
-    event_log: EventLog, session_id: str, budget: _TextBudget
+    tail: tuple[str | None, list[Any]], session_id: str, budget: _TextBudget
 ) -> tuple[ResultField, str | None]:
-    continuity, events = _represented_tail(event_log)
+    continuity, events = tail
     if not continuity or not events:
         return (
             ResultField(
@@ -655,19 +657,9 @@ def _represented_latest_result(
     )
 
 
-def represented_attention_boundary(
-    event_log: EventLog, reason: str | None
-) -> tuple[str | None, Any | None]:
-    """The represented tail's continuity and the event behind *reason* (see
-    :func:`~.represented_pending.represented_boundary_event`)."""
-    continuity, events = _represented_tail(event_log)
-    return continuity, represented_boundary_event(events, reason)
-
-
 def _represented_pending_input(
-    event_log: EventLog, budget: _TextBudget
+    events: list[Any], budget: _TextBudget
 ) -> tuple[ResultField, bool]:
-    _continuity, events = _represented_tail(event_log)
     pending = represented_pending_events(events)
     if not pending:
         return (
@@ -739,8 +731,13 @@ def build_represented_result_snapshot(
     max_text_chars: int = DEFAULT_MAX_TEXT_CHARS,
     retired_ids: frozenset[str] = frozenset(),
     inbox: list[dict[str, Any]] | None = None,
+    tail: tuple[str | None, list[Any]] | None = None,
 ) -> DelegatedResultSnapshot:
-    """Build a reduced-fidelity snapshot for a represented live session."""
+    """Build a reduced-fidelity snapshot for a represented live session.
+
+    Pending input, the latest result and attention come from one
+    :func:`represented_tail` window: *tail* when given (a caller that reads
+    more from the same window passes it), else one captured here."""
     max_items, max_text_chars = normalize_bounds(max_items, max_text_chars)
     state_budget = _TextBudget(max(64, max_text_chars // 4))
     latest_budget = _TextBudget(max(128, max_text_chars // 2))
@@ -754,9 +751,10 @@ def build_represented_result_snapshot(
         registration.get("latest_progress") or {},
         state_budget,
     )
-    pending_input, attention_pending = _represented_pending_input(event_log, state_budget)
+    tail = tail if tail is not None else represented_tail(event_log)
+    pending_input, attention_pending = _represented_pending_input(tail[1], state_budget)
     latest_result, latest_stop_reason = _represented_latest_result(
-        event_log, session_id, latest_budget
+        tail, session_id, latest_budget
     )
     incremental = _incremental_events(
         event_log,
