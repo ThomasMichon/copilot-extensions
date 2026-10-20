@@ -67,6 +67,8 @@ def _pr_watch_usage() -> None:
     print("  threads <repo> <pr> --json  Read discussion bodies and revision context on demand.", file=out)
     print("  reply/requeue <repo> <pr> --help  Bounded ADO discussion or existing-evaluation remediation.", file=out)
     print("  checks <repo> <lenses|record-self-review|verify-self-review|scope-report> --workspace PATH", file=out)
+    print("  checks <repo> export-config --workspace WORKER_PATH --base origin/main --output NEW_FILE", file=out)
+    print("    Worker checks also pass --config <delivered-file>; --workspace alone is not policy.", file=out)
     print("  subscribe <repo> <pr> --notify OWNER --bridge COMMAND  Use the shared watch owner.", file=out)
     print("  stop --notify OWNER --json  Cancel that owner's subscriptions; ownerstatus inspects them.", file=out)
     print(file=out)

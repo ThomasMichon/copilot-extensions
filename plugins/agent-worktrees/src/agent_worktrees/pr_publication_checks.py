@@ -362,9 +362,12 @@ def dispatch_cli(argv: list[str]) -> int:
 
     parser = argparse.ArgumentParser(prog="pr-watch checks")
     parser.add_argument("repo")
-    parser.add_argument("operation", choices=("lenses", "record-self-review", "verify-self-review", "scope-report"))
+    parser.add_argument("operation", choices=(
+        "lenses", "record-self-review", "verify-self-review", "scope-report", "export-config",
+    ))
     parser.add_argument("--workspace", required=True)
     parser.add_argument("--config")
+    parser.add_argument("--output", help="New worker config file for export-config only")
     parser.add_argument("--base")
     parser.add_argument("--expected-head")
     parser.add_argument("--lenses", default="")
@@ -386,9 +389,23 @@ def dispatch_cli(argv: list[str]) -> int:
         policy = getattr(repo.pr, "publication_checks", None)
         if policy is None:
             raise CheckError("this repository has no configured publication checks")
+        if args.operation == "export-config":
+            from .pr_worker_config import export_config
+            if not args.output or any((
+                args.expected_head, args.lenses, args.summary, args.fixed,
+                args.since, args.allowed_path is not None,
+            )):
+                raise CheckError("export-config needs --output and no local review/scope options")
+            result = export_config(args.repo, repo, args.workspace, args.base, Path(args.output))
+            print(json.dumps(result))
+            return 0
+        if args.output:
+            raise CheckError("--output applies only to export-config")
         root = Path(args.workspace).resolve()
-        remote = _git(root, "remote", "get-url", repo.remote).strip()
-        if (git_ops.slug_from_url(remote) or "").casefold() != args.repo.casefold():
+        remotes = _git(root, "remote", "get-url", "--push", "--all", repo.remote).splitlines()
+        if len(remotes) != 1:
+            raise CheckError("workspace publication remote must have exactly one push URL")
+        if (git_ops.slug_from_url(remotes[0]) or "").casefold() != args.repo.casefold():
             raise CheckError("workspace remote does not match the selected repository")
         base = args.base or f"{repo.remote}/{repo.default_branch}"
         if args.operation != "scope-report" and (args.since or args.allowed_path is not None):

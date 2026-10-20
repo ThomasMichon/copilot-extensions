@@ -54,6 +54,46 @@ including binary changes, without confusing unrelated base changes with branch
 scope. JSON includes a `PROGRESS scope=...` line for milestone consumers.
 An allow-list checks paths, not whether a change is a good idea.
 
+## Delivering policy to a worker
+
+`--workspace` selects the Git checkout, not the configuration source. Installing
+the central command or supplying policy prose does not give a fresh worker the
+host's resolved related-repository configuration. Export that effective policy
+before dispatch:
+
+```text
+agent-worktrees pr-watch checks example/project export-config --workspace <absolute-worker-worktree> --base origin/main --output <private-dispatch-directory>/pr-worker.json --json
+```
+
+The workspace is a target-platform absolute path; export does not look it up on
+the host. `--base` must use the selected repository's configured remote. It may
+be omitted only when that binding already supplies a default branch. The new
+output file contains the selected provider/endpoint, publication checks,
+observation requirements and guidance, bound to that worker workspace/base.
+It does not copy host checkout/runtime configuration, machine identity, token commands, credentials or
+publication/merge grants. Missing publication policy, an ambiguous workspace,
+an endpoint containing credential/query data, or an existing output file
+refuses export.
+
+Deliver the file using the selected venue's supported input-file transport,
+outside the product checkout. Retain the returned SHA-256 in the task input
+inventory and require the worker to verify the delivered bytes before use.
+Do not transcribe the policy, commit the artifact into the product repository,
+or silently substitute defaults. Regenerate it when the selected host policy
+or target workspace/base changes. Authentication remains the worker's own
+configured responsibility.
+
+Every worker check then passes `--config <delivered-pr-worker.json>` in
+addition to `--workspace`. This explicit local check context works without a
+host project registry or an adopted worker project; it does not admit
+unmanaged stateful waits or subscriptions. All ordinary receipt, remote and
+candidate checks still apply. Publication target matching uses the configured
+remote's push URL, so an optimized fetch mirror cannot replace the actual
+publication destination. Multiple push URLs refuse instead of validating only
+one destination of a multi-destination push.
+Missing, malformed or empty explicit configuration refuses the read/check
+instead of falling back to ambient policy.
+
 ## Mandatory publication path
 
 Configured checks run before local `create-pr` and `push-changes` mutation and

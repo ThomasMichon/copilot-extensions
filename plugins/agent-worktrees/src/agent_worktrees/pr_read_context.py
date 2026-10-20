@@ -4,10 +4,22 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import yaml
+
 
 def load_read_config(path=None):
     from . import config, related, repos
-    if path is not None or config.active_project():
+    if path is not None:
+        if not path.is_file():
+            raise ValueError("explicit PR configuration file is unavailable")
+        try:
+            raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+        except (UnicodeError, yaml.YAMLError):
+            raise ValueError("explicit PR configuration must be a valid UTF-8 mapping") from None
+        if not isinstance(raw, dict) or not raw:
+            raise ValueError("explicit PR configuration must be a nonempty mapping")
+        return config.load_config(path)
+    if config.active_project():
         return config.load_config(path)
     anchor = related.find_control_plane_anchor()
     if not anchor:

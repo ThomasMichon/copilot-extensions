@@ -413,6 +413,11 @@ def _is_no_project_invocation(args_list: list[str]) -> bool:
         "snapshot", "status", "threads", "deliver",
     ):
         return True
+    if args_list[:2] == ["pr-watch", "checks"] and all(
+        any(arg == flag or arg.startswith(flag + "=") for arg in args_list[2:])
+        for flag in ("--config", "--workspace")
+    ):
+        return True
     if command == "pr-status" and all(
         any(arg == flag or arg.startswith(flag + "=") for arg in args_list[1:])
         for flag in ("--repo", "--pr")

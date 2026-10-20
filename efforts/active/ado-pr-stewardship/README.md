@@ -143,8 +143,11 @@ preserve the requested behavior rather than adding automatic human actions.
 - [x] Reuse the existing owning agent for code changes, tests and publication.
   Preserve ordinary build triggers and bounded, explicitly authorized retry
   operations; never manufacture approvals or human attestations.
-- [ ] Document the consumer migration contract and prove centralized feature
+- [x] Document the consumer migration contract and prove centralized feature
   parity before consumers remove their legacy watcher and its call sites.
+- [ ] Deliver the resolved target publication/observation policy to fresh
+  workers through the central export and explicit configuration path; source
+  parity alone does not configure another execution environment.
 - [ ] Land implementation and report contribution, release and authorized
   rollout separately. Do not change a running shared service as a side effect
   of implementing observation.
@@ -170,12 +173,17 @@ All items below are **agent-recommended** acceptance checks.
 - [x] Related-repository configuration and overlay tests prove defaults, strict
   input validation, feature/requirement selection and surfaced supplemental
   guidance; unsupported or unknown facts never become human-ready.
-- [ ] Existing GitHub/Gitea verdict, consent, lifecycle and observation behavior
+- [x] Existing GitHub/Gitea verdict, consent, lifecycle and observation behavior
   remains intact. Runtime changes pass the relevant contained tests, fatal lint,
   install-contract gate, documentation-impact review and required CI.
 - [x] A bounded real-transport/CLI integration exercises the changed consumer
   contract. Where an authorized live ADO read is available, compare its
   centralized gate report with native evidence without mutating a real PR.
+- [x] A real-Git fresh-worker fixture runs all four publication-check commands
+  through the public CLI using exported policy, with no host registry.
+  Missing explicit context fails, credentials/host identity are excluded,
+  strict policy round trips, and canonical push versus optimized fetch
+  destinations remain distinct.
 - [ ] Consumer retirement demonstrates no remaining legacy watcher invocation,
   no lost observation/remediation responsibility, and a supported centralized
   tool version. Missing rollout permission remains an explicit tracked gate.
@@ -188,6 +196,81 @@ approval, human attestation, policy bypass, service cutover and production rollo
 remain outside this proposal's authority.
 
 ## Journal
+
+### 2026-10-19 - Fresh workers need explicit machine-readable policy
+
+- Consumer qualification exposed a migration gap: `--workspace` selects Git
+  state, but does not deliver the host's effective related PR policy.
+  Supplying central executables and guidance alone leaves a fresh worker
+  unable to run the required publication checks.
+- The central `checks export-config` operation now writes only the resolved
+  read/check policy for an explicit target-platform workspace and base.
+  It refuses missing policy, unsafe endpoint data and replacement of an
+  existing output. The task transports that artifact and its returned hash;
+  worker commands supply it through the existing `--config` path.
+- The first real worker regression also exposed project-front-door rejection
+  despite explicit local check context. The narrow admission now covers only
+  `checks` with both explicit config and workspace; stateful operations retain
+  their ownership rules. Local destination checking uses the push URL rather
+  than treating a fetch mirror as the publication target.
+- The two fail-first cases initially failed at the missing operation. After
+  implementation and the front-door correction, the combined worker and
+  existing publication selection passes 48 cases in 128.88 seconds.
+  The augmented strict-input/endpoint/base/destination matrix passes 60 cases
+  in 147.88 seconds; the unchanged read-context and observation CLI selection
+  passes another 21 cases in 0.94 seconds. Fatal lint, install contract and
+  documentation-consistency checks pass.
+  Review, required CI, supported release and actual consumer delivery remain
+  open; this source result does not close retirement.
+
+### 2026-10-19 - Qualified release available; authorized adoption in progress
+
+- The qualified canary `39344826377` completed its actual source-unit,
+  artifact-build, attestation, publication/readback, exact-candidate reuse,
+  non-administrator merge and landed-record jobs successfully. This is not
+  another successful pause-only gate.
+- Its released source `6e2e59ceed9a5cb822bd02906f5d4e1173aeae71` contains
+  implementation merge `b7a8f8ba31bc362cfc682edcff0986120f5dc4e0`.
+  Repository comparison confirms zero commits behind that implementation.
+  The canonical state now records `paused: false`; the existing release
+  owner retains subsequent cycle and stability acceptance.
+- The stewardship driver is proceeding with the already authorized
+  consumer-side unified update through its normal safety gates. Installed
+  owner/CLI behavior, consumer publication and retirement remain unproven
+  until their actual results are recorded. Keep this effort Active.
+
+### 2026-10-19 - Release held by the existing Main qualification owner
+
+- The merged commit's CI exposed an unrelated recorded-launch fixture timeout,
+  now tracked in #7256. The one expressly authorized same-revision diagnostic
+  retry was cancelled before any job ran; it is not same-revision pass evidence
+  or a repeated failure, and no second retry was requested.
+- A later normal green `dev` snapshot contains this implementation. Release
+  remains independently paused by operator-approved containment under #6237.
+  The successful normal promotion run deferred every validation/publication/
+  merge stage; its green pause gate is not a release.
+- Requested read-only status from the canonical release coordination thread.
+  The existing `main-owned-workflow-control` owner retains qualification,
+  publisher and Main acceptance; no competing controller, qualification wave,
+  pause bypass or unreleased installation follows from this dependency.
+  Keep this effort Active until supported release and adoption are proven.
+
+### 2026-10-19 - Implementation merged; release and adoption remain open
+
+- #7226 merged to `dev` as `b7a8f8ba31bc362cfc682edcff0986120f5dc4e0`
+  after the actual current-head clean review, green required CI and resolved
+  conversations. No negative review, draft, hold or conflict remained.
+- The successful exact-head CI run includes both Ubuntu owner partitions and
+  the selected native file's real POSIX owned-child and nested late-effect
+  cases. Local Windows execution, real HTTP streaming and authorized TLS reads
+  provide the complementary consumer evidence.
+- Reviewed source and migration/parity validation are complete. The consumer
+  retirement gate still requires a promoted supported version, explicitly
+  authorized rollout, live capability proof and consumer publication.
+  A `dev` merge is not release or deployment. Keep this effort Active.
+- The next slice is the merged commit's `dev` CI and promotion, followed by
+  authorized consumer adoption. The CI delay coincided with the public GitHub
+  Actions availability incident; no failing check was bypassed or force-retried.
 
 ### 2026-10-19 - Remote review: absolute HTTP receive budgets
 
