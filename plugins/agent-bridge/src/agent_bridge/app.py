@@ -16,7 +16,6 @@ from typing import TYPE_CHECKING
 from fastapi import FastAPI
 
 from . import telemetry
-from .agent_registry import AgentResolver, daemon_resolver
 from .app_agent_roster import start_agent_roster_cache, stop_agent_roster_cache
 from .app_worktree_cache import start_worktree_cache, stop_worktree_cache
 from .config import load_config, load_or_create_auth_token
@@ -26,6 +25,7 @@ from .session_manager import session_manager_from_config
 from .transport import shutdown_ssh
 
 if TYPE_CHECKING:
+    from .agent_registry_resolver import AgentResolver
     from .runtime_restore import RestoredRuntime
 
 log = logging.getLogger("agent-bridge")
@@ -34,6 +34,12 @@ _GOVERNANCE_BACKOFF_SECONDS = 10.0
 # Session statuses that mean "a host is actively using this daemon". When none
 # of these are present, the idle-shutdown monitor (if armed) counts down.
 _ACTIVE_STATUSES = {"created", "starting", "running", "idle"}
+
+
+def daemon_resolver(cfg) -> AgentResolver:
+    from .agent_registry import daemon_resolver as resolve
+
+    return resolve(cfg)
 
 
 def _count_active_sessions(mgr, db=None) -> int:
@@ -387,6 +393,8 @@ async def lifespan(app: FastAPI):
         record_manager_generation_id(mgr)
     governance = LoopGovernance()
     app.state.loop_governance = governance
+    from .agent_registry_resolver import AgentResolver
+
     app.state.resolver = AgentResolver({}, {})
     mgr.set_resolver(app.state.resolver)
     app.state.ready = False

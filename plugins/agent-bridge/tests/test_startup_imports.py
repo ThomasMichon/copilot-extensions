@@ -21,6 +21,11 @@ def test_cold_app_and_manager_defer_sdk_until_the_public_client_is_requested(tmp
         from agent_bridge.runtime_transfer import receive_runtime
 
         assert "agent_bridge.app_routes" not in sys.modules
+        assert "agent_bridge.agent_registry" not in sys.modules
+        assert "agent_bridge.worktree_runtime" not in sys.modules
+        assert "agent_bridge.routes.worktrees" not in sys.modules
+        assert "agent_bridge.serving_runtime" not in sys.modules
+        assert "agent_bridge.staged_relay" not in sys.modules
         config = ServiceConfig(db_path=str(Path(sys.argv[1]) / "sessions.db"))
         db = Database(Path(config.db_path))
         try:

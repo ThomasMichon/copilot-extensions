@@ -6,7 +6,7 @@ import json
 import re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Literal, Mapping
+from typing import TYPE_CHECKING, Literal, Mapping
 
 from credential_relay.server import CredentialRelayServer
 from credential_relay.sources.injected_token import InjectedTokenSource
@@ -28,7 +28,9 @@ from .resolver_runtime import _encode, restore_resolver
 from .roster_runtime import FrozenRoster, restore_roster
 from .session_manager import SessionManager, session_manager_from_config
 from .session_snapshot import SessionSnapshot, decode_sessions
-from .worktree_runtime import FrozenWorktrees, restore_worktrees
+
+if TYPE_CHECKING:
+    from .worktree_runtime import FrozenWorktrees
 
 
 @dataclass(frozen=True)
@@ -269,7 +271,11 @@ def restore_runtime(payload: object) -> RestoredRuntime:
         relay = restore_relay(state.relay) if state.relay is not None else None
         roster = restore_roster(state.roster, resolver) if state.roster is not None else None
         sessions = decode_sessions(state.sessions) if state.sessions is not None else None
-        worktrees = restore_worktrees(state.worktrees, resolver) if state.worktrees is not None else None
+        worktrees = None
+        if state.worktrees is not None:
+            from .worktree_runtime import restore_worktrees
+
+            worktrees = restore_worktrees(state.worktrees, resolver)
         live_events = restore_live_events(state.live_events) if state.live_events is not None else None
         authentication = (
             restore_authentication(state.authentication) if state.authentication is not None else None

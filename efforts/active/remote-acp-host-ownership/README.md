@@ -217,6 +217,25 @@ before the proposal clears review.
 - This is source reconciliation and a review correction, not release,
   deployment or live acceptance. The effort and transfer work remain open.
 
+### 2026-10-20 - Retain the cold native gate while narrowing imports
+
+- The rebased Windows native lane still intermittently exceeds the original
+  five-second cold-start-plus-IPC gate. Current qualification is not green;
+  earlier passing native runs are not substituted for this source.
+- Failure-side import profiling observed one complete native test-module import
+  taking 8.27 seconds before connection, including 7.27 seconds under the app
+  import. Other samples completed; the underlying host or filesystem cause of
+  that variance is not established.
+- Production preparation now defers ordinary registry composition, optional
+  worktree-cache restoration and candidate serving/relay constructors to their
+  existing use boundaries. Strict decoding, custody and activation fences remain
+  unchanged. The native fixture and its timeouts are untouched; temporary
+  profiling instrumentation is removed.
+- The latest focused run passes 128 cases, including the two-row removal race,
+  optional-worktree restoration, provider startup and passive restoration, but
+  two native cold-start cases still fail. This remains an explicit publication
+  qualification blocker, not a reason to widen timeouts or retry into a pass.
+
 ### 2026-10-20 - Optimize production cold startup, not the native deadline
 
 - Broader validation found cold native transfer deadline failures. Failure-side

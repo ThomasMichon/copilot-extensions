@@ -30,12 +30,12 @@ from .predecessor_runtime import PredecessorBinding, RetainedChannel
 from .relay_runtime import capture_relay
 from .resolver_runtime import _encode, capture_resolver
 from .runtime_restore import RestoredRuntime, restore_runtime
-from .serving_runtime import CandidateServing
-from .staged_relay import StagedRelay
 
 if TYPE_CHECKING:
     from .runtime_idle import PendingIdleSession
+    from .serving_runtime import CandidateServing
     from .session_host.private_receipt import VerifiedHostReceipt
+    from .staged_relay import StagedRelay
 
 
 class AuthenticatedChannel(Channel, RetainedChannel, Protocol):
@@ -441,6 +441,8 @@ class PendingRuntime:
             raise PrivateIPCError(Refusal.AUTHORITY)
         self.verify_resources(app)
         deadline.remaining()
+        from .serving_runtime import CandidateServing
+
         serving = CandidateServing(app, self.runtime)
         object.__setattr__(self, "_serving", serving)
         serving.prepare_writer()
@@ -467,6 +469,8 @@ class PendingRuntime:
         ):
             raise PrivateIPCError(Refusal.AUTHORITY)
         object.__setattr__(self, "_relay_attempted", True)
+        from .staged_relay import StagedRelay
+
         stage = StagedRelay(self.runtime.relay, deadline)
         object.__setattr__(self, "_relay_stage", stage)
         app.state.pending_runtime = self
