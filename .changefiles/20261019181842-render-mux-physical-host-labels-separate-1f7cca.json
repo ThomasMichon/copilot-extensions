@@ -1,0 +1,9 @@
+{
+  "comment": "Render mux physical host labels separately from execution environments and bound external worktree IDs to four characters.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

@@ -117,14 +117,14 @@ def test_status_context_alias_resolution_fails_open(monkeypatch, capsys):
 
 
 @pytest.mark.parametrize(
-    ("platform", "key", "badge"),
+    ("platform", "badge"),
     [
-        ("windows", "friendly-host", "win"),
-        ("wsl", "friendly-host-wsl", "wsl"),
+        ("windows", "win"),
+        ("wsl", "wsl"),
     ],
 )
 def test_status_context_disambiguates_physical_host_using_record_platform(
-    monkeypatch, capsys, platform, key, badge,
+    monkeypatch, capsys, platform, badge,
 ):
     entries = {
         name: m.cfg.MachineEntry(
@@ -146,7 +146,7 @@ def test_status_context_disambiguates_physical_host_using_record_platform(
     monkeypatch.setattr(repos_module, "resolve_path", lambda _name: "/repo/test-chamber")
     monkeypatch.setattr(m.cfg, "load_machines_yaml", lambda *_a, **_k: entries)
     assert m.cmd_status_context(_ns()) == 0
-    assert capsys.readouterr().out.strip() == f"{key}  {badge}  test-chamber:8e45"
+    assert capsys.readouterr().out.strip() == f"host-family  {badge}  test-chamber:8e45"
 
 
 def test_status_context_preserves_ambiguous_physical_host(monkeypatch, capsys):
@@ -165,3 +165,47 @@ def test_status_context_preserves_ambiguous_physical_host(monkeypatch, capsys):
     monkeypatch.setattr(m.cfg, "load_machines_yaml", lambda *_a, **_k: entries)
     assert m.cmd_status_context(_ns()) == 0
     assert capsys.readouterr().out.strip() == "raw-host-01  win  test-chamber:8e45"
+
+
+@pytest.mark.parametrize("physical_host", ["declared-host", ""])
+@pytest.mark.parametrize("source", ["tracked", "detected"])
+def test_status_context_separates_host_display_from_opaque_execution_identity(
+    monkeypatch, capsys, physical_host, source,
+):
+    record = _record(machine="literal-wsl", platform="wsl")
+    entry = m.cfg.MachineEntry(
+        key="literal-wsl", display_name="Guest", execution_platform="wsl",
+        physical_host=physical_host,
+    )
+    monkeypatch.setattr(m, "_find_record_for_path",
+                        lambda _p: record if source == "tracked" else None)
+    monkeypatch.setattr(m.cfg, "detect_machine", lambda: "literal-wsl")
+    monkeypatch.setattr(m.cfg, "detect_platform", lambda: "wsl")
+    monkeypatch.setattr(repos_module, "resolve_path", lambda _name: "/repo/test-chamber")
+    monkeypatch.setattr(m.worktree_identity, "_find_repo_dir", lambda: "/repo/test-chamber")
+    monkeypatch.setattr(m.cfg, "load_machines_yaml", lambda *_a, **_k: {"literal-wsl": entry})
+    assert m.cmd_status_context(_ns()) == 0
+    locus = "  test-chamber:8e45" if source == "tracked" else ""
+    assert capsys.readouterr().out.strip() == (
+        f"{physical_host or 'literal-wsl'}  wsl{locus}")
+    assert record.machine == entry.key == "literal-wsl"
+    assert record.worktree_id.endswith("-8e45")
+
+
+@pytest.mark.parametrize("identity,suffix", [
+    ("host-wsl-20260101-010101-0123456789abcdef0123456789abcdef", "cdef"),
+    ("external.id.without-hyphen", "phen"),
+    ("abc", "abc"),
+])
+@pytest.mark.parametrize("plain", [True, False])
+def test_status_context_bounds_external_worktree_identifier_to_four_characters(
+    monkeypatch, capsys, identity, suffix, plain,
+):
+    record = _record(worktree_id=identity)
+    monkeypatch.setattr(m, "_find_record_for_path", lambda _p: record)
+    assert m.cmd_status_context(_ns(plain=plain)) == 0
+    result = capsys.readouterr().out.strip()
+    assert f"test-chamber:{suffix}" in result
+    if len(identity) > 4:
+        assert identity not in result
+    assert record.worktree_id == identity

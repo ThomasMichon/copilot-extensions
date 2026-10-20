@@ -664,7 +664,9 @@ def _resolve_machine_alias(machine: str, repo: str | None, platform: str) -> str
     """Resolve a historical machine label without rewriting tracked identity.
 
     The recorded platform disambiguates physical hostnames shared by native
-    and guest registrations. Missing or ambiguous topology retains the raw
+    and guest registrations. Explicit physical-host metadata supplies the
+    display label; the execution-space key remains unchanged internally.
+    Missing or ambiguous topology retains the raw
     label so unavailable metadata never blanks the status segment.
     """
     if not machine:
@@ -681,7 +683,7 @@ def _resolve_machine_alias(machine: str, repo: str | None, platform: str) -> str
         entry = cfg.find_machine_entry(entries, machine, execution_platform=platform)
         if entry is None:
             return machine
-        return cfg.machine_name(entry)
+        return entry.physical_host or cfg.machine_name(entry)
     except Exception:
         return machine
 
@@ -703,10 +705,10 @@ def _render_status_context(path: str | None = None, plain: bool = False) -> str:
     ``<id4>`` is the worktree id's 4-char suffix (its "last 4 digits").
     Values come from the worktree's tracking record when the path is
     inside a tracked worktree, falling back to live host detection. Either
-    source is normalized through machines.yaml's alias resolution (see
-    ``_resolve_machine_alias``) so a decoupled hostname/alias mapping (a
-    shared-pool box whose COMPUTERNAME differs from its mesh key) renders
-    its friendly name here too, matching ``machine-context``.
+    source is normalized through machines.yaml (see ``_resolve_machine_alias``):
+    explicit physical-host metadata supplies the display host independently of
+    the environment badge; legacy entries retain their friendly alias or key.
+    Neither the tracked execution identity nor the full worktree ID is rewritten.
     """
     override = _core_helper("_render_status_context", _render_status_context)
     if override is not _render_status_context:
@@ -720,7 +722,7 @@ def _render_status_context(path: str | None = None, plain: bool = False) -> str:
     env = _platform_short(platform)
 
     repo = rec.repo if rec else ""
-    suffix = rec.worktree_id.rsplit("-", 1)[-1] if rec and rec.worktree_id else ""
+    suffix = rec.worktree_id[-4:] if rec and rec.worktree_id else ""
     locus = f"{repo}:{suffix}" if repo and suffix else (repo or "")
 
     fields = [f for f in (machine, env, locus) if f]
