@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from agent_procutil import no_window_kwargs
 
 from agent_worktrees import reconcile, reconcile_deployment
 from test_reconcile import env as env
@@ -279,3 +280,40 @@ def test_old_probe_rejects_unknown_publication_action(
     )
     assert diagnostic is not None and diagnostic["reason"] == "deployment-policy-unavailable"
     assert "invalid choice" in diagnostic["message"]
+
+
+@pytest.mark.parametrize("state", ["missing", "standalone", "managed"])
+def test_aliased_home_retains_installation_policy_scope(
+    deployment: Any, monkeypatch: pytest.MonkeyPatch, state: str,
+) -> None:
+    if state != "missing":
+        deployment.policy(state)
+    physical_home = deployment.home
+    alias = physical_home.parent / "home-alias"
+    if os.name == "nt":
+        subprocess.run(
+            ["cmd.exe", "/d", "/c", "mklink", "/J", str(alias), str(physical_home)],
+            capture_output=True, check=True, timeout=10, **no_window_kwargs(),
+        )
+    else:
+        alias.symlink_to(physical_home, target_is_directory=True)
+    monkeypatch.setattr(reconcile, "_home", lambda: alias)
+    monkeypatch.setenv("HOME", str(alias))
+    monkeypatch.setenv("USERPROFILE", str(alias))
+    before = _snapshot(physical_home)
+    plan = reconcile.build_plan(deployment.repo, machine="test", cache={}, save=False)
+    assert _snapshot(physical_home) == before
+    if state == "managed":
+        assert plan["action"] == "continue"
+        assert plan["diagnostics"][0]["reason"] == "deployment-managed"
+    else:
+        assert plan["updates"][0]["runtime_root"] == str(alias / ".agent-index")
+        assert reconcile_deployment.execution_diagnostic(plan["updates"][0]) is None
+    assert _snapshot(physical_home) == before
+    # The same normalization applies to optional context and policy paths;
+    # missing, relative and wrong-target values still do not match.
+    assert reconcile_deployment._matching_path(str(physical_home), alias)
+    assert reconcile_deployment._matching_path(None, None)
+    for value in (None, "", "relative", 1, str(alias.parent / "foreign")):
+        assert not reconcile_deployment._matching_path(value, alias)
+    assert not reconcile_deployment._matching_path(str(physical_home), None)

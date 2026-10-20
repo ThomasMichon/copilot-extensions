@@ -6,6 +6,17 @@ from pathlib import Path
 from typing import Any
 
 
+def _matching_path(value: Any, expected: Path | None) -> bool:
+    from .reconcile import _same_path
+
+    if expected is None:
+        return value is None
+    return (
+        isinstance(value, str) and bool(value)
+        and Path(value).is_absolute() and _same_path(Path(value), expected)
+    )
+
+
 def publication_diagnostic(
     plugin: str, payload: Path, root: Path, *, context: Path | None,
 ) -> dict[str, Any] | None:
@@ -45,12 +56,12 @@ def publication_diagnostic(
             or result.get("pluginId") != plugin
             or result.get("status") != "ready"
             or result.get("actualMode") != ("namespaced" if context else "legacy")
-            or result.get("runtimeRoot") != str(root)
-            or result.get("context") != (str(context) if context else None)
+            or not _matching_path(result.get("runtimeRoot"), root)
+            or not _matching_path(result.get("context"), context)
         ):
             raise ValueError("The deployment probe did not confirm the ready installation.")
         deployment = result.get("deployment")
-        if not isinstance(deployment, dict) or deployment.get("path") != str(policy):
+        if not isinstance(deployment, dict) or not _matching_path(deployment.get("path"), policy):
             raise ValueError("The deployment probe returned an invalid policy location.")
         if deployment.get("allowPluginPublication") is True:
             if (
