@@ -1,18 +1,18 @@
 {
   "captured_from": {
-    "commit": "ee6faa4ac2b896e3d6178ca55228a4a4d1f8b1e4",
+    "commit": "a2b7b5c976e2bfd474150c50243678916b7b8517",
     "plugin_version": "0.4.1-dev3",
-    "protocol_generation": 42,
-    "source_path": "plugins/agent-bridge/src/agent_bridge/routes/live_startup_controls.py",
-    "source_git_blob": "8b1f74d379be0c4f56871f553fdf546c0127627b",
-    "source_sha256": "54ad082ab38b584c277963d9583076da4542f7fd9a80852c35fc495d017f0f92"
+    "protocol_generation": 43,
+    "source_path": "plugins/agent-bridge/src/agent_bridge/acquisition_contract.py",
+    "source_git_blob": "331f5b16d971e5069b8b9f9070ada176128c6478",
+    "source_sha256": "b783839d063ac6cf1267967786cab467bcb2940bc0b6fa32bedb6e05f6015434"
   },
   "response": {
-    "protocol_version": 42,
+    "protocol_version": 43,
     "min_protocol_version": 1
   },
   "capability": {
-    "required_protocol_version": 42,
+    "required_protocol_version": 43,
     "readiness_control": "control:plugin-readiness",
     "autopilot_control": "control:set-mode-ready",
     "ordinary_input_is_gated": false,

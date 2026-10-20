@@ -1,10 +1,10 @@
 {
   "captured_from": {
-    "commit": "4cee06ed296deec2b17fa9bbcfed7c9b488cfe61",
+    "commit": "a2b7b5c976e2bfd474150c50243678916b7b8517",
     "plugin_version": "0.4.1-dev3",
+    "protocol_generation": 43,
     "source_path": "plugins/agent-bridge/src/agent_bridge/cli_mode_models.py",
     "source_git_blob": "9941f066986c7b1427c4bfa70401412ac9789512",
-    "protocol_generation": 43,
     "source_sha256": "212ba2f30dfc0c1cdfe788b379f473620b48a1e5a4f6fd5b20fb211074e1f88d"
   },
   "request": {

@@ -45,7 +45,7 @@
     "ordinary_provider_instance_default": false
   },
   "captured_from": {
-    "commit": "ee6faa4ac2b896e3d6178ca55228a4a4d1f8b1e4",
+    "commit": "1d527942d774bc9da23ad878ba8eac62ea10c40e",
     "plugin_version": "0.4.1-dev3",
     "protocol_generation": 42,
     "source_path": "plugins/agent-bridge/src/agent_bridge/client_answers.py",
@@ -54,6 +54,7 @@
   },
   "reattested_from": {
     "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-acp-client_answers-generation-41.json",
-    "sha256": "62f10e3e8b9e1e04e28a757b006a66b73277b1606e4c2ee5c556c6d39a9e3265"
+    "sha256": "62f10e3e8b9e1e04e28a757b006a66b73277b1606e4c2ee5c556c6d39a9e3265",
+    "method": "Retain the independently authored historical expected semantics and capability floors; only protocol_version advertisements advance to 42. Re-attest against exact committed source bytes, not a producer-generated expected snapshot. test_contract_registry.py and test_http_targets_contract.py verify the retained model, client, route and provenance expectations; test_attention_current.py separately covers the additive attention-row boundary fields."
   }
 }

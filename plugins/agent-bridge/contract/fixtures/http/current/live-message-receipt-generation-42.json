@@ -1,11 +1,11 @@
 {
   "captured_from": {
-    "commit": "ee6faa4ac2b896e3d6178ca55228a4a4d1f8b1e4",
+    "commit": "1d527942d774bc9da23ad878ba8eac62ea10c40e",
     "plugin_version": "0.4.1-dev3",
     "protocol_generation": 42,
     "source_path": "plugins/agent-bridge/src/agent_bridge/live_message_models.py",
-    "source_git_blob": "688e638d85cef69b4e4b285e1280bdba8cf02f5d",
-    "source_sha256": "56b6a27d9142b1ccd26dd22ea5f3bc4e4c4e3cb4df900f0c55da1623e0bfd4ed"
+    "source_git_blob": "b24f0c1b2b53d2cb9dcf92ae63a44d65f8052ba8",
+    "source_sha256": "03bbc897a991d68c0e862e7d87b802d9b2d5a058647ce7117385cb5f1de60509"
   },
   "capability": {
     "operation": "GET /api/v1/live-sessions/{session_id}/messages/{message_id}/receipt",
@@ -50,6 +50,7 @@
   },
   "reattested_from": {
     "path": "plugins/agent-bridge/contract/fixtures/http/current/live-message-receipt-generation-41.json",
-    "sha256": "1a33356b15a2a4bf5a0398517798caeeb08fc3860a0fe6a884031e3e7b39b748"
+    "sha256": "1a33356b15a2a4bf5a0398517798caeeb08fc3860a0fe6a884031e3e7b39b748",
+    "method": "Retain the independently authored historical expected semantics and capability floors; only protocol_version advertisements advance to 42. Re-attest against exact committed source bytes, not a producer-generated expected snapshot. test_contract_registry.py and test_http_targets_contract.py verify the retained model, client, route and provenance expectations; test_attention_current.py separately covers the additive attention-row boundary fields."
   }
 }

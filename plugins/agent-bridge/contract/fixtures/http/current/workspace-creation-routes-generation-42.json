@@ -1,6 +1,6 @@
 {
   "captured_from": {
-    "commit": "ee6faa4ac2b896e3d6178ca55228a4a4d1f8b1e4",
+    "commit": "1d527942d774bc9da23ad878ba8eac62ea10c40e",
     "plugin_version": "0.4.1-dev3",
     "protocol_generation": 42,
     "source_path": "plugins/agent-bridge/src/agent_bridge/routes/sessions.py",
@@ -46,6 +46,7 @@
   },
   "reattested_from": {
     "path": "plugins/agent-bridge/contract/fixtures/http/current/workspace-creation-routes-generation-41.json",
-    "sha256": "48a109f74ac3c0ebe0603e554dfc4fa81c46bd352219d152b09d6b3e0d40e008"
+    "sha256": "48a109f74ac3c0ebe0603e554dfc4fa81c46bd352219d152b09d6b3e0d40e008",
+    "method": "Retain the independently authored historical expected semantics and capability floors; only protocol_version advertisements advance to 42. Re-attest against exact committed source bytes, not a producer-generated expected snapshot. test_contract_registry.py and test_http_targets_contract.py verify the retained model, client, route and provenance expectations; test_attention_current.py separately covers the additive attention-row boundary fields."
   }
 }
