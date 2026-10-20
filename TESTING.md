@@ -116,12 +116,9 @@ limits. Guard, collection, baseline and unrelated steps do not inherit those
 worker options. The local runner remains serial unless explicitly configured;
 activation of preserved Main declarations is separately reviewed. These options
 do not count as complete budget evidence until the exact full run succeeds.
-CI enables these Worktrees worker options for an owning promotion run or manual
-validation of Dev and managed `pr/*` candidate branches, whose test manifest
-declares the bounded worker dependency. Ordinary manual Main, legacy-tag and
-unqualified-ref validation stays serial and does not require an unshipped test
-dependency. The declaration guard fails qualification if a candidate removes or
-moves the worker dependency into runtime requirements.
+CI's worker options also require an owning promotion run, so ordinary manual
+validation of an older released Main stays serial and does not require a test
+dependency that has not shipped there yet.
 The initial paired disconnected Linux run executes all 17 groups with the same
 11,941 passes and 336 skips: serial 560.951 seconds versus two workers 348.064
 seconds, including preparation and cleanup. This is local execution evidence,
@@ -626,13 +623,6 @@ Native artifact/diagnostic subprocesses and durable planner/ledger tests do not
 consume each other's wall-clock budgets. Gateway TLS/credential tests and
 separate-process acceptance are independently bounded too; none shares the
 unrelated test-runner job's budget.
-The full Worktrees CI lane reports unbuffered runner progress. Worker selection
-changes concurrency only: collected tests and existing item, sub-suite and
-plugin budgets remain unchanged. An aggregate
-timeout still fails acceptance; use the last reported item to diagnose a
-stalled call or establish measured budget composition before changing test
-grouping.
-
 The full Worktrees runner gives `test_python_runtime_dev_live.py` and
 `test_python_runtime_install.py` separate file groups. Exact-head native CI
 showed the former shared group consuming 196 seconds through both dev cycles

@@ -348,6 +348,16 @@ copy selection passed 15 cases in 14.62 seconds. These corrections require
 fresh hosted qualification and exact-final-head lifecycle proof; no previous
 pass is attributed to the corrected head.
 
+The subsequent reconciliation incorporates the landed unit-only source CI
+from #7269 without changing that workflow. Its removed full/native jobs
+supersede this PR's worker-policy expression and workflow-only assertions;
+those authored additions are withdrawn, not translated into a new integration
+PR gate. Runtime tests and their existing deadlines remain intact. Remaining
+source qualification uses the current required unit/guard pipeline, the
+existing manual container integration route, and actual native Windows
+acceptance. A green source-unit gate is not full/native validation or Main
+activation evidence.
+
 ### 2026-10-18 -- Recovery preserves WIP and proves both native dev lifecycles
 
 The operator released the backlog-related waiting holds and authorized recovery

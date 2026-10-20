@@ -8,10 +8,6 @@ import subprocess
 
 import pytest
 
-from full_worktrees_worker_contract import (
-    assert_full_step_uses_exactly_two_workers_without_narrowing_tests,
-)
-
 ROOT = Path(__file__).resolve().parents[1]
 CI = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
 STANDALONE = (ROOT / ".github/workflows/payload-cwd-contract.yml").read_text(encoding="utf-8")
@@ -53,15 +49,6 @@ def test_native_jobs_preserve_dev_scope_budget_and_required_aggregate():
     assert 'cron: "27 11 * * 3"' in STANDALONE
     assert "workflow_dispatch:" in STANDALONE
     assert STANDALONE.count("if: github.event_name != 'pull_request'") == 2
-
-
-def test_full_worktrees_reports_current_item_without_narrowing_or_widening():
-    full = _job("full")
-    assert "PYTHONUNBUFFERED: \"1\"" in full
-    assert_full_step_uses_exactly_two_workers_without_narrowing_tests("ci.yml")
-    assert "run: python tools/run-plugin-tests.py ${{ matrix.plugin }}\n" in full
-    assert "--timeout" not in full and " -k " not in full
-    assert len(re.findall(r"^          - agent-[a-z-]+$", full, re.M)) == 9
 
 
 @pytest.mark.parametrize("index,suffix", [(0, "launch_survives"), (1, "windows_bash")])

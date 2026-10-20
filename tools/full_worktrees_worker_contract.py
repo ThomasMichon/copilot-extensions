@@ -19,8 +19,7 @@ BRIDGE_OPTIONS = (
 )
 OPTIONS = {
     "ci.yml": (
-        "${{ matrix.plugin == 'agent-worktrees' && (inputs.promotion_run != '' "
-        "|| github.ref == 'refs/heads/dev' || startsWith(github.ref, 'refs/heads/pr/')) "
+        "${{ matrix.plugin == 'agent-worktrees' && inputs.promotion_run != '' "
         "&& '-n 2 --dist=worksteal' || '' }}"
     ),
     "validate-and-promote.yml": (
