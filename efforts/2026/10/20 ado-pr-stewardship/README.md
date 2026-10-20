@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** Serial proposal and bounded implementation PRs against `dev`
 - **Created:** 2026-10-18
-- **Status:** Active
+- **Status:** Done
 - **Vision:** `visions/plugins/agent-worktrees/pull-requests/README.md`:
   `one-surface-no-forking`, `reviewer-capable-provider`,
   `repository-declared-pr-requirements`,
@@ -145,10 +145,10 @@ preserve the requested behavior rather than adding automatic human actions.
   operations; never manufacture approvals or human attestations.
 - [x] Document the consumer migration contract and prove centralized feature
   parity before consumers remove their legacy watcher and its call sites.
-- [ ] Deliver the resolved target publication/observation policy to fresh
+- [x] Deliver the resolved target publication/observation policy to fresh
   workers through the central export and explicit configuration path; source
   parity alone does not configure another execution environment.
-- [ ] Land implementation and report contribution, release and authorized
+- [x] Land implementation and report contribution, release and authorized
   rollout separately. Do not change a running shared service as a side effect
   of implementing observation.
 
@@ -184,7 +184,7 @@ All items below are **agent-recommended** acceptance checks.
   Missing explicit context fails, credentials/host identity are excluded,
   strict policy round trips, and canonical push versus optimized fetch
   destinations remain distinct.
-- [ ] Consumer retirement demonstrates no remaining legacy watcher invocation,
+- [x] Consumer retirement demonstrates no remaining legacy watcher invocation,
   no lost observation/remediation responsibility, and a supported centralized
   tool version. Missing rollout permission remains an explicit tracked gate.
 
@@ -196,6 +196,85 @@ approval, human attestation, policy bypass, service cutover and production rollo
 remain outside this proposal's authority.
 
 ## Journal
+
+### 2026-10-20 - Consumer retirement complete
+
+- The consumer migration merged after a fresh review recommended approval at
+  the unchanged candidate, all required CI succeeded and every review thread
+  was resolved. The consumer's authoritative record retains its private
+  publication details; no private repository link or identifier is published
+  here.
+- All Plan and Validation Plan items are resolved: generic provider/config/
+  observation changes are merged and released, the authorized selected runtime
+  and fresh-worker export contract are proved, and the consumer's dedicated
+  implementation and concrete call sites are retired without replacing the
+  shared observation owner.
+- The separate canonical Manager construction/Terminal-profile repair remains
+  with #3336 and the existing control-plane owner. Existing durable-delivery
+  and broader lifecycle work remain with #6007 and #7051. These are not being
+  declared complete by this effort's close-out. No other-machine deployment
+  or human approval/attestation was performed.
+
+### 2026-10-20 - Installed exporter and fresh-worker contract proved
+
+- The normal authorized updater activated Worktrees 1.24.91-dev1, including
+  the reviewed exporter. The selected runtime's isolated interpreter reports
+  `1.24.91.dev1`; its installed exporter module has SHA-256
+  `ab28c611e55ce00120b5c1adb01205df891e9592a450ed3313d442669be86b4e`.
+  This is actual runtime evidence, not a payload-refresh claim.
+- A generated real-Git worker with an empty registry consumed policy exported
+  by the installed catalog command. Both publication turns passed all four
+  CLI checks; advancing the source invalidated the prior review receipt.
+  Exported bytes remained unchanged and the fixture checkout stayed clean.
+  The complete installed witness passed in 71.62 seconds.
+- This proves installed CLI/configuration delivery, not product review,
+  product builds or native vote mutation. Prior provider and source checks
+  retain their own scope. The existing continuous observation registration
+  survived the update without duplicate ownership or delivery errors.
+- The updater still exited nonzero at a separate Windows Terminal profile
+  refresh after runtime reconciliation completed. The canonical Manager
+  repair remains a separately owned objective; no runtime override was used.
+  Consumer retirement remains the final adoption gate; this effort is Active.
+
+### 2026-10-20 - Qualified exporter release; installed acceptance blocked explicitly
+
+- Qualification run `39488240024` completed the actual source-unit, artifact
+  construction/attestation, immutable-candidate reuse, publication/readback,
+  non-administrator merge and landed-record jobs successfully.
+- Generated release #7416 promoted source `55ab8231307a` to Main
+  `0b987eae4b154aaccd068952baf6d17f59a07811`, publishing Worktrees
+  `1.24.90-dev1` and consuming this exporter's changefile. Provider comparison
+  confirms the qualified source contains #7323's merge with zero commits
+  behind; the pinned Main tree contains the exporter and destination matcher.
+- This is released, not deployed. The existing #7407/#7406 correction owns the
+  exact helper-copy publication failure blocking normal consumer activation;
+  #7412 documents the equivalent fresh Linux failure. No competing repair or
+  installed-code workaround is being introduced. Added the actual Windows
+  normal-update witness on #7407 while respecting its author's manual completion.
+- Installed worker-policy proof and consumer retirement remain open. Keep this
+  effort Active until the supported updater can activate the qualified release
+  and the actual consumer contract is exercised.
+
+### 2026-10-20 - Worker-policy source merged; release and installed acceptance open
+
+- #7323 merged to `dev` as `da9aadadf8b0d1c062ad327789b768faac19d5cc`
+  from exact reviewed head `3a57137d18ca384e01290a0db471f4b3a3582e79`.
+  The actual full Copilot review approved that head; required CI passed and
+  every review conversation was resolved.
+- A cooperating qualified claimant performed one explicitly requested normal
+  managed completion, without a review-gate bypass, source edit or transfer of
+  this driver's ownership. This source worktree independently confirmed the
+  merge through `pr-status`, reconciled its record and pulled forward with
+  recovery refs retained.
+- Contribution is merged, not released or installed. The prior consumer's
+  active merge classifier predates already-released #7302/#7308. Its normal
+  authorized unified update constructed a healthy candidate but refused
+  helper publication with `Callback copy paths are aliased`, retaining the
+  previous selected runtime. Payload refresh alone is not activation.
+- Keep the effort Active through qualified release, supported installed
+  worker-policy acceptance and consumer retirement. The helper-publication
+  and independent installer-adoption work retain their existing owners; no
+  policy, dependency-admission or deployment bypass closes those gates.
 
 ### 2026-10-20 - Equivalent encoded paths and public SSH transport
 
