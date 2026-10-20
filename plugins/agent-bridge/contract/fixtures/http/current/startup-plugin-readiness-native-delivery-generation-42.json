@@ -1,18 +1,18 @@
 {
   "captured_from": {
-    "commit": "7f9539baef7ed9854e5b8c3d3230f574b9fab848",
+    "commit": "ee6faa4ac2b896e3d6178ca55228a4a4d1f8b1e4",
     "plugin_version": "0.4.1-dev3",
-    "protocol_generation": 41,
+    "protocol_generation": 42,
     "source_path": "plugins/agent-bridge/extensions/agent-bridge/delivery.mjs",
     "source_git_blob": "dd7d21971b3b224528428ff1c6b8529de9257185",
     "source_sha256": "eb5ffd40843e4e5019d36dc0aeef1c896d164cdb5fb4c3a2094daa91ae2f1204"
   },
   "response": {
-    "protocol_version": 41,
+    "protocol_version": 42,
     "min_protocol_version": 1
   },
   "capability": {
-    "required_protocol_version": 41,
+    "required_protocol_version": 42,
     "readiness_control": "control:plugin-readiness",
     "autopilot_control": "control:set-mode-ready",
     "ordinary_input_is_gated": false,

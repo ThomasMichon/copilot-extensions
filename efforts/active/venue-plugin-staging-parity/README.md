@@ -266,6 +266,27 @@ or a reason to create a daemon.
 
 ## Journal
 
+### 2026-10-20 - Reconcile the upstream protocol generation without narrowing compatibility
+
+- New `dev` changes assigned HTTP generation 41 to direct remote ACP targets
+  while this open slice independently used 41 for plugin readiness. Replayed
+  the owned commits onto the new base and assigned readiness generation 42,
+  retaining remote ACP targeting at 41 and the minimum-supported generation
+  at 1. The supported range and per-capability floors remain distinct.
+- Preserved every upstream immutable HTTP fixture, including the generation-41
+  targets and exact-workspace-owner vectors. Integrated generation-42 evidence
+  retains the independently frozen expectations and older capability floors;
+  the new readiness vectors continue to exercise real HTTP/SQLite admission.
+- Focused contained integration passes 244 cases, including ordinary receipt
+  delivery to generation-39/40/41 peers, older ordinary packets accepted without
+  readiness gating, readiness refusal before dispatch to generation-40/41
+  peers, and remote ACP target negotiation through generation 42.
+- The prior authenticated Codespace consumer already proved the existing auth
+  relay and repository-scoped skill loading with global settings unchanged.
+  This rebase still needs current-head native evidence, review and required CI;
+  the earlier one-time provider merge consent was pinned to the old head and
+  is not authorization to merge this replacement.
+
 ### 2026-10-19 - Validate detached source startup with existing inference authentication
 
 - A source-bound Codespace consumer exercised canonical emitted preparation,

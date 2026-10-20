@@ -45,11 +45,16 @@
     "ordinary_provider_instance_default": false
   },
   "captured_from": {
-    "commit": "7f9539baef7ed9854e5b8c3d3230f574b9fab848",
+    "commit": "2ecd9cff2436e7abab212023ae17307a7a7823d8",
     "plugin_version": "0.4.1-dev3",
     "protocol_generation": 41,
     "source_path": "plugins/agent-bridge/src/agent_bridge/remote_acp_sessions.py",
-    "source_git_blob": "e1c95c1065f20e29cf40e933701222b3ba2ea6ce",
-    "source_sha256": "178c24707f1957706aeb80466f067e9591c206ec215cc6596730234ba115a942"
+    "source_git_blob": "89c419a8af26d2954754ed53b256098da3e6b985",
+    "source_sha256": "32b02a91924538ac07bc7ba98d2fd98df91fee299f498a8c4f57ff6ce4470a56"
+  },
+  "reattested_from": {
+    "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-acp-remote_acp_sessions-generation-40.json",
+    "sha256": "995aa922b10236c46bd0798da23858483551162a5550b4ea392c6ec678c110e9",
+    "method": "Retain the independently authored historical expected semantics and capability floors; only protocol_version advertisements advance to 41. Re-attest against exact committed source bytes, not a producer-generated expected snapshot. test_contract_registry.py and test_http_targets_contract.py verify the retained model, client, route and provenance expectations; the target vector separately covers the new selection and binding contract."
   }
 }

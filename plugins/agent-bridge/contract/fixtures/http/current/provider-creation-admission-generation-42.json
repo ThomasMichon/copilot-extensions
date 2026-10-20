@@ -44,7 +44,7 @@
     "required_provider_capability": "instance_pinned_exec"
   },
   "captured_from": {
-    "commit": "1d527942d774bc9da23ad878ba8eac62ea10c40e",
+    "commit": "ee6faa4ac2b896e3d6178ca55228a4a4d1f8b1e4",
     "plugin_version": "0.4.1-dev3",
     "protocol_generation": 42,
     "source_path": "plugins/agent-bridge/src/agent_bridge/workspace_creation.py",
@@ -59,7 +59,6 @@
   },
   "reattested_from": {
     "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-admission-generation-41.json",
-    "sha256": "7f9fb6b47b61d0b392e477f59451b78ea7f5be96178934bb8c1d214ec3f3aeaf",
-    "method": "Retain the independently authored historical expected semantics and capability floors; only protocol_version advertisements advance to 42. Re-attest against exact committed source bytes, not a producer-generated expected snapshot. test_contract_registry.py and test_http_targets_contract.py verify the retained model, client, route and provenance expectations; test_attention_current.py separately covers the additive attention-row boundary fields."
+    "sha256": "7f9fb6b47b61d0b392e477f59451b78ea7f5be96178934bb8c1d214ec3f3aeaf"
   }
 }

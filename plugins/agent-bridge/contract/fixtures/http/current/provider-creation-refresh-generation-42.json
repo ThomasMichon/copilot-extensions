@@ -44,12 +44,12 @@
     "required_provider_capability": "instance_pinned_exec"
   },
   "captured_from": {
-    "commit": "1d527942d774bc9da23ad878ba8eac62ea10c40e",
+    "commit": "ee6faa4ac2b896e3d6178ca55228a4a4d1f8b1e4",
     "plugin_version": "0.4.1-dev3",
     "protocol_generation": 42,
     "source_path": "plugins/agent-bridge/src/agent_bridge/session_core.py",
-    "source_git_blob": "337327675392254d076f9e99d4f1cfaba1609504",
-    "source_sha256": "59e17e5bf559e09c63c88a2aab5100c5e5900422d0dc4c51384cedda04a4f955"
+    "source_git_blob": "823b23012c20ae869bfe9eb0666098eb14f3e954",
+    "source_sha256": "282bc4d134a9dbc7c19783831adae938dfe7a89fd79cc47a1f39d9f845696ad2"
   },
   "compatibility": {
     "name_only_provider_refused": true,
@@ -58,7 +58,6 @@
   },
   "reattested_from": {
     "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-refresh-generation-41.json",
-    "sha256": "c353a319faf476dc4bf69f2cf82700b35cf76086b238b18cb1483b9bec67aba6",
-    "method": "Retain the independently authored historical expected semantics and capability floors; only protocol_version advertisements advance to 42. Re-attest against exact committed source bytes, not a producer-generated expected snapshot. test_contract_registry.py and test_http_targets_contract.py verify the retained model, client, route and provenance expectations; test_attention_current.py separately covers the additive attention-row boundary fields."
+    "sha256": "c353a319faf476dc4bf69f2cf82700b35cf76086b238b18cb1483b9bec67aba6"
   }
 }

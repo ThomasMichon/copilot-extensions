@@ -1,6 +1,6 @@
 {
   "captured_from": {
-    "commit": "7f9539baef7ed9854e5b8c3d3230f574b9fab848",
+    "commit": "2ecd9cff2436e7abab212023ae17307a7a7823d8",
     "plugin_version": "0.4.1-dev3",
     "protocol_generation": 41,
     "source_path": "plugins/agent-bridge/src/agent_bridge/worktree_native_resume.py",
@@ -32,5 +32,10 @@
     "status": 409,
     "reason": "workspace_identity_changed",
     "native_history_replacement": false
+  },
+  "reattested_from": {
+    "path": "plugins/agent-bridge/contract/fixtures/http/current/native-worktree-reconciliation-generation-40.json",
+    "sha256": "4b1e516da42ecf6db08c3e35ffb199acc93e67c07ffb91f920fee5a22f5582f0",
+    "method": "Retain the independently authored historical expected semantics and capability floors; only protocol_version advertisements advance to 41. Re-attest against exact committed source bytes, not a producer-generated expected snapshot. test_contract_registry.py and test_http_targets_contract.py verify the retained model, client, route and provenance expectations; the target vector separately covers the new selection and binding contract."
   }
 }

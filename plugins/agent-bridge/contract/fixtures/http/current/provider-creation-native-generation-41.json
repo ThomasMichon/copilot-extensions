@@ -44,7 +44,7 @@
     "required_provider_capability": "instance_pinned_exec"
   },
   "captured_from": {
-    "commit": "7f9539baef7ed9854e5b8c3d3230f574b9fab848",
+    "commit": "2ecd9cff2436e7abab212023ae17307a7a7823d8",
     "plugin_version": "0.4.1-dev3",
     "protocol_generation": 41,
     "source_path": "plugins/agent-bridge/src/agent_bridge/provider_creation.py",
@@ -58,5 +58,10 @@
     "name_only_provider_refused": true,
     "cold_resume_placement_drift_refused_before_spawn": true,
     "guest_workspace_preserved_on_load": true
+  },
+  "reattested_from": {
+    "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-native-generation-40.json",
+    "sha256": "eded34e2815d0dc7c0618dac5b1ad8f8ce3a07ee3970ee3068b3db35ea6e2b7e",
+    "method": "Retain the independently authored historical expected semantics and capability floors; only protocol_version advertisements advance to 41. Re-attest against exact committed source bytes, not a producer-generated expected snapshot. test_contract_registry.py and test_http_targets_contract.py verify the retained model, client, route and provenance expectations; the target vector separately covers the new selection and binding contract."
   }
 }

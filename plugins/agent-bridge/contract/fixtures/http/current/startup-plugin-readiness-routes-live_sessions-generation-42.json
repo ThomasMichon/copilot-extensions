@@ -1,18 +1,18 @@
 {
   "captured_from": {
-    "commit": "7f9539baef7ed9854e5b8c3d3230f574b9fab848",
+    "commit": "ee6faa4ac2b896e3d6178ca55228a4a4d1f8b1e4",
     "plugin_version": "0.4.1-dev3",
-    "protocol_generation": 41,
-    "source_path": "plugins/agent-bridge/src/agent_bridge/acquisition_contract.py",
-    "source_git_blob": "331f5b16d971e5069b8b9f9070ada176128c6478",
-    "source_sha256": "b783839d063ac6cf1267967786cab467bcb2940bc0b6fa32bedb6e05f6015434"
+    "protocol_generation": 42,
+    "source_path": "plugins/agent-bridge/src/agent_bridge/routes/live_sessions.py",
+    "source_git_blob": "37d905572259c17d5d2c501aee74176534c6fe0f",
+    "source_sha256": "3c3405cd264b34807ea606177a00361d7701fa929ab3819a988911279e27d42e"
   },
   "response": {
-    "protocol_version": 41,
+    "protocol_version": 42,
     "min_protocol_version": 1
   },
   "capability": {
-    "required_protocol_version": 41,
+    "required_protocol_version": 42,
     "readiness_control": "control:plugin-readiness",
     "autopilot_control": "control:set-mode-ready",
     "ordinary_input_is_gated": false,

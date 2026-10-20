@@ -40,6 +40,10 @@ native handshake and does not require a joined CLI extension.
 Readiness wire models likewise ignore additive unknown peer fields while
 retaining required ownership, identity, uniqueness and result-state validation.
 The default `acquisition-readiness` producer probe also requires protocol 42.
+This is a capability floor, not the minimum-supported wire generation.
+Ordinary messages and receipt delivery retain their existing compatibility
+range; generation-41 peers can still serve remote ACP targets. Only a caller
+requesting readiness-bound delivery requires generation 42.
 Existing ACP holders lacking the new optional metadata retain their established
 prepared-directory/handshake path; no new transcript or CLI-extension requirement
 is introduced to retrofit that metadata.

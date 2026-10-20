@@ -34,10 +34,10 @@ VECTOR = json.loads(
     (CONTRACT / "fixtures/http/current/remote-acp-targets-generation-41.json").read_text(
         encoding="utf-8",
     )
-    CURRENT_VECTOR = json.loads(
-        (CONTRACT / "fixtures/http/current/remote-acp-targets-generation-42.json").read_text(
-            encoding="utf-8",
-        )
+)
+CURRENT_VECTOR = json.loads(
+    (CONTRACT / "fixtures/http/current/remote-acp-targets-generation-42.json").read_text(
+        encoding="utf-8",
     )
 )
 
@@ -193,23 +193,25 @@ def test_source_approval_matches_exact_policy_without_resolving_secrets():
     assert source.resolve.call_count == VECTOR["endpoint_policy"]["discovery_secret_reads"]
 
 
-def _wire_generation(value):
+def _wire_generation(value, previous=40, current=41):
     if isinstance(value, dict):
         return {
-            key: 41 if key == "protocol_version" and item == 40 else _wire_generation(item)
+            key: current if key == "protocol_version" and item == previous
+            else _wire_generation(item, previous, current)
             for key, item in value.items()
         }
     if isinstance(value, list):
-        return [_wire_generation(item) for item in value]
+        return [_wire_generation(item, previous, current) for item in value]
     return value
 
 
-def test_reattestations_retain_independent_historical_expectations():
+@pytest.mark.parametrize(("generation", "expected_count"), [(41, 40), (42, 42)])
+def test_reattestations_retain_independent_historical_expectations(generation, expected_count):
     registry = json.loads((CONTRACT / "registry.json").read_text(encoding="utf-8"))
     contract = next(item for item in registry["contracts"] if item["id"] == "agent-bridge.http-wire")
     count = 0
     for registered in contract["fixtures"]:
-        if registered["generation"] != 41:
+        if registered["generation"] != generation:
             continue
         current = json.loads((REPO / registered["path"]).read_text(encoding="utf-8"))
         if "reattested_from" not in current:
@@ -219,11 +221,13 @@ def test_reattestations_retain_independent_historical_expectations():
         previous_bytes = previous_path.read_bytes().replace(b"\r\n", b"\n")
         assert hashlib.sha256(previous_bytes).hexdigest() == current["reattested_from"]["sha256"]
         previous = json.loads(previous_bytes)
-        expected = _wire_generation(previous)
+        expected = _wire_generation(previous, generation - 1, generation)
         actual = copy.deepcopy(current)
         actual.pop("captured_from")
         actual.pop("reattested_from")
         expected.pop("captured_from")
+        expected.pop("reattested_from", None)
         assert actual == expected
-        assert current["captured_from"]["commit"] == VECTOR["captured_from"]["commit"]
-    assert count == 40
+        vector = VECTOR if generation == 41 else CURRENT_VECTOR
+        assert current["captured_from"]["commit"] == vector["captured_from"]["commit"]
+    assert count == expected_count

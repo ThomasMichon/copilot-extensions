@@ -167,3 +167,32 @@ def test_typed_client_old_peer_is_rejected_without_posting_and_legacy_schema_sta
     assert failure.value.status == 426
     assert calls == [("GET", "/health")]
     assert "plugin_readiness" not in SendMessageRequest(sender="operator", body="ordinary").model_dump()
+
+
+@pytest.mark.parametrize("generation", [39, 40, 41])
+def test_ordinary_receipt_delivery_retains_older_peer_capability_floor(generation):
+    client = BridgeClient("http://fixture", "fixture", connect_grace=0)
+    calls = []
+
+    def request(method, path, payload=None, **kwargs):
+        calls.append((method, path, payload))
+        if path == "/health":
+            return {"protocol_version": generation, "min_protocol_version": 1}
+        return {"message_id": 7}
+
+    client._request = request
+    assert client.send_live_message(
+        "native", sender="operator", body="ordinary", wait=True,
+    ) == {"message_id": 7}
+    assert calls[-1][:2] == ("POST", "/api/v1/live-sessions/native/messages")
+    assert "plugin_readiness" not in calls[-1][2]
+
+
+def test_current_http_accepts_older_ordinary_packet_without_readiness_gate(http, tmp_db):
+    response = http.post("/api/v1/live-sessions/native/messages", json={
+        "sender": "operator", "body": "ordinary", "delivery": "queue",
+    })
+    assert response.status_code == 200
+    messages = tmp_db.execute_read("SELECT kind,body FROM live_messages")
+    assert len(messages) == 1
+    assert messages[0]["kind"] == "prompt" and messages[0]["body"] == "ordinary"

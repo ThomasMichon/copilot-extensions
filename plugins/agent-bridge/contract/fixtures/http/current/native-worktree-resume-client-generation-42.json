@@ -1,11 +1,11 @@
 {
   "captured_from": {
-    "commit": "1d527942d774bc9da23ad878ba8eac62ea10c40e",
+    "commit": "ee6faa4ac2b896e3d6178ca55228a4a4d1f8b1e4",
     "plugin_version": "0.4.1-dev3",
     "protocol_generation": 42,
     "source_path": "plugins/agent-bridge/src/agent_bridge/client.py",
-    "source_git_blob": "4cc342a43aa7c4b648150ebf3a8be30379577ba2",
-    "source_sha256": "5baf0775e49aebd69bb67e734b19d07f7e6fbdc5a0d7485c1ab6577da5994ef9"
+    "source_git_blob": "0db7713059acae0b1f3f829b4b5f0d124aeea971",
+    "source_sha256": "2d2aa5f346c3b4ed54f6db9cc9d19a0541cede902f77aae67183d833939131b7"
   },
   "response": {
     "protocol_version": 42,
@@ -40,7 +40,6 @@
   },
   "reattested_from": {
     "path": "plugins/agent-bridge/contract/fixtures/http/current/native-worktree-resume-client-generation-41.json",
-    "sha256": "a0db58e42ce353570f7d146b2bbb2a8eed476ed6427f3c8d140a1e9c44dd4119",
-    "method": "Retain the independently authored historical expected semantics and capability floors; only protocol_version advertisements advance to 42. Re-attest against exact committed source bytes, not a producer-generated expected snapshot. test_contract_registry.py and test_http_targets_contract.py verify the retained model, client, route and provenance expectations; test_attention_current.py separately covers the additive attention-row boundary fields."
+    "sha256": "a0db58e42ce353570f7d146b2bbb2a8eed476ed6427f3c8d140a1e9c44dd4119"
   }
 }

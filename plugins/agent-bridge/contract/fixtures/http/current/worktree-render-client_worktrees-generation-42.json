@@ -1,6 +1,6 @@
 {
   "captured_from": {
-    "commit": "1d527942d774bc9da23ad878ba8eac62ea10c40e",
+    "commit": "ee6faa4ac2b896e3d6178ca55228a4a4d1f8b1e4",
     "plugin_version": "0.4.1-dev3",
     "protocol_generation": 42,
     "source_path": "plugins/agent-bridge/src/agent_bridge/client_worktrees.py",
@@ -49,7 +49,6 @@
   },
   "reattested_from": {
     "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-client_worktrees-generation-41.json",
-    "sha256": "7151eaa295d8666545ead548681eb347c5171f1e8aa5da8fbe346295818c9004",
-    "method": "Retain the independently authored historical expected semantics and capability floors; only protocol_version advertisements advance to 42. Re-attest against exact committed source bytes, not a producer-generated expected snapshot. test_contract_registry.py and test_http_targets_contract.py verify the retained model, client, route and provenance expectations; test_attention_current.py separately covers the additive attention-row boundary fields."
+    "sha256": "7151eaa295d8666545ead548681eb347c5171f1e8aa5da8fbe346295818c9004"
   }
 }

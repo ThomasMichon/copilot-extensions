@@ -1,6 +1,6 @@
 {
   "captured_from": {
-    "commit": "1d527942d774bc9da23ad878ba8eac62ea10c40e",
+    "commit": "ee6faa4ac2b896e3d6178ca55228a4a4d1f8b1e4",
     "plugin_version": "0.4.1-dev3",
     "protocol_generation": 42,
     "source_path": "plugins/agent-bridge/src/agent_bridge/routes/remote.py",
@@ -41,7 +41,6 @@
   },
   "reattested_from": {
     "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-zero-reply-generation-41.json",
-    "sha256": "9ddf4ebd1b914b07a84ad9953445841c2f9b662f07e0c24e8a7d2e25627fc3ec",
-    "method": "Retain the independently authored historical expected semantics and capability floors; only protocol_version advertisements advance to 42. Re-attest against exact committed source bytes, not a producer-generated expected snapshot. test_contract_registry.py and test_http_targets_contract.py verify the retained model, client, route and provenance expectations; test_attention_current.py separately covers the additive attention-row boundary fields."
+    "sha256": "9ddf4ebd1b914b07a84ad9953445841c2f9b662f07e0c24e8a7d2e25627fc3ec"
   }
 }
