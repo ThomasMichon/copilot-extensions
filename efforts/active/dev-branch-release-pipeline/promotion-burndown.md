@@ -3,9 +3,12 @@
 Parent: [Dev/Main Release Pipeline](README.md). Related portfolio:
 [Test Portfolio Rationalization](../test-portfolio-rationalization/README.md).
 
-**Status:** policy #7255 and Source unit-packet/PR-CI implementation #7269 are
-reviewed and merged. The source controller mirror and independent Main
-activation are the next slice. Production remains paused.
+**Status:** policy #7255, Source engine #7269, Source controller #7281 and
+independent Main control #7282 are reviewed and merged. One real manual
+paused qualification succeeded through actual publication, Main merge and
+tagging in 11m22s (11m28s through complete workflow termination). Canonical
+resume #7287 is merged and verified; natural cycles and client acceptance
+remain open.
 This governs the next recovery slice. It supersedes the earlier requirement to
 preserve full, generated, native and installation integration suites as
 promotion prerequisites.
@@ -60,15 +63,15 @@ private worktree paths and session locators are intentionally omitted.
 | PB-13 | P0 | Rework or supersede the old full-corpus proposal; retain code, evidence and claims. | Existing proposal held as draft |
 | PB-01 | P0 | Inventory every gating job/step/test as `KEEP_UNIT`, `MOVE_PERIODIC` or `REMOVE_DUPLICATE`, with cost and owner. | Inventoried; closure edges identified |
 | PB-03 | P0 | Establish the small positive unit manifest; exclude hidden integration and slow/unclassified cases. | Starter merged in #7269: 236 cells; wider corpus classification stays open |
-| PB-02 | P0 | Remove full/native/integration tasks and indirect dependency edges from promotion. | Eleven-job source mirror prepared; Main activation pending |
-| PB-04 | P0 | Produce unit coverage once; verify every admitted file/chunk/node and outcome, with a distinct unit-profile identity. | Source engine merged in #7269; hosted promotion proof pending |
-| PB-05 | P0 | Replace general-purpose candidate CI admission with the compact exact unit-evidence contract and aggregate. | Explicit v2 helpers merged; controller integration prepared |
+| PB-02 | P0 | Remove full/native/integration tasks and indirect dependency edges from promotion. | Eleven-job Source/Main controls and actual unit-only canary proven |
+| PB-04 | P0 | Produce unit coverage once; verify every admitted file/chunk/node and outcome, with a distinct unit-profile identity. | Actual packet: 236 nodes, 708 passing phases, no effects; receipt/digests verified |
+| PB-05 | P0 | Replace general-purpose candidate CI admission with the compact exact unit-evidence contract and aggregate. | Actual v2 original-job/archive reuse qualified and published the candidate |
 | PB-06 | P0 | Make required PR testing impact-conditional and unit-only; migrate aggregate/selector requirements coherently. | Source four-job CI and required aggregate merged in #7269 |
-| PB-07 | P1 | Route removed integration to periodic containers with named failure ownership, never a release dependency. | Source routing/inventory merged; actual enrollment/execution still unproven |
+| PB-07 | P1 | Route removed integration to periodic containers with named failure ownership, never a release dependency. | Routing and locked CLI provisioning merged; actual container execution still unproven |
 | PB-08 | P0 | Preserve fail-closed configuration admission, including quoted/merged keys, if reused by the unit gate. | Explicit unit profile and strict evidence admission merged in #7269 |
-| PB-09 | P0 | Keep bounded production build/signing/provenance/freshness/publication/merge safeguards. | Source controller retains safeguards; offline decision checks pass, Main review pending |
-| PB-10 | P0 | Measure the whole flow under thirty minutes; remove long tasks rather than increasing deadlines. | Pending |
-| PB-11 | P0 | Land reviewed control, prove the unit-only release, resume canonically and observe stable natural cycles. | Blocked on preceding items |
+| PB-09 | P0 | Keep bounded production build/signing/provenance/freshness/publication/merge safeguards. | Actual canary built, signed, verified, published, merged and tagged |
+| PB-10 | P0 | Measure the whole flow under thirty minutes; remove long tasks rather than increasing deadlines. | First canary 11m28s including queue; natural-cycle measurements pending |
+| PB-11 | P0 | Land reviewed control, prove the unit-only release, resume canonically and observe stable natural cycles. | Controls, canary and canonical resume done; natural-cycle acceptance pending |
 | PB-12 | P1 | Run the first value-for-cost replacement tournament after stable operation. | Deferred until PB-11 |
 
 The recovery owner owns the manifest, Source publication, Main control proposal,

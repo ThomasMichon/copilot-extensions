@@ -1078,6 +1078,56 @@ proposal.
 
 ## Journal
 
+### 2026-10-19 - Reviewed unit-only controls landed; real canary qualified
+
+Source #7281 merged as `6e2e59ceed9a5cb822bd02906f5d4e1173aeae71`
+after current-head Copilot approval and all three required checks. Main
+#7282 then merged independently as
+`4186ffb4a19caca118b0a2c5dcaeb2ee6c6b985d`, after a current-head clean
+comment verdict and the strict required Main source gate. The Main
+preservation manifest and canonical pause state did not change. Re-read
+this effort's Plan/Validation Plan and the Main-control gates; their
+release, periodic and client acceptance obligations remain open.
+
+The periodic prerequisite repair is included in both reviewed declarations.
+Source exposes the exact CLI lock before Main activation. Actual isolated
+CLI installation and health checking pass, but no Docker suite or Windows
+qualification is inferred from that prerequisite proof.
+
+Verified the actual Main declaration has eleven jobs, exactly one source-unit
+runner and the reviewed `ce77da58017442f83bf3d82a5f80b111b63b9737`
+helper pin. No earlier promotion PR remained open. Started one manual
+paused qualification, [run 39344826377](https://github.com/ThomasMichon/copilot-extensions/actions/runs/39344826377),
+attempt 1, from that exact Main controller. It admitted Dev
+`6e2e59ceed9a5cb822bd02906f5d4e1173aeae71` and completed successfully.
+The actual unit packet independently verifies 236 collected nodes, 708 passing
+phase reports, no prohibited effects and the exact v2 receipt digest. Producing
+job `118374970235` completed in 24 seconds; its unit/coverage execution was
+5.852 seconds. Artifact `12230936464` supplied qualification, not a second
+candidate test run.
+
+Source-owned assets were published and read back, then #7285 actually merged
+candidate `68f3e3fe116148c9717c65923e6b260001e45de6` to Main
+`5ee1468f15967fd6e76a0be08ee3dc69da2551bb`. The annotated
+`promote-dev-6e2e59ceed9a5cb822bd02906f5d4e1173aeae71` tag points to that
+exact landed commit. From provider-created time `2026-10-19T23:58:29Z` to
+tag time `2026-10-20T00:09:51Z` is 11m22s; complete workflow termination at
+`00:09:57Z` is 11m28s, including queueing. All ten operational/unit jobs
+succeeded and the failure reporter was correctly skipped.
+
+Main now contains a real qualified release, not merely repaired controls.
+The existing tool prepared the canonical resume payload without invoking its
+legacy automatic-merge path. State-only #7287 passed current-head Copilot
+approval and the strict source gate, then merged as
+`3aca996a9c712a86dc4b2cb0c3c649f3b150b621` at `00:38:57Z`.
+Provider readback confirms `paused: false`, a cleared reason and unchanged
+qualified source lineage. Naturally dispatched
+[run 39348986302](https://github.com/ThomasMichon/copilot-extensions/actions/runs/39348986302)
+started at `00:40:01Z` from that resumed controller; a running workflow is not
+yet a successful natural cycle. Two natural cycles, periodic execution/repair
+ownership and Windows/WSL/local client acceptance remain open; one successful
+canary and resume are not stable-state or parent-effort completion.
+
 ### 2026-10-19 - Source unit engine merged; controller reuse is the next slice
 
 Source #7269 merged as `ce77da58017442f83bf3d82a5f80b111b63b9737` after
