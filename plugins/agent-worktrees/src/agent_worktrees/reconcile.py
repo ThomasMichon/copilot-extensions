@@ -1900,10 +1900,14 @@ def build_plan(
     second pass (so a freshly installed payload's runtime is picked up).
     """
     now = time.time() if now is None else now
-    if machine is None:
-        from .machine_identity import repository_execution_machine
+    from .machine_identity import repository_config
 
-        machine = repository_execution_machine(repo_dir)
+    config = repository_config(repo_dir)
+    if machine is None:
+        machine = cfg.detect_machine(
+            repo_dir, value=config.configured_machine if config is not None else None,
+            config=config,
+        )
     cache = load_cache() if cache is None else cache
     plugins_cache: dict[str, Any] = cache.setdefault("plugins", {})
 
@@ -1962,6 +1966,7 @@ def build_plan(
         scope = manifest_runtime_scope(pdir) or "none"
         if scope != "none" and runtime_allowed(
             scope, name, machine, gate, gate_present=gate_present, repo_dir=repo_dir,
+            config=config,
         ):
             try:
                 runtime_env, selected_runtime_root = runtime_installer_environment(

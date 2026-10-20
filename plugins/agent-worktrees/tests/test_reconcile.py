@@ -717,24 +717,41 @@ def test_machine_gate_uses_physical_host_without_changing_execution_id(
 
 
 @pytest.mark.parametrize("resident_project", [None, "unrelated-project"])
+@pytest.mark.parametrize("overlay", [False, True])
 def test_deferred_runtime_admission_uses_target_project_without_ambient_state(
     env: Any, monkeypatch: pytest.MonkeyPatch, resident_project: str | None,
+    overlay: bool,
 ) -> None:
     from types import SimpleNamespace
     import threading
 
-    from agent_worktrees import __main__ as main, front_door_cli
+    from agent_worktrees import __main__ as main, front_door_cli, state_root
 
     env.write_settings({f"agent-bridge@{MKT}": True})
     env.install_payload("agent-bridge", "3.0.0", scope="machine-gated")
     env.deploy_runtime("agent-bridge", "2.0.0")
     env.write_gate({"agent-bridge": ["physical-host"]})
-    entry = cfg.MachineEntry(
-        key="custom-execution", display_name="Custom execution",
-        execution_platform="wsl", physical_host="physical-host",
+    knowledge = env.home / "knowledge"
+    knowledge.mkdir()
+    registry = knowledge if overlay else env.repo
+    (registry / "machines.yaml").write_text(json.dumps({
+        "machines": {"custom-execution": {
+            "execution_platform": "wsl", "physical_host": "physical-host",
+        }},
+    }), encoding="utf-8")
+    config = cfg.Config(
+        srcroot=str(env.home), machine="custom-execution", platform="wsl",
+        repo_name="target-project", configured_machine="custom-execution",
+        knowledge_repo="knowledge" if overlay else "",
+        repos={"target-project": cfg.RepoConfig(
+            anchor=str(env.repo), worktree_root=str(env.home / "trees"), stateless=overlay,
+        )},
     )
     monkeypatch.setattr(cfg, "detect_platform", lambda: "wsl")
-    monkeypatch.setattr(cfg, "load_machines_yaml", lambda *args, **kwargs: {entry.key: entry})
+    monkeypatch.setattr(
+        state_root, "_checkout_path",
+        lambda name: str(knowledge) if name == "knowledge" else None,
+    )
     monkeypatch.setattr(front_door_cli, "_git_toplevel", lambda path: env.repo)
     monkeypatch.setattr(front_door_cli, "_reverse_lookup_project", lambda anchor: "target-project")
     expected_path = cfg.project_dir("target-project") / "config.yaml"
@@ -744,7 +761,7 @@ def test_deferred_runtime_admission_uses_target_project_without_ambient_state(
     ) -> Any:
         if path != expected_path or project != "target-project":
             raise RuntimeError("No active project could be resolved")
-        return SimpleNamespace(configured_machine=entry.key)
+        return config
 
     monkeypatch.setattr(cfg, "load_config", load)
     monkeypatch.setattr(cfg, "_ACTIVE_PROJECT", "target-project")

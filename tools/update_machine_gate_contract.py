@@ -132,15 +132,19 @@ def _check_case(
     present, failure, admitted,
 ) -> None:
     detected, gate_reads, presence_reads, consulted, prepared, invoked = [], [], [], [], [], []
+    selected_config = []
 
     def load_config():
         if failure == "anchor":
             raise ValueError("synthetic anchor resolution failure")
-        return SimpleNamespace(configured_machine="local", default_repo=SimpleNamespace(anchor=anchor))
+        config = SimpleNamespace(configured_machine="local", default_repo=SimpleNamespace(anchor=anchor))
+        selected_config.append(config)
+        return config
 
-    def detect_machine(repo, *, value=None):
+    def detect_machine(repo, *, value=None, config=None):
         detected.append(repo)
         _expect(value == "local", f"{case}: configured machine identity was not supplied")
+        _expect(config is selected_config[0], f"{case}: target configuration was not supplied")
         if failure == "detect":
             raise ValueError("synthetic machine detection failure")
         return "local"
@@ -192,6 +196,7 @@ def _check_case(
                 consulted == [((scope, name, "local", allowed), {
                     "gate_present": present,
                     "repo_dir": context if explicit_context else anchor,
+                    "config": selected_config[0],
                 })],
                 f"{case}: canonical policy or manifest-presence argument was bypassed",
             )

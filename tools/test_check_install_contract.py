@@ -77,6 +77,7 @@ def test_install_guard_runs_machine_gate_contract(monkeypatch, capsys) -> None:
     ("update_gate.py", "return machine in allowed", "return True"),
     ("update_gate.py", "or physical_machine in allowed", "or False"),
     ("update_gate.py", "repo_dir=repo_dir", "repo_dir=None"),
+    ("update_gate.py", "config=config", "config=None"),
 ])
 def test_machine_gate_contract_rejects_actual_source_regressions(
     tmp_path: Path, name: str, before: str, after: str,

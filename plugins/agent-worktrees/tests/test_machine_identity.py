@@ -170,7 +170,7 @@ def test_execution_context_refuses_ambiguous_registry(
         )
 
 
-def test_repository_execution_machine_keeps_unregistered_detection_project_free(
+def test_repository_config_keeps_unregistered_detection_project_free(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from agent_worktrees import front_door_cli
@@ -182,15 +182,7 @@ def test_repository_execution_machine_keeps_unregistered_detection_project_free(
         cfg, "load_config",
         lambda *args, **kwargs: pytest.fail("unregistered detection must not load ambient config"),
     )
-    seen = []
-
-    def detect(repo: Path, *, value: str | None = None) -> str:
-        seen.append((repo, value))
-        return "observed-host"
-
-    monkeypatch.setattr(cfg, "detect_machine", detect)
-    assert machine_identity.repository_execution_machine(root) == "observed-host"
-    assert seen == [(root, None)]
+    assert machine_identity.repository_config(root) is None
 
 
 class TestIsLocalMachine:

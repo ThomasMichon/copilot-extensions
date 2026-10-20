@@ -1451,6 +1451,8 @@ execution ID through the same `machine_transport` physical/environment map;
 custom execution keys and physical names ending in platform-like suffixes are
 not rewritten. Deferred launch planning selects the target repository's project
 configuration explicitly, without changing the resident's active project.
+That configuration follows both execution detection and physical projection, so
+a stateless harness retains its declared knowledge-overlay machine registry.
 Exact execution-ID selectors remain compatible and select only
 that execution address. Unknown names retain exact-match behavior, while
 ambiguous or conflicting registry selections refuse. This deployment decision

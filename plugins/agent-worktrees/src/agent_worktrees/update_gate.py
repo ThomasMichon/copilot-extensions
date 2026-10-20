@@ -17,6 +17,7 @@ class MachineDetectionError(Exception):
 def runtime_allowed(
     scope: str, name: str, machine: str, gate: dict[str, set[str]], *,
     gate_present: bool = True, repo_dir: Path | None = None,
+    config: cfg.Config | None = None,
 ) -> bool:
     """Apply deployment policy without granting execution-space authority.
 
@@ -36,6 +37,7 @@ def runtime_allowed(
 
                 physical_machine = resolve_execution_context(
                     machine, repo_dir, environment=cfg.detect_platform(),
+                    config=config,
                 ).target.machine
             return machine in allowed or physical_machine in allowed
         return not gate_present
@@ -74,7 +76,7 @@ def _machine_gate_blocks(name: str, scope: str, context: Path | None) -> bool:
                 f"could not resolve the repository that enables {name}: {error}"
             ) from error
     try:
-        machine = cfg.detect_machine(repo_dir, value=config.configured_machine)
+        machine = cfg.detect_machine(repo_dir, value=config.configured_machine, config=config)
     except Exception as error:
         # Never fall back to a bare hostname: detection raises on purpose when
         # an explicit execution space is required or the machine registry is
@@ -85,6 +87,7 @@ def _machine_gate_blocks(name: str, scope: str, context: Path | None) -> bool:
     try:
         return not reconcile.runtime_allowed(
             scope, name, machine, gate, gate_present=gate_present, repo_dir=repo_dir,
+            config=config,
         )
     except (ValueError, OSError) as error:
         raise MachineDetectionError(

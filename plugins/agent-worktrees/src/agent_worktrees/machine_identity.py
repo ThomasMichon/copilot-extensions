@@ -92,6 +92,7 @@ def resolve_execution_machine(
 
 def resolve_execution_context(
     name: str, repo_dir: str | Path, *, environment: str,
+    config: cfg.Config | None = None,
 ) -> MachineSelection[MachineEntry]:
     """Project a registered execution ID into its physical/environment tuple.
 
@@ -99,7 +100,10 @@ def resolve_execution_context(
     names retain their exact spelling; suffixes alone cannot admit another host.
     """
     try:
-        entries = cfg.load_machines_yaml(repo_dir)
+        entries = (
+            cfg.load_machines_yaml(repo_dir, config=config)
+            if config is not None else cfg.load_machines_yaml(repo_dir)
+        )
     except FileNotFoundError:
         entries = {}
     selection = resolve_machine_selection(entries, name, environment)
@@ -108,20 +112,18 @@ def resolve_execution_context(
     return selection
 
 
-def repository_execution_machine(repo_dir: Path) -> str:
-    """Resolve the target's configured identity without changing ambient project."""
+def repository_config(repo_dir: Path) -> cfg.Config | None:
+    """Load target configuration without changing or depending on ambient project."""
     from . import front_door_cli
 
     anchor = front_door_cli._git_toplevel(repo_dir)
     project = front_door_cli._reverse_lookup_project(anchor or repo_dir)
-    configured = None
     if project is not None:
-        config = cfg.load_config(
+        return cfg.load_config(
             cfg.project_dir(project) / "config.yaml", project=project,
             include_control_plane_related_pr=False,
         )
-        configured = config.configured_machine
-    return cfg.detect_machine(repo_dir, value=configured)
+    return None
 
 
 def is_local_machine(name: str, config: cfg.Config) -> bool:
