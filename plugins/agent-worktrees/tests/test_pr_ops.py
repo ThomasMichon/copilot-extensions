@@ -5916,6 +5916,7 @@ class TestPRStatusLive:
             pr_state="open", merged=False, head_sha="h", base_ref="master",
             author="alice", mergeable=True, title="Feature", reviews=(),
         )
+        exception_calls = []
 
         class _GhLikeProv:
             name = "gitea"
@@ -5926,15 +5927,28 @@ class TestPRStatusLive:
             def get_snapshot(self, repo, number, *, api_base="", token=None):
                 return snap
 
-            def pull_review_gate(self, repo, number, *, api_base="", token=None):
-                return (True, True)
+            def pull_review_exception(
+                self, repo, number, *, expected_head_sha, hold_labels=(),
+                wip_title_prefixes=(), api_base="", token=None,
+            ):
+                exception_calls.append((
+                    repo, number, expected_head_sha, hold_labels,
+                    wip_title_prefixes, api_base, token,
+                ))
+                return (True, False, "")
 
         from agent_worktrees import providers
         monkeypatch.setattr(providers, "get_provider", lambda name: _GhLikeProv())
-        monkeypatch.setattr(providers, "resolve_token", lambda prcfg: "tok")
+        monkeypatch.setattr(
+            providers, "account_token_for_slug", lambda slug, prcfg: "tok",
+        )
 
         res = pr_ops.pr_status(wid, config=config)
         assert "Maintainer bypass" in res["live"]["self_merge_note"]
+        assert exception_calls == [
+            ("ext", 7, "h", ("do-not-merge", "needs-rebase", "wip"),
+             ("wip:",), "https://h/gitea", "tok"),
+        ]
 
     def test_live_self_merge_note_absent_when_not_bypassable(
         self, pr_repo, monkeypatch,
@@ -5950,6 +5964,7 @@ class TestPRStatusLive:
             pr_state="open", merged=False, head_sha="h", base_ref="master",
             author="alice", mergeable=True, title="Feature", reviews=(),
         )
+        exception_calls = []
 
         class _GhLikeProv:
             name = "gitea"
@@ -5960,21 +5975,34 @@ class TestPRStatusLive:
             def get_snapshot(self, repo, number, *, api_base="", token=None):
                 return snap
 
-            def pull_review_gate(self, repo, number, *, api_base="", token=None):
-                return (True, False)
+            def pull_review_exception(
+                self, repo, number, *, expected_head_sha, hold_labels=(),
+                wip_title_prefixes=(), api_base="", token=None,
+            ):
+                exception_calls.append((
+                    repo, number, expected_head_sha, hold_labels,
+                    wip_title_prefixes, api_base, token,
+                ))
+                return (False, False, "not authorized")
 
         from agent_worktrees import providers
         monkeypatch.setattr(providers, "get_provider", lambda name: _GhLikeProv())
-        monkeypatch.setattr(providers, "resolve_token", lambda prcfg: "tok")
+        monkeypatch.setattr(
+            providers, "account_token_for_slug", lambda slug, prcfg: "tok",
+        )
 
         res = pr_ops.pr_status(wid, config=config)
         assert "self_merge_note" not in res["live"]
+        assert exception_calls == [
+            ("ext", 7, "h", ("do-not-merge", "needs-rebase", "wip"),
+             ("wip:",), "https://h/gitea", "tok"),
+        ]
 
     def test_live_self_merge_note_absent_on_non_self_merge_repo(
         self, pr_repo, monkeypatch,
     ):
         # A gitea repo without submitter-direct merge_actor never surfaces the
-        # note even if the (hypothetical) provider had pull_review_gate.
+        # note even if the provider supports a head-bound review exception.
         from agent_worktrees import pr_contract as pc
 
         config, wid, _wt, _ = pr_repo
@@ -5994,12 +6022,17 @@ class TestPRStatusLive:
             def get_snapshot(self, repo, number, *, api_base="", token=None):
                 return snap
 
-            def pull_review_gate(self, repo, number, *, api_base="", token=None):
-                return (True, True)
+            def pull_review_exception(
+                self, repo, number, *, expected_head_sha, hold_labels=(),
+                wip_title_prefixes=(), api_base="", token=None,
+            ):
+                pytest.fail("non-self-merge profiles must not read review exceptions")
 
         from agent_worktrees import providers
         monkeypatch.setattr(providers, "get_provider", lambda name: _GhLikeProv())
-        monkeypatch.setattr(providers, "resolve_token", lambda prcfg: "tok")
+        monkeypatch.setattr(
+            providers, "account_token_for_slug", lambda slug, prcfg: "tok",
+        )
 
         res = pr_ops.pr_status(wid, config=config)
         assert "self_merge_note" not in res["live"]

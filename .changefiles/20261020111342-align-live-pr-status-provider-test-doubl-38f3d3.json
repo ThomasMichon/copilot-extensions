@@ -1,0 +1,9 @@
+{
+  "comment": "Align live PR status provider test doubles with the head-bound review-exception contract.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

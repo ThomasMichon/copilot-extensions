@@ -87,7 +87,50 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Mechanical move mapping: preserved, not conflated with fixtures
 
+### Corrective prerequisite: live-status provider doubles
+
+After #7386, native validation of the next mechanical partition found
+`TestPRStatusLive::test_live_self_merge_note_surfaced_when_bypassable`
+failing on Dev `8f2f495df6b30855f38ca95c07a9301b8e482f6a`.
+The three adjacent live-status note cases still implemented the retired
+`pull_review_gate` double, whereas #7232's actual consumer requires
+`pull_review_exception` with the expected head and safety filters.
+This is a newly observed fixture discrepancy, not a reclassification of
+the immutable census or permission to mix fixture semantics into M-MOVE.
+
+The mechanical extraction was reversed before publication. Its separate
+corrective prerequisite changes only those three test doubles and their
+synthetic repository-token seam in the retained `test_pr_ops.py`:
+
+- The bypassable case returns the current authorized/safe/reason tuple and
+  verifies the actual repository, PR number, expected head, hold labels,
+  WIP prefixes, endpoint and synthetic token passed by `pr_status`.
+- The unauthorized case returns an explicit refusal, requires the same
+  observed inputs and retains the no-note assertion. It cannot pass merely
+  because an obsolete double was never invoked.
+- The non-self-merge case retains its no-note assertion and fails if the
+  review-exception method is consulted at all.
+
+All production merge authority and safety decisions remain unchanged.
+The independent correction must actually merge before retrying the
+CLI/claim/status mechanical move from fresh Dev. Every original method,
+parameter and fixture remains present; no skip or assertion removal is
+authorized. The original 900/240-second parent qualification stays open.
+Native Windows validation of all live-status, bypass-note, head-observation,
+thread and create-PR CLI cases passes: 41 cases without skips in 43.32
+seconds, 47.42 including sandbox preparation/removal, with exactly two
+workers and unchanged 30-second item and 240-second diagnostic group bounds.
+The install-contract guard reports thirteen plugins and zero violations.
+This is a fixture/consumer correction, not a performance qualification or
+production authority change; clean-room installation is inapplicable, and
+no unavailable Linux/external environment is credited.
+
 ### First admitted move: naming, body and patch-identity helpers
+
+**Actually merged:** #7386 as
+`8f2f495df6b30855f38ca95c07a9301b8e482f6a`. The 35 helper cases and
+unchanged shared `_git` relocation below are no longer residual. Remaining
+M-MOVE classes and all fixture-semantic partitions stay open.
 
 Baseline: current Dev `422b4827e9b58d3bf04699415c0b3845a99d8e3c`.
 This is the M-MOVE helper partition only: seven whole classes move from

@@ -111,6 +111,15 @@ dependencies between otherwise independent contracts.
 
 ## Batch admission and validation
 
+The first helper move landed in #7386. Validation of the next mechanical
+partition then exposed three live-status provider doubles still using the
+retired review-gate API. The
+[separate corrective prerequisite](windows-residual-worktrees.md#corrective-prerequisite-live-status-provider-doubles)
+aligns only those doubles with the current head-bound consumer and preserves
+all authority assertions. Stop the mechanical extraction, land that
+correction independently, then resume the moves from fresh Dev; do not fold
+the fixture correction into a nominally mechanical PR.
+
 Before opening each implementation PR, record its exact baseline, one
 observable contract, owned hunks, existing dependencies and exclusions.
 Include regression assertions that would fail without that batch's change.
