@@ -1,5 +1,6 @@
 """Fresh source witnesses must publish the command they subsequently exercise."""
 
+import argparse
 import os
 from pathlib import Path
 import shutil
@@ -73,8 +74,13 @@ def _version_witness(plugin, version_command, reported):
 @pytest.mark.parametrize(("reported", "accepted"), [
     ("{plugin} {generation}", True),
     ("{plugin} {generation} (abcdef01)", True),
+    ("{plugin}\n{generation}", True),
+    ("{plugin}\r\n{generation}\r\n(abcdef01)", True),
     ("{plugin} {generation}0 (abcdef01)", False),
+    ("{plugin}\n{generation}0", False),
     ("{plugin} 1.2.3 (abcdef01)", False),
+    ("{plugin}\n1.2.3", False),
+    ("other-command\n{generation}", False),
 ])
 def test_source_version_witness_matches_the_exact_command_field(plugin, version_command, reported, accepted):
     result = _version_witness(plugin, version_command, reported)
@@ -82,10 +88,29 @@ def test_source_version_witness_matches_the_exact_command_field(plugin, version_
 
 
 @pytest.mark.skipif(os.name == "nt", reason="native POSIX scenario")
+def test_source_version_witness_accepts_argparse_wrapping(capsys):
+    generation = "1.2.3+source." + "a" * 40 + "." + "0" * 16
+    parser = argparse.ArgumentParser(
+        formatter_class=lambda prog: argparse.HelpFormatter(prog, width=len(generation) + 1),
+    )
+    parser.add_argument("--version", action="version", version=f"agent-dispatch {generation}")
+    with pytest.raises(SystemExit) as exited:
+        parser.parse_args(["--version"])
+    assert exited.value.code == 0
+    reported = capsys.readouterr().out
+    assert reported.splitlines() == ["agent-dispatch", generation]
+    result = _version_witness("agent-dispatch", "agent-dispatch --version", reported)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.skipif(os.name == "nt", reason="native POSIX scenario")
 @pytest.mark.parametrize(("reported", "accepted"), [
     ("{generation}", True),
+    ("{generation}\r\n", True),
     ("{generation} unexpected", False),
+    ("{generation}\nunexpected", False),
     ("agent-index {generation}", False),
+    ("agent-index\n{generation}", False),
     ("1.2.3", False),
 ])
 def test_index_source_version_witness_requires_the_exact_bare_generation(reported, accepted):

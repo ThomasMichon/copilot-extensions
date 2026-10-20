@@ -173,7 +173,8 @@ for version_command in "${VERSION_COMMANDS[@]}"; do
         local reported command version remainder
         reported="$(bash -lc "$version_command")" || return 1
         printf '%s\n' "$reported"
-        read -r command version remainder <<< "$reported"
+        reported="${reported//$'\r'/ }"
+        read -r command version remainder <<< "${reported//$'\n'/ }"
         if [ "$PLUGIN" = agent-index ]; then
             [[ "$command" = "$GENERATION" && -z "${version:-}" && -z "${remainder:-}" ]]
             return

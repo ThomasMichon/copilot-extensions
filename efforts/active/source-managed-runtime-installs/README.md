@@ -91,8 +91,8 @@ with private host identifiers redacted. Implementation choices below marked
 ### Phase 2 - Assemble immutable merged-source generations
 - [x] Reuse canonical source materialization for the complete declared vendor closure without modifying the input checkout.
 - [x] Add source-qualified non-editable generation identity while preserving package versions, profiles, dependency policy and completion evidence.
-- [ ] Make installer, runtime resolver and installed command redirects agree on the exact selected generation on Linux and Windows.
-- [ ] Prove identical reuse, distinct same-package-version commits, source removal, interrupted build and failed-candidate preservation.
+- [x] Make installer, runtime resolver and installed command redirects agree on the exact selected generation on Linux and Windows.
+- [x] Prove identical reuse, distinct same-package-version commits, source removal, interrupted build and failed-candidate preservation.
 
 ### Phase 3 - Separate plugin-triggered service deployment
 - [ ] Add a local managed-deployment policy at the shared publication boundary, retaining standalone defaults and installation scope.
@@ -353,3 +353,15 @@ onto one branch.
 - An independent scoped review identified ordinary-directory substitution between verification and path reopening. Reproduced it separately, then removed that reopening: child-directory operations use the original admitted descriptor, and copied ancestor bindings detect substitution before opening a lease file. The subsequent scoped review found no remaining High/Medium defect in the named correction.
 - A real contender initially refused canonical storage created under a permissive umask. Newly created default lease directories now use private creation permissions; existing unsafe directories are not silently repaired. The contender regression retains actual subprocess diagnostics and proves serialization for both changed and unchanged metadata.
 - The final full source suite passes 253 native Windows cases with three skips and 222 Linux cases with 34 platform skips. The complete stamp-security module passes 44 Windows cases with 36 platform skips and 65 Linux cases with fifteen skips. All runs retain existing bounds and verified cleanup. Exact-head review and provider CI remain separate merge gates, followed by frozen exact-merged all-adopter qualification; later deployment-policy, Manager and adoption work remains open.
+
+### 2026-10-20 - Installer prerequisite merged; assembled qualification
+- PR #7234 merged as `86dc022d2ba8acb8915e389754f65c95b59a8ad3` after the exact corrected-head Copilot verdict reported no open findings and all required provider checks passed. The two remaining Phase 2 items are closed by the integrated native source/selection and failure-preservation regressions; this does not close any deployment-policy, Manager source-selection or native rollout gate.
+- Froze the complete merged repository outside the active checkout for the thirteen-adopter clean-room qualification. Each adopter requires a fresh container, explicit exact commit and plugin parameters, six passing stages, zero jams, successful runner exit and stationary full-repository inputs. Active-checkout edits are not mounted into that witness.
+- The effort remains Active. The next implementation stretch is deployment-only policy and independent Manager-owned service-runtime source selection; the requested recurring maintenance extension must clear its own reviewed intent before implementation. Native adoption remains separately consented.
+
+### 2026-10-20 - Exact-merged qualification stopped on Dispatch
+- Nine adopters passed all six phases from the frozen `86dc022d2ba8acb8915e389754f65c95b59a8ad3` repository: Bridge, Codespaces, Containers, MCP, SSH, Machines, Pull Requests, Budget Guidance and Worktrees. Each actual runner exited zero, with no jams; installed commands and immutable reuse remained usable after source removal. Bridge additionally verified authenticated serving identity.
+- Dispatch installed its source-qualified generation but its runner exited one at phase three: the scenario rejected a two-line `--version` response containing the correct generation on its second line. Its ordinary argparse version formatter wraps a long command/version pair; the scenario's first-line-only field extraction, not the installed generation, caused this refusal.
+- Index, Logger and Vault were not started. All ten attempted runs retained matching full-source before/after inventories; no successful adopter was rerun and no scenario or source input was changed during qualification.
+- Normalized captured line separators before extracting the existing exact command/generation fields. The scenario's complete regression module passes 66 cases, including actual argparse wrapping, CRLF, incorrect command/generation and strict bare-generation Index cases. Production version output and optional provenance suffix semantics are unchanged.
+- The complete thirteen-adopter gate remains open. Preserve the failed report; the scenario correction must merge before fresh qualification from frozen merged inputs. This unit result does not turn the failed container run into a pass.
