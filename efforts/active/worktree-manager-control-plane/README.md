@@ -1230,6 +1230,28 @@ claiming discipline alone.
 
 ## Journal
 
+- **2026-10-19** - Prepared the next explicit restart-owner increment under
+  [machine restart recovery](machine-restart-recovery.md): exact-original
+  Resume, current-owner fencing, durable prelaunch uncertainty, full interactive
+  STATUS FIRST seed and read-only frozen-attempt/owner-outcome composition.
+  Real competing owner processes and owner death after invocation retain one
+  launch/uncertain outcome; simulated mux/native evidence is not native
+  acknowledgement qualification. The increment awaits provider review and CI.
+  Automatic recovery, enrollment and rollout remain disabled; the focused
+  completion gate and this umbrella remain **Active**.
+
+- **2026-10-19** - Current task-owner policy inspection landed in
+  [#7280](https://github.com/ThomasMichon/copilot-extensions/pull/7280)
+  (`5635c2df1b`) after genuine exact-head approval and required green checks.
+  Failing-first review regressions preserve unread steering and opaque persisted
+  claim uncertainty; disconnected dispatch/owner/Manager receipts are
+  365/1,163/16 contracts. The [focused recovery plan](machine-restart-recovery.md)
+  records only provisional task-owner reads as delivered: action-time policy,
+  exact-head fenced native Resume, durable outcomes/crash reconciliation,
+  status-first acknowledgement, startup enrollment and notification timing
+  remain open. Next is the existing native Resume boundary and durable attempt
+  reconciliation. This umbrella remains Active; no release or rollout is claimed.
+
 - **2026-10-19** - Prepared the next
   [focused recovery](machine-restart-recovery.md) increment: explicit read-only
   current task-owner snapshots through the existing claim-provider process

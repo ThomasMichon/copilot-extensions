@@ -213,6 +213,21 @@ installed can run this fixture without changing the wrapper's filesystem,
 credential or network isolation. Neither fixture proves resident-loop latency,
 real host shutdown coverage, automatic enrollment or acknowledged Resume.
 
+Explicit exact-original restart Resume and read-only outcome composition use:
+
+```bash
+python tools/run_tests_in_devcontainer.py agent-worktrees worktree-manager -k 'test_native_restart_launch or test_embody or test_bridge_acquisition_launch or test_native_restart_check or test_restart_owner_check or test_restart_launch_inspection or test_restart_capabilities'
+```
+
+These contracts cover real concurrent owner processes, owner death after the
+native invocation boundary, private/fsynced uncertainty before invocation,
+failed outcome publication, corrupt/indirect receipts, changed owner policy,
+unknown mux absence, typed staged seeds, exact UUID/full interactive STATUS
+FIRST argv and read-only frozen-attempt/outcome binding. The process tests keep
+the real locks and durable state; native epoch, process liveness and mux creation
+are synthetic. They do not launch Copilot, prove prompt readiness or acknowledge
+the seed, and do not qualify automatic startup/platform recovery.
+
 Frozen restart-attempt identities and historical owner bindings use:
 
 ```text

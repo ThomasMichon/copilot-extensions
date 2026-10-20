@@ -397,6 +397,39 @@ Native Windows hosting proof remains explicitly unqualified. The payload's
 `automatic_eligible` is always false: task policy, claims, holds, recovery
 enrollment and launch admission remain their existing owners' responsibilities.
 
+`embody --worktree-id <exact-id> --restart-request <json> --json` is an explicit
+restart-only owner operation, separate from ordinary Resume and Bridge's
+unseeded acquisition. Its 8 KiB object requires exactly `request_id` (canonical
+UUID), `expected` (the restart-check object below), `source_epoch` (old
+`platform`, `environment_id`, `boot_id`) and `native_incarnation` (`PID:birth`).
+The old epoch must be different-boot/same-environment, and the old UUID/PID/birth
+hash must match the recorded source activation. Current owner policy, dead
+native process, absent mux and no staged typed/legacy seed are rechecked under
+the existing lifecycle/native-admission guards and strict record lock before
+invocation. All claims, dispatch provenance and profile assignment remain
+unqualified; no task snapshot is promoted to an action-time reservation.
+
+The request ID is the Manager's existing frozen attempt UUID, not a replacement
+conversation ID. Normalized native launch uses the exact original `--resume`
+and full `--interactive` STATUS FIRST seed. Before mux invocation the owner
+durably publishes `state: "launch-uncertain"`; only a successful mux return can
+advance it to `mux-created`. Crashes, timeouts and failed outcome publication
+never release the request for retry. An exact repeat returns the saved result;
+a different request cannot overwrite it. The receipt contains identities and
+outcome only, no transcript, seed text or executable command. It is bounded to
+32 KiB and private per worktree. No automatic caller or receipt-clearing command
+is introduced.
+
+Adding `--restart-receipt` is strictly read-only, even when no receipt exists.
+The payload has exactly `schema: "native-restart-launch"`, integer `version: 1`,
+the exact typed `request`, `state` (`not-reserved`, `launch-uncertain` or
+`mux-created`) and false `seed_acknowledged`, `restored`, `automatic_eligible`.
+The launch response additionally has `ok` and `repeated`; `ok` means only mux
+invocation succeeded, not that native restoration completed. `not-reserved`
+cannot authorize launch. There is no unseeded, filesystem-latest, task-writer or
+fresh-conversation fallback. Platform notification/startup and actual original
+native identity/ready/seed acknowledgement remain separate qualification gates.
+
 `session-role --restart-check <expected-json> --json` checks a **single explicit
 frozen identity** against the current worktree owner. The bounded (8 KiB)
 object requires exactly `project`, `worktree_id`, `worktree_path`, `native_session_id`,

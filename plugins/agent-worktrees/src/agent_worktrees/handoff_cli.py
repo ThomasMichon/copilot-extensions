@@ -10,7 +10,7 @@ from . import config as cfg, output, profile_assignment, sessions, tracking, tra
 from . import launch_seed_state, embody_resume
 from . import reclaim_cli, resolve_launch_cli, status_monitor_runtime
 from .worktree_creation import LaunchSeedStagingFailure
-from . import bridge_acquisition_launch
+from . import bridge_acquisition_launch, native_restart_launch
 from .launch_passthrough import passthrough_error as _passthrough_error
 
 
@@ -124,6 +124,7 @@ def add_parsers(sub) -> None:
     p.add_argument("--seed", default=None, help="Seed prompt injected as the session's first interactive turn once Copilot is ready")
     r = p.add_mutually_exclusive_group()
     bridge_acquisition_launch.add_arguments(p, r)
+    native_restart_launch.add_arguments(p, r)
     r.add_argument("--fresh", action="store_true", help="Start a new conversation even in an existing worktree. By default, an existing worktree embodied without a seed resumes its head session (the conversation the worktree's ledger names as current), so bringing a task back never loses its history")
     r.add_argument("--resume-head", dest="resume_head", action="store_true", help="Resume the worktree's head session even when a --seed (or pending seed) is given; the seed is then typed into the resumed conversation. Without this, a seeded embody starts a fresh conversation for its new task")
     p.add_argument("--seed-ready-timeout", dest="seed_ready_timeout", type=float, default=180.0, metavar="SECONDS", help="Idle window while waiting for Copilot's input prompt before typing the --seed (default 180). Visibly busy/changing panes keep waiting up to a hard cap; if the pane never reaches a confirmed live input prompt, the seed is never delivered and the session idles at an empty prompt")
@@ -240,11 +241,11 @@ def cmd_embody(args: argparse.Namespace) -> int:
     ``-i`` startup instead because its attached successor does not
     need embody's post-launch bridge verification.
 
-    Verification: the caller confirms the embodiment by polling
-    ``agent-bridge live-sessions?worktree_id=<id>`` -- the bundled extension
-    auto-registers the new session. ``--verify-timeout`` optionally waits here
-    for the mux session to come up before returning.
+    Verification: ``agent-bridge live-sessions?worktree_id=<id>`` reports
+    registration. ``--verify-timeout`` waits for mux existence, not native proof.
     """
+    if getattr(args, "restart_request", None) is not None or getattr(args, "restart_receipt", False):
+        return native_restart_launch.cmd_embody(args)
     make_new = getattr(args, "new", False)
     raw_id = getattr(args, "worktree_id", None)
     if getattr(args, "require_native_admission", False) and getattr(args, "bridge_acquisition", None) in {None, "fresh"}:

@@ -38,7 +38,9 @@ def recovery_capabilities(config: RestartRecoveryConfig, platform: str | None) -
     return {"shutdown_notifications": notifications, "automatic_restore": automatic}
 
 
-def inspect_recovery(root: Path, *, check_attempt: str | None = None) -> dict:
+def inspect_recovery(
+    root: Path, *, check_attempt: str | None = None, check_launch: str | None = None,
+) -> dict:
     """Inspect evidence/configuration without creating state or contacting logind."""
     observer = RestartObserver(root)
     result = observer.startup()
@@ -59,6 +61,19 @@ def inspect_recovery(root: Path, *, check_attempt: str | None = None) -> dict:
                 "Current worktree check is provisional; current task policy, fenced launch "
                 "and acknowledged native restart Resume remain unqualified."
             )
+        except (EngineError, ValueError) as exc:
+            blocker = str(exc)
+        result["blocker"] = "; ".join(filter(None, [result.get("blocker"), blocker]))
+    if check_launch is not None:
+        from .restart_owner_check import inspect_launch
+
+        try:
+            if result.get("blocker"):
+                raise ValueError("Launch outcome inspection requires readable evidence and epoch.")
+            result["launch_receipt"] = inspect_launch(
+                check_launch, result["attempts"], observer.epoch,
+            )
+            blocker = "Launch outcome is not acknowledged seed pickup or completed recovery."
         except (EngineError, ValueError) as exc:
             blocker = str(exc)
         result["blocker"] = "; ".join(filter(None, [result.get("blocker"), blocker]))

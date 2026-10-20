@@ -143,21 +143,33 @@ means of fulfilling the operator's request. They require normal source review.
   launch automatically.
   [#7271](https://github.com/ThomasMichon/copilot-extensions/pull/7271)
   delivered a provisional exact current-worktree check and explicit single
-  frozen-attempt inspection. Current task/claim/profile policy and action-time
-  launch admission remain unresolved; a matching snapshot cannot authorize them.
-  The next source increment adds opt-in current task-owner snapshots for one
-  explicit local/central task ref, binding native owner/generation and current
-  holds/steering. This is not action-time admission or a generation reservation;
-  mixed/producer/inbound claims and profile policy remain unqualified.
+  frozen-attempt inspection.
+  [#7280](https://github.com/ThomasMichon/copilot-extensions/pull/7280)
+  delivered opt-in current task-owner snapshots for one explicit local/central
+  task ref, binding native owner/generation, holds and the unread steering
+  inbox. Persisted claim uncertainty survives owner load/save without becoming
+  active-claim proof. These are provisional reads, not action-time admission
+  or generation reservations; mixed/producer/inbound claims and profile policy
+  remain unqualified. A matching snapshot cannot authorize launch.
 - [ ] Reuse a proven surviving session first. Otherwise request supported
   native cold Resume of the exact original conversation in its proper mux.
   Never substitute a new conversation, raw process spawn or a global repair
   command that mutates unrelated sessions.
+  The explicit restart-only owner increment now fences the original UUID,
+  old source process/epoch and current owner record through durable reservation
+  and mux invocation. It admits no task/claim/profile-bound worktree and is
+  not wired to automatic startup. Actual native readiness/identity/seed
+  acknowledgement and surviving-session adoption remain unresolved.
 - [ ] Persist recovery attempt and outcome; reconcile a crash between launch
   and receipt, concurrent startup, seed timeout and delayed registration before
   retrying. Do not claim exactly-once delivery merely from a pre-launch flag.
   #7263 retains frozen candidate identity and pre-commit crash rollback, not
   launch reservation/outcome or acknowledged seed pickup.
+  The subsequent explicit owner increment persists `launch-uncertain` before
+  invocation and distinguishes `mux-created` without permitting retries.
+  Manager read-only inspection composes this receipt with the immutable frozen
+  attempt. Outcome reconciliation through actual native acknowledgement
+  remains open; a frozen Manager row no longer implies no invocation.
 - [ ] Apply bounded admission and concurrency. Authentication, dependency or
   ownership failures remain visible and resumable without busy retry loops.
 
@@ -167,6 +179,9 @@ means of fulfilling the operator's request. They require normal source review.
   prompt transport. Identify restart recovery, require current status and
   objective/claim/hold reconciliation, and prohibit interpreting the seed as
   renewed permission for physical or service operations.
+  The explicit owner increment builds the full interactive STATUS FIRST seed
+  into exact-original Resume argv. This proves the construction/transport
+  boundary, not actual native seed consumption or acknowledgement.
 - [ ] Verify expected native identity, ready CLI/prompt, fresh registration
   where that optional capability is available, and acknowledged seed pickup.
   Launch, registration and completed restoration are distinct outcomes.
@@ -740,3 +755,63 @@ The umbrella effort remains Active independently of this slice's completion.
   shapes are unchanged. The expanded disconnected owner/claim/finality lane
   passed 1,163 tests; unchanged dispatch/Manager sources retain their 365/16
   receipts. This fix still needs exact-head provider review and required CI.
+
+### 2026-10-19 - Current task-owner policy landed; fenced Resume next
+
+- [#7280](https://github.com/ThomasMichon/copilot-extensions/pull/7280)
+  squash-merged to `dev` as `5635c2df1b` after genuine exact-head Copilot
+  approval on `53920971f2` and required green CI. Both review findings were
+  addressed with failing-first regressions: unread steering cannot pass via
+  cleared form flags, and normalized/malformed persisted claims cannot become
+  active or absent-ledger proof. The final disconnected receipts are 365
+  dispatch and 1,163 owner/claim/finality contracts, with unchanged Manager
+  sources retaining 16 owner-check contracts.
+- A stale source-attribution check lost a PR-description race; its later
+  normal metadata-event check passed. The actual required check set was green
+  before merge; no workflow retry or review bypass was used.
+- Reconciled the combined current worktree/task/claim/hold Plan item as partial,
+  not complete. Current explicit task snapshots are delivered, but there is
+  still no action-time task/claim reservation, fenced restart launch,
+  acknowledged seed pickup or native recovery qualification.
+- Next stretch: reuse the existing exact-conversation native Resume boundary,
+  with expected-head/incarnation preconditions and durable attempt/outcome/
+  crash reconciliation; then prove explicit status-first seed acknowledgement
+  without treating pane readiness or registration as acknowledgement.
+  Startup enrollment and blocking-work notification timing remain open.
+  This merge is not release promotion, installation or automatic enrollment.
+
+### 2026-10-19 - Exact-original restart launch and durable owner uncertainty
+
+- Added an explicit restart intent to the existing `embody` boundary. The
+  request binds the frozen native UUID and owner/head/source revisions to
+  old PID/birth/epoch evidence; same-boot, foreign, changed, ended, live,
+  unknown or pending-seed targets refuse. All task/resource/profile and
+  dispatch-bound targets remain unqualified rather than treating provisional
+  policy snapshots as action-time reservations.
+- Reused lifecycle and per-worktree native admission, with strict record-writer
+  exclusion covering final revalidation, durable uncertainty and mux invocation.
+  The private bounded per-worktree owner receipt is file/directory-synced before
+  launch. Repeated requests read the existing result; uncertainty, timeout or
+  owner crash cannot authorize another invocation. A different request cannot
+  overwrite an unreconciled receipt.
+- Native argv carries the exact original UUID and full interactive STATUS FIRST
+  restart seed, with no fresh conversation or post-fence prompt typing.
+  `mux-created` is not ready-native proof, seed acknowledgement or restoration;
+  all corresponding completion/automatic flags remain false. The Manager's
+  explicit `--check-launch` only reads and binds the owner outcome to its frozen
+  identity; it does not alter attempt state or enable an automatic caller.
+- The first 16 launch contracts failed against the old CLI. The disconnected
+  lane subsequently passed 252 owner/embody and 42 Manager contracts, including
+  real competing CLI processes and `os._exit` after the native invocation
+  boundary. Those process tests uncovered stale-lock output contaminating JSON;
+  the shared fence now routes that diagnostic to stderr. Mux/native epochs and
+  process state remain simulated; no Copilot process or live host was changed.
+- This source increment still needs provider review and required CI. The full
+  restoration gate remains open: actual native identity/readiness and STATUS
+  FIRST acknowledgement, task/claim/profile action-time admission, startup
+  enrollment, surviving-session adoption and notification blocking-work timing
+  remain obligations. No release, rollout or enrollment is implied.
+- The final expanded disconnected lane passed 284 owner/admission/embody and
+  76 Manager attempt/outcome contracts. High-signal lint, unchanged module
+  ceilings and documentation consistency passed. Native process readiness and
+  acknowledged seed pickup are still not qualified by these synthetic fixtures.

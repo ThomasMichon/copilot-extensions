@@ -6,7 +6,7 @@ import argparse
 from contextlib import contextmanager
 from pathlib import Path
 
-from . import finalize, launch_admission, sessions
+from . import finalize, launch_admission, output, sessions
 from .session_liveness import session_liveness
 
 
@@ -30,7 +30,8 @@ def launch_fence(repo, record_path: Path):
     lifecycle = finalize.FinalizeLock(
         Path(repo.worktree_root) / ".finalize.lock", timeout=300, stale_after=3600,
     )
-    lifecycle.acquire()
+    with output.stdout_to_stderr():
+        lifecycle.acquire()
     try:
         with launch_admission.guard(record_path):
             yield

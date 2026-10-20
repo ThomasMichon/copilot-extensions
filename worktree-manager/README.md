@@ -578,7 +578,7 @@ The current task must match the original native owner and be started, unheld,
 unsteered and without a pending resume or waiter. Changed, paused, ended,
 pending, externally claimed, opaque/legacy/mixed-task or profile-assigned
 worktrees remain unqualified. A matching worktree is still **not admitted**:
-action-time task/claim policy, fenced launch and acknowledged restart Resume
+action-time task/claim policy and acknowledged automatic restart Resume
 remain unresolved, so this inspection returns a blocker/nonzero status
 even on a match. Neither command writes an attempt outcome, reserves a launch,
 starts a conversation, changes enrollment or contacts the host notification
@@ -587,11 +587,32 @@ no additional polling or blocking work from this opt-in check.
 Failed or timed-out mux listings remain unknown and cannot establish the mux
 absence needed for even a provisional worktree match.
 
+`worktree-manager mux-daemon recovery-evidence --check-launch <attempt-uuid>`
+additionally offers an explicit read-only owner-outcome inspection. It composes
+the frozen attempt UUID and original source epoch/PID/birth with the exact
+agent-worktrees `embody --restart-request ... --restart-receipt` API. The
+versioned, typed response distinguishes `not-reserved`, `launch-uncertain` and
+`mux-created`; none acknowledges a seed or marks restoration complete. Old
+owners, mismatched requests, unavailable owners and corrupt receipts remain
+blockers. The command returns nonzero because recovery is still unqualified.
+It does not rewrite the immutable frozen attempt, acquire a daemon lease,
+reserve or launch, or turn an absent/uncertain receipt into retry authority.
+Ordinary inspection still performs no owner call.
+
+The explicit owner restart-launch increment holds its existing lifecycle,
+native-admission and strict record-writer fences through final validation and
+mux creation. It durably records uncertainty before invocation and supplies the
+original UUID plus full interactive STATUS FIRST seed. It currently admits no
+task/resource/profile-bound worktree and has no automatic caller in the Manager.
+Persisted owner launch outcomes are independent of Manager process lifetime;
+`frozen` in the Manager database is historical candidate state, not evidence
+that no native invocation has occurred.
+
 Native Linux and WSL have evidence-epoch readers; WSL includes its init-process
 incarnation because a distro can restart without restarting the shared kernel.
 Native Windows, macOS and container epochs are explicitly unqualified, not
 silently treated as Linux. Qualified native shutdown notification, automatic admission,
-exact-conversation Resume and acknowledged restart-seed delivery remain tracked
+qualified exact-conversation Resume and acknowledged restart-seed delivery remain tracked
 under [#4564](https://github.com/ThomasMichon/copilot-extensions/issues/4564).
 An evidence report is not completed restoration or installed-release proof.
 

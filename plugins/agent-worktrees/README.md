@@ -194,6 +194,44 @@ before creating a new execution leg. Older owners reject the new flag rather
 than silently returning an unfenced launch. The caller-facing mode contract is
 owned by the [Bridge resume reference](../agent-bridge/skills/agent-bridge/references/cli-commands.md#session-management).
 
+### Explicit restart Resume
+
+`embody --worktree-id <exact-id> --restart-request <json> --json` is a separate,
+explicit Linux/WSL restart intent, not the ordinary Resume or Bridge acquisition
+mode. The bounded typed request binds the original UUID, frozen owner/head/source
+revisions, old native PID/birth and old/current environment epochs. The old
+process identity must hash to the recorded activation; same-boot, foreign,
+changed, ended, live or unknown targets refuse. All task/resource claims,
+historical released claims, inbound ownership, dispatch provenance and profile
+assignment remain blocked: a read-only task-policy snapshot is not action-time
+permission. Custom launch templates and legacy setup launchers are unqualified.
+
+This mode reuses the lifecycle and per-worktree launch-admission fences, with a
+strict record-writer lock spanning final validation and mux invocation. The
+owner persists a private, bounded `restart-recovery/launch.json` receipt under
+that worktree's external tracking state, syncing the file and directories before
+launch. It supplies the exact original `--resume=<uuid>` and full `--interactive`
+STATUS FIRST restart seed through the existing native launch builder, never a
+fresh conversation or post-launch `send-keys`. Other launch intent/argument
+overrides, mux-installation opt-ins and staged typed/legacy prompts refuse.
+
+`launch-uncertain` survives a timeout or owner crash and is never automatically
+retried; `mux-created` records only a successful mux invocation. Repeating the
+same request reads that outcome without another launch, even after native
+startup advances the owner revision. A different request cannot overwrite an
+unreconciled receipt. There is currently no receipt-clear/retry operation:
+uncertainty requires owner reconciliation, not deleting state or guessing that
+nothing launched. Neither outcome proves a ready original native process,
+seed acknowledgement or completed restoration; `restored`,
+`seed_acknowledged` and `automatic_eligible` remain false.
+
+Add `--restart-receipt` to read the exact request's receipt without launch
+configuration, admission, provisioning or writes. `not-reserved` means no owner
+reservation is present, not permission to launch. `--dry-run` performs a
+provisional current-owner check without reservation. Automatic recovery,
+startup enrollment and actual native seed-acknowledgement qualification remain
+disabled/unresolved; Windows, macOS and container restart intents refuse.
+
 ## Static instruction preparation
 
 Startup copies every declared instruction unchanged in process, after applicable

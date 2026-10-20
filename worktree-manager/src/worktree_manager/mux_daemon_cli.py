@@ -22,12 +22,17 @@ def cmd_mux_daemon(rest: list[str]) -> int:
         from .self_install import default_root
 
         check_attempt = None
+        check_launch = None
         if len(args) == 2 and args[0] == "--check-attempt":
             check_attempt = args[1]
+        elif len(args) == 2 and args[0] == "--check-launch":
+            check_launch = args[1]
         elif args:
-            print("error: recovery-evidence accepts only --check-attempt <UUID>")
+            print("error: recovery-evidence accepts only --check-attempt or --check-launch <UUID>")
             return 2
-        result = inspect_recovery(default_root(), check_attempt=check_attempt)
+        result = inspect_recovery(
+            default_root(), check_attempt=check_attempt, check_launch=check_launch,
+        )
         print(json.dumps(result))
         return 1 if result.get("blocker") else 0
     if action == "status":
