@@ -38,7 +38,7 @@ def validate_acknowledgement(request: dict, value: object) -> dict:
             for field in ("owner_revision", "activation_ordinal")
         )
         or not isinstance(value["session_incarnation"], str)
-        or re.fullmatch(r"[A-Za-z0-9._:-]{1,128}", value["session_incarnation"]) is None
+        or re.fullmatch(r"[A-Za-z0-9.$_:-]{1,128}", value["session_incarnation"]) is None
         or not isinstance(value["native_incarnation"], str)
         or re.fullmatch(r"[1-9][0-9]{0,9}:[0-9]{1,32}", value["native_incarnation"]) is None
     ):

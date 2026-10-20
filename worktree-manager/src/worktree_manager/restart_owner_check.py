@@ -43,7 +43,7 @@ def _acknowledged(result: dict, request: dict) -> bool:
             for field, pattern in (
                 ("source_identity", r"native-source-v1:[0-9a-f]{64}"),
                 ("native_incarnation", r"[1-9][0-9]{0,9}:[0-9]{1,32}"),
-                ("session_incarnation", r"[A-Za-z0-9._:-]{1,128}"),
+                ("session_incarnation", r"[A-Za-z0-9.$_:-]{1,128}"),
             )
         )
         and value["source_identity"] != expected["source_identity"]

@@ -885,3 +885,10 @@ The umbrella effort remains Active independently of this slice's completion.
   containers and unavailable epochs as one class. Three unskipped regressions
   failed before the fix and passed after it; the unchanged qualified native
   acknowledgement/lifecycle lane passed 197 additional contracts.
+- A subsequent provider pass identified both owner and Manager ACK validators
+  rejecting the actual tmux incarnation alphabet. Positive fixtures now retain
+  the producer's `$1:100` shape, including in the real child crash/repeat case;
+  both bounded validators accept its leading dollar sign. Newline and
+  delimiter-bearing variants remain refused. Three owner and one Manager
+  regressions failed before this correction; the integrated disconnected
+  acknowledgement lane then passed 64 owner and 28 Manager contracts.

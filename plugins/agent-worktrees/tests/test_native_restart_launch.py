@@ -329,7 +329,7 @@ if mode.startswith("ack"):
     hosting.session_process_owns_hold = lambda *a: True
     sessions.mux_binding_for_session = lambda *a, **k: {
         "session_name": sessions.mux_session_name(request["expected"]["worktree_id"]),
-        "pane_id": "%1", "pane_start_time": "455", "session_incarnation": "new-mux",
+        "pane_id": "%1", "pane_start_time": "455", "session_incarnation": "$1:100",
         "copilot_pid": 99, "copilot_start_time": "456"}
     native_source_context.capture = lambda: {
         "version": 1, "qualified": True, **request["expected"]["target_epoch"],
@@ -401,7 +401,7 @@ def resumed(subject, capfd, monkeypatch):
     monkeypatch.setattr(native_hosting_evidence, "session_process_owns_hold", lambda *a: True)
     monkeypatch.setattr(sessions, "mux_binding_for_session", lambda *a, **k: {
         "session_name": sessions.mux_session_name(record.worktree_id),
-        "pane_id": "%1", "pane_start_time": "455", "session_incarnation": "new-mux",
+        "pane_id": "%1", "pane_start_time": "455", "session_incarnation": "$1:100",
         "copilot_pid": 99, "copilot_start_time": "456",
     })
     monkeypatch.setattr(native_source_context, "capture", lambda: {
@@ -430,6 +430,7 @@ def test_acknowledgement_is_explicit_durable_and_bound_to_resumed_process(resume
     assert result["restored"] is False and result["automatic_eligible"] is False
     ack = result["acknowledgement"]
     assert ack["native_session_id"] == NATIVE and ack["native_incarnation"] == "99:456"
+    assert ack["session_incarnation"] == "$1:100"
     assert ack["target_epoch"] == TARGET and ack["activation_ordinal"] == 3
     assert ack["status_reconciled"] is True
     assert native_restart_receipt.read(resumed.path)["acknowledgement"] == ack
@@ -525,6 +526,21 @@ def test_ack_requires_status_reconciliation_and_cannot_be_dry_run(resumed, capfd
     assert handoff_cli.cmd_embody(args) != 0
     capfd.readouterr()
     assert acknowledge(resumed, capfd, "--dry-run")[0] != 0
+
+
+@pytest.mark.parametrize("incarnation", ["$1:100\n", "$1:100;extra"])
+def test_invalid_mux_incarnation_cannot_be_loaded_as_acknowledged(resumed, capfd, incarnation):
+    from agent_worktrees import native_restart_receipt
+
+    assert acknowledge(resumed, capfd)[0] == 0
+    path = native_restart_receipt._path(resumed.path)
+    receipt = json.loads(path.read_text())
+    receipt["acknowledgement"]["session_incarnation"] = incarnation
+    path.write_text(json.dumps(receipt))
+    before = path.read_bytes()
+    rc, result = invoke(resumed, capfd, "--restart-receipt")
+    assert rc != 0 and "Invalid restart seed acknowledgement" in result["error"]
+    assert path.read_bytes() == before and len(resumed.launches) == 1
 
 
 def test_actual_ack_crash_after_commit_is_idempotent_without_native_relaunch(resumed):

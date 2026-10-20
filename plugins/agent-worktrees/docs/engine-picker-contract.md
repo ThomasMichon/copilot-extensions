@@ -453,7 +453,9 @@ exactly one `acknowledgement` object. Its exact fields are `native_session_id`,
 `target_epoch`, `source_identity`, `native_incarnation`, `session_incarnation`,
 `head_revision`, `owner_revision`, `activation_ordinal`, `status_reconciled`.
 The status field is exactly true; the identities/revisions bind the actual new
-execution to the frozen request. `restored` and `automatic_eligible` remain false.
+execution to the frozen request. The bounded `session_incarnation` retains the
+mux producer's token, including tmux's leading dollar sign (for example `$1:100`).
+`restored` and `automatic_eligible` remain false.
 `--restart-receipt` returns that version-2 object unchanged; the ACK response
 adds `ok`, not launch/retry authority. An identical ACK revalidates current
 execution/policy without rewriting storage. Missing/mismatched receipts,
