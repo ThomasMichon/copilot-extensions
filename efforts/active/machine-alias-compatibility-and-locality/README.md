@@ -259,7 +259,7 @@ _(Operator-selected convergence; detailed mechanism is agent-recommended.)_
 _(Agent-recommended realization of the operator's explicit model clarification.)_
 - [x] Review the [structured identity contract](physical-machine-environment-boundary.md)
       before changing implementation.
-- [ ] Reuse the shared map's physical-machine/environment selection; identify
+- [x] Reuse the shared map's physical-machine/environment selection; identify
       compact execution-ID boundaries explicitly, without another registry or
       suffix-derived authority.
 - [ ] Make runtime admission, structured machine guidance and prospective
@@ -334,6 +334,26 @@ operator's all-alias/all-worktree acceptance requirement, not authorization for
 unrelated service changes or a second machine registry.
 
 ## Journal
+
+### 2026-10-19 - Physical runtime admission merged; structured guidance next
+- #7321 merged after exact-head Copilot approval, required Source checks and
+  resolution of the implemented machine-local finding. The shared selection
+  now drives update and launch physical admission while retaining exact
+  execution selectors and independent native/guest authority.
+- Review uncovered real configuration-boundary gaps. Deferred workers now carry
+  explicit target configuration through both identity lookups, including real
+  knowledge and machine-local registry sources. Linked checkouts preserve
+  local registry precedence, borrow an anchor only after Git ownership proof,
+  and retain launch-local settings and gates. Cross-project update uses the
+  enabling project's configuration rather than unrelated resident state.
+- Bounded disconnected-container affected validation passed 619 cases, with
+  conditional skips reported separately. No live runtime, historical record,
+  deployment allowlist, session or queue was changed by source implementation.
+- The next bounded slice presents physical machine, hostname, environment and
+  execution identifier as separate guidance facts through the same map.
+  Prospective creation metadata/naming and allocation replay remain distinct
+  implementation obligations; qualification and installed acceptance still
+  gate the containing Phase 3d objective.
 
 ### 2026-10-19 - Reviewed physical boundary and runtime-admission implementation
 - The Phase 3d contract merged in #7298 after current-head approval and required

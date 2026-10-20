@@ -4,10 +4,21 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from machine_transport import machine_name
+from machine_transport import entry_physical_host, machine_name
 
 if TYPE_CHECKING:
     from .config import MachineEntry
+
+
+def render_unresolved_context(
+    machine: str, *, project: str, platform: str, hostname: str,
+) -> str:
+    """Render execution facts without claiming a resolved physical machine."""
+    return "\n".join((
+        "Machine: unresolved", f"Hostname: {hostname}",
+        f"Execution identity: {machine}", f"Environment: {platform}",
+        f"Platform: {platform}", f"Project: {project}", f"Binstub: {project}",
+    ))
 
 
 def render_copilot_instructions(
@@ -16,9 +27,9 @@ def render_copilot_instructions(
 ) -> str:
     """Render the content of ``machine.instructions.md`` for a machine.
 
-    Includes the supplied platform along with the deployment environment (SSH
-    alias) so agents know their exact identity for service deployments. When
-    *project* is provided, includes project and binstub metadata.
+    Physical machine, observed hostname, execution environment, compact identity
+    and SSH transport remain distinct facts. When *project* is provided,
+    includes project and binstub metadata.
     """
     # Find the SSH alias matching the current platform
     deploy_env = ""
@@ -28,15 +39,18 @@ def render_copilot_instructions(
             break
 
     lines = [
-        f"Machine: {machine or entry.display_name}",
+        f"Machine: {entry_physical_host(entry)}",
         f"Hostname: {hostname or entry.hostname or entry.key}",
-        f"Machine name: {machine_name(entry)}",
+        f"Machine name: {entry_physical_host(entry)}",
+        f"Execution identity: {machine or machine_name(entry)}",
         f"Alias/friendly name: {entry.display_name}",
-        f"Environment: {entry.environment}",
+        f"Environment: {platform}",
         f"Platform: {platform}",
     ]
+    if entry.environment:
+        lines.append(f"System environment: {entry.environment}")
     if deploy_env:
-        lines.append(f"Deployment environment: {deploy_env}")
+        lines.append(f"SSH alias: {deploy_env}")
     if entry.role:
         lines.append(f"Role: {entry.role}")
     if entry.description:

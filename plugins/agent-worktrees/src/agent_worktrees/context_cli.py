@@ -19,7 +19,7 @@ from . import config as cfg
 from . import output
 from . import git_ops, sessions, state_root as state_root_mod, tracking
 from . import installer as inst
-from . import installation_cli, pr_config, session_binding_cli, status_updater_cli
+from . import installation_cli, machine_instructions, pr_config, session_binding_cli, status_updater_cli
 from . import worktree_identity
 
 
@@ -314,9 +314,8 @@ def cmd_machine_context(args: argparse.Namespace) -> int:
         return _empty()
 
     def _identity_only() -> int:
-        raw = (
-            f"Machine: {machine}\nPlatform: {cfg.detect_platform()}\n"
-            f"Project: {project}\nBinstub: {project}"
+        raw = machine_instructions.render_unresolved_context(
+            machine, project=project, platform=cfg.detect_platform(), hostname=cfg.socket.gethostname(),
         )
         print(_json.dumps({"additionalContext": raw}))
         return 0
@@ -329,7 +328,7 @@ def cmd_machine_context(args: argparse.Namespace) -> int:
         return _identity_only()
 
     try:
-        registry = cfg.load_machines_yaml(repo_dir)
+        registry = cfg.load_machines_yaml(repo_dir, config=config)
     except FileNotFoundError:
         return _identity_only()
     except ValueError as exc:

@@ -53,14 +53,16 @@ def test_emits_identity_without_machines_yaml(monkeypatch, capsys):
     monkeypatch.setattr(m.cfg, "set_active_project", lambda _p: None)
     monkeypatch.setattr(m.cfg, "load_config", lambda: _Config())
 
-    def _raise(_rd):
+    def _raise(_rd, **kwargs):
         raise FileNotFoundError
 
     monkeypatch.setattr(m.cfg, "load_machines_yaml", _raise)
     rc = m.cmd_machine_context(_Args())
     assert rc == 0
     context = json.loads(capsys.readouterr().out)["additionalContext"]
-    assert "Machine: foo" in context
+    assert "Machine: unresolved" in context
+    assert "Execution identity: foo" in context
+    assert "Hostname:" in context
     assert "Project: proj" in context
 
 
@@ -69,7 +71,7 @@ def test_emits_additional_context_in_project(monkeypatch, capsys):
     monkeypatch.setattr(m, "_resolve_active_project", lambda _p: ("proj", None))
     monkeypatch.setattr(m.cfg, "set_active_project", lambda _p: None)
     monkeypatch.setattr(m.cfg, "load_config", lambda: _Config())
-    monkeypatch.setattr(m.cfg, "load_machines_yaml", lambda _rd: {"foo": sentinel})
+    monkeypatch.setattr(m.cfg, "load_machines_yaml", lambda _rd, **kwargs: {"foo": sentinel})
     monkeypatch.setattr(
         m.cfg, "render_copilot_instructions",
         lambda _entry, project="", machine="": (
@@ -100,12 +102,14 @@ def test_render_includes_normalized_machine_metadata_after_role(monkeypatch):
     rendered = cfg.render_copilot_instructions(entry, project="example")
 
     assert rendered.splitlines() == [
-        "Machine: Host A",
+        "Machine: host-a",
         "Hostname: os-host-a",
         "Machine name: host-a",
+        "Execution identity: host-a",
         "Alias/friendly name: Host A",
-        "Environment: Linux",
+        "Environment: linux",
         "Platform: linux",
+        "System environment: Linux",
         "Role: worker",
         "Description: General-purpose worker.",
         "Capabilities: builds, tests",
@@ -145,6 +149,7 @@ def test_session_machine_identity_reads_registry_without_worktree_binding(tmp_pa
 
     assert facts == {
         "hostname": "VM-ABC", "machine": "worker-a", "alias": "builder",
+        "execution_machine": "worker-a", "environment": "windows",
         "platform": "windows", "status": "resolved", "source": "machine-registry",
     }
     assert len(context.encode("utf-8")) < 1024
@@ -165,6 +170,8 @@ def test_session_machine_identity_keeps_unresolved_hostname_explicit(
 
     assert facts["hostname"] == "VM-ABC"
     assert facts["machine"] is None and facts["alias"] is None
+    assert facts["execution_machine"] is None
+    assert facts["environment"] == facts["platform"]
     assert facts["status"] == "unresolved"
     assert facts["source"] == "os-hostname"
     assert facts["reason"] == ("FileNotFoundError" if config_available else "project-unavailable")
@@ -209,7 +216,9 @@ def test_session_machine_identity_selects_current_execution_platform(tmp_path, m
         session_context.render_machine_context(config).split("```json\n", 1)[1].split("\n```", 1)[0]
     )
 
-    assert facts["machine"] == ("worker-a" if platform == "windows" else "worker-a-wsl")
+    assert facts["machine"] == "worker-a"
+    assert facts["execution_machine"] == ("worker-a" if platform == "windows" else "worker-a-wsl")
+    assert facts["environment"] == platform
     assert facts["platform"] == platform
     assert facts["status"] == "resolved"
 
@@ -233,10 +242,49 @@ def test_renderer_uses_explicit_platform_and_wrapper_remains_patchable(monkeypat
         hostname=cfg.socket.gethostname(),
     )
     assert cfg.render_copilot_instructions(entry, "example", machine=machine) == direct
-    assert f"Machine: {machine}\n" in direct
+    assert "Machine: example-host\n" in direct
+    assert f"Execution identity: {machine}\n" in direct
+    assert f"Environment: {platform}\n" in direct
+    assert "System environment: Example environment\n" in direct
     assert f"Platform: {platform}\n" in direct
-    assert f"Deployment environment: independent-{platform}-transport\n" in direct
+    assert f"SSH alias: independent-{platform}-transport\n" in direct
     assert direct.endswith("Binstub: example\n")
+
+
+@pytest.mark.parametrize("platform", ["windows", "wsl"])
+def test_machine_guidance_keeps_physical_environment_and_execution_distinct(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, platform: str,
+) -> None:
+    machines = {
+        "custom-native": {"execution_platform": "windows"},
+        "custom-guest": {"execution_platform": "wsl"},
+    }
+    for metadata in machines.values():
+        metadata.update(
+            physical_host="physical-host-wsl", hostname="Independent-Hostname",
+            display_name="Friendly host",
+        )
+    (tmp_path / "machines.yaml").write_text(
+        json.dumps({"machines": machines}), encoding="utf-8",
+    )
+    monkeypatch.setattr(session_context.socket, "gethostname", lambda: "Independent-Hostname")
+    monkeypatch.setattr(cfg, "detect_platform", lambda: platform)
+    config = SimpleNamespace(default_repo=SimpleNamespace(anchor=str(tmp_path)))
+    facts = json.loads(
+        session_context.render_machine_context(config).split("```json\n", 1)[1].split("\n```", 1)[0]
+    )
+    execution = "custom-native" if platform == "windows" else "custom-guest"
+    entry = cfg.load_machines_yaml(tmp_path)[execution]
+    text = cfg.render_copilot_instructions(entry, machine=execution)
+    assert facts["machine"] == "physical-host-wsl"
+    assert facts["execution_machine"] == execution
+    assert facts["environment"] == platform
+    assert facts["hostname"] == "Independent-Hostname"
+    assert facts["alias"] == "Friendly host"
+    assert "Machine: physical-host-wsl\n" in text
+    assert "Machine name: physical-host-wsl\n" in text
+    assert f"Execution identity: {execution}\n" in text
+    assert f"Environment: {platform}\n" in text
 
 
 @pytest.mark.parametrize("failure", ["config", "topology", "metadata", "missing", "render"])
@@ -245,7 +293,7 @@ def test_machine_context_warning_stream(monkeypatch, capsys, failure):
     monkeypatch.setattr(cfg, "set_active_project", lambda _p: None)
     monkeypatch.setattr(cfg, "load_config", lambda: _Config(machine="example-host-wsl"))
     monkeypatch.setattr(cfg, "detect_platform", lambda: "wsl")
-    monkeypatch.setattr(cfg, "load_machines_yaml", lambda _repo: {})
+    monkeypatch.setattr(cfg, "load_machines_yaml", lambda _repo, **kwargs: {})
     monkeypatch.setattr(cfg, "find_machine_metadata", lambda *_args: object())
     monkeypatch.setattr(
         cfg, "render_copilot_instructions", lambda *_args, **_kwargs: "Machine: example-host-wsl",

@@ -159,7 +159,8 @@ def test_missing_guest_keeps_identity_and_host_metadata(tmp_path, monkeypatch, c
     metadata = cfg.find_machine_metadata(entries, "example-host-wsl")
     assert metadata.description == "Shared host metadata"
     rendered = cfg.render_copilot_instructions(metadata, machine="example-host-wsl")
-    assert "Machine: example-host-wsl" in rendered
+    assert "Machine: example-host\n" in rendered
+    assert "Execution identity: example-host-wsl\n" in rendered
 
 
 def test_get_and_context_share_execution_identity(topology, monkeypatch, capsys):
@@ -180,7 +181,8 @@ def test_get_and_context_share_execution_identity(topology, monkeypatch, capsys)
     monkeypatch.setattr(cli, "_resolve_active_project", lambda _project: ("example", None))
     assert cli.cmd_machine_context(argparse.Namespace()) == 0
     context = json.loads(capsys.readouterr().out)["additionalContext"]
-    assert f"Machine: {config.machine}" in context
+    assert "Machine: example-host\n" in context
+    assert f"Execution identity: {config.machine}" in context
 
 
 def test_ambiguous_topology_fails_closed(tmp_path, monkeypatch):

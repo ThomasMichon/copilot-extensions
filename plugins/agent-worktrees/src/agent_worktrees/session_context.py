@@ -6,7 +6,7 @@ import json
 import socket
 from typing import Any
 
-from machine_transport import find_machine_entry
+from machine_transport import entry_physical_host, find_machine_entry
 
 from . import config as cfg
 from . import pr_config, related, state_root
@@ -43,11 +43,14 @@ def publish_machine_context(payload: dict) -> str:
 
 def render_machine_context(config: Any) -> str:
     hostname = socket.gethostname()
+    platform = cfg.detect_platform()
     facts = {
         "hostname": hostname,
         "machine": None,
+        "execution_machine": None,
+        "environment": platform,
         "alias": None,
-        "platform": cfg.detect_platform(),
+        "platform": platform,
         "status": "unresolved",
         "source": "os-hostname",
     }
@@ -67,7 +70,8 @@ def render_machine_context(config: Any) -> str:
             facts["reason"] = "hostname-not-registered" if config else "project-unavailable"
         else:
             facts.update(
-                machine=cfg.machine_name(entry),
+                machine=entry_physical_host(entry),
+                execution_machine=cfg.machine_name(entry),
                 alias=entry.display_name,
                 status="resolved",
                 source="machine-registry",
