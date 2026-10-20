@@ -133,6 +133,34 @@ def test_valid_launcher_is_preferred(admission, host):
 
 
 @pytest.mark.parametrize("host", HOSTS)
+@pytest.mark.parametrize("selector", ["-3.14-64", "-V:PythonCore/3.14"])
+def test_old_default_finds_newer_launcher_only_interpreter(admission, host, selector):
+    launcher = admission[0] / "registered-launcher.ps1"
+    stream = "stderr" if selector.startswith("-3") else "stdout"
+    inventory = (
+        "import sys;"
+        "sys.stderr.write('Installed Pythons found:\\n -3.9-64 *\\n');"
+        f"sys.{stream}.write(' {selector} Python 3.14\\n')"
+    )
+    launcher.write_text(
+        "if ($args[0] -eq '-0') {\n"
+        f" & {_quote(sys.executable)} -I -B -c {_quote(inventory)}\n"
+        " exit $LASTEXITCODE\n}\n"
+        f"if ($args[0] -eq {_quote(selector)}) {{\n"
+        f" & {_quote(sys.executable)} @($args | Select-Object -Skip 1)\n"
+        " exit $LASTEXITCODE\n}\n"
+        "if ($args[0] -eq '-3' -or $args[0] -eq '-3.9-64') {\n"
+        f" & {_quote(admission[4])} @args\n"
+        " exit $LASTEXITCODE\n}\nexit 1\n",
+        encoding="utf-8",
+    )
+    result, receipt = _run(admission, host, {"py": [str(launcher)]})
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert receipt["python"] == sys.executable
+    assert "--run-lifecycle" in receipt["arguments"]
+
+
+@pytest.mark.parametrize("host", HOSTS)
 @pytest.mark.parametrize("compatible", [False, True])
 def test_explicit_python_is_validated_without_fallback(admission, host, compatible):
     result, receipt = _run(

@@ -204,9 +204,28 @@ if (-not $ContextualInstall -and $Action -in @('install', 'update', 'provision',
             Select-Object -First 1
     } else { $null }
     if ($admissionLauncher) {
-        foreach ($selector in @('-3', '-3.13', '-3.12', '-3.11', '-3.10')) {
-            $admissionPython = & $probeAdmissionPython -Candidate $admissionLauncher.Source -Prefix @($selector)
-            if ($admissionPython) { break }
+        $admissionPython = & $probeAdmissionPython -Candidate $admissionLauncher.Source -Prefix @('-3')
+        if (-not $admissionPython) {
+            $inventoryPreviousErrorAction = $ErrorActionPreference
+            $ErrorActionPreference = 'Continue'
+            try {
+                $inventory = @(& $admissionLauncher.Source -0 2>&1)
+                $inventoryCode = $LASTEXITCODE
+            } catch {
+                $inventory = @()
+                $inventoryCode = 1
+            } finally {
+                $ErrorActionPreference = $inventoryPreviousErrorAction
+            }
+            if ($inventoryCode -eq 0) {
+                foreach ($entry in (($inventory -join "`n") -split '\r?\n')) {
+                    if ([string]$entry -match '^\s*(-(?:V:)?[^\s*]+)(?:\s|\*|$)') {
+                        $selector = $Matches[1]
+                        $admissionPython = & $probeAdmissionPython -Candidate $admissionLauncher.Source -Prefix @($selector)
+                        if ($admissionPython) { break }
+                    }
+                }
+            }
         }
     }
     if (-not $admissionPython) {

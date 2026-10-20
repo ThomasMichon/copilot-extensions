@@ -2877,11 +2877,12 @@ The bootstrap requires Python 3.11 or newer.
 Worktrees' Windows pre-lifecycle admission independently requires Python 3.10+,
 the declared minimum for its payload and shared human-output helper, before
 reserving ownership or staging the installer. A working but older `py -3`
-selection is not sufficient: discovery checks supported launcher selections and real PATH
-interpreters, excluding WindowsApps aliases. An explicit `-BootstrapPython`
-must be an existing absolute, compatible interpreter; an invalid explicit
-selection is refused rather than silently replaced. Discovery never installs
-Python or changes PATH. Interpreter paths cross the native-output boundary as
+selection is not sufficient: discovery probes the registered selectors listed
+by `py -0`, then real PATH interpreters, excluding WindowsApps aliases. There
+is no fixed upper version bound for launcher discovery. An explicit
+`-BootstrapPython` must be an existing absolute, compatible interpreter; an
+invalid explicit selection is refused rather than silently replaced. Discovery
+never installs Python or changes PATH. Interpreter paths cross the native-output boundary as
 ASCII-safe JSON strings, preserving non-ASCII paths without changing the host's
 console or pipeline encoding.
 
