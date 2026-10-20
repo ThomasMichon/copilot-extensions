@@ -1901,8 +1901,9 @@ def build_plan(
     """
     now = time.time() if now is None else now
     if machine is None:
-        config = cfg.load_config()
-        machine = cfg.detect_machine(repo_dir, value=config.configured_machine)
+        from .machine_identity import repository_execution_machine
+
+        machine = repository_execution_machine(repo_dir)
     cache = load_cache() if cache is None else cache
     plugins_cache: dict[str, Any] = cache.setdefault("plugins", {})
 

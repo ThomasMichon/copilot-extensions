@@ -41,7 +41,7 @@ def _configure(tmp_path, monkeypatch, platform, *, configured=True):
     monkeypatch.setattr(cfg, "detect_platform", lambda: platform)
     monkeypatch.setattr("socket.gethostname", lambda: "shared-host")
     load = cfg.load_config
-    monkeypatch.setattr(cfg, "load_config", lambda: load(
+    monkeypatch.setattr(cfg, "load_config", lambda *args, **kwargs: load(
         project_path, project="project", include_control_plane_related_pr=False,
     ))
     return anchor
@@ -140,6 +140,10 @@ def test_update_gate_selects_declared_physical_machine(
     assert update_gate._machine_gate_blocks(
         "agent-example", "machine-gated", anchor,
     ) is (not allowed)
+    from agent_worktrees import front_door_cli
+
+    monkeypatch.setattr(front_door_cli, "_git_toplevel", lambda repo: anchor)
+    monkeypatch.setattr(front_door_cli, "_reverse_lookup_project", lambda repo: "project")
     monkeypatch.setattr(reconcile, "read_enabled_plugins", lambda repo: [])
     plan = reconcile.build_plan(anchor, cache={}, save=False)
     assert plan["machine"] == "local-space"

@@ -716,6 +716,64 @@ def test_machine_gate_uses_physical_host_without_changing_execution_id(
     assert plan["machine"] == "custom-execution"
 
 
+@pytest.mark.parametrize("resident_project", [None, "unrelated-project"])
+def test_deferred_runtime_admission_uses_target_project_without_ambient_state(
+    env: Any, monkeypatch: pytest.MonkeyPatch, resident_project: str | None,
+) -> None:
+    from types import SimpleNamespace
+    import threading
+
+    from agent_worktrees import __main__ as main, front_door_cli
+
+    env.write_settings({f"agent-bridge@{MKT}": True})
+    env.install_payload("agent-bridge", "3.0.0", scope="machine-gated")
+    env.deploy_runtime("agent-bridge", "2.0.0")
+    env.write_gate({"agent-bridge": ["physical-host"]})
+    entry = cfg.MachineEntry(
+        key="custom-execution", display_name="Custom execution",
+        execution_platform="wsl", physical_host="physical-host",
+    )
+    monkeypatch.setattr(cfg, "detect_platform", lambda: "wsl")
+    monkeypatch.setattr(cfg, "load_machines_yaml", lambda *args, **kwargs: {entry.key: entry})
+    monkeypatch.setattr(front_door_cli, "_git_toplevel", lambda path: env.repo)
+    monkeypatch.setattr(front_door_cli, "_reverse_lookup_project", lambda anchor: "target-project")
+    expected_path = cfg.project_dir("target-project") / "config.yaml"
+
+    def load(
+        path: Path | None = None, *, project: str | None = None, **kwargs: Any,
+    ) -> Any:
+        if path != expected_path or project != "target-project":
+            raise RuntimeError("No active project could be resolved")
+        return SimpleNamespace(configured_machine=entry.key)
+
+    monkeypatch.setattr(cfg, "load_config", load)
+    monkeypatch.setattr(cfg, "_ACTIVE_PROJECT", "target-project")
+    monkeypatch.setattr(main, "_aw_runtime_home", lambda: env.home / ".agent-worktrees")
+    monkeypatch.setattr(main, "_provisioning_status_diagnostic", lambda cwd: "")
+    workers, spawned = [], []
+    monkeypatch.setattr(
+        main.threading, "Thread",
+        lambda *, target, **kwargs: SimpleNamespace(start=lambda: workers.append(target)),
+    )
+
+    def spawn(argv: list[str], **kwargs: Any) -> Any:
+        spawned.append(argv)
+        return SimpleNamespace(wait=lambda: None)
+
+    monkeypatch.setattr(main.subprocess, "Popen", spawn)
+    release = threading.Event()
+    assert main._schedule_provisioning_if_needed(
+        str(env.repo), {}, start_event=release,
+    ) == ""
+    cfg.set_active_project(resident_project)
+    release.set()
+    assert len(workers) == 1
+    workers[0]()
+    assert len(spawned) == 1
+    assert spawned[0][spawned[0].index("--repo") + 1] == str(env.repo)
+    assert cfg.active_project() == resident_project
+
+
 def test_machine_gated_no_manifest_provisions_locally(env):
     # #693 Phase 3: with NO gate manifest anywhere, an explicitly-enabled
     # machine-gated runtime provisions on the local machine (enabling it is the

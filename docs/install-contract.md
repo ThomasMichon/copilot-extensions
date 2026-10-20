@@ -1449,7 +1449,9 @@ Deployment selectors may name the canonical physical machine shared by its
 declared environments. Update and launch reconciliation resolve a registered
 execution ID through the same `machine_transport` physical/environment map;
 custom execution keys and physical names ending in platform-like suffixes are
-not rewritten. Exact execution-ID selectors remain compatible and select only
+not rewritten. Deferred launch planning selects the target repository's project
+configuration explicitly, without changing the resident's active project.
+Exact execution-ID selectors remain compatible and select only
 that execution address. Unknown names retain exact-match behavior, while
 ambiguous or conflicting registry selections refuse. This deployment decision
 does not change installation identity, native/guest locality or record ownership.

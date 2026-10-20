@@ -170,6 +170,29 @@ def test_execution_context_refuses_ambiguous_registry(
         )
 
 
+def test_repository_execution_machine_keeps_unregistered_detection_project_free(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_worktrees import front_door_cli
+
+    root = Path("/synthetic")
+    monkeypatch.setattr(front_door_cli, "_git_toplevel", lambda repo: None)
+    monkeypatch.setattr(front_door_cli, "_reverse_lookup_project", lambda repo: None)
+    monkeypatch.setattr(
+        cfg, "load_config",
+        lambda *args, **kwargs: pytest.fail("unregistered detection must not load ambient config"),
+    )
+    seen = []
+
+    def detect(repo: Path, *, value: str | None = None) -> str:
+        seen.append((repo, value))
+        return "observed-host"
+
+    monkeypatch.setattr(cfg, "detect_machine", detect)
+    assert machine_identity.repository_execution_machine(root) == "observed-host"
+    assert seen == [(root, None)]
+
+
 class TestIsLocalMachine:
     @pytest.fixture(autouse=True)
     def native_execution(self, monkeypatch) -> None:

@@ -108,6 +108,22 @@ def resolve_execution_context(
     return selection
 
 
+def repository_execution_machine(repo_dir: Path) -> str:
+    """Resolve the target's configured identity without changing ambient project."""
+    from . import front_door_cli
+
+    anchor = front_door_cli._git_toplevel(repo_dir)
+    project = front_door_cli._reverse_lookup_project(anchor or repo_dir)
+    configured = None
+    if project is not None:
+        config = cfg.load_config(
+            cfg.project_dir(project) / "config.yaml", project=project,
+            include_control_plane_related_pr=False,
+        )
+        configured = config.configured_machine
+    return cfg.detect_machine(repo_dir, value=configured)
+
+
 def is_local_machine(name: str, config: cfg.Config) -> bool:
     """True when ``name`` (a machine key, alias, ``hostname`` field, or
     display_name) refers to the CURRENT machine.
