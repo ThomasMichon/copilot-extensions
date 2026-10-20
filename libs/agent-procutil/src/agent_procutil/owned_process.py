@@ -301,14 +301,14 @@ def _communicate_windows_bounded(
                 ):
                     fail(error)
 
-    workers = [
-        threading.Thread(target=read, args=(stream, index), daemon=True)
-        for index, stream in enumerate((process.stdout, process.stderr)) if stream is not None
-    ]
-    if process.stdin is not None:
-        workers.append(threading.Thread(target=write, daemon=True))
+    workers = []
     cleanup_error = None
     try:
+        for index, stream in enumerate((process.stdout, process.stderr)):
+            if stream is not None:
+                workers.append(threading.Thread(target=read, args=(stream, index), daemon=True))
+        if process.stdin is not None:
+            workers.append(threading.Thread(target=write, daemon=True))
         for worker in workers:
             worker.start()
         for worker in workers:
@@ -407,7 +407,14 @@ def _run_owned(
         raise
     finally:
         try:
-            if not windows:
+            if bounded_windows and not retained and job.handle:
+                try:
+                    job.terminate_and_wait(2.0)
+                    process.wait(timeout=2.0)
+                except BaseException as error:
+                    retained = True
+                    raise OwnedCleanupError(process, job) from error
+            elif not windows:
                 if confirm_posix_group:
                     from agent_procutil._caller_owned import _confirm_group
 

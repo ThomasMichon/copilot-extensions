@@ -11,6 +11,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import threading
 import time
 import venv
 from types import SimpleNamespace
@@ -494,3 +495,57 @@ def test_pinned_observer_refuses_foreign_identity_before_termination(
     finally:
         pin.close()
     assert closed == [7]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows worker interruption cleanup")
+@pytest.mark.parametrize("boundary", ["initialization", "constructor", "start"])
+def test_worker_interruption_retires_job_with_traceback_retained(monkeypatch, boundary):
+    from agent_procutil import _windows_caller_owned as native
+    from agent_procutil import owned_process as ownership
+
+    pins = []
+    workers = []
+    initialize = native._Process.__init__
+
+    def record(process, argv, info, streams):
+        initialize(process, argv, info, streams)
+        pins.append(PinnedProcess(fixture.identity(info.dwProcessId)))
+
+    def lock():
+        if boundary == "initialization":
+            raise KeyboardInterrupt()
+        return threading.Lock()
+
+    def thread(*args, **kwargs):
+        if boundary == "constructor":
+            raise KeyboardInterrupt()
+        worker = threading.Thread(*args, **kwargs)
+        workers.append(worker)
+        if boundary == "start":
+            start = worker.start
+
+            def interrupt():
+                start()
+                raise KeyboardInterrupt()
+
+            worker.start = interrupt
+        return worker
+
+    monkeypatch.setattr(native._Process, "__init__", record)
+    monkeypatch.setattr(ownership, "threading", SimpleNamespace(
+        Lock=lock, Event=threading.Event, Thread=thread,
+    ))
+    try:
+        with pytest.raises(KeyboardInterrupt) as caught:
+            ownership.run_caller_owned(
+                [sys.executable, "-I", "-c", "import time;time.sleep(60)"],
+                timeout=5, max_stdout_bytes=32, max_stderr_bytes=32,
+            )
+        assert caught.value.__traceback__ is not None
+        assert pins and all(pin.gone() for pin in pins)
+        assert all(not worker.is_alive() for worker in workers)
+    finally:
+        with ExitStack() as cleanup:
+            for pin in pins:
+                cleanup.callback(pin.close)
+                cleanup.callback(pin.kill)
