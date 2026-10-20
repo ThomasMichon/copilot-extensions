@@ -129,6 +129,24 @@ def test_renderer_validates_private_origin_before_parsing(
     assert "cloudflare-ingress-refused code=invalid-origin" in caplog.text
 
 
+@pytest.mark.parametrize("field", ["fleet", "gateway"])
+@pytest.mark.parametrize("value", ["private/identifier", None, {}])
+def test_renderer_classifies_listener_identifier_errors(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], caplog: pytest.LogCaptureFixture,
+    field: str, value: object,
+) -> None:
+    document = listener_document(Rig(tmp_path).listener) | {
+        "external_origin": "https://gateway.example", field: value,
+    }
+    path = tmp_path / "listener.json"
+    path.write_text(json.dumps(document))
+    assert main(["--tls-config", str(path)]) == 1
+    captured = capsys.readouterr()
+    assert captured.out == "" and "Traceback" not in captured.err
+    assert "private/identifier" not in caplog.text
+    assert "cloudflare-ingress-refused code=invalid-identifier" in caplog.text
+
+
 def test_dual_tls_proxy_routes_two_outbound_channels_and_unfinished_stream(tmp_path: Path) -> None:
     async def scenario() -> None:
         async with proxied(tmp_path) as (rig, proxy):

@@ -10,6 +10,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from .gateway_service_channel import TransportError, check
+from .gateway_service_context import ServicePolicyError
 from .gateway_service_listener import Listener, external_origin
 
 
@@ -51,8 +52,9 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         document = ingress(Listener.load(args.tls_config), ca_pool=args.ca_pool)
-    except (TransportError, OSError) as exc:
-        code = exc.code if isinstance(exc, TransportError) else "source-unavailable"
+    except (TransportError, ServicePolicyError, OSError) as exc:
+        code = exc.code if isinstance(exc, (TransportError, ServicePolicyError)) else (
+            "source-unavailable")
         logging.getLogger(__name__).error("cloudflare-ingress-refused code=%s", code)
         return 1
     print(json.dumps(document, indent=2, sort_keys=True))
