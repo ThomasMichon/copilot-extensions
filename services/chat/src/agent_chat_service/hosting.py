@@ -322,31 +322,35 @@ class HostedChat:
         return self.store.drain()
 
     def close(self):
-        try:
-            if self.store is not None:
-                if self.server is not None:
-                    self.server.draining = True
+        drain_error = None
+        if self.server is not None:
+            self.server.draining = True
+        if self.store is not None:
+            try:
                 self.store.drain()
-            if self.server is not None:
-                self.server.server_close()
-                self.server = None
-            if self.store is not None:
-                self.store.close()
-                self.store = None
-            if self._advertised:
-                self._clear_endpoint(self.run_dir)
-                self._advertised = False
-            if self._socket_identity is not None:
-                info = self._socket_path.lstat()
-                if (info.st_dev, info.st_ino) == self._socket_identity and stat.S_ISSOCK(info.st_mode):
-                    self._socket_path.unlink()
-                else:
-                    raise HostError("host_socket_ownership_changed")
-                self._socket_identity = None
-        finally:
-            if self.lease is not None:
-                self.lease.release()
-                self.lease = None
+            except ChatError as error:
+                drain_error = error
+            # close waits for the transaction boundary even if timed drain could not.
+            self.store.close()
+            self.store = None
+        if self.server is not None:
+            self.server.server_close()
+            self.server = None
+        if self._advertised:
+            self._clear_endpoint(self.run_dir)
+            self._advertised = False
+        if self._socket_identity is not None:
+            info = self._socket_path.lstat()
+            if (info.st_dev, info.st_ino) == self._socket_identity and stat.S_ISSOCK(info.st_mode):
+                self._socket_path.unlink()
+            else:
+                raise HostError("host_socket_ownership_changed")
+            self._socket_identity = None
+        if self.lease is not None:
+            self.lease.release()
+            self.lease = None
+        if drain_error is not None:
+            raise drain_error
 
     def __enter__(self):
         return self

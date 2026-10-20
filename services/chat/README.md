@@ -129,10 +129,13 @@ ordinary RPC admission. Request logs never reflect credentials or bodies.
 opening the store. Its `serve(stop_event)` has no child process or detached
 helper. The embedding owner must stop that serving loop before closing the
 host. `drain()` rejects new RPCs, releases held waits through the existing store
-generation fence and reports health as nonaccepting. `close()` drains, joins
-bounded request workers, closes storage, removes only the owned endpoint/socket
-and releases custody. The foreground entry handles normal SIGINT/SIGTERM this
-way where delivered by the platform. Forced Windows process termination is a
+generation fence and reports health as nonaccepting. `close()` drains and closes
+storage at the committed-transaction boundary, joins bounded request workers,
+removes only the owned endpoint/socket and then releases custody. A timed drain
+failure still waits for storage retirement and worker cleanup before releasing
+the lease, then surfaces that original failure. Other incomplete cleanup retains
+custody; it is not a successful close. The foreground entry handles normal
+SIGINT/SIGTERM this way where delivered by the platform. Forced Windows process termination is a
 crash, not graceful drain; the installed qualification checks durable recovery
 separately. No reader cursor, pending client request, data or membership is
 erased during stop/restart.

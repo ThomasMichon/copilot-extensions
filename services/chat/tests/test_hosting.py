@@ -1,4 +1,4 @@
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 from contextlib import contextmanager
 import http.client
 import json
@@ -11,6 +11,7 @@ import time
 import pytest
 
 from agent_chat_service import hosting
+from agent_chat_service import ChatError
 
 
 TOKEN = "synthetic-local-key-" + "x" * 32
@@ -305,3 +306,51 @@ def test_failed_endpoint_publication_retires_host_and_removes_own_attempt(tmp_pa
     with running(config) as host:
         assert rpc(host, {"op": "join", "channel": "room",
                           "actor": {"codename": "agent-a"}})[0] == 200
+
+
+def test_close_retains_custody_until_held_transaction_and_workers_retire(tmp_path, monkeypatch):
+    config = configuration(tmp_path)
+    entered, release = threading.Event(), threading.Event()
+    with hosting.HostedChat(config) as host:
+        stop = threading.Event()
+        serving = threading.Thread(target=host.serve, args=(stop,))
+        serving.start()
+        assert rpc(host, {"op": "join", "channel": "room",
+                          "actor": {"codename": "agent-a"}})[0] == 200
+        original = host.store._post
+
+        def held_post(request):
+            entered.set()
+            assert release.wait(5)
+            return original(request)
+
+        monkeypatch.setattr(host.store, "_post", held_post)
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            post = pool.submit(rpc, host, {
+                "op": "post", "channel": "room", "codename": "agent-a",
+                "request_id": "held-close", "text": "committed before custody release",
+            })
+            closing = None
+            try:
+                assert entered.wait(3)
+                stop.set()
+                serving.join(3)
+                assert not serving.is_alive()
+                closing = pool.submit(host.close)
+                with pytest.raises(FutureTimeout):
+                    closing.result(timeout=1.5)
+                with pytest.raises(hosting.HostError, match="host_already_running"):
+                    hosting.HostedChat(config)
+            finally:
+                release.set()
+                stop.set()
+                serving.join(3)
+                status, posted = post.result(timeout=5)
+                assert status == 200
+                if closing is not None:
+                    with pytest.raises(ChatError, match="Store is busy"):
+                        closing.result(timeout=5)
+        assert host.store is None and host.server is None and host.lease is None
+    with running(config) as replacement:
+        page = rpc(replacement, {"op": "read", "channel": "room", "codename": "agent-a"})[1]
+        assert page["messages"] == [posted["event"]]

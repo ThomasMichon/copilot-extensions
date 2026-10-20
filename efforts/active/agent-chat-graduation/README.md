@@ -258,6 +258,14 @@ graduation still requires the declared native and lifecycle guarantees.
   not available in this local Windows venue; Unix-socket source/tests remain
   unqualified until the existing native qualification owner exercises that
   platform. Synthetic installed participants are not a live-adopter exchange.
+- Current-head review found that a timed drain failure could release singleton
+  custody while an admitted transaction was still writable. A real held HTTP
+  transaction reproduced that failure. Close now waits for the storage
+  transaction boundary even when drain times out, retires workers and storage
+  before custody release, and still raises the original drain failure.
+  The focused case passes with real competing-host refusal during cleanup and
+  preserved committed data after replacement. The refreshed full Windows
+  portfolio passes 103 tests in 51.25 seconds under the same 120-second bound.
 - No production install, external host activation, trusted release selection,
   stable launcher, passive-candidate cutover, rollback or post-installer health
   is claimed. Those remain the existing #6424/#6240 lifecycle boundary.
