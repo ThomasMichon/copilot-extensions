@@ -25,6 +25,10 @@ worktree/repo resolver, and needs no resident daemon. The optional `serve`
 command only warms repeated shell `call`/materialized-stub usage; it is not part
 of normal agent wiring.
 
+Windows setup probes optional Python-launcher versions quietly when choosing a
+signed base interpreter. Unavailable candidates are verbose diagnostics; actual
+venv creation and package-install failures retain their normal error reporting.
+
 1. Enable/install the `agent-mcp` plugin. Session-facing skills receive an exact
    payload-local command through the session command catalog; static MCP
    frontmatter and generated materialized fleets continue using the

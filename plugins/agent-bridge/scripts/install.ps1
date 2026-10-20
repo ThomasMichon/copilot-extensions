@@ -1221,19 +1221,34 @@ function Get-SignedBasePython {
        trampoline; a venv built from a signed base with `--copies` has a signed
        python.exe that SAC allows. #>
     if ($env:OS -ne 'Windows_NT') { return $null }
-    $cands = @()
-    if (Get-Command py -ErrorAction SilentlyContinue) {
-        foreach ($v in '3.13', '3.12', '3.11', '3.10') {
-            $launcher = (Get-Command py -ErrorAction Stop).Source
-            $output = Invoke-Hidden -FilePath $launcher -ArgList @("-$v", '-c', 'import sys;print(sys.executable)')
-            if ($LASTEXITCODE -eq 0 -and $output) {
-                $cands += $output.Trim()
-            }
-        }
+    $cached = Get-Variable -Name BridgeSignedBasePython -Scope Script -ValueOnly -ErrorAction SilentlyContinue
+    if ($cached -and (Test-Path -LiteralPath $cached)) {
+        try {
+            if ((Get-AuthenticodeSignature $cached).Status -eq 'Valid') { return $cached }
+        } catch { Write-Verbose "Cached Python signature probe failed: $_" }
     }
-    foreach ($c in ($cands | Select-Object -Unique)) {
-        if (Test-Path $c) {
-            try { if ((Get-AuthenticodeSignature $c).Status -eq 'Valid') { return $c } } catch {}
+    $script:BridgeSignedBasePython = $null
+    $seen = @{}
+    if (Get-Command py -ErrorAction SilentlyContinue) {
+        $launcher = (Get-Command py -ErrorAction Stop).Source
+        foreach ($v in '3.13', '3.12', '3.11', '3.10') {
+            $probeError = ''
+            $output = Invoke-Hidden -FilePath $launcher -ArgList @("-$v", '-c', 'import sys;print(sys.executable)') -ErrorOutput ([ref]$probeError)
+            if ($LASTEXITCODE -eq 0 -and $output) {
+                $candidate = $output.Trim()
+                if ($seen.ContainsKey($candidate)) { continue }
+                $seen[$candidate] = $true
+                if (Test-Path -LiteralPath $candidate) {
+                    try {
+                        if ((Get-AuthenticodeSignature $candidate).Status -eq 'Valid') {
+                            $script:BridgeSignedBasePython = $candidate
+                            return $candidate
+                        }
+                    } catch { Write-Verbose "Python signature probe failed: $_" }
+                }
+            } elseif ($probeError) {
+                Write-Verbose $probeError
+            }
         }
     }
     return $null

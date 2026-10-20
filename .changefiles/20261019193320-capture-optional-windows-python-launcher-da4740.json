@@ -1,0 +1,13 @@
+{
+  "comment": "Capture optional Windows Python launcher misses and reuse signed Bridge discovery without repeated child probes",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    }
+  ]
+}

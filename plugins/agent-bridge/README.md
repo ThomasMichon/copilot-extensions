@@ -12,6 +12,12 @@ approval contract, and connection-only ownership boundary.
 
 Supports **Windows** and **Linux/WSL** (macOS planned).
 
+Windows installation captures unavailable optional Python-launcher versions as
+verbose diagnostics, not install failures. Signed-base discovery stops at the
+first accepted candidate and reuses it only within that installer process,
+checking its existence and Authenticode signature on each use. An unsuccessful
+lookup is not cached, and required native-operation failures remain visible.
+
 Both installers co-deploy the canonical Python runtime resolver and its lease
 and construction companions into the Bridge installation's `scripts/` directory,
 alongside the existing native-shell resolver deployment in `bin/`. Native

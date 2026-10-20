@@ -684,9 +684,12 @@ if ($Force -or -not (Test-Path $VenvPython)) {
     $signedBase = $null
     if ($env:OS -eq 'Windows_NT' -and (Get-Command py -ErrorAction SilentlyContinue)) {
         foreach ($v in '3.13', '3.12', '3.11') {
-            $cand = (Invoke-Hidden -FilePath py -ArgList @("-$v", '-c', 'import sys;print(sys.executable)') | Out-String).Trim()
+            $probeError = ''
+            $cand = (Invoke-Hidden -FilePath py -ArgList @("-$v", '-c', 'import sys;print(sys.executable)') -ErrorOutput ([ref]$probeError) | Out-String).Trim()
             if ($LASTEXITCODE -eq 0 -and $cand -and (Test-Path $cand)) {
                 try { if ((Get-AuthenticodeSignature $cand).Status -eq 'Valid') { $signedBase = $cand; break } } catch {}
+            } elseif ($probeError) {
+                Write-Verbose $probeError
             }
         }
     }
