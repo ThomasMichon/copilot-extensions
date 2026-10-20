@@ -110,9 +110,7 @@ async def read_worktree_record(
     ):
         raise AcquisitionRefused("owner_response_invalid", "owner returned invalid last_session_id")
     nonce = row.get("creation_nonce")
-    if nonce is not None and (
-        not isinstance(nonce, str) or nonce != "" and not nonce.strip()
-    ):
+    if nonce is not None and not isinstance(nonce, str):
         raise AcquisitionRefused("owner_response_invalid", "owner returned invalid creation_nonce")
     for field in ("sessions_indexed", "execution_leg_opaque", "session_backend_opaque"):
         if type(row[field]) is not bool:

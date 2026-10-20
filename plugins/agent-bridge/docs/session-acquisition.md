@@ -57,7 +57,8 @@ allocation or be unavailable without preventing an exact current owner read.
 The record must identify the requested worktree in the selected project's
 tracking scope, its configured repository, absolute path, creation nonce,
 lifecycle state and explicit session/history opacity. Version-1 acquisition
-accepts configured companion repositories and legacy null/empty nonce metadata;
+accepts configured companion repositories and opaque string-or-null legacy nonce
+metadata, including empty or whitespace-only strings;
 version 2 still checks its exact repository/path. Keyed creation and retained
 replay additionally require a nonblank string nonce and exact allocation identity.
 These metadata facts do not grant launch authority: native-head, holder and launch-gate checks

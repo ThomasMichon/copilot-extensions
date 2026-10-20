@@ -11,7 +11,9 @@
   "legacy_metadata_cases": [
     ["companion-repo", "original-allocation"],
     ["project-a", ""],
-    ["project-a", null]
+    ["project-a", null],
+    ["project-a", " "],
+    ["companion-repo", " "]
   ],
   "invalid_keyed_nonces": [null, "", " ", 123, false],
   "record": {
