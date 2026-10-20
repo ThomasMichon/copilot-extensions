@@ -253,6 +253,82 @@ def test_failed_group_is_cleaned_without_starting_another(
     assert not roots[0].exists()
 
 
+@pytest.mark.parametrize("seam", ["wait", "shutdown", "both"])
+@pytest.mark.parametrize("unreaped", [False, True])
+def test_cleanup_wait_interruptions_join_before_preserving_ownership_error(
+    monkeypatch, capsys, cleanup_runner, seam, unreaped,
+):
+    started = threading.Event()
+    release = threading.Event()
+    finished = threading.Event()
+    roots = []
+    calls = []
+    interruptions = []
+    original_remove = runner.tempfile.TemporaryDirectory._rmtree
+
+    def remove(name, *args, **kwargs):
+        if Path(name).name == "g1":
+            started.set()
+            assert release.wait(5), "cleanup was not released after interruption"
+        original_remove(name, *args, **kwargs)
+        if Path(name).name == "g1":
+            finished.set()
+
+    class Pool(ThreadPoolExecutor):
+        def submit(self, *args, **kwargs):
+            future = super().submit(*args, **kwargs)
+            result = future.result
+
+            def interrupt_once(*args, **kwargs):
+                if seam in {"wait", "both"} and "wait" not in interruptions:
+                    assert not future.done()
+                    interruptions.append("wait")
+                    raise KeyboardInterrupt("cleanup wait interrupted")
+                release.set()
+                return result(*args, **kwargs)
+
+            monkeypatch.setattr(future, "result", interrupt_once)
+            return future
+
+        def shutdown(self, *args, **kwargs):
+            if seam in {"shutdown", "both"} and "shutdown" not in interruptions:
+                assert finished.is_set()
+                interruptions.append("shutdown")
+                raise KeyboardInterrupt("executor shutdown interrupted")
+            return super().shutdown(*args, **kwargs)
+
+    def run(command, **kwargs):
+        roots.append(kwargs["sandbox"])
+        calls.append(command)
+        group = Path(next(arg.split("=", 1)[1] for arg in command
+                          if arg.startswith("--basetemp=")))
+        (group / "owned.txt").write_text("preserve")
+        if len(calls) == 2:
+            assert started.wait(5)
+            if unreaped:
+                raise runner.UnreapedProcessError("second group still owns its files")
+        return 0
+
+    monkeypatch.setattr(runner, "ThreadPoolExecutor", Pool)
+    monkeypatch.setattr(runner, "run_contained", run)
+    monkeypatch.setattr(runner.tempfile.TemporaryDirectory, "_rmtree", staticmethod(remove))
+    try:
+        expected = runner.UnreapedProcessError if unreaped else KeyboardInterrupt
+        with pytest.raises(expected):
+            cleanup_runner()
+        assert finished.is_set()
+        assert interruptions == (["wait", "shutdown"] if seam == "both" else [seam])
+        if unreaped:
+            assert (roots[0] / "t" / "g2" / "owned.txt").read_text() == "preserve"
+        else:
+            assert not roots[0].exists()
+        assert "[PASS]" not in capsys.readouterr().out
+    finally:
+        release.set()
+        if roots and roots[0].exists():
+            shutil.rmtree(roots[0])
+
+
 def test_final_sandbox_cleanup_failure_cannot_report_pass(
     monkeypatch, tmp_path, capsys, cleanup_runner,
 ):

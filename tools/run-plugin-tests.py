@@ -406,24 +406,36 @@ def _test_file_groups(
 
 @contextmanager
 def _group_cleanup_worker() -> Iterator[tuple[ThreadPoolExecutor, list[Future[None]]]]:
-    with ThreadPoolExecutor(max_workers=1) as pool:
-        cleanups: list[Future[None]] = []
-        try:
-            yield pool, cleanups
-        finally:
-            pending = sys.exception()
-            failure: Exception | None = None
-            for cleanup in cleanups:
+    pool = ThreadPoolExecutor(max_workers=1)
+    cleanups: list[Future[None]] = []
+    try:
+        yield pool, cleanups
+    finally:
+        pending = sys.exception()
+        failure: BaseException | None = None
+        for cleanup in cleanups:
+            while True:
                 try:
                     cleanup.result()
-                except Exception as exc:
+                    break
+                except BaseException as exc:
                     print(f"[FAIL] Group sandbox cleanup failed: {exc}", file=sys.stderr)
                     if failure is None:
                         failure = exc
-            # Never replace an unreaped-tree error: TestSandbox must retain
-            # the current group even when an earlier group's removal failed.
-            if failure is not None and pending is None:
-                raise failure
+                    if cleanup.done() or not isinstance(exc, (KeyboardInterrupt, SystemExit)):
+                        break
+        while True:
+            try:
+                pool.shutdown(wait=True)
+                break
+            except (KeyboardInterrupt, SystemExit) as exc:
+                print(f"[FAIL] Cleanup worker shutdown interrupted: {exc}", file=sys.stderr)
+                if failure is None:
+                    failure = exc
+        # Defer cancellation until every cleanup has joined, without replacing
+        # an ownership error that TestSandbox must see to retain live files.
+        if failure is not None and pending is None:
+            raise failure
 
 
 def run_plugin(
