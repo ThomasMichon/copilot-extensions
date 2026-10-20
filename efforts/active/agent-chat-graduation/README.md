@@ -312,6 +312,41 @@ graduation still requires the declared native and lifecycle guarantees.
   Manager baseline, and existing Gateway/SSH, Vault and lifecycle owners.
   No runtime API, new process, deployment or permission grant is supplied.
 
+### 2026-10-20 - Review correction: private retained post creation
+
+- Addressed the current review's retained-body permission finding in the
+  client, not a utility fork. New reader namespaces and pending directories
+  use POSIX mode0700; each atomic temporary is created exclusively with
+  mode0600 before writing and keeps that mode after replacement. Existing
+  directory permissions are not silently migrated, and Windows account ACLs
+  remain the owned state-root prerequisite.
+- The creation-order regression first failed against the prior client, then
+  passed with real retained uncertain-request content and the actual atomic
+  replacement. It costs0.01s in the Windows evaluation. A separate native
+  POSIX subprocess sets its own umask022 and checks namespace/directory/file
+  modes and retained content; it is explicitly skipped on Windows, not
+  credited as native evidence or implemented by changing pytest's process-wide
+  umask.
+- The first current full230-case runs exhausted120s, with no functional
+  failure observed; the verbose diagnostic reached the installed artifact
+  test after the client contracts. Under the operator's bounded600s evaluation
+  allowance,229 passed and the one native POSIX permission case was explicitly
+  skipped in153.824s. The broad CLI flow cost23.71s, source-independent artifact
+  22.06s and shared first-use role setup22.24s. This is not a current120s pass,
+  a permanent gate change or proof that pruning these valuable process
+  boundaries is safe.
+- Tightened the existing installed-console-death witness so lock reacquisition
+  must occur before the unchanged10s held-response watchdog expires. A slower
+  run cannot gain false cleanup credit from fixture timeout. No production
+  deadline, test synchronization allowance or containment boundary is widened.
+  With that explicit witness, the full matrix again passed229 with the one
+  native POSIX permission case skipped in170.250s under600s. The complete
+  console-death call was11.66s including its normal join/setup; the direct
+  monotonic assertion proves the actual held-response cleanup witness
+  preceded watchdog expiry rather than inferring it from total call time.
+  F/E9 checks pass. Positive native Linux qualification, current-head review
+  and required CI remain required before merge; no120s pass is claimed.
+
 ### 2026-10-20 - Released caller-owned API consumed by the retained client
 
 - Integrated the actually published #7372 `run_caller_owned` API in the existing

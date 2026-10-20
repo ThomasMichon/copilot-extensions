@@ -134,6 +134,9 @@ def test_actual_installed_cli_death_releases_reader_lock_before_outer_cleanup(
         process.kill()
         process.wait(timeout=5)
         assert json.loads(run([*command, "status"], cwd=tmp_path))["pending_posts"] == []
+        assert time.monotonic() < rpc_endpoint.state.read_hold_deadline, (
+            "Caller death and lock reacquisition were not proved before the hold watchdog expired."
+        )
         rpc_endpoint.state.release_read.set()
         assert rpc_endpoint.store.dispatch({
             "op": "read", "channel": "room", "codename": "agent-a",

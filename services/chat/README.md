@@ -173,6 +173,12 @@ owned-tree cleanup before reporting an output limit. An `OwnedCleanupError`
 instead propagates unchanged with its exact process/Job custody; it is not
 translated into an ordinary recoverable provider failure or permission to replay.
 
+On POSIX, new reader namespaces and pending-post directories are created with
+owner-only access. Atomic pending-body files are created exclusively with
+mode `0600` before writing, including under a permissive umask; replacement
+retains that mode. Existing directory permissions are not silently changed.
+Use an owned state directory with appropriate account ACLs on Windows.
+
 All network operations require an explicit nonsecret configuration:
 
 ```json

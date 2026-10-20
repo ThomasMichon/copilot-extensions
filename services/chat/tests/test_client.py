@@ -2,6 +2,8 @@ import copy
 import hashlib
 import io
 import json
+import os
+from pathlib import Path
 import subprocess
 import sys
 import time
@@ -41,6 +43,77 @@ def pair(tmp_path):
         yield client, transport, store
     finally:
         store.close()
+
+
+def test_uncertain_post_creates_private_exclusive_temporary_before_atomic_replace(pair, monkeypatch):
+    import agent_chat_service.client as module
+
+    client, transport, _ = pair
+    opened, replaced = [], []
+    original_open, original_replace = os.open, os.replace
+
+    def create(path, flags, mode=0o777, **kwargs):
+        opened.append((Path(path), flags, mode))
+        return original_open(path, flags, mode, **kwargs)
+
+    def replace(source, target):
+        assert json.loads(source.read_text(encoding="utf-8"))["text"] == "retained private body"
+        if os.name != "nt":
+            assert source.stat().st_mode & 0o777 == 0o600
+        replaced.append(target)
+        return original_replace(source, target)
+
+    def unavailable(_request):
+        raise ClientError("provider_timeout", "Synthetic uncertain response.")
+
+    transport.before = unavailable
+    monkeypatch.setattr(module.os, "open", create)
+    monkeypatch.setattr(module.os, "replace", replace)
+    with pytest.raises(ClientError) as caught:
+        client.post("room", "retained private body", "private-request")
+    assert caught.value.code == "post_unconfirmed"
+    assert len(opened) == len(replaced) == 1
+    temporary, flags, mode = opened[0]
+    assert flags & os.O_EXCL and flags & os.O_CREAT and flags & os.O_WRONLY
+    assert mode == 0o600 and temporary.parent == replaced[0].parent
+    assert not temporary.exists()
+    assert json.loads(replaced[0].read_text(encoding="utf-8"))["text"] == "retained private body"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX creation modes require native POSIX")
+def test_posix_uncertain_post_is_private_under_umask_022_without_changing_test_process(tmp_path):
+    probe = """
+import os,sys
+from pathlib import Path
+from agent_chat_service.client import Client,ClientError
+os.umask(0o022)
+class Unavailable:
+    identity="private-state-fixture"
+    def call(self,payload):
+        raise ClientError("provider_timeout","Synthetic uncertain response.")
+client=Client(Unavailable(),{"codename":"agent-a"},Path(sys.argv[1]))
+try:
+    client.post("room","retained private body","private-request")
+except ClientError as error:
+    assert error.code=="post_unconfirmed"
+else:
+    raise AssertionError("fixture did not retain an uncertain post")
+pending=client.directory/"pending-posts"
+files=list(pending.glob("*.json"))
+assert len(files)==1
+assert client.directory.stat().st_mode & 0o777==0o700
+assert pending.stat().st_mode & 0o777==0o700
+assert files[0].stat().st_mode & 0o777==0o600
+assert "retained private body" in files[0].read_text()
+assert not list(pending.glob("*.tmp"))
+print("private retained post",flush=True)
+"""
+    result = subprocess.run(
+        [sys.executable, "-I", "-c", probe, str(tmp_path / "traversable-client-state")],
+        capture_output=True, text=True, timeout=10, check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.strip() == "private retained post"
 
 
 def test_members_pages_preserve_legacy_shape_without_read_progress(pair):

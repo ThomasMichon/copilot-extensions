@@ -38,7 +38,7 @@ class RpcTransport(Protocol):
 @contextmanager
 def reader_lock(path: Path):
     """Nonblocking OS locks are released even if the client process dies."""
-    path.parent.mkdir(parents=True, exist_ok=True)
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     if path.is_symlink():
         raise ClientError("invalid_state", "Redirected lock file.")
     with path.open("a+b") as stream:
@@ -80,10 +80,11 @@ def emit(value: dict, stream) -> None:
 
 
 def _atomic_json(path: Path, value: dict) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     temporary = path.with_name(path.name + "." + uuid.uuid4().hex + ".tmp")
     try:
-        with temporary.open("xb") as stream:
+        descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(descriptor, "wb") as stream:
             stream.write(json_bytes(value))
             stream.flush()
             os.fsync(stream.fileno())

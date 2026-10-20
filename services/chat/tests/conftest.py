@@ -7,6 +7,7 @@ import socket
 import subprocess
 import sys
 import threading
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -107,6 +108,7 @@ def rpc_endpoint(tmp_path):
     state = SimpleNamespace(
         mode="normal", requests=[], authenticated=0,
         read_entered=threading.Event(), release_read=threading.Event(),
+        read_hold_deadline=None,
         trickle_progress=threading.Event(), stop_trickle=threading.Event(),
     )
     expected_prefix = "Bear" + "er "
@@ -127,6 +129,7 @@ def rpc_endpoint(tmp_path):
                 state.requests.append(request)
                 if state.mode == "hold-read" and request["op"] == "read":
                     state.mode = "normal"
+                    state.read_hold_deadline = time.monotonic() + 10
                     state.read_entered.set()
                     assert state.release_read.wait(10), "fixture read was not released"
                 try:
