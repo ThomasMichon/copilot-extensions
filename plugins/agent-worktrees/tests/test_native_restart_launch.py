@@ -14,7 +14,7 @@ import pytest
 
 from agent_worktrees import __main__ as core
 from agent_worktrees import handoff_cli, launch_admission, native_restart_check
-from agent_worktrees import native_source_context, sessions, tracking
+from agent_worktrees import native_source_context, record_cache, sessions, tracking
 
 
 pytestmark = pytest.mark.skipif(os.name != "posix", reason="Linux/WSL restart owner contract")
@@ -129,6 +129,7 @@ def test_canonical_original_self_claim_survives_exact_fenced_resume(subject, cap
         ),
     )
     tracking.save_record(replace(subject.record, resources=[claim]), subject.path)
+    record_cache.clear()
     before = subject.path.read_bytes()
     rc, result = invoke(subject, capfd)
     assert rc == 0, result
@@ -153,6 +154,7 @@ def test_native_start_transaction_claim_is_retained_by_restart_resume(monkeypatc
         "source": "hook", "started_at": "2026-01-01T00:00:00+00:00",
     })
     assert result["ok"] is True, result
+    record_cache.clear()
     record = tracking.load_record(subject.path)
     assert len(record.resources) == 1 and record.resources[0].kind == "session"
     subject.request["expected"].update(
@@ -198,6 +200,7 @@ def test_self_claim_admission_never_relaxes_other_owner_policy(subject, capfd, m
         changes["owner_ref"] = "other/project/worktree"
     elif damage == "dispatch":
         changes["dispatch_attempt_raw_present"] = True
+        changes["dispatch_attempt_opaque"] = True
     elif damage == "released-ledger":
         changes["last_finalize_released"] = [claim]
     elif damage == "action-time-replacement":
@@ -215,6 +218,11 @@ def test_self_claim_admission_never_relaxes_other_owner_policy(subject, capfd, m
         raw = yaml.safe_load(subject.path.read_text())
         raw["resources"][0]["producer"] = None
         subject.path.write_text(yaml.safe_dump(raw))
+    record_cache.clear()
+    if damage == "dispatch":
+        persisted = tracking.load_record(subject.path)
+        assert persisted.dispatch_attempt_raw_present is True
+        assert persisted.dispatch_attempt_opaque is True
     rc, result = invoke(subject, capfd)
     assert rc != 0 and "action-time-claim-policy-unqualified" in result["error"]
     assert subject.launches == []

@@ -944,3 +944,9 @@ The umbrella effort remains Active independently of this slice's completion.
   reviewed or merged. Full native/platform qualification, surviving-session
   adoption, task/producer/profile action-time policy, receipt lifecycle,
   enrollment and blocking-work notification guarantees remain unresolved.
+- The dispatch negative fixture initially retained only an in-memory raw-field
+  flag, not serializable opaque dispatch evidence. Clearing the writer cache
+  reproduced the false-positive assertion. Persisted claim fixtures now force
+  a cold owner read; the dispatch fixture explicitly preserves and asserts both
+  raw-present and opaque flags after YAML serialization. This changes fixture
+  evidence, not launch policy or the owner codec.

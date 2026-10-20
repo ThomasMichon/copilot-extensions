@@ -250,7 +250,9 @@ Canonical self-session claim regressions cover the actual native Start
 transaction's persisted claim, unchanged owner bytes through exact-original
 Resume, wrong machine/project/worktree/UUID, released/producer/opaque/duplicate
 or mixed claims, inbound/dispatch/released-ledger fences, and replacement during
-preflight. Concurrent owner processes and post-invocation owner death exercise
+preflight. Persisted launch-admission cases clear the writer cache before the
+owner reread; opaque dispatch metadata must survive actual YAML serialization.
+Concurrent owner processes and post-invocation owner death exercise
 both an empty ledger and the original self claim with real locks and durable
 uncertainty. The provisional check makes no self-claim provider callback;
 task-policy snapshots still cannot authorize a launch.
