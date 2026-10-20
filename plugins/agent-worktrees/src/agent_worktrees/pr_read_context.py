@@ -7,6 +7,17 @@ from pathlib import Path
 import yaml
 
 
+def resolve_read_repo_config(config, repository, *, explicit=False):
+    from . import pr_config
+    from .pr_related_binding import resolve_related_binding
+
+    if explicit:
+        repo, name, error = resolve_related_binding(config, repository, include_control_plane=False)
+        if repo is not None or error:
+            return pr_config.ForeignRepoResolution(repo, name, error=error)
+    return pr_config.resolve_repo_config_for_slug(config, repository)
+
+
 def load_read_config(path=None):
     from . import config, related, repos
     if path is not None:

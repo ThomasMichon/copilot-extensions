@@ -360,8 +360,8 @@ def dispatch_cli(argv: list[str]) -> int:
     """Only the central facade exposes these built-ins; no external check executables."""
     import argparse
 
-    from . import output, pr_config
-    from .pr_read_context import load_read_config
+    from . import output
+    from .pr_read_context import load_read_config, resolve_read_repo_config
 
     parser = argparse.ArgumentParser(prog="pr-watch checks")
     parser.add_argument("repo")
@@ -385,7 +385,7 @@ def dispatch_cli(argv: list[str]) -> int:
         return int(exc.code or 0)
     try:
         config = load_read_config(Path(args.config) if args.config else None)
-        resolution = pr_config.resolve_repo_config_for_slug(config, args.repo)
+        resolution = resolve_read_repo_config(config, args.repo, explicit=bool(args.config))
         if not resolution.resolved:
             raise CheckError(resolution.error or "repository publication binding is unavailable")
         repo = resolution.repo_config

@@ -20,9 +20,9 @@ def remember_checkout_free_pr(bindings, name, machine_repo, related_pr):
         bindings[name] = cfg._parse_pr(raw.get("pr"))
 
 
-def resolve_related_binding(config, repo_slug):
+def resolve_related_binding(config, repo_slug, *, include_control_plane=True):
     from . import config as cfg
-    entries = cfg._control_plane_related_pr_map()
+    entries = cfg._control_plane_related_pr_map() if include_control_plane else {}
     targets = dict(config.repos)
     targets.update({
         name: cfg.RepoConfig(anchor="", worktree_root="", default_branch="", pr=pr)

@@ -541,7 +541,11 @@ def cmd_pr_watch_dispatch(argv: list[str]) -> int:
                 )
                 return 2
         from . import pr_config
-        resolution = pr_config.resolve_repo_config_for_slug(config, args.repo)
+        if read_only and args.config:
+            from .pr_read_context import resolve_read_repo_config
+            resolution = resolve_read_repo_config(config, args.repo, explicit=True)
+        else:
+            resolution = pr_config.resolve_repo_config_for_slug(config, args.repo)
         if not resolution.resolved:
             if resolution.error:
                 output.err("pr-watch: " + resolution.error)

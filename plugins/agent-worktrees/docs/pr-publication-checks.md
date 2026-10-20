@@ -90,7 +90,12 @@ Every worker check then passes `--config <delivered-pr-worker.json>` in
 addition to `--workspace`. This explicit local check context works without a
 host project registry or an adopted worker project; it does not admit
 unmanaged stateful waits or subscriptions. All ordinary receipt, remote and
-candidate checks still apply. Publication target matching uses the configured
+candidate checks still apply. Target resolution uses the explicit
+file's declared `pr.repository` binding before consulting ambient registry
+targets; a same-slug registered project cannot replace that delivered policy.
+One-shot snapshot/thread reads use the same precedence with explicit config.
+Without an explicit file, ordinary ambient resolution is unchanged.
+Publication target matching uses the configured
 remote's push URL, so an optimized fetch mirror cannot replace the actual
 publication destination. Matching includes the provider endpoint (including
 the Azure organization), not just the repository slug, and preserves equivalent

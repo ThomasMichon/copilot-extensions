@@ -282,6 +282,55 @@ def test_exported_config_runs_all_checks_from_fresh_worker_context(host, tmp_pat
         assert json.loads(result.stdout)["ok"]
 
 
+def test_explicit_worker_policy_precedes_a_conflicting_registered_target(
+    host, tmp_path, worker, monkeypatch, capsys,
+):
+    from types import SimpleNamespace
+    from agent_worktrees import pr_watch, repos
+    from agent_worktrees.pr_snapshot import PRSnapshot
+
+    output = tmp_path / "worker.json"
+    assert export(host, output, str(worker)) == 0
+    capsys.readouterr()
+    ambient = cfg.RepoConfig(
+        anchor=str(worker), worktree_root="",
+        pr=cfg._parse_pr({"provider": "azure-devops", "repository": "project/repo",
+                         "api_base": POLICY["api_base"], "publication_checks": {
+                             "features": {"self_review": False, "scope_report": False},
+                         }}),
+    )
+    monkeypatch.setattr(repos, "find_repo", lambda name: None)
+    monkeypatch.setattr(repos, "list_repos", lambda: [
+        SimpleNamespace(name="ambient", remote="https://dev.azure.com/example/project/_git/repo"),
+    ])
+    calls = []
+    monkeypatch.setattr(cfg, "load_project_config",
+                        lambda name: calls.append(name) or SimpleNamespace(repos={"ambient": ambient}))
+    for operation, options in (
+        ("lenses", []),
+        ("record-self-review", ["--lenses", "runtime", "--summary", "reviewed"]),
+        ("verify-self-review", []),
+        ("scope-report", []),
+    ):
+        assert pr_cli.cmd_pr_watch_dispatch([
+            "checks", "project/repo", operation, "--workspace", str(worker),
+            "--config", str(output), "--json", *options,
+        ]) == 0
+        result = json.loads(capsys.readouterr().out)
+        assert result["ok"]
+        if operation == "lenses":
+            assert result["lenses"] == ["runtime"]
+    observed = []
+    monkeypatch.setattr(pr_watch, "build_fetch",
+                        lambda policy, *args, **kwargs: observed.append(policy) or (lambda: PRSnapshot()))
+    assert pr_cli.cmd_pr_watch_dispatch([
+        "snapshot", "project/repo", "1", "--config", str(output), "--json",
+    ]) == 0
+    capsys.readouterr()
+    assert observed[0].publication_checks == parse_publication_checks(POLICY["publication_checks"])
+    assert not calls
+
+
 def test_export_pins_github_host_across_fresh_worker_environments(
     host, tmp_path, worker, monkeypatch, capsys,
 ):

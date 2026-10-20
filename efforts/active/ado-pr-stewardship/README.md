@@ -197,6 +197,21 @@ remain outside this proposal's authority.
 
 ## Journal
 
+### 2026-10-20 - Explicit policy precedes a conflicting local registry
+
+- A real review case combined the supported optimized fetch URL with a
+  registered same-slug repository. Ordinary foreign-target resolution could
+  select that ambient project's different restrictions before considering the
+  delivered artifact's explicit target.
+- Explicit read/check invocations now prefer their declared target without
+  changing ordinary ambient resolution. The same scoped resolver covers local
+  publication operations and one-shot native reads; ambiguous declarations
+  retain the existing visible refusal.
+- The worker/read-context selection passes 76 cases, including all four
+  publication operations plus a native snapshot with conflicting ambient
+  policy. The unchanged related-binding selection passes 28 more cases.
+  Review, release and installed consumer acceptance remain open.
+
 ### 2026-10-19 - Preserving unchanged-policy receipt compatibility
 
 - Review found that an empty optional SSH field changed serialized policy
