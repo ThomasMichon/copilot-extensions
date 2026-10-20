@@ -243,3 +243,17 @@ def test_generic_claim_writers_cannot_remove_release_settle_or_overwrite(owner):
     assert tracking_claim_write.apply_claim_settle({**args, "disposition": "at-rest"})["error"]
     assert tracking_claim_write.apply_claim_add({**args, "kind": "bridge"})["error"]
     assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize("initial,replay", [
+    ({"number": 1}, {"number": True}),
+    ({"number": 1}, {"number": 1.0}),
+    ({"nested": [True]}, {"nested": [1]}),
+])
+def test_replayed_recovery_requires_canonical_json_identity(owner, initial, replay):
+    path, _ = owner
+    payload = {"kind": "bridge", "namespace": "bridge-remote", "request_id": "typed", "recovery": initial}
+    assert call(path, "reserve", payload)["ok"]
+    before = path.read_bytes()
+    assert call(path, "reserve", {**payload, "recovery": replay})["error"]
+    assert path.read_bytes() == before

@@ -210,7 +210,7 @@ before the proposal clears review.
   against concurrent updates, then synced onto the reviewed design.
 - Began the Worktrees metadata/transaction/preservation slice. A fail-first
   focused regression confirmed the missing retained authority. The current
-  58 retained-lifetime cases pass, including an actual interpreter CLI, a real
+  61 retained-lifetime cases pass, including an actual interpreter CLI, a real
   registered provider process, final cleanup and an OS-sidecar race.
 - Disposable allocation, absence, transfer recovery, projection, token and
   legacy preservation selections pass. Command-boundary coverage found and
@@ -218,6 +218,9 @@ before the proposal clears review.
   unintended dependency on record status for non-relationship preservation.
   Slow compatibility files used complementary bounded selections, without
   changing deadlines or dropping cases.
+- Exact replay compares canonical JSON rather than Python object equality;
+  fail-first boolean/integer/float and nested-value cases prove that a changed
+  recovery subject cannot alias the original request.
 - Fresh temporary ledgers provide first-touch API proof. No installer or
   provisioning behavior changed; full synthetic peer integration belongs to
   the next source slice. Live external acceptance remains separately held,

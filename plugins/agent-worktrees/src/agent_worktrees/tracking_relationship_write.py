@@ -82,8 +82,9 @@ def _reserve(record, owner, payload):
     ]
     if existing:
         claim = _matches(record, {"request_id": payload["request_id"]})
-        if claim.kind != payload["kind"] or any(
-            claim.producer[key] != payload[key] for key in ("namespace", "recovery")
+        if (
+            claim.kind != payload["kind"] or claim.producer["namespace"] != payload["namespace"]
+            or producer.canonical_json(claim.producer["recovery"]) != producer.canonical_json(payload["recovery"])
         ):
             raise ValueError("relationship request_id conflicts with its original reservation")
         return claim, False
