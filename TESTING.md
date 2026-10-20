@@ -1527,12 +1527,20 @@ $env:AGENT_WORKTREES_LIST_WARM_NATIVE = '1'
 python tools\run-plugin-tests.py agent-worktrees --allow-explicit-tiers -k test_native_resident_warm_two_cycle_git_budget
 ```
 
-The agent-worktrees namespace-package health-gate regression uses a minimal
-payload containing the real installer and slot/resolver helpers, with fake uv
-and a real isolated Python namespace import. It retains staging and activation
-rejection without copying or fingerprinting unrelated runtime sources as the
-plugin grows. The installer's 10-second process-tree watchdog runs inside a
-15-second subprocess bound and the unchanged 30-second per-test budget.
+The agent-worktrees namespace-package health-gate regressions materialize the
+real release payload and install it through UV and the canonical seasoning
+adapter. Preparation retains registry metadata, wheels, and isolated-build
+dependencies in the runner venv's `.bootstrap-uv-cache`. Each fixture copies
+that seed into its own temporary root and sets `UV_CACHE_DIR` and `UV_OFFLINE`,
+so redirecting HOME/XDG state cannot trigger dependency downloads after the
+container disconnects. Missing prerequisite state fails explicitly; prepare
+with `tools/run-plugin-tests.py agent-worktrees --prepare-only`.
+The UV wrapper changes only the staged interpreter's health invocation:
+it removes package entrypoints to exercise real namespace rejection, or stalls
+that invocation to exercise the installer's process-tree watchdog. Both cases
+must reach health before asserting rejection, and retain child stderr when
+construction fails. The 60-second installer deadline stays inside the
+90-second subprocess and 120-second test bounds.
 The stalled descendant/captured-pipe case lives separately in
 `test_first_install_bootstrap_watchdog.py` and runs only in the full suite,
 not the required guard lane.

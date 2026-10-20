@@ -279,6 +279,8 @@ def _dep_fingerprint(name: str) -> str:
     if libs.is_dir():
         parts += sorted(libs.glob("*/pyproject.toml"))
     h = hashlib.sha256()
+    if name == "agent-worktrees":
+        h.update(b"native-bootstrap-uv-cache-v1\n")
     for dependency in (*RUNNER_DEPENDENCIES, *EXTERNAL_TEST_DEPENDENCIES.get(name, ())):
         h.update(f"runner:{dependency}\n".encode())
     for p in parts:
@@ -308,6 +310,8 @@ def _ensure_venv(name: str, uv: str, *, reinstall: bool) -> Path:
         try:
             drifted = stamp.read_text(encoding="utf-8").strip() != fingerprint
         except OSError:
+            drifted = True
+        if name == "agent-worktrees" and not (venv / ".bootstrap-uv-cache").is_dir():
             drifted = True
     if reinstall or drifted or fresh:
         # The held lease is keyed by this directory's filesystem identity.
@@ -351,6 +355,10 @@ def _ensure_venv(name: str, uv: str, *, reinstall: bool) -> Path:
             if spec == ".":
                 cmd.append("pytest")   # no dev extra -> ensure a runner is present
             cmd.extend((*RUNNER_DEPENDENCIES, *EXTERNAL_TEST_DEPENDENCIES.get(name, ())))
+            if name == "agent-worktrees":
+                # Native installer fixtures need registry metadata and build
+                # dependencies after the container loses network access.
+                cmd.extend(["--cache-dir", str(venv / ".bootstrap-uv-cache")])
             run_uv_install(
                 uv, cmd[3:], cwd=_plugin_dir(name), trusted_source_roots=(REPO,), check=True,
                 retained_resource_roots=(

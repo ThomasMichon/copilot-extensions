@@ -729,11 +729,20 @@ os.execv(str(real), [str(real), *sys.argv[1:]])
     fake_uv.chmod(0o755)
 
     env = os.environ.copy()
+    prepared_cache = Path(sys.prefix) / ".bootstrap-uv-cache"
+    assert prepared_cache.is_dir(), (
+        "native bootstrap prerequisites are missing; prepare with "
+        "tools/run-plugin-tests.py agent-worktrees --prepare-only"
+    )
+    cache = tmp_path / "uv-cache"
+    shutil.copytree(prepared_cache, cache)
     env.update(
         {
             "HOME": str(home),
             "USERPROFILE": str(home),
             "PATH": f"{fake_bin}{os.pathsep}{env['PATH']}",
+            "UV_CACHE_DIR": str(cache),
+            "UV_OFFLINE": "1",
             "AGENT_WORKTREES_INSTALL_DEADLINE_SEC": "60",
             "NAMESPACE_HEALTH_STALL": "1" if stall_health_gate else "0",
             "HEALTH_REACHED": str(tmp_path / "health-reached"),
@@ -749,6 +758,7 @@ os.execv(str(real), [str(real), *sys.argv[1:]])
     )
 
     assert provision.returncode != 0
+    assert (tmp_path / "health-reached").exists(), provision.stderr
     assert (tmp_path / "health-reached").read_text() == "reached", provision.stderr
     if stall_health_gate:
         assert provision.returncode == 124, provision.stderr
