@@ -58,12 +58,18 @@ sync:
   With `redact_secrets` on, process-log publication and its reclamation are
   also skipped, because process logs are not redacted.
 
-> **Old raw copies are not retroactively protected.** Enabling either setting
-> never removes or rewrites what an earlier pass published. Files outside
-> `session_files`, and copies published before redaction was enabled, stay at
-> the destination unchanged. `doctor` warns when it finds such copies. Delete
-> them, or clear this machine's destination folder and let the next run
-> republish, if they must not be kept.
+> **Old raw copies are not retroactively protected.** Changing either setting
+> forces one full reconcile. For each session still on this machine and
+> selected by the repo filter, the files the settings select are published
+> again: a destination copy that differs is replaced by the version the new
+> settings produce, and an identical one is left alone. The reconcile removes
+> no copy, so these stay exactly as previously published, possibly raw: files
+> outside `session_files`; the earlier copy of a file that is now withheld;
+> the last published copy of a deferred transcript, until its source
+> completes; and copies of sessions the reconcile does not revisit (no longer
+> on this machine, or excluded by the repo filter). `doctor` warns when it
+> finds such copies. If they must not be kept, delete them, or clear this
+> machine's destination folder and run `session-sync run --full`.
 
 `run --dry-run --verbose` prints the effective scope without creating any
 destination output: the `filter:` line (when a repo filter applies),
@@ -82,4 +88,5 @@ withheld), with up to 10 sample paths and reasons.
 
 With `sync.redact_secrets` or `sync.session_files` set, `run --dry-run
 --verbose` also prints the effective `protection:` scope, and `doctor` adds a
-"session protection" check that warns about earlier unprotected copies.
+"session protection" check that warns about destination copies the current
+settings did not produce.

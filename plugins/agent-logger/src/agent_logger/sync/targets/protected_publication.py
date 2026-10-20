@@ -233,15 +233,17 @@ def _protection_doctor_detail(
 ) -> str:
     """Doctor detail for session protection, warning about earlier copies.
 
-    Protection never removes or rewrites what is already published, so a
-    destination can still hold files from before the settings were enabled.
+    A settings change replaces only differing selected files of sessions that
+    are still synced and removes no copy, so a destination can still hold
+    files the current settings did not produce.
     """
     detail = settings.describe()
     if not machine:
         return (
-            f"{detail}; note: existing destination copies are not removed or "
-            "rewritten -- files outside session_files and copies published "
-            "before redaction stay as previously published"
+            f"{detail}; note: a settings change replaces only differing "
+            "selected files of sessions still synced and removes no copy -- "
+            "files outside session_files, withheld files and copies of "
+            "sessions no longer synced stay as previously published"
         )
     try:
         dest = _fs._existing_relative_directory(root, Path(machine))
@@ -262,7 +264,7 @@ def _protection_doctor_detail(
             f"{detail}; warning: destination check stopped after "
             f"{_DOCTOR_SCAN_LIMIT} files"
         )
-    return f"{detail}; no earlier unprotected destination copies found"
+    return f"{detail}; no destination copies outside these settings found"
 
 
 def receipts_dir(machine_root: Path) -> Path | None:

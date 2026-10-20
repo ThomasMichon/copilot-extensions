@@ -914,13 +914,47 @@ def test_enabling_redaction_reconciles_but_leaves_old_raw_copies(tmp_path, capsy
     assert "full reconciliation" in out
     assert not _has_secret((dest / "events.jsonl").read_bytes())
     assert not _has_secret((dest / "context.json").read_bytes())
-    # Not retroactive: the earlier raw copy stays and is reported as such.
+    # Withheld files are not re-derived: the earlier raw copy stays and is
+    # reported as such.
     assert (dest / "files" / "blob.bin").read_bytes() == raw_blob
     summary = read_sync_meta(base / "machine")["session_protection"]
     prior = {item["path"]: item["prior_copy"] for item in summary["withheld"]}
     assert prior[f"session-state/{SID}/files/blob.bin"] == protection.PRIOR_COPY_UNPROTECTED
     assert prior[f"session-state/{SID}/session.db"] == protection.PRIOR_COPY_UNPROTECTED
     assert not _has_secret(out + err)
+
+
+def test_essential_reconcile_leaves_unselected_copies_and_doctor_warns(tmp_path, capsys):
+    src = _rich_source(tmp_path)
+    cfg, base = _target(tmp_path, src, "local")
+    code, _out, err = _run(cfg, capsys)
+    assert code == 0, err
+    dest = _dest_session(base)
+    unselected = ("files/blob.bin", "rewind-file-snapshots/a.json", "instructions/a.md")
+    earlier = {name: (dest / name).read_bytes() for name in unselected}
+    cfg, _base = _target(tmp_path, src, "local", files="essential")
+    code, out, err = _run(cfg, capsys)
+    assert code == 0, err
+    assert "full reconciliation" in out
+    # The reconcile replaces selected files only; it removes no copy.
+    assert {name: (dest / name).read_bytes() for name in unselected} == earlier
+    assert (dest / "events.jsonl").is_file()
+    engine.do_doctor(cfg)
+    rows = [line for line in capsys.readouterr().out.splitlines()
+            if "session protection" in line]
+    assert len(rows) == 1 and rows[0].startswith("  [ok ]")
+    assert "warning:" in rows[0] and "destination file(s)" in rows[0]
+
+
+def test_doctor_reports_a_destination_produced_under_current_settings(tmp_path, capsys):
+    cfg, _base = _target(tmp_path, _rich_source(tmp_path), "local", redact=True)
+    code, _out, err = _run(cfg, capsys)
+    assert code == 0, err
+    engine.do_doctor(cfg)
+    rows = [line for line in capsys.readouterr().out.splitlines()
+            if "session protection" in line]
+    assert len(rows) == 1 and "warning:" not in rows[0]
+    assert rows[0].endswith("no destination copies outside these settings found)")
 
 
 def test_destination_change_triggers_full_protected_reconcile(tmp_path, capsys):

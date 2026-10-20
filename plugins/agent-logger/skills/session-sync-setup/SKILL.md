@@ -160,10 +160,11 @@ Opt-in, honored only by `local`/`onedrive` (other targets refuse them):
 `sync.redact_secrets: true` replaces known secret shapes with `[REDACTED]` in
 each pushed copy; `sync.session_files: essential` publishes only a fixed list
 of session files. With redaction on, an incomplete or malformed transcript is
-deferred whole (`partial`, retried next run), never published raw. **Old raw
-copies are not retroactively protected** (`doctor` warns about them). A
-`run --dry-run --verbose` prints the effective `protection:` scope and writes
-nothing. See [protected publication](references/protected-publication.md).
+deferred whole (`partial`, retried next run), never published raw. A settings
+change reconciles once, replacing differing selected files of still-synced
+sessions; it removes no copy, so other raw copies are **not retroactively
+protected** (`doctor` warns). `run --dry-run --verbose` prints the scope and
+writes nothing; see [protected publication](references/protected-publication.md).
 
 ## Repo-local log organization
 
