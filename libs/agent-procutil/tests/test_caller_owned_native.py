@@ -1,0 +1,300 @@
+"""Fresh installed consoles and birth-pinned cleanup before observer retirement."""
+
+from __future__ import annotations
+
+from contextlib import ExitStack, contextmanager, nullcontext
+import ctypes
+import json
+import os
+from pathlib import Path
+import select
+import shutil
+import signal
+import subprocess
+import sys
+import time
+import venv
+
+import psutil
+import pytest
+
+import agent_procutil as pu
+import caller_owned_fixture as fixture
+
+
+LIBRARY = Path(__file__).resolve().parents[1]
+
+
+def _command(argv, *, cwd=None):
+    result = subprocess.run(
+        argv, cwd=cwd, capture_output=True, text=True, timeout=20,
+        **pu.no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    return result
+
+
+@pytest.fixture(scope="module")
+def installed_console(tmp_path_factory):
+    uv = shutil.which("uv")
+    if not uv:
+        pytest.fail("native artifact qualification requires the existing uv tool")
+    root = tmp_path_factory.mktemp("caller-wheel")
+    source = root / "source"
+    shutil.copytree(
+        LIBRARY, source,
+        ignore=shutil.ignore_patterns("tests", "__pycache__", "*.egg-info", ".pytest_cache"),
+    )
+    wheels = root / "wheels"
+    _command([
+        uv, "build", "--offline", "--no-build-isolation", "--python", sys.executable,
+        "--wheel", "--out-dir", str(wheels), str(source),
+    ])
+    wheel, = wheels.glob("*.whl")
+    slot = root / "env"
+    venv.EnvBuilder(with_pip=False).create(slot)
+    python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    _command([
+        uv, "pip", "install", "--offline", "--no-index", "--no-deps",
+        "--python", str(python), str(wheel),
+    ])
+    script = root / "fixture.py"
+    script.write_bytes(Path(fixture.__file__).read_bytes())
+    shutil.rmtree(source)
+    assert not source.exists()
+    yield python, script, slot
+
+
+class PinnedProcess:
+    def __init__(self, identity):
+        self.pid = identity["pid"]
+        self.handle = None
+        self.fd = None
+        if os.name == "nt":
+            self.kernel = fixture.windows_kernel()
+            handle = self.kernel.OpenProcess(0x1000 | 0x100000 | 0x0001, False, self.pid)
+            if not handle:
+                raise ctypes.WinError(ctypes.get_last_error())
+            try:
+                if fixture.handle_birth(self.kernel, handle) != identity["birth"]:
+                    raise AssertionError("fixture process birth changed")
+            except BaseException:
+                self.kernel.CloseHandle(handle)
+                raise
+            self.handle = handle
+        else:
+            fd = os.pidfd_open(self.pid)
+            try:
+                if fixture.identity(self.pid)["birth"] != identity["birth"]:
+                    raise AssertionError("fixture process birth changed")
+            except BaseException:
+                os.close(fd)
+                raise
+            self.fd = fd
+
+    def gone(self):
+        if self.handle is not None:
+            result = self.kernel.WaitForSingleObject(self.handle, 0)
+            if result not in (0, 0x102):
+                raise ctypes.WinError(ctypes.get_last_error())
+            return result == 0
+        return bool(select.select([self.fd], [], [], 0)[0])
+
+    def kill(self, signum=None):
+        if self.gone():
+            return
+        if self.handle is not None:
+            if not self.kernel.TerminateProcess(self.handle, 137):
+                raise ctypes.WinError(ctypes.get_last_error())
+        else:
+            signal.pidfd_send_signal(self.fd, signal.SIGKILL if signum is None else signum)
+
+    def close(self):
+        if self.handle is not None:
+            self.kernel.CloseHandle(self.handle)
+            self.handle = None
+        if self.fd is not None:
+            os.close(self.fd)
+            self.fd = None
+
+
+@contextmanager
+def _linux_observer():
+    libc = ctypes.CDLL(None, use_errno=True)
+    previous = ctypes.c_int()
+    if libc.prctl(37, ctypes.byref(previous), 0, 0, 0) != 0:
+        raise OSError(ctypes.get_errno(), "cannot inspect test subreaper")
+    if libc.prctl(36, 1, 0, 0, 0) != 0:
+        raise OSError(ctypes.get_errno(), "cannot establish test subreaper")
+    baseline = {process.pid for process in psutil.Process().children(recursive=True)}
+    try:
+        yield
+    finally:
+        cleanup = []
+
+        def restore():
+            if libc.prctl(36, previous.value, 0, 0, 0) != 0:
+                raise OSError(ctypes.get_errno(), "cannot restore test subreaper")
+
+        def settle():
+            deadline = time.monotonic() + 3
+            while cleanup and not all(pin.gone() for pin in cleanup):
+                if time.monotonic() >= deadline:
+                    raise AssertionError("test observer cleanup did not settle")
+                time.sleep(0.01)
+            for pin in cleanup:
+                try:
+                    os.waitpid(pin.pid, os.WNOHANG)
+                except ChildProcessError:
+                    pass
+
+        try:
+            for process in psutil.Process().children(recursive=True):
+                if process.pid in baseline:
+                    continue
+                try:
+                    pin = PinnedProcess(fixture.identity(process.pid))
+                    if os.getpid() not in {parent.pid for parent in psutil.Process(pin.pid).parents()}:
+                        pin.close()
+                        raise AssertionError("observer discovered a foreign process")
+                    cleanup.append(pin)
+                except (ProcessLookupError, FileNotFoundError, psutil.NoSuchProcess):
+                    continue
+        finally:
+            with ExitStack() as retirement:
+                retirement.callback(restore)
+                for pin in cleanup:
+                    retirement.callback(pin.close)
+                retirement.callback(settle)
+                for pin in cleanup:
+                    retirement.callback(pin.kill)
+
+
+def _read(path):
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
+def _wait(predicate, seconds, message):
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        result = predicate()
+        if result:
+            return result
+        time.sleep(0.01)
+    raise AssertionError(message)
+
+
+@pytest.mark.skipif(
+    os.name != "nt" and not sys.platform.startswith("linux"),
+    reason="native Windows Job or Linux pidfd/subreaper observer required",
+)
+@pytest.mark.parametrize("mode", [
+    "completed", "timeout", "blocked-input", "stdout", "stderr", "interrupt", "kill", "term",
+])
+def test_installed_console_faults_settle_before_observer_cleanup(
+    tmp_path, installed_console, mode,
+):
+    if mode == "term" and os.name == "nt":
+        pytest.skip("native SIGTERM case; Windows actual-console termination uses a pinned handle")
+    if os.name != "nt" and not all(
+        hasattr(module, name) for module, name in (
+            (os, "pidfd_open"), (signal, "pidfd_send_signal"),
+        )
+    ):
+        pytest.fail("native caller-death qualification requires available Linux pidfds")
+    python, script, slot = installed_console
+    observer = nullcontext()
+    windows = nullcontext()
+    if os.name == "nt":
+        from test_spawn_daemon_windows_integration import _WindowObserver, _configure_win32
+
+        windows = _WindowObserver(*_configure_win32())
+    else:
+        observer = _linux_observer()
+    with observer, windows as window_observer:
+        for cycle in range(2):
+            state = tmp_path / str(cycle)
+            state.mkdir()
+            pins = {}
+            process = job = None
+            try:
+                process, job = pu.spawn_sync_in_kill_on_close_job(
+                    [str(python), "-I", str(script), "caller", str(state), mode],
+                    require_job=True, allow_breakaway=False,
+                    stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                    **pu.no_window_kwargs(),
+                    **({"start_new_session": True} if os.name != "nt" else {}),
+                )
+                pins[process.pid] = PinnedProcess(fixture.identity(process.pid))
+                def ready():
+                    values = [
+                        _read(state / f"{role}.json") for role in ("caller", "target", "leaf")
+                    ]
+                    return values if all(values) else None
+
+                observations = _wait(ready, 4, "installed fixture did not expose all live roles")
+                caller, target, leaf = observations
+                assert Path(caller["package"]).resolve().is_relative_to(slot.resolve())
+                assert Path(caller["prefix"]).resolve() == slot.resolve()
+                identities = [caller["self"], target["self"], target["parent"],
+                              leaf["self"], leaf["parent"]]
+                for identity in identities:
+                    if identity["pid"] not in pins:
+                        pins[identity["pid"]] = PinnedProcess(identity)
+                assert not any(pin.gone() for pin in pins.values())
+                if os.name != "nt":
+                    assert target["parent"]["pid"] == target["group"] == target["session"]
+                started = time.monotonic()
+                if mode in ("kill", "term"):
+                    pins[caller["self"]["pid"]].kill(
+                        signal.SIGTERM if mode == "term" else None,
+                    )
+                elif mode == "interrupt" and os.name != "nt":
+                    pins[caller["self"]["pid"]].kill(signal.SIGINT)
+                else:
+                    (state / "gate").write_text("go", encoding="ascii")
+                if mode not in ("kill", "term"):
+                    outcome = _wait(
+                        lambda: _read(state / "result.json"), 7, "caller did not finish its scope",
+                    )
+                    expected = (
+                        "output-limit" if mode in ("stdout", "stderr")
+                        else "timeout" if mode in ("timeout", "blocked-input") else mode
+                    )
+                    assert outcome["kind"] == expected
+                    assert outcome["settled_before_result"], "API returned before descendant exit"
+                    if expected == "output-limit":
+                        assert outcome["stream"] == mode
+                        assert outcome["limit"] == 32
+                _wait(
+                    lambda: all(pin.gone() for pin in pins.values()),
+                    3, "owned role survived before observer cleanup",
+                )
+                if mode in ("kill", "term", "interrupt", "stdout", "stderr", "completed"):
+                    assert time.monotonic() - started < 3
+                process.wait(timeout=3)
+                stdout, stderr = process.communicate(timeout=3)
+                assert not stderr, stderr.decode("utf-8", errors="replace")
+                if mode not in ("kill", "term"):
+                    assert process.returncode == 0, stdout
+            finally:
+                with ExitStack() as cleanup:
+                    for pin in pins.values():
+                        cleanup.callback(pin.close)
+                    if process is not None:
+                        for stream in (process.stdout, process.stderr):
+                            if stream is not None:
+                                cleanup.callback(stream.close)
+                        cleanup.callback(process.wait, timeout=3)
+                    if job is not None:
+                        cleanup.callback(job.terminate_and_wait, 3)
+                    if process is not None:
+                        cleanup.callback(lambda: process.kill() if process.poll() is None else None)
+                    for pin in pins.values():
+                        cleanup.callback(pin.kill)
+        if os.name == "nt":
+            assert not window_observer.surfaced
+            assert not window_observer.focus_changes

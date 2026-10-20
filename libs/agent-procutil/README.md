@@ -65,6 +65,85 @@ completion. Standalone entry points must supervise that worker with the default
 owned-root mode, not assume ambient containment. This is a lifetime contract,
 not application-level authorization.
 
+## Caller-owned native execution with streaming limits
+
+An ordinary synchronous caller that also needs caller-death cleanup uses the
+explicit opt-in API:
+
+```python
+from agent_procutil.owned_process import run_caller_owned
+
+result = run_caller_owned(
+    argv,
+    timeout=15,
+    max_stdout_bytes=1024 * 1024,
+    max_stderr_bytes=64 * 1024,
+    input_text=request,
+    capture=True,
+)
+```
+
+Both byte budgets are required positive integers. They count raw bytes while
+stdout and stderr drain concurrently, before buffering or strict UTF-8 decoding.
+The result is `subprocess.CompletedProcess`-compatible, with the original
+command's return code and separate, newline-normalized text streams. With
+`capture=False`, both streams are discarded and returned as `None`. No successful
+partial result, silent truncation or automatic retry is supplied.
+
+Windows retains suspended-before-assignment, strict non-breakaway Job ownership.
+Input writing and bounded output draining remain deadline-supervised together;
+the Job must report zero active processes and pipe workers must settle before
+completion or an output-limit error.
+
+Native POSIX caller-death execution currently requires Linux `pidfd_open`,
+readable `/proc` pidfd identity, and the existing unreaped-child/default-SIGCHLD
+prerequisites. Unsupported prerequisites refuse before target launch. One finite
+helper owns its session/group before starting the target in that inherited
+scope. A dedicated lifetime writer belongs only to the caller; EOF, including
+caller `SIGTERM`/`SIGKILL`, retires that group. The caller retains unreaped custody
+of the helper through the final group sweep and pidfd-based exit confirmation
+before reporting completion. No caller pre-wrapping, persistent daemon,
+per-session subscription worker, network endpoint or sibling runtime is needed.
+The helper imports only the caller's selected canonical package under isolated
+Python, not an ambient CWD or `PYTHONPATH` fallback.
+
+This is native process-group/Job lifetime ownership, not an application
+authorization or hostile-code sandbox. POSIX descendants must remain in the
+inherited group; deliberate session/group escape, privilege changes and
+cross-kernel execution require their own supported owner rather than a claimed
+native-tree guarantee.
+
+The complete argument/input control request is limited to 16 MiB. POSIX
+completion frames are separately bounded from the declared stream budgets,
+with a 64-KiB control-stderr ceiling. Failures remain explicit:
+
+- `OutputLimitExceeded` exposes `stream` and `limit` only after confirmed
+  cleanup; its default text never includes captured content.
+- `subprocess.TimeoutExpired` retains the original command and timeout;
+  interruption also goes through the owned cleanup boundary.
+- `OwnedCleanupError` means cleanup is unconfirmed, not that a partial command
+  succeeded. It retains the exact `process` and optional `job` custody for the
+  owner; retain that evidence rather than reaping an unconfirmed group or
+  replaying the operation.
+- Invalid input, unsupported custody, malformed completion and invalid UTF-8
+  refuse visibly. Native OS errors do not assert that no target effect occurred.
+
+Existing `run_owned()` arguments, default behavior, borrowed-scope kernel checks
+and daemon launchers are unchanged.
+
+The focused contracts are in `tests/test_caller_owned.py`; the explicit manual
+native lane is `tests/test_caller_owned_native.py`. Prepare the library's `dev`
+dependencies, then run these selections through the repository's bounded test
+supervisor with the normal 30-second item and 300-second group limits. The native
+lane builds and installs an offline wheel, removes its source fixture, and
+executes actual installed interpreters. Two cycles per scenario cover caller
+death, interruption, blocked input, timeout, both stream overflows and normal
+return. Birth-pinned process handles/pidfds observe exit before observer cleanup;
+returning callers also check exit before recording their result. Windows checks
+visible windows and foreground transitions. These native cases are not added
+unconditionally to required PR CI, and are not installed service/client adoption
+evidence.
+
 ## Launching a resident daemon: `spawn_daemon`
 
 A long-lived daemon (one started by an installer, a hook, a CLI or a cutover
