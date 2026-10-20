@@ -247,9 +247,9 @@ class ServiceRuntime:
 
     async def public(self, request: web.Request) -> web.StreamResponse:
         path, query = target(request.raw_path)
-        check(not request.headers.get("Upgrade") and request.method != "CONNECT",
+        check("Upgrade" not in request.headers and request.method != "CONNECT",
               "unsupported-upgrade", 400)
-        check(request.headers.get("Content-Encoding", "identity") == "identity",
+        check(request.headers.getall("Content-Encoding", ["identity"]) == ["identity"],
               "unsupported-content-encoding", 400)
         slot, route = self.route(path, request.method)
         check("response-stream" not in route.capabilities or request.version >= HttpVersion11,

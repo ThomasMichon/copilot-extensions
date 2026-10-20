@@ -113,8 +113,10 @@ bounded query. Percent-encoded paths, dot segments, repeated separators,
 backslashes and ambiguous path forms refuse in this initial implementation.
 
 Only declared HTTP behavior is supported. Generic TCP, upgrades, encoded
-request/response bodies and unsupported forwarding refuse explicitly. Request
-credentials, cookies, client identity headers and hop-by-hop metadata are not
+request/response bodies and unsupported forwarding refuse explicitly.
+Request and response content encoding must be absent or one exact `identity` field;
+duplicate encoding fields refuse rather than hiding another encoding.
+Request credentials, cookies, client identity headers and hop-by-hop metadata are not
 forwarded. Backend response headers use a narrow allowlist; authentication and
 cookies are not passed through.
 Backend 3xx responses other than `304 Not Modified` refuse before downstream

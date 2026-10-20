@@ -254,6 +254,40 @@ def test_backend_not_modified_is_not_rejected_as_redirect(tmp_path):
     asyncio.run(scenario())
 
 
+@pytest.mark.parametrize("values", [
+    ["identity", "gzip"], ["gzip", "identity"], ["identity", "identity"],
+])
+def test_repeated_request_content_encoding_refuses_before_dispatch(tmp_path, values):
+    async def scenario():
+        async with running(tmp_path) as rig:
+            await rig.connect()
+            selected = await rig.auth("/api/echo", "POST")
+            headers = [*selected.items(), *(("Content-Encoding", value) for value in values)]
+            async with rig.session.post(
+                rig.origin + "/api/echo", headers=headers, data=b"unsupported-encoded-bytes",
+            ) as response:
+                assert response.status == 400
+                assert await response.json() == {"error": "unsupported-content-encoding"}
+            assert not rig.backends[0].requests
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("values", [
+    ["identity", "gzip"], ["gzip", "identity"], ["identity", "identity"],
+])
+def test_repeated_response_content_encoding_refuses_before_downstream_headers(tmp_path, values):
+    async def scenario():
+        async with running(tmp_path) as rig:
+            await rig.connect()
+            query = "&".join("value=" + value for value in values)
+            async with await rig.request("/api/encoded?" + query) as response:
+                assert response.status == 502
+                assert await response.json() == {"error": "invalid-backend-response"}
+                assert "Content-Encoding" not in response.headers
+            assert len(rig.backends[0].requests) == 1
+    asyncio.run(scenario())
+
+
 def test_http_10_stream_request_refuses_before_backend_dispatch(tmp_path):
     async def scenario():
         async with running(tmp_path) as rig:

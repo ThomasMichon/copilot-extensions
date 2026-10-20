@@ -98,6 +98,10 @@ class Backend:
                                 headers={"Location": "/login"})
         if request.path == "/not-modified":
             return web.Response(status=304, headers={"ETag": '"unchanged"'})
+        if request.path == "/encoded":
+            return web.Response(
+                body=b"unsupported-encoded-bytes",
+                headers=[("Content-Encoding", value) for value in request.query.getall("value")])
         return web.json_response(
             {"service": self.name, "path": request.raw_path, "body": body.decode()},
             headers={"Set-Cookie": "fixture=not-forwarded", "X-Identity": "not-forwarded",
