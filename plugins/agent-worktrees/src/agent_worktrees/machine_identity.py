@@ -90,6 +90,30 @@ def resolve_execution_machine(
     return resolved.canonical
 
 
+def load_execution_registry(
+    repo_dir: str | Path, *, config: cfg.Config | None = None,
+) -> dict[str, MachineEntry]:
+    """Prefer checkout-local registry data, then its proven owning anchor."""
+    try:
+        return (
+            cfg.load_machines_yaml(repo_dir, config=config)
+            if config is not None else cfg.load_machines_yaml(repo_dir)
+        )
+    except FileNotFoundError:
+        if config is None:
+            raise
+        anchor = Path(config.default_repo.anchor)
+        checkout = Path(repo_dir)
+        if checkout.resolve() == anchor.resolve():
+            raise
+        from . import front_door_cli
+
+        owning_anchor = front_door_cli._git_toplevel(checkout)
+        if owning_anchor is None or owning_anchor.resolve() != anchor.resolve():
+            raise
+        return cfg.load_machines_yaml(anchor, config=config)
+
+
 def resolve_execution_context(
     name: str, repo_dir: str | Path, *, environment: str,
     config: cfg.Config | None = None,
@@ -100,10 +124,7 @@ def resolve_execution_context(
     names retain their exact spelling; suffixes alone cannot admit another host.
     """
     try:
-        entries = (
-            cfg.load_machines_yaml(repo_dir, config=config)
-            if config is not None else cfg.load_machines_yaml(repo_dir)
-        )
+        entries = load_execution_registry(repo_dir, config=config)
     except FileNotFoundError:
         entries = {}
     selection = resolve_machine_selection(entries, name, environment)

@@ -1453,6 +1453,9 @@ not rewritten. Deferred launch planning selects the target repository's project
 configuration explicitly, without changing the resident's active project.
 That configuration follows both execution detection and physical projection, so
 a stateless harness retains its declared knowledge-overlay machine registry.
+Registry lookup prefers checkout-local data. If absent, a linked checkout may
+use its configured owning anchor's registry/overlay only after Git confirms that
+ownership; plugin settings and deployment gates still come from the launch path.
 Exact execution-ID selectors remain compatible and select only
 that execution address. Unknown names retain exact-match behavior, while
 ambiguous or conflicting registry selections refuse. This deployment decision

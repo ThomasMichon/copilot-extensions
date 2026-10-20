@@ -185,6 +185,54 @@ def test_repository_config_keeps_unregistered_detection_project_free(
     assert machine_identity.repository_config(root) is None
 
 
+def test_execution_registry_keeps_checkout_local_precedence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mixed_registry_config: cfg.Config,
+) -> None:
+    from agent_worktrees import front_door_cli
+
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    (checkout / "machines.yaml").write_text(
+        "machines:\n  checkout-space:\n    execution_platform: windows\n"
+        "    physical_host: checkout-host\n", encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        front_door_cli, "_git_toplevel",
+        lambda path: pytest.fail("an existing checkout registry must not fall back"),
+    )
+    entries = machine_identity.load_execution_registry(checkout, config=mixed_registry_config)
+    assert set(entries) == {"checkout-space"}
+    assert entries["checkout-space"].physical_host == "checkout-host"
+
+
+def test_execution_registry_refuses_foreign_anchor_fallback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mixed_registry_config: cfg.Config,
+) -> None:
+    from agent_worktrees import front_door_cli
+
+    checkout = tmp_path / "foreign-checkout"
+    checkout.mkdir()
+    monkeypatch.setattr(front_door_cli, "_git_toplevel", lambda path: tmp_path / "foreign-anchor")
+    with pytest.raises(FileNotFoundError):
+        machine_identity.load_execution_registry(checkout, config=mixed_registry_config)
+
+
+def test_execution_registry_does_not_hide_invalid_checkout_registry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mixed_registry_config: cfg.Config,
+) -> None:
+    from agent_worktrees import front_door_cli
+
+    checkout = tmp_path / "invalid-checkout"
+    checkout.mkdir()
+    (checkout / "machines.yaml").write_text("machines: []\n", encoding="utf-8")
+    monkeypatch.setattr(
+        front_door_cli, "_git_toplevel",
+        lambda path: pytest.fail("invalid local data must not borrow the anchor registry"),
+    )
+    with pytest.raises(ValueError):
+        machine_identity.load_execution_registry(checkout, config=mixed_registry_config)
+
+
 class TestIsLocalMachine:
     @pytest.fixture(autouse=True)
     def native_execution(self, monkeypatch) -> None:

@@ -718,19 +718,38 @@ def test_machine_gate_uses_physical_host_without_changing_execution_id(
 
 @pytest.mark.parametrize("resident_project", [None, "unrelated-project"])
 @pytest.mark.parametrize("overlay", [False, True])
+@pytest.mark.parametrize("linked", [False, True])
 def test_deferred_runtime_admission_uses_target_project_without_ambient_state(
     env: Any, monkeypatch: pytest.MonkeyPatch, resident_project: str | None,
-    overlay: bool,
+    overlay: bool, linked: bool,
 ) -> None:
     from types import SimpleNamespace
     import threading
 
     from agent_worktrees import __main__ as main, front_door_cli, state_root
+    from agent_procutil import no_window_kwargs
 
     env.write_settings({f"agent-bridge@{MKT}": True})
     env.install_payload("agent-bridge", "3.0.0", scope="machine-gated")
     env.deploy_runtime("agent-bridge", "2.0.0")
     env.write_gate({"agent-bridge": ["physical-host"]})
+    launch_dir = env.repo
+    if linked:
+        for args in (
+            ["init", "-q"],
+            ["-c", "user.name=Test", "-c", "user.email=test@example.com",
+             "commit", "--allow-empty", "-qm", "Synthetic anchor"],
+            ["worktree", "add", "--detach", "--no-checkout", str(env.home / "linked"), "HEAD"],
+        ):
+            subprocess.run(
+                ["git", "-C", str(env.repo), *args], check=True,
+                capture_output=True, timeout=10, **no_window_kwargs(),
+            )
+        launch_dir = env.home / "linked"
+        shutil.copytree(env.repo / ".github", launch_dir / ".github")
+        shutil.copyfile(env.repo / "external-repos.yaml", launch_dir / "external-repos.yaml")
+        env.write_gate({"agent-bridge": ["foreign-host"]})
+        assert front_door_cli._git_toplevel(launch_dir) == env.repo
     knowledge = env.home / "knowledge"
     knowledge.mkdir()
     registry = knowledge if overlay else env.repo
@@ -752,7 +771,8 @@ def test_deferred_runtime_admission_uses_target_project_without_ambient_state(
         state_root, "_checkout_path",
         lambda name: str(knowledge) if name == "knowledge" else None,
     )
-    monkeypatch.setattr(front_door_cli, "_git_toplevel", lambda path: env.repo)
+    if not linked:
+        monkeypatch.setattr(front_door_cli, "_git_toplevel", lambda path: env.repo)
     monkeypatch.setattr(front_door_cli, "_reverse_lookup_project", lambda anchor: "target-project")
     expected_path = cfg.project_dir("target-project") / "config.yaml"
 
@@ -773,21 +793,25 @@ def test_deferred_runtime_admission_uses_target_project_without_ambient_state(
         lambda *, target, **kwargs: SimpleNamespace(start=lambda: workers.append(target)),
     )
 
+    real_popen = main.subprocess.Popen
+
     def spawn(argv: list[str], **kwargs: Any) -> Any:
-        spawned.append(argv)
-        return SimpleNamespace(wait=lambda: None)
+        if "reconcile-plugins" in argv:
+            spawned.append(argv)
+            return SimpleNamespace(wait=lambda: None)
+        return real_popen(argv, **kwargs)
 
     monkeypatch.setattr(main.subprocess, "Popen", spawn)
     release = threading.Event()
     assert main._schedule_provisioning_if_needed(
-        str(env.repo), {}, start_event=release,
+        str(launch_dir), {}, start_event=release,
     ) == ""
     cfg.set_active_project(resident_project)
     release.set()
     assert len(workers) == 1
     workers[0]()
     assert len(spawned) == 1
-    assert spawned[0][spawned[0].index("--repo") + 1] == str(env.repo)
+    assert spawned[0][spawned[0].index("--repo") + 1] == str(launch_dir)
     assert cfg.active_project() == resident_project
 
 
