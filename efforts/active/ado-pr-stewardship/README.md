@@ -197,6 +197,25 @@ remain outside this proposal's authority.
 
 ## Journal
 
+### 2026-10-19 - Worker-policy review corrections
+
+- The first review of #7323 identified three real policy-boundary gaps.
+  Local checks now compare the full provider endpoint/repository identity,
+  reusing existing URL normalization and secure Azure SSH/HTTPS equivalence.
+  Same-slug destinations on another host or Azure organization refuse.
+- Explicit configuration rejects malformed repository collections and entries
+  before layered loading can consult a registered ambient target. Worker export
+  also retains hold labels and WIP title prefixes: these are blocking policy,
+  not publication or merge grants.
+- The contained worker/publication/observation selection passes 102 cases,
+  including fresh-process worker checks and hold/WIP round trips through the
+  actual publication-readiness evaluator. The initial three failures were
+  incorrect new fixture construction and were corrected before the passing run.
+- Documentation impact is limited to the existing publication-check contract;
+  no new workflow surface or authority is introduced. A separate external venue
+  is not needed for these local configuration checks. Supported release and
+  installed consumer proof remain open.
+
 ### 2026-10-19 - Fresh workers need explicit machine-readable policy
 
 - Consumer qualification exposed a migration gap: `--workspace` selects Git

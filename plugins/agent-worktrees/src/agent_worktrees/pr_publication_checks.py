@@ -405,7 +405,8 @@ def dispatch_cli(argv: list[str]) -> int:
         remotes = _git(root, "remote", "get-url", "--push", "--all", repo.remote).splitlines()
         if len(remotes) != 1:
             raise CheckError("workspace publication remote must have exactly one push URL")
-        if (git_ops.slug_from_url(remotes[0]) or "").casefold() != args.repo.casefold():
+        from .pr_worker_config import matches_remote
+        if not matches_remote(remotes[0], args.repo, repo.pr, str(root)):
             raise CheckError("workspace remote does not match the selected repository")
         base = args.base or f"{repo.remote}/{repo.default_branch}"
         if args.operation != "scope-report" and (args.since or args.allowed_path is not None):

@@ -18,6 +18,13 @@ def load_read_config(path=None):
             raise ValueError("explicit PR configuration must be a valid UTF-8 mapping") from None
         if not isinstance(raw, dict) or not raw:
             raise ValueError("explicit PR configuration must be a nonempty mapping")
+        declared_repos = raw.get("repos")
+        if (
+            not isinstance(declared_repos, dict) or not declared_repos
+            or any(not isinstance(name, str) or not name or not isinstance(repo, dict)
+                   for name, repo in declared_repos.items())
+        ):
+            raise ValueError("explicit PR configuration repos must be a nonempty mapping of mappings")
         return config.load_config(path)
     if config.active_project():
         return config.load_config(path)

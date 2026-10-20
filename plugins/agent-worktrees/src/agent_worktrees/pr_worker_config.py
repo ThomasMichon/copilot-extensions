@@ -39,6 +39,25 @@ def _observation(policy: ObservationConfig | None) -> dict | None:
     }
 
 
+def matches_remote(remote: str, repository: str, pr, workspace: str) -> bool:
+    """Bind local checks to the selected provider's full publication destination."""
+    from . import providers
+    from .pr_publish import _identity
+    from .providers.pr_source import same_repository
+
+    endpoint = providers.get_provider(pr.provider).authority_endpoint(pr.api_base)
+    if pr.provider == "github":
+        expected = f"https://{endpoint}/{repository}"
+    elif pr.provider == "azure-devops":
+        project, name = repository.split("/", 1)
+        expected = f"{endpoint.rstrip('/')}/{project}/_git/{name}"
+    elif pr.provider == "gitea":
+        expected = f"{endpoint.rstrip('/')}/{repository}"
+    else:
+        raise ValueError("publication checks need a supported provider")
+    return same_repository(_identity(remote, workspace), _identity(expected, workspace), pr.provider)
+
+
 def export_config(
     repository: str, repo: RepoConfig, workspace: str, base: str | None, destination: Path,
 ) -> dict:
@@ -73,6 +92,8 @@ def export_config(
     }
     pr.update(
         repository=repository,
+        hold_labels=list(repo.pr.hold_labels),
+        wip_title_prefixes=list(repo.pr.wip_title_prefixes),
         publication_checks=_publication(publication),
         observation=_observation(repo.pr.observation),
     )

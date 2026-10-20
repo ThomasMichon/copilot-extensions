@@ -69,7 +69,8 @@ The workspace is a target-platform absolute path; export does not look it up on
 the host. `--base` must use the selected repository's configured remote. It may
 be omitted only when that binding already supplies a default branch. The new
 output file contains the selected provider/endpoint, publication checks,
-observation requirements and guidance, bound to that worker workspace/base.
+observation requirements, hold labels, WIP title prefixes and guidance, bound
+to that worker workspace/base.
 It does not copy host checkout/runtime configuration, machine identity, token commands, credentials or
 publication/merge grants. Missing publication policy, an ambiguous workspace,
 an endpoint containing credential/query data, or an existing output file
@@ -89,9 +90,12 @@ host project registry or an adopted worker project; it does not admit
 unmanaged stateful waits or subscriptions. All ordinary receipt, remote and
 candidate checks still apply. Publication target matching uses the configured
 remote's push URL, so an optimized fetch mirror cannot replace the actual
-publication destination. Multiple push URLs refuse instead of validating only
+publication destination. Matching includes the provider endpoint (including
+the Azure organization), not just the repository slug, and preserves equivalent
+secure SSH/HTTPS destinations. Multiple push URLs refuse instead of validating only
 one destination of a multi-destination push.
-Missing, malformed or empty explicit configuration refuses the read/check
+Missing, malformed or empty explicit configuration, including a non-mapping
+`repos` block or repository entry, refuses the read/check
 instead of falling back to ambient policy.
 
 ## Mandatory publication path

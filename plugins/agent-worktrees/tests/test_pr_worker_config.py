@@ -22,6 +22,8 @@ POLICY = {
     "merge_strategy": "squash",
     "review_blocking": True,
     "dismiss_stale_reviews": False,
+    "hold_labels": ["paused"],
+    "wip_title_prefixes": ["WIP:"],
     "publication_checks": {
         "features": {"self_review": True, "scope_report": True},
         "review_lenses_path": ".checks/lenses",
@@ -88,6 +90,8 @@ def test_export_uses_effective_policy_without_host_paths_or_credentials(host, tm
     assert repo["pr"]["api_base"] == POLICY["api_base"]
     assert repo["pr"]["review_blocking"] is True
     assert repo["pr"]["dismiss_stale_reviews"] is False
+    assert repo["pr"]["hold_labels"] == POLICY["hold_labels"]
+    assert repo["pr"]["wip_title_prefixes"] == POLICY["wip_title_prefixes"]
     text = output.read_text("utf-8")
     assert "do-not-export" not in text and str(host.parent) not in text
     assert "machine" not in raw and "token_command" not in repo["pr"]
@@ -148,6 +152,42 @@ def test_invalid_explicit_config_cannot_use_an_ambient_policy(tmp_path, monkeypa
     with pytest.raises(ValueError, match="explicit PR configuration"):
         pr_read_context.load_read_config(path)
     assert not calls
+
+
+@pytest.mark.parametrize("repos", [None, [], {}, {"target": []}, {"target": None}, {"target": "bad"}])
+def test_malformed_explicit_repos_cannot_fall_back_to_registered_policy(
+    tmp_path, monkeypatch, repos,
+):
+    path = tmp_path / "explicit.json"
+    path.write_text(json.dumps({"repo_name": "target", "repos": repos}), "utf-8")
+    calls = []
+    monkeypatch.setattr(cfg, "_resolve_anchor_from_registry",
+                        lambda *args: calls.append(args) or str(tmp_path))
+    with pytest.raises(ValueError, match="explicit PR configuration repos"):
+        pr_read_context.load_read_config(path)
+    assert not calls
+
+
+@pytest.mark.parametrize(("title", "labels", "blocked"), [
+    ("Ready", (), False), ("Ready", ("PAUSED",), True), ("wip: change", (), True),
+])
+def test_worker_preserves_publication_holds(host, tmp_path, capsys, title, labels, blocked):
+    from agent_worktrees.pr_observation import Observation, configured_snapshot
+    from agent_worktrees.pr_snapshot import PRSnapshot
+
+    output = tmp_path / "worker.json"
+    assert export(host, output, "/worker/repo") == 0
+    capsys.readouterr()
+    loaded = pr_read_context.load_read_config(output).default_repo.pr
+
+    class Driver:
+        def get_configured_snapshot(self, *args, **kwargs):
+            evidence = Observation("azure-devops", "project/repo", 1, POLICY["api_base"], "abc")
+            return PRSnapshot(title=title, labels=labels, observation=evidence)
+
+    snapshot = configured_snapshot(Driver(), "project/repo", 1, prcfg=loaded)
+    gate = next(g for g in snapshot.observation.gates if g.id == "publication_ready")
+    assert (gate.state == "blocked") is blocked
 
 
 def test_export_does_not_replace_existing_file(host, tmp_path, capsys):
@@ -220,11 +260,15 @@ def test_exported_config_runs_all_checks_from_fresh_worker_context(host, tmp_pat
         assert json.loads(result.stdout)["ok"]
 
 
-@pytest.mark.parametrize("mode", ["different", "additional"])
+@pytest.mark.parametrize("mode", ["different", "additional", "organization", "host"])
 def test_worker_rejects_a_different_push_destination(host, tmp_path, worker, capsys, mode):
     git(worker, "remote", "set-url", "origin", "https://dev.azure.com/example/project/_git/repo")
     args = ["remote", "set-url", *(["--add"] if mode == "additional" else []), "--push"]
-    git(worker, *args, "origin", "https://dev.azure.com/example/project/_git/other")
+    url = {
+        "organization": "https://dev.azure.com/another/project/_git/repo",
+        "host": "https://elsewhere.invalid/example/project/_git/repo",
+    }.get(mode, "https://dev.azure.com/example/project/_git/other")
+    git(worker, *args, "origin", url)
     output = tmp_path / "worker.json"
     assert export(host, output, str(worker)) == 0
     capsys.readouterr()
@@ -239,3 +283,23 @@ def test_worker_rejects_a_different_push_destination(host, tmp_path, worker, cap
     assert result.returncode == 2
     expected = "exactly one push URL" if mode == "additional" else "workspace remote does not match"
     assert expected in json.loads(result.stdout)["error"]
+
+
+@pytest.mark.parametrize(("provider", "endpoint", "repository", "remote", "matches"), [
+    ("azure-devops", "https://dev.azure.com/example", "project/repo",
+     "git@ssh.dev.azure.com:v3/example/project/repo", True),
+    ("azure-devops", "https://dev.azure.com/example", "project/repo",
+     "git@ssh.dev.azure.com:v3/another/project/repo", False),
+    ("github", "", "example/repo", "git@github.com:example/repo.git", True),
+    ("github", "", "example/repo", "https://other.invalid/example/repo.git", False),
+    ("github", "https://forge.invalid", "example/repo", "ssh://git@forge.invalid/example/repo", True),
+    ("gitea", "https://forge.invalid/prefix", "example/repo",
+     "ssh://git@forge.invalid/prefix/example/repo.git", True),
+    ("gitea", "https://forge.invalid/prefix", "example/repo",
+     "https://forge.invalid/another/example/repo", False),
+])
+def test_remote_binding_includes_provider_endpoint(provider, endpoint, repository, remote, matches):
+    from agent_worktrees.pr_worker_config import matches_remote
+
+    policy = cfg._parse_pr({"provider": provider, "api_base": endpoint})
+    assert matches_remote(remote, repository, policy, "/worker/repo") is matches

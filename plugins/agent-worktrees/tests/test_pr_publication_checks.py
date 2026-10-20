@@ -286,7 +286,7 @@ def test_cli_dispatch_records_and_verifies_without_raw_provider(branch, monkeypa
     from agent_worktrees import pr_cli, pr_config, pr_read_context
     git(branch, "remote", "add", "origin", "https://github.com/example/project.git")
     repo = SimpleNamespace(remote="origin", default_branch="main",
-                           pr=SimpleNamespace(publication_checks=POLICY))
+                           pr=SimpleNamespace(publication_checks=POLICY, provider="github", api_base=""))
     monkeypatch.setattr(pr_read_context, "load_read_config", lambda path: object())
     monkeypatch.setattr(pr_config, "resolve_repo_config_for_slug",
                         lambda config, slug: SimpleNamespace(resolved=True, repo_config=repo))
