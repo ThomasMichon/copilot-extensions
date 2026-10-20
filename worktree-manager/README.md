@@ -536,9 +536,10 @@ never assert intentional closure or recovery permission.
 Invalid configuration, including non-UTF-8 input, is a JSON inspection blocker
 and disables recovery admission without preventing ordinary mux service.
 
-An explicit `automatic_restore = true` request currently only freezes qualified
-previous-boot candidates before ordinary startup reconciliation, under the
-daemon's existing active lease. The private `restart-recovery/attempts.sqlite3`
+An explicit `automatic_restore = true` request freezes qualified previous-boot
+candidates before ordinary startup reconciliation and observes their exact
+owner receipts, under the daemon's existing active lease. It never launches.
+The private `restart-recovery/attempts.sqlite3`
 retains each original execution, worktree creation nonce, head revision and
 target epoch under a deduplicated attempt identity. A same-boot daemon restart
 or later evidence refresh does not overwrite that frozen snapshot. Legacy
@@ -557,8 +558,9 @@ initialization rather than falling back to an unsafe creation path.
 Out-of-range numeric evidence and excessive JSON nesting also remain structured
 recovery blockers, without preventing ordinary mux startup.
 Transactions preserve prior attempts across a crash before commit and serialize
-concurrent freezing. At most 4096 unresolved attempts are retained, each bounded
-to 32 KiB. Capacity refuses new freezing rather than evicting pending identities.
+concurrent freezing. At most 4096 attempts are retained, including acknowledged
+history, each bounded to 32 KiB plus one receipt of at most 32 KiB. Capacity
+refuses new freezing rather than evicting identities.
 `frozen` means **awaiting owner admission**, never launched or seed-acknowledged;
 it is not an exactly-once execution guarantee. Default-off and passive daemon
 paths do not create attempt state.
@@ -567,6 +569,31 @@ the active daemon lease, inside its existing drain-visible loop-mutation
 boundary. A draining generation admits no new freeze, and an already admitted
 freeze must finish or report its blocker before drain can report idle. The
 existing update/cutover owner and notification resource teardown are unchanged.
+
+While this explicit preference remains enabled, the active daemon samples at
+most one unacknowledged attempt's owner receipt per twenty seconds, with a
+four-second owner-call timeout and the same no-update/no-reconcile read boundary
+as `--check-launch`. It rotates through retained same-environment attempts,
+preserving each historical target boot. Completed ACKs need no further probe.
+Sampling runs in the ordinary loop's existing mutation fence, not on the native
+notification I/O thread or a parallel scheduler. Admission is rechecked after
+owner I/O before persistence: observed drain refuses the write, while an
+already-admitted write must finish before drain can report idle.
+
+The first valid observation transactionally adds an outcome table to the
+existing version-1 attempt database. Read-only inspection accepts either version
+without migrating. Frozen payload bytes and attempt IDs never change. Each
+retained receipt must match the exact original request, and states only advance
+from `not-reserved` through `launch-uncertain`, `mux-created` and
+`seed-acknowledged`. Skipped intermediate observations are allowed; regressions
+and conflicting ACK execution bindings are blockers, not overwritten evidence.
+Unavailable owners and failed writes preserve the last retained outcome.
+Malformed, orphaned or oversized outcome rows block recovery without reset.
+The authenticated daemon health includes `outcome_observation` with the last
+sample's state or explicit blocker; ordinary `recovery-evidence` includes the
+retained `outcome` inside its frozen attempt, without contacting an owner.
+Neither receipt persistence nor its absence grants retry authority, current
+liveness, completed restoration or automatic eligibility.
 
 To request a provisional current-worktree check for **one existing frozen
 attempt**, without enabling recovery:
@@ -592,8 +619,8 @@ action-time task/claim policy and acknowledged automatic restart Resume
 remain unresolved, so this inspection returns a blocker/nonzero status
 even on a match. Neither command writes an attempt outcome, reserves a launch,
 starts a conversation, changes enrollment or contacts the host notification
-service. Ordinary inspection makes no owner call, and the resident daemon has
-no additional polling or blocking work from this opt-in check.
+service. Ordinary inspection makes no owner call; these explicit inspection
+commands do not enroll daemon polling or enable the recovery preference.
 Failed or timed-out mux listings remain unknown and cannot establish the mux
 absence needed for even a provisional worktree match.
 

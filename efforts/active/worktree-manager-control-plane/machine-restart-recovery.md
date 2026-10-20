@@ -122,9 +122,12 @@ means of fulfilling the operator's request. They require normal source review.
 - [ ] Handle native restart/shutdown notification by checkpointing the eligible
   generation before teardown. Reconcile cancelled shutdowns. Do not rely on
   this notification being delivered during a crash or sudden power loss.
-  The gated Linux transport and cancellation fixtures landed in #7252. Resident
-  blocking-work latency remains unqualified; Windows/WSL notifications remain
-  explicitly unsupported, so this item is not complete.
+  The gated Linux transport and cancellation fixtures landed in #7252.
+  [#7349](https://github.com/ThomasMichon/copilot-extensions/pull/7349)
+  services native I/O independently of ordinary blocking daemon work, with a
+  private-bus sub-delay checkpoint and joined lease-release fixture.
+  Actual host shutdown/startup coverage remains unqualified; Windows/WSL
+  notifications remain explicitly unsupported, so this item is not complete.
 - [x] Surface failed, corrupt, stale or unavailable evidence explicitly.
   Ambiguous closure stays unconfirmed; absence of a clean-exit hook is not proof
   that automatic resurrection is authorized.
@@ -187,6 +190,10 @@ means of fulfilling the operator's request. They require normal source review.
   retains acknowledged later-boot history without eviction or retry authority,
   reserves future ACK/counter capacity before invocation, and preserves frozen
   historical target identity during explicit read-only inspection.
+  The next Manager increment retains bounded monotonic owner observations
+  separately from immutable frozen identities under the existing daemon lease.
+  Synthetic owner responses and durable process fixtures do not resolve actual
+  native recovery qualification or authorize retry.
 - [ ] Apply bounded admission and concurrency. Authentication, dependency or
   ownership failures remain visible and resumable without busy retry loops.
 
@@ -1072,3 +1079,67 @@ The umbrella effort remains Active independently of this slice's completion.
   close consume that result even after the event loop has closed. The focused
   private-bus/runtime/adapter lane passed 45 tests before the additional
   unclaimed-reply-descriptor variants. No native recovery authority changed.
+
+### 2026-10-20 - Independent notification I/O merged; durable reconciliation next
+
+- [#7349](https://github.com/ThomasMichon/copilot-extensions/pull/7349)
+  squash-merged to `dev` as `eab777e811` after genuine approval of exact head
+  `46fc1e6534a`, the cleanup finding resolved and all required checks green.
+  The final private-bus/actual-adapter/runtime/thread lane passed 47 contracts
+  without skips, including inhibitor and unclaimed descriptor failure during
+  both pump-time and shutdown cleanup. The unchanged integrated daemon/evidence
+  source retained its 328-test/three-platform-skip result.
+- Re-read the actual focused Plan, Validation Plan and completion gate after
+  merge. Independent notification timing and cleanup ownership are delivered,
+  not complete recovery or platform qualification. Original tracking and the
+  umbrella remain open; no promotion, installation or live enrollment is
+  implied.
+- Next permitted source-only stretch: persist bounded Manager observations of
+  the exact owner's recovery outcomes against immutable frozen attempts.
+  Preserve uncertainty and historical ACK identity without inferring current
+  liveness, retry authority, automatic eligibility or completed restoration.
+  Keep ordinary inspection read-only and default-off behavior unchanged.
+- Actual native CLI/mux plus seed-ACK qualification requires an explicitly
+  approved isolated venue, launch profile and on-device authentication boundary.
+  No such fixture is established or launched by the source/private-bus tests.
+  Real qualification remains gated while source-only work continues; surviving
+  sessions, task/producer/profile action-time policy and platform
+  startup/enrollment also remain open under this same objective.
+
+### 2026-10-20 - Durable Manager observation without recovery authority
+
+- Established separate failing storage and existing-daemon pump regressions:
+  no durable Manager outcome existed, and the active pump never retained the
+  owner's exact receipt. Added one bounded receipt per retained attempt, with a
+  transactional version-1-to-2 schema extension and no change to frozen payload
+  bytes or identities. Ordinary inspection accepts either version read-only;
+  absent, corrupt, foreign, orphaned and oversized state cannot be recreated.
+- Persistence and explicit owner inspection share one exact-request/typed ACK
+  validator. Observed states advance monotonically; lower receipts or different
+  acknowledged executions are visible inconsistencies, never silent rewrites.
+  Capacity includes acknowledged history, with no eviction or retry authority.
+- The explicit default-off preference admits at most one unresolved owner read
+  per twenty seconds in the existing ordinary daemon loop, under its active
+  lease and drain-visible mutation boundary. A post-I/O admission recheck
+  refuses writes when drain is observed; an already-admitted write remains
+  drain-visible until it finishes. No additional thread,
+  daemon, scheduler, launch, registration or seed acknowledgement is created.
+  Historical ACKs remain pickup evidence, not current liveness.
+- The focused forty-case outcome lane passed in the bounded disconnected
+  runner. Actual child processes cover concurrent observations and crashes
+  before COMMIT or after publication, during both migration and later updates.
+  Write failure rolls back schema and outcome together; owner unavailability
+  retains uncertainty. Actual daemon-loop and blocked-owner drain fixtures
+  exercise the lease/mutation boundary; ordinary inspection makes no owner call.
+  The final integrated recovery/mux lane passed 433 contracts with seven
+  explicit native/platform skips. Its initial run found the existing exact
+  health-shape assertion needed the intentional additive observation field;
+  the implementation and contract now agree. No skipped native proof is claimed.
+- Documentation-impact review updates Manager behavior/configuration and the
+  focused test flow. This closes part of the existing session-hosting
+  snapshot-outlives-process/provisional-receipt intent under the existing
+  graceful-cutover safe point, not a new architectural authority.
+  Source still awaits review and merge. The full
+  focused gate remains open: actual native readiness/seed consumption,
+  surviving-session adoption, task/producer/profile action-time admission and
+  platform startup/enrollment remain unresolved, with no live rollout.

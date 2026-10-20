@@ -93,40 +93,32 @@ def inspect_attempt(attempt_id: str, attempts: list[dict], epoch: HostEpoch | No
     return result
 
 
-def inspect_launch(attempt_id: str, attempts: list[dict], epoch: HostEpoch | None) -> dict:
-    """Compose the frozen Manager identity with its durable owner launch outcome.
-
-    No Manager attempt is reset or advanced by this inspection. An absent or
-    uncertain owner receipt cannot authorize a retry.
-    """
-    attempt, expected = _attempt(attempt_id, attempts, epoch, historical=True)
+def launch_request(attempt: dict) -> dict:
+    """Bind receipt inspection and persistence to the same immutable attempt."""
     evidence = attempt["last_positive"]
-    request = {
-        "request_id": attempt_id, "expected": expected,
+    expected = {field: evidence[field] for field in _EXPECTED_FIELDS}
+    expected["target_epoch"] = attempt["target_epoch"]
+    return {
+        "request_id": attempt["attempt_id"], "expected": expected,
         "source_epoch": {field: evidence[field] for field in (
             "platform", "environment_id", "boot_id",
         )},
         "native_incarnation": evidence["native_incarnation"],
     }
-    payload = json.dumps(request, sort_keys=True, allow_nan=False)
-    if len(payload.encode("utf-8")) > 8192:
-        raise ValueError("Restart launch request exceeds its budget")
-    result = engine_client.run_json(
-        expected["project"], [
-            "embody", "--worktree-id", expected["worktree_id"],
-            "--restart-request", payload, "--restart-receipt", "--json",
-        ],
-        timeout=4,
-        environment={"WORKTREE_NO_UPDATE": "1", "WORKTREE_NO_RECONCILE": "1"},
-    )
+
+
+def validate_launch_receipt(result: dict, request: dict) -> None:
+    """Validate exact typed historical evidence without consulting live owners."""
     if (
-        set(result) != {
+        not isinstance(result, dict)
+        or set(result) != {
             "schema", "version", "request", "state", "seed_acknowledged",
             "restored", "automatic_eligible",
         } | ({"acknowledgement"} if result.get("version") == 2 else set())
         or result["schema"] != "native-restart-launch"
         or type(result["version"]) is not int or result["version"] not in {1, 2}
-        or json.dumps(result["request"], sort_keys=True, allow_nan=False) != payload
+        or json.dumps(result["request"], sort_keys=True, allow_nan=False)
+        != json.dumps(request, sort_keys=True, allow_nan=False)
         or result["restored"] is not False or result["automatic_eligible"] is not False
         or (
             result["version"] == 1 and (
@@ -138,4 +130,22 @@ def inspect_launch(attempt_id: str, attempts: list[dict], epoch: HostEpoch | Non
         )
     ):
         raise ValueError("Restart inspection received an unconfirmed launch receipt")
+
+
+def inspect_launch(attempt_id: str, attempts: list[dict], epoch: HostEpoch | None) -> dict:
+    """Read an exact owner outcome without advancing state or authorizing retry."""
+    attempt, expected = _attempt(attempt_id, attempts, epoch, historical=True)
+    request = launch_request(attempt)
+    payload = json.dumps(request, sort_keys=True, allow_nan=False)
+    if len(payload.encode("utf-8")) > 8192:
+        raise ValueError("Restart launch request exceeds its budget")
+    result = engine_client.run_json(
+        expected["project"], [
+            "embody", "--worktree-id", expected["worktree_id"],
+            "--restart-request", payload, "--restart-receipt", "--json",
+        ],
+        timeout=4,
+        environment={"WORKTREE_NO_UPDATE": "1", "WORKTREE_NO_RECONCILE": "1"},
+    )
+    validate_launch_receipt(result, request)
     return result

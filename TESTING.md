@@ -282,6 +282,28 @@ same platform/environment; current-owner inspection remains boot-strict.
 Real owner processes cover concurrent reservation and crashes both before and
 after synthetic mux invocation. No fixture qualifies a real native recovery.
 
+Manager-owned durable receipt observation uses:
+
+```text
+python tools/run_tests_in_devcontainer.py worktree-manager -k 'test_restart_outcomes or test_restart_attempts or test_restart_launch_inspection or test_restart_owner_check or test_restart_notification_runtime'
+```
+
+The lane covers additive version-1 migration, unchanged frozen payload bytes,
+typed exact-request outcomes, monotonic state and immutable ACK binding,
+orphaned/malformed/oversized storage, write failure and capacity refusal.
+Real child processes crash before COMMIT or after publication, both during
+migration and later updates; concurrent owner observations retain the newer
+receipt without replacement or retry. Active opt-in polling is bounded and
+fair, skips historical ACKs and preserves their original target boot.
+Unavailable or stale owners cannot erase uncertainty. Default-off, passive and
+draining generations make no owner call. A real existing-daemon loop fixture
+observes under its lease/mutation fence, and a blocked owner read keeps drain
+busy until it returns without persisting after admission closes. Ordinary
+inspection reports retained outcomes without owner I/O or schema migration.
+These are durable receipt and daemon-lifecycle contracts with synthetic owner
+responses, not live native Copilot readiness, seed consumption or automatic
+startup qualification.
+
 Positive owner/Manager ACK fixtures use the mux producer's actual `$1:100`
 incarnation shape, including the leading dollar sign, rather than a
 synthetic token alphabet. Newline and delimiter-bearing tokens remain refused.

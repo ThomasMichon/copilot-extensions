@@ -30,10 +30,10 @@ The connection and FD exist only while the daemon holds its active lease and
 admits loop mutations. Passive generations do not connect. WSL teardown, Windows,
 macOS and containers are not qualified by Linux logind support.
 
-The transport reports `qualified: false`: private D-Bus/FD-transfer tests do not
-prove that the resident loop always services notifications within the native
-delay budget while other work blocks it. This timing gate must close before
-automatic recovery can rely on that notification. `automatic_restore = true`
+The transport reports `qualified: false`: the private D-Bus/FD-transfer fixture
+services a shutdown signal within its delay budget while ordinary daemon work
+blocks, but does not qualify actual host shutdown/startup or hard real-time
+OS/filesystem bounds. `automatic_restore = true`
 currently reports a blocker because current-owner admission and acknowledged
 exact-conversation restart Resume are not qualified; it never launches.
 An explicit request lets the active daemon durably freeze only qualified
@@ -42,6 +42,13 @@ private local attempt state, not host startup enrollment. Frozen records require
 the historical owner's existing worktree incarnation and head revision; missing
 legacy proof is not inferred or backfilled. Neither freezing nor enabling this
 preference admits a task, launches a conversation, or acknowledges a seed.
+With this request enabled, the active ordinary daemon loop additionally reads
+at most one unresolved attempt's exact historical owner receipt per twenty
+seconds. It durably retains monotonic outcomes without changing frozen evidence
+or resetting uncertainty. Owner errors and contradictory receipts remain
+visible, and acknowledged historical pickup is not current liveness or
+completed restoration. There is no parallel scheduler, automatic launch or
+retry. Default-off/passive paths perform no such owner reads or outcome writes.
 
 `worktree-manager mux-daemon recovery-evidence` is read-only and includes the
 requested capability states. It does not connect to the system bus to establish
@@ -50,10 +57,13 @@ platforms are `blocked`, and disabled requests are `disabled`. Requested but
 unconfirmed/blocked capabilities, invalid configuration and unavailable
 evidence produce a JSON blocker and nonzero exit. The resident daemon's
 authenticated health response additionally exposes `restart_recovery` with its
-actual notification transport state, admission and qualification.
+actual notification transport state, admission, qualification and last
+`outcome_observation` result.
 The report also reads retained attempts without creating absent storage.
 Attempt corruption and capacity failures remain explicit blockers; existing
-unresolved attempt identities are never discarded to permit a retry.
+attempt identities and acknowledged receipts are never discarded to permit a
+retry. Retained receipts appear as each attempt's optional `outcome`; ordinary
+inspection neither contacts their owners nor migrates the legacy database.
 
 ## Picker logical machine roster
 

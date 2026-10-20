@@ -1247,6 +1247,26 @@ claiming discipline alone.
 
 ## Journal
 
+- **2026-10-20** - Implemented bounded durable Manager observations for
+  [restart recovery](machine-restart-recovery.md), preserving immutable frozen
+  identities, launch uncertainty and historical ACK bindings. The existing
+  active daemon samples one unresolved owner receipt per twenty seconds inside
+  its lease/drain fence; no launch/retry authority or parallel scheduler is
+  added. Process-crash/concurrency, schema migration, read-only inspection and
+  actual daemon/drain contracts pass in the focused isolated lane; the final
+  integrated recovery/mux lane passes 433 contracts with seven native/platform
+  skips. Source still awaits review/merge; the full focused objective,
+  actual native qualification and platform startup/enrollment remain open.
+
+- **2026-10-20** - Independent native notification I/O and sticky cleanup-result
+  handling merged in
+  [#7349](https://github.com/ThomasMichon/copilot-extensions/pull/7349) after
+  genuine exact-head approval, resolved findings and required green checks.
+  Re-read and reconciled the [focused recovery gate](machine-restart-recovery.md);
+  it remains open. Next is bounded durable Manager outcome observation, without
+  retry/launch authority. Actual native qualification remains separately gated
+  on an approved isolated venue/auth boundary; no rollout or enrollment occurs.
+
 - **2026-10-19** - Implemented a single daemon-owned native notification I/O
   thread for [restart recovery](machine-restart-recovery.md), so ordinary
   blocking work no longer drives the bus loop. Drain closes admission and

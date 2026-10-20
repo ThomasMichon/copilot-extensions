@@ -11,6 +11,7 @@ from .manager_config import ManagerConfigError, RestartRecoveryConfig, load_conf
 from .restart_capabilities import recovery_capabilities
 from .restart_attempts import RestartAttemptError, RestartAttempts
 from .restart_observer import RestartObserver
+from .restart_outcome_observer import RestartOutcomeObserver
 
 
 log = logging.getLogger(__name__)
@@ -25,6 +26,7 @@ class RestartNotificationRuntime:
     ) -> None:
         self.root = root
         self.observer = observer
+        self.outcomes = RestartOutcomeObserver(root)
         self._config: RestartRecoveryConfig | None = None
         self._adapter = None
         self._capabilities: dict = {}
@@ -51,6 +53,7 @@ class RestartNotificationRuntime:
             },
             "automatic_eligible": False,
             "admitted": not self._paused,
+            "outcome_observation": self.outcomes.status,
         }
         if self._blocker:
             result["blocker"] = self._blocker
@@ -174,6 +177,11 @@ class RestartNotificationRuntime:
                 return
             self._paused = False
             self._start()
+        if self._config.automatic_restore and self._attempts is not None:
+            self.outcomes.observe(
+                self.observer.epoch,
+                can_admit=lambda: not self._paused and self._can_admit(),
+            )
 
     @property
     def drained(self) -> bool:

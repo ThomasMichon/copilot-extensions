@@ -25,11 +25,15 @@ _TABLE = (
     "CREATE TABLE attempts (attempt_id TEXT PRIMARY KEY, "
     "candidate_key TEXT NOT NULL UNIQUE, payload TEXT NOT NULL)"
 )
+_OUTCOME_TABLE = (
+    "CREATE TABLE outcomes (attempt_id TEXT PRIMARY KEY, payload TEXT NOT NULL)"
+)
 _APPLICATION_ID = 0x57524131
 _MAX_ATTEMPTS = 4096
 _MAX_PAYLOAD_BYTES = 32768
 _SOURCE_STATES = {"live", "shutdown-pending", "shutdown-interrupted", "unknown", "intentional"}
 _FROZEN_STATES = {"live", "shutdown-pending", "shutdown-interrupted"}
+_OUTCOME_STATES = ("not-reserved", "launch-uncertain", "mux-created", "seed-acknowledged")
 
 
 def _epoch(epoch: HostEpoch) -> dict:
@@ -107,8 +111,8 @@ def _decode(attempt_id: str, key: str, payload: str) -> dict:
 class RestartAttempts:
     """Freeze once per source/target identity, retaining all unresolved attempts.
 
-    A frozen attempt is not admitted, launched or acknowledged. Capacity refuses
-    rather than evicting an unresolved attempt and permitting a duplicate.
+    Frozen identity never becomes authority; optional outcomes are historical.
+    Capacity refuses rather than evicting an attempt and permitting a duplicate.
     """
 
     def __init__(self, root: Path) -> None:
@@ -177,7 +181,10 @@ class RestartAttempts:
             connection.execute(_TABLE)
             connection.execute("PRAGMA user_version=1")
             connection.execute(f"PRAGMA application_id={_APPLICATION_ID}")
-        elif objects != {"attempts": _TABLE} or version != 1 or application != _APPLICATION_ID:
+        elif application != _APPLICATION_ID or not (
+            version == 1 and objects == {"attempts": _TABLE}
+            or version == 2 and objects == {"attempts": _TABLE, "outcomes": _OUTCOME_TABLE}
+        ):
             raise RestartAttemptError("Recovery attempt database has an incompatible schema.")
 
     @staticmethod
@@ -188,7 +195,28 @@ class RestartAttempts:
         ).fetchall()
         if len(rows) > _MAX_ATTEMPTS:
             raise RestartAttemptError("Recovery attempt limit exceeded.")
-        return [_decode(*row) for row in rows]
+        attempts = [_decode(*row) for row in rows]
+        if connection.execute("PRAGMA user_version").fetchone()[0] == 2:
+            from .restart_owner_check import launch_request, validate_launch_receipt
+
+            by_id = {item["attempt_id"]: item for item in attempts}
+            outcomes = connection.execute(
+                "SELECT attempt_id, payload FROM outcomes ORDER BY attempt_id LIMIT ?",
+                (_MAX_ATTEMPTS + 1,),
+            ).fetchall()
+            if len(outcomes) > _MAX_ATTEMPTS:
+                raise RestartAttemptError("Recovery outcome limit exceeded.")
+            for attempt_id, payload in outcomes:
+                if (
+                    not isinstance(attempt_id, str) or attempt_id not in by_id
+                    or not isinstance(payload, str)
+                    or len(payload.encode("utf-8")) > _MAX_PAYLOAD_BYTES
+                ):
+                    raise ValueError("Recovery outcome is oversized, orphaned or not text")
+                value = decode_recovery_json(payload)
+                validate_launch_receipt(value, launch_request(by_id[attempt_id]))
+                by_id[attempt_id]["outcome"] = value
+        return attempts
 
     def snapshot(self, *, recover_existing: bool = False) -> list[dict]:
         """Read without creating absent storage; only the lease holder recovers."""
@@ -251,3 +279,50 @@ class RestartAttempts:
                 return self._read(connection)
         except (OSError, sqlite3.Error, ValueError, TypeError, KeyError) as exc:
             raise RestartAttemptError(f"Could not freeze recovery attempts: {exc}") from exc
+
+    def record_outcome(self, attempt_id: str, receipt: dict) -> dict:
+        """Retain monotonic exact owner evidence, never creating absent attempts.
+
+        The first valid receipt upgrades storage transactionally. A lower state
+        or a different acknowledged execution is a visible inconsistency, not a
+        reason to erase prior launch uncertainty or authorize another launch.
+        """
+        from .restart_owner_check import launch_request, validate_launch_receipt
+
+        try:
+            if not self._exists():
+                raise RestartAttemptError("Recovery attempts are absent; outcome cannot be retained.")
+            self._protect()
+            with closing(sqlite3.connect(
+                self.path.absolute().as_uri() + "?mode=rw", uri=True, timeout=5,
+            )) as connection, connection:
+                connection.execute("PRAGMA synchronous=FULL")
+                connection.execute("BEGIN IMMEDIATE")
+                self._schema(connection, create=False)
+                attempts = self._read(connection)
+                attempt = next((item for item in attempts if item["attempt_id"] == attempt_id), None)
+                if attempt is None:
+                    raise ValueError("Frozen recovery attempt not found")
+                validate_launch_receipt(receipt, launch_request(attempt))
+                payload = json.dumps(receipt, allow_nan=False, sort_keys=True)
+                if len(payload.encode("utf-8")) > _MAX_PAYLOAD_BYTES:
+                    raise ValueError("Recovery outcome receipt exceeds its budget")
+                previous = attempt.get("outcome")
+                if previous is not None:
+                    if _OUTCOME_STATES.index(receipt["state"]) < _OUTCOME_STATES.index(previous["state"]):
+                        raise ValueError("Owner receipt would regress retained recovery evidence")
+                    if receipt["state"] == previous["state"]:
+                        if receipt != previous:
+                            raise ValueError("Owner receipt changed an already retained execution")
+                        return attempt
+                if connection.execute("PRAGMA user_version").fetchone()[0] == 1:
+                    connection.execute(_OUTCOME_TABLE)
+                    connection.execute("PRAGMA user_version=2")
+                connection.execute(
+                    "INSERT INTO outcomes(attempt_id, payload) VALUES (?, ?) "
+                    "ON CONFLICT(attempt_id) DO UPDATE SET payload=excluded.payload",
+                    (attempt_id, payload),
+                )
+                return {**attempt, "outcome": decode_recovery_json(payload)}
+        except (OSError, sqlite3.Error, ValueError, TypeError, KeyError) as exc:
+            raise RestartAttemptError(f"Could not retain recovery outcome: {exc}") from exc

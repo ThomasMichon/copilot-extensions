@@ -1731,6 +1731,9 @@ def test_runtime_health_reports_version_attached_clients_and_busy(tmp_path):
             "busy": False,
             "restart_recovery": {
                 "admitted": False, "automatic_eligible": False, "capabilities": {},
+                "outcome_observation": {
+                    "applied": False, "reason": "not-observed", "automatic_eligible": False,
+                },
             },
         }
 
