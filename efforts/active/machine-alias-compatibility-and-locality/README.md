@@ -257,7 +257,7 @@ _(Operator-selected convergence; detailed mechanism is agent-recommended.)_
 
 ### Phase 3d - Physical machine and environment boundaries
 _(Agent-recommended realization of the operator's explicit model clarification.)_
-- [ ] Review the [structured identity contract](physical-machine-environment-boundary.md)
+- [x] Review the [structured identity contract](physical-machine-environment-boundary.md)
       before changing implementation.
 - [ ] Reuse the shared map's physical-machine/environment selection; identify
       compact execution-ID boundaries explicitly, without another registry or
@@ -334,6 +334,27 @@ operator's all-alias/all-worktree acceptance requirement, not authorization for
 unrelated service changes or a second machine registry.
 
 ## Journal
+
+### 2026-10-19 - Reviewed physical boundary and runtime-admission implementation
+- The Phase 3d contract merged in #7298 after current-head approval and required
+  CI, using the ordinarily installed managed completion path. The prerequisite
+  #7308 repair preserved the checked Maintainer exception for target-branch
+  deletion/force-update protections without waiving required CI or other merge
+  constraints. Its qualified release preceded the successful installed use.
+- The first implementation slice reuses the shared registry selection to expose
+  a physical/environment tuple separately from the execution ID. Runtime update
+  and launch admission consume that same projection; exact execution selectors
+  remain compatible, unknown labels are not suffix-normalized into another host,
+  and ambiguous or conflicting selections refuse.
+- The original regression failed in both update and launch planning. Bounded
+  disconnected-container validation then covered the affected identity,
+  reconciliation and updater suites. Conditional native/probe skips do not
+  constitute installed native acceptance.
+- Structured guidance and prospective creation metadata/naming remain the next
+  slice. Historical IDs, record ownership, references and existing allocations
+  have not been changed. Source review, qualified release and authorized
+  installed acceptance still gate this implementation; no plan checkbox above
+  claims the whole Phase 3d boundary or containing rollout is complete.
 
 ### 2026-10-19 - Physical identity clarified after installed update
 - An installed update exposed a real dimension mismatch: the receiving context

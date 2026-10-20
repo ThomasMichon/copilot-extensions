@@ -44,7 +44,7 @@ def _module(path: Path, name: str) -> ModuleType:
 def check_machine_gate(source: Path) -> list[str]:
     """Run fresh synthetic-boundary cases against the actual source functions.
 
-    Config discovery, payload inventory and installer execution are fixtures;
+    Config/identity metadata, payload inventory and installer execution are fixtures;
     policy, gate decisions, both planners and the execution barrier are real.
     No source module can reach an installed agent_worktrees package.
     """
@@ -60,9 +60,12 @@ def _check_machine_gate(source: Path) -> None:
     package = ModuleType(package_name)
     package.__path__ = []
     config = ModuleType(f"{package_name}.config")
+    identity = ModuleType(f"{package_name}.machine_identity")
     reconcile = ModuleType(f"{package_name}.reconcile")
     runtime = ModuleType(f"{package_name}.update_runtime")
-    modules = {module.__name__: module for module in (package, config, reconcile, runtime)}
+    modules = {
+        module.__name__: module for module in (package, config, identity, reconcile, runtime)
+    }
     with patch.dict(sys.modules, modules), tempfile.TemporaryDirectory(
         prefix="update-machine-gate-contract-"
     ) as temporary:
@@ -73,7 +76,12 @@ def _check_machine_gate(source: Path) -> None:
         for extension in ("sh", "ps1"):
             (scripts / f"install.{extension}").write_text("exit 0\n", encoding="utf-8")
         anchor, context = root / "anchor", root / "enabling-repo"
-        policy = _function(source / "reconcile.py", "runtime_allowed", {})
+        identity.resolve_execution_context = lambda *args, **kwargs: SimpleNamespace(
+            target=SimpleNamespace(machine="physical-host"),
+        )
+        policy = _function(source / "update_gate.py", "runtime_allowed", {
+            "__name__": reconcile.__name__, "__package__": package_name, "cfg": config,
+        })
         gate = _module(source / "update_gate.py", f"{package_name}.update_gate")
         runtime._machine_gate_blocks = gate._machine_gate_blocks
         runtime.MACHINE_GATED_SKIP = gate.MACHINE_GATED_SKIP
@@ -97,6 +105,7 @@ def _check_machine_gate(source: Path) -> None:
             ("excluded", "machine-gated", {name: {"other"}}, True, None, False),
             ("omitted", "machine-gated", {}, True, None, False),
             ("allowed", "machine-gated", {name: {"local"}}, True, None, True),
+            ("physical-allowed", "machine-gated", {name: {"physical-host"}}, True, None, True),
             ("unconfigured", "machine-gated", {}, False, None, True),
             ("universal", "universal", {}, True, None, True),
             ("detection-error", "machine-gated", {}, False, "detect", False),
@@ -157,6 +166,7 @@ def _check_case(
         return SimpleNamespace(status="OK")
 
     config.load_config, config.detect_machine = load_config, detect_machine
+    config.detect_platform = lambda: platform
     reconcile.manifest_runtime_scope = lambda path: scope
     reconcile.load_runtime_gate = load_gate
     reconcile.gate_manifest_present = gate_present
@@ -179,7 +189,10 @@ def _check_case(
                 f"{case}: gate configuration came from the wrong repository",
             )
             _expect(
-                consulted == [((scope, name, "local", allowed), {"gate_present": present})],
+                consulted == [((scope, name, "local", allowed), {
+                    "gate_present": present,
+                    "repo_dir": context if explicit_context else anchor,
+                })],
                 f"{case}: canonical policy or manifest-presence argument was bypassed",
             )
     else:

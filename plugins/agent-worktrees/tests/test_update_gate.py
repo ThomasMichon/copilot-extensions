@@ -115,6 +115,45 @@ def test_update_gate_reports_invalid_registry(tmp_path, monkeypatch):
         update_gate._machine_gate_blocks("agent-example", "machine-gated", anchor)
 
 
+@pytest.mark.parametrize("platform", ["windows", "wsl"])
+@pytest.mark.parametrize("physical", ["physical-host", "physical-host-wsl"])
+@pytest.mark.parametrize("allowed", [False, True])
+def test_update_gate_selects_declared_physical_machine(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    platform: str, physical: str, allowed: bool,
+) -> None:
+    anchor = _configure(tmp_path, monkeypatch, platform)
+    registry = anchor / "machines.yaml"
+    data = yaml.safe_load(registry.read_text(encoding="utf-8"))
+    data["machines"]["local-space"]["physical_host"] = physical
+    registry.write_text(yaml.safe_dump(data), encoding="utf-8")
+    (anchor / "services.yaml").write_text(yaml.safe_dump({
+        "plugins": [{
+            "name": "agent-example",
+            "deploy_machines": [physical if allowed else "foreign-host"],
+        }],
+    }), encoding="utf-8")
+    monkeypatch.setattr(reconcile, "GATE_ANCHOR", "")
+    monkeypatch.setattr(reconcile, "GATE_MANIFESTS", ("services.yaml",))
+
+    assert cfg.load_config().machine == "local-space"
+    assert update_gate._machine_gate_blocks(
+        "agent-example", "machine-gated", anchor,
+    ) is (not allowed)
+    monkeypatch.setattr(reconcile, "read_enabled_plugins", lambda repo: [])
+    plan = reconcile.build_plan(anchor, cache={}, save=False)
+    assert plan["machine"] == "local-space"
+    assert reconcile.runtime_allowed(
+        "machine-gated", "agent-example", plan["machine"],
+        reconcile.load_runtime_gate(anchor), repo_dir=anchor,
+    ) is allowed
+    assert reconcile.runtime_allowed(
+        "machine-gated", "agent-example", plan["machine"],
+        {"agent-example": {"local-space"}}, repo_dir=anchor,
+    )
+    assert cfg.load_config().machine == "local-space"
+
+
 def test_empty_machine_setting_retains_existing_global_fallback(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch, "windows")
     project = tmp_path / "project.yaml"

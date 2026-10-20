@@ -13,6 +13,7 @@ from typing import Any
 
 import pytest
 
+from agent_worktrees import config as cfg
 from agent_worktrees import reconcile
 
 MKT = reconcile.MARKETPLACE
@@ -684,6 +685,35 @@ def test_machine_gated_disallowed_machine(env):
         env.repo, machine="host-book2", cache={}, save=False
     )
     assert _services(plan, phase="runtime") == set()
+
+
+@pytest.mark.parametrize("platform", ["windows", "wsl"])
+@pytest.mark.parametrize("allowed", [False, True])
+def test_machine_gate_uses_physical_host_without_changing_execution_id(
+    env: Any, monkeypatch: pytest.MonkeyPatch, platform: str, allowed: bool,
+) -> None:
+    env.write_settings({f"agent-bridge@{MKT}": True})
+    env.install_payload("agent-bridge", "3.0.0", scope="machine-gated")
+    env.deploy_runtime("agent-bridge", "2.0.0")
+    (env.repo / "machines.yaml").write_text(json.dumps({
+        "machines": {
+            "custom-execution": {
+                "execution_platform": platform,
+                "physical_host": "physical-host-wsl",
+                "hostname": "Independent-Hostname",
+            },
+        },
+    }), encoding="utf-8")
+    monkeypatch.setattr(cfg, "detect_platform", lambda: platform)
+    env.write_gate({"agent-bridge": [
+        "physical-host-wsl" if allowed else "foreign-host",
+    ]})
+
+    plan = reconcile.build_plan(
+        env.repo, machine="custom-execution", cache={}, save=False,
+    )
+    assert _services(plan, phase="runtime") == ({"agent-bridge"} if allowed else set())
+    assert plan["machine"] == "custom-execution"
 
 
 def test_machine_gated_no_manifest_provisions_locally(env):

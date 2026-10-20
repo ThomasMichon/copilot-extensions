@@ -886,6 +886,7 @@ def _gate(monkeypatch, *, allowed: dict[str, set[str]], present: bool,
     monkeypatch.setattr(reconcile, "load_runtime_gate", load)
     monkeypatch.setattr(reconcile, "gate_manifest_present", lambda repo_dir: present)
     monkeypatch.setattr(cfg, "detect_machine", lambda repo_dir=None, **kwargs: machine)
+    monkeypatch.setattr(cfg, "load_machines_yaml", lambda repo_dir: {})
     return seen
 
 
@@ -1057,8 +1058,8 @@ def test_gate_decision_is_delegated_to_reconcile_runtime_allowed(monkeypatch):
     _gate(monkeypatch, allowed={"agent-codespaces": {"this-box"}}, present=True)
     recorded: list[tuple] = []
 
-    def fake_allowed(scope, name, machine, gate, *, gate_present=True):
-        recorded.append((scope, name, machine, gate, gate_present))
+    def fake_allowed(scope, name, machine, gate, *, gate_present=True, repo_dir=None):
+        recorded.append((scope, name, machine, gate, gate_present, repo_dir))
         return False
 
     monkeypatch.setattr(reconcile, "runtime_allowed", fake_allowed)
@@ -1068,7 +1069,7 @@ def test_gate_decision_is_delegated_to_reconcile_runtime_allowed(monkeypatch):
     ) is True
     assert recorded == [
         ("machine-gated", "agent-codespaces", "this-box",
-         {"agent-codespaces": {"this-box"}}, True)
+         {"agent-codespaces": {"this-box"}}, True, Path("/repo/anchor"))
     ]
 
 

@@ -1,5 +1,4 @@
-"""Machine-gate decision for ``update``: never provision a runtime the launch-time
-reconcile would refuse on this machine."""
+"""Shared physical-machine runtime policy and update configuration boundary."""
 
 from __future__ import annotations
 
@@ -13,6 +12,34 @@ MACHINE_GATED_SKIP = "SKIPPED (not allowed on this machine)"
 class MachineDetectionError(Exception):
     """The machine gate can't be decided: the enabling repository or the
     machine identity could not be resolved."""
+
+
+def runtime_allowed(
+    scope: str, name: str, machine: str, gate: dict[str, set[str]], *,
+    gate_present: bool = True, repo_dir: Path | None = None,
+) -> bool:
+    """Apply deployment policy without granting execution-space authority.
+
+    Universal runtimes always reconcile. Machine-gated runtimes use a present
+    manifest's explicit physical or execution selectors. With no manifest,
+    enabling the plugin permits its local runtime; an omitted entry in a
+    present manifest still refuses.
+    """
+    if scope == "universal":
+        return True
+    if scope == "machine-gated":
+        allowed = gate.get(name)
+        if allowed is not None:
+            physical_machine = machine
+            if repo_dir is not None:
+                from .machine_identity import resolve_execution_context
+
+                physical_machine = resolve_execution_context(
+                    machine, repo_dir, environment=cfg.detect_platform(),
+                ).target.machine
+            return machine in allowed or physical_machine in allowed
+        return not gate_present
+    return False
 
 
 def _machine_gate_blocks(name: str, scope: str, context: Path | None) -> bool:
@@ -55,6 +82,11 @@ def _machine_gate_blocks(name: str, scope: str, context: Path | None) -> bool:
         raise MachineDetectionError(f"could not detect machine identity for {name}: {error}") from error
     gate = reconcile.load_runtime_gate(repo_dir)
     gate_present = reconcile.gate_manifest_present(repo_dir)
-    return not reconcile.runtime_allowed(
-        scope, name, machine, gate, gate_present=gate_present
-    )
+    try:
+        return not reconcile.runtime_allowed(
+            scope, name, machine, gate, gate_present=gate_present, repo_dir=repo_dir,
+        )
+    except (ValueError, OSError) as error:
+        raise MachineDetectionError(
+            f"could not resolve physical machine identity for {name}: {error}"
+        ) from error

@@ -1,0 +1,9 @@
+{
+  "comment": "Resolve physical-machine runtime deployment policy separately from execution identity",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

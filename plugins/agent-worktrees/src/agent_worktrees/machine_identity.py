@@ -23,9 +23,13 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
-from machine_transport import MachineEntry, machine_entries_to_topology, machine_name, resolve_identity
+from machine_transport import (
+    MachineEntry, MachineEnvironment, MachineSelection,
+    machine_entries_to_topology, machine_name, resolve_identity,
+)
 from machine_transport import resolve_machine_selection, split_machine_environment
 from machine_transport import is_local_machine as _mt_is_local_machine
 
@@ -84,6 +88,24 @@ def resolve_execution_machine(
     if not guest and resolved.topology_key is not None:
         return machine_name(entries[resolved.topology_key])
     return resolved.canonical
+
+
+def resolve_execution_context(
+    name: str, repo_dir: str | Path, *, environment: str,
+) -> MachineSelection[MachineEntry]:
+    """Project a registered execution ID into its physical/environment tuple.
+
+    This is metadata selection, not execution-space mutation authority. Unknown
+    names retain their exact spelling; suffixes alone cannot admit another host.
+    """
+    try:
+        entries = cfg.load_machines_yaml(repo_dir)
+    except FileNotFoundError:
+        entries = {}
+    selection = resolve_machine_selection(entries, name, environment)
+    if selection.entry is None:
+        return MachineSelection(None, MachineEnvironment(name, environment), selection.exact)
+    return selection
 
 
 def is_local_machine(name: str, config: cfg.Config) -> bool:

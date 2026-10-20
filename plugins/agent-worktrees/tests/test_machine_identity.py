@@ -103,6 +103,73 @@ def test_remote_legacy_projection_does_not_suppress_local_wsl_qualification() ->
         ) == "example-host-wsl"
 
 
+@pytest.mark.parametrize("environment", ["windows", "wsl", "linux"])
+def test_execution_context_preserves_declared_dimensions(
+    monkeypatch: pytest.MonkeyPatch, environment: str,
+) -> None:
+    entry = cfg.MachineEntry(
+        key="custom-space", display_name="Custom space", execution_platform=environment,
+        physical_host="physical-host-wsl", hostname="Independent-Hostname",
+    )
+    monkeypatch.setattr(cfg, "load_machines_yaml", lambda repo: {entry.key: entry})
+    selected = machine_identity.resolve_execution_context(
+        entry.key, Path("/synthetic"), environment=environment,
+    )
+    assert selected.entry == entry
+    assert selected.target.machine == "physical-host-wsl"
+    assert selected.target.environment == environment
+    assert selected.entry.key == "custom-space"
+    assert selected.entry.hostname == "Independent-Hostname"
+
+
+@pytest.mark.parametrize("missing", [False, True])
+def test_execution_context_does_not_infer_unknown_physical_host(
+    monkeypatch: pytest.MonkeyPatch, missing: bool,
+) -> None:
+    def entries(repo: str | Path) -> dict[str, cfg.MachineEntry]:
+        if missing:
+            raise FileNotFoundError("no optional registry")
+        return {}
+
+    monkeypatch.setattr(cfg, "load_machines_yaml", entries)
+    selected = machine_identity.resolve_execution_context(
+        "unregistered-wsl", Path("/synthetic"), environment="wsl",
+    )
+    assert selected.entry is None
+    assert selected.target.machine == "unregistered-wsl"
+
+
+def test_execution_context_refuses_conflicting_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    entry = cfg.MachineEntry(
+        key="guest-space", display_name="Guest space",
+        execution_platform="wsl", physical_host="physical-host",
+    )
+    monkeypatch.setattr(cfg, "load_machines_yaml", lambda repo: {entry.key: entry})
+    with pytest.raises(ValueError, match="conflicts"):
+        machine_identity.resolve_execution_context(
+            entry.key, Path("/synthetic"), environment="windows",
+        )
+
+
+def test_execution_context_refuses_ambiguous_registry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    entries = {
+        key: cfg.MachineEntry(
+            key=key, display_name=key, execution_platform="wsl",
+            physical_host=key, hostname="Shared-Hostname",
+        )
+        for key in ("first-space", "second-space")
+    }
+    monkeypatch.setattr(cfg, "load_machines_yaml", lambda repo: entries)
+    with pytest.raises(ValueError):
+        machine_identity.resolve_execution_context(
+            "Shared-Hostname", Path("/synthetic"), environment="wsl",
+        )
+
+
 class TestIsLocalMachine:
     @pytest.fixture(autouse=True)
     def native_execution(self, monkeypatch) -> None:

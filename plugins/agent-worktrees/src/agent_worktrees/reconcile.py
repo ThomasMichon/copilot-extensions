@@ -64,6 +64,7 @@ import yaml
 from . import config as cfg
 from . import runtime_identity
 from .installer_capabilities import posix_zero_downtime_flag_supported
+from .update_gate import runtime_allowed as runtime_allowed
 
 MARKETPLACE = "copilot-extensions"
 _CORE_SOURCE_FIELDS = (
@@ -1846,31 +1847,6 @@ def load_runtime_gate(repo_dir: Path) -> dict[str, set[str]]:
     return gate
 
 
-def runtime_allowed(scope: str, name: str, machine: str,
-                    gate: dict[str, set[str]], *, gate_present: bool = True) -> bool:
-    """Whether a plugin's runtime should be reconciled on this machine.
-
-    ``universal`` always reconciles. ``machine-gated`` reconciles when the gate
-    manifest lists this machine for the plugin. The #693 Phase 3 refinement: when
-    **no** gate manifest exists anywhere (``gate_present`` False), an
-    explicitly-enabled ``machine-gated`` runtime is provisioned on the local
-    machine -- there is no gate to defer to and enabling the plugin is the whole
-    intent. A manifest that is *present* stays authoritative: a plugin/machine it
-    omits is still skipped (conservative). ``gate_present`` defaults to True so a
-    caller that does not thread it keeps the strict, pre-Phase-3 behavior.
-    """
-    if scope == "universal":
-        return True
-    if scope == "machine-gated":
-        allowed = gate.get(name)
-        if allowed is not None:
-            return machine in allowed
-        # Not named in the gate: provision locally only when no gate manifest
-        # exists at all; a present-but-silent manifest stays conservative.
-        return not gate_present
-    return False
-
-
 # --------------------------------------------------------------------------
 # Cache
 # --------------------------------------------------------------------------
@@ -1925,7 +1901,8 @@ def build_plan(
     """
     now = time.time() if now is None else now
     if machine is None:
-        machine = cfg.detect_machine(repo_dir)
+        config = cfg.load_config()
+        machine = cfg.detect_machine(repo_dir, value=config.configured_machine)
     cache = load_cache() if cache is None else cache
     plugins_cache: dict[str, Any] = cache.setdefault("plugins", {})
 
@@ -1983,7 +1960,7 @@ def build_plan(
         # Runtime reconciliation (local, version-keyed, gated).
         scope = manifest_runtime_scope(pdir) or "none"
         if scope != "none" and runtime_allowed(
-            scope, name, machine, gate, gate_present=gate_present
+            scope, name, machine, gate, gate_present=gate_present, repo_dir=repo_dir,
         ):
             try:
                 runtime_env, selected_runtime_root = runtime_installer_environment(

@@ -1441,8 +1441,18 @@ via environment variables — `WORKTREE_GATE_MANIFEST` (the filename) and
 `WORKTREE_GATE_ANCHOR` (the anchor repo name) — so any control harness can point
 the gate at its own manifest; the defaults (`external-repos.yaml`, anchor
 `private downstream reference repo`) match this repo's reference facility. With no gate info
-available, a `machine-gated` runtime is **skipped** (safe default — never
-auto-install a machine-specific runtime where the policy is unknown).
+available because no gate manifest exists, enabling the plugin permits its
+local runtime. A present manifest remains authoritative: omitted plugins or
+machines are skipped.
+
+Deployment selectors may name the canonical physical machine shared by its
+declared environments. Update and launch reconciliation resolve a registered
+execution ID through the same `machine_transport` physical/environment map;
+custom execution keys and physical names ending in platform-like suffixes are
+not rewritten. Exact execution-ID selectors remain compatible and select only
+that execution address. Unknown names retain exact-match behavior, while
+ambiguous or conflicting registry selections refuse. This deployment decision
+does not change installation identity, native/guest locality or record ownership.
 Reconciliation is local and version-keyed, so a re-launch with no version change
 does ~no work; the network payload refresh is throttled via a small cache under
 `~/.agent-worktrees/`. Opt out per session with `WORKTREE_NO_RECONCILE=1`.
