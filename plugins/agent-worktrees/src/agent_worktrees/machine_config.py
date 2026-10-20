@@ -18,10 +18,10 @@ _MARKERS = (
 )
 
 
-def machine_config_root(base: str | None) -> str | None:
-    """The machine-local project root when it carries agent config, else ``None``."""
+def machine_config_root(base: str | None, *, project: str | None = None) -> str | None:
+    """The selected project's local config root; omitted project retains ambient lookup."""
     try:
-        root = str(cfg.project_dir())
+        root = str(cfg.project_dir(project))
     except Exception:  # noqa: BLE001 -- an unresolvable project has no overlay
         return None
     if base and os.path.abspath(root) == os.path.abspath(base):

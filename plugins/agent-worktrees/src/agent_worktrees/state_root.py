@@ -1042,7 +1042,7 @@ def config_source_anchors(
         sources.append(ConfigSource(anchor=base, origin="harness"))
     from .machine_config import machine_config_root
 
-    if local := machine_config_root(base):
+    if local := machine_config_root(base, project=config.repo_name):
         sources.append(ConfigSource(anchor=local, origin="machine"))
     res = resolve_state_root(config, cwd=cwd)
     if res.requires_external and res.bound and res.path:

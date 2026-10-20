@@ -717,11 +717,11 @@ def test_machine_gate_uses_physical_host_without_changing_execution_id(
 
 
 @pytest.mark.parametrize("resident_project", [None, "unrelated-project"])
-@pytest.mark.parametrize("overlay", [False, True])
+@pytest.mark.parametrize("registry_location", ["repository", "knowledge", "machine"])
 @pytest.mark.parametrize("linked", [False, True])
 def test_deferred_runtime_admission_uses_target_project_without_ambient_state(
     env: Any, monkeypatch: pytest.MonkeyPatch, resident_project: str | None,
-    overlay: bool, linked: bool,
+    registry_location: str, linked: bool,
 ) -> None:
     from types import SimpleNamespace
     import threading
@@ -752,7 +752,18 @@ def test_deferred_runtime_admission_uses_target_project_without_ambient_state(
         assert front_door_cli._git_toplevel(launch_dir) == env.repo
     knowledge = env.home / "knowledge"
     knowledge.mkdir()
-    registry = knowledge if overlay else env.repo
+    if registry_location == "machine":
+        registry = cfg.project_dir("target-project") / cfg.INREPO_CONFIG_DIRNAME
+        registry.mkdir(parents=True)
+        foreign_registry = cfg.project_dir("unrelated-project") / cfg.INREPO_CONFIG_DIRNAME
+        foreign_registry.mkdir(parents=True)
+        (foreign_registry / "machines.yaml").write_text(json.dumps({
+            "machines": {"custom-execution": {
+                "execution_platform": "wsl", "physical_host": "foreign-host",
+            }},
+        }), encoding="utf-8")
+    else:
+        registry = knowledge if registry_location == "knowledge" else env.repo
     (registry / "machines.yaml").write_text(json.dumps({
         "machines": {"custom-execution": {
             "execution_platform": "wsl", "physical_host": "physical-host",
@@ -761,9 +772,10 @@ def test_deferred_runtime_admission_uses_target_project_without_ambient_state(
     config = cfg.Config(
         srcroot=str(env.home), machine="custom-execution", platform="wsl",
         repo_name="target-project", configured_machine="custom-execution",
-        knowledge_repo="knowledge" if overlay else "",
+        knowledge_repo="knowledge" if registry_location == "knowledge" else "",
         repos={"target-project": cfg.RepoConfig(
-            anchor=str(env.repo), worktree_root=str(env.home / "trees"), stateless=overlay,
+            anchor=str(env.repo), worktree_root=str(env.home / "trees"),
+            stateless=registry_location == "knowledge",
         )},
     )
     monkeypatch.setattr(cfg, "detect_platform", lambda: "wsl")

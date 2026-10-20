@@ -1453,6 +1453,8 @@ not rewritten. Update and deferred launch planning select the target repository'
 project configuration explicitly, without changing the resident's active project.
 That configuration follows both execution detection and physical projection, so
 a stateless harness retains its declared knowledge-overlay machine registry.
+Machine-local registry sources use that target project's configuration root,
+never the resident's unrelated or cleared active project.
 Registry lookup prefers checkout-local data. If absent, a linked checkout may
 use its configured owning anchor's registry/overlay only after Git confirms that
 ownership; plugin settings and deployment gates still come from the launch path.
