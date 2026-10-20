@@ -4131,6 +4131,182 @@ function Resolve-InstallationStatus(
     return [pscustomobject]$result
 }
 
+function Get-RuntimeDeploymentOwner(
+    $Resolution,
+    [string]$ResolvedCopilotHome,
+    [string]$ResolvedProjectRoot
+) {
+    # Activation receipts describe the selected artifact, not invocation provenance.
+    $invocationPayload = $PayloadRoot
+    if (-not $invocationPayload) { $invocationPayload = $env:COPILOT_PLUGIN_ROOT }
+    if (-not $invocationPayload) {
+        Fail 'resolve requires -PayloadRoot or COPILOT_PLUGIN_ROOT.'
+    }
+    if (-not [IO.Path]::IsPathRooted($invocationPayload)) {
+        Fail 'The payload root must be absolute.'
+    }
+    $resolvedPayload = Canonical-Path $invocationPayload -MustExist
+    if (-not (Test-Path -LiteralPath $resolvedPayload -PathType Container)) {
+        Fail "The payload root must be an existing directory: $resolvedPayload"
+    }
+    if ($env:COPILOT_PLUGIN_ROOT) {
+        if (-not [IO.Path]::IsPathRooted($env:COPILOT_PLUGIN_ROOT)) {
+            Fail 'COPILOT_PLUGIN_ROOT must be absolute.'
+        }
+        if (-not (Paths-Equal $resolvedPayload $env:COPILOT_PLUGIN_ROOT)) {
+            Fail 'COPILOT_PLUGIN_ROOT conflicts with -PayloadRoot.'
+        }
+    }
+    $descriptor = Read-SourceDescriptor
+    if ($null -ne $descriptor) {
+        if (-not $PluginId) { Fail 'Explicit source resolution requires -PluginId.' }
+        $evidence = [pscustomobject]@{
+            source = Normalize-Source $descriptor ''
+            pluginId = $PluginId
+            readableName = $(if ($MarketplaceKey) { $MarketplaceKey } else { 'marketplace' })
+        }
+    }
+    else {
+        $evidence = Resolve-InstalledEvidence $resolvedPayload $ResolvedCopilotHome $ResolvedProjectRoot
+        if ($null -eq $evidence) {
+            $evidence = Resolve-DirectoryEvidence $resolvedPayload $PluginId
+        }
+        if ($null -eq $evidence) {
+            Fail "Cannot establish marketplace provenance for payload '$resolvedPayload'. Supply an explicit source descriptor for management/development mode."
+        }
+        if ($PluginId -and $PluginId -cne $evidence.pluginId) {
+            Fail "Expected plugin '$PluginId', payload evidence identifies '$($evidence.pluginId)'."
+        }
+    }
+    $identity = Source-Identity $evidence.source $evidence.readableName
+    Assert-PluginId $evidence.pluginId
+    if ($Resolution.status -cne 'ready' -or
+        $Resolution.actualMode -cnotin @('legacy', 'namespaced') -or
+        $identity.marketplaceId -cne $Resolution.marketplaceId -or
+        $evidence.pluginId -cne $Resolution.pluginId) {
+        Fail 'Runtime deployment requires a resolved installation owner.'
+    }
+    return [pscustomobject][ordered]@{
+        sourceFingerprint = $identity.fingerprint
+        pluginId = $Resolution.pluginId
+        mode = $Resolution.actualMode
+        runtimeRoot = $Resolution.runtimeRoot
+        environment = $Resolution.environment
+    }
+}
+
+function Get-RuntimeDeploymentProperty($Object, [string]$Name) {
+    if (-not (Has-ExactProperty $Object $Name)) { return $null }
+    # Preserve JSON arrays: a singleton must not become an authorized scalar.
+    return ,$Object.PSObject.Properties[$Name].Value
+}
+
+function Test-RuntimeDeploymentOwnerEqual($Actual, $Expected) {
+    if ($null -eq $Expected) { return ($null -eq $Actual) }
+    if ($Expected -is [string]) {
+        return ($Actual -is [string] -and $Actual -ceq $Expected)
+    }
+    if ($Actual -isnot [System.Management.Automation.PSCustomObject]) {
+        return $false
+    }
+    $actualProperties = @($Actual.PSObject.Properties)
+    $expectedProperties = @($Expected.PSObject.Properties)
+    if ($actualProperties.Count -ne $expectedProperties.Count) { return $false }
+    foreach ($property in $expectedProperties) {
+        if (-not (Has-ExactProperty $Actual $property.Name)) { return $false }
+        if (-not (Test-RuntimeDeploymentOwnerEqual `
+            (Get-RuntimeDeploymentProperty $Actual $property.Name) $property.Value)) {
+            return $false
+        }
+    }
+    return $true
+}
+
+function Read-RuntimeDeploymentPolicy(
+    $Resolution,
+    [string]$ResolvedCopilotHome,
+    [string]$ResolvedProjectRoot
+) {
+    $runtimeRoot = $Resolution.runtimeRoot
+    if ($null -eq $runtimeRoot) { $runtimeRoot = $Resolution.legacy.root }
+    # Never canonicalize the leaf: a policy link must remain visible to safe I/O.
+    $path = Join-Path $runtimeRoot 'runtime-deployment.json'
+    $deployment = [pscustomobject][ordered]@{
+        path = $path
+        state = 'missing'
+        managed = $false
+        allowPluginPublication = $true
+        reason = 'deployment-default-standalone'
+        owner = $null
+        diagnostic = $null
+        recovery = $null
+    }
+    try {
+        $entry = Get-Item -LiteralPath $path -Force -ErrorAction Stop
+    }
+    catch [System.Management.Automation.ItemNotFoundException] {
+        return $deployment
+    }
+    catch {
+        $deployment.diagnostic = $_.Exception.Message
+    }
+    $deployment.state = 'invalid'
+    $deployment.managed = $null
+    $deployment.allowPluginPublication = $false
+    $deployment.reason = 'deployment-policy-invalid'
+    $deployment.recovery = 'Repair the installation-owned runtime deployment policy explicitly.'
+    if ($null -ne $deployment.diagnostic) { return $deployment }
+    try {
+        $capture = Read-RegularFileBytes $path 'Runtime deployment policy' -RequireSameIdentity
+        $text = $strictUtf8.GetString([byte[]]$capture.bytes)
+        $policy = Read-JsonText $text 'runtime deployment policy'
+        if ($policy -isnot [System.Management.Automation.PSCustomObject]) {
+            Fail 'Runtime deployment policy must be a JSON object.'
+        }
+        $schema = Get-RuntimeDeploymentProperty $policy 'schema'
+        if ($schema -isnot [string] -or $schema -cne 'copilot-extensions.runtime-deployment') {
+            Fail 'Runtime deployment policy has an invalid schema.'
+        }
+        $version = Get-RuntimeDeploymentProperty $policy 'version'
+        if (($version -isnot [int] -and $version -isnot [long] -and
+             $version -isnot [bigint]) -or $version -lt 1) {
+            Fail 'Runtime deployment policy version must be a positive integer.'
+        }
+        if ($version -gt 1) {
+            $deployment.state = 'unsupported'
+            $deployment.reason = 'deployment-policy-version-unsupported'
+            $deployment.diagnostic = "Runtime deployment policy version $version is unsupported."
+            return $deployment
+        }
+        if (@($policy.PSObject.Properties).Count -ne 4 -or
+            -not (Has-ExactProperty $policy 'owner') -or
+            -not (Has-ExactProperty $policy 'managed')) {
+            Fail 'Runtime deployment policy fields must be schema, version, owner and managed.'
+        }
+        $managed = Get-RuntimeDeploymentProperty $policy 'managed'
+        if ($managed -isnot [bool]) {
+            Fail 'Runtime deployment policy managed must be a JSON boolean.'
+        }
+        $owner = Get-RuntimeDeploymentProperty $policy 'owner'
+        $expected = Get-RuntimeDeploymentOwner $Resolution $ResolvedCopilotHome $ResolvedProjectRoot
+        if (-not (Test-RuntimeDeploymentOwnerEqual $owner $expected)) {
+            Fail 'Runtime deployment policy belongs to another installation or environment.'
+        }
+        $deployment.state = 'valid'
+        $deployment.managed = $managed
+        $deployment.allowPluginPublication = -not $managed
+        $deployment.reason = $(if ($managed) { 'deployment-managed' } else { 'deployment-explicit-standalone' })
+        $deployment.owner = $expected
+        $deployment.recovery = $(if ($managed) {
+            'Use explicit installation management to install or update this runtime; plugin bootstrap and first use may not publish it.'
+        } else { $null })
+    }
+    catch {
+        $deployment.diagnostic = $_.Exception.Message
+    }
+    return $deployment
+}
+
 function Assert-ExpectedGeneration(
     [long]$Actual,
     [long]$Expected,
@@ -6387,6 +6563,8 @@ try {
         'slot-cutover',
         'slot-release',
         'status',
+        'deployment-status',
+        'probe-plugin-publication',
         'probe-legacy'
     ) 'Action'
     if ($WithContextValidation) {
@@ -6449,6 +6627,8 @@ try {
             'slot-completion-validate',
             'slot-cutover',
             'status',
+            'deployment-status',
+            'probe-plugin-publication',
             'probe-legacy'
         )) {
         Fail "-ExpectedPayloadRoot is not valid for $Action."
@@ -6512,8 +6692,12 @@ try {
         if (-not $name) { $name = 'marketplace' }
         $result = Source-Identity $normalized $name
     }
-    elseif ($Action -eq 'status' -or $Action -eq 'probe-legacy') {
+    elseif ($Action -in @('status', 'deployment-status', 'probe-plugin-publication', 'probe-legacy')) {
         $result = Resolve-InstallationStatus $resolvedCopilotHome $resolvedProjectRoot $resolvedDurableHome
+        if ($Action -cin @('deployment-status', 'probe-plugin-publication')) {
+            $deployment = Read-RuntimeDeploymentPolicy $result $resolvedCopilotHome $resolvedProjectRoot
+            $result | Add-Member -NotePropertyName deployment -NotePropertyValue $deployment
+        }
         if ($WithContextValidation -and $result.actualMode -ceq 'namespaced' -and
             $result.status -cin @('ready', 'deactivation-required')) {
             $validationDurableHome = [string]$result.context
@@ -6676,6 +6860,10 @@ try {
     }
     $result | ConvertTo-Json -Depth 12 -Compress
     if ($Action -eq 'probe-legacy' -and -not $result.allowMutation) {
+        exit 3
+    }
+    if ($Action -ceq 'probe-plugin-publication' -and
+        -not $result.deployment.allowPluginPublication) {
         exit 3
     }
     if ($Action -eq 'guest-status' -and $result.status -ne 'ready') {

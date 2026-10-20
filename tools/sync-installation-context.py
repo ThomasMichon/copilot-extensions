@@ -44,6 +44,7 @@ FILES = (
     "_installation_context_legacy_retirement.py",
     "_installation_context_maintenance.py",
     "_installation_context_mode_cli.py",
+    "_installation_context_deployment.py",
     "installation_context.py",
     "installation-context.sh",
     "installation-context.ps1",

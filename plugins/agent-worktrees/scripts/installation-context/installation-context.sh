@@ -4314,7 +4314,7 @@ tombstone_snapshot() {
         "$disposition" "$owner_marketplace_id" "$activation_path"
 }
 
-status_identity_snapshot() {
+payload_source_snapshot() {
     if [[ -n "$SOURCE_FILE" ]]; then
         [[ -n "$PLUGIN_ID" ]] || fail "Explicit source resolution requires --plugin-id."
         normalize_source "$SOURCE_FILE" ""
@@ -4333,6 +4333,12 @@ status_identity_snapshot() {
     fi
     assert_plugin_id "$EVIDENCE_PLUGIN_ID"
     derive_identity "$EVIDENCE_READABLE_NAME"
+    printf 'marketplaceId\t%s\npluginId\t%s\nsourceFingerprint\t%s\n' \
+        "$MARKETPLACE_ID" "$EVIDENCE_PLUGIN_ID" "$SOURCE_FINGERPRINT"
+}
+
+status_identity_snapshot() {
+    payload_source_snapshot >/dev/null
     find_existing_source "$DURABLE_HOME" "$SOURCE_FINGERPRINT" "$MARKETPLACE_ID"
     if [[ "$EXISTING_JSON" =~ \"sameId\":false || "$EXISTING_JSON" =~ \"locatorMatch\":false ]]; then
         fail "Source '$SOURCE_FINGERPRINT' already owns another cell/locator; explicit rebind or new-cell intent is required."
@@ -4640,6 +4646,143 @@ emit_legacy_json() {
     printf '}'
 }
 
+DEPLOYMENT_JSON=""
+
+deployment_policy_snapshot() {
+    local path="$1" actual_mode="$2" status="$3" runtime_root="$4"
+    local encoded document="" schema version managed owner field value source_snapshot
+    local source_marketplace source_plugin source_fingerprint ancestor ancestor_metadata
+    if [[ ! -e "$path" && ! -L "$path" ]]; then
+        # A failed existence test also covers EACCES and ENOTDIR. Only accept
+        # absence after finding a searchable ordinary directory above it.
+        ancestor="$(dirname -- "$path")"
+        while [[ ! -e "$ancestor" && ! -L "$ancestor" ]]; do
+            [[ "$ancestor" != / ]] ||
+                fail "Cannot inspect runtime deployment policy ancestors."
+            ancestor="$(dirname -- "$ancestor")"
+        done
+        ancestor_metadata="$(stat_file_metadata "$ancestor")" ||
+            fail "Cannot inspect runtime deployment policy ancestor '$ancestor'."
+        [[ ! -L "$ancestor" ]] && metadata_is_directory "$ancestor_metadata" ||
+            fail "Runtime deployment policy ancestor '$ancestor' must be an ordinary directory."
+        [[ -x "$ancestor" ]] ||
+            fail "Runtime deployment policy ancestor '$ancestor' is not searchable."
+        emit_deployment_json "$path" missing false true deployment-default-standalone
+        return
+    fi
+    open_regular_file_once "$path" "Runtime deployment policy" true ||
+        fail "Runtime deployment policy could not be opened safely without blocking."
+    encoded="$(LC_ALL=C od -An -v -tx1 <&"$SAFE_FILE_FD" | tr -d ' \n')" ||
+        fail "Cannot read runtime deployment policy."
+    finish_regular_file_once "$path" "Runtime deployment policy" true
+    # Bash strings cannot retain NUL. Reject it before decoding so corrupt JSON
+    # cannot become an apparently valid policy through command substitution.
+    [[ ! "$encoded" =~ ^([[:xdigit:]]{2})*00 ]] ||
+        fail "Runtime deployment policy contains a NUL byte."
+    decode_hex_into document "$encoded"
+    utf8_is_well_formed "$document" ||
+        fail "Runtime deployment policy is not valid UTF-8."
+    local DEPLOYMENT_DOCUMENT="$document"
+    document=@DEPLOYMENT_DOCUMENT
+    [[ "$(json_type_path "$document" "")" == object ]] ||
+        fail "Runtime deployment policy must be a JSON object."
+    json_optional_string_into schema "$document" schema
+    [[ "$schema" == copilot-extensions.runtime-deployment ]] ||
+        fail "Runtime deployment policy has an invalid schema."
+    version="$(json_optional_path "$document" version)"
+    [[ "$(json_type_path "$document" version)" == number &&
+       "$version" =~ ^[1-9][0-9]*$ ]] ||
+        fail "Runtime deployment policy version must be a positive integer."
+    if [[ "$version" != 1 ]]; then
+        emit_deployment_json "$path" unsupported null false \
+            deployment-policy-version-unsupported null \
+            "Runtime deployment policy version $version is unsupported." \
+            "Repair the installation-owned runtime deployment policy explicitly."
+        return
+    fi
+    assert_json_object_length "$document" "" 4 "Runtime deployment policy"
+    [[ "$(json_type_path "$document" managed)" == boolean ]] ||
+        fail "Runtime deployment policy managed must be a JSON boolean."
+    managed="$(json_optional_path "$document" managed)"
+    [[ "$(json_type_path "$document" owner)" == object ]] ||
+        fail "Runtime deployment policy belongs to another installation or environment."
+
+    # Resolve invocation provenance again, independently of activation/context
+    # receipts. Those receipts can select another source's runtime artifact.
+    local PAYLOAD_ROOT="${PAYLOAD_ROOT:-${COPILOT_PLUGIN_ROOT:-}}"
+    [[ -n "$PAYLOAD_ROOT" ]] ||
+        fail "resolve requires --payload-root or COPILOT_PLUGIN_ROOT."
+    is_absolute "$PAYLOAD_ROOT" || fail "The payload root must be absolute."
+    PAYLOAD_ROOT="$(canonical_path "$PAYLOAD_ROOT" true)"
+    [[ -d "$PAYLOAD_ROOT" ]] ||
+        fail "The payload root must be an existing directory: $PAYLOAD_ROOT"
+    if [[ -n "${COPILOT_PLUGIN_ROOT:-}" ]]; then
+        is_absolute "$COPILOT_PLUGIN_ROOT" || fail "COPILOT_PLUGIN_ROOT must be absolute."
+        paths_equal "$PAYLOAD_ROOT" "$COPILOT_PLUGIN_ROOT" ||
+            fail "COPILOT_PLUGIN_ROOT conflicts with --payload-root."
+    fi
+    source_snapshot="$(payload_source_snapshot)"
+    source_marketplace="$(snapshot_value "$source_snapshot" marketplaceId)"
+    source_plugin="$(snapshot_value "$source_snapshot" pluginId)"
+    source_fingerprint="$(snapshot_value "$source_snapshot" sourceFingerprint)"
+    [[ "$status" == ready && ( "$actual_mode" == legacy || "$actual_mode" == namespaced ) &&
+       "$source_marketplace" == "$RESOLVED_MARKETPLACE_ID" &&
+       "$source_plugin" == "$RESOLVED_PLUGIN_ID" ]] ||
+        fail "Runtime deployment requires a resolved installation owner."
+    assert_json_object_length "$document" owner 5 "Runtime deployment policy owner"
+    for field in sourceFingerprint pluginId mode runtimeRoot; do
+        case "$field" in
+            sourceFingerprint) value="$source_fingerprint" ;;
+            pluginId) value="$RESOLVED_PLUGIN_ID" ;;
+            mode) value="$actual_mode" ;;
+            runtimeRoot) value="$runtime_root" ;;
+        esac
+        [[ "$(json_type_path "$document" "$(path_join owner "$field")")" == string ]] ||
+            fail "Runtime deployment policy belongs to another installation or environment."
+        json_optional_into owner "$document" "$(path_join owner "$field")"
+        [[ "$owner" == "$value" ]] ||
+            fail "Runtime deployment policy belongs to another installation or environment."
+    done
+    assert_json_object_length "$document" "$(path_join owner environment)" 3 \
+        "Runtime deployment policy owner environment"
+    read_environment_tuple "$document" "$(path_join owner environment)" \
+        "runtime deployment owner environment"
+    [[ "$READ_ENV_PLATFORM" == "$CURRENT_PLATFORM" &&
+       "$READ_ENV_HOME_REAL_PATH" == "$CURRENT_PROFILE_HOME" &&
+       "$READ_ENV_WSL_DISTRO_TYPE" == "$CURRENT_WSL_DISTRO_TYPE" &&
+       "$READ_ENV_WSL_DISTRO" == "$CURRENT_WSL_DISTRO" ]] ||
+        fail "Runtime deployment policy belongs to another installation or environment."
+    owner="{\"sourceFingerprint\":$(json_quote "$source_fingerprint"),\"pluginId\":$(json_quote "$RESOLVED_PLUGIN_ID"),\"mode\":$(json_quote "$actual_mode"),\"runtimeRoot\":$(json_quote "$runtime_root"),\"environment\":$(emit_environment_json)}"
+    if [[ "$managed" == true ]]; then
+        emit_deployment_json "$path" valid true false deployment-managed "$owner" "" \
+            "Use explicit installation management to install or update this runtime; plugin bootstrap and first use may not publish it."
+    else
+        emit_deployment_json "$path" valid false true deployment-explicit-standalone "$owner"
+    fi
+}
+
+emit_deployment_json() {
+    local path="$1" state="$2" managed="$3" allow="$4" reason="$5"
+    local owner="${6:-null}" diagnostic="${7:-}" recovery="${8:-}"
+    printf '{"path":%s,"state":%s,"managed":%s,"allowPluginPublication":%s,"reason":%s,"owner":%s,"diagnostic":%s,"recovery":%s}' \
+        "$(json_quote "$path")" "$(json_quote "$state")" "$managed" "$allow" \
+        "$(json_quote "$reason")" "$owner" "$(json_string_or_null "$diagnostic")" \
+        "$(json_string_or_null "$recovery")"
+}
+
+resolve_deployment_result() {
+    local actual_mode="$1" status="$2" runtime_root="$3" path deployment_snapshot
+    path="${runtime_root:-$LEGACY_ROOT}"
+    path="${path%/}/runtime-deployment.json"
+    if capture_output deployment_snapshot deployment_policy_snapshot "$path" "$actual_mode" "$status" "$runtime_root"; then
+        DEPLOYMENT_JSON="$deployment_snapshot"
+    else
+        DEPLOYMENT_JSON="$(emit_deployment_json "$path" invalid null false \
+            deployment-policy-invalid null "${deployment_snapshot#installation-context: }" \
+            "Repair the installation-owned runtime deployment policy explicitly.")"
+    fi
+}
+
 emit_status_result() {
     local desired_mode="$1" actual_mode="$2" status="$3" runtime_root="$4" context_path="$5" activation_path="$6" activation_generation="$7" install_generation="$8" reason="$9" allow_mutation="${10-}" probe_reason="${11-}"
     printf '{'
@@ -4667,6 +4810,9 @@ emit_status_result() {
     printf ','
     printf '"legacy":'
     emit_legacy_json
+    if [[ "$ACTION" == deployment-status || "$ACTION" == probe-plugin-publication ]]; then
+        printf ',"deployment":%s' "$DEPLOYMENT_JSON"
+    fi
     if [[ -n "$allow_mutation" ]]; then
         printf ',"allowMutation":%s' "$([[ "$allow_mutation" == true ]] && printf true || printf false)"
         printf ',"probeReason":%s' "$(json_quote "$probe_reason")"
@@ -4804,10 +4950,18 @@ run_status_action() {
         install_generation=""
     fi
 
-    if [[ "$ACTION" == status ]]; then
+    if [[ "$ACTION" == status || "$ACTION" == deployment-status || "$ACTION" == probe-plugin-publication ]]; then
+        if [[ "$ACTION" == deployment-status || "$ACTION" == probe-plugin-publication ]]; then
+            resolve_deployment_result "$actual_mode" "$status" "$runtime_root"
+        fi
         emit_status_result "$desired_mode" "$actual_mode" "$status" "$runtime_root" \
             "$context_path" "$activation_path" "$activation_generation" "$install_generation" "$reason"
         printf '\n'
+        # This exit status reports only the deployment-policy conjunct.
+        if [[ "$ACTION" == probe-plugin-publication &&
+              "$(json_optional_path @DEPLOYMENT_JSON allowPluginPublication)" != true ]]; then
+            return 3
+        fi
         return 0
     fi
 
@@ -4849,8 +5003,8 @@ run_status_action() {
 . "$SCRIPT_DIR/guest-environment.sh"
 
 ACTION="${1:-}"
-[[ "$ACTION" == guest-register || "$ACTION" == guest-status || "$ACTION" == source-id || "$ACTION" == resolve || "$ACTION" == validate || "$ACTION" == stamp || "$ACTION" == activation-cas || "$ACTION" == snapshot-stamp || "$ACTION" == snapshot-validate || "$ACTION" == slot-provision || "$ACTION" == slot-release || "$ACTION" == slot-validate || "$ACTION" == slot-complete || "$ACTION" == slot-completion-validate || "$ACTION" == slot-cutover || "$ACTION" == status || "$ACTION" == probe-legacy ]] ||
-    fail "Usage: installation-context.sh {guest-register|guest-status|source-id|resolve|validate|stamp|activation-cas|snapshot-stamp|snapshot-validate|slot-provision|slot-validate|slot-release|slot-complete|slot-completion-validate|slot-cutover|status|probe-legacy} [options]"
+[[ "$ACTION" == guest-register || "$ACTION" == guest-status || "$ACTION" == source-id || "$ACTION" == resolve || "$ACTION" == validate || "$ACTION" == stamp || "$ACTION" == activation-cas || "$ACTION" == snapshot-stamp || "$ACTION" == snapshot-validate || "$ACTION" == slot-provision || "$ACTION" == slot-release || "$ACTION" == slot-validate || "$ACTION" == slot-complete || "$ACTION" == slot-completion-validate || "$ACTION" == slot-cutover || "$ACTION" == status || "$ACTION" == deployment-status || "$ACTION" == probe-plugin-publication || "$ACTION" == probe-legacy ]] ||
+    fail "Usage: installation-context.sh {guest-register|guest-status|source-id|resolve|validate|stamp|activation-cas|snapshot-stamp|snapshot-validate|slot-provision|slot-validate|slot-release|slot-complete|slot-completion-validate|slot-cutover|status|deployment-status|probe-plugin-publication|probe-legacy} [options]"
 shift
 
 SOURCE_JSON=""
@@ -4986,11 +5140,13 @@ if [[ "$EXPECTED_PAYLOAD_ROOT_SUPPLIED" == true &&
       "$ACTION" != slot-completion-validate &&
       "$ACTION" != slot-cutover &&
       "$ACTION" != status &&
+      "$ACTION" != deployment-status &&
+      "$ACTION" != probe-plugin-publication &&
       "$ACTION" != probe-legacy ]]; then
     fail "--expected-payload-root is not valid for $ACTION."
 fi
 if [[ -n "$SOURCE_JSON" ]]; then
-    if [[ "$ACTION" == status || "$ACTION" == probe-legacy ]]; then
+    if [[ "$ACTION" == status || "$ACTION" == deployment-status || "$ACTION" == probe-plugin-publication || "$ACTION" == probe-legacy ]]; then
         SOURCE_FILE="@SOURCE_JSON"
     else
         SOURCE_FILE="$(mktemp "${TMPDIR:-/tmp}/installation-context-source.XXXXXX")"
@@ -5000,7 +5156,7 @@ if [[ -n "$SOURCE_JSON" ]]; then
 fi
 if [[ -n "$LEGACY_PROBE_FILE" ]]; then
     LEGACY_PROBE_FILE="$(canonical_path "$LEGACY_PROBE_FILE" true)"
-elif [[ "$ACTION" == status || "$ACTION" == probe-legacy || "$ACTION" == activation-cas ]]; then
+elif [[ "$ACTION" == status || "$ACTION" == deployment-status || "$ACTION" == probe-plugin-publication || "$ACTION" == probe-legacy || "$ACTION" == activation-cas ]]; then
     LEGACY_PROBE_FILE="@LEGACY_PROBE_JSON"
 fi
 
@@ -5095,7 +5251,7 @@ if [[ "$ACTION" == slot-cutover ]]; then
     exit 0
 fi
 
-if [[ "$ACTION" == status || "$ACTION" == probe-legacy ]]; then
+if [[ "$ACTION" == status || "$ACTION" == deployment-status || "$ACTION" == probe-plugin-publication || "$ACTION" == probe-legacy ]]; then
     [[ -n "$LEGACY_ROOT" ]] || fail "$ACTION requires --legacy-root."
     is_absolute "$LEGACY_ROOT" || fail "--legacy-root must be absolute."
     LEGACY_ROOT="$(canonical_path "$LEGACY_ROOT")"

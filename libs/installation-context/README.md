@@ -537,6 +537,32 @@ Read-only callers may import `resolve_installation_mode` and
 `wsl_distro`, `current_time`, `host`, and `pid_is_live` arguments are explicit
 test/diagnostic seams; they are not ambient authorization.
 
+`deployment-status` (or Python `resolve_runtime_deployment`) adds a `deployment`
+decision to that unchanged mode-resolution object. `probe-plugin-publication`
+returns the same JSON, exiting 0 when deployment policy permits plugin-triggered
+publication and 3 when it refuses. Malformed invocation remains exit 1.
+This is only the deployment-policy conjunct, not permission to bypass mode
+governance, command ownership, construction, activation or maintenance.
+
+The policy is an ordinary, unlinked `runtime-deployment.json` file in the actual
+runtime root already selected by mode governance. There is no deployment-policy
+path override or environment-variable authorization. Its exact fields are
+`schema: "copilot-extensions.runtime-deployment"`, `version: 1`, a JSON boolean
+`managed`, and `owner`. The owner's exact fields match the existing installation
+tuple: `sourceFingerprint`, `pluginId`, `mode`, `runtimeRoot` and `environment`
+(`platform`, `homeRealPath`, `wslDistro`). This is invocation/installation
+ownership, not a runtime-artifact source selector or a new installation mode.
+No copy of a policy may redirect the resolver to its recorded root.
+
+Missing policy retains standalone behavior; matching `managed: false` explicitly
+permits standalone publication. Matching `managed: true` refuses plugin
+publication, with an explicit-management recovery action. Unreadable, malformed,
+unsupported, linked or foreign policy refuses publication with an explicit
+diagnostic instead of becoming a standalone default. Healthy installed
+execution does not require publication permission. These helpers are read-only:
+they never install, update a redirect, create policy or authorize an explicit
+management lifecycle. Publication-path callers opt into the decision separately.
+
 `status` emits a complete
 `copilot-extensions.installation-resolution` object and exits 0 whenever a
 diagnostic result can be constructed, including invalid or blocked on-disk

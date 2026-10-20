@@ -64,6 +64,54 @@ registration or other non-deployment behavior the operator explicitly retained.
   candidate health and failure preservation intact. Policy changes do not
   authorize starting unused services, resetting source or rewriting live slots.
 
+## First implementation trace - Worktrees
+
+Pre-implementation evidence at `600c0efcae`; these are integration points,
+not a claim that a deployment gate already exists.
+
+| Path | Publication or retained behavior |
+|------|----------------------------------|
+| `plugins/agent-worktrees/scripts/hook_client.py` | Writes command-catalog/session guidance before lifecycle work. Native first install may invoke `command_binding.py --deferred-runtime --run-lifecycle` directly, bypassing `bootstrap-check.ps1`. |
+| `plugins/agent-worktrees/scripts/bootstrap-check.ps1` | First install stamps a snapshot/redirect. The older installed lib-copy reconcile branch directly replaces package files, build metadata and deployment manifest, outside the runtime slot publisher. |
+| `plugins/agent-worktrees/scripts/invoke-payload-runtime.ps1` | Resolves a healthy runtime before provisioning. A miss commits to provisioning before root/lock creation, then invokes namespaced install or legacy stamp plus snapshot provision. |
+| `plugins/agent-worktrees/scripts/install.ps1` | Legacy lifecycle admission precedes staging. Deferred stamp still publishes snapshots, payload pointers and global redirects; it is not a read-only action. |
+| `libs/payload-invocation/command_lifecycle.py` | Validates live borrowed tickets and holds source-qualified ownership through native mutation. Managed deployment must compose with this admission, not waive its source checks. |
+
+The Python hook's legacy fallback separately invokes project hooks, session
+registration, nudges and hygiene checks alongside deployment-capable bootstrap
+and provision checks. A gate must preserve those independent behaviors and the
+guidance writer. Gating only the bootstrap script, whole hook, slot completion
+helper or environment-variable self-provisioning switch misses at least one
+of the traced boundaries.
+
+## Shared decision under implementation
+
+The canonical installation-context helper now has a read-only
+`resolve_runtime_deployment` entry point and `deployment-status` diagnostic
+action. Native parity and publication-path callers are being integrated; the
+presence of this helper alone is not enforcement.
+
+Its installation-local `runtime-deployment.json` record lives at the actual
+runtime root returned by existing mode governance. It does not choose a root,
+change installation mode, select runtime source, activate a generation or grant
+an explicit update authorization. A record has exact `schema`, `version`,
+`owner` and `managed` properties. Version 1 uses schema
+`copilot-extensions.runtime-deployment`; `owner` matches the existing
+source fingerprint, plugin, mode, runtime root and environment tuple.
+
+Absent policy retains standalone behavior. A matching `managed: false` is an
+explicit standalone choice; `managed: true` denies plugin-triggered publication.
+Unreadable, malformed, linked, unsupported or foreign records deny publication
+with an explicit diagnostic and recovery action. Policy permission is only one
+conjunct: callers still owe installation governance, command ownership,
+construction and activation admission. No environment boolean grants permission.
+
+This root-local record keeps scope tied to the already selected installation,
+including a first installation that has only its policy present. It is not a
+second registry of runtime roots or an extension of the binary mode policy.
+Explicit management will compose with the existing source-qualified lifecycle
+lease rather than treating this read-only decision as a management permit.
+
 ## Validation before claiming Phase 3 complete
 
 - [ ] Exercise the real session-bootstrap and indirect first-use paths with

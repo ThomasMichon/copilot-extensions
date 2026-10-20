@@ -615,6 +615,12 @@ def _build_parser() -> argparse.ArgumentParser:
     status_parser = subparsers.add_parser("status")
     _add_mode_arguments(status_parser)
 
+    deployment_parser = subparsers.add_parser("deployment-status")
+    _add_mode_arguments(deployment_parser)
+
+    publication_parser = subparsers.add_parser("probe-plugin-publication")
+    _add_mode_arguments(publication_parser)
+
     probe_parser = subparsers.add_parser("probe-legacy")
     _add_mode_arguments(probe_parser)
 
@@ -899,11 +905,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             }
             if arguments.action == "status":
                 result = resolve_installation_mode(**mode_arguments)
+            elif arguments.action in {"deployment-status", "probe-plugin-publication"}:
+                result = resolve_runtime_deployment(**mode_arguments)
             else:
                 result = probe_legacy_entrypoint(**mode_arguments)
         json.dump(result, sys.stdout, ensure_ascii=False, separators=(",", ":"))
         sys.stdout.write("\n")
         if arguments.action == "probe-legacy" and not result["allowMutation"]:
+            return 3
+        if arguments.action == "probe-plugin-publication" and not result["deployment"]["allowPluginPublication"]:
             return 3
         if arguments.action == "guest-status" and result["status"] != "ready":
             return 1

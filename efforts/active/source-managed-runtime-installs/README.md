@@ -109,6 +109,8 @@ The [deployment-policy slice](deployment-policy.md) maps the existing trigger,
 publication and command-ownership boundaries; it does not disable whole hooks.
 
 - [ ] Add a local managed-deployment policy at the shared publication boundary, retaining standalone defaults and installation scope.
+- [ ] Land and qualify the shared installation-owned decision on Python,
+  no-Python POSIX and PowerShell 5.1 before wiring every publication caller.
 - [ ] Cover session bootstrap and indirect first-use publication without disabling other hook or extension behavior.
 - [ ] Keep adapters thin and enforce drift-compatible service interaction without implicit runtime replacement.
 
@@ -123,7 +125,7 @@ publication and command-ownership boundaries; it does not disable whole hooks.
 The [maintenance slice](maintenance.md) owns the detailed proposal and evidence
 matrix; no schedule or cadence is enabled by this plan.
 
-- [ ] Land the portable source-backed maintenance intent and implementation plan through review before adding that capability.
+- [x] Land the portable source-backed maintenance intent and implementation plan through review before adding that capability.
 - [ ] Extend the existing Manager update path and Agent Machines maintenance owner for bounded source health, selected-ref synchronization and canonical installation; do not add a parallel updater.
 - [ ] Preserve independent Manager/service/plugin-content selections, configured roles and exact per-run source identity across scheduled operation and retries.
 - [ ] Prove unchanged-source reuse, a merged-source advance and explicit dirty/unavailable/overlapping/failed-candidate outcomes on Linux and Windows.
@@ -402,3 +404,13 @@ onto one branch.
 - Full-repository inventories covering 8,476 entries and executable modes remained unchanged before and after each run. An independent coordinator check matched all reports, inventory pairs, exact source/generation assertions and retained container identities.
 - Each adopter proves non-editable installation, source-removal imports/commands and immutable reuse. Bridge additionally proves authenticated serving identity. Dispatch runs without service/supervisor, Index uses only its synthetic client role, Vault requests no credentials or service, and Logger exercises post-removal `session-sync`. These scopes do not claim all-daemon cutover, heavy-engine operation or Manager installation.
 - The all-adopter qualification item is closed. Original deployment-policy/source-selection work, the separately reviewed maintenance extension and consented native adoption remain open; the effort stays Active.
+
+### 2026-10-20 - Deployment and maintenance intent reviewed
+- PR #7397 merged as `600c0efcae6bc2fde86fae07bdeceaf49d147390` after exact-head Copilot approval with no open findings and successful required checks. The reviewed proposal preserves existing deployment, source-selection and scheduling owners; it enables no policy, source binding, cadence or native operation.
+- Re-read the Plan and Validation Plan. Only the Phase 4a intent-review item closes. Deployment-only policy, independent Manager/service source selection, maintenance implementation and observed native operation remain open.
+- The next implementation slice is Phase 3: trace a real bootstrap and indirect first-use path to the owning publication seam, preserve non-deployment behavior and source-qualified ownership, then implement and validate the shared authority decision before partitioning adopter wiring.
+
+### 2026-10-20 - Shared deployment decision implementation
+- Implemented the read-only installation-context decision and native diagnostic/probe adapters under #7030. The installation-local record matches existing source/plugin/mode/root/environment ownership; it does not select runtime source or authorize management.
+- Native fixture coverage distinguishes absent, managed, explicit standalone, malformed, unsupported, inaccessible and foreign policies without runtime or redirect writes. The focused Linux reference/Bash/PowerShell matrix passes 87 cases; Windows API/PowerShell 7, the separate 16-case PowerShell 5.1 matrix, packaging and existing mode smoke checks also pass.
+- Publication callers, skew behavior, explicit management admission and the complete native transition remain open. This helper alone does not enforce the plugin/runtime boundary or complete Phase 3.

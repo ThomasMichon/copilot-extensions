@@ -35,6 +35,7 @@ py-modules = [
     "_installation_context_legacy_retirement",
     "_installation_context_maintenance",
     "_installation_context_mode_cli",
+    "_installation_context_deployment",
 ]
 
 [project.optional-dependencies]
