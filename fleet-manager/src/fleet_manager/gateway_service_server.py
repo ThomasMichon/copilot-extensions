@@ -18,7 +18,7 @@ from aiohttp import HttpVersion11, WSMsgType, web
 from .gateway_service_channel import (
     DEADLINE, FRAME_BYTES, GLOBAL_REQUESTS, REQUEST_HEADERS, RESPONSE_BYTES,
     BODY_BYTES,
-    Channel, Pending, REQUEST_BURST, REQUEST_RATE, TransportError, ValueFreeLogger,
+    Channel, Pending, REQUEST_BURST, REQUEST_RATE, ServerSocket, TransportError, ValueFreeLogger,
     binary, check, headers, close_socket, encode_frame, no_store_response,
     send, send_encoded, shape, target, unpack,
 )
@@ -189,8 +189,8 @@ class ServiceRuntime:
         check(request.method == "GET", "method-denied", 405)
         check(self.unverified < 8, "handshake-limit", 429)
         self.unverified += 1
-        ws = web.WebSocketResponse(max_msg_size=FRAME_BYTES, heartbeat=10,
-                                   compress=False, timeout=2)
+        ws = ServerSocket(max_msg_size=FRAME_BYTES, heartbeat=10,
+                          compress=False, timeout=2, autoclose=False)
         channel = None
         grant = None
         candidate = None

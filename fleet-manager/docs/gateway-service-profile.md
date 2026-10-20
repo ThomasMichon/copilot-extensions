@@ -82,6 +82,9 @@ the same absolute bound while waiting for attachment confirmation.
 Socket closure also has a five-second absolute bound around close-frame writes,
 drain and peer acknowledgment, so a stalled peer cannot hold policy sweep or
 shutdown indefinitely. Expiry reports a value-free `close-timeout` diagnostic.
+Peer CLOSE frames return to the application finalizer rather than automatically
+closing inside `receive()`. Both socket types also bound the base close method
+itself so library-internal protocol-error closure cannot bypass that deadline.
 
 Ticket preparation does not withdraw a healthy active channel. Promotion occurs
 only after attachment confirmation is written, before the channel becomes

@@ -53,6 +53,19 @@ class TransportError(ValueError):
         super().__init__(code)
 
 
+class ServerSocket(web.WebSocketResponse):
+    async def close(self, *, code: int = 1000, message: bytes = b"",
+                    drain: bool = True) -> bool:
+        return await asyncio.wait_for(
+            super().close(code=code, message=message, drain=drain), SEND_TIMEOUT)
+
+
+class ClientSocket(ClientWebSocketResponse):
+    async def close(self, *, code: int = 1000, message: bytes = b"") -> bool:
+        return await asyncio.wait_for(
+            super().close(code=code, message=message), SEND_TIMEOUT)
+
+
 class ValueFreeLogger(logging.LoggerAdapter):
     """aiohttp parser/handler diagnostics must not render supplied byte values."""
 

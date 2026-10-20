@@ -21,7 +21,7 @@ from yarl import URL
 
 from .gateway_auth import make_proof
 from .gateway_service_channel import (
-    BODY_BYTES, CHANNEL_REQUESTS, CHUNK_BYTES, DEADLINE, FRAME_BYTES,
+    BODY_BYTES, CHANNEL_REQUESTS, CHUNK_BYTES, ClientSocket, DEADLINE, FRAME_BYTES,
     REQUEST_HEADERS, RESPONSE_BYTES, RESPONSE_HEADERS, TransportError,
     binary, check, close_socket, headers, origin, response_status, send, shape, target,
     unpack, wire_headers,
@@ -43,7 +43,7 @@ async def channel_socket(
 ) -> AsyncIterator[aiohttp.ClientWebSocketResponse]:
     async with session.ws_connect(
         uri, ssl=tls, heartbeat=10, max_msg_size=FRAME_BYTES, compress=0,
-        autoclose=True, timeout=aiohttp.ClientWSTimeout(ws_close=2),
+        autoclose=False, timeout=aiohttp.ClientWSTimeout(ws_close=2),
     ) as ws:
         try:
             yield ws
@@ -209,6 +209,7 @@ class ServiceConnector:
             timeout=timeout, connector=connector, trust_env=False,
             cookie_jar=aiohttp.DummyCookieJar(), auto_decompress=False,
             trace_configs=[trace],
+            ws_response_class=ClientSocket,
         ) as session:
             # aiohttp 3 has no public toggle for replaying PUT/DELETE on disconnect.
             session._retry_connection = False
