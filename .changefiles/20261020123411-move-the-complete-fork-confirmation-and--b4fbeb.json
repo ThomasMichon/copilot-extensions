@@ -1,0 +1,9 @@
+{
+  "comment": "Move the complete fork confirmation and identity test class unchanged into its focused module.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

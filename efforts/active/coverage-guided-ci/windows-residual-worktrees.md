@@ -87,7 +87,46 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Mechanical move mapping: preserved, not conflated with fixtures
 
+### Fourth admitted move: fork confirmation and identity flow
+
+Baseline: Dev `de3652abbe3da7c0bd5c11299a0a7da0a84dc97d`, including the
+actual #7402 merge. This M-MOVE partition moves only the complete
+`TestCreatePRForkFlow` class into `tests/test_create_pr_fork.py`.
+The adjacent role-resolution class and its B-ROLE provider correction
+remain separate; no fixture correction is folded into this move.
+
+For every method, the bijection is
+`tests/test_pr_ops.py::TestCreatePRForkFlow::<method><parameters>` ->
+`tests/test_create_pr_fork.py::TestCreatePRForkFlow::<method><parameters>`.
+Real before/after collection proves all 317 expanded nodes: 18 moved and
+299 unchanged, with identical fixture bodies/scopes/closures, parameters
+and effective marks. Every original top-level definition remains exactly
+once with an identical AST. No shared fixture, native operation, assertion,
+test tier, production behavior, authority decision or CI admission changes.
+
+Native Windows execution passes all 18 moved cases without skips, using
+exactly two work-stealing workers and the unchanged 30-second item and
+240-second diagnostic group limits: 87.21 seconds, 91.81 including sandbox
+preparation/removal. The nine existing real-Git/contained split-selection
+controls pass without skips in 27.58 seconds (30.03 inclusive), preserving
+whole-file selection and strict refusal of unknown nodes elsewhere.
+The install-contract guard reports thirteen plugins and zero violations.
+Clean-room provisioning is inapplicable to a test-only whole-class move;
+no unavailable Linux/external result or dependency installation is claimed.
+
+The three earlier moves account for 157 expanded nodes; this partition
+brings that total to 175, leaving 142 in the monolith. Remaining leaf
+moves, the setup-bearing finalize/push class, fixture semantics, current
+root-policy compatibility and repeated complete same-head Windows
+qualification remain open. Focused passes do not satisfy the parent gate.
+
 ### Third admitted move: snapshot creation, refspec and head privacy
+
+**Actually merged:** #7402 as
+`48e548aee22be8a2ff8df74ef97ca25f5dbc0fbc`. Its exact-head full Copilot
+approval, green required CI and managed merge are complete; the child was
+finalized. Subsequent moves start from these merged bodies, without claiming
+the complete parent Windows qualification.
 
 Baseline: Dev `7c5b1631026e01a6f45cd73b61517475287f7aba`, the actual #7395
 merge. This M-MOVE partition relocates four complete classes and changes no
