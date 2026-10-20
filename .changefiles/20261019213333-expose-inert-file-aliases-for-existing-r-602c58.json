@@ -1,0 +1,9 @@
+{
+  "comment": "Expose inert file aliases for existing registrar recipe bases",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

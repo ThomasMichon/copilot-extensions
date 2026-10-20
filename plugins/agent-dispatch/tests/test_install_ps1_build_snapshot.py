@@ -34,8 +34,10 @@ explicitly in a local dev loop or a path-gated/manual CI lane, not by default.
 from __future__ import annotations
 
 import os
+import json
 import shutil
 import subprocess
+from functools import partial
 from pathlib import Path
 
 import pytest
@@ -113,6 +115,7 @@ def _run_harness(extra_script: str) -> subprocess.CompletedProcess[str]:
         env=os.environ,
         timeout=30,
         check=True,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
 
 
@@ -157,6 +160,63 @@ Write-Output "RESULT:$result"
     assert (snap_dir / "src" / "mod.py").exists()
     # The live $PluginDir is untouched -- the copy is one-directional.
     assert (plugin_dir / "pyproject.toml").exists()
+
+
+def test_snapshot_retains_base_assets_for_real_settings_resolution(tmp_path, monkeypatch):
+    from plugin_activation import resolve_active_plugins
+    from agent_dispatch import registrar_recipes as recipes
+
+    plugin_dir = _marketplace_plugin_dir(tmp_path)
+    _seed_plugin_dir(plugin_dir)
+    shutil.copy2(_PLUGIN_ROOT / "plugin.json", plugin_dir / "plugin.json")
+    shutil.copytree(_PLUGIN_ROOT / ".agent-dispatch", plugin_dir / ".agent-dispatch")
+    result = _run_harness(f"""
+$result = New-PluginBuildSnapshot -PluginDir "{plugin_dir}" -InstallDir "{tmp_path / 'install'}" -Version "0.1.0-dev1"
+Write-Output "RESULT:$result"
+""")
+    snapshot = Path(result.stdout.split("RESULT:", 1)[1].strip().splitlines()[0])
+    marketplace = snapshot.parent
+    index = marketplace / ".claude-plugin" / "marketplace.json"
+    index.parent.mkdir()
+    index.write_text(json.dumps({
+        "name": "copilot-extensions",
+        "plugins": [{"name": "agent-dispatch", "source": f"./{snapshot.name}"}],
+    }), encoding="utf-8")
+    project = tmp_path / "consumer"
+    settings = project / ".github" / "copilot" / "settings.json"
+    settings.parent.mkdir(parents=True)
+    settings.write_text(json.dumps({
+        "extraKnownMarketplaces": {
+            "copilot-extensions": {
+                "source": {"source": "directory", "path": str(marketplace)},
+            },
+        },
+        "enabledPlugins": {"agent-dispatch@copilot-extensions": True},
+    }), encoding="utf-8")
+    home = tmp_path / "isolated-home"
+    home.mkdir()
+    resolve = partial(
+        resolve_active_plugins, home=home, project_root=project,
+        include_projects=False, plugin_names=("agent-dispatch",),
+    )
+    report = resolve()
+    assert report.active["agent-dispatch@copilot-extensions"].root == snapshot.resolve()
+    monkeypatch.setattr(recipes, "resolve_active_plugins", resolve)
+    recipes._reset_active_plugins_cache()
+    try:
+        for name in (
+            "backlog-triager", "issue-reproducer", "effort-builder",
+            "effort-driver", "goal-driven",
+        ):
+            relative = Path(".agent-dispatch") / "registrar" / "templates" / f"{name}.json"
+            assert (snapshot / relative).read_bytes() == (_PLUGIN_ROOT / relative).read_bytes()
+            assert recipes.resolve_extends({
+                "extends": f"plugin:agent-dispatch@copilot-extensions:{relative.as_posix()}",
+            }, base_dir=project) == recipes.resolve_extends({
+                "extends": f"global:{name}",
+            }, base_dir=project)
+    finally:
+        recipes._reset_active_plugins_cache()
 
 
 def test_local_checkout_is_never_snapshotted(tmp_path: Path) -> None:

@@ -1317,6 +1317,11 @@ worked example for standing up a new declaration from scratch.
 
 ### Registrar `extends:` -- recipe references
 
+For ordinary file-based adoption, the
+[inactive base files](.agent-dispatch/registrar/templates/README.md) expose
+five existing global recipes without copying their implementation or creating
+registrations. They are not provider-catalog instances or an activation API.
+
 Any registrar declaration file (not just `repository-issue-loop`/
 `reviewer-loop`) may carry an `extends:` key instead of (or in addition to)
 spelling out every field directly:
