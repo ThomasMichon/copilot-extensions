@@ -226,6 +226,13 @@ communication contract. Where an agent runs is a venue detail, not a different
 interface.
 
 ### host-qualified-guest-identity
+A physical machine has one stable configured name and a separately recorded OS
+hostname. Windows, WSL and other declared execution environments belong to that
+machine; selecting an environment does not create another physical machine.
+Structured interfaces expose machine and environment separately. An interface
+that requires one execution identifier may use a compact address such as
+`example-host-wsl`; that address is not the physical machine name.
+
 A host and each of its persistent guests are independently addressable through
 compact, stable logical names. A guest needs one distinguishing qualifier, not
 a growing chain of platform, distribution and transport suffixes. The owning

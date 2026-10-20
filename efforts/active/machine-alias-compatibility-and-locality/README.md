@@ -21,6 +21,13 @@ The completion gate is released, installed behavior that resolves every existing
 worktree on the adopting host's Windows and WSL environments, not a passing
 example, a source commit, or a merged individual pull request.
 
+**Physical-machine clarification:** machine name, OS hostname and execution
+environment are separate dimensions. A compact host/environment address is
+appropriate only where an interface needs one execution identifier; it must not
+replace the physical machine name in deployment policy or structured context.
+The [Phase 3d contract](physical-machine-environment-boundary.md) applies this
+clarification without rewriting historical identifiers.
+
 ## Participants
 
 | Participant | Role in this effort | Reached via |
@@ -121,6 +128,29 @@ authorized but separately coordinator-owned, not a release promotion or rollout.
 Private operational evidence and identifiers remain redacted. The settled
 direction is one canonical command, preserving valid same-machine alias
 relationships; misplaced-record integrity is a distinct capability.
+
+**Physical machine and environment clarification (verbatim, private host names
+replaced with generic examples):**
+
+> We need to deal with the situation properly:
+>
+> Machines:
+>   - example-host:
+>     - hostname: Example-Host
+>     - environments:
+>       - windows
+>       - wsl
+>
+> The machine name is "example-host".
+> For systems which need just a single identifier for machine+environment,
+> "example-host-wsl" may be used to represent WSL.
+
+The operator also reported that several WSL worktrees briefly could not resolve
+from Worktree Manager after a local update, then could not reproduce the
+failure. That observation remains unconfirmed: diagnose read-only and preserve
+its uncertainty rather than claiming that a naming change fixed it. Duplicate
+environment qualifiers in historical IDs are a naming-generation defect in
+this host's case, not permission to rename existing IDs or paths.
 
 ## Plan
 
@@ -225,6 +255,25 @@ _(Operator-selected convergence; detailed mechanism is agent-recommended.)_
   coordinator. No runtime deployment, service change, real-record repair or
   release promotion by this participant; the containing user gate remains open.
 
+### Phase 3d - Physical machine and environment boundaries
+_(Agent-recommended realization of the operator's explicit model clarification.)_
+- [ ] Review the [structured identity contract](physical-machine-environment-boundary.md)
+      before changing implementation.
+- [ ] Reuse the shared map's physical-machine/environment selection; identify
+      compact execution-ID boundaries explicitly, without another registry or
+      suffix-derived authority.
+- [ ] Make runtime admission, structured machine guidance and prospective
+      worktree naming/metadata consume the correct dimension. Keep native and
+      guest execution authority distinct and use the same policy in update and
+      launch reconciliation.
+- [ ] Preserve existing IDs, paths, refs, records, queued work and live sessions;
+      retain supported legacy lookup and allocation replay. No automatic
+      relabel, rename, policy widening or data migration.
+- [ ] Pass bounded in-process decision regressions and required Source CI, then
+      qualify and release the implementation through normal promotion.
+- [ ] Verify the installed Windows/WSL deployment and all-worktree resolution
+      matrix; record or explicitly transfer any reproducible Manager regression.
+
 ### Phase 4 - Installed acceptance and closure
 - [ ] Enumerate all registered projects and existing Windows/WSL worktrees;
   report removed checkouts separately from identity-resolution failures.
@@ -265,6 +314,10 @@ _(Operator-selected convergence; detailed mechanism is agent-recommended.)_
   including knowledge-only repositories, with no competing public API.
 - [x] For Phase 3c, distinguish exact-record truth from stale resident/list
   projections; no source-only invocation claims to upgrade or patch the daemon.
+- [ ] For Phase 3d, verify physical name/hostname/environment/execution-ID
+  separation, update/launch gate agreement, new single-environment naming,
+  unchanged legacy lookup and native/guest refusal boundaries using the
+  [validation matrix](physical-machine-environment-boundary.md#validation-plan).
 
 ## Proposal
 
@@ -281,6 +334,24 @@ operator's all-alias/all-worktree acceptance requirement, not authorization for
 unrelated service changes or a second machine registry.
 
 ## Journal
+
+### 2026-10-19 - Physical identity clarified after installed update
+- An installed update exposed a real dimension mismatch: the receiving context
+  supplies a compact guest execution ID to a runtime gate whose manifest lists
+  physical machines. The gate's conservative denial is not a reason to broaden
+  adopter policy or force an installer.
+- The operator clarified one physical machine with independently selected
+  Windows/WSL environments, allowing a compact address only at one-ID
+  interfaces. Captured that clarification above and linked one bounded Phase 3d
+  contract; existing execution-space ownership and identity-repair owners remain.
+- Current naming code already suppresses a repeated qualifier in its modern
+  path, and a read-only preview resolves a historical repeated-qualifier
+  worktree. That is not proof that all Manager failures are fixed. The remaining
+  implementation must correct the structured boundary, not rely on string
+  suppression or mutate historical IDs.
+- No adopter deployment allowlist, real record or native Windows runtime was
+  changed to accommodate the mismatch. Implementation and further rollout wait
+  for the normal review and acceptance gates below.
 
 ### 2026-10-16 - Operator selected canonical convergence
 - The operator selected convergence on the already merged #7048 command.
