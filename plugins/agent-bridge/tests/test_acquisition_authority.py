@@ -106,23 +106,25 @@ async def test_cached_display_never_overrides_native_head(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("project,path", [
-    ("queue-repo", "workspace-path"), (None, "workspace-path"),
-    ("execution-repo", "other-path"), ("execution-repo", None),
+@pytest.mark.parametrize("project,path,code", [
+    ("queue-repo", "/fixture", "workspace_identity_conflict"),
+    (None, "/fixture", "owner_response_invalid"),
+    ("execution-repo", "/other-path", "workspace_identity_conflict"),
+    ("execution-repo", None, "owner_response_invalid"),
 ])
 async def test_workspace_owner_identity_must_match_request(
-    acquisition_request, monkeypatch, project, path,
+    acquisition_request, monkeypatch, project, path, code,
 ):
     request = acquisition_request.model_copy(update={
-        "version": 2, "project": "execution-repo", "worktree_path": "workspace-path",
+        "version": 2, "project": "execution-repo", "worktree_path": "/fixture",
     })
     command = AsyncMock(return_value=_owner_result({
-        "id": "worktree-a", "repo": project, "path": path,
+        "id": "worktree-a", "repo": project, "path": path, "status": "active",
     }))
     monkeypatch.setattr(authority, "worktree_command", command)
     with pytest.raises(AcquisitionRefused) as error:
         await authority.verify_worktree(request)
-    assert error.value.code in {"owner_response_invalid", "workspace_identity_conflict"}
+    assert error.value.code == code
     assert command.await_count == 1
 
 
