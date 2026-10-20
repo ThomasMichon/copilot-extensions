@@ -273,3 +273,69 @@ def test_delegate_graph_qualifies_same_host_records_by_execution_owner() -> None
     assert child["caller_state"]["execution_machine"] == "guest-space"
     assert len(guest["delegates"]) == 1
     assert "delegates" not in native
+
+
+@pytest.mark.parametrize("registry", ["missing", "empty", "unscoped"])
+@pytest.mark.parametrize("versioned", [False, True])
+def test_forced_tuple_cleanup_requires_receiving_registry_before_legacy_fallback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, registry: str, versioned: bool,
+) -> None:
+    from agent_worktrees import cleanup_gc_cli
+
+    if registry != "missing":
+        (tmp_path / "machines.yaml").write_text(
+            "machines: {}\n" if registry == "empty" else "machines:\n  guest-space: {}\n",
+        )
+    config = cfg.Config(
+        srcroot=str(tmp_path), machine="guest-space", platform="wsl", repo_name="project",
+        repos={"project": cfg.RepoConfig(
+            anchor=str(tmp_path), worktree_root=str(tmp_path / "trees"),
+        )},
+    )
+    monkeypatch.setattr(cfg, "load_project_config", lambda *_a, **_kw: config)
+    monkeypatch.setattr(cfg, "detect_platform", lambda: "wsl")
+    monkeypatch.setattr(cfg, "project_dir", lambda project: tmp_path / project)
+    path = tmp_path / "project" / "worktrees" / "owned.yaml"
+    path.parent.mkdir(parents=True)
+    tracking.save_record(_record(path, versioned=versioned), path)
+    before = path.read_bytes()
+    monkeypatch.setattr(cleanup_gc_cli, "_hosted_session_blocks_cleanup", lambda _record: False)
+    monkeypatch.setattr(cleanup_gc_cli.sessions, "scan_sessions_fast", lambda _records: None)
+    monkeypatch.setattr(cleanup_gc_cli, "_build_active_paths", lambda *_a: set())
+    reaped = []
+    result = cleanup_gc_cli._revalidate_cleanup_safety(
+        "owned", repo=config.default_repo, tracking_path=path.parent, force=True,
+        reap=lambda record, info: reaped.append(record.worktree_id) or (0, []),
+    )
+    if versioned:
+        assert not result.cleanable and result.bucket == "execution-space"
+        assert reaped == []
+    else:
+        assert result.cleanable and result.reaped
+        assert reaped == ["owned"]
+    assert path.read_bytes() == before
+
+
+def test_tuple_controller_navigation_targets_execution_owner(tmp_path: Path) -> None:
+    from agent_worktrees import controller_lineage, reciprocal_presentation
+
+    controller = _record(tmp_path / "controller.yaml")
+    controller.sessions = [tracking.SessionEntry("controller-session", "2026-01-01T00:00:00")]
+    child = _record(tmp_path / "child.yaml")
+    child.controllers = [tracking.ControllerRelation(
+        kind="session", source="explicit", relation_revision=1,
+        created_at="2026-01-01T00:00:00",
+        controller_ref="guest-space/project/controller#controller-session",
+    )]
+    findings = controller_lineage.controller_findings(
+        child, record_loader=lambda project, worktree_id: controller,
+        local_machine="guest-space",
+    )
+    assert findings[0]["status"] == "resolved"
+    assert findings[0]["controller_machine"] == "guest-space"
+    presentation = reciprocal_presentation.derive(child, findings)
+    assert presentation["state"] == "controlled-elsewhere"
+    assert presentation["actions"][0]["target"] == {
+        "machine": "guest-space", "project": "project",
+        "worktree_id": "controller", "session_id": "controller-session",
+    }

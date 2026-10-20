@@ -90,6 +90,56 @@ def test_real_pending_allocating_bound_and_read_only(ledgers: Path, monkeypatch:
         assert before == {path: path.read_bytes() for path in ledgers.rglob("*") if path.is_file()}
 
 
+@pytest.mark.parametrize("damage", [None, "version", "execution", "environment", "platform"])
+def test_tuple_reservation_scans_execution_owner_or_explicit_uncertainty(
+    ledgers: Path, monkeypatch: pytest.MonkeyPatch, damage: str | None,
+) -> None:
+    from dataclasses import replace
+
+    from agent_worktrees.worktree_machine_identity import WorktreeMachineIdentity
+
+    config = replace(cfg.load_config(), machine="guest-space")
+    monkeypatch.setattr(cfg, "load_config", lambda *_a, **_kw: config)
+    monkeypatch.setattr(cfg, "load_project_config", lambda *_a, **_kw: config)
+    (ledgers / "machines.yaml").write_text(
+        "machines:\n  guest-space: {execution_platform: linux, physical_host: desk}\n",
+        encoding="utf-8",
+    )
+    mutate(ledgers, lambda data: data.update(
+        WorktreeMachineIdentity("desk", "linux", "guest-space").to_record_fields(),
+    ))
+    result = apply_resource_producer({
+        "schema": "copilot-extensions.resource-producer", "version": 1,
+        "yaml_path": str(ledgers / "p" / "worktrees" / "owner.yaml"),
+        "owner_ref": "guest-space/p/owner", "operation": "reserve",
+        "input": {"kind": "container", "namespace": "raw-resource", "recovery": {}},
+    })
+    assert result.get("ok"), result
+    if damage:
+        def corrupt(data: dict) -> None:
+            if damage == "version":
+                data["machine_identity_version"] = 2
+            elif damage == "execution":
+                data.pop("execution_machine")
+            elif damage == "environment":
+                data["environment"] = "windows"
+            else:
+                data.pop("platform")
+        mutate(ledgers, corrupt)
+    before = {path: path.read_bytes() for path in ledgers.rglob("*") if path.is_file()}
+    snapshot = scan_ownership(owner="guest-space/p/owner")
+    if damage:
+        assert not snapshot["complete"] and snapshot["resolution"] == "unknown"
+        assert "record-unavailable" in {item["code"] for item in snapshot["issues"]}
+    else:
+        assert snapshot["complete"], snapshot["issues"]
+        assert snapshot["entries"][0]["record_owner"] == "guest-space/p/owner"
+        assert snapshot["entries"][0]["current_owner"] == "guest-space/p/owner"
+        assert snapshot["entries"][0]["creator"] == "guest-space/p/owner"
+        assert snapshot["entries"][0]["phase"] == "pending"
+    assert before == {path: path.read_bytes() for path in ledgers.rglob("*") if path.is_file()}
+
+
 def test_real_transfer_chain_preserves_creator_and_current_owner(ledgers: Path) -> None:
     bound = reserve(ledgers, bound=True)
     for source, consumer in (("owner", "consumer"), ("consumer", "last")):

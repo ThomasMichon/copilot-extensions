@@ -76,6 +76,11 @@ still requires the receiving project's shared registry and actual execution
 platform; sharing a physical host does not make native and guest owners equal.
 Versioned records require an actual receiving-registry entry even when an
 unregistered execution spelling would match the legacy configuration fallback.
+Cleanup, including forced removal, applies that tuple check before any missing,
+empty or unscoped registry fallback retained for historical records. Resolved
+controller navigation and strict resource-owner scans use the execution owner;
+malformed explicit tuples make the scan incomplete rather than borrowing the
+physical host or disappearing behind an owner filter.
 Publication privacy guards check both physical and execution names. Terminal
 pair receipts preserve the exact legacy identity shape; versioned receipts
 retain the full tuple while reciprocal references use the execution owner.

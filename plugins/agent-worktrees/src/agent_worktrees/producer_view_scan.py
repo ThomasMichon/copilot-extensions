@@ -10,6 +10,7 @@ import yaml
 from . import config as cfg, installer
 from .producer_views import ObservedClaim, issue, ownership_snapshot, qualified_owner
 from .strict_yaml import load_strict_yaml_document
+from .worktree_machine_identity import execution_machine_from_fields
 
 _READ_ERRORS = (OSError, ValueError, TypeError, KeyError, UnicodeError, RecursionError, yaml.YAMLError)
 
@@ -47,7 +48,10 @@ def _record(data: object, path: Path, project: str, issues: list[dict[str, str]]
         or not isinstance(data.get("branch"), str)
     ):
         raise ValueError("record identity does not match its registered project/path")
-    owner = f"{data['machine']}/{project}/{path.stem}"
+    execution_machine = execution_machine_from_fields(data)
+    if not _component(execution_machine):
+        raise ValueError("record execution owner is not canonical")
+    owner = f"{execution_machine}/{project}/{path.stem}"
     if not qualified_owner(owner):
         raise ValueError("record owner is not canonical")
     resources = data.get("resources", [])

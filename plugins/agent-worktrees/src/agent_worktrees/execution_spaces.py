@@ -360,7 +360,7 @@ def require_project_record_mutation(record: Any) -> None:
 
 
 def require_cleanup_identity(record: Any, anchor: str | Path) -> None:
-    """Cleanup has only repo metadata; require config only for scoped registries.
+    """Require tuple authority before considering legacy registry fallbacks.
 
     Resolves authority for ``record.repo`` (receiving-side), never ambient
     ``cfg.load_config()``: the caller's own active project can differ from
@@ -368,7 +368,11 @@ def require_cleanup_identity(record: Any, anchor: str | Path) -> None:
     unscoped/legacy registry would make ``require_record_mutation``
     silently no-op, letting a foreign record be reaped.
     """
-    from . import config as cfg
+    from . import config as cfg, record_machine_identity
+
+    if record_machine_identity.machine_identity(record) is not None:
+        require_project_record_mutation(record)
+        return
 
     try:
         entries = cfg.load_machines_yaml(anchor)
