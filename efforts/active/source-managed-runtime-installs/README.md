@@ -412,5 +412,5 @@ onto one branch.
 
 ### 2026-10-20 - Shared deployment decision implementation
 - Implemented the read-only installation-context decision and native diagnostic/probe adapters under #7030. The installation-local record matches existing source/plugin/mode/root/environment ownership; it does not select runtime source or authorize management.
-- Native fixture coverage distinguishes absent, managed, explicit standalone, malformed, unsupported, inaccessible and foreign policies without runtime or redirect writes. The focused Linux reference/Bash/PowerShell matrix passes 87 cases; Windows API/PowerShell 7, the separate 16-case PowerShell 5.1 matrix, packaging and existing mode smoke checks also pass.
+- Native fixture coverage distinguishes absent, managed, explicit standalone, malformed, unsupported, inaccessible and foreign policies without runtime or redirect writes. The focused Linux reference/Bash/PowerShell matrix passes 108 cases; Windows API/PowerShell 7, the separate 23-case PowerShell 5.1 matrix, packaging and existing mode smoke checks also pass.
 - Publication callers, skew behavior, explicit management admission and the complete native transition remain open. This helper alone does not enforce the plugin/runtime boundary or complete Phase 3.

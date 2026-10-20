@@ -4259,6 +4259,10 @@ function Read-RuntimeDeploymentPolicy(
     try {
         $capture = Read-RegularFileBytes $path 'Runtime deployment policy' -RequireSameIdentity
         $text = $strictUtf8.GetString([byte[]]$capture.bytes)
+        # Check before conversion can unwrap a singleton JSON array.
+        if ($text -cnotmatch '\A[ \t\r\n]*\{') {
+            Fail 'Runtime deployment policy must be a JSON object.'
+        }
         $policy = Read-JsonText $text 'runtime deployment policy'
         if ($policy -isnot [System.Management.Automation.PSCustomObject]) {
             Fail 'Runtime deployment policy must be a JSON object.'

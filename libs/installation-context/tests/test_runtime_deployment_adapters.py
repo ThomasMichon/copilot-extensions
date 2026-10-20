@@ -38,6 +38,8 @@ def _run_adapter(runner: str, arguments: list[str]) -> subprocess.CompletedProce
     "missing", "managed", "standalone", "unsupported", "invalid-json", "duplicate",
     "wrong-case", "string-boolean", "array-boolean", "array-version", "array-owner-field",
     "foreign-source", "foreign-root", "foreign-environment", "directory",
+    "array-policy-managed", "array-policy-standalone", "nested-array-policy",
+    "empty-array-policy", "multiple-array-policies", "null-policy", "whitespace-policy",
 ])
 def test_native_policy_decision_matches_reference(
     tmp_path: Path, runner: str, case: str,
@@ -87,6 +89,20 @@ def test_native_policy_decision_matches_reference(
         path.write_text("{", encoding="utf-8")
     elif case == "duplicate":
         path.write_text('{"managed":true,"managed":false}', encoding="utf-8")
+    elif case == "array-policy-managed":
+        _write_json(path, [policy])
+    elif case == "array-policy-standalone":
+        _write_json(path, [{**policy, "managed": False}])
+    elif case == "nested-array-policy":
+        _write_json(path, [[{**policy, "managed": False}]])
+    elif case == "empty-array-policy":
+        _write_json(path, [])
+    elif case == "multiple-array-policies":
+        _write_json(path, [policy, policy])
+    elif case == "null-policy":
+        _write_json(path, None)
+    elif case == "whitespace-policy":
+        path.write_text(" \t\r\n" + json.dumps({**policy, "managed": False}), encoding="utf-8")
     reference = module.resolve_runtime_deployment(**arguments)["deployment"]
     before = path.read_bytes() if path.is_file() else None
     result = _run_adapter(
