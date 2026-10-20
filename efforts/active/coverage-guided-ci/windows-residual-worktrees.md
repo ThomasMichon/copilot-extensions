@@ -87,7 +87,44 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Mechanical move mapping: preserved, not conflated with fixtures
 
+### Tenth admitted move: push-changes method family
+
+Baseline: Dev `c3bfeb88e56c70a671c109c82ee1bde24d5c0c21`, the actual
+#7450 record reassignment partition merge. Thirteen methods move unchanged
+from `test_pr_ops.py::TestPRFinalizeAndPush` to
+`test_push_changes.py::TestPushChanges`: all `test_push_changes_*` methods
+and `test_an_unreachable_recorded_fork_fails_push_changes_cleanly`. Their
+existing parameterization expands to fifteen cases. Both classes retain the
+identical merged `PRWorkflowSetup`; only newly unused imports and empty
+headings/spacing disappear from the retained module.
+
+Real before/after collection proves the complete 317-node bijection:
+15 module/class-only moves and 302 unchanged identities, with identical
+method/decorator/base AST, fixture body/scope/closure, parameter value and
+effective mark. Complete collection passes take 18.89 and 12.86 seconds
+including sandbox preparation and removal.
+
+All fifteen moved cases pass on native Windows without skips in 97.31
+seconds (101.72 inclusive), exactly two work-stealing workers and unchanged
+30-second item, 240-second diagnostic group and resource limits. The two
+existing real-Git/contained partial-split selection controls pass without skips
+in 5.28 seconds (7.70 inclusive), preserving both changed whole files without
+invented moved-node coverage credit. Ruff F/E9 passes; the install-contract
+guard covers thirteen plugins with zero violations.
+
+No production decision, helper, provider double, fixture, seed, assertion,
+parameter, mark, tier or CI-admission change enters this partition. Clean-room
+provisioning is inapplicable to unchanged relocation; unavailable Linux/external
+execution receives no credit. Ten mechanical partitions now move 284 original
+expanded cases, leaving 33 publication-target cases. Their whole-class
+relocation, fixture contracts and repeated complete same-head Windows
+qualification remain open.
+
 ### Ninth admitted move: record reassignment and stale-writer method family
+
+**Actually merged:** #7450 as
+`c3bfeb88e56c70a671c109c82ee1bde24d5c0c21`. Subsequent partitions retain
+these merged bodies; fixture contracts and parent qualification remain open.
 
 Baseline: Dev `58caadeacd0c1f0af8ee0f618e85b9dcb80f477e`, the actual
 #7444 finalization partition merge. Nine methods move unchanged from
