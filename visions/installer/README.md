@@ -9,7 +9,7 @@
   all three of its roles.
 - **Scope:** branch (application intent; configuration detail lives in its child)
 - **Status:** Active
-- **Last revised:** 2026-10-16
+- **Last revised:** 2026-10-20
 - **Reality docs:** [`docs/install-contract.md`](../../docs/install-contract.md) ·
   [`docs/architecture.md`](../../docs/architecture.md)
 
@@ -244,6 +244,22 @@ Source failures preserve the current healthy installation and name the
 blocked selection; they never substitute an ambient checkout or newer payload.
 Ordinary marketplace delivery of skills, instructions, hooks and extensions
 continues independently, including their non-deployment behavior.
+
+### source-backed-maintenance
+An opted-in installation stays healthy and current through regular,
+observable maintenance at an explicitly selected bounded cadence. The
+existing maintenance owner checks its dedicated source, advances the chosen
+tracking ref when appropriate and invokes the same canonical installation
+flow used interactively. Exact pins remain pinned; unchanged source reuses
+verified immutable generations without rewriting them.
+
+The flow covers the adopter's installed services and tools, including the
+management tools needed to maintain them, without enabling unselected roles.
+Manager self-update, service-runtime source and Copilot plugin-content delivery
+retain their separate choices. Dirty or unavailable source, overlapping runs
+and failed candidates produce attributable outcomes while preserving healthy
+installations and working edits; they never cause an implicit fallback or a
+second updater.
 
 ### exclusive-plugin-content-source
 An adopter can separately choose approved local-checkout delivery of Copilot

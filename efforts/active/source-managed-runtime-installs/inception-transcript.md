@@ -2,7 +2,7 @@
 
 This is the operator's request record for
 [Source-Managed Runtime Installs](README.md). Quoted operator text is retained
-verbatim except for the explicit private-host redaction in the final request.
+verbatim except for the explicitly marked private-host redactions.
 The implementation plan is a separate interpretation, not part of these quotes.
 Assistant design responses are summarized separately below; they are not
 additional operator instructions.
@@ -45,6 +45,22 @@ The operator selected:
 effort_slug=source-managed-runtime-installs
 windows_pilot_scope=runtime-only
 ```
+
+## Full transition and recurring maintenance
+
+Only the private host name is replaced below. The request's complete installed
+service/tool scope and regular source-maintenance requirement are retained.
+
+> Your current mission is to get [native Windows host] onto dev-backed copilot-extensions installs for all services and tools, making fixes as needed to ensure everything works end-to-end. Make sure we have a regular flow to keep the source dev checkout healthy and updated, for example using agent-machines maintenance to sync it and re-run the install on an interval. Fix service installers, vendoring, etc, as appropriate to get the faster development and preview loop fully functional
+
+The earlier runtime-only clarification still governs Copilot plugin-content
+delivery; "all services and tools" does not authorize enabling unselected roles.
+
+## Execution follow-through
+
+> Sounds like good progress. Keep going!
+>
+> Be sure to build out the effort as you go and track durable goals as you continue
 
 ## Assistant analysis - summary, not operator requirements
 

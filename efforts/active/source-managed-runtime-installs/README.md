@@ -19,9 +19,11 @@ iterate through immutable generations without waiting for marketplace payload
 updates or rewriting a live environment.
 
 Prove the source install on a disposable container before attempting a native
-Windows runtime-only pilot. Ordinary plugin self-provisioning remains the
-default; managed deployment is a local choice, not adoption of another product
-or a change to service-supervision ownership.
+Windows runtime-only pilot and completing the adopter's installed service/tool
+transition. Keep the dedicated source healthy and current through the existing
+maintenance owner and canonical install flow. Ordinary plugin self-provisioning
+remains the default; managed deployment is a local choice, not adoption of
+another product or a change to service-supervision ownership.
 
 ## Participants
 
@@ -73,6 +75,14 @@ The operator confirmed the slug and explicitly selected **runtime-only** for
 the Windows pilot. Local plugin-content sourcing is long-term intent tracked
 separately in #7031, with exclusive source replacement rather than shadowing.
 
+**Execution follow-through summary:** the requested outcome covers all installed
+services and tools, including their management tools, rather than ending at a
+successful canary. A regular flow must keep the dedicated merged-dev source
+healthy and updated and rerun canonical installation at a bounded interval,
+reusing Agent Machines maintenance where supported. The
+[maintenance slice](maintenance.md) proposes the portable integration and
+validation; it must clear review before implementation.
+
 The [inception record](inception-transcript.md) retains the operator's words,
 with private host identifiers redacted. Implementation choices below marked
 **agent-recommended** are not additional operator requirements.
@@ -95,6 +105,9 @@ with private host identifiers redacted. Implementation choices below marked
 - [x] Prove identical reuse, distinct same-package-version commits, source removal, interrupted build and failed-candidate preservation.
 
 ### Phase 3 - Separate plugin-triggered service deployment
+The [deployment-policy slice](deployment-policy.md) maps the existing trigger,
+publication and command-ownership boundaries; it does not disable whole hooks.
+
 - [ ] Add a local managed-deployment policy at the shared publication boundary, retaining standalone defaults and installation scope.
 - [ ] Cover session bootstrap and indirect first-use publication without disabling other hook or extension behavior.
 - [ ] Keep adapters thin and enforce drift-compatible service interaction without implicit runtime replacement.
@@ -104,13 +117,24 @@ with private host identifiers redacted. Implementation choices below marked
 - [ ] Keep service-source selection independent of Manager self-update and Copilot plugin-content selection.
 - [ ] Route the selected source through the same assembly, readiness, activation and observable update-outcome path.
 - [ ] Preserve exact selection across retries and source failures; never fall back to an ambient checkout or marketplace payload.
+- [ ] Qualify Manager's own clean-source, immutable non-editable installation and recovery independently of the selected service-runtime source.
+
+### Phase 4a - Maintain selected source through existing update ownership
+The [maintenance slice](maintenance.md) owns the detailed proposal and evidence
+matrix; no schedule or cadence is enabled by this plan.
+
+- [ ] Land the portable source-backed maintenance intent and implementation plan through review before adding that capability.
+- [ ] Extend the existing Manager update path and Agent Machines maintenance owner for bounded source health, selected-ref synchronization and canonical installation; do not add a parallel updater.
+- [ ] Preserve independent Manager/service/plugin-content selections, configured roles and exact per-run source identity across scheduled operation and retries.
+- [ ] Prove unchanged-source reuse, a merged-source advance and explicit dirty/unavailable/overlapping/failed-candidate outcomes on Linux and Windows.
 
 ### Phase 5 - Prove assembled use and native Windows readiness
 - [ ] Run the assembled runtime path in a fresh WSL-hosted clean-room container from a clean merged dev commit.
-- [ ] Qualify every declared installer adopter against that exact merged commit with frozen scenario inputs, successful runner exit and source-independent installed command evidence; retain each adopter's separate report.
+- [x] Qualify every declared installer adopter against that exact merged commit with frozen scenario inputs, successful runner exit and source-independent installed command evidence; retain each adopter's separate report.
 - [ ] Exercise real commands and service interaction after source-checkout removal, including marketplace/runtime skew and non-deployment hooks.
 - [ ] Prove native Windows source installation, generation selection and hook-deployment separation before a consented runtime-only pilot.
 - [ ] Update owner documentation and record actual serving-generation evidence, not only successful copies or install markers.
+- [ ] Prove every installed service/tool in the adopter's declared inventory, including Manager, rather than treating a canary or all-adopter installer tests as the native transition.
 
 ### Completion and scope control
 - [ ] Resolve all Plan and Validation Plan items; record or transfer remaining discrete work to a named tracked objective before marking Done.
@@ -127,6 +151,8 @@ with private host identifiers redacted. Implementation choices below marked
 - [ ] **Policy:** real hook and first-use paths do not publish runtime copies or redirects in managed mode; their non-deployment behavior still runs.
 - [ ] **Skew:** newer-plugin/older-service and older-plugin/newer-service interactions work within declared capabilities or return precise readiness outcomes.
 - [ ] **Source modes:** main tracking, stable/exact pins and dev tracking converge through one source-assembly path without moving midway through a run.
+- [ ] **Maintenance:** the existing owner runs bounded, observable source health/sync/install cycles at the selected cadence; unchanged input is reused and source/candidate/overlap failures preserve healthy runtimes and edits.
+- [ ] **Management continuity:** Manager and the selected service runtimes can use distinct clean merged-source selections; the management tools remain usable for update and supported recovery.
 - [x] **Clean-room:** a structured Tier-P report proves fresh Linux installation and real service use; report the exact source and serving identities.
 - [ ] **Windows:** native installer/resolver fixtures pass; any installed pilot has explicit change consent and attributable running-state evidence.
 - [ ] **Agent-recommended - robustness:** test concurrent preparation/publication, unavailable-source retry and state-aware rollback through existing lifecycle primitives.
@@ -365,3 +391,14 @@ onto one branch.
 - Index, Logger and Vault were not started. All ten attempted runs retained matching full-source before/after inventories; no successful adopter was rerun and no scenario or source input was changed during qualification.
 - Normalized captured line separators before extracting the existing exact command/generation fields. The scenario's complete regression module passes 66 cases, including actual argparse wrapping, CRLF, incorrect command/generation and strict bare-generation Index cases. Production version output and optional provenance suffix semantics are unchanged.
 - The complete thirteen-adopter gate remains open. Preserve the failed report; the scenario correction must merge before fresh qualification from frozen merged inputs. This unit result does not turn the failed container run into a pass.
+
+### 2026-10-20 - Version-witness correction merged
+- PR #7367 merged as `a4bdee25a5b723f2d1dc2698278eeb15e6812dbf` after an exact-head Copilot approval with no open findings and all required provider checks passed.
+- The next witness uses a new full-repository archive of that merged commit, with all thirteen adopters in separate fresh containers. Earlier `86dc022d2b` reports remain retained evidence for their original commit; they cannot be combined with new runs into an exact-commit all-adopter claim.
+- Deployment-only policy, independent source selection, proposed recurring maintenance and consented native adoption remain open. No host install, source binding or schedule was changed by this merge.
+
+### 2026-10-20 - All thirteen merged-source installers qualified
+- Every declared adopter passed six phases with no jams and actual runner exit zero from a complete frozen archive of `a4bdee25a5b723f2d1dc2698278eeb15e6812dbf`. All thirteen containers were fresh and distinct; no earlier-commit result was reused.
+- Full-repository inventories covering 8,476 entries and executable modes remained unchanged before and after each run. An independent coordinator check matched all reports, inventory pairs, exact source/generation assertions and retained container identities.
+- Each adopter proves non-editable installation, source-removal imports/commands and immutable reuse. Bridge additionally proves authenticated serving identity. Dispatch runs without service/supervisor, Index uses only its synthetic client role, Vault requests no credentials or service, and Logger exercises post-removal `session-sync`. These scopes do not claim all-daemon cutover, heavy-engine operation or Manager installation.
+- The all-adopter qualification item is closed. Original deployment-policy/source-selection work, the separately reviewed maintenance extension and consented native adoption remain open; the effort stays Active.
