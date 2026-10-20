@@ -85,6 +85,7 @@ result = run_caller_owned(
 
 Both byte budgets are required positive integers. They count raw bytes while
 stdout and stderr drain concurrently, before buffering or strict UTF-8 decoding.
+Arguments containing NUL characters refuse before spawning on both platforms.
 The result is `subprocess.CompletedProcess`-compatible, with the original
 command's return code and separate, newline-normalized text streams. With
 `capture=False`, both streams are discarded and returned as `None`. No successful

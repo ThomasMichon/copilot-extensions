@@ -114,6 +114,8 @@ def _validate(request: object) -> dict:
     argv = request["argv"]
     if not isinstance(argv, list) or not argv or any(not isinstance(arg, str) for arg in argv):
         raise ValueError("native child argv must be a nonempty list of strings")
+    if any("\0" in arg for arg in argv):
+        raise ValueError("native child argv must not contain NUL characters")
     timeout = request["timeout"]
     if type(timeout) not in (int, float) or not math.isfinite(timeout) or timeout <= 0:
         raise ValueError("native child timeout must be finite and positive")

@@ -406,3 +406,23 @@ def test_atomic_spawn_failures_do_not_release_live_processes(tmp_path, monkeypat
             for pin in pins:
                 cleanup.callback(pin.close)
                 cleanup.callback(pin.kill)
+
+
+def test_installed_console_refuses_nul_before_target_effect(tmp_path, installed_console):
+    python, _script, _slot = installed_console
+    marker = tmp_path / "must-not-run"
+    target = f"open({str(marker)!r},'w').write('bad')"
+    code = (
+        "import sys\n"
+        "from agent_procutil.owned_process import run_caller_owned\n"
+        "try:\n"
+        f" run_caller_owned([sys.executable,'-I','-c',{target!r},'input\\x00suffix'],"
+        "timeout=5,max_stdout_bytes=32,max_stderr_bytes=32)\n"
+        "except ValueError:\n"
+        " print('refused')\n"
+        "else:\n"
+        " raise AssertionError('NUL command was not refused')\n"
+    )
+    result = _command([str(python), "-I", "-c", code])
+    assert result.stdout.strip() == "refused"
+    assert not marker.exists()

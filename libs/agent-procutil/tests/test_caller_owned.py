@@ -141,12 +141,15 @@ def test_invalid_capture_limit_refuses_before_spawn(monkeypatch, field, value):
         _run("pass", **{field: value})
 
 
-@pytest.mark.parametrize("argv", [[], "not-an-argv-list", [123]])
+@pytest.mark.parametrize("argv", [
+    [], "not-an-argv-list", [123], ["command\0suffix"],
+    ["command", "input\0suffix", "--dry-run"],
+])
 def test_invalid_argv_refuses_before_spawn(monkeypatch, argv):
     def forbidden(*args, **kwargs):
         raise AssertionError("invalid request reached native spawn")
 
-    monkeypatch.setattr(ownership, "spawn_sync_in_kill_on_close_job", forbidden)
+    monkeypatch.setattr(protocol, "_run_owned", forbidden)
     with pytest.raises(ValueError):
         run_caller_owned(argv, timeout=1, max_stdout_bytes=10, max_stderr_bytes=10)
 
