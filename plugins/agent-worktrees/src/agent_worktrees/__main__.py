@@ -67,21 +67,9 @@ from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-# `-m agent_worktrees` (the binstub's own invocation, and this module's
-# normal entry point) executes this file under the name ``"__main__"``, a
-# SEPARATE sys.modules entry from its real qualified name
-# ``agent_worktrees.__main__``. Late in this file, `pr_cli.py` does
-# `from . import __main__ as core` -- an ordinary submodule import that,
-# absent this alias, finds no `agent_worktrees.__main__` entry yet and
-# re-executes this entire module FROM THE TOP under that qualified name.
-# That second execution reaches its own `from . import pr_cli, ...` line
-# while the FIRST pr_cli import is still mid-load (frozen at its own
-# `from . import __main__ as core` line), so it gets back the same
-# partially-initialized `pr_cli` module and crashes attribute-binding a name
-# `pr_cli` hasn't defined yet ("partially initialized module ... has no
-# attribute"). Aliasing the qualified name to the module already executing
-# -- BEFORE any submodule import can trigger the problem -- makes `pr_cli`'s
-# import a no-op cache hit instead of a second full execution. Fixes #2650.
+# `-m agent_worktrees` executes this file as "__main__". Alias it before
+# pr_cli imports the qualified module as core, otherwise a second execution
+# encounters the partially initialized pr_cli module and fails (#2650).
 sys.modules.setdefault(f"{__package__}.__main__", sys.modules[__name__])
 from agent_procutil import (
     detached_kwargs,
@@ -5358,6 +5346,8 @@ def _current_session_ids() -> set[str]:
 # fleet, reconcile, delegates, hook -- each of those is fixed to do its own
 # lazy `from . import <module>` at its own call site instead).
 _LAZY_DISPATCH_TABLE: dict[str, tuple[str, str]] = {
+    'dev-status': ('installation_cli', 'cmd_dev_status'),
+    'dev-release': ('installation_cli', 'cmd_dev_release'),
     'anchor-check': ('maintenance_cli', 'cmd_anchor_check'),
     'attribution-audit': ('finalize_cli', 'cmd_attribution_audit'),
     'attribution-prepare': ('attribution_prepare_cli', 'cmd_attribution_prepare'),
@@ -6103,6 +6093,8 @@ def _load_full_command_surface() -> None:
         "validate": cmd_validate,
         "config-migrate": cmd_config_migrate,
         "install": cmd_install,
+        "dev-status": installation_cli.cmd_dev_status,
+        "dev-release": installation_cli.cmd_dev_release,
         "register": cmd_register,
         "unregister": installation_cli.cmd_unregister,
         "uninstall": cmd_uninstall,

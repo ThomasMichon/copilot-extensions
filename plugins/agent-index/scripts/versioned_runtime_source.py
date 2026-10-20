@@ -53,6 +53,31 @@ def runtime_version(package_version: str, commit: str, assembly_hash: str) -> st
     return f"{package_version}{separator}source.{commit}.{assembly_hash[:16]}"
 
 
+def package_version(slot_name: str) -> str:
+    """Separate generated source/repair identities from the package version."""
+    ordinary = re.sub(r"[+.]repair\.[0-9a-f]{32}$", "", slot_name)
+    return re.sub(
+        r"[+.]source\.(?:[0-9a-f]{40}|[0-9a-f]{64})\.[0-9a-f]{16}$", "", ordinary,
+    )
+
+
+def version_key(version: str):
+    """Order package releases and profiles before generated identities."""
+    supported = re.fullmatch(
+        r"(\d+)\.(\d+)\.(\d+)(?:-dev(\d+))?(?:\+([A-Za-z0-9][A-Za-z0-9._-]*))?",
+        package_version(version),
+    )
+    if supported:
+        major, minor, patch, dev, profile = supported.groups()
+        return (
+            0, int(major), int(minor), int(patch),
+            1 if dev is None else 0, int(dev or 0), (profile or "").casefold(),
+            version.casefold(),
+        )
+    tokens = re.split(r"(\d+)", version.casefold())
+    return (1, tuple((1, int(token)) if token.isdigit() else (0, token) for token in tokens))
+
+
 def requires_exact_selection(versions: list[str]) -> bool:
     """Refuse unordered source recovery, including implicit plain-slot downgrade."""
     if not any(re.search(r"[+.]source\.", version) for version in versions):

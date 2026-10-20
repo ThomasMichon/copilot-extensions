@@ -1002,7 +1002,9 @@ def test_native_reconcilers_pin_stable_staged_origin() -> None:
     powershell = (PLUGIN / "scripts" / "install.ps1").read_text(encoding="utf-8")
     assert '${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}' in posix
     assert "$env:COPILOT_PLUGIN_STAGED_FROM" in powershell
-    assert '"path": "$stable_plugin"' in posix
+    assert 'local manifest_plugin="$stable_plugin"' in posix
+    assert 'manifest_plugin="$(cygpath -m "$stable_plugin")"' in posix
+    assert '"path": "$manifest_plugin"' in posix
     assert "$pluginPath = if ($env:COPILOT_PLUGIN_STAGED_FROM)" in powershell
     assert "Project registration failed (exit $LASTEXITCODE)" in powershell
     assert (

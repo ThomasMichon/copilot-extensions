@@ -524,3 +524,99 @@ worktree disposition still comes only from `agent-worktrees status`.
 | Windows | `install.ps1` | Windows Terminal fragments, psmux |
 | Linux/WSL | `install.sh` | tmux, Tabby profiles |
 | macOS | `install.sh` (POSIX path; reported as `linux` internally) | tmux where available |
+
+## Explicit runtime repair and development
+
+Ordinary `install`, `provision`, and `update` construct a numbered runtime once,
+reuse exact healthy content, or refuse drift. `-Force` / `--force` reconciles
+configuration; it never authorizes rewriting a completed numbered slot.
+
+Both native installers also expose `repair`, `dev`, and `dev-release`:
+
+```powershell
+.\scripts\install.ps1 repair -InstallDir <runtime-root>
+.\scripts\install.ps1 dev -InstallDir <runtime-root> -Owner <worktree-root>
+.\scripts\install.ps1 dev-release -InstallDir <runtime-root> -Owner <worktree-root>
+```
+
+```bash
+bash scripts/install.sh repair --install-dir <runtime-root>
+bash scripts/install.sh dev --install-dir <runtime-root> --owner <worktree-root>
+bash scripts/install.sh dev-release --install-dir <runtime-root> --owner <worktree-root>
+```
+
+Repair leaves the old slot untouched and constructs a distinct health-gated
+generation of the package version. A single Python owner acquires the existing
+cutover guard before choosing that generation and keeps it through construction,
+promotion, and actual monitor retirement or recovery. A private, frozen control
+environment supplies installed lifecycle code even when the old runtime cannot
+start; it is not a selected deployment or a second lock protocol.
+
+An ordinary update discovers completed generations of the requested package,
+preferring the selected or last-known-good generation with matching frozen
+content. It retains and health-checks that build without rebuilding or
+restamping it. Repair suffixes distinguish runtime identities, not package
+releases: an older repaired slot never outranks a later package release during
+first-run discovery.
+
+Dev is explicit and claim-gated. Its inputs must belong to the claiming
+worktree; an omitted owner is resolved from the source checkout's Git root.
+In a namespaced installation, that worktree is distinct from the stable
+authorized payload named by `COPILOT_PLUGIN_STAGED_FROM` and its installation
+receipt. Owner containment and build provenance describe the actual inputs;
+the authorized payload still supplies installation governance. The installed
+control build carries the frozen source evidence into candidate construction,
+without rereading or attributing the build to that authorization payload.
+Each invocation refreshes the mutable `versions/dev` environment from a frozen,
+non-editable snapshot of the whole local dependency graph. This is the pattern's
+ordinary-rebuild form, not the pilot plugin's editable-source form: edits become
+visible on the next `dev` invocation, and installed preparation never writes
+generated provenance into the worktree. Another owner's claim refuses with exit
+code 2; configuration force is not a takeover.
+
+Release probes and restores the original numbered target before relinquishing
+the claim. Failed construction or restoration leaves the claim available for
+diagnosis and an explicit retry; do not delete a held lock or hot-patch a numbered
+runtime. Structured installation contexts use the same commands with their
+validated root and receipt, never a fallback legacy root.
+
+The deployed CLI also exposes `agent-worktrees dev-status --json` and
+`agent-worktrees dev-release --owner <worktree-root> --json`. The explicit
+owner may name a worktree that no longer exists; with no `--owner`, release
+uses the caller's Git root. These commands use lifecycle code and validators
+frozen into the installed slot, not the owner's checkout or today's installer
+scripts. Namespaced release still requires its authorized installed payload and
+receipt. There is no force-takeover option. Release checks the original target's
+own frozen-origin receipt when present, without comparing its dependencies to
+the newer dev build; a failed probe keeps both the claim and the selected dev
+runtime intact. Older targets without that receipt retain legacy health behavior.
+
+Deployment manifests are published by the retained Python owner under the same
+cutover/governance authority. `source.version` is the package version;
+`runtime_slot` and `runtime_generation` identify the actual installed build.
+Source path, commit, branch, dirty state, and payload fingerprint come from that
+build's frozen provenance, including after `dev-release`, not from the checkout
+that happens to run the release command. Legacy builds without a saved footprint
+report unknown fingerprint evidence rather than attributing today's payload to
+an older deployment. Monitor lock/health evidence and self-supersession checks
+also compare build generations, so reusing the `dev` path cannot hide an old
+process behind an equal interpreter prefix.
+
+Read-only runtime diagnostics use the live monitor's PID/start-time-verified
+lock and startup-cached package/build identity, including the selected
+installation-cell root. An equal package version with a different build UUID
+is reported as serving-build drift, not as an up-to-date repaired/dev process
+and not as a reason to reinstall that package. Restart from the selected runtime;
+missing legacy generation evidence remains unknown.
+
+Installation-cell governance waits use the caller's bounded installer wait
+budget, not the directory-lock helper's short initialization grace period.
+On Windows, temporary frozen package inputs use the OS temporary directory:
+`CreateProcess` cannot start a build backend with an overlong working directory,
+even when long file paths are enabled. The installed slot stays in its authorized
+root. Its immutable `.runtime-input-origins.json` records each local package's
+exact frozen origin, allowing installed-health reuse after the temporary input
+workspace has been removed. Missing legacy receipts retain the older
+installation-local frozen-origin check; malformed or conflicting evidence
+requires explicit repair. Long interpreter paths are launched with an explicit
+application path, not inferred from the command-line token.

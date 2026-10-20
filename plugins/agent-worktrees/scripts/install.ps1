@@ -30,6 +30,10 @@
     Existing absolute Python executable supplied by the cold hook. Ownership
     admission still runs through the canonical lifecycle helper.
 
+.PARAMETER Owner
+    Claiming worktree root for dev and dev-release. Dev requires its source
+    payload to belong to that worktree. Omission resolves the source Git root.
+
 .PARAMETER RemoveConfig
     On uninstall: also delete project config and worktree session metadata.
 
@@ -43,13 +47,14 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('install', 'uninstall', 'start', 'stop', 'status', 'update-config', 'update', 'refresh-profiles', 'stamp', 'provision')]
+    [ValidateSet('install', 'uninstall', 'start', 'stop', 'status', 'update-config', 'update', 'refresh-profiles', 'stamp', 'provision', 'repair', 'dev', 'dev-release')]
     [string]$Action = 'status',
 
     [string]$ProjectName,
 
     [string]$InstallDir,
     [string]$BootstrapPython,
+    [string]$Owner,
     [switch]$RemoveConfig,
     [switch]$Force,
     [switch]$ZeroDowntime
@@ -64,6 +69,8 @@ if ($env:COPILOT_EXTENSIONS_HUMAN_UTF8 -eq '1') {
     }
     . (Join-Path $PSScriptRoot 'installer-human-output.ps1')
 }
+
+$script:PythonRuntimeManifestPublished = $false
 
 if ($BootstrapPython) {
     [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
@@ -215,10 +222,18 @@ if (-not $ContextualInstall -and $Action -in @('install', 'update', 'provision',
     }
 }
 # === end command-lifecycle: admission before staging ===
+$RuntimeInputPlugin = if (
+    $env:COPILOT_PLUGIN_INSTALL_STAGED -eq 'context-install' -and
+    $env:AGENT_WORKTREES_RUNTIME_INPUTS
+) {
+    [IO.Path]::GetFullPath($env:AGENT_WORKTREES_RUNTIME_INPUTS)
+} else {
+    (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+}
 if ($ContextualInstall) {
     Set-Location -LiteralPath $env:USERPROFILE
     [IO.Directory]::SetCurrentDirectory($env:USERPROFILE)
-    if ($Action -notin @('install', 'update', 'status')) {
+    if ($Action -notin @('install', 'update', 'status', 'repair', 'dev', 'dev-release')) {
         Write-Error "Structured installation context does not support action '$Action'."
         exit 1
     }
@@ -362,8 +377,11 @@ if ($ContextualInstall) {
         # Preserve ../../libs references in a self-contained context stage.
         $contextPluginsStage = Join-Path $contextStage 'plugins'
         New-Item -ItemType Directory -Force -Path $contextPluginsStage | Out-Null
-        Copy-Item -LiteralPath $contextPayload -Destination $contextPluginsStage -Recurse -Force
-        $contextCanonicalLibs = Join-Path $contextPayload '..\..\libs'
+        $contextInputPayload = if ($Action -in @('repair', 'dev', 'dev-release')) {
+            $RuntimeInputPlugin
+        } else { $contextPayload }
+        Copy-Item -LiteralPath $contextInputPayload -Destination $contextPluginsStage -Recurse -Force
+        $contextCanonicalLibs = Join-Path $contextInputPayload '..\..\libs'
         if (Test-Path -LiteralPath $contextCanonicalLibs -PathType Container) {
             $contextIndirected = @(
                 Get-Item -LiteralPath $contextCanonicalLibs -Force
@@ -375,7 +393,7 @@ if ($ContextualInstall) {
             Copy-Item -LiteralPath $contextCanonicalLibs `
                 -Destination (Join-Path $contextStage 'libs') -Recurse -ErrorAction Stop
         }
-        $contextStagedPayload = Join-Path $contextPluginsStage (Split-Path -Leaf $contextPayload)
+        $contextStagedPayload = Join-Path $contextPluginsStage (Split-Path -Leaf $contextInputPayload)
         $contextStagedEntry = Join-Path (
             Join-Path $contextStagedPayload 'scripts'
         ) (Split-Path -Leaf $PSCommandPath)
@@ -410,6 +428,7 @@ if ($ContextualInstall) {
         }
         $env:COPILOT_PLUGIN_INSTALL_STAGED = 'context-install'
         $env:COPILOT_PLUGIN_STAGED_FROM = $contextPayload
+        $env:AGENT_WORKTREES_RUNTIME_INPUTS = $RuntimeInputPlugin
         $contextDeadline = 480
         $contextDeadlineRaw = $env:AGENT_WORKTREES_INSTALL_DEADLINE_SEC
         if (-not $contextDeadlineRaw) {
@@ -446,11 +465,15 @@ if ($ContextualInstall) {
         $contextStart.WorkingDirectory = $env:USERPROFILE
         $contextStart.UseShellExecute = $false
         $contextStart.CreateNoWindow = $true
+        $contextStart.RedirectStandardOutput = $true
+        $contextStart.RedirectStandardError = $true
         $contextChild = [Diagnostics.Process]::Start($contextStart)
         if (-not $contextChild) {
             Write-Error 'Context installer child could not be started.'
             exit 1
         }
+        $contextStdout = $contextChild.StandardOutput.ReadToEndAsync()
+        $contextStderr = $contextChild.StandardError.ReadToEndAsync()
         if (
             $contextDeadline -gt 0 -and
             -not $contextChild.WaitForExit($contextDeadline * 1000)
@@ -479,10 +502,20 @@ if ($ContextualInstall) {
             $contextExitCode = 124
         } else {
             if ($contextDeadline -le 0) {
-                $contextChild.WaitForExit()
+                if (-not $contextChild.WaitForExit(10000)) {
+                    throw "Context installer child teardown is unsettled; retaining stage: $contextStage"
+                }
+                if (-not [Threading.Tasks.Task]::WaitAll(
+                    [Threading.Tasks.Task[]]@($contextStdout, $contextStderr), 10000
+                )) {
+                    throw "Context installer output is unsettled; retaining stage: $contextStage"
+                }
             }
             $contextExitCode = $contextChild.ExitCode
         }
+        $contextChild.WaitForExit()
+        [Console]::Out.Write($contextStdout.GetAwaiter().GetResult())
+        [Console]::Error.Write($contextStderr.GetAwaiter().GetResult())
         Remove-Item -LiteralPath $contextStage -Recurse -Force -ErrorAction SilentlyContinue
         exit $contextExitCode
     }
@@ -1755,6 +1788,10 @@ function Get-GitInfo {
 function Write-V3Manifest {
     <# Unified schema_version 3 manifest -- self-contained per plugin. Records
        the source footprint (local vs marketplace); written atomically. #>
+    if ($script:PythonRuntimeManifestPublished) {
+        Write-ServiceOk 'Deploy manifest published by the retained Python lifecycle'
+        return
+    }
     $manifestPath = Join-Path $InstallDir 'deploy-manifest.json'
     $pluginPath = if ($env:COPILOT_PLUGIN_STAGED_FROM) {
         $env:COPILOT_PLUGIN_STAGED_FROM
@@ -2591,6 +2628,57 @@ function Deploy-VenvAndPackage {
         return
     }
     if (-not (Deploy-Package)) { exit 1 }
+}
+
+function Deploy-PythonRuntime {
+    $base = Get-SignedBasePython
+    if (-not $base) { $base = Get-BootstrapPython -ExcludeVenvDir }
+    if (-not $base) {
+        throw 'The Python-owned installer requires a base Python 3.11+ outside the target slot.'
+    }
+    $uvCommand = Get-Command uv -CommandType Application -ErrorAction SilentlyContinue
+    if ($Action -in @('repair', 'dev', 'dev-release') -or -not (Test-Path -LiteralPath (Join-Path $VenvDir '.install-complete.json'))) {
+        if (-not (Ensure-Uv)) { throw 'Runtime construction requires uv.' }
+        Ensure-UvIndex
+        $uvCommand = Get-Command uv -CommandType Application -ErrorAction SilentlyContinue
+    }
+    $uvPath = if ($uvCommand) { $uvCommand.Source } else {
+        Join-Path $InstallDir 'tool\uv.exe'
+    }
+    $originPayload = if ($env:COPILOT_PLUGIN_STAGED_FROM) {
+        $env:COPILOT_PLUGIN_STAGED_FROM
+    } else { $PluginDir.ToString() }
+    $resultDir = Join-Path $InstallDir '.installer-inputs'
+    Ensure-InstallDir $resultDir
+    $resultPath = Join-Path $resultDir ("result-$PID-" + [Guid]::NewGuid().ToString('N') + '.json')
+    $modeArgs = @()
+    if ($Action -in @('repair', 'dev', 'dev-release')) { $modeArgs = @('--mode', $Action) }
+    $runtimeInputs = if ($modeArgs.Count) { $RuntimeInputPlugin } else { $PluginDir.ToString() }
+    if ($Owner) { $modeArgs += @('--owner', $Owner) }
+    try {
+        & $base -I -B (Join-Path $ScriptDir 'runtime_install.py') `
+            --root $InstallDir --plugin $runtimeInputs `
+            --payload $originPayload --uv $uvPath --base-python $base `
+            --result $resultPath @modeArgs
+        if ($LASTEXITCODE -eq 2) { exit 2 }
+        if ($LASTEXITCODE -ne 0) { throw "Python runtime lifecycle failed (exit $LASTEXITCODE)." }
+        $result = Get-Content -LiteralPath $resultPath -Raw | ConvertFrom-Json
+        if (-not $result.runtime_version -or -not $result.runtime_python) {
+            throw 'Python runtime lifecycle returned an incomplete result.'
+        }
+        $script:SrcVersion = [string]$result.runtime_version
+        if ($result.deployment_manifest_published -ne $true) {
+            throw 'Python runtime lifecycle did not publish its installed deployment evidence.'
+        }
+        $script:PythonRuntimeManifestPublished = $true
+        $script:VenvPython = [string]$result.runtime_python
+        $script:VenvDir = Split-Path -Parent (Split-Path -Parent $VenvPython)
+        $script:LinkDir = $VenvDir
+        $script:LinkPython = $VenvPython
+        Write-ServiceOk "Python runtime $SrcVersion ready and transition settled (reused: $($result.reused))"
+    } finally {
+        Remove-Item -LiteralPath $resultPath -Force -ErrorAction SilentlyContinue
+    }
 }
 
 function Deploy-Wrappers {
@@ -3712,6 +3800,7 @@ function Copy-StampDirectory {
         [IO.File]::Copy($file, [IO.Path]::Combine($Destination, [IO.Path]::GetFileName($file)), $true)
     }
     foreach ($directory in [IO.Directory]::EnumerateDirectories($Source)) {
+        if ([IO.Path]::GetFileName($directory) -eq '__pycache__') { continue }
         Copy-StampDirectory $directory ([IO.Path]::Combine($Destination, [IO.Path]::GetFileName($directory)))
     }
 }
@@ -3760,6 +3849,21 @@ if (-not $ContextualInstall -and $Action -in @('install', 'update', 'provision',
 
 try {
 switch ($Action) {
+    'dev' {
+        Write-ServiceHeader "Building explicitly claimed $ServiceName dev runtime"
+        Deploy-PythonRuntime
+        Write-V3Manifest
+    }
+    'dev-release' {
+        Write-ServiceHeader "Restoring $ServiceName before releasing its dev claim"
+        Deploy-PythonRuntime
+        Write-V3Manifest
+    }
+    'repair' {
+        Write-ServiceHeader "Repairing $ServiceName in a distinct runtime generation"
+        Deploy-PythonRuntime
+        Write-V3Manifest
+    }
     'stamp' {
         Invoke-Stamp
     }
@@ -3774,12 +3878,9 @@ switch ($Action) {
             Write-ServiceErr 'Missing prerequisite: git'
             exit 1
         }
-        if (-not (Ensure-Uv)) { exit 1 }
-        Ensure-UvIndex
         foreach ($dir in @($InstallDir, $BinDir, $LocalBin)) { Ensure-InstallDir $dir }
         if (-not (Deploy-RuntimeResolvers)) { exit 1 }
-        Deploy-VenvAndPackage
-        if (-not (Invoke-VersionedActivate)) { exit 1 }
+        Deploy-PythonRuntime
         Deploy-GlobalBinstub
         Write-V3Manifest
         Write-ServiceOk "Runtime provisioned (marker -> versions/$SrcVersion); agent-worktrees tools ready."
@@ -3799,7 +3900,6 @@ switch ($Action) {
         # Prereq checks
         $missingPrereqs = @()
         try { git --version 2>&1 | Out-Null } catch { $missingPrereqs += 'git' }
-        if (-not (Ensure-Uv)) { $missingPrereqs += 'uv' }
         if ($missingPrereqs.Count -gt 0) {
             Write-ServiceErr "Missing prerequisites: $($missingPrereqs -join ', ')"
             exit 1
@@ -3826,13 +3926,8 @@ switch ($Action) {
         }
 
         # -- Shared runtime (venv first: package install targets the venv) --
-        Deploy-VenvAndPackage
+        Deploy-PythonRuntime
         if (-not (Deploy-Wrappers)) { exit 1 }
-        if ($ContextualInstall -and -not (Test-ContextGovernanceUnchanged)) {
-            Write-ServiceErr 'Installation governance changed before runtime cutover'
-            exit 1
-        }
-        if (-not (Invoke-VersionedActivate)) { exit 1 }
         if ($ContextualInstall) {
             Write-V3Manifest
             Write-ServiceOk "Context runtime installed at $InstallDir"
@@ -4161,18 +4256,11 @@ switch ($Action) {
         Write-ServiceHeader "Updating $ServiceName"
 
         if ($ContextualInstall) {
-            if (-not (Ensure-Uv)) { exit 1 }
-            Ensure-UvIndex
             foreach ($dir in @($InstallDir, $BinDir)) {
                 Ensure-InstallDir $dir
             }
-            Deploy-VenvAndPackage
+            Deploy-PythonRuntime
             if (-not (Deploy-Wrappers)) { exit 1 }
-            if (-not (Test-ContextGovernanceUnchanged)) {
-                Write-ServiceErr 'Installation governance changed before runtime cutover'
-                exit 1
-            }
-            if (-not (Invoke-VersionedActivate)) { exit 1 }
             Write-V3Manifest
             Write-ServiceOk "Context runtime updated at $InstallDir"
             exit 0
@@ -4184,10 +4272,8 @@ switch ($Action) {
         }
 
         # -- Shared runtime (venv first: package install targets the venv) --
-        Deploy-VenvAndPackage
+        Deploy-PythonRuntime
         if (-not (Deploy-Wrappers)) { exit 1 }
-        if (-not (Invoke-VersionedActivate)) { exit 1 }
-        Write-V3Manifest
         Deploy-CopilotPlugin
         Deploy-GlobalBinstub
         Ensure-CopilotExperimental

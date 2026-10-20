@@ -61,8 +61,7 @@ def _payload_root(
 
 def _load_context_helper(payload_root: Path) -> ModuleType:
     helper = (
-        payload_root
-        / "scripts"
+        Path(__file__).resolve().parent
         / "installation-context"
         / "installation_context.py"
     )

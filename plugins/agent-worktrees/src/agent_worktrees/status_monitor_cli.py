@@ -179,6 +179,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     # `core.attr`, is what lets `status-monitor` stay cluster-free too.
     lock = _core_helper("_monitor_lock_path", status_monitor_runtime._monitor_lock_path)()
     my_prefix = os.path.realpath(sys.prefix)
+    from .runtime_identity import PROCESS_GENERATION, PROCESS_VERSION
     token = str(os.getpid())
     activate_project_for_path = _core_helper("_activate_project_for_path", status_updater_cli._activate_project_for_path)
     load_hook_client_module = core._load_hook_client_module
@@ -216,7 +217,8 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
         if d.get("mux") is False and mux_bin:
             return False
         op = d.get("prefix")
-        return not (op and runtime_superseded(prefix=op))
+        identity = {"generation": d["runtime_generation"]} if d.get("runtime_generation") else {}
+        return not (op and runtime_superseded(prefix=op, **identity))
 
     # Atomic exclusivity gate -- MUST run before the lock-file check below,
     # not instead of it. The lock file remains the metadata channel other
@@ -549,7 +551,12 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     )
 
     def _lock_extra() -> dict:
-        extra = {"prefix": my_prefix, "mux": bool(mux_bin)}
+        extra = {
+            "prefix": my_prefix, "mux": bool(mux_bin),
+            "runtime_generation": PROCESS_GENERATION,
+            "version": PROCESS_VERSION,
+            "runtime_slot": os.path.basename(my_prefix),
+        }
         if isinstance(installation_context, dict):
             extra.update(
                 {
@@ -655,6 +662,9 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                 "published": published_lock,
                 "pid": os.getpid(),
                 **worktrees_runtime.health(),
+                "runtime_generation": PROCESS_GENERATION,
+                "version": PROCESS_VERSION,
+                "runtime_slot": os.path.basename(my_prefix),
             }
         if action == READ_ACTION:
             if status_monitor_cutover.active_generation_for_pid(os.getpid()) is None:

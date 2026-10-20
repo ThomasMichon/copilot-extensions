@@ -14,12 +14,16 @@
 #   bash plugins/agent-worktrees/scripts/install.sh install --project-name my-repo
 #   bash plugins/agent-worktrees/scripts/install.sh status
 #   bash plugins/agent-worktrees/scripts/install.sh update
+#   bash plugins/agent-worktrees/scripts/install.sh repair --install-dir <root>
+#   bash plugins/agent-worktrees/scripts/install.sh dev --owner <worktree-root>
+#   bash plugins/agent-worktrees/scripts/install.sh dev-release --owner <worktree-root>
 #
 # Options:
 #   --project-name N Project name (auto-detected if omitted)
 #   --force          Overwrite config without drift confirmation
 #   --remove-config  On uninstall: also delete config and session metadata
 #   --machine NAME   Machine name (auto-detected if omitted)
+#   --owner PATH     Claiming worktree root for explicit dev/development release
 #   --zero-downtime  Deprecated no-op; update now auto-detects and cuts over
 #                    a live status-monitor whenever possible
 # =============================================================================
@@ -45,8 +49,14 @@ for ((__aw_i = 1; __aw_i < ${#__aw_args[@]}; __aw_i++)); do
             exit 1
         }
         __aw_install_dir_arg="${__aw_args[$((__aw_i + 1))]}"
+        case "${OSTYPE:-}" in
+            msys*|cygwin*)
+                __aw_install_dir_arg="$(cygpath -u "$__aw_install_dir_arg")" || exit 1
+                __aw_args[$((__aw_i + 1))]="$__aw_install_dir_arg" ;;
+        esac
     fi
 done
+set -- "${__aw_args[@]}"
 # === command-lifecycle: admission before staging ===
 if [[ -z "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
     case "$__aw_action" in
@@ -57,12 +67,16 @@ if [[ -z "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
                 exit 1
             }
             __aw_admission_python=""
-            for __aw_candidate in python3 python; do
-                __aw_candidate_path="$(type -P -- "$__aw_candidate" 2>/dev/null || true)"
+            while IFS= read -r __aw_candidate_path; do
                 [[ -f "$__aw_candidate_path" && -x "$__aw_candidate_path" ]] || continue
+                case "$__aw_candidate_path" in
+                    */Microsoft/WindowsApps/*) continue ;;
+                esac
+                "$__aw_candidate_path" -I -B -c \
+                    'import sys; assert sys.version_info >= (3, 11)' >/dev/null 2>&1 || continue
                 __aw_admission_python="$(cd "$(dirname "$__aw_candidate_path")" && pwd -P)/$(basename "$__aw_candidate_path")"
                 break
-            done
+            done < <(type -ap python3 python)
             [[ -n "$__aw_admission_python" ]] || {
                 printf '%s\n' "ERROR: Attributable runtime admission requires bootstrap Python." >&2
                 exit 1
@@ -103,6 +117,10 @@ if [[ -z "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
 fi
 # === end command-lifecycle: admission before staging ===
 if [[ -n "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
+    __aw_runtime_inputs="${AGENT_WORKTREES_RUNTIME_INPUTS:-$PLUGIN_DIR}"
+    if [[ "${COPILOT_PLUGIN_INSTALL_STAGED:-}" != context-install ]]; then
+        __aw_runtime_inputs="$PLUGIN_DIR"
+    fi
     case "${OSTYPE:-}:$PWD" in
         msys*:*/.copilot/installed-plugins/*|cygwin*:*/.copilot/installed-plugins/*)
             printf 'self-stage failed: Windows shell launch CWD pins the payload; launch from HOME or use install.ps1\n' >&2
@@ -117,7 +135,7 @@ if [[ -n "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
         __aw_origin_payload="$COPILOT_PLUGIN_STAGED_FROM"
     fi
     case "$__aw_action" in
-        install|update|status) ;;
+        install|update|status|repair|dev|dev-release) ;;
         *)
             printf '%s\n' \
                 "ERROR: structured installation context does not support action '$__aw_action'" >&2
@@ -293,7 +311,8 @@ if [[ -n "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
             __aw_deadline="$__aw_deadline_raw"
         fi
         export COPILOT_PLUGIN_INSTALL_STAGED=context-install
-        export COPILOT_PLUGIN_STAGED_FROM="$PLUGIN_DIR"
+        export COPILOT_PLUGIN_STAGED_FROM="$__aw_origin_payload"
+        export AGENT_WORKTREES_RUNTIME_INPUTS="$__aw_runtime_inputs"
         __aw_watchdog="$(cat <<'CONTEXT_INSTALL_WATCHDOG'
         __aw_staged_entry=$1
         __aw_stage=$2
@@ -556,6 +575,7 @@ REMOVE_CONFIG=false
 MACHINE=""
 PROJECT_NAME_ARG=""
 INSTALL_DIR_ARG=""
+OWNER_ARG=""
 ZERO_DOWNTIME=false
 
 while [[ $# -gt 0 ]]; do
@@ -565,6 +585,7 @@ while [[ $# -gt 0 ]]; do
         --machine)       MACHINE="$2"; shift 2 ;;
         --project-name)  PROJECT_NAME_ARG="$2"; shift 2 ;;
         --install-dir)   INSTALL_DIR_ARG="$2"; shift 2 ;;
+        --owner)         OWNER_ARG="$2"; shift 2 ;;
         --zero-downtime) ZERO_DOWNTIME=true; shift ;;
         *)               echo "Unknown option: $1" >&2; exit 1 ;;
     esac
@@ -967,10 +988,12 @@ _bootstrap_python() {
         echo "$LINK_DIR/bin/python"
         return 0
     fi
-    local __c __resolved __resolved_bin_real
-    for __c in python3 python; do
-        command -v "$__c" >/dev/null 2>&1 || continue
-        __resolved="$(command -v "$__c")"
+    local __resolved __resolved_bin_real
+    while IFS= read -r __resolved; do
+        [[ -n "$__resolved" ]] || continue
+        case "$__resolved" in
+            */Microsoft/WindowsApps/*) continue ;;
+        esac
         if [[ -n "$venv_real" ]]; then
             # The executable resolved via PATH lives in $VENV_DIR's bin/
             # (one level under the directory venv_real points at), not AT
@@ -978,10 +1001,85 @@ _bootstrap_python() {
             __resolved_bin_real="$(cd "$(dirname "$__resolved")" 2>/dev/null && pwd -P)"
             [[ -n "$__resolved_bin_real" && "$__resolved_bin_real" == "$venv_real"/* ]] && continue
         fi
+        __resolved="$("$__resolved" -I -B -c \
+            'import sys; assert sys.version_info >= (3, 11); print(sys.executable)' 2>/dev/null)" \
+            || continue
+        case "${OSTYPE:-}" in
+            msys*|cygwin*)
+                __resolved="${__resolved%$'\r'}"
+                __resolved="$(cygpath -u "$__resolved")" || continue ;;
+        esac
         echo "$__resolved"
         return 0
-    done
+    done < <(type -ap python3 python)
     return 1
+}
+
+_deploy_python_runtime() {
+    local base uv_path result_dir result_path parsed origin_payload runtime_inputs
+    runtime_inputs="$PLUGIN_DIR"
+    local mode_args=()
+    case "$ACTION" in
+        repair|dev|dev-release)
+            mode_args=(--mode "$ACTION")
+            runtime_inputs="${__aw_runtime_inputs:-$PLUGIN_DIR}"
+            ;;
+    esac
+    [[ -z "$OWNER_ARG" ]] || mode_args+=(--owner "$OWNER_ARG")
+    base="$(_bootstrap_python exclude-venv-dir)" || {
+        err "The Python-owned installer requires a base Python 3.11+ outside the target slot"
+        return 1
+    }
+    if [[ "$ACTION" == repair || "$ACTION" == dev || "$ACTION" == dev-release ||
+          ! -f "$VENV_DIR/.install-complete.json" ]]; then
+        _ensure_uv || return 1
+        _ensure_uv_index
+    fi
+    uv_path="$(command -v uv || true)"
+    [[ -n "$uv_path" ]] || uv_path="$INSTALL_DIR/tool/uv"
+    case "${OSTYPE:-}" in
+        msys*|cygwin*)
+            if [[ "$uv_path" != *.exe && -f "$uv_path.exe" ]]; then uv_path="$uv_path.exe"; fi ;;
+    esac
+    origin_payload="${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}"
+    result_dir="$INSTALL_DIR/.installer-inputs"
+    mkdir -p "$result_dir"
+    result_path="$(mktemp "$result_dir/result-$$-XXXXXX")" || return 1
+    local runtime_rc=0
+    "$base" -I -B "$SCRIPT_DIR/runtime_install.py" \
+        --root "$INSTALL_DIR" --plugin "$runtime_inputs" \
+        --payload "$origin_payload" --uv "$uv_path" --base-python "$base" \
+        --result "$result_path" "${mode_args[@]}" || runtime_rc=$?
+    if [[ "$runtime_rc" != 0 ]]; then
+        rm -f -- "$result_path"
+        err "Python runtime lifecycle failed"
+        return "$runtime_rc"
+    fi
+    parsed="$("$base" -I -c '
+import json, sys
+result = json.load(open(sys.argv[1], encoding="utf-8"))
+assert result.get("deployment_manifest_published") is True, \
+    "Python runtime lifecycle did not publish its installed deployment evidence"
+print(result["runtime_version"])
+print(result["runtime_python"])
+' "$result_path")" || {
+        rm -f -- "$result_path"
+        return 1
+    }
+    case "${OSTYPE:-}" in
+        msys*|cygwin*) parsed="${parsed//$'\r'/}" ;;
+    esac
+    rm -f -- "$result_path"
+    PYTHON_RUNTIME_MANIFEST_PUBLISHED=1
+    SRC_VERSION="$(printf '%s\n' "$parsed" | sed -n '1p')"
+    VENV_PYTHON="$(printf '%s\n' "$parsed" | sed -n '2p')"
+    case "${OSTYPE:-}" in
+        msys*|cygwin*) VENV_PYTHON="$(cygpath -u "$VENV_PYTHON")" ;;
+    esac
+    VENV_DIR="$(dirname "$(dirname "$VENV_PYTHON")")"
+    LINK_DIR="$VENV_DIR"
+    LINK_PYTHON="$VENV_PYTHON"
+    ok "Python runtime $SRC_VERSION ready and transition settled"
 }
 
 _payload_hash() {
@@ -2303,11 +2401,21 @@ EOF
 }
 
 write_deploy_manifest() {
+    if [[ "${PYTHON_RUNTIME_MANIFEST_PUBLISHED:-}" == 1 ]]; then
+        ok "Deploy manifest published by the retained Python lifecycle"
+        return 0
+    fi
     local manifest_path="$INSTALL_DIR/deploy-manifest.json"
     local machine platform kind ver commit branch dirty stable_plugin
     machine="$(resolve_machine)"
     platform="$(detect_platform)"
     stable_plugin="${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}"
+    local manifest_plugin="$stable_plugin" manifest_venv="$LINK_DIR"
+    case "${OSTYPE:-}" in
+        msys*|cygwin*)
+            manifest_plugin="$(cygpath -m "$stable_plugin")" || return 1
+            manifest_venv="$(cygpath -m "$LINK_DIR")" || return 1 ;;
+    esac
     kind="$(_source_kind "$stable_plugin")"
     ver="$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' "$PLUGIN_DIR/pyproject.toml" 2>/dev/null || echo 0.0.0)"
 
@@ -2337,8 +2445,11 @@ write_deploy_manifest() {
         fp="$("$VENV_PYTHON" -c "
 from agent_worktrees.update_stage import fingerprint
 from pathlib import Path
-print(fingerprint(Path('$stable_plugin')))
+print(fingerprint(Path('$manifest_plugin')))
 " 2>/dev/null || true)"
+        case "${OSTYPE:-}" in
+            msys*|cygwin*) fp="${fp%$'\r'}" ;;
+        esac
         [[ -n "$fp" ]] && payload_fingerprint="\"$fp\""
     fi
 
@@ -2351,7 +2462,7 @@ print(fingerprint(Path('$stable_plugin')))
   "deployed_by": "${machine}-${platform}",
   "source": {
     "kind": "$kind",
-    "path": "$stable_plugin",
+    "path": "$manifest_plugin",
     "repo": "copilot-extensions",
     "plugin": "agent-worktrees",
     "version": "$ver",
@@ -2360,7 +2471,7 @@ print(fingerprint(Path('$stable_plugin')))
     "dirty": $dirty,
     "payload_fingerprint": $payload_fingerprint
   },
-  "venv": "$LINK_DIR",
+  "venv": "$manifest_venv",
   "runtime": "python"
 }
 EOF
@@ -2902,6 +3013,16 @@ if ! $CONTEXTUAL_INSTALL; then
 fi
 
 case "$ACTION" in
+    dev|dev-release)
+        header "Explicit $SERVICE_NAME runtime mode: $ACTION"
+        _deploy_python_runtime || exit $?
+        write_deploy_manifest
+        ;;
+    repair)
+        header "Repairing $SERVICE_NAME in a distinct runtime generation"
+        _deploy_python_runtime || exit 1
+        write_deploy_manifest
+        ;;
     stamp)
         # Cheap 'stamp' (runtime-self-provisioning pattern): splat the
         # self-provisioning tool binstub + record the payload dir, deferring the
@@ -2925,12 +3046,9 @@ case "$ACTION" in
         # use (see bin/agent-worktrees).
         header "Provisioning $SERVICE_NAME runtime (lean; tools only, no launcher/hooks)"
         command -v git >/dev/null 2>&1 || { err "Missing prerequisite: git"; exit 1; }
-        _ensure_uv || exit 1
-        _ensure_uv_index
         mkdir -p "$INSTALL_DIR" "$BIN_DIR" "$LOCAL_BIN"
         deploy_runtime_resolvers || exit 1
-        _deploy_venv_and_package
-        _versioned_activate || exit 1
+        _deploy_python_runtime || exit 1
         deploy_tool_binstub
         write_deploy_manifest
         ok "Runtime provisioned (marker -> versions/$SRC_VERSION); agent-worktrees tools ready."
@@ -2959,13 +3077,6 @@ case "$ACTION" in
             err "Missing prerequisite: git"
             exit 1
         }
-        if $CONTEXTUAL_INSTALL; then
-            _ensure_uv || exit 1
-            _ensure_uv_index
-        elif ! command -v uv >/dev/null 2>&1; then
-            err "Missing prerequisite: uv"
-            exit 1
-        fi
 
         # Create only installation-local paths for a structured context.
         if $CONTEXTUAL_INSTALL; then
@@ -2978,13 +3089,8 @@ case "$ACTION" in
         fi
 
         # -- Shared runtime (venv first: package install targets the venv) --
-        _deploy_venv_and_package
+        _deploy_python_runtime || exit 1
         deploy_wrappers || exit 1
-        if $CONTEXTUAL_INSTALL && ! context_governance_unchanged; then
-            err "Installation governance changed before runtime cutover"
-            exit 1
-        fi
-        _versioned_activate || exit 1
         if $CONTEXTUAL_INSTALL; then
             remove_legacy_scripts
             write_deploy_manifest
@@ -3236,16 +3342,9 @@ case "$ACTION" in
         header "Updating $SERVICE_NAME"
 
         if $CONTEXTUAL_INSTALL; then
-            _ensure_uv || exit 1
-            _ensure_uv_index
             mkdir -p "$INSTALL_DIR" "$BIN_DIR"
-            _deploy_venv_and_package
+            _deploy_python_runtime || exit 1
             deploy_wrappers || exit 1
-            if ! context_governance_unchanged; then
-                err "Installation governance changed before runtime cutover"
-                exit 1
-            fi
-            _versioned_activate || exit 1
             remove_legacy_scripts
             write_deploy_manifest
             ok "Context runtime updated at $INSTALL_DIR"
@@ -3258,10 +3357,8 @@ case "$ACTION" in
         fi
 
         # -- Shared runtime (venv first: package install targets the venv) --
-        _deploy_venv_and_package
+        _deploy_python_runtime || exit 1
         deploy_wrappers || exit 1
-        _versioned_activate || exit 1
-        write_deploy_manifest
         remove_legacy_scripts
         remove_legacy_binstubs
         # Deploy the tool binstub unconditionally (see the install action) so a

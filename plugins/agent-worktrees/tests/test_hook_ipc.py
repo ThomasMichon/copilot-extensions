@@ -628,12 +628,15 @@ def test_installed_bin_layout_contains_all_lifecycle_helpers(tmp_path, monkeypat
     ):
         assert name in declared, f"{installer} does not deploy {name}"
     if installer.endswith(".sh"):
-        if not shutil.which("bash"):
+        from test_installer_slot_clean_posix import _bash_path, _resolve_bash
+
+        bash = _resolve_bash()
+        if not bash:
             pytest.skip("Native shell installer requires bash")
         block = "for script in " + text.split("for script in ", 1)[1].split("\n    done", 1)[0] + "\n done"
         subprocess.run(
-            ["bash", "-eu", "-c", 'SCRIPT_DIR="$1"; BIN_DIR="$2"; ok() { :; }; deploy() {\n'
-             + block + "\n}; deploy", "fixture", str(scripts), str(installed)],
+            [bash, "-eu", "-c", 'SCRIPT_DIR="$1"; BIN_DIR="$2"; ok() { :; }; deploy() {\n'
+             + block + "\n}; deploy", "fixture", _bash_path(scripts), _bash_path(installed)],
             check=True, capture_output=True, text=True, **no_window_kwargs(),
         )
     elif installer.endswith(".ps1"):
@@ -643,9 +646,9 @@ def test_installed_bin_layout_contains_all_lifecycle_helpers(tmp_path, monkeypat
                 "foreach ($script in @(", 1,
             )[1].split("\n    }\n", 1)[0] + "\n}"
             subprocess.run(
-                ["pwsh", "-NoProfile", "-NonInteractive", "-Command", "-"],
-                input="$ErrorActionPreference='Stop'; $ScriptDir=$env:FIXTURE_SCRIPTS; "
-                "$BinDir=$env:FIXTURE_BIN; function Write-ServiceOk {};\n" + block + "\n",
+                ["pwsh", "-NoProfile", "-NonInteractive", "-Command",
+                 "$ErrorActionPreference='Stop'; $ScriptDir=$env:FIXTURE_SCRIPTS; "
+                 "$BinDir=$env:FIXTURE_BIN; function Write-ServiceOk {};\n" + block],
                 env={**os.environ, "FIXTURE_SCRIPTS": str(scripts), "FIXTURE_BIN": str(installed)},
                 check=True, capture_output=True, text=True, **no_window_kwargs(),
             )
@@ -792,10 +795,12 @@ def test_session_start_old_runtime_skips_legacy_when_worktree_manager_active(
         encoding="utf-8",
     )
     monkeypatch.setattr(hook_client.shutil, "which", lambda name: None)
+    versioned_runtime = hook_client._load_sibling("versioned_runtime.py")
     monkeypatch.setattr(
         hook_client,
         "_load_sibling",
         lambda name: SimpleNamespace(
+            _version_key=versioned_runtime._version_key,
             _pid_alive=lambda pid: pid == os.getpid(),
             _pid_image_path=lambda pid: str(python),
         ),

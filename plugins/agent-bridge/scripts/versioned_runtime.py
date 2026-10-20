@@ -1,33 +1,20 @@
 #!/usr/bin/env python3
 """Immutable per-version runtime layout manager (dotfiles #581).
 
-Never mutate a runtime venv in place. Each version installs into its own immutable
-directory under ``<root>/versions/<version>``; the active version is published by a
-``<root>/current-version`` **plain-text marker file**. Switching versions writes the
-marker (atomic temp + rename) and the installer rewrites its **version-pinned
-binstubs** (and scheduled task / deploy manifest) to point straight at
-``versions/<version>/...`` -- so a running daemon (which already holds its own
-immutable files open) is never edited underneath itself, rollback is a marker
-rewrite (no rebuild), and the concurrent-venv-mutation race that spawns duplicate
-daemons (#123) cannot happen.
+Numbered runtimes are immutable ``<root>/versions/<version>`` directories,
+selected by a ``<root>/current-version`` **plain-text marker file**. Atomic selection and
+version-pinned launchers keep running daemons' files immutable; rollback selects
+the retained previous generation without rebuilding it.
 
-On **Windows there is no directory junction at all**. The legacy ``current``/``venv``
-junction (a reparse point) was blocked by Windows RedirectionGuard with WinError 448
-("untrusted mount point") on managed devices whenever the installer *traversed* it
-over a non-interactive logon; a marker file + pinned binstubs need no reparse point
-at all, so those machines work with no special-casing and the legacy real-venv fork
-is retired. On **POSIX** the active slot is still published by a plain ``venv``/
-``.venv`` **symlink** (not a reparse point, never blocked by RedirectionGuard) that
-the ``.sh`` binstub, systemd unit, and deploy-manifest resolve *through* -- the
-marker is authoritative and the symlink is the stable runtime-facing path.
-``current_version`` still falls back to reading an old link target during the
-one-time migration.
+Windows uses markers and pinned binstubs, never directory junctions: traversing
+legacy junctions under non-interactive logons can trigger RedirectionGuard
+WinError 448. POSIX publishes a ``venv``/``.venv`` symlink for shell launchers,
+systemd and deploy manifests; the marker remains authoritative.
+``current_version`` accepts an old link target during migration.
 
-This is a **stdlib-only** helper deliberately kept *out* of every runtime venv (no
-vendored-lib fan-out): the bootstrapping python at install time runs it as
-``python versioned_runtime.py <cmd> ...``. It owns only the ``versions/`` +
-``current-version`` layout; venv *creation* and package install stay in the
-per-plugin installer, which points them at the slot this returns.
+This stdlib-only helper owns layout, admission and runtime custody; package
+construction stays in the installer engine. A repair slot retains its package
+version but adds ``+repair.<uuid>`` (or ``.repair.<uuid>`` after a local version).
 
 Commands (all take ``--root <dir>``; ``--json`` for machine output)::
 
@@ -174,19 +161,14 @@ def list_versions(root: Path) -> list[str]:
     return sorted(names, key=_version_key)
 
 
+def package_version(slot_name: str) -> str:
+    """Separate generated source/repair identities from the package version."""
+    return _runtime_component("versioned_runtime_source").package_version(slot_name)
+
+
 def _version_key(v: str):
-    """Order package versions before optional dependency-profile qualifiers."""
-    supported = re.fullmatch(
-        r"(\d+)\.(\d+)\.(\d+)(?:-dev(\d+))?(?:\+([A-Za-z0-9][A-Za-z0-9._-]*))?", v
-    )
-    if supported:
-        major, minor, patch, dev, profile = supported.groups()
-        return (
-            0, int(major), int(minor), int(patch),
-            1 if dev is None else 0, int(dev or 0), (profile or "").casefold(),
-        )
-    tokens = re.split(r"(\d+)", v.casefold())
-    return (1, tuple((1, int(t)) if t.isdigit() else (0, t) for t in tokens))
+    """Order package releases and profiles before generated repair identities."""
+    return _runtime_component("versioned_runtime_source").version_key(v)
 
 
 # --------------------------------------------------------------------------
@@ -1462,10 +1444,22 @@ def retention_lease(root: Path, version: str, *, payload_hash: str | None = None
     this lease before releasing construction; retain it through cutover/drain
     or rollback, never store a PID/timestamp pin inside the immutable slot.
     """
+    with retention_custody(
+        root, version, payload_hash=payload_hash, timeout=timeout, poll_interval=poll_interval,
+    ) as (vdir, _):
+        yield vdir
+
+
+@contextmanager
+def retention_custody(root: Path, version: str, *, payload_hash: str | None = None,
+                      timeout: float = 60.0, poll_interval: float = 0.05):
+    """Yield a retained slot and borrowed descriptor under the same lease protocol.
+    POSIX guardians may inherit it; callers must never close it themselves.
+    """
     with _kernel_lease(
         root, version, kind="retention", shared=True,
         timeout=timeout, poll_interval=poll_interval,
-    ):
+    ) as descriptor:
         vdir = version_dir(root, version)
         if not vdir.is_dir() or _is_link(vdir):
             raise FileNotFoundError(f"ordinary runtime slot not installed: {vdir}")
@@ -1473,7 +1467,7 @@ def retention_lease(root: Path, version: str, *, payload_hash: str | None = None
             decision = check_admission(root, version, payload_hash=payload_hash)
             if decision != ADMIT_REUSE:
                 raise RuntimeError(f"runtime retention admission refused: {version}: {decision}")
-        yield vdir
+        yield vdir, descriptor
 
 
 def construction_session(root: Path, version: str, *, payload_hash: str,
@@ -1861,7 +1855,7 @@ def fingerprint_source(paths) -> str:
         # root (see `_root_label`), never the root's bare basename (not
         # unique across declared roots) and never its absolute path
         # (would make the digest depend on checkout location).
-        for root_path in ordered_roots:
+        for root_path in (f,) if f in root_modes else ordered_roots:
             try:
                 rel = f.relative_to(root_path)
             except ValueError:

@@ -685,3 +685,32 @@ def test_candidate_bridge_workers_share_the_existing_job_and_limits() -> None:
 
 def test_worktrees_manual_main_bootstrap_stays_serial() -> None:
     worker_contract.assert_manual_main_validation_does_not_need_unshipped_test_dependencies()
+
+
+@pytest.mark.parametrize("plugin,ref,promotion_run,expected", [
+    ("agent-worktrees", "refs/heads/dev", "", "-n 2 --dist=worksteal"),
+    ("agent-worktrees", "refs/heads/pr/candidate", "", "-n 2 --dist=worksteal"),
+    ("agent-worktrees", "refs/heads/main", "", ""),
+    ("agent-worktrees", "refs/tags/legacy-main", "", ""),
+    ("agent-worktrees", "refs/heads/unqualified", "", ""),
+    ("agent-worktrees", "refs/heads/release/promote-123", "123-1", "-n 2 --dist=worksteal"),
+    ("agent-bridge", "refs/heads/pr/candidate", "", ""),
+    ("agent-bridge", "refs/heads/dev", "123-1", ""),
+])
+def test_worktrees_manual_candidate_worker_policy_preserves_legacy_and_other_suites(
+    plugin: str, ref: str, promotion_run: str, expected: str,
+) -> None:
+    job = worker_contract._workflow("ci.yml")["jobs"]["full"]
+    step = next(step for step in job["steps"] if step.get("name") == worker_contract.FULL_STEP)
+    expression = step["env"]["PYTEST_ADDOPTS"].removeprefix("${{").removesuffix("}}")
+    expression = (
+        expression.replace("matrix.plugin", "plugin")
+        .replace("inputs.promotion_run", "promotion_run")
+        .replace("github.ref", "ref")
+        .replace("&&", "and")
+        .replace("||", "or")
+    )
+    assert eval(expression.strip(), {"__builtins__": {}}, {
+        "plugin": plugin, "ref": ref, "promotion_run": promotion_run,
+        "startsWith": str.startswith,
+    }) == expected

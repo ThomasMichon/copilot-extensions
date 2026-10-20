@@ -165,7 +165,7 @@ def test_bootstrap_python_exclude_venv_dir_behavioral(tmp_path: Path, exclusion:
     fallback_bin = tmp_path / "fallback-bin"
     fallback_bin.mkdir()
     fallback_python = fallback_bin / "python3"
-    fallback_python.write_text("#!/bin/sh\necho fallback-python\n")
+    fallback_python.write_text('#!/bin/sh\nprintf "%s\\n" "$0"\n')
     fallback_python.chmod(0o755)
 
     text = _INSTALL_SH.read_text(encoding="utf-8")
@@ -215,13 +215,10 @@ def test_bootstrap_python_exclude_venv_dir_filters_the_path_fallback_too(
 
     fallback_bin = tmp_path / "fallback-bin"
     fallback_bin.mkdir()
-    # Named "python" (not "python3"): `command -v NAME` only ever returns
-    # the FIRST PATH match for that exact name -- once the loop's "python3"
-    # iteration finds and excludes the venv's own copy, it moves on to try
-    # the NEXT candidate NAME ("python"), not a second PATH match for
-    # "python3". This fallback deliberately occupies that second slot.
+    # Control every candidate: an ambient second python3 is also a valid
+    # outside-slot interpreter, but would obscure this fixture's fallback.
     fallback_python = fallback_bin / "python"
-    fallback_python.write_text("#!/bin/sh\necho fallback-python\n")
+    fallback_python.write_text('#!/bin/sh\nprintf "%s\\n" "$0"\n')
     fallback_python.chmod(0o755)
 
     link_dir = tmp_path / "nonexistent-link"  # no bin/python here at all
@@ -231,10 +228,16 @@ def test_bootstrap_python_exclude_venv_dir_filters_the_path_fallback_too(
 
     harness = f"""
 set -uo pipefail
+__dirname="$(command -v dirname)"
+__basename="$(command -v basename)"
+__cygpath="$(command -v cygpath || true)"
+dirname() {{ "$__dirname" "$@"; }}
+basename() {{ "$__basename" "$@"; }}
+cygpath() {{ "$__cygpath" "$@"; }}
 LINK_DIR="{_bash_path(link_dir)}"
 VENV_DIR="{_bash_path(venv_dir)}"
 INSTALL_DIR="{_bash_path(runtime)}"
-PATH="{_bash_path(venv_dir)}/bin:{_bash_path(fallback_bin)}:$PATH"
+PATH="{_bash_path(venv_dir)}/bin:{_bash_path(fallback_bin)}"
 {fn_body}
 }}
 _bootstrap_python {exclusion}

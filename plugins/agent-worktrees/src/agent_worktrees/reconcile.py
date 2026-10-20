@@ -62,6 +62,7 @@ from typing import Any
 import yaml
 
 from . import config as cfg
+from . import runtime_identity
 from .installer_capabilities import posix_zero_downtime_flag_supported
 
 MARKETPLACE = "copilot-extensions"
@@ -257,18 +258,18 @@ def _version_lt(a: str | None, b: str | None) -> bool:
 # Repo settings -> enabled copilot-extensions plugins
 # --------------------------------------------------------------------------
 
-def _ce_plugin_names(enabled: dict[str, bool]) -> set[str]:
+def _ce_plugin_names(enabled: dict[str, bool], *, include_self: bool = False) -> set[str]:
     """copilot-extensions plugin names from an ``enabledPlugins`` map.
 
     Keeps truthy ``"<name>@<marketplace>"`` specs whose marketplace is this
-    one, excluding ``agent-worktrees`` itself (managed by the self-update path).
+    one. Self-update excludes Worktrees by default; diagnostics can include it.
     """
     names: set[str] = set()
     for spec, val in enabled.items():
         if not val or "@" not in spec:
             continue
         name, _, mkt = spec.partition("@")
-        if mkt != MARKETPLACE or name == SELF_PLUGIN:
+        if mkt != MARKETPLACE or (name == SELF_PLUGIN and not include_self):
             continue
         names.add(name)
     return names
@@ -277,6 +278,8 @@ def _ce_plugin_names(enabled: dict[str, bool]) -> set[str]:
 def _read_enabled_plugin_settings(
     base: Path,
     rels: Sequence[tuple[str, ...]],
+    *,
+    include_self: bool = False,
 ) -> list[str]:
     """Read activation settings strictly so callers can fail closed."""
     enabled: dict[str, bool] = {}
@@ -305,10 +308,10 @@ def _read_enabled_plugin_settings(
                     f"enabledPlugins entries must be string/boolean pairs: {path}"
                 )
             enabled[source] = value
-    return sorted(_ce_plugin_names(enabled))
+    return sorted(_ce_plugin_names(enabled, include_self=include_self))
 
 
-def read_enabled_plugins(repo_dir: Path) -> list[str]:
+def read_enabled_plugins(repo_dir: Path, *, include_self: bool = False) -> list[str]:
     """Return copilot-extensions plugin names enabled in repo settings.
 
     Reads the repo's plugin settings across both the Copilot-native and Claude
@@ -316,11 +319,11 @@ def read_enabled_plugins(repo_dir: Path) -> list[str]:
     ``.github/copilot/settings.json`` (+ ``settings.local.json``) and, as a
     fallback, ``.claude/settings.json`` (+ ``.claude/settings.local.json``), with
     the local file overriding per key and native winning over Claude on a key
-    conflict. Excludes ``agent-worktrees`` itself (managed by the self-update path).
+    conflict. Self-update excludes Worktrees; read-only diagnostics include it.
     """
     from plugin_resolve import SETTINGS_RELS
 
-    return _read_enabled_plugin_settings(repo_dir, SETTINGS_RELS)
+    return _read_enabled_plugin_settings(repo_dir, SETTINGS_RELS, include_self=include_self)
 
 
 def read_user_enabled_plugins() -> list[str]:
@@ -1229,6 +1232,17 @@ def _pid_alive(pid: int) -> bool:
         return False
 
 
+def _runtime_running_record(name: str, root: Path) -> dict[str, Any] | None:
+    if name == SELF_PLUGIN:
+        record = runtime_identity.monitor_record(root)
+        if record is not None:
+            return record
+    data = _read_json(root / "running-version.json")
+    if isinstance(data, dict) and data.get("version") and _pid_alive(data.get("pid")):
+        return data
+    return None
+
+
 def runtime_running_version(
     name: str,
     home: Path | None = None,
@@ -1237,44 +1251,24 @@ def runtime_running_version(
 ) -> str | None:
     """Version the *running* runtime reported on boot, if its pid is still alive.
 
-    Reads ``~/.<plugin>/running-version.json`` (``{version, pid, started_at}``),
-    which a runtime service writes on startup. Returns the version only when the
-    recorded pid is still alive; a missing file, malformed content, or a dead pid
-    all yield ``None`` so callers fall back to the on-disk deploy manifest. This is
-    the truthful "what is actually serving" signal -- a live daemon can lag its
-    installed plugin while the on-disk manifest already matches (dotfiles #533).
+    Worktrees uses its PID/start-time-verified monitor lock; other runtimes use
+    their live ``running-version.json`` marker. Never infer a process's build
+    from the current on-disk deployment.
     """
     selected_root = root or runtime_dir(name, home)
-    data = _read_json(selected_root / "running-version.json")
-    if not data:
-        return None
-    ver = data.get("version")
-    pid = data.get("pid")
-    if not ver or not _pid_alive(pid):
-        return None
-    return str(ver)
+    data = _runtime_running_record(name, selected_root)
+    return str(data["version"]) if data else None
 
 
 def running_version_lag(repo_dir: Path) -> list[dict[str, Any]]:
-    """Enabled runtime plugins whose *live* process lags the installed payload.
+    """Report live package or attributable installed-build drift, read-only.
 
-    Part C (#533): the launch path already heals runtime drift (running-aware
-    reconcile + the Part B zero-downtime cutover), but a running session can't
-    restart/cut-over its own daemon mid-turn -- so a `copilot plugin update`
-    applied *during* a session leaves the daemon lagging until the next launch.
-    This read-only diagnostic surfaces that gap for ``doctor``/``status`` so the
-    operator can `service restart` sooner rather than lag silently.
-
-    For each enabled copilot-extensions plugin that exposes a *live*
-    running-version signal, report ``{service, running, payload}`` when the
-    running version differs from the installed payload (PEP 440-aware, so the
-    ``0.4.0-dev5`` vs ``0.4.0.dev5`` spelling never reads as a false lag).
-    Plugins with no live process (dead/absent running-version) are omitted --
-    there is nothing serving to nudge about. Never raises.
+    Build UUIDs distinguish repair/dev generations with the same package.
+    Legacy missing evidence is unknown, not equality or fabricated drift.
     """
     lags: list[dict[str, Any]] = []
     try:
-        names = read_enabled_plugins(repo_dir)
+        names = read_enabled_plugins(repo_dir, include_self=True)
     except Exception:
         return lags
     for name in names:
@@ -1283,24 +1277,25 @@ def running_version_lag(repo_dir: Path) -> list[dict[str, Any]]:
             if pdir is None:
                 continue
             payload = payload_version(pdir)
-            running = runtime_running_version(name)
+            _, root = runtime_installer_environment(name, pdir)
+            record = _runtime_running_record(name, root)
+            running = str(record["version"]) if record else None
+            drift = runtime_identity.generation_drift(
+                _read_json(root / "deploy-manifest.json"), record,
+            )
             if (running is not None and payload is not None
-                    and not _versions_equal(running, payload)):
+                    and (not _versions_equal(running, payload) or drift)):
                 lags.append({
                     "service": name,
                     "running": running,
                     "payload": payload,
+                    **drift,
                 })
         except Exception:
             continue
     return lags
 def _zero_downtime_update(plugin_dir: Path) -> bool:
-    """Whether the plugin supports a zero-downtime in-place update (#533 Part B).
-
-    A daemon that ships a ZDD cutover (`install.ps1 update -ZeroDowntime` -> an
-    in-place venv update handed off via `agent-bridge deploy`) sets
-    ``"zeroDowntimeUpdate": true`` in its plugin.json.
-    """
+    """Whether the manifest declares zero-downtime updates."""
     data = _read_json(plugin_dir / "plugin.json") or {}
     return bool(data.get("zeroDowntimeUpdate"))
 def runtime_installer_argv(
@@ -2004,10 +1999,19 @@ def build_plan(
                 continue
             rdep = runtime_deployed_version(name, root=selected_runtime_root)
             rrun = runtime_running_version(name, root=selected_runtime_root)
-            # Prefer the *running* version when a live service reports one, so a
-            # daemon that lags its installed plugin is healed even though the
-            # on-disk manifest already matches the payload (dotfiles #533). No
-            # running-version.json (or a dead pid) -> fall back to on-disk.
+            drift = runtime_identity.generation_drift(
+                _read_json(selected_runtime_root / "deploy-manifest.json"),
+                _runtime_running_record(name, selected_runtime_root),
+            )
+            if drift:
+                diagnostics.append({
+                    "service": name, "phase": "runtime",
+                    "reason": "runtime-running-generation-drift", **drift,
+                    "message": "The live process differs from the installed build; "
+                               "restart the service from the selected runtime.",
+                })
+            # Package drift can require installation; build drift only requires
+            # a restart from the selected runtime, not rewriting that build.
             rver = rrun if rrun is not None else rdep
             if pver is None or not _versions_equal(rver, pver):
                 # Monotonic guard (#1366): never redeploy a payload that is
@@ -2040,7 +2044,6 @@ def build_plan(
                     if rver is None:
                         reason = "runtime-missing"
                     elif rrun is not None and _versions_equal(rdep, pver):
-                        # on-disk looks current; the live process is the laggard.
                         reason = "runtime-running-drift"
                     else:
                         reason = "runtime-version-drift"
@@ -2073,10 +2076,6 @@ def build_plan(
         result["diagnostics"] = diagnostics
     return result
 
-
-# --------------------------------------------------------------------------
-# In-process plan execution (the session-start self-provisioning path)
-# --------------------------------------------------------------------------
 
 def apply_plan(
     repo_dir: Path,

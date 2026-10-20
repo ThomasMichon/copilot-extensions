@@ -158,6 +158,37 @@ def test_explicit_context_selects_all_three_registry_files(monkeypatch, tmp_path
     assert repos._adopted_project_names() == {"example"}
 
 
+def test_installed_registry_validation_never_executes_live_payload_code(monkeypatch, tmp_path):
+    payload = _payload(tmp_path, "payload")
+    context, plugin_root = _stamp(
+        tmp_path / "durable", payload,
+        marketplace="pinned", repository="Example-Org/Pinned-Marketplace",
+    )
+    _select(monkeypatch, context, payload)
+    prefix = tmp_path / "installed"
+    bootstrap = prefix / ".runtime-bootstrap"
+    shutil.copytree(payload / "scripts", bootstrap)
+    monkeypatch.setattr(registry_paths.sys, "prefix", str(prefix))
+    (payload / "scripts" / "registry_root.py").write_text(
+        'raise AssertionError("executed mutable registry helper")\n', encoding="utf-8",
+    )
+    (payload / "scripts" / "installation-context" / "installation_context.py").write_text(
+        'raise AssertionError("executed mutable context validator")\n', encoding="utf-8",
+    )
+    assert config.install_dir() == plugin_root
+    assert registry_paths.installation_context()["pluginRoot"] == str(plugin_root)
+
+
+def test_incomplete_installed_registry_bootstrap_cannot_fall_back_to_payload(monkeypatch, tmp_path):
+    payload = _payload(tmp_path, "payload")
+    prefix = tmp_path / "installed"
+    (prefix / ".runtime-bootstrap").mkdir(parents=True)
+    monkeypatch.setattr(registry_paths.sys, "prefix", str(prefix))
+    monkeypatch.setenv("AGENT_WORKTREES_PAYLOAD_ROOT", str(payload))
+    with pytest.raises(ValueError, match="helper is unavailable"):
+        registry_paths._helper()
+
+
 def test_binstub_arbitration_is_shared_across_validated_cells(monkeypatch, tmp_path):
     isolated_home = tmp_path / "sandbox"
     monkeypatch.setenv("AGENT_HOME", str(isolated_home))

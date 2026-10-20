@@ -12,8 +12,7 @@ from agent_procutil import no_window_kwargs
 
 from . import config as cfg
 from . import installer as inst
-from . import output, reclaim, sessions, tracking
-from . import worktree_identity
+from . import output, reclaim, sessions, tracking, worktree_identity
 
 
 def _core():
@@ -785,13 +784,11 @@ def _render_doctor_report(
 
     lag = report.get("runtime_lag") or []
     if lag:
-        print(f"  ! Runtime version lag: {len(lag)} service(s) serving older code than installed")
+        from .runtime_identity import drift_description
+
+        print(f"  ! Runtime drift: {len(lag)} service(s) differ from installed payload/build")
         for entry in lag:
-            print(
-                f"      - {entry['service']}: running {entry['running']} but "
-                f"{entry['payload']} installed -> "
-                f"{entry['service']} service restart"
-            )
+            print(drift_description(entry))
         print(
             "      (a new launch heals this automatically; restart to "
             "converge this running session sooner)"

@@ -46,6 +46,71 @@ def test_posix_wait_error_is_not_exit_evidence(monkeypatch, flags):
         diagnostic_exit.wait_posix(4096, 0)
 
 
+@pytest.mark.parametrize("exited", [False, True])
+def test_posix_liveness_uses_exit_evidence_before_pid_existence(monkeypatch, exited):
+    calls = []
+    monkeypatch.setattr(diagnostics.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(os, "pidfd_open", lambda pid: 123, raising=False)
+    monkeypatch.setattr(os, "close", calls.append)
+    monkeypatch.setattr(diagnostic_exit, "wait_posix", lambda fd, timeout: exited)
+    monkeypatch.setattr(os, "kill", lambda *_: pytest.fail("PID existence is not exit evidence"))
+    assert diagnostics._pid_alive(456) is (not exited)
+    assert calls == [123]
+
+
+def test_failed_posix_exit_probe_preserves_custody_and_closes_descriptor(monkeypatch):
+    closed = []
+    monkeypatch.setattr(diagnostics.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(os, "pidfd_open", lambda pid: 123, raising=False)
+    monkeypatch.setattr(os, "close", closed.append)
+
+    def unavailable(*_):
+        raise OSError("exit probe unavailable")
+
+    monkeypatch.setattr(diagnostic_exit, "wait_posix", unavailable)
+    assert diagnostics._pid_alive(456) is True
+    assert closed == [123]
+
+
+@pytest.mark.parametrize("error,alive", [
+    (ProcessLookupError(), False), (PermissionError(), True), (OSError(), True),
+])
+def test_posix_exit_handle_failure_retains_conservative_pid_fallback(monkeypatch, error, alive):
+    monkeypatch.setattr(diagnostics.platform, "system", lambda: "Linux")
+
+    def unavailable(_):
+        raise error
+
+    monkeypatch.setattr(os, "pidfd_open", unavailable, raising=False)
+    monkeypatch.setattr(os, "kill", lambda *_: None)
+    assert diagnostics._pid_alive(456) is alive
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="native Linux unreaped-process exit proof")
+def test_exited_unreaped_child_is_not_a_live_retention_owner():
+    child = subprocess.Popen(
+        [sys.executable, "-c", "import time; print('ready',flush=True); time.sleep(30)"],
+        stdout=subprocess.PIPE, text=True,
+    )
+    descriptor = None
+    try:
+        assert child.stdout.readline().strip() == "ready"
+        assert diagnostics._pid_alive(child.pid)
+        descriptor = os.pidfd_open(child.pid)
+        child.terminate()
+        assert diagnostic_exit.wait_posix(descriptor, 5)
+        # Do not poll/wait: its parent still owns the unreaped process record.
+        os.kill(child.pid, 0)
+        assert not diagnostics._pid_alive(child.pid)
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+        if child.poll() is None:
+            child.kill()
+        child.wait(timeout=5)
+        child.stdout.close()
+
+
 @pytest.mark.parametrize("timeout", [-1, 31, float("inf"), float("nan"), True, "1"])
 def test_invalid_exit_timeout_refuses_before_signaling(monkeypatch, timeout):
     monkeypatch.setattr(

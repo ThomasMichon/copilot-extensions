@@ -26,16 +26,17 @@ def _ownership_key(root: Path, version: str) -> tuple[int, str, str]:
 @contextmanager
 def construction_lease(root: Path, version: str, *, timeout: float = 60.0,
                        poll_interval: float = 0.05):
-    """Hold exclusive construction ownership for one installation/version.
+    """Yield a borrowed descriptor under exclusive construction ownership.
 
     This is an installer-facing Python primitive, not a shell acquire/release
     command: the descriptor must remain in the process doing construction.
+    Borrowers must not close it; POSIX guardians may inherit its custody.
     Recheck ``check_admission`` inside the context before any slot writes.
     Release before unrelated reconciliation or activation/cutover locking.
 
     POSIX uses flock; Windows uses a nonblocking LockFileEx byte lock. Closing
-    the descriptor (including process death) releases ownership. The persistent
-    lock file is never unlinked: replacing it could create a second lock inode.
+    the final descriptor (including process death) releases ownership. The
+    persistent lock file is never unlinked: replacing it could create a second lock inode.
     No PID file, stale timestamp, or mkdir fallback grants ownership.
 
     This does not pin a completed candidate against GC or replace a repair's
@@ -44,14 +45,14 @@ def construction_lease(root: Path, version: str, *, timeout: float = 60.0,
     with _kernel_lease(
         root, version, kind="construction", shared=False,
         timeout=timeout, poll_interval=poll_interval,
-    ):
+    ) as descriptor:
         owners = getattr(_construction_owners, "keys", None)
         if owners is None:
             owners = _construction_owners.keys = set()
         key = _ownership_key(root, version)
         owners.add(key)
         try:
-            yield
+            yield descriptor
         finally:
             owners.remove(key)
 
@@ -151,9 +152,8 @@ def _kernel_lease(root: Path, version: str, *, kind: str, shared: bool,
                 mode = fcntl.LOCK_SH if shared else fcntl.LOCK_EX
                 fcntl.flock(fd, mode | fcntl.LOCK_NB)
 
-            def unlock():
-                fcntl.flock(fd, fcntl.LOCK_UN)
-
+            # Final close preserves inherited guardian custody; LOCK_UN would
+            # also unlock the guardian's copy of the open file description.
             def is_busy(exc):
                 return exc.errno in {errno.EAGAIN, errno.EWOULDBLOCK}
         deadline = time.monotonic() + timeout
@@ -177,8 +177,9 @@ def _kernel_lease(root: Path, version: str, *, kind: str, shared: bool,
             if (not stat.S_ISREG(named.st_mode) or
                     (opened.st_dev, opened.st_ino) != (named.st_dev, named.st_ino)):
                 raise OSError(f"{kind} lease path changed while waiting")
-            yield
+            yield fd
         finally:
-            unlock()
+            if os.name == "nt":
+                unlock()
     finally:
         os.close(fd)

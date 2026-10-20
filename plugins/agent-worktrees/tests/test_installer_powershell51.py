@@ -19,15 +19,44 @@ SERVICE_UTILS = PLUGIN / "scripts" / "service-utils.ps1"
 pytestmark = pytest.mark.guard
 
 
+def test_context_stage_captures_both_streams_before_wait_and_retains_unsettled_stage():
+    installer = INSTALLER.read_text(encoding="utf-8")
+    stage = installer.split("$contextStart = ", 1)[1].split(
+        "# === install-contract:v4 self-stage", 1,
+    )[0]
+    assert stage.index("RedirectStandardOutput = $true") < stage.index(
+        "[Diagnostics.Process]::Start"
+    )
+    assert stage.index("RedirectStandardError = $true") < stage.index(
+        "[Diagnostics.Process]::Start"
+    )
+    assert stage.index("StandardOutput.ReadToEndAsync()") < stage.index(
+        "WaitForExit($contextDeadline"
+    )
+    assert stage.index("StandardError.ReadToEndAsync()") < stage.index(
+        "WaitForExit($contextDeadline"
+    )
+    assert "if (-not $contextChild.WaitForExit(10000))" in stage
+    assert "[Threading.Tasks.Task]::WaitAll(" in stage
+    assert "retaining stage: $contextStage" in stage
+    assert stage.index("GetAwaiter().GetResult()") < stage.index(
+        "Remove-Item -LiteralPath $contextStage"
+    )
+
+
 def test_windows_provision_bootstraps_uv_before_runtime_build():
     installer = INSTALLER.read_text(encoding="utf-8")
     provision = installer.split("'provision' {", 1)[1].split("'install' {", 1)[0]
+    runtime = installer.split("function Deploy-PythonRuntime {", 1)[1].split("\nfunction ", 1)[0]
     manifest = installer.split("function Write-V3Manifest", 1)[1].split(
         "function Ensure-UvIndex", 1
     )[0]
 
-    assert "if (-not (Ensure-Uv)) { exit 1 }" in provision
-    assert provision.index("Ensure-Uv") < provision.index("Deploy-Venv")
+    assert "Deploy-PythonRuntime" in provision
+    assert "Deploy-VenvAndPackage" not in provision
+    assert "if (-not (Ensure-Uv)) { throw 'Runtime construction requires uv.' }" in runtime
+    assert runtime.index("Ensure-Uv") < runtime.index("runtime_install.py")
+    assert runtime.index("Ensure-UvIndex") < runtime.index("runtime_install.py")
     assert "Invoke-NativeCapture" in installer
     assert "[System.IO.File]::WriteAllText" in manifest
     assert "Set-Content -Path $tmp -Encoding UTF8" not in manifest
@@ -1092,6 +1121,9 @@ def test_native_stamp_directory_copy_preserves_complete_tree(tmp_path: Path):
     (source / "empty").mkdir()
     (source / ".hidden" / "nested" / "payload.bin").write_bytes(bytes(range(256)))
     (source / "metadata.json").write_text('{"fixture": true}', encoding="utf-8")
+    bytecode = source / ".hidden" / "nested" / "__pycache__"
+    bytecode.mkdir()
+    (bytecode / "stale.pyc").write_bytes(b"not payload")
     installer = INSTALLER.read_text(encoding="utf-8")
     function = "function Copy-StampDirectory" + installer.split(
         "function Copy-StampDirectory", 1
@@ -1107,10 +1139,14 @@ def test_native_stamp_directory_copy_preserves_complete_tree(tmp_path: Path):
         **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
     )
     assert result.returncode == 0, result.stderr
-    assert {str(path.relative_to(source)) for path in source.rglob("*")} == {
+    payload = [
+        path for path in source.rglob("*")
+        if "__pycache__" not in path.relative_to(source).parts
+    ]
+    assert {str(path.relative_to(source)) for path in payload} == {
         str(path.relative_to(destination)) for path in destination.rglob("*")
     }
-    for path in source.rglob("*"):
+    for path in payload:
         if path.is_file():
             assert (destination / path.relative_to(source)).read_bytes() == path.read_bytes()
 

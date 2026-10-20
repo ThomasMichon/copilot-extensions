@@ -2734,6 +2734,167 @@ self-containment constraint (a plugin's installer must not reach across a
 plugin boundary at install time) — see the `vendored-installer-engine`
 effort's Journal for the full git-fetch-vs-vendoring reasoning.
 
+### Python-owned construction foundation
+
+`libs/installer-engine/installer_engine.py` is the in-progress Python ownership
+seam for the mutable-dev-slot effort, not a completed installer adoption.
+Construction follows the complete transitive local `tool.uv.sources` graph.
+The canonical dependency policy's `retain_uv_install()` transaction is the
+single owner of its source snapshot, resolver configuration and admitted argv;
+the Python lifecycle retains that context through child settlement and installed
+health. It verifies the copied file coverage and content against the admitted
+source identity, and records the transaction's actual non-editable installation
+origins, not a second snapshot's paths. `freeze_inputs()` remains an explicit
+source-copy utility for packaging fixtures, not the construction path.
+The bootstrap requires Python 3.11 or newer.
+
+Canonical admission uses the requested package root as its working directory.
+Relative package/configuration relationships are retained without accumulating
+the caller's absolute checkout ancestry on each control/dev transaction. The
+native regression checks nested retained graphs against Windows' build-directory
+limit; long-path file support alone does not make a deep backend working directory
+acceptable to process creation.
+
+`numbered_candidate()` constructs or admits an ordinary numbered identity and
+keeps its shared retention descriptor until the calling lifecycle exits the
+context. Exact reuse never obtains exclusive construction ownership or invokes
+venv/package writers, even when construction tools are absent. Unfinished
+builders recheck under the canonical OS lease; completed content drift or
+invalid evidence refuses instead of rewriting a published slot.
+
+For a materialized source deployment, the Python lifecycle validates
+`runtime-source.json`, publishes the canonical source snapshot and selects its
+exact source-qualified runtime identity. It does not coalesce across source
+generations or silently downgrade to a plain package slot. Package provenance
+remains the declared package version; deployment evidence retains the full source
+identity, including when an explicit repair adds its own generation suffix.
+
+Reuse also runs an isolated installed-origin health probe under retention. Its
+historical, non-editable local origin remains attributable to this runtime's
+frozen-input staging root even after that build's snapshot is removed. Failed
+health preserves the published bytes and selectors; it never becomes permission
+to rebuild that identity. A Python health callable can exercise lazy imports
+before both fresh publication and healthy reuse; Worktrees requires its full
+command surface, not just a package import.
+
+An optional installed `module:function` construction callable receives JSON
+data under the same owned, isolated candidate interpreter. It runs only for
+fresh construction, before the installed-origin/full-surface health gate and
+immutable completion publication; exact reuse never reruns it. Worktrees uses
+this seam to stamp source provenance, the frozen package version, UTC build
+time and a distinct `runtime_generation`, and to remove unused unsigned
+Windows `agent-*.exe` console trampolines. POSIX scripts and the signed Windows
+interpreter are preserved. Package-version comparison accounts for normalized
+distribution metadata while retaining the declared version spelling. Its
+health callable checks the stamped identity and full command surface; missing
+or conflicting metadata is a repair refusal, not permission to restamp a
+published slot.
+
+Worktrees' native install/update/provision entrypoints now invoke its vendored
+Python lifecycle driver; native prerequisite and platform/project setup remain
+outside that operation. Publication executes under the retained candidate's
+own interpreter, not by importing its site-packages into a possibly
+ABI-incompatible bootstrap interpreter. The parent keeps candidate/rollback
+custody while awaiting that receiver. Receiver diagnostics stream to the caller
+even while settlement is pending. A custom root that is not the resolved
+Worktrees runtime root never cuts over the host's monitor.
+
+The caller-owned monitor seam can return actual passive **and restart**
+process handles without releasing its cutover guard. Supplying both guard and
+handles transfers settlement responsibility to that lifecycle; older callers
+retain their existing asynchronous recovery backstop. Spawn/commit return
+values do not prove service readiness or process exit. Candidate readiness,
+failed-child exit and predecessor retirement are observed under retained
+custody; uncertain durable publication requires a terminal owner-led recovery
+witness, never a missing/corrupt breadcrumb interpreted as success. Selector
+publication, monitor transition, and selector settlement share one exception-safe
+owning boundary: failures before either selector write, between writes, or after
+both writes retain custody through rollback or observed commit-forward, then
+rethrow the original failure. A transient rollback-write failure does not release
+the generations. Selector recovery accepts the exact prior bytes or the candidate's
+native newline spelling, never an unrelated concurrent selection.
+
+The serving monitor's attributable slot is retained even when it differs from
+the previous selector. For an uncertain publication, the same owning receiver
+can retry recovery under native ZDD transition authority instead of waiting for
+another installer blocked by its own guards. Recovery validates its breadcrumb,
+actual spawned handle, process start identities, and strict routing state.
+It confirms durable publication and actual predecessor drain before
+commit-forward, or restores and verifies the predecessor before retiring a
+ready unpublished passive. Unknown evidence, formerly-published unhealthy
+candidates, and storage failures retain custody rather than manufacturing a
+terminal outcome. Promoted monitor demand uses its existing worktree-status
+subscription, renewed under the lifecycle's transition stack through actual
+predecessor retirement. The successor is reattested after that exit. Windows
+exit evidence tests the native process signal, not whether a retained exited
+process object can still be opened. These
+pieces do not yet constitute complete adoption: dev/release, distinct-generation
+repair, generation propagation and process-death/live monitor recovery still require their
+own implementation and evidence.
+
+Construction uses the explicitly supplied base interpreter's `venv --copies`
+and one `uv pip install --no-sources --no-editable --link-mode copy` invocation
+over every frozen local package. It preserves the caller's configured indexes;
+it neither fetches unpublished local libraries from an index nor silently
+downgrades to another interpreter. An isolated installed-origin health probe
+precedes immutable completion publication. Retention is acquired before
+construction ownership is released, so GC cannot discard a ready candidate
+waiting for cutover.
+
+Worktrees opts into a process-retention bootstrap before completing a fresh
+candidate. The frozen input's stdlib runtime helper and `runtime_launcher.py`
+are copied into the unpublished slot's `.runtime-bootstrap/`; reuse never
+patches a completed slot. Monitor launch arguments preserve that slot before
+Windows direct-base-interpreter conversion. The slot-local launcher runs with
+`-I -S -B`, admits attributable completion and acquires the canonical shared
+retention lease before `site.main()`, `.pth` files, or application imports.
+It verifies the resulting interpreter prefix and retains the lease through the
+module's entire lifetime, including after the launching owner dies. A partial
+bootstrap refuses launch; an older numbered runtime without any bootstrap
+uses the explicit, warned legacy path until a new version is installed.
+Pre-3.14 venv prefix initialization is exercised separately from 3.14's early
+initialization. Default GC needs no process scan to protect these children.
+
+`retention_custody()` exposes the retained slot and its borrowed kernel
+descriptor to owned children; `retention_lease()` remains the compatible
+path-only context over that same protocol. `ReadyCandidate.descriptor` is
+valid only within the candidate context and must not be closed by its caller.
+This keeps read-only health children under actual custody without taking a
+construction lease on reuse. The single-file, independently vendored helper's
+reviewable ceiling increases from 2,362 to 2,376 lines for this accessor; it
+introduces no deploy-time import or alternate lock protocol.
+
+`installer_engine_process.py` owns bounded child execution. Windows uses the
+frozen canonical `agent-procutil` strict, non-breakaway Job implementation.
+POSIX uses an owner-death pipe guardian retaining the construction descriptor,
+an unreaped process-group leader and verified process-group teardown. The
+canonical POSIX lease releases on final descriptor close, not an explicit
+unlock that could revoke a live guardian's inherited custody.
+An unavailable teardown attestation is not permission to unwind construction:
+the owner logs the failure and keeps its actual kernel custody and frozen
+inputs until the Job or process group is verified settled. It then surfaces
+the original failure, so a recovered teardown cannot publish the failed
+candidate. The guardian does not reap its group leader before confirming
+that no live descendant writers remain.
+
+The existing Worktrees monitor cutover API now accepts the owning Python
+lifecycle's already-held guard. It validates the exact runtime-root lock and
+does not acquire it again or release it on success or failure. The legacy
+restart path accepts the candidate interpreter separately from the bootstrap
+interpreter. These are integration seams, not evidence that an entrypoint
+already holds the repair guard or waits through actual monitor settlement.
+
+Both Worktrees ordinary native entrypoints now call this foundation.
+Installation-cell authority,
+governance/transaction lock ordering, actual monitor cutover and rollback,
+claimed dev/release, distinct-generation repair, generation propagation and
+self-contained release materialization remain integration gates. Native
+Windows fixture tests exercise real offline uv construction, two-process
+coalescing, source-independent installed imports, exact reuse, GC retention,
+failed health, timeout and abrupt caller death. Equivalent POSIX execution and
+the authorized installed signed-Python deployment lane remains unverified; these
+fixtures do not complete the first-adopter or portfolio acceptance gates.
+
 `agent-codespaces` uses the canonical-reference form for both installers.
 Its Connection Owner service, sibling-library install order, and Windows
 signed-Python recovery/venv health probes remain plugin-owned; uv acquisition,

@@ -1,0 +1,660 @@
+"""Python-owned Worktrees construction, publication and monitor settlement."""
+
+from __future__ import annotations
+
+import argparse
+import importlib.util
+import json
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+import tomllib
+from contextlib import ExitStack, contextmanager
+from pathlib import Path
+
+
+SCRIPTS = Path(__file__).resolve().parent
+sys.path.insert(0, str(SCRIPTS))
+
+import installer_engine as engine
+import versioned_runtime as runtime
+import versioned_runtime_source as runtime_source
+
+
+class InstallationRefused(RuntimeError):
+    """Installation authority or a completed transition could not be proved."""
+
+
+class Governance:
+    def __init__(self, root: Path, payload: Path):
+        self.root = root.resolve()
+        self.payload = payload.resolve(strict=True)
+        helper = SCRIPTS / "installation-context" / "installation_context.py"
+        spec = importlib.util.spec_from_file_location("_worktrees_installation_context", helper)
+        if spec is None or spec.loader is None:
+            raise ImportError(f"Installation-context helper unavailable: {helper}")
+        self.helper = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = self.helper
+        spec.loader.exec_module(self.helper)
+        self.context = os.environ.get("COPILOT_EXTENSIONS_CONTEXT", "").strip()
+        self.durable_home = (
+            Path(self.context).parents[4] if self.context else
+            Path(os.environ.get("USERPROFILE") or Path.home())
+            / ".copilot-extensions"
+        )
+        self.initial = self.read()
+
+    def read(self) -> tuple[dict, dict | None]:
+        arguments = {
+            "legacy_root": self.root if not self.context else Path.home() / ".agent-worktrees",
+            "payload_root": self.payload,
+            "plugin_id": "agent-worktrees",
+            "durable_home": self.durable_home,
+        }
+        if not self.context:
+            state = self.helper.probe_legacy_entrypoint(**arguments)
+            if state.get("allowMutation") is not True:
+                raise InstallationRefused(
+                    f"Legacy runtime mutation refused: {state.get('probeReason')}"
+                )
+            return state, None
+        receipt = self.helper.validate_context_receipt(
+            self.context, self.durable_home,
+            expected_plugin_id="agent-worktrees", expected_payload_root=self.payload,
+        )
+        state = self.helper.resolve_installation_mode(context=self.context, **arguments)
+        if (
+            Path(receipt["pluginRoot"]).resolve() != self.root
+            or state.get("actualMode") != "namespaced"
+            or state.get("status") not in ("ready", "deactivation-required")
+            or Path(state["runtimeRoot"]).resolve() != self.root
+            or Path(state["context"]).resolve() != Path(self.context).resolve()
+            or state.get("installGeneration") != receipt["generation"]
+        ):
+            raise InstallationRefused("Installation context does not authorize this runtime root")
+        return state, receipt
+
+    def recheck(self) -> None:
+        state, receipt = self.read()
+        previous, previous_receipt = self.initial
+        keys = (
+            "actualMode", "desiredMode", "status", "reason", "runtimeRoot",
+            "context", "activationGeneration", "installGeneration", "allowMutation",
+        )
+        if any(state.get(key) != previous.get(key) for key in keys):
+            raise InstallationRefused("Installation governance changed during construction")
+        if receipt is not None and any(
+            receipt[key] != previous_receipt[key]
+            for key in ("marketplaceId", "namespaceGeneration", "generation", "pluginRoot")
+        ):
+            raise InstallationRefused("Installation receipt changed during construction")
+
+    def signature(self) -> dict:
+        state, receipt = self.initial
+        return {
+            "state": {key: state.get(key) for key in (
+                "actualMode", "desiredMode", "status", "reason", "runtimeRoot",
+                "context", "activationGeneration", "installGeneration", "allowMutation",
+            )},
+            "receipt": None if receipt is None else {key: receipt[key] for key in (
+                "marketplaceId", "namespaceGeneration", "generation", "pluginRoot",
+            )},
+        }
+
+    @contextmanager
+    def held(self, *, timeout: float = 180):
+        deadline = time.monotonic() + timeout
+        with ExitStack() as stack:
+            receipt = self.initial[1]
+            if receipt is not None:
+                marketplace = receipt["marketplaceId"]
+                stack.enter_context(self.helper._DirectoryLock(
+                    self.durable_home / "marketplaces" / ".locks" / f"{marketplace}.genesis",
+                    kind="genesis", marketplace_id=marketplace,
+                    timeout_seconds=max(0, deadline - time.monotonic()),
+                ))
+                stack.enter_context(self.helper._DirectoryLock(
+                    Path(receipt["cellRoot"]) / ".locks" / "agent-worktrees.install.lock",
+                    kind="install", marketplace_id=marketplace, plugin_id="agent-worktrees",
+                    timeout_seconds=max(0, deadline - time.monotonic()),
+                ))
+            self.recheck()
+            yield
+
+
+def _load_installed(slot: Path) -> None:
+    if Path(sys.prefix).resolve() != slot.resolve():
+        raise InstallationRefused("Publication must execute under the retained candidate interpreter")
+    import agent_worktrees
+
+    if not Path(agent_worktrees.__file__).resolve().is_relative_to(slot.resolve()):
+        raise InstallationRefused("Installer lifecycle resolved outside the retained candidate")
+    from agent_worktrees import __main__ as core
+
+    if not Path(core.__file__).resolve().is_relative_to(slot.resolve()):
+        raise InstallationRefused("CLI health resolved outside the retained candidate")
+    core._load_full_command_surface()
+
+
+def _selected(root: Path) -> str | None:
+    python = runtime.resolve_python(root)
+    return python.parent.parent.name if python is not None else None
+
+
+def _selector_snapshot(root: Path) -> dict[str, bytes | None]:
+    result = {}
+    for name in ("current-version", "last-known-good"):
+        try:
+            result[name] = (root / name).read_bytes()
+        except FileNotFoundError:
+            result[name] = None
+    return result
+
+
+def _restore_selectors(root: Path, version: str, snapshot: dict[str, bytes | None]) -> None:
+    with runtime._publication_lease(root):
+        observed = _selector_snapshot(root)
+        for name, content in observed.items():
+            if content not in (
+                snapshot[name], (version + "\n").encode("utf-8"), (version + "\r\n").encode("utf-8"),
+            ):
+                raise InstallationRefused("Runtime selection changed before rollback")
+        for name, content in snapshot.items():
+            path = root / name
+            if content is None:
+                path.unlink(missing_ok=True)
+            else:
+                temporary = path.with_name(f"{path.name}.rollback-{os.getpid()}")
+                temporary.write_bytes(content)
+                os.replace(temporary, path)
+
+
+def _wait_for_exit(pid: int, identity: str, *, label: str) -> None:
+    from zdd import diagnostics
+
+    announced = False
+    while diagnostics._pid_alive(pid):
+        observed = diagnostics.process_start_time(pid)
+        if observed is not None and observed != identity:
+            return
+        if not announced:
+            print(f"Retaining installer custody until {label} pid={pid} exits", file=sys.stderr)
+            announced = True
+        time.sleep(0.2)
+
+
+def _monitor_identity(root: Path) -> tuple[int, str] | None:
+    from agent_worktrees import locks
+    from zdd import diagnostics
+
+    record = locks.read_lock(root / "status-monitor.lock")
+    if not locks.lock_is_live(record):
+        return None
+    pid = record.get("pid")
+    if type(pid) is not int or pid <= 0:
+        raise InstallationRefused("Serving monitor has no attributable PID")
+    identity = diagnostics.process_start_time(pid)
+    if identity is None:
+        raise InstallationRefused("Serving monitor process identity cannot be established")
+    return pid, identity
+
+
+def _candidate_serving(root: Path, slot: Path) -> bool:
+    from agent_worktrees import locks, status_monitor_cutover as cutover
+    from agent_worktrees.runtime_identity import slot_generation
+
+    record = locks.read_lock(root / "status-monitor.lock")
+    generation = slot_generation(slot)
+    if (
+        not locks.lock_is_live(record)
+        or not record.get("prefix")
+        or Path(record["prefix"]).resolve() != slot.resolve()
+        or (generation is not None and record.get("runtime_generation") != generation)
+    ):
+        return False
+    endpoint = cutover.live_endpoint()
+    if endpoint is None or endpoint.pid != record.get("pid"):
+        return False
+    health = cutover.ControlClient(endpoint.base_url).health()
+    return (
+        health.get("status") == "ready"
+        and health.get("published") is True
+        and health.get("pid") == endpoint.pid
+        and (generation is None or health.get("runtime_generation") == generation)
+    )
+
+
+def _monitor_slot(root: Path, identity: tuple[int, str]) -> str | None:
+    from agent_worktrees import locks
+    from zdd import diagnostics
+
+    record = locks.read_lock(root / "status-monitor.lock")
+    if (
+        not isinstance(record, dict)
+        or record.get("pid") != identity[0]
+        or diagnostics.process_start_time(identity[0]) != identity[1]
+        or not isinstance(record.get("prefix"), str)
+        or not record["prefix"]
+    ):
+        raise InstallationRefused("Serving monitor runtime identity changed before retention")
+    prefix = Path(record["prefix"]).resolve(strict=True)
+    if prefix.parent == (root / "versions").resolve():
+        return prefix.name
+    return None
+
+
+def _settle_monitor(
+    root: Path, slot: Path, summary: dict,
+    predecessor: tuple[int, str] | None, handles: list[subprocess.Popen],
+) -> bool:
+    from zdd import breadcrumb
+
+    action = summary.get("action")
+    if action == "noop":
+        if summary.get("reason") not in ("disabled", "no-live-monitor"):
+            raise InstallationRefused(f"Monitor transition refused: {summary.get('reason')}")
+        return True
+    result = summary.get("result") or {}
+    committed = result.get("committed") is True
+    restart = summary.get("restart") or {}
+    committed = committed or (action == "restart" and (
+        restart.get("spawned") is True or restart.get("already_current") is True
+    ))
+    announcements: set[str] = set()
+
+    def announce(message: str) -> None:
+        if message not in announcements:
+            print(message, file=sys.stderr, flush=True)
+            announcements.add(message)
+
+    while True:
+        interrupted_record = (
+            breadcrumb.read_breadcrumb(root / "status-monitor-routing")
+            if action == "interrupted" else None
+        )
+        if action == "interrupted" and (
+            interrupted_record is not None and breadcrumb.is_stale(interrupted_record)
+            or interrupted_record is None and breadcrumb.breadcrumb_path(root / "status-monitor-routing").exists()
+        ):
+            result["publication_uncertain"] = True
+        if result.get("publication_uncertain"):
+            record = breadcrumb.read_breadcrumb(root / "status-monitor-routing")
+            # Missing/corrupt evidence cannot settle a durable-publication
+            # failure. Only the recovery owner's terminal witness can.
+            if record is None or record.get("state") not in ("committed", "rolled_back", "failed"):
+                announce("Monitor publication is uncertain; retaining both generations for owner-led recovery")
+                if record is not None:
+                    from agent_worktrees.runtime_monitor_recovery import recover_owned_publication
+
+                    try:
+                        if recover_owned_publication(root, record, predecessor, handles):
+                            continue
+                    except (OSError, ValueError, ConnectionError) as error:
+                        announce(f"Owned monitor recovery unavailable: {error}")
+                time.sleep(1)
+                continue
+            committed = record["state"] == "committed"
+        try:
+            ready = _candidate_serving(root, slot)
+        except (OSError, ValueError, ConnectionError) as error:
+            announce(f"Monitor serving attestation unavailable: {error}")
+            time.sleep(0.2)
+            continue
+        if ready:
+            if predecessor is not None and _monitor_identity(root) != predecessor:
+                _wait_for_exit(*predecessor, label="retired predecessor")
+                if not _candidate_serving(root, slot):
+                    raise InstallationRefused("Candidate stopped serving before predecessor retirement completed")
+            return True
+        live_handles = [handle for handle in handles if handle.poll() is None]
+        if live_handles and result.get("rolled_back"):
+            from agent_worktrees.runtime_monitor_recovery import recover_owned_publication
+
+            record = breadcrumb.read_breadcrumb(root / "status-monitor-routing")
+            if record is not None:
+                try:
+                    recover_owned_publication(root, record, predecessor, handles)
+                except (OSError, ValueError, ConnectionError) as error:
+                    announce(f"Owned monitor recovery unavailable: {error}")
+        if not live_handles:
+            # A vanished failed/restarted child is an observed failure, not
+            # an indefinitely pending success based on its spawn return.
+            if not committed or handles:
+                return False
+        announce("Retaining both generations until the candidate serves or every failed child exits")
+        time.sleep(0.2)
+
+
+def _source_provenance(
+    payload: Path, version: str, source_identity: runtime_source.SourceIdentity | None = None,
+) -> dict[str, str]:
+    provenance = {"version": version, "source": payload.as_posix()}
+    for field, arguments in (
+        ("commit", ["rev-parse", "HEAD"]),
+        ("branch", ["rev-parse", "--abbrev-ref", "HEAD"]),
+    ):
+        if shutil.which("git") is None:
+            provenance[field] = "unknown"
+            continue
+        result = subprocess.run(
+            ["git", "-C", str(payload), *arguments],
+            capture_output=True, text=True, timeout=30,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        )
+        if result.returncode != 0:
+            if "not a git repository" not in result.stderr:
+                raise InstallationRefused(f"Source provenance lookup failed: {result.stderr}")
+            provenance[field] = "unknown"
+        else:
+            provenance[field] = result.stdout.strip()
+    kind = "marketplace" if "/.copilot/installed-plugins/" in payload.as_posix() else "local"
+    dirty = None
+    if kind == "local" and provenance["commit"] != "unknown":
+        status = subprocess.run(
+            ["git", "-C", str(payload), "status", "--porcelain", "--", str(payload)],
+            capture_output=True, text=True, timeout=30, check=True,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        )
+        dirty = bool(status.stdout.strip())
+    if source_identity is not None:
+        provenance["commit"] = source_identity.source_commit
+    provenance["deployment_source"] = json.dumps({
+        "kind": kind, "path": payload.as_posix(), "repo": "copilot-extensions",
+        "plugin": "agent-worktrees", "version": version,
+        "commit": provenance["commit"] if kind == "local" else None,
+        "branch": provenance["branch"] if kind == "local" else None, "dirty": dirty,
+        **runtime_source.manifest_fields(source_identity),
+    })
+    return provenance
+
+
+def _installed_identity(slot: Path) -> dict:
+    python = runtime.slot_python(slot.parent.parent, slot.name)
+    if python is None:
+        raise InstallationRefused("Retained runtime has no interpreter for deployment evidence")
+    probe = (
+        "import json,pathlib,sys; from importlib.metadata import version; "
+        "from agent_worktrees import _build_info; "
+        "assert pathlib.Path(_build_info.__file__).resolve().is_relative_to("
+        "pathlib.Path(sys.prefix).resolve()); "
+        "print(json.dumps({'package_version':version('agent-worktrees'),"
+        "'build_info':_build_info.BUILD_INFO}))"
+    )
+    result = subprocess.run(
+        [str(python), "-I", "-B", "-c", probe],
+        executable=str(python) if os.name == "nt" else None,
+        capture_output=True, text=True, timeout=30, check=True,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    return json.loads(result.stdout)
+
+
+def install(
+    root: Path, plugin: Path, *, payload: Path, uv: Path, base_python: Path,
+    wait_timeout: float = 180, child_timeout: float = 180,
+) -> dict:
+    if base_python.resolve(strict=True) != Path(sys.executable).resolve():
+        raise InstallationRefused("The lifecycle driver must run under the selected base interpreter")
+    governance = Governance(root, payload)
+    os.environ["AGENT_WORKTREES_PAYLOAD_ROOT"] = str(governance.payload)
+    root = governance.root
+    package_version = tomllib.loads(
+        (plugin / "pyproject.toml").read_text(encoding="utf-8"),
+    )["project"]["version"]
+    source_identity = runtime_source.read_source_identity(
+        plugin, package_version, plugin="agent-worktrees",
+    )
+    version = source_identity.runtime_version if source_identity is not None else package_version
+    provenance = _source_provenance(governance.payload, package_version, source_identity)
+    print(f"Runtime {version}: admitting frozen inputs", flush=True)
+    with ExitStack() as custody:
+        previous = _selected(root)
+        if previous is not None:
+            custody.enter_context(runtime.retention_lease(root, previous, timeout=wait_timeout))
+        with governance.held(timeout=wait_timeout):
+            if source_identity is not None:
+                plugin = runtime_source.publish_source_snapshot(plugin, root, source_identity)
+            candidate = custody.enter_context(engine.numbered_candidate(
+                root, version, plugin=plugin, uv=uv, base_python=base_python,
+                health_module="agent_worktrees.runtime_candidate", health_callable="verify_runtime_candidate",
+                construction_callable="agent_worktrees.runtime_candidate:prepare_runtime_candidate",
+                construction_data=provenance,
+                process_retention=True,
+                reuse_generations=source_identity is None,
+                wait_timeout=wait_timeout, child_timeout=child_timeout,
+            ))
+        version = candidate.slot.name
+        print(
+            f"Runtime {version}: candidate healthy (reused={candidate.reused}); "
+            "retaining through publication", flush=True,
+        )
+        with tempfile.TemporaryDirectory(dir=root / ".installer-inputs", prefix="transition-") as temporary:
+            result_path = Path(temporary) / "result.json"
+            argv = [
+                str(runtime.slot_python(root, version)), "-I", "-B", str(SCRIPTS / "runtime_install.py"),
+                "--root", str(root), "--plugin", str(plugin), "--payload", str(payload),
+                "--uv", str(uv), "--base-python", str(base_python), "--result", str(result_path),
+                "--settle-slot", version, "--payload-hash", candidate.payload_hash,
+                "--governance-generation", json.dumps(governance.signature()),
+                "--wait-timeout", str(wait_timeout), "--package-version", package_version,
+            ]
+            if previous is not None:
+                argv.extend(["--previous-version", previous])
+            environment = dict(os.environ)
+            for name in ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV"):
+                environment.pop(name, None)
+            environment["PYTHONDONTWRITEBYTECODE"] = "1"
+            process = subprocess.Popen(
+                argv, env=environment, stdin=subprocess.DEVNULL,
+                executable=argv[0] if os.name == "nt" else None,
+                text=True,
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+            )
+            try:
+                stdout, stderr = process.communicate()
+            except BaseException:
+                # This child owns both retained generations and cutover authority.
+                # A caller interruption must not turn its unfinished transition
+                # into permission for cleanup.
+                process.communicate()
+                raise
+            if stdout:
+                print(stdout, end="", flush=True)
+            if stderr:
+                print(stderr, end="", file=sys.stderr, flush=True)
+            if process.returncode != 0:
+                raise subprocess.CalledProcessError(process.returncode, argv, stdout, stderr)
+            result = json.loads(result_path.read_text(encoding="utf-8"))
+            result["reused"] = candidate.reused
+            return result
+
+
+def settle_candidate(
+    root: Path, version: str, *, payload: Path, payload_hash: str,
+    expected_governance: dict, previous: str | None = None, wait_timeout: float = 180,
+    cutover_guard=None, lifecycle_slot: Path | None = None, package_version: str | None = None,
+    force_monitor_transition: bool = False,
+) -> dict:
+    governance = Governance(root, payload)
+    if governance.signature() != expected_governance:
+        raise InstallationRefused("Installation governance changed before candidate handover")
+    root = governance.root
+    os.environ["AGENT_WORKTREES_PAYLOAD_ROOT"] = str(governance.payload)
+    with ExitStack() as custody:
+        candidate_slot = custody.enter_context(runtime.retention_lease(
+            root, version, payload_hash=payload_hash,
+        ))
+        if previous is not None:
+            custody.enter_context(runtime.retention_lease(root, previous))
+        print(f"Runtime {version}: verifying publication under its own interpreter", flush=True)
+        _load_installed(lifecycle_slot if lifecycle_slot is not None else candidate_slot)
+        from agent_worktrees import (
+            config as cfg, status_monitor_cutover as cutover, runtime_deployment as deployment,
+        )
+
+        identity = _installed_identity(candidate_slot)
+        if package_version is not None:
+            from packaging.version import Version
+
+            if Version(identity["package_version"]) != Version(package_version):
+                raise InstallationRefused("Retained runtime differs from the requested package version")
+        manifest = deployment.manifest_bytes(identity, candidate_slot, payload_hash)
+
+        monitor_scope = cfg.install_dir().resolve() == root
+        guard = cutover_guard
+        if guard is None:
+            guard = cutover._acquire_cutover_lock(root / "status-monitor-routing")
+            custody.callback(guard.release)
+        print(f"Runtime {version}: cutover authority acquired", flush=True)
+        with governance.held(timeout=wait_timeout):
+            selected = _selected(root)
+            if selected is not None and selected != previous:
+                custody.enter_context(runtime.retention_lease(root, selected, timeout=wait_timeout))
+            snapshot = _selector_snapshot(root)
+            manifest_snapshot = deployment.read_manifest(root)
+            predecessor = _monitor_identity(root) if monitor_scope else None
+            if predecessor is not None:
+                serving_slot = _monitor_slot(root, predecessor)
+                if serving_slot is not None and serving_slot not in (version, previous, selected):
+                    custody.enter_context(runtime.retention_lease(root, serving_slot, timeout=wait_timeout))
+            if monitor_scope:
+                from zdd import breadcrumb
+
+                refusal = breadcrumb.recovery_refusal(
+                    cutover.routing_dir(), breadcrumb.read_breadcrumb(cutover.routing_dir()),
+                )
+                if refusal is not None:
+                    raise InstallationRefused(f"Monitor recovery refused before publication: {refusal}")
+            already_serving = (
+                monitor_scope and not force_monitor_transition
+                and _candidate_serving(root, candidate_slot)
+            )
+            print(
+                f"Runtime {version}: monitor scope={monitor_scope} "
+                f"predecessor={predecessor} already-serving={already_serving}", flush=True,
+            )
+            handles: list[subprocess.Popen] = []
+            summary = {"action": "interrupted"}
+            try:
+                runtime.activate(root, version, link_free=True)
+                print(f"Runtime {version}: selection published", flush=True)
+                committed = True
+                if monitor_scope and not already_serving:
+                    summary = cutover.activate_after_update(
+                        runtime_python=str(runtime.slot_python(root, version)),
+                        monitor_was_live=predecessor is not None, cutover_guard=guard,
+                        spawned_handles=handles,
+                        transition_custody=custody,
+                    )
+                    print(
+                        f"Runtime {version}: monitor transition action={summary.get('action')} "
+                        f"reason={summary.get('reason')} result={summary.get('result')}", flush=True,
+                    )
+                    committed = _settle_monitor(root, candidate_slot, summary, predecessor, handles)
+                if not committed:
+                    raise InstallationRefused("Monitor cutover rolled back; previous selection restored")
+                deployment.publish(root, manifest)
+            except BaseException:
+                announced = False
+                while True:
+                    try:
+                        committed = False
+                        if monitor_scope:
+                            committed = _settle_monitor(
+                                root, candidate_slot, summary, predecessor, handles,
+                            )
+                        if not committed:
+                            _restore_selectors(root, version, snapshot)
+                            deployment.restore(root, manifest_snapshot, manifest)
+                        elif any(content not in (
+                            (version + "\n").encode("utf-8"), (version + "\r\n").encode("utf-8"),
+                        ) for content in _selector_snapshot(root).values()):
+                            runtime.activate(root, version, link_free=True)
+                        if committed:
+                            deployment.publish(root, manifest)
+                        break
+                    except BaseException as error:
+                        if not announced:
+                            print(
+                                f"Publication settlement interrupted ({type(error).__name__}: {error}); "
+                                "retaining both generations until its actual outcome",
+                                file=sys.stderr, flush=True,
+                            )
+                            announced = True
+                        time.sleep(0.2)
+                raise
+        return {
+            "runtime_version": version,
+            "package_version": identity["build_info"]["version"],
+            "runtime_generation": identity["build_info"].get("runtime_generation"),
+            "deployment_manifest_published": True,
+            "runtime_python": str(runtime.slot_python(root, version)),
+            "payload_hash": payload_hash,
+        }
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--root", type=Path, required=True)
+    parser.add_argument("--plugin", type=Path, required=True)
+    parser.add_argument("--payload", type=Path, required=True)
+    parser.add_argument("--uv", type=Path, required=True)
+    parser.add_argument("--base-python", type=Path, required=True)
+    parser.add_argument("--result", type=Path, required=True)
+    parser.add_argument("--wait-timeout", type=float, default=180)
+    parser.add_argument("--child-timeout", type=float, default=180)
+    parser.add_argument("--settle-slot")
+    parser.add_argument("--payload-hash")
+    parser.add_argument("--previous-version")
+    parser.add_argument("--package-version")
+    parser.add_argument("--governance-generation", type=json.loads)
+    parser.add_argument("--mode", choices=("ordinary", "repair", "dev", "dev-release"), default="ordinary")
+    parser.add_argument("--owner", type=Path)
+    parser.add_argument("--mode-owner", action="store_true", help=argparse.SUPPRESS)
+    arguments = parser.parse_args(argv)
+    if arguments.settle_slot:
+        if arguments.payload_hash is None or arguments.governance_generation is None:
+            parser.error("candidate handover requires its content and governance generations")
+        result = settle_candidate(
+            arguments.root, arguments.settle_slot, payload=arguments.payload,
+            payload_hash=arguments.payload_hash, expected_governance=arguments.governance_generation,
+            previous=arguments.previous_version, wait_timeout=arguments.wait_timeout,
+            package_version=arguments.package_version,
+        )
+    elif arguments.mode != "ordinary":
+        import runtime_install_modes as modes
+
+        if arguments.mode_owner and arguments.governance_generation is None:
+            parser.error("whole-operation owner requires its original governance generation")
+        mode_arguments = (
+            {"expected_governance": arguments.governance_generation}
+            if arguments.mode_owner else {}
+        )
+        try:
+            result = (modes.run_owned if arguments.mode_owner else modes.run)(
+                arguments.root, arguments.plugin, payload=arguments.payload,
+                uv=arguments.uv, base_python=arguments.base_python, mode=arguments.mode,
+                owner=arguments.owner,
+                wait_timeout=arguments.wait_timeout, child_timeout=arguments.child_timeout,
+                **mode_arguments,
+            )
+        except runtime.DevClaimConflict as error:
+            print(str(error), file=sys.stderr)
+            return 2
+    else:
+        result = install(
+            arguments.root, arguments.plugin, payload=arguments.payload,
+            uv=arguments.uv, base_python=arguments.base_python,
+            wait_timeout=arguments.wait_timeout, child_timeout=arguments.child_timeout,
+        )
+    temporary = arguments.result.with_name(f"{arguments.result.name}.tmp-{os.getpid()}")
+    temporary.write_text(json.dumps(result) + "\n", encoding="utf-8")
+    os.replace(temporary, arguments.result)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

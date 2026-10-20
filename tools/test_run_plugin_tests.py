@@ -391,6 +391,56 @@ def test_explicit_empty_selection_is_not_a_guard_success(monkeypatch, tmp_path):
     assert 0 < calls[0][1]["limits"].wall_seconds <= 60
 
 
+def test_worktrees_native_runtime_files_have_independent_groups():
+    assert {
+        "test_python_runtime_dev_live.py", "test_python_runtime_install.py",
+    } <= runner._INDEPENDENT_SUBSUITE_FILES["agent-worktrees"]
+
+
+@pytest.mark.parametrize("filtered", [False, True])
+def test_independent_native_groups_preserve_every_collected_file(tmp_path, monkeypatch, filtered):
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    filenames = [
+        "test_a.py", "test_b.py", "test_c_native.py", "test_d.py",
+        "test_e.py", "test_f_native.py", "test_g.py",
+    ]
+    files = [tests / name for name in filenames]
+    for path in files:
+        path.touch()
+    monkeypatch.setattr(runner, "_plugin_dir", lambda _name: tmp_path)
+    monkeypatch.setattr(runner, "_INDEPENDENT_SUBSUITE_FILES", {
+        "fixture": {"test_c_native.py", "test_f_native.py"},
+    })
+    groups = runner._test_file_groups("fixture", 2, filtered=filtered)
+    assert [path for group in groups for path in group] == files
+    assert len({path for group in groups for path in group}) == len(files)
+    if filtered:
+        assert groups == [files]
+    else:
+        assert groups == [files[:2], [files[2]], files[3:5], [files[5]], [files[6]]]
+
+
+def test_missing_independent_native_group_fails_explicitly(tmp_path, monkeypatch):
+    (tmp_path / "tests").mkdir()
+    monkeypatch.setattr(runner, "_plugin_dir", lambda _name: tmp_path)
+    monkeypatch.setattr(runner, "_INDEPENDENT_SUBSUITE_FILES", {"fixture": {"test_missing.py"}})
+    with pytest.raises(ValueError, match="Independent sub-suite files are missing"):
+        runner._test_file_groups("fixture", 25)
+
+
+def test_explicit_collection_does_not_require_unselected_independent_files(tmp_path, monkeypatch):
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    selected = tests / "test_selected.py"
+    selected.touch()
+    monkeypatch.setattr(runner, "_plugin_dir", lambda _name: tmp_path)
+    monkeypatch.setattr(runner, "_INDEPENDENT_SUBSUITE_FILES", {"fixture": {"test_native.py"}})
+    assert runner._test_file_groups(
+        "fixture", 25, test_files=("tests/test_selected.py",),
+    ) == [[selected]]
+
+
 def test_worker_launch_uses_canonical_headlessness(monkeypatch, tmp_path):
     ready = tmp_path / "ready"
     ready.touch()

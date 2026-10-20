@@ -13,13 +13,13 @@ import sys
 import threading
 import time
 from collections.abc import Callable
+from contextlib import ExitStack
 from pathlib import Path
 from urllib.parse import urlparse
 
 from agent_procutil import spawn_daemon, windowless_python, windowless_python_env
 from single_instance_lease import AlreadyRunningError, SingleInstance
-from zdd import breadcrumb
-from zdd import routing
+from zdd import breadcrumb, routing
 from zdd.cutover import CutoverOrchestrator
 
 from . import locks
@@ -251,6 +251,7 @@ class ControlClient:
         token: str | None = None,
         config_dir: Path | None = None,
         timeout: float = 5.0,
+        transition_custody: ExitStack | None = None,
     ):
         parsed = urlparse(base_url)
         if parsed.scheme not in ("http", "") or not parsed.hostname or parsed.port is None:
@@ -261,10 +262,12 @@ class ControlClient:
         self.token = token or load_or_create_control_token()
         self.config_dir = Path(config_dir) if config_dir is not None else None
         self.timeout = timeout
+        self.transition_custody = transition_custody
 
     def _request(
         self, action: str, payload: dict | None = None, *,
         max_response_bytes: int | None = None, total_timeout: float | None = None,
+        read_timeout: float | None = None,
     ) -> dict:
         body = json.dumps(
             {"version": 1, "token": self.token, "action": action, "payload": payload or {}},
@@ -272,7 +275,7 @@ class ControlClient:
         ).encode("utf-8") + b"\n"
         deadline = None if total_timeout is None else time.monotonic() + total_timeout
         with socket.create_connection((self.host, self.port), timeout=self.timeout) as sock:
-            sock.settimeout(self.timeout)
+            sock.settimeout(self.timeout if read_timeout is None else read_timeout)
             sock.sendall(body)
             sock.shutdown(socket.SHUT_WR)
             chunks = []
@@ -314,6 +317,10 @@ class ControlClient:
         )
 
     def drain(self, *, timeout: float, poll: float, force: bool) -> dict:
+        with ExitStack() as local_custody:
+            return self._drain(timeout, poll, force, self.transition_custody or local_custody)
+
+    def _drain(self, timeout: float, poll: float, force: bool, custody: ExitStack) -> dict:
         trace = DrainTrace(
             self.config_dir or routing_dir(), role="client", port=self.port,
             timeout=timeout, poll=poll, rpc_timeout=self.timeout, force=force,
@@ -331,9 +338,13 @@ class ControlClient:
                 ).promote()
                 if not promoted.get("adopted"):
                     raise ValueError("status-monitor successor refused promotion")
+                from .runtime_monitor_demand import retain_transition_demand
+
+                custody.enter_context(retain_transition_demand(self.config_dir.parent, active.pid))
         with trace.stage("request-predecessor"):
             result = self._request(
                 "drain", {"timeout": timeout, "poll": poll, "force": force},
+                read_timeout=max(self.timeout, timeout + 5.0),
             )
         trace.emit(
             "response", "ok" if result.get("drained") else "fail",
@@ -404,6 +415,9 @@ def spawn_passive(runtime_python: str, *, port: int):
         "--control-port",
         str(port),
     ]
+    from .runtime_monitor_launch import retained_monitor_argv
+
+    argv = retained_monitor_argv(argv)
     if os.name == "nt":
         argv[0], extra_env = direct_monitor_python(runtime_python)
     else:
@@ -508,10 +522,23 @@ def activate_after_update(
     health_timeout: float = _DEFAULT_HEALTH_TIMEOUT_S,
     drain_timeout: float = _DEFAULT_DRAIN_TIMEOUT_S,
     monitor_was_live: bool | None = None,
+    cutover_guard: SingleInstance | None = None,
+    spawned_handles: list[subprocess.Popen] | None = None,
+    transition_custody: ExitStack | None = None,
 ) -> dict[str, object]:
     """Installer seam: cut over a live monitor after activating a new slot."""
     from . import status_monitor_reap_stale
     from . import status_monitor_runtime as smr
+
+    if spawned_handles is not None:
+        print("Monitor transition: validating owning guard", flush=True)
+    if cutover_guard is not None:
+        if (
+            not isinstance(cutover_guard, SingleInstance)
+            or not cutover_guard.held
+            or cutover_guard.lock_path.resolve() != (routing_dir() / "cutover.lock").resolve()
+        ):
+            raise ValueError("Installer cutover requires the held guard for this runtime root")
 
     summary: dict[str, object] = {
         "enabled": smr._status_monitor_enabled(),
@@ -527,11 +554,17 @@ def activate_after_update(
         summary.update(action="refused", reason=refusal, result={"ok": False, "error": refusal})
         return summary
     monitor_was_live = _monitor_lock_is_live() if monitor_was_live is None else bool(monitor_was_live)
+    restart_arguments = {}
+    if runtime_python is not None:
+        restart_arguments["runtime_python"] = runtime_python
+    if spawned_handles is not None:
+        restart_arguments["spawned_handles"] = spawned_handles
     if not _monitor_lock_is_live():
         if monitor_was_live:
             summary["action"] = "restart"
-            summary["restart"] = smr._restart_status_monitor()
-            status_monitor_reap_stale.schedule_delayed_daemon_health_reap()
+            summary["restart"] = smr._restart_status_monitor(**restart_arguments)
+            if cutover_guard is None or spawned_handles is None:
+                status_monitor_reap_stale.schedule_delayed_daemon_health_reap()
             return summary
         summary["reason"] = "no-live-monitor"
         return summary
@@ -539,43 +572,63 @@ def activate_after_update(
     if active_url is None:
         if monitor_was_live:
             summary["action"] = "restart"
-            summary["restart"] = smr._restart_status_monitor()
-            status_monitor_reap_stale.schedule_delayed_daemon_health_reap()
+            summary["restart"] = smr._restart_status_monitor(**restart_arguments)
+            if cutover_guard is None or spawned_handles is None:
+                status_monitor_reap_stale.schedule_delayed_daemon_health_reap()
             return summary
         summary["reason"] = "no-routed-monitor"
         return summary
 
     try:
-        lease = _acquire_cutover_lock(routing_dir())
+        lease = cutover_guard if cutover_guard is not None else _acquire_cutover_lock(routing_dir())
     except AlreadyRunningError as exc:
         summary["reason"] = f"cutover-busy:{exc.holder_pid or 'unknown'}"
         return summary
     py = runtime_python or sys.executable
+    make_client = _make_client
+    if transition_custody is not None:
+        def make_client(base_url: str) -> ControlClient:
+            client = _make_client(base_url)
+            client.transition_custody = transition_custody
+            return client
     try:
+        if spawned_handles is not None:
+            print("Monitor transition: checking prior recovery", flush=True)
         pre_recovery = breadcrumb.read_breadcrumb(routing_dir())
         summary["recovery"] = breadcrumb.recover_stale_cutover(
             routing_dir(),
-            _make_client,
+            make_client,
             health_check=_health_check,
         )
         if summary["recovery"].get("refused"):
             reason = breadcrumb.refusal_reason(summary["recovery"])
             summary.update(action="refused", reason=reason, result={"ok": False, "error": reason})
             return summary
+        if spawned_handles is not None:
+            print("Monitor transition: checking abandoned passive custody", flush=True)
         summary["passive_reap"] = _reap_abandoned_passive(pre_recovery)
         if summary["passive_reap"].get("refused"):
             reason = breadcrumb.refusal_reason(summary["passive_reap"])
             summary.update(action="refused", reason=reason, result={"ok": False, "error": reason})
             return summary
+        def spawn(port: int):
+            handle = spawn_passive(py, port=port)
+            if spawned_handles is not None:
+                spawned_handles.append(handle)
+                print(f"Monitor transition: passive spawned pid={getattr(handle, 'pid', None)} port={port}", flush=True)
+            return handle
+
         orch = CutoverOrchestrator(
             routing_dir(),
             bind=_BIND,
             version=None,
-            spawn_passive=lambda port: spawn_passive(py, port=port),
+            spawn_passive=spawn,
             health_check=_health_check,
-            make_client=_make_client,
+            make_client=make_client,
             pick_free_port=pick_free_port,
         )
+        if spawned_handles is not None:
+            print("Monitor transition: entering native cutover", flush=True)
         result = orch.run(
             health_timeout=health_timeout,
             drain_timeout=drain_timeout,
@@ -585,9 +638,10 @@ def activate_after_update(
         summary["result"] = result.to_dict()
     finally:
         try:
-            lease.release()
+            if cutover_guard is None:
+                lease.release()
         finally:
-            # Async backstop unconditionally, even on an unexpected
+            # Legacy callers require the async backstop, even on an unexpected
             # exception escaping stale recovery, orchestration, or the
             # lease release itself above (copilot-extensions#5453): the
             # installer wrapper suppresses a raised exception from this
@@ -596,9 +650,10 @@ def activate_after_update(
             # `lease.release()` would let a release failure itself skip
             # it) any such exception would skip scheduling the one thing
             # meant to heal an ambiguous daemon state left behind by that
-            # very failure. A clean cutover's repair pass simply finds
-            # nothing to do; never blocks this return.
-            status_monitor_reap_stale.schedule_delayed_daemon_health_reap()
+            # very failure. An owner supplying both the guard and child
+            # handles instead settles those processes under retained custody.
+            if cutover_guard is None or spawned_handles is None:
+                status_monitor_reap_stale.schedule_delayed_daemon_health_reap()
     return summary
 
 

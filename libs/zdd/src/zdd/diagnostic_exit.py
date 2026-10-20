@@ -39,3 +39,24 @@ def wait_windows(kernel32, handle, timeout: float) -> bool:
     if result not in (0, 0x102):
         raise OSError("native process exit wait failed")
     return result == 0
+
+
+def pid_alive_windows(pid: int) -> bool:
+    import ctypes
+    from ctypes import wintypes
+
+    try:
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        kernel32.OpenProcess.restype = wintypes.HANDLE
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        kernel32.CloseHandle.restype = wintypes.BOOL
+        handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, False, pid)
+        if handle:
+            try:
+                return not wait_windows(kernel32, handle, 0)
+            finally:
+                kernel32.CloseHandle(handle)
+        return ctypes.get_last_error() != 87  # ERROR_INVALID_PARAMETER proves no such PID.
+    except (OSError, ctypes.ArgumentError):
+        return True

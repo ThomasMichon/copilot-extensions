@@ -1269,6 +1269,56 @@ def source_project(path, name="fixture-source", sources="", dependencies=""):
     return path
 
 
+def test_retained_transaction_exposes_only_admitted_inputs_until_context_exit(tmp_path, monkeypatch):
+    source = source_project(tmp_path / "source")
+    original = (source / "pyproject.toml").read_bytes()
+    calls = []
+
+    def probe(command, **_kwargs):
+        calls.append(command)
+        assert "--show-settings" in command
+        return CompletedProcess(command, 0, settings(), "")
+
+    monkeypatch.setattr(policy.subprocess, "run", probe)
+    with policy.retain_uv_install(
+        "attributed-uv", ["--no-config", str(source)],
+        env={}, cwd=tmp_path, now=NOW, trusted_source_roots=(source,),
+    ) as transaction:
+        retained = transaction.sources[source]
+        assert len(calls) == 2
+        assert str(retained) in transaction.argv and str(source) not in transaction.argv
+        assert "--exclude-newer" in transaction.argv
+        assert transaction.environment["UV_CONFIG_FILE"] in transaction.argv
+        assert (retained / "pyproject.toml").read_bytes() == original
+        assert transaction.source_hashes[source / "pyproject.toml"] == hashlib.sha256(original).hexdigest()
+        assert transaction.cwd.is_dir()
+    assert not retained.exists()
+    assert (source / "pyproject.toml").read_bytes() == original
+
+
+def test_retained_transaction_refuses_copy_mutation_before_execution(tmp_path, monkeypatch):
+    source = source_project(tmp_path / "source")
+    copy = policy._copy_retained_file
+
+    def mutate(original, destination):
+        result = copy(original, destination)
+        if Path(original).name == "pyproject.toml":
+            Path(original).write_text('[project]\nname="changed"\nversion="1"\n', encoding="utf-8")
+        return result
+
+    monkeypatch.setattr(policy, "_copy_retained_file", mutate)
+    monkeypatch.setattr(
+        policy.subprocess, "run",
+        lambda command, **_kwargs: CompletedProcess(command, 0, settings(), ""),
+    )
+    with pytest.raises(policy.DependencyPolicyError, match="source content changed"):
+        with policy.retain_uv_install(
+            "attributed-uv", [str(source)],
+            env={}, cwd=tmp_path, now=NOW, trusted_source_roots=(source,),
+        ):
+            pytest.fail("mutated input cannot reach the admitted execution boundary")
+
+
 def offline_environment(tmp_path):
     import os
 

@@ -3283,6 +3283,21 @@ def test_restart_clears_dead_lock_then_spawns(monkeypatch):
     assert spawned["argv"][-1] == "status-monitor"
 
 
+def test_restart_explicit_candidate_interpreter_preserves_bootstrap_identity(monkeypatch):
+    import sys
+    import agent_worktrees.status_monitor_runtime as runtime
+
+    monkeypatch.delenv("AGENT_WORKTREES_STATUS_MONITOR", raising=False)
+    spawned, _, _ = _wire_restart(
+        monkeypatch, lock_data=None, live=False, superseded=False,
+    )
+    bootstrap = sys.executable
+    result = runtime._restart_status_monitor(runtime_python="candidate-python")
+    assert result["spawned"]
+    assert spawned["argv"] == ["candidate-python", "-m", "agent_worktrees", "status-monitor"]
+    assert sys.executable == bootstrap
+
+
 def test_cmd_restart_always_exits_zero(monkeypatch, capsys):
     monkeypatch.delenv("AGENT_WORKTREES_STATUS_MONITOR", raising=False)
     _wire_restart(monkeypatch, lock_data=None, live=False, superseded=False)

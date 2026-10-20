@@ -429,7 +429,7 @@ def _native_fixture(fixture: dict, shell: str, action: str = "provision") -> lis
             "# === command-lifecycle: admission before staging ===\n", 1
         )[1].split("# === end command-lifecycle: admission before staging ===", 1)[0]
         dispatch = "case \"$ACTION\" in\n    stamp)" + source.split(
-            'case "$ACTION" in\n    stamp)', 1
+            "    stamp)", 1
         )[1].split("    install)\n", 1)[0] + "esac\n"
         program = (
             "#!/usr/bin/env bash\nset -euo pipefail\n"
@@ -452,10 +452,10 @@ def _native_fixture(fixture: dict, shell: str, action: str = "provision") -> lis
             "header() { :; }\nok() { :; }\nerr() { printf '%s\\n' \"$*\" >&2; }\n"
             "_ensure_uv() { :; }\n_ensure_uv_index() { :; }\n"
             "deploy_runtime_resolvers() { :; }\ndeploy_tool_binstub() { :; }\n"
-            "_deploy_venv_and_package() {\n"
+            "_deploy_python_runtime() {\n"
             "  printf '%s' \"$TEST_OWNER\" > \"$INSTALL_DIR/runtime-slot\"\n"
-            "  sleep 0.3\n}\n"
-            "_versioned_activate() { cp \"$INSTALL_DIR/runtime-slot\" \"$INSTALL_DIR/current-version\"; }\n"
+            "  sleep 0.3\n"
+            "  cp \"$INSTALL_DIR/runtime-slot\" \"$INSTALL_DIR/current-version\"\n}\n"
             + writer + "\n" + admission + "\n" + dispatch
         )
         if action == "uninstall":
@@ -494,12 +494,11 @@ def _native_fixture(fixture: dict, shell: str, action: str = "provision") -> lis
         "function Ensure-InstallDir { param($Dir); [void][IO.Directory]::CreateDirectory($Dir) }\n"
         "function Invoke-NativeCapture { param($Action); $text=& $Action;"
         "@{ExitCode=$LASTEXITCODE;Output=($text -join \"`n\")} }\n"
-        "function Deploy-VenvAndPackage {\n"
+        "function Deploy-PythonRuntime {\n"
         "  [IO.File]::WriteAllText((Join-Path $InstallDir 'runtime-slot'),$env:TEST_OWNER)\n"
-        "  Start-Sleep -Milliseconds 300\n}\n"
-        "function Invoke-VersionedActivate {\n"
+        "  Start-Sleep -Milliseconds 300\n"
         "  Copy-Item (Join-Path $InstallDir 'runtime-slot') (Join-Path $InstallDir 'current-version')\n"
-        "  $true\n}\n"
+        "}\n"
         + writer + "\n" + stamp + "\n" + admission + "\n" + dispatch
     )
     if action == "uninstall":

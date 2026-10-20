@@ -131,6 +131,9 @@ class _DirectoryLock(AbstractContextManager["_DirectoryLock"]):
                     continue
                 try:
                     owner = self._owner()
+                except _FileIdentityChanged:
+                    time.sleep(LOCK_POLL_SECONDS)
+                    continue
                 except InstallationContextError:
                     if not self.path.exists() or not self.owner_path.exists():
                         time.sleep(LOCK_POLL_SECONDS)
@@ -143,6 +146,9 @@ class _DirectoryLock(AbstractContextManager["_DirectoryLock"]):
                         time.sleep(LOCK_POLL_SECONDS)
                         try:
                             current_owner = self._owner()
+                        except _FileIdentityChanged:
+                            time.sleep(LOCK_POLL_SECONDS)
+                            continue
                         except InstallationContextError:
                             if not self.path.exists() or not self.owner_path.exists():
                                 continue

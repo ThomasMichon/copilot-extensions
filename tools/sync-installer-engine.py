@@ -43,6 +43,7 @@ FILES = ier.FILES
 # Add future adopters here as later rollout phases land. The list stays explicit
 # so the canonical engine can migrate one plugin at a time.
 ADOPTERS = ier.ADOPTERS
+PYTHON_ADOPTERS = ier.PYTHON_ADOPTERS
 
 
 def vendor_pairs() -> list[tuple[Path, Path]]:
@@ -279,6 +280,25 @@ def verify() -> list[str]:
                     raise ValueError(f"{declaration}: native human-output declaration drift")
             except (OSError, ValueError) as error:
                 problems.append(str(error))
+    for plugin in PYTHON_ADOPTERS:
+        for name in (*ier.PYTHON_FILES, *ier.SUPPORT_FILES):
+            source = CANONICAL_DIR / name
+            destination = _plugin_dir(plugin) / "scripts" / name
+            indirect = next(
+                (found for path in (source, destination)
+                 if (found := uer._find_symlinked_ancestor(path, REPO.resolve())) is not None),
+                None,
+            )
+            if indirect is not None:
+                problems.append(f"{indirect} is a symlink -- refusing")
+            elif not destination.is_file() or destination.read_bytes() != source.read_bytes():
+                problems.append(f"{destination.relative_to(REPO)} differs from canonical Python engine")
+    plugins = REPO / "plugins"
+    for candidate in plugins.iterdir() if plugins.is_dir() else ():
+        if candidate.name not in PYTHON_ADOPTERS and any(
+            (candidate / "scripts" / name).exists() for name in ier.PYTHON_FILES
+        ):
+            problems.append(f"{candidate.name} has an unregistered Python installer engine")
     return problems
 
 
@@ -338,6 +358,19 @@ def sync() -> list[str]:
             if not declaration.is_file() or declaration.read_text(encoding="utf-8") != expected:
                 declaration.write_text(expected, encoding="utf-8")
                 written.append(declaration.relative_to(REPO).as_posix())
+    for plugin in PYTHON_ADOPTERS:
+        for name in (*ier.PYTHON_FILES, *ier.SUPPORT_FILES):
+            source = CANONICAL_DIR / name
+            destination = _plugin_dir(plugin) / "scripts" / name
+            for path in (source, destination):
+                indirect = uer._find_symlinked_ancestor(path, REPO.resolve())
+                if indirect is not None:
+                    raise RuntimeError(f"{indirect} is a symlink -- refusing")
+            if destination.is_file() and destination.read_bytes() == source.read_bytes():
+                continue
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source, destination)
+            written.append(destination.relative_to(REPO).as_posix())
     return written
 
 

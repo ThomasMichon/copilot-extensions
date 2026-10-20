@@ -24,6 +24,8 @@ REPO = Path(__file__).resolve().parent.parent
 CANONICAL_DIR = REPO / "libs" / "installer-engine"
 FILES = ("installer-engine.ps1", "installer-engine.sh")
 SUPPORT_FILES = ("installer_dependency_policy.py", "installer_dependency_config.py")
+PYTHON_FILES = ("installer_engine.py", "installer_engine_process.py", "runtime_launcher.py")
+PYTHON_ADOPTERS = ("agent-worktrees",)
 INSTALLER_SCRIPTS = ("install.ps1", "install.sh")
 ADOPTERS = (
     "agent-pull-requests",

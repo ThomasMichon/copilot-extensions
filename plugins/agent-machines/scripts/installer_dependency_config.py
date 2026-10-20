@@ -5,11 +5,61 @@ import json
 import os
 import re
 from datetime import date, datetime, time, timedelta, timezone
+from pathlib import Path
 
 _STRUCTURED_CUTOFF = re.compile(
     r"ExcludeNewerValue\s*\{\s*timestamp:\s*([^,\s]+),\s*span:\s*"
     r"(?:None|Some\(\s*ExcludeNewerSpan\(\s*([^,\s]+),?\s*\),?\s*\)),?\s*\}"
 )
+
+
+def config_inputs(arguments, environment, base, *, argument_pairs, toml, error_type):
+    pairs = dict(argument_pairs(arguments))
+    if "--no-config" in pairs or environment.get("UV_NO_CONFIG", "").lower() in ("1", "true"):
+        return []
+    explicit = pairs.get("--config-file") or environment.get("UV_CONFIG_FILE")
+    if explicit:
+        return [(base / explicit, False)]
+    candidates = []
+    project = base / (pairs.get("--project") or environment.get("UV_PROJECT") or ".")
+    if "--isolated" not in pairs and environment.get("UV_ISOLATED", "").lower() not in ("1", "true"):
+        for directory in (project, *project.parents):
+            uv = directory / "uv.toml"
+            manifest = directory / "pyproject.toml"
+            if uv.is_file():
+                candidates.append((uv, False))
+                break
+            if manifest.is_file():
+                tool = toml(manifest).get("tool", {})
+                if not isinstance(tool, dict):
+                    raise error_type("configured project metadata is unsupported")
+                if "uv" in tool:
+                    if not isinstance(tool["uv"], dict):
+                        raise error_type("configured UV metadata is unsupported")
+                    candidates.append((manifest, True))
+                    break
+    if os.name == "nt":
+        if environment.get("APPDATA"):
+            candidates.append((Path(environment["APPDATA"]) / "uv" / "uv.toml", False))
+        if environment.get("SYSTEMDRIVE"):
+            candidates.append((
+                Path(environment["SYSTEMDRIVE"] + "\\") / "ProgramData" / "uv" / "uv.toml", False,
+            ))
+    else:
+        user = Path(environment.get("XDG_CONFIG_HOME") or (
+            Path(environment.get("HOME") or Path.home()) / ".config"
+        )) / "uv" / "uv.toml"
+        candidates.append((user, False))
+        system = Path("/etc/uv/uv.toml")
+        for directory in (environment.get("XDG_CONFIG_DIRS") or "/etc/xdg").split(":"):
+            if not directory:
+                break
+            candidate = base / directory / "uv" / "uv.toml"
+            if candidate.is_file():
+                system = candidate
+                break
+        candidates.append((system, False))
+    return [(path, project) for path, project in candidates if path.is_file()]
 
 
 def metadata_needs_caller_layout(value):

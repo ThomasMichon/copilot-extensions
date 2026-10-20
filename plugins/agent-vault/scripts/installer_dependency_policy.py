@@ -25,6 +25,7 @@ from datetime import datetime, timedelta, timezone
 from contextlib import contextmanager
 from functools import partial
 from pathlib import Path
+from typing import NamedTuple
 from urllib.parse import unquote, urlsplit
 from urllib.request import url2pathname
 
@@ -529,7 +530,12 @@ def _source_inputs(arguments, environment, cwd, trusted_source_roots):
         if environment.get(variable):
             for path in environment[variable].split():
                 _check_requirements_sources(base / path, set(), roots, base, seen, files, editables)
-    for project in seen:
+    source_editables = (
+        "--no-sources" not in dict(pairs) and "--no-editable" not in dict(pairs)
+        and environment.get("UV_NO_SOURCES", "").lower() not in ("1", "true")
+        and environment.get("UV_NO_EDITABLE", "").lower() not in ("1", "true")
+    )
+    for project in seen if source_editables else ():
         mappings = _toml(project / "pyproject.toml").get("tool", {}).get("uv", {}).get("sources", {})
         for entries in mappings.values():
             for entry in entries if isinstance(entries, list) else [entries]:
@@ -544,7 +550,7 @@ def prepare_uv_install(
     trusted_source_roots: tuple[Path, ...] = (),
     _projection: list[str] | None = None,
 ) -> list[str]:
-    """Preflight only. Installations must use run_uv_install to retain inputs."""
+    """Preflight only. Installations must execute a retained UV transaction."""
     env = _captured_environment(env)
     _source_inputs(arguments, env, cwd, trusted_source_roots)
     probe_arguments = [
@@ -634,52 +640,10 @@ _resolver_configuration = partial(
 
 
 def _config_inputs(arguments, environment, base):
-    pairs = dict(_argument_pairs(arguments))
-    if "--no-config" in pairs or environment.get("UV_NO_CONFIG", "").lower() in ("1", "true"):
-        return []
-    explicit = pairs.get("--config-file") or environment.get("UV_CONFIG_FILE")
-    if explicit:
-        return [(base / explicit, False)]
-    candidates = []
-    project = base / (pairs.get("--project") or environment.get("UV_PROJECT") or ".")
-    if "--isolated" not in pairs and environment.get("UV_ISOLATED", "").lower() not in ("1", "true"):
-        for directory in (project, *project.parents):
-            uv = directory / "uv.toml"
-            manifest = directory / "pyproject.toml"
-            if uv.is_file():
-                candidates.append((uv, False))
-                break
-            if manifest.is_file():
-                tool = _toml(manifest).get("tool", {})
-                if not isinstance(tool, dict):
-                    raise DependencyPolicyError("configured project metadata is unsupported")
-                if "uv" in tool:
-                    if not isinstance(tool["uv"], dict):
-                        raise DependencyPolicyError("configured UV metadata is unsupported")
-                    candidates.append((manifest, True))
-                    break
-    if os.name == "nt":
-        if environment.get("APPDATA"):
-            candidates.append((Path(environment["APPDATA"]) / "uv" / "uv.toml", False))
-        if environment.get("SYSTEMDRIVE"):
-            candidates.append((
-                Path(environment["SYSTEMDRIVE"] + "\\") / "ProgramData" / "uv" / "uv.toml", False,
-            ))
-    else:
-        user = Path(environment.get("XDG_CONFIG_HOME") or (
-            Path(environment.get("HOME") or Path.home()) / ".config"
-        )) / "uv" / "uv.toml"
-        candidates.append((user, False))
-        system = Path("/etc/uv/uv.toml")
-        for directory in (environment.get("XDG_CONFIG_DIRS") or "/etc/xdg").split(":"):
-            if not directory:
-                break
-            candidate = base / directory / "uv" / "uv.toml"
-            if candidate.is_file():
-                system = candidate
-                break
-        candidates.append((system, False))
-    return [(path, project) for path, project in candidates if path.is_file()]
+    return _configuration.config_inputs(
+        arguments, environment, base, argument_pairs=_argument_pairs,
+        toml=_toml, error_type=DependencyPolicyError,
+    )
 
 
 def _native_retained_path(path):
@@ -704,13 +668,24 @@ def _temporary_inputs(parent):
         temporary.cleanup()
 
 
-def run_uv_install(
+class RetainedUVInstall(NamedTuple):
+    """Admitted command and its single, context-owned retained input graph."""
+
+    argv: tuple[str, ...]
+    environment: dict[str, str]
+    cwd: Path
+    sources: dict[Path, Path]
+    source_hashes: dict[Path, str]
+
+
+@contextmanager
+def retain_uv_install(
     uv: str, arguments: list[str], *, env: dict[str, str] | None = None,
     cwd: Path | None = None, now: datetime | None = None,
     trusted_source_roots: tuple[Path, ...] = (),
-    retained_resource_roots: tuple[Path, ...] = (), **run_options,
-) -> subprocess.CompletedProcess:
-    """Audit and execute the same private source, requirements and configuration."""
+    retained_resource_roots: tuple[Path, ...] = (),
+):
+    """Own the admitted graph until the caller's execution and health settle."""
     now = datetime.now(timezone.utc) if now is None else now
     environment = _captured_environment(env)
     base, projects, files, editables = _source_inputs(arguments, environment, cwd, trusted_source_roots)
@@ -848,15 +823,22 @@ def run_uv_install(
                         ".pytest_cache", ".ruff_cache", "node_modules", "build", "dist",
                     ),
                 )
+        source_hashes = {}
+        for project in projects:
+            destination = Path(_native_retained_path(mirror(project)))
+            for path in destination.rglob("*"):
+                if path.is_file():
+                    original_path = project / path.relative_to(destination)
+                    retained_hash = hashlib.sha256(path.read_bytes()).hexdigest()
+                    if hashlib.sha256(Path(_native_retained_path(original_path)).read_bytes()).hexdigest() != retained_hash:
+                        raise DependencyPolicyError("source content changed while retaining UV inputs")
+                    source_hashes[original_path] = retained_hash
         for project in projects:
             manifest = mirror(project) / "pyproject.toml"
-            data = remap(_toml(manifest))
-            for entries in data.get("tool", {}).get("uv", {}).get("sources", {}).values():
-                for entry in entries if isinstance(entries, list) else [entries]:
-                    if entry.get("editable") is True and "path" in entry:
-                        child = (mirror(project) / entry["path"]).resolve()
-                        editables.update(path for path in projects if mirror(path) == child)
-            _write_toml(Path(_native_retained_path(manifest)), data)
+            original_data = _toml(manifest)
+            data = remap(original_data)
+            if data != original_data:
+                _write_toml(Path(_native_retained_path(manifest)), data)
         for project in editables:
             manifest = mirror(project) / "pyproject.toml"
             data = _toml(manifest)
@@ -952,10 +934,28 @@ def run_uv_install(
             raise DependencyPolicyError("retained UV configuration differs from the configured resolver")
         if editables:
             admitted.extend(["--config-setting", "editable_mode=compat"])
+        yield RetainedUVInstall(
+            (uv, "pip", "install", *admitted), retained_environment, retained_base,
+            {path: mirror(path) for path in projects}, source_hashes,
+        )
+
+
+def run_uv_install(
+    uv: str, arguments: list[str], *, env: dict[str, str] | None = None,
+    cwd: Path | None = None, now: datetime | None = None,
+    trusted_source_roots: tuple[Path, ...] = (),
+    retained_resource_roots: tuple[Path, ...] = (), **run_options,
+) -> subprocess.CompletedProcess:
+    """Audit and execute the same private source, requirements and configuration."""
+    with retain_uv_install(
+        uv, arguments, env=env, cwd=cwd, now=now,
+        trusted_source_roots=trusted_source_roots,
+        retained_resource_roots=retained_resource_roots,
+    ) as transaction:
         run_options.setdefault("creationflags", _HEADLESS)
         return subprocess.run(
-            [uv, "pip", "install", *admitted], env=retained_environment,
-            cwd=retained_base, **run_options,
+            list(transaction.argv), env=transaction.environment,
+            cwd=transaction.cwd, **run_options,
         )
 
 

@@ -11,6 +11,7 @@ from pathlib import Path
 from . import config as cfg
 from . import sessions
 from . import installer as inst
+from . import runtime_identity
 
 
 def _core():
@@ -219,7 +220,10 @@ def _slot_superseded(active: str, mine: str, versions_root: str) -> bool:
     return mine != active
 
 
-def _runtime_superseded(*, prefix: str | None = None, install_root: Path | None = None) -> bool:
+def _runtime_superseded(
+    *, prefix: str | None = None, install_root: Path | None = None,
+    generation: str | None = None,
+) -> bool:
     """True when a newer agent-worktrees runtime has superseded the one running
     this ``status-updater`` -- i.e. the active ``versions/<current-version>``
     slot (published by the marker) no longer resolves to this process's
@@ -237,7 +241,10 @@ def _runtime_superseded(*, prefix: str | None = None, install_root: Path | None 
     """
     override = _core_helper("_runtime_superseded", _runtime_superseded)
     if override is not _runtime_superseded:
-        return override(prefix=prefix, install_root=install_root)
+        arguments = {"prefix": prefix, "install_root": install_root}
+        if generation is not None:
+            arguments["generation"] = generation
+        return override(**arguments)
     try:
         root = install_root if install_root is not None else cfg.install_dir()
         versions_root = os.path.realpath(os.path.join(str(root), "versions"))
@@ -251,7 +258,15 @@ def _runtime_superseded(*, prefix: str | None = None, install_root: Path | None 
         mine = os.path.realpath(prefix if prefix is not None else sys.prefix)
     except Exception:
         return False
-    return _slot_superseded(active, mine, versions_root)
+    if _slot_superseded(active, mine, versions_root):
+        return True
+    if active != mine or os.path.dirname(mine) != versions_root:
+        return False
+    process_generation = (
+        generation if generation is not None else
+        runtime_identity.PROCESS_GENERATION if prefix is None else None
+    )
+    return runtime_identity.generation_superseded(Path(active), process_generation)
 
 
 _BACKGROUND_AUTH_ENV_KEYS = {
@@ -552,4 +567,3 @@ def cmd_status_updater(args: argparse.Namespace) -> int:
 # one TEST/DEBUG-ONLY override, never an operator-facing opt-out. Single-active
 # on the host via a liveness lock; a superseded runtime self-retires (mirrors
 # the updater's #911 behaviour).
-
