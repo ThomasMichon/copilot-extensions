@@ -260,7 +260,7 @@ test("list-sessions degrades honestly (never fabricates a chain) without agent-w
     assert.equal(parsed.available, false);
     assert.equal(result.status, 1);
     assert.equal(parsed.sessions, undefined);
-    assert.equal(parsed.chain, undefined);
+    assert.equal(parsed.handoffs, undefined);
   }));
 });
 
