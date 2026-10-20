@@ -281,11 +281,20 @@ or a reason to create a daemon.
   delivery to generation-39/40/41 peers, older ordinary packets accepted without
   readiness gating, readiness refusal before dispatch to generation-40/41
   peers, and remote ACP target negotiation through generation 42.
-- The prior authenticated Codespace consumer already proved the existing auth
-  relay and repository-scoped skill loading with global settings unchanged.
-  This rebase still needs current-head native evidence, review and required CI;
-  the earlier one-time provider merge consent was pinned to the old head and
-  is not authorization to merge this replacement.
+- Broad guard collection exposed this slice's standard-library `TypedDict`
+  inside the newly integrated Pydantic session-snapshot graph on Python 3.11.
+  Used the explicitly declared `typing-extensions` form without changing the
+  dictionary shape and added a strict typed-target JSON round-trip regression.
+  The full Bridge guards pass 295 cases (eight explicit platform/tier skips);
+  focused launch, transport, typed-target and readiness coverage passes 174.
+- Repeated the authenticated Codespace consumer against committed source
+  `4d432a57f939efb9c49a5ed1969f6f5c98a13120`, including the real HTTP-42
+  client/server boundary and source extension. Exactly one admitted task invoked
+  the selected skill; retry returned message 3. Mode-0700 auth scope, one-time
+  credential consumption, mux/forward/server cleanup and unchanged productive
+  settings all passed. Recovered the session and stopped the preserved venue.
+  Current-head review and required CI still gate merge; the earlier one-time
+  provider merge consent was pinned to the old head, not this replacement.
 
 ### 2026-10-19 - Validate detached source startup with existing inference authentication
 
