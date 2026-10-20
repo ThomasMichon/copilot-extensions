@@ -87,7 +87,56 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Mechanical move mapping: preserved, not conflated with fixtures
 
+### Second admitted move: CLI, claims and live status
+
+Baseline: Dev `54c7879cfe9680dd87a02242a846081065a82cea`, including the
+separately merged #7394 fixture correction. This M-MOVE partition relocates
+nine complete leaf classes with every class/function AST unchanged; it
+does not replay fixture changes or split a setup-bearing class.
+
+For every method in the classes below, the bijection is
+`tests/test_pr_ops.py::<class>::<method><parameters>` ->
+`tests/<destination>::<class>::<method><parameters>`. The entire parameter
+suffix, decorator list, signature, fixture closure and effective marks
+remain unchanged. All other original nodes, including the 35 helpers
+already moved by #7386, retain their identities.
+
+| Destination under `tests/` | Whole classes | Expanded nodes |
+|----------------------------|---------------|---------------:|
+| `test_pr_claims.py` | `TestPrClaimHelpers`, `TestAbandonPr`, `TestReconcileActivePrSelfHeal` | 34 |
+| `test_pr_status.py` | `TestRefreshHeadObservation`, `TestSelfMergeBypassNote`, `TestPRStatusLive`, `TestPRThreads` | 37 |
+| `test_create_pr_cli.py` | `TestCreatePRCLIPolicyError`, `TestCreatePRCLIArgs` | 4 |
+
+AST comparison retains every original definition exactly once across the
+retained monolith and three destinations, including #7394's now-correct
+provider doubles. Real before/after pytest collection has the exact
+317-node bijection: 75 moved and 242 unchanged, with identical fixtures,
+parameters and marks. The earlier failed attempt is not credited.
+No fixture reuse, setup change, assertion change, new mark, tier admission,
+production change or budget adjustment is included.
+
+Native Windows two-worker execution passes every moved case without skips:
+34 claims cases in 3.47 seconds (7.24 inclusive), 37 status cases in
+35.65 seconds (40.36 inclusive), and four CLI cases in 13.80 seconds
+(17.69 inclusive). Each diagnostic group retains the 30-second item and
+240-second supervisor limits. Nine real-Git/contained selection controls
+also pass, without skips, in 12.17 seconds. The retained monolith and three
+new modules remain conservative whole-file selections; unchanged strict
+controls refuse unknown nodes outside selected whole files. No old node
+is renamed into fabricated measured coverage.
+
+The install-contract guard reports thirteen plugins and zero violations.
+This test-only move requires no clean-room provisioning, and no Linux or
+external-venue result is claimed. The remaining mechanical classes,
+immutable fixtures and parent complete same-head Windows qualification
+remain separate open work.
+
 ### Corrective prerequisite: live-status provider doubles
+
+**Actually merged:** #7394 as
+`54c7879cfe9680dd87a02242a846081065a82cea`. This independent fixture
+correction is no longer a prerequisite blocker. Further mechanical moves
+start from its merged bodies, not the historical obsolete doubles.
 
 After #7386, native validation of the next mechanical partition found
 `TestPRStatusLive::test_live_self_merge_note_surfaced_when_bypassable`
