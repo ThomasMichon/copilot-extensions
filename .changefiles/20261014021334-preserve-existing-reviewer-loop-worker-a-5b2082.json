@@ -1,9 +1,0 @@
-{
-  "comment": "Preserve reviewer-loop registration identities and selectors, add index-backed exact repo-scoped dedup lookup, and retain verification-pending submissions through serialized logical dedup with local conflict reporting instead of a startup index migration.",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

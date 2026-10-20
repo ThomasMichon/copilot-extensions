@@ -1,9 +1,0 @@
-{
-  "comment": "Separate live message admission receipts from reply waiting and expose bounded busy-peer inbox readback",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

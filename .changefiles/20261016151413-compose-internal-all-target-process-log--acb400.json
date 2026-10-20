@@ -1,9 +1,0 @@
-{
-  "comment": "Compose internal all-target process-log retirement verification with a post-hash policy commit guard; keep runtime reclamation disabled.",
-  "changes": [
-    {
-      "plugin": "agent-logger",
-      "type": "patch"
-    }
-  ]
-}

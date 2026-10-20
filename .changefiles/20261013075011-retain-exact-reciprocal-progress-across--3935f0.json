@@ -1,9 +1,0 @@
-{
-  "comment": "Retain exact reciprocal progress across interrupted terminal pair cleanup",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

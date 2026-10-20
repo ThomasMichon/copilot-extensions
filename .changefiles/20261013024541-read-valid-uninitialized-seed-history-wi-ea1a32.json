@@ -1,9 +1,0 @@
-{
-  "comment": "Read valid uninitialized seed history without schema writes and refuse invalid seeded resume targets early",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "dev"
-    }
-  ]
-}

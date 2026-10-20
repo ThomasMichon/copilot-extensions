@@ -1,9 +1,0 @@
-{
-  "comment": "Normalize actual fallback release labels in preference authority fingerprints",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Add the standalone bounded conversation core",
-  "changes": [
-    {
-      "plugin": "services/chat",
-      "type": "patch"
-    }
-  ]
-}

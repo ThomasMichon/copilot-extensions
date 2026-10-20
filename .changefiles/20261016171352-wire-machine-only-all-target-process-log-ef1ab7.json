@@ -1,9 +1,0 @@
-{
-  "comment": "Wire machine-only all-target process-log reclamation under the existing sync lock with file-backed policy fencing",
-  "changes": [
-    {
-      "plugin": "agent-logger",
-      "type": "patch"
-    }
-  ]
-}

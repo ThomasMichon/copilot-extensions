@@ -1,9 +1,0 @@
-{
-  "comment": "Add current-policy permits, bounded Gateway fallback and truthful controller expiry",
-  "changes": [
-    {
-      "plugin": "fleet-manager",
-      "type": "patch"
-    }
-  ]
-}

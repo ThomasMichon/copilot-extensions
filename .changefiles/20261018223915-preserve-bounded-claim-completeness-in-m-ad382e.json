@@ -1,9 +1,0 @@
-{
-  "comment": "Preserve bounded claim completeness in Manager rows and expose owner-aware descendant inspection.",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

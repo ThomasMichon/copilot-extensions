@@ -1,9 +1,0 @@
-{
-  "comment": "Make the real-wheel negative fixture independent of promoted Core versions.",
-  "changes": [
-    {
-      "plugin": "services/index",
-      "type": "patch"
-    }
-  ]
-}

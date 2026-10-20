@@ -1,9 +1,0 @@
-{
-  "comment": "Project active descendant PR claims onto parent worktree rows without copying ownership; preserve direct claim totals and report incomplete traversal.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

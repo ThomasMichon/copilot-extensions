@@ -1,9 +1,0 @@
-{
-  "comment": "Bound Linux full-suite validation to two contained workers and isolate publication/update test contexts",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

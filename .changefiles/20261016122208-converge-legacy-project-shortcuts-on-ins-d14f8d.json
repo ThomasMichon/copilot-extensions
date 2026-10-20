@@ -1,9 +1,0 @@
-{
-  "comment": "Converge legacy project shortcuts on installed user-side commands and repair proven checkout or payload launchers during install/update",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Resolve historical mux machine labels using the recorded execution platform",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

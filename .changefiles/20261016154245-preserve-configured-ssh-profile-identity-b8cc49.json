@@ -1,9 +1,0 @@
-{
-  "comment": "Preserve configured SSH profile identity for carrier, ACP, discovery and session-read connections instead of overriding profile users or ports with topology metadata.",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

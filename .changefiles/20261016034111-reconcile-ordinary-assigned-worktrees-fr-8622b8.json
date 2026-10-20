@@ -1,9 +1,0 @@
-{
-  "comment": "Reconcile ordinary assigned worktrees from exact current owner and native facts while preserving legacy history, original keys, explicit retirement and workspace ownership.",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

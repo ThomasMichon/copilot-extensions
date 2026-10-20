@@ -1,9 +1,0 @@
-{
-  "comment": "Resume owner-asserted native worktree heads in explicit ACP or muxed CLI mode without replacing conversation history",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

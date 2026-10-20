@@ -1,9 +1,0 @@
-{
-  "comment": "Stage native-bound idle ACP frontend state without initialization or activation",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Honor explicitly configured execution-space identity during runtime update preflight without promoting hostname inference to configured authority.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

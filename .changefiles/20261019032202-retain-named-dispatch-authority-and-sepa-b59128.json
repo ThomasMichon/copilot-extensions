@@ -1,9 +1,0 @@
-{
-  "comment": "Retain named dispatch authority and separate shared control credentials in the canonical peer launch boundary.",
-  "changes": [
-    {
-      "plugin": "agent-pull-requests",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Add an unwired native Windows exact-file process-log retirement boundary with writer-exclusion contract tests; retain unsupported POSIX sources",
-  "changes": [
-    {
-      "plugin": "agent-logger",
-      "type": "patch"
-    }
-  ]
-}

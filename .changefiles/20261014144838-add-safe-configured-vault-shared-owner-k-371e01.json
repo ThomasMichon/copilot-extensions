@@ -1,9 +1,0 @@
-{
-  "comment": "Add safe configured-vault shared owner key provisioning and pinned read-only context",
-  "changes": [
-    {
-      "plugin": "agent-vault",
-      "type": "patch"
-    }
-  ]
-}

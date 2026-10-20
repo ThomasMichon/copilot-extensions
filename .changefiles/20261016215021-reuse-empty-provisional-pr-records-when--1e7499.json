@@ -1,9 +1,0 @@
-{
-  "comment": "Reuse empty provisional PR records when retrying failed creation, preserving attribution and publication guards.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

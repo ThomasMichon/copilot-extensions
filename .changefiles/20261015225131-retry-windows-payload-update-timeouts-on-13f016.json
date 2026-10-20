@@ -1,9 +1,0 @@
-{
-  "comment": "Retry Windows payload update timeouts only after confirmed non-breakaway Job cleanup, retaining refusal precedence and the total attempt budget.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

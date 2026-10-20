@@ -1,9 +1,0 @@
-{
-  "comment": "Serialize endpoint publication and owner cleanup with a bounded native lock.",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

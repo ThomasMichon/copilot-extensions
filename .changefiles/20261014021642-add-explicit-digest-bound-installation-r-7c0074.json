@@ -1,9 +1,0 @@
-{
-  "comment": "Add explicit digest-bound installation repair with fail-closed enabled-peer ownership census, ordinary unaliased roots and exclusive qualified-owner admission, independently bound action content and declared interpreter semantics, confirmed Windows/POSIX transient teardown, governed clean-room dependencies and independent readiness",
-  "changes": [
-    {
-      "plugin": "agent-machines",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Prove external stewardship preserves source publication leases, unpublished work and post-merge recovery refs",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

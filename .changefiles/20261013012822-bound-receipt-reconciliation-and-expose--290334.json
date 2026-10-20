@@ -1,9 +1,0 @@
-{
-  "comment": "Bound receipt reconciliation and expose generation-fenced supervisor progress",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

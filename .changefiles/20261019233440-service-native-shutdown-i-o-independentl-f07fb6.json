@@ -1,9 +1,0 @@
-{
-  "comment": "Service native shutdown I/O independently of blocking daemon work and include owned cleanup in drain",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

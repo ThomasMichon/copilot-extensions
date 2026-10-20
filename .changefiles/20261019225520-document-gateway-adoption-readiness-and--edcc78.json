@@ -1,9 +1,0 @@
-{
-  "comment": "Document Gateway adoption readiness and explicit architecture and provider qualification gates",
-  "changes": [
-    {
-      "plugin": "fleet-manager",
-      "type": "patch"
-    }
-  ]
-}

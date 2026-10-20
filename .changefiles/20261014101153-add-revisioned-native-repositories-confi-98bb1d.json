@@ -1,9 +1,0 @@
-{
-  "comment": "Add revisioned native Repositories Configuration inspection and future-launch preference set/reset",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

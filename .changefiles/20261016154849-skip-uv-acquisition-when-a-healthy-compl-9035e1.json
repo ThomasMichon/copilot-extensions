@@ -1,9 +1,0 @@
-{
-  "comment": "Skip UV acquisition when a healthy completed runtime earns canonical reuse; retain required acquisition and cleanup for fresh construction.",
-  "changes": [
-    {
-      "plugin": "agent-codespaces",
-      "type": "patch"
-    }
-  ]
-}

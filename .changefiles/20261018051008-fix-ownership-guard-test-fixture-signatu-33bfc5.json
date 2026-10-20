@@ -1,9 +1,0 @@
-{
-  "comment": "Fix ownership-guard test fixture signature and clear stale cache task state on a periodic-to-on-demand restart",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

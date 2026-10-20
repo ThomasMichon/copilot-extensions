@@ -1,9 +1,0 @@
-{
-  "comment": "Expose versioned source and component metadata in the shared worker catalog",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Serialize endpoint publication and owner cleanup to preserve successor discovery.",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

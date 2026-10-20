@@ -1,9 +1,0 @@
-{
-  "comment": "Read exact owner records for keyed workspace preflight and retain strict sessionless same-allocation recovery independently of roster readiness.",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

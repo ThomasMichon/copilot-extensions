@@ -1,9 +1,0 @@
-{
-  "comment": "Prepare explicit reclamation policy and full all-target process-log ZIP readback while refusing enabled runtime retirement",
-  "changes": [
-    {
-      "plugin": "agent-logger",
-      "type": "patch"
-    }
-  ]
-}

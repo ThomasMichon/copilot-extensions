@@ -1,9 +1,0 @@
-{
-  "comment": "Ship and admit the complete source-aware standalone runtime resolver bundle.",
-  "changes": [
-    {
-      "plugin": "fleet-manager",
-      "type": "patch"
-    }
-  ]
-}

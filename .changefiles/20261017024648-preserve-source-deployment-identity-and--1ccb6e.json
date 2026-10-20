@@ -1,9 +1,0 @@
-{
-  "comment": "Preserve source deployment identity and refuse unordered generation recovery.",
-  "changes": [
-    {
-      "plugin": "budget-guidance",
-      "type": "patch"
-    }
-  ]
-}

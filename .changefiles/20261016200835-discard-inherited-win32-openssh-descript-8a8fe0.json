@@ -1,9 +1,0 @@
-{
-  "comment": "Discard inherited Win32-OpenSSH descriptor state before starting newly redirected SSH processes.",
-  "changes": [
-    {
-      "plugin": "agent-codespaces",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Add explicit native attachment commit reconciliation and independent idle ACP event/turn readback without enabling adoption.",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

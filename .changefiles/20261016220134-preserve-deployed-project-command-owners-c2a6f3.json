@@ -1,9 +1,0 @@
-{
-  "comment": "Preserve deployed project command ownership when the target repository also contains plugin source.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

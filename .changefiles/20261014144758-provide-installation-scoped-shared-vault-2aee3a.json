@@ -1,9 +1,0 @@
-{
-  "comment": "Provide installation-scoped shared-vault PR identity setup, read-only status and fresh-process verification",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

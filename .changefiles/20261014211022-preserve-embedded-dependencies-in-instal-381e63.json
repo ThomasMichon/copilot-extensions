@@ -1,9 +1,0 @@
-{
-  "comment": "Preserve materialized installer fixture integrity, isolate stdlib test startup and enforce one total verified-session quota deadline",
-  "changes": [
-    {
-      "plugin": "budget-guidance",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Prefer head-pinned protected GitHub merges before configured strict admin fallback and confirm actual merge completion",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Add bounded owner-authorized SSH profile reconciliation with strict execution budgets and explicit indeterminate outcomes.",
-  "changes": [
-    {
-      "plugin": "fleet-manager",
-      "type": "patch"
-    }
-  ]
-}

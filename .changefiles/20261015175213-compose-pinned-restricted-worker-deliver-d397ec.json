@@ -1,9 +1,0 @@
-{
-  "comment": "Compose pinned restricted-worker delivery and scoped renewal with the existing supervisor; fence task-only start without granting token renewal.",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

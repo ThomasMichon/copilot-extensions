@@ -1,9 +1,0 @@
-{
-  "comment": "Make installer fixtures explicit about canonical and materialized layouts",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

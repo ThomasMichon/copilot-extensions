@@ -1,9 +1,0 @@
-{
-  "comment": "Add strict read-only disposable ownership snapshots derived from registered ledgers, with conservative transfer and uncertainty handling",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

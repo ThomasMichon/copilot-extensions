@@ -1,9 +1,0 @@
-{
-  "comment": "Add explicit central task authority and strictly local-only targets without cross-queue failover.",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

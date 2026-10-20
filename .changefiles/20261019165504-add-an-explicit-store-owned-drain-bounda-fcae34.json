@@ -1,9 +1,0 @@
-{
-  "comment": "Add an explicit store-owned drain boundary that preserves committed conversation state and fences held waits across rollback.",
-  "changes": [
-    {
-      "plugin": "services/chat",
-      "type": "patch"
-    }
-  ]
-}

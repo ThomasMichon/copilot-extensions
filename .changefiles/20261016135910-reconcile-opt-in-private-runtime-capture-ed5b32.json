@@ -1,9 +1,0 @@
-{
-  "comment": "Reconcile opt-in private runtime capture with owned worktree refresh evidence and refuse uncovered remote ACP policy",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "dev"
-    }
-  ]
-}

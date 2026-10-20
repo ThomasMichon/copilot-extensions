@@ -1,9 +1,0 @@
-{
-  "comment": "Block archival and cleanup while open PRs or held resource obligations remain, including forced removal and missing checkouts.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

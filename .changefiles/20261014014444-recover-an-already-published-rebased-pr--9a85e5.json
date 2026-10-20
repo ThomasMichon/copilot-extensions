@@ -1,9 +1,0 @@
-{
-  "comment": "Recover an already published rebased PR tip with verified non-forcing incremental publication after a lost transport acknowledgement.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

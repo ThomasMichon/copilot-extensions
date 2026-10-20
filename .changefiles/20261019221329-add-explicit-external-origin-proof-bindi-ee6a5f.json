@@ -1,9 +1,0 @@
-{
-  "comment": "Add explicit external-origin proof binding and transport-only Cloudflare ingress rendering",
-  "changes": [
-    {
-      "plugin": "fleet-manager",
-      "type": "patch"
-    }
-  ]
-}

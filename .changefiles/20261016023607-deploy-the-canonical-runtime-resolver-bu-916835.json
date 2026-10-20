@@ -1,9 +1,0 @@
-{
-  "comment": "Deploy the canonical runtime resolver bundle for native service worktree-owner launches.",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

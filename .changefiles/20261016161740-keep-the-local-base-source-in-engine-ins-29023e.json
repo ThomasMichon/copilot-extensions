@@ -1,9 +1,0 @@
-{
-  "comment": "Keep the local base source in engine install and upgrade dependency transactions",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

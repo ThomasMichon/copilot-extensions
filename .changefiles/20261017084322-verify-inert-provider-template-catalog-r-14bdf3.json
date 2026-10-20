@@ -1,9 +1,0 @@
-{
-  "comment": "Verify inert provider-template catalog rows preserve Details-only action capability without plugin-to-Manager imports.",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

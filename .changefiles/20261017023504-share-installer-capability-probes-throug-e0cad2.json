@@ -1,9 +1,0 @@
-{
-  "comment": "Share installer capability probes through the existing update-telemetry dependency without plugin source coupling.",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

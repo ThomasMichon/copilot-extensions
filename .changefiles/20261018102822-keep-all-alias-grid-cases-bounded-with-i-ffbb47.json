@@ -1,9 +1,0 @@
-{
-  "comment": "Keep all alias-grid cases bounded with isolated content-keyed topology parsing",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

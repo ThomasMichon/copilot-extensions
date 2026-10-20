@@ -1,9 +1,0 @@
-{
-  "comment": "Correct platform and machine identity test fixtures",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

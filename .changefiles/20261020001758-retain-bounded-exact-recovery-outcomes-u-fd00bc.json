@@ -1,9 +1,0 @@
-{
-  "comment": "Retain bounded exact recovery outcomes under the existing daemon lease without retry authority",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

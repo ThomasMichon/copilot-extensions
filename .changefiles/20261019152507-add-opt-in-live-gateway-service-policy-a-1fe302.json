@@ -1,9 +1,0 @@
-{
-  "comment": "Add opt-in live Gateway service policy and authenticated outbound HTTP/response-stream connectors.",
-  "changes": [
-    {
-      "plugin": "fleet-manager",
-      "type": "patch"
-    }
-  ]
-}

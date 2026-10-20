@@ -1,9 +1,0 @@
-{
-  "comment": "Restore uv-only Windows construction bootstrap and align fail-closed installer fixtures with canonical source retention and self-staging",
-  "changes": [
-    {
-      "plugin": "agent-codespaces",
-      "type": "patch"
-    }
-  ]
-}

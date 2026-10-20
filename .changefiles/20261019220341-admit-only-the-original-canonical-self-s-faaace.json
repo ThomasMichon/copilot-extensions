@@ -1,9 +1,0 @@
-{
-  "comment": "Admit only the original canonical self-session claim through fenced restart Resume and acknowledgement without changing task authority.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

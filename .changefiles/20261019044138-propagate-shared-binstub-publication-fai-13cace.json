@@ -1,9 +1,0 @@
-{
-  "comment": "Propagate shared binstub publication failures and retain complete installed command files on failure.",
-  "changes": [
-    {
-      "plugin": "agent-codespaces",
-      "type": "patch"
-    }
-  ]
-}

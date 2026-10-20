@@ -1,9 +1,0 @@
-{
-  "comment": "Fix native tmux active-pane targeting so seeded New and Resume handoffs recognize their own pane.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

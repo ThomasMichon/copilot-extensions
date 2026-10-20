@@ -1,9 +1,0 @@
-{
-  "comment": "Add an explicit doctor repair for proven legacy native machine labels without changing worktree identity or ownership",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

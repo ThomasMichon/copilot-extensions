@@ -1,9 +1,0 @@
-{
-  "comment": "Add a non-root Gateway service image and exact-source isolated container witness",
-  "changes": [
-    {
-      "plugin": "fleet-manager",
-      "type": "patch"
-    }
-  ]
-}

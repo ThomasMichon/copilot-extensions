@@ -1,9 +1,0 @@
-{
-  "comment": "Present physical machine, environment and compact execution identity as separate guidance facts",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

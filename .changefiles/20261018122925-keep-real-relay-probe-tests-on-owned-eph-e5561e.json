@@ -1,9 +1,0 @@
-{
-  "comment": "Isolate quiet remote ACP SSE readers from control HTTP/2 responses and keep complete candidate validation bounded with two contained workers and owned relay-probe listeners",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

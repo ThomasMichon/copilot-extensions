@@ -1,9 +1,0 @@
-{
-  "comment": "Add opt-in effective runtime and warmed-roster capture, explicit private session metadata/event staging, native-verified stable host observations, passive-safe restoration, retained predecessor exit custody, receiver-fenced staged resources and host-owned attachment with pre-commit recovery receipts valid only after exact committed-owner exit; refuse serving captured sessions until ACP continuation is implemented and keep full runtime ADOPT and automatic retirement unavailable",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

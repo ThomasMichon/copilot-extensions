@@ -1,9 +1,0 @@
-{
-  "comment": "Add strict default-off per-module maintenance-safe consent and execute only explicitly selected modules.",
-  "changes": [
-    {
-      "plugin": "agent-machines",
-      "type": "patch"
-    }
-  ]
-}

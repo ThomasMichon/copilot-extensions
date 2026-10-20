@@ -1,9 +1,0 @@
-{
-  "comment": "Cover shared Workers kind metadata at standard and wide terminal widths without displacing existing facts.",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

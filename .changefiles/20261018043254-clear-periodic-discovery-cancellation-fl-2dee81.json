@@ -1,9 +1,0 @@
-{
-  "comment": "Clear periodic-discovery cancellation flag on restart and resolve singleton-anchor resume through the app-bound worktree cache too",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Prepare bounded exact-ZIP publication to explicitly resolved process-log destinations without enabling source reclamation.",
-  "changes": [
-    {
-      "plugin": "agent-logger",
-      "type": "patch"
-    }
-  ]
-}
