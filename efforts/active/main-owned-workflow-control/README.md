@@ -401,6 +401,16 @@ regressions, retained-owner seams and the completion gate.
   bypass entry or live enablement needs explicit operator approval; existing
   human exemptions and the licensed review-request credential do not imply it.
   CI protections and Main publication requirements remain unchanged.
+- [x] Record owner acceptance of the existing repository-only App and the
+  completion-token permission subset. The owner confirmed the permission
+  additions and approved the updated installation on October 20.
+  This is not independent token verification or credential/activation consent.
+- [ ] Apply the owner-approved, reviewed CODEOWNER-only policy split:
+  preserve the independent one-approval rule without an App bypass and give
+  the App PR-only bypass on a separate CODEOWNER-only layer. Preserve all
+  existing human actors, CI and Main protections. The
+  [completion contract](maintainer-pr-completion.md#codeowner-only-exception-preserve-the-independent-approval-rule)
+  owns create-first application, restore-first rollback and canary obligations.
 - [x] Prove external rebase compatibility with the owning managed worktree:
   stale local publication refuses, unpublished work/backups survive, and a
   later verified squash merge supports `pr-complete` and claim settlement.
@@ -411,9 +421,13 @@ regressions, retained-owner seams and the completion gate.
   normal qualified promotion. Keep it Dev-owned unless an independently
   governed critical-control requirement is separately approved; do not expand
   the Main preservation allowlist merely because the job is privileged.
-  Reviewed disabled Dev source merged in #7244; qualified delivery and
-  installed behavior remain blocked. The normal consumer update reproduced
-  the existing #6947 and #6564 installation failures without bypassing them.
+  Reviewed disabled Dev source merged in #7244. Qualified promotion #7391
+  includes the readiness, claims, disabled controller and Vault prerequisite
+  changes; producing run `39469486744`, attempt 1, passed exact source-unit,
+  artifact publication/readback and nonadministrator merge gates.
+  Actual installed-runtime and Manager behavior remain unproven. Earlier
+  #6947/#6564 failures and any new local installation failure require their own
+  acceptance; source publication and a payload refresh are not runtime proof.
 - [ ] After authority acceptance, prove report-only operation and one
   explicitly consented rebase/new-CI/new-approval/merge canary. Verify both
   CI-first and review-first event ordering and the actual mutation identity.
@@ -513,3 +527,4 @@ this contract. New evidence belongs in its date file, not another peer effort.
 - [2026-10-18](journal/2026/10.18.md)
 - [2026-10-19](journal/2026/10.19.md)
 - [2026-10-19 - Metadata source delivery](journal/2026/10.19-metadata-source.md)
+- [2026-10-20](journal/2026/10.20.md)

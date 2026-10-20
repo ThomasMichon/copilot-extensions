@@ -167,6 +167,12 @@ on the readiness contract, not on every unrelated portfolio wave. Steps 5 and
 6 retain explicit policy/credential/rollout approval gates.
 
 The source-delivery boundary is now recorded, not an activation decision.
+Promotion #7391 and producing run `39469486744`, attempt 1, bind the qualified
+Dev snapshot `5c6ddda800a520ad8989e501529d9f458c970c40` to Main
+`917425026a811c641087b402e6d031f8edde5870`. Exact source-unit reuse,
+artifact attestation, publication and full raw readback passed before the
+candidate PR opened. Installed-runtime and visible Manager acceptance remain
+separate; refreshing a payload does not prove its runtime was activated.
 Read-only checks of six execution-user legacy project configurations found
 the expected required GitHub direct-submit profile and no local PR override.
 Other users and separately provisioned installation cells are not thereby
@@ -174,10 +180,13 @@ audited. The existing Windows consumer failures in #6947 and #6564 still block
 installed acceptance; source merges and a refreshed payload manifest are not
 proof that the fixes are running.
 
-### Proposed completion-token permissions
+### Completion-token permissions and authority acceptance
 
-The following is an **agent-recommended activation proposal**, not a report of
-the existing App's live grants or approval to change them:
+The owner confirmed the following permission additions and approval of the
+updated existing installation on October 20. This is an operator receipt,
+not independent App-token verification or controller activation. Completion
+tokens must request only this subset, even when another approved use retains
+broader App-level permissions:
 
 | Repository permission | Completion token | Purpose |
 |-----------------------|------------------|---------|
@@ -201,6 +210,52 @@ change, not another token permission or a CI bypass. Reuse still needs exact
 App/installation evidence, the protected Main-only workflow credential boundary,
 reviewer-veto enforcement, and the separately accepted live canary and rollback.
 
+### CODEOWNER-only exception: preserve the independent approval rule
+
+The observed Dev review ruleset combines one required approving review with
+required CODEOWNER review. Giving the completion App a bypass on that combined
+ruleset would exempt both requirements. That is broader than the requested
+CODEOWNER-only exception.
+
+The owner accepted this narrower split on October 20, subject to review of this
+amendment before live application:
+
+| Layer | Required behavior | Completion App bypass |
+|-------|-------------------|-----------------------|
+| Existing review ruleset | Retain one required approval and every other setting; move only the CODEOWNER requirement into the new layer | None |
+| New Dev CODEOWNER-only ruleset | Require CODEOWNER approval, with zero additional required approvals | PR-only |
+| Existing PR-required, CI and workflow/source-attribution layers | Unchanged | None |
+
+Preserve the existing human bypass actors and modes in both review layers.
+Keep their other review parameters unchanged, including unattributed-change
+handling. The App is not added to the general approval rule, required-check
+rules, classic protection or Main policy.
+
+[GitHub rule layering](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/about-rulesets#about-rule-layering)
+aggregates applicable protections using the most restrictive requirements.
+The [REST rules schema](https://docs.github.com/en/rest/repos/rules#create-a-repository-ruleset)
+allows a zero approving-review count independently of the CODEOWNER flag.
+That establishes a supported proposal shape, not proof that a live App canary
+has enforced the intended interaction.
+
+Apply create-first: capture the current before-images, create and verify the
+active CODEOWNER-only layer while the combined rule still protects Dev, then
+change only the existing rule's CODEOWNER flag. Recheck the before-images
+immediately before each write; concurrent drift or an ambiguous response
+requires reconciliation, not a stale overwrite or duplicate rule. Verify the
+resulting layers and unchanged CI/classic/Main boundaries afterward.
+
+Rollback restores and verifies the original combined review rule first, then
+disables the added CODEOWNER-only rule. It does not delete a rule, reset other
+policy, revoke unrelated App permissions or restart a controller.
+
+The separately authorized canary must prove current-head approval admission,
+missing-approval rejection and a persistent reviewer veto using the actual App
+identity. Controller-side checks remain mandatory even with provider layering.
+Credential provisioning, report-only execution and any merge/rebase canary
+remain separate acceptance gates. Do not change non-strict Dev CI policy merely
+to manufacture a rebase demonstration.
+
 ## Validation and completion gate
 
 | Surface | Required positive and negative evidence |
@@ -212,6 +267,7 @@ reviewer-veto enforcement, and the separately accepted live canary and rollback.
 | Claims | Parent/child/grandchild, shared descendant, canonical duplicate, missing/cyclic/cross-machine edge, bounded overflow and unchanged original ledgers; partial results remain visible in Manager. |
 | Integration | Required-CI-first and review-first ordering, consent removal, duplicate events, catch-up, original-worktree unpublished work and backups, merged-PR reconciliation and claim settlement. |
 | Adoption | Exact released implementation, effective canonical configuration, permitted local-override audit and explicit live-canary approval; no claim that Dev merge installed a fix. |
+| CODEOWNER exception | Create-first/restore-first policy transactions; unchanged human actors and CI/Main protections; the App cannot bypass the independent approval layer; actual approval/veto interaction is proven separately. |
 
 The slice is complete only when implementation and documentation are reviewed
 and merged, the admitted release/adoption and canary evidence is recorded, and
