@@ -19,7 +19,7 @@ import copy
 import os
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from string import Formatter
-from typing import TYPE_CHECKING, Any
+from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 try:
@@ -29,10 +29,8 @@ except ImportError:  # pragma: no cover - pyyaml is a hard dependency
 
 from .repo_trust import has_symlink_ancestor, path_traverses_symlink, repo_config_is_trusted
 from .config_process_logs import ProcessLogArchiveConfig
+from .config_sync_protection import SYNC_PROTECTION_DEFAULTS, SyncProtectionConfig
 from .config_origin import MachineConfigOrigin, machine_config_origin
-
-if TYPE_CHECKING:
-    from .sync.protection import ProtectionSettings
 
 #: Neutral, personality- and multi-machine system-free defaults.
 DEFAULTS: dict[str, Any] = {
@@ -75,18 +73,7 @@ DEFAULTS: dict[str, Any] = {
         # config remains sufficient on its own, as today) so enabling it is
         # an explicit, opt-in behavior change, not a silent one.
         "require_repo_opt_in": False,
-        # Opt-in content protection, honored by the local and onedrive targets
-        # only (every other target refuses to sync while either is on); see
-        # agent_logger.sync.protection. Both off -> published copies stay
-        # byte-identical to their sources.
-        # redact_secrets: published copies replace secret-shaped strings with
-        # "[REDACTED]" (JSON stays valid; a malformed JSON file is deferred;
-        # databases and binaries holding a token shape are withheld).
-        "redact_secrets": False,
-        # session_files: "all" publishes every session file; "essential"
-        # publishes only the essential set and ignores every other file --
-        # including future kinds -- for change detection too.
-        "session_files": "all",
+        **SYNC_PROTECTION_DEFAULTS,
         # Retention for destination pruning. None/<=0 -> retain everything.
         "retention_days": None,
         "lock_timeout_sec": 10,
@@ -653,7 +640,7 @@ def _load_repo_config(path: Path) -> dict[str, Any]:
     return result
 
 
-class Config(ProcessLogArchiveConfig):
+class Config(ProcessLogArchiveConfig, SyncProtectionConfig):
     """Resolved agent-logger configuration."""
 
     def __init__(
@@ -839,13 +826,6 @@ class Config(ProcessLogArchiveConfig):
 
         raw = dict(self._data.get("sync", {}).get("change_tracking", {}) or {})
         return resolve_settings(raw)
-
-    @property
-    def sync_protection(self) -> ProtectionSettings:
-        """Validated ``sync.redact_secrets`` / ``sync.session_files``."""
-        from agent_logger.sync.protection import resolve_protection_settings
-
-        return resolve_protection_settings(self._data.get("sync", {}))
 
     @property
     def log_path_template(self) -> str:

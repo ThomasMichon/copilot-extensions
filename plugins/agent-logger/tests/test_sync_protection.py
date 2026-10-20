@@ -15,11 +15,11 @@ import pytest
 
 from agent_logger import secret_patterns
 from agent_logger.config import Config, load_config
-from agent_logger.sync import engine, protection, rescue, rescue_projection
+from agent_logger.sync import engine, protection, protection_engine, rescue, rescue_projection
 from agent_logger.sync.change_tracker import ChangeTracker, resolve_db_path
 from agent_logger.sync.meta import read_sync_meta
 from agent_logger.sync.rescue import RescueSourceError
-from agent_logger.sync.targets import filesystem
+from agent_logger.sync.targets import filesystem, protected_publication
 from agent_logger.sync.targets.filesystem import LocalTarget
 
 SID = "abc-123"
@@ -784,7 +784,8 @@ def test_binary_token_split_across_scan_reads_is_withheld(tmp_path, capsys, monk
 
 def test_essential_never_reads_or_copies_unlisted_files(tmp_path, capsys, monkeypatch):
     seen: list[str] = []
-    real_protected, real_copy = filesystem._protected_copy, filesystem._copy_replace
+    real_protected = protected_publication._protected_copy
+    real_copy = filesystem._copy_replace
 
     def protected(src, dst, member, **kwargs):
         seen.append(member)
@@ -794,7 +795,7 @@ def test_essential_never_reads_or_copies_unlisted_files(tmp_path, capsys, monkey
         seen.append(Path(src).name)
         return real_copy(src, dst)
 
-    monkeypatch.setattr(filesystem, "_protected_copy", protected)
+    monkeypatch.setattr(protected_publication, "_protected_copy", protected)
     monkeypatch.setattr(filesystem, "_copy_replace", plain)
     for redact in (None, True):
         seen.clear()
@@ -831,7 +832,8 @@ def _count_pushes(monkeypatch) -> list:
 
 def _count_copies(monkeypatch) -> list[str]:
     copies: list[str] = []
-    real_protected, real_copy = filesystem._protected_copy, filesystem._copy_replace
+    real_protected = protected_publication._protected_copy
+    real_copy = filesystem._copy_replace
 
     def protected(src, dst, member, **kwargs):
         copies.append(member)
@@ -841,7 +843,7 @@ def _count_copies(monkeypatch) -> list[str]:
         copies.append(Path(src).name)
         return real_copy(src, dst)
 
-    monkeypatch.setattr(filesystem, "_protected_copy", protected)
+    monkeypatch.setattr(protected_publication, "_protected_copy", protected)
     monkeypatch.setattr(filesystem, "_copy_replace", plain)
     return copies
 
@@ -1024,7 +1026,7 @@ def test_remote_targets_refuse_protected_settings(tmp_path, capsys, target, reda
 def test_remote_targets_are_unchanged_without_protection(tmp_path, target):
     cfg = _cfg(tmp_path / "home", _make_source(tmp_path), tmp_path / "dest", target=target)
     remote = engine.build_target(target, cfg.target_options(target))
-    assert engine._apply_protection(cfg, remote) is None
+    assert protection_engine.apply_protection(cfg, remote) is None
     assert remote.protection is None
 
 
@@ -1184,7 +1186,7 @@ def test_unreadable_transcript_without_prior_copy_publishes_nothing(tmp_path, ca
 
 def _lock_events_once(monkeypatch, events: Path) -> list[int]:
     """The transcript's writer holds it locked for one pass."""
-    original = filesystem._protected_copy
+    original = protected_publication._protected_copy
     armed = {"events.jsonl"}
 
     def locked(src, dst, member, **kwargs):
@@ -1193,7 +1195,7 @@ def _lock_events_once(monkeypatch, events: Path) -> list[int]:
             raise filesystem._LockedSourceFile(f"source file is locked: {member}")
         return original(src, dst, member, **kwargs)
 
-    monkeypatch.setattr(filesystem, "_protected_copy", locked)
+    monkeypatch.setattr(protected_publication, "_protected_copy", locked)
     return [1, 2, 3]
 
 
