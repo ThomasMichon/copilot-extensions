@@ -258,6 +258,12 @@ def test_ambiguous_merge_base_fails_closed(branch):
     {"allowed_paths": "all"}, {"allowed_paths": ["/absolute"]}, {"allowed_paths": ["C:\\escape"]},
     {"allowed_paths": ["a", "a"]}, {"guidance": []},
     {"features": {"scope_report": False}, "allowed_paths": []},
+    {"ssh_url": None}, {"ssh_url": "https://forge.invalid/owner/repo"},
+    {"ssh_url": "ssh://git:fixture-value@forge.invalid/owner/repo"},
+    {"ssh_url": "ssh://forge.invalid:invalid/owner/repo"},
+    {"ssh_url": "git@forge.invalid:owner/repo?private=value"},
+    {"ssh_url": "git@forge.invalid:owner/repo\n"},
+    {"ssh_url": "C:\\local\\repo"}, {"ssh_url": "git@forge.invalid:owner/repo\x00"},
 ])
 def test_strict_config_rejects_extensions_and_malformed_policy(raw):
     with pytest.raises(ValueError):

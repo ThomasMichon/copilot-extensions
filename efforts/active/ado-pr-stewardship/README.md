@@ -197,6 +197,21 @@ remain outside this proposal's authority.
 
 ## Journal
 
+### 2026-10-19 - Explicit Gitea SSH destination binding
+
+- Follow-up review identified a real Gitea transport distinction: an HTTPS
+  instance prefix is not necessarily part of its SSH clone path. Dropping
+  that prefix heuristically would conflate different instances on one host.
+- Added the narrow optional `publication_checks.ssh_url` declaration. It binds
+  the selected repository/endpoint to its canonical secure SSH clone URL,
+  survives export and strict round trips, and participates in receipt policy
+  identity. It does not introduce a network read, executable hook or grant.
+  Without this explicit declaration, unmatched SSH destinations still refuse.
+- The worker/publication selection passes 100 cases, including canonical
+  subpath-free SSH, endpoint isolation, insecure transport and malformed
+  credential/path declarations. All four CLI checks retain fresh-worker
+  coverage. Updated-head review and release/consumer proof remain open.
+
 ### 2026-10-19 - Pinning endpoint authority across worker environments
 
 - The next review confirmed the initial three corrections and exposed endpoint

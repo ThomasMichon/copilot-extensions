@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import PurePosixPath, PureWindowsPath
+import re
+from urllib.parse import urlsplit
 
 
 def parse_string_tuple(value: object) -> tuple[str, ...]:
@@ -22,6 +24,27 @@ class PublicationChecksConfig:
     review_lenses_path: str = ""
     allowed_paths: tuple[str, ...] | None = None
     guidance: str = ""
+    ssh_url: str = ""
+
+
+def _ssh_url(value: object) -> str:
+    if value == "":
+        return ""
+    if (
+        not isinstance(value, str) or len(value) > 2048 or "\\" in value
+        or any(c.isspace() or ord(c) < 32 for c in value)
+    ):
+        raise ValueError("publication check ssh_url must be a bounded secure SSH clone URL")
+    if value.startswith("ssh://"):
+        parsed = urlsplit(value)
+        if (
+            parsed.hostname and parsed.path.strip("/") and not parsed.password
+            and not parsed.query and not parsed.fragment and parsed.port != 0
+        ):
+            return value
+    elif re.fullmatch(r"(?:[A-Za-z0-9_.-]+@)?[A-Za-z0-9_.-]+:[^/?#:\s][^?#:\s]*", value):
+        return value
+    raise ValueError("publication check ssh_url must be a secure SSH clone URL without credentials/query data")
 
 
 def relative_pattern(value: object, *, glob: bool = True) -> str:
@@ -42,7 +65,7 @@ def parse_publication_checks(raw: object) -> PublicationChecksConfig | None:
     if raw is None:
         return None
     if not isinstance(raw, dict) or set(raw) - {
-        "features", "review_lenses_path", "allowed_paths", "guidance",
+        "features", "review_lenses_path", "allowed_paths", "guidance", "ssh_url",
     }:
         raise ValueError("pr.publication_checks must contain only built-in configuration fields")
     features = raw.get("features", {})
@@ -72,4 +95,5 @@ def parse_publication_checks(raw: object) -> PublicationChecksConfig | None:
         review_lenses_path=lens_path,
         allowed_paths=paths,
         guidance=guidance,
+        ssh_url=_ssh_url(raw.get("ssh_url", "")),
     )

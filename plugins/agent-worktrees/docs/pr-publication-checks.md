@@ -97,6 +97,13 @@ the Azure organization), not just the repository slug, and preserves equivalent
 secure SSH/HTTPS destinations, including Azure's legacy organization URLs.
 Multiple push URLs refuse instead of validating only
 one destination of a multi-destination push.
+For a Gitea SSH clone whose host, port or repository path differs from the
+HTTP endpoint, configure that repository's canonical clone destination as
+`pr.publication_checks.ssh_url` (for example,
+`git@forge.invalid:example/project.git`). It is an explicit endpoint-specific
+binding, preserved by export, not a guessed removal of the HTTP subpath.
+Absent that declaration, an SSH path that does not match the full endpoint
+refuses. Only secure SSH URLs without password/query data are accepted.
 Missing, malformed or empty explicit configuration, including a non-mapping
 `repos` block or repository entry, refuses the read/check
 instead of falling back to ambient policy.

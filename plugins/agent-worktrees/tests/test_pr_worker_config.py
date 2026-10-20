@@ -351,3 +351,41 @@ def test_remote_binding_includes_provider_endpoint(provider, endpoint, repositor
 
     policy = cfg._parse_pr({"provider": provider, "api_base": endpoint})
     assert matches_remote(remote, repository, policy, "/worker/repo") is matches
+
+
+@pytest.mark.parametrize("remote", [
+    "git@forge.invalid:project/repo.git",
+    "ssh://git@forge.invalid/project/repo",
+])
+def test_gitea_ssh_subpath_binding_survives_export(host, tmp_path, capsys, remote):
+    from agent_worktrees.pr_worker_config import matches_remote
+
+    data = json.loads(host.read_text("utf-8"))
+    policy = data["repos"]["target"]["pr"]
+    policy.update(provider="gitea", api_base="https://forge.invalid/gitea")
+    host.write_text(json.dumps(data), "utf-8")
+    without_binding = tmp_path / "unbound.json"
+    assert export(host, without_binding, "/worker/repo") == 0
+    capsys.readouterr()
+    unbound = pr_read_context.load_read_config(without_binding).default_repo.pr
+    assert not matches_remote(remote, "project/repo", unbound, "/worker/repo")
+    policy["publication_checks"]["ssh_url"] = "git@forge.invalid:project/repo.git"
+    host.write_text(json.dumps(data), "utf-8")
+    output = tmp_path / "worker.json"
+    assert export(host, output, "/worker/repo") == 0
+    capsys.readouterr()
+    loaded = pr_read_context.load_read_config(output).default_repo.pr
+    assert loaded.publication_checks.ssh_url == policy["publication_checks"]["ssh_url"]
+    assert matches_remote(remote, "project/repo", loaded, "/worker/repo")
+    assert not matches_remote(
+        "git@another.invalid:project/repo.git", "project/repo", loaded, "/worker/repo",
+    )
+    assert not matches_remote(
+        "git@forge.invalid:project/other.git", "project/repo", loaded, "/worker/repo",
+    )
+    assert not matches_remote(
+        "https://forge.invalid/project/repo.git", "project/repo", loaded, "/worker/repo",
+    )
+    assert not matches_remote(
+        "ftp://forge.invalid/project/repo.git", "project/repo", loaded, "/worker/repo",
+    )

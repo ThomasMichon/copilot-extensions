@@ -10,7 +10,7 @@ from urllib.parse import urlsplit
 
 from .config import RepoConfig
 from .pr_observation_config import ObservationConfig, parse_observation
-from .pr_publication_config import PublicationChecksConfig, parse_publication_checks
+from .pr_publication_config import PublicationChecksConfig, _ssh_url, parse_publication_checks
 
 
 def _publication(policy: PublicationChecksConfig) -> dict:
@@ -19,6 +19,7 @@ def _publication(policy: PublicationChecksConfig) -> dict:
         "review_lenses_path": policy.review_lenses_path,
         "allowed_paths": None if policy.allowed_paths is None else list(policy.allowed_paths),
         "guidance": policy.guidance,
+        "ssh_url": policy.ssh_url,
     }
 
 
@@ -45,6 +46,8 @@ def matches_remote(remote: str, repository: str, pr, workspace: str) -> bool:
     from .pr_publish import _identity
     from .providers.pr_source import same_repository
 
+    if "://" in remote and urlsplit(remote).scheme not in ("https", "http", "ssh"):
+        return False
     endpoint = providers.get_provider(pr.provider).authority_endpoint(pr.api_base)
     if pr.provider == "github":
         expected = f"https://{endpoint}/{repository}"
@@ -55,7 +58,17 @@ def matches_remote(remote: str, repository: str, pr, workspace: str) -> bool:
         expected = f"{endpoint.rstrip('/')}/{repository}"
     else:
         raise ValueError("publication checks need a supported provider")
-    return same_repository(_identity(remote, workspace), _identity(expected, workspace), pr.provider)
+    actual = _identity(remote, workspace)
+    if same_repository(actual, _identity(expected, workspace), pr.provider):
+        return True
+    policy = pr.publication_checks
+    if pr.provider != "gitea" or policy is None or not policy.ssh_url:
+        return False
+    try:
+        _ssh_url(remote)
+    except ValueError:
+        return False
+    return actual == _identity(policy.ssh_url, workspace)
 
 
 def _export_endpoint(pr) -> str:
