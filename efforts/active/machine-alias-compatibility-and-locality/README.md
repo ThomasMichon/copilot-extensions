@@ -169,6 +169,12 @@ require tuple-shaped commands. The [new-record contract](physical-machine-enviro
 keeps the physical tuple and one-term shorthand distinct and equivalent at the
 appropriate interfaces.
 
+**2026-10-20 cross-plugin boundary choice:** the operator selected
+`shared-pure-codec`, the form option "Extract a shared, dependency-free codec;
+preserve the existing Worktrees import path." The
+[bounded integration plan](physical-machine-environment-boundary.md#shared-raw-json-codec-integration)
+implements that choice without enabling tuple producers or installing runtimes.
+
 ## Plan
 
 ### Phase 0 - Empty-mux readiness prerequisite
@@ -282,6 +288,10 @@ _(Agent-recommended realization of the operator's explicit model clarification.)
 - [x] Review the [tuple-first new-record contract](physical-machine-environment-boundary.md#tuple-first-new-record-contract)
       and one-term WSL reference equivalence before changing durable creation
       semantics.
+- [x] Prepare Worktrees' versioned tracking, reference and observational
+      consumers in #7414, keeping ordinary creation producers legacy.
+- [ ] Review and execute the [shared raw-JSON codec integration](physical-machine-environment-boundary.md#shared-raw-json-codec-integration)
+      before enabling producers; retain independent plugin installation.
 - [ ] Make runtime admission, structured machine guidance and prospective
       worktree naming/metadata consume the correct dimension. Keep native and
       guest execution authority distinct and use the same policy in update and
@@ -354,6 +364,41 @@ operator's all-alias/all-worktree acceptance requirement, not authorization for
 unrelated service changes or a second machine registry.
 
 ## Journal
+
+### 2026-10-20 - Shared pure codec selected for external consumers
+- The operator selected a shared dependency-free codec rather than copied
+  local readers. Dispatch currently has no machine-transport or Worktrees
+  runtime dependency; importing the owning plugin would break that boundary.
+- The linked Phase 3d amendment proposes extracting the existing strict wire
+  decoder with a compatibility import at its current Worktrees location,
+  followed by bounded Dispatch, Bridge and Manager adapters. The source,
+  packaging and consumer validation obligations are explicit; implementation
+  waits for this amendment's review.
+- Existing transport-convergence, task lifecycle and Manager runtime owners
+  retain their scopes. No CI-capacity role, infrastructure adoption, live
+  recovery, historical migration or producer activation is part of this slice.
+
+### 2026-10-20 - Tracking consumers merged; external adapters remain next
+- #7414 merged as `6439a58836ee068672e3f5e7d97773a8d1d250c6` after
+  exact-head Copilot approval of `6a06f4d1338d54a3e3807bab11bd2c478f8d1515`
+  and passing required CI. The local source is reconciled onto the actual
+  squash; the incremental history remains retained in a recovery reference.
+- Review corrections now require receiving-project tuple authority before
+  legacy cleanup fallbacks, including forced removal. Controller navigation,
+  strict producer scans and pending run-claim recognition use the execution
+  owner; malformed explicit tuples retain uncertainty or unsettled ownership.
+- The new review regressions reproduced nine failures with three legacy
+  controls passing before correction. The final four-module contained packet
+  passes 290 cases; the earlier 78-case run-claim packet is unchanged. These
+  are source contracts, not installed Windows/WSL acceptance.
+- Next, adapt Dispatch, Bridge and Manager consumers of raw Worktrees JSON,
+  then prove prospective creation, retained allocation replay and one-term
+  selector equivalence before enabling tuple producers. Existing records,
+  identifiers, relationships, queues and live sessions remain unchanged.
+- The independent Manager startup blocker remains #7305. Its qualified-runtime
+  and diagnostic owners retain their scopes; normal updater adoption must use
+  the supported published repair without an index or seasoning exception.
+  Phase 3d and the containing installed rollout remain open.
 
 ### 2026-10-20 - Consumer-first tracking integration; creation remains gated
 - #7389 merged after exact-head approval and required checks. Its pure tuple
