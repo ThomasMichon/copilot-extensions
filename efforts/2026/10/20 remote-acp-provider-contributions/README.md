@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** Independent reviewed proposal and implementation PRs targeting `dev`
 - **Created:** 2026-10-18
-- **Status:** Done - generic source merged to dev; release and adopter acceptance transferred, no rollout
+- **Status:** Done
 - **Vision:** [externally-hosted-acp-agents](../../../../visions/plugins/agent-bridge/README.md#externally-hosted-acp-agents), [topology-aware-agent-resolution](../../../../visions/plugins/agent-bridge/README.md#topology-aware-agent-resolution)
 - **Umbrella issue:** #7218
 
