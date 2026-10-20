@@ -114,7 +114,7 @@ that pattern to this repository.
 | [Authoritative Write-Through Daemon](active/agent-worktrees-authoritative-daemon/README.md) | Active | #3761 |
 | [agent-dispatch Worker Operating Procedures](active/agent-dispatch-worker-operating-procedures/README.md) | Done; pending archive | #3897 |
 | [Mux Companion Manual Cutover Diagnostics](active/mux-companion-manual-cutover-diagnostics/README.md) | Active | #4369 |
-| [Coverage-Guided CI Test Selection](active/coverage-guided-ci/README.md) | Draft | #4453 |
+| [Coverage-Guided CI Test Selection](active/coverage-guided-ci/README.md) | Draft; proposed Windows PR waves, complete native qualification remains open | #4453 |
 | [Launch-Time Model/Effort/Context Preference Flags](active/launch-time-model-preference-flags/README.md) | Done; pending archive | #4776 |
 | [Picker New-Session Prompt + Registered-Pivot Composer](active/picker-new-session-prompt-and-composer/README.md) | Done; pending archive | See effort |
 | [Per-Worktree Activity State](active/per-worktree-activity-state/README.md) | Active | #5664 |

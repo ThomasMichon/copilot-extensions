@@ -45,6 +45,11 @@ replace that plugin's collect-only tier with genuine diff-scoped selection.
   until Phase 1 scopes out real parallelizable slices.
 - **Handoff:** each phase's PR merges to `dev` before the next phase begins;
   no phase depends on an unmerged predecessor's uncommitted state.
+- **Remaining Windows work:** #5694 is a preserved source of candidate
+  changes, not the next all-in-one publication. Follow the proposed
+  [reviewed wave plan](windows-pr-waves.md); its plan-only PR must clear
+  review before implementation resumes. Existing sibling owners retain
+  their scopes.
 
 ## Context
 
@@ -101,12 +106,39 @@ full, verbatim exchange):
 > inception sidecar, and hand back a short prompt to kick off a fresh
 > worktree.
 
+### Follow-up: review a wave plan before continuing the large PR
+
+Operator direction, verbatim, 2026-10-20:
+
+> This is the kind of work which was probably better done by making a plan,
+> submitting it, and then incrementally making the updates from the PR in
+> batches. You may want to split about your PR into waves at this point,
+> given how many review rounds the PR has gone.
+
+The [wave plan](windows-pr-waves.md) below is an agent-recommended
+decomposition of that direction, not permission to weaken the original
+Windows acceptance requirement or to execute before the plan is reviewed.
+
 _(agent-recommended)_ Everything below this point — the phase breakdown,
 sequencing, and validation plan — is the agent's own structuring of how to
 realize the above; the operator did not specify phases or an implementation
 order.
 
 ## Plan
+
+### Remaining Windows PR work - reviewed waves
+
+- [ ] Review and merge the [plan-only wave proposal](windows-pr-waves.md)
+      before further implementation or extraction.
+- [ ] Inventory each remaining #5694 hunk against current `dev`, then land
+      the bounded contract-specific batches in the reviewed order.
+- [ ] Complete the unchanged native Windows acceptance and settle the
+      original PR only after its actual remaining obligations are resolved.
+
+This is a sequencing amendment for the remaining Windows work, not a
+replacement effort or a restoration of historical integration CI. Current
+Source CI remains unit-only; the older phase descriptions below retain
+their historical context rather than authorizing retired jobs.
 
 ### Phase 0 — Design spike: coverage mechanism + storage format
 - [x] Pick the concrete coverage-collection mechanism (`coverage.py` dynamic
