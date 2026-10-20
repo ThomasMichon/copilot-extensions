@@ -470,3 +470,11 @@ def test_new_sources_remain_bounded_and_production_image_has_no_fixture_dependen
     assert "COPY . " not in dockerfile and "fixture" not in dockerfile.lower()
     assert "pip install" not in dockerfile.replace("uv pip install", "")
     assert "PYTHONPATH" not in dockerfile
+
+
+def test_dockerignore_recloses_each_reopened_parent_before_file_exceptions() -> None:
+    lines = (ROOT / SOURCE.IMAGE / "Dockerfile.dockerignore").read_text().splitlines()
+    assert lines[0] == "**"
+    for index, line in enumerate(lines):
+        if line.startswith("!") and line.endswith("/"):
+            assert lines[index + 1] == line[1:] + "**"
