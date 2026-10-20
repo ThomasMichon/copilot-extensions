@@ -117,12 +117,9 @@ complete same-head Windows qualification remain open.
 
 ### Independent finalize/push setup-helper extraction
 
-This partition began independently from Dev while the separately reviewed
-role-class move #7421 awaited the retained completion owner's review-policy
-disposition. After that owner restored the prior policy arrangement, #7421
-actually merged as `7da41c6d06464012088b4e311e476144c4f3bfb0`, with fresh
-full review/CI/authority checks, and its child was finalized. No policy or
-installed runtime was changed by this test-extraction worker.
+Baseline: Dev `7da41c6d06464012088b4e311e476144c4f3bfb0`, the actual
+#7421 role-class merge. This extraction is independent of role-provider
+semantics and changes only the finalize/push setup-helper location.
 
 Extract only the finalize/push class's eight setup helpers into a shared,
 non-test `PRWorkflowSetup` base. Every helper and test-method AST is identical;
