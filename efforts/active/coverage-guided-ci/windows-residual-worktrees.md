@@ -87,6 +87,39 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Mechanical move mapping: preserved, not conflated with fixtures
 
+### Seventh admitted move: source-attribution refresh method family
+
+Baseline: Dev `039208cd6022e3cedb42b76f69a5d5ddb28dcb6c`, the actual
+#7427 setup-helper merge. Ten methods move unchanged from
+`test_pr_ops.py::TestPRFinalizeAndPush` to
+`test_pr_source_attribution.py::TestPRSourceAttribution`. The method set is
+`test_push_changes_refreshes_marker_and_preserves_body`, all six
+`test_refresh_source_attribution_*` methods, and the
+`test_frozen_codename_marker_*`, `test_explicit_config_addition_*` and
+`test_finish_auto_open_rerun_*` methods. Both classes inherit the identical
+merged `PRWorkflowSetup`; no helper or fixture changes enter this partition.
+
+Real before/after collection proves the complete 317-node bijection:
+ten module/class-only moves and 307 unchanged identities, with every
+method/decorator AST, resolved fixture body/scope/closure, parameter value
+and effective mark identical. Both collection passes and cleanup take
+29.42 seconds. Only unused imports are removed after relocation.
+
+All ten moved cases pass on native Windows without skips in 28.86 seconds
+(32.27 including sandbox preparation and removal), exactly two work-stealing
+workers with unchanged 30-second item and 240-second diagnostic group
+limits. The two existing real-Git/contained partial-split selection controls
+pass without skips in 5.07 seconds (7.14 inclusive), preserving both changed
+whole files without invented moved-node coverage credit.
+
+No production decision, native operation, assertion, provider double, shared
+fixture, seed, test-tier or CI admission changes. Clean-room provisioning is
+inapplicable to unchanged test-method relocation; unavailable Linux/external
+execution receives no credit. Seven mechanical partitions now move 236
+original expanded cases, leaving 81 finalize/push cases. Subsequent method
+partitions, fixture contracts and repeated complete same-head Windows
+qualification remain open.
+
 ### Sixth admitted move: complete role-resolution class
 
 Baseline: Dev `26db968a27bdfd4a5c0b88fbbe4a1c17ffd1c8b5`, the actual
@@ -116,6 +149,11 @@ now move 226 original cases; the setup-bearing finalize/push class retains
 complete same-head Windows qualification remain open.
 
 ### Independent finalize/push setup-helper extraction
+
+**Actually merged:** #7427 as
+`039208cd6022e3cedb42b76f69a5d5ddb28dcb6c`. The method partitions below
+start from these unchanged shared helper bodies; fixture-semantic ownership
+and complete parent Windows qualification remain separate.
 
 Baseline: Dev `7da41c6d06464012088b4e311e476144c4f3bfb0`, the actual
 #7421 role-class merge. This extraction is independent of role-provider
