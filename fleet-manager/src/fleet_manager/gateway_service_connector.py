@@ -194,6 +194,8 @@ class ServiceConnector:
             cookie_jar=aiohttp.DummyCookieJar(), auto_decompress=False,
             trace_configs=[trace],
         ) as session:
+            # aiohttp 3 has no public toggle for replaying PUT/DELETE on disconnect.
+            session._retry_connection = False
             ticket = await self._admit(session)
             async with session.ws_connect(
                 self.gateway + "/_fleet/service-channel", ssl=self._gateway_tls,

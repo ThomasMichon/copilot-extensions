@@ -256,3 +256,21 @@ def test_buffered_cancels_retire_workers_that_never_start(monkeypatch) -> None:
         assert connector.active == {}
         assert list(connector.retired) == correlations
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("method", ["PUT", "DELETE"])
+def test_backend_disconnect_never_implicitly_replays_mutation(tmp_path, method) -> None:
+    async def scenario() -> None:
+        async with running(tmp_path) as rig:
+            rig.h.document["manifest"]["slots"][0]["routes"][0]["methods"].append(method)
+            rig.h.document["callers"][0]["methods"].append(method)
+            await rig.update()
+            await rig.connect()
+            async with await rig.request(
+                "/api/lost-mutation", method, data=b"accepted-once",
+            ) as response:
+                assert response.status == 502
+                assert await response.json() == {"error": "outcome-unknown"}
+            assert rig.backends[0].mutations == 1
+            assert len(rig.backends[0].requests) == 1
+    asyncio.run(scenario())

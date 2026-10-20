@@ -157,6 +157,9 @@ Cancellation retires a correlation even if its worker task never began running.
 Only an actually attached channel lasting at least 60 seconds resets that
 budget; long failed admissions do not. It never retries requests from a lost
 channel.
+The pinned aiohttp 3 transport's implicit connection retry is explicitly
+disabled as well: replayable PUT/DELETE byte bodies must not be resubmitted
+after a backend disconnects before returning headers.
 
 The runtime SDK's `status()` reports applied revision/generation, expected role
 availability and the last classified reload error. It is a bounded embedding

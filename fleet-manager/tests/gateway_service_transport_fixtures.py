@@ -43,6 +43,10 @@ class Backend:
     async def handle(self, request):
         body = await request.read()
         self.requests.append((request.method, request.raw_path, dict(request.headers), body))
+        if request.path == "/lost-mutation":
+            self.mutations += 1
+            request.transport.close()
+            return web.Response()
         if request.path == "/conditional":
             if (request.headers.get("If-Match", '"current"') != '"current"'
                     or request.headers.get("If-Unmodified-Since", "current") != "current"):
