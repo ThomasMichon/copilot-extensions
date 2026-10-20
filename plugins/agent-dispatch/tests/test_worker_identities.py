@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -233,6 +234,24 @@ def test_list_case_variants_follow_runtime_resolution(tmp_path: Path, no_overlay
         assert sorted(e.name for e in group) == ["Custom-Name", "custom-name"]
         assert all(e.shadows == () for e in group)
         assert sorted(e.name for e in packaged_group) == sorted([packaged, packaged.upper()])
+
+
+@pytest.mark.parametrize("link", ["hardlink", "symlink"])
+def test_list_keeps_linked_files_under_distinct_names(tmp_path: Path, no_overlay, link):
+    repo_dir = tmp_path / ".copilot-extensions" / "agent-dispatch" / "identities"
+    alpha = _write_identity(repo_dir, "alpha", "Shared.", "Rules.")
+    beta = repo_dir / "beta.identity.md"
+    try:
+        if link == "hardlink":
+            os.link(alpha, beta)
+        else:
+            beta.symlink_to(alpha)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"cannot create {link}: {exc}")
+    entries = {e.name: e for e in list_worker_identities(cwd=tmp_path)}
+    for name in ("alpha", "beta"):
+        assert entries[name].source == "repository"
+        assert load_worker_identity(name, cwd=tmp_path).source_path == entries[name].path
 
 
 def test_describe_returns_rules_and_provenance(tmp_path: Path, no_overlay):

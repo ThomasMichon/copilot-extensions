@@ -249,18 +249,26 @@ def list_worker_identities(*, cwd: Path | None = None) -> list[WorkerIdentityEnt
     tiers = _candidate_tiers(cwd=cwd)
     # name -> index of the lowest-precedence tier its file appears in.
     discovered: dict[str, int] = {}
+    listed: set[str] = set()
     for index, (_, directory) in enumerate(tiers):
         if not directory.is_dir():
             continue
         for path in directory.glob(f"*{_IDENTITY_SUFFIX}"):
             if path.is_file():
                 discovered[path.name[: -len(_IDENTITY_SUFFIX)]] = index
+                listed.add(str(path))
     seen: set[tuple[object, ...]] = set()
     resolved: dict[str, list[tuple[str, Path]]] = {}
     for name in sorted(discovered, key=lambda n: (-discovered[n], n)):
         hits = _resolution_hits(name, tiers)
-        key = tuple(_file_key(path) for _, path in hits)
-        if not hits or key in seen:
+        if not hits:
+            continue
+        key = (name.casefold(), *(_file_key(path) for _, path in hits))
+        # Only a spelling that resolved some tier through case-insensitive
+        # matching (no literal directory entry; compared as strings because
+        # Windows path equality ignores case) is an alias of another
+        # spelling; linked files under distinct names stay separate selectors.
+        if key in seen and any(str(path) not in listed for _, path in hits):
             continue
         seen.add(key)
         resolved[name] = hits
