@@ -105,20 +105,20 @@ Detailed design, sequence and validation below are **agent-recommended**.
   readiness documentation without growing unconditional CI integration lanes.
 
 ### Phase 2 - Actual native qualification
-- [ ] Run the exact committed candidate on the admitted native amd64 engine,
+- [x] Run the exact committed candidate on the admitted native amd64 engine,
   checking the existing default and all assembled contract stages.
-- [ ] Execute the same committed candidate on the explicitly admitted native
+- [x] Execute the same committed candidate on the explicitly admitted native
   ARM64 venue, with installed wheel and actual Gateway/two-service behavior.
-- [ ] Inspect architecture, source/image and stable Gateway process receipts,
+- [x] Inspect architecture, source/image and stable Gateway process receipts,
   all ten stage outcomes and exact-owned cleanup on each venue. Retain private
   results and publish only a generic, non-secret conclusion.
-- [ ] Preserve truthful failures; do not install emulation, weaken deadlines,
+- [x] Preserve truthful failures; do not install emulation, weaken deadlines,
   touch unrelated workloads or claim a live target ready to force completion.
 
 ### Completion
 - [ ] Resolve every Plan/Validation item or transfer a concrete residual to a
   named tracked objective before marking Done and archiving.
-- [ ] Promote durable architecture truth into the living readiness docs, retaining
+- [x] Promote durable architecture truth into the living readiness docs, retaining
   #7257 provider/live-edge gates and existing lifecycle/deployment ownership.
 - [ ] Merge the implementation and completion record, settle owned remote/local
   resources, release effort focus and finalize the source worktree.
@@ -133,13 +133,13 @@ Detailed design, sequence and validation below are **agent-recommended**.
   native architecture before native execution is reported.
 - [x] **Custody:** exact-source helpers and canonical resources remain complete;
   existing source/argv/private-results/deadline/termination/cleanup guards pass.
-- [ ] **Native amd64:** actual assembled API/HTML/SSE, policy, role/caller denial,
+- [x] **Native amd64:** actual assembled API/HTML/SSE, policy, role/caller denial,
   replacement, restart/reconnect and revocation pass under stable Gateway identity.
-- [ ] **Native ARM64:** the same real assembled assertions pass on native ARM64,
+- [x] **Native ARM64:** the same real assembled assertions pass on native ARM64,
   not emulation, with source/image/process evidence and complete exact-ID cleanup.
 - [ ] **Contribution:** focused bounded tests, lint, relevant repository guards,
   complete current-head review and actual merge cover the changed source.
-- [ ] **Boundary:** no production identity, key, DNS, Access, firewall, service,
+- [x] **Boundary:** no production identity, key, DNS, Access, firewall, service,
   enrollment or deployment change is included or implied.
 
 ## Proposal
@@ -180,3 +180,29 @@ revision custody and real adoption remain separately tracked.
 - The focused native-selection and retained runner/probe portfolio passes
   eighty-eight cases. Lint, install-contract and documentation consistency
   guards pass. These are mechanical guards, not native execution evidence.
+
+### 2026-10-20 - Exact-source amd64 proof; ARM64 qualification assigned
+- Candidate `7a6e0614034814708297935660866b8e3eb7186d` passed all ten
+  assembled stages on native Linux amd64. Selected architecture, engine,
+  inspected image and installed process agreed; seven Gateway identity samples
+  were identical and exact-owned cleanup completed without errors.
+- Assigned that same committed candidate to the explicitly admitted native
+  ARM64 qualifier. Retained allocation and conversation identity through a
+  supported startup-registration recovery; durable task admission is not
+  proof execution. Actual ARM64 receipts remain pending.
+- Private run results and image IDs stay with the executing owners. No
+  production configuration, identity enrollment or runtime deployment changed.
+
+### 2026-10-20 - Native ARM64 proof independently verified
+- The same candidate passed all ten stages on an actual Linux/aarch64 engine,
+  with an inspected ARM64 image and noneditable installed wheel. Engine, image
+  and installed-process architecture agreed; no emulation was used.
+- The coordinator independently verified report/receipt hashes, exact source
+  and source-manifest custody, retained image identity/revision, unfinished
+  backend SSE and all stage outcomes. Seven Gateway identity samples matched.
+  All six receipted containers and the one receipted network were independently
+  confirmed absent; cleanup was complete with no errors.
+- Updated the living readiness and image qualification boundaries for both
+  native architectures. Implementation review/merge and final resource
+  settlement remain open; provider/live-edge, lifecycle and adoption owners
+  retain their existing gates.

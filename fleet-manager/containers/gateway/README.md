@@ -58,5 +58,5 @@ Build, emulation and native execution remain separate evidence. Do not install
 privileged emulation to make that gate pass.
 This is not Cloudflare compatibility, managed installation or live deployment.
 The [adoption-readiness record](../../docs/gateway-adoption-readiness.md)
-separates the completed native amd64 proof from open architecture, provider,
-lifecycle and live-activation gates.
+records actual exact-source native amd64 and ARM64 qualification separately
+from open provider, lifecycle, distribution and live-activation gates.

@@ -10,9 +10,9 @@ delivers reusable source and isolated proof; it does not enroll a live fleet.
 | Surface | Evidence | Remaining owner/gate |
 |---|---|---|
 | Manifest, coherent policy and real identity verification | Reviewed source and retained-verifier/socket tests | Production configuration-source authority and provider interoperability |
-| Base image and direct service channels | Native amd64 exact-source isolated container witness | No production sizing or managed deployment implied |
+| Base image and direct service channels | Native amd64 and ARM64 exact-source isolated container witnesses | No production sizing or managed deployment implied |
 | External-origin ingress | Actual synthetic dual verified-TLS HTTP/WebSocket/SSE proxy and renderer tests | Supported cloudflared configuration validation and live edge proof under #7257 |
-| ARM64 | Intended image target only; no ARM64 image build or execution qualified | Native ARM64 venue, runner and explicit execution approval under #7257 |
+| ARM64 | Actual native Linux ARM64 image, installed wheel and ten assembled stages qualified | Target-specific capacity, distribution and deployment remain adopter-owned |
 | Gateway-owned provider authentication | Common-profile JWT/DPoP and scoped caller grants | Actual Entra/Authelia login, token/proof interoperability and enrollment under #7257, coordinated with #5789/#6804 |
 | Durable restart and installation lifecycle | Existing owners retain responsibility | Accepted-revision custody and actual install/update/drain/rollback under #6240/#6424 |
 | Managed placement and live adoption | Existing external manager retains responsibility | Native target capacity, deployment/credential/migration approval and actual manager proof under #6030 |
@@ -32,29 +32,29 @@ caller revocation under unchanged Gateway process identity. Exact-ID cleanup
 completed. Private source/image receipts remain with the executing owner;
 public examples do not contain provider credentials or deployment inventory.
 
-## Architecture capability blocker
+## Native architecture qualification
 
-The qualified engine is Linux x86_64/amd64. Its builders advertise additional
-platforms, including ARM64; advertisement is neither an ARM64 image build nor
-native execution evidence. The witness now accepts explicit native amd64/ARM64
+The follow-on [native qualification effort](../../efforts/active/gateway-native-qualification/README.md)
+executed candidate `7a6e0614034814708297935660866b8e3eb7186d` separately on
+native Linux amd64 and ARM64. Both runs passed all ten assembled stages with
+selected architecture, engine, inspected image and installed process agreement.
+Each retained seven identical Gateway process identity samples and completed
+exact-ID cleanup without errors. The ARM64 run's actual installed process
+reported `aarch64`; it was not emulation or a cross-build advertisement.
+The native-selection and retained runner/probe portfolio passed 88 guards.
+Those mechanical checks are distinct from these actual executions.
+
+The witness accepts explicit native amd64/ARM64
 selection, preserving amd64 as its default. It does not select a remote target,
 invoke QEMU or turn runner support into successful architecture qualification.
+Every new candidate or target still needs its applicable qualification and
+separate execution approval; retained images and private receipts are not a
+released registry artifact or an installation.
 
-Native ARM64 qualification is **blocked and transferred to #7257**: supply an
-explicitly admitted native ARM64 venue and run the selected exact-source witness
-with architecture receipts, non-root resource limits, internal networking and
-exact-ID cleanup. The [native qualification effort](../../efforts/active/gateway-native-qualification/README.md)
-owns that follow-on. Build and run the real installed
-Gateway plus service connectors there, exercising the same assembled contract
-before claiming that architecture supported. Record emulated execution
-separately if independently selected; never install privileged emulation or
-quietly use it to satisfy a native gate.
-
-The initial campaign is allowed to end with this concrete capability/approval
-gate. It does not mark ARM64, an intended live host or the running fleet ready.
-The same distinction applies to the generic proxy contract: cloudflared is not
-available in the qualified venue, so no vendor-validator or live account result
-is claimed.
+This closes the native ARM64 qualification gap transferred by the initial
+campaign, not #7257's provider/live-edge gates. No intended live host or running
+fleet is marked ready. Supported cloudflared configuration validation and live
+account proof remain unqualified; the generic proxy contract is separate.
 
 ## Adopter-owned inputs and exact changes
 
@@ -119,5 +119,5 @@ placement, persistence and effect fencing remain deployment/service obligations.
 
 No live cloudflared account, Entra/Authelia login, production key custody, durable
 restart fence, managed install/update/rollback or service migration has been
-demonstrated by the isolated amd64 proof. The broader Fleet Control V2 and named
+demonstrated by the isolated native proofs. The broader Fleet Control V2 and named
 follow-on issues stay open.
