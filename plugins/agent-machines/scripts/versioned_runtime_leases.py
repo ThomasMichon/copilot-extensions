@@ -10,6 +10,7 @@ import threading
 import time
 from contextlib import contextmanager, nullcontext
 from pathlib import Path
+from typing import Callable
 
 _construction_owners = threading.local()
 
@@ -181,7 +182,8 @@ def _cleanup_lease(root: Path, version: str, *, allow_construction_owner: bool =
 
 @contextmanager
 def _kernel_lease(root: Path, version: str, *, kind: str, shared: bool,
-                  timeout: float = 60.0, poll_interval: float = 0.05):
+                  timeout: float = 60.0, poll_interval: float = 0.05,
+                  open_lock: Callable[[Path, str], int] | None = None):
     import hashlib
 
     if not isinstance(version, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._+-]*", version):
@@ -196,10 +198,14 @@ def _kernel_lease(root: Path, version: str, *, kind: str, shared: bool,
     # Case aliases share ownership, including on case-insensitive POSIX volumes.
     key = hashlib.sha256(version.lower().encode("utf-8")).hexdigest()
     lock_dir = root / f".{kind}-leases"
-    lock_dir.mkdir(parents=True, exist_ok=True)
     lock_path = lock_dir / (key + ".lock")
-    flags = os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0)
-    fd = os.open(lock_path, flags, 0o600)
+    if open_lock is None:
+        lock_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+        flags = os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0)
+        fd = os.open(lock_path, flags, 0o600)
+    else:
+        # The caller keeps its verified directory handles alive through release.
+        fd = open_lock(lock_dir, lock_path.name)
     try:
         opened = os.fstat(fd)
         named = os.lstat(lock_path)

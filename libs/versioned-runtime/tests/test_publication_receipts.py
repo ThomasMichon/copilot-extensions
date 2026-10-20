@@ -198,9 +198,9 @@ import stamp_paths
 component = stamp_paths.publication_component()
 original = component.target_leases
 @contextmanager
-def attempted(root, targets):
+def attempted(root, targets, **kwargs):
     Path(barrier).write_text('ready')
-    with original(root, targets):
+    with original(root, targets, **kwargs):
         yield
 component.target_leases = attempted
 sys.argv = [entry, 'publish', target, 'metadata']
@@ -221,13 +221,29 @@ runpy.run_path(entry, run_name='__main__')
                 assert time.monotonic() < deadline, "Default producer did not reach its actual lease"
                 time.sleep(0.01)
             time.sleep(0.05)
-            assert child.poll() is None and target.read_bytes() == before
+            if child.poll() is not None:
+                output, error = child.communicate(timeout=10)
+                pytest.fail(f"Default producer exited before lease release: {output!r} {error!r}")
+            assert target.read_bytes() == before
         output, error = child.communicate(timeout=10)
         assert child.returncode == 0, output + error
         assert target.read_bytes() == (before if noop else b"serialized\n")
     finally:
         if child is not None and child.poll() is None:
             child.communicate(timeout=10)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX creation modes")
+def test_publication_lease_storage_is_private_with_permissive_umask(tmp_path: Path) -> None:
+    root, _context, _payload, _bindings = case(tmp_path, ("payload-dir",))
+    previous = os.umask(0)
+    try:
+        with proof.target_leases(root, [root / "payload-dir"]):
+            directory = root / ".publication-leases"
+            assert directory.stat().st_mode & 0o777 == 0o700
+            assert all(path.stat().st_mode & 0o777 == 0o600 for path in directory.iterdir())
+    finally:
+        os.umask(previous)
 
 
 def test_failed_activation_keeps_created_selector_proof(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

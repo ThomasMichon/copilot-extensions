@@ -114,6 +114,123 @@ def test_publication_rechecks_root_mutation_permissions(tmp_path: Path) -> None:
     assert list(root.iterdir()) == []
 
 
+@pytest.mark.skipif(os.name != "nt", reason="native Windows ownership revalidation")
+def test_publication_rechecks_windows_directory_ownership(tmp_path: Path, monkeypatch) -> None:
+    module = _paths_module()
+    root = tmp_path / "root"
+    root.mkdir()
+    with module.Directory(root) as directory:
+        monkeypatch.setattr(module, "_windows_owned", lambda fd: False)
+        with pytest.raises(ValueError, match="not privately owned"):
+            directory.publish("payload-dir", b"not published")
+    assert list(root.iterdir()) == []
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX directory replacement adversaries")
+@pytest.mark.parametrize("when", ["before-acquisition", "during-acquisition"])
+def test_publication_lease_root_replacement_never_writes_external_tree(
+    tmp_path: Path, monkeypatch, when: str,
+) -> None:
+    module = _paths_module()
+    root, external = tmp_path / "root", tmp_path / "external"
+    root.mkdir()
+    external.mkdir()
+    sentinel = external / "payload-dir"
+    sentinel.write_bytes(b"external sentinel")
+    before = sentinel.stat()
+
+    def replace_root():
+        root.rename(tmp_path / "admitted-root")
+        root.symlink_to(external, target_is_directory=True)
+
+    original = os.mkdir
+
+    def mkdir(path, *args, **kwargs):
+        if Path(path).name == ".publication-leases":
+            replace_root()
+        return original(path, *args, **kwargs)
+
+    with module.Directory(root) as directory:
+        if when == "before-acquisition":
+            replace_root()
+        else:
+            monkeypatch.setattr(os, "mkdir", mkdir)
+        with pytest.raises((ValueError, OSError)):
+            directory.publish("payload-dir", b"not published")
+    assert set(path.name for path in external.iterdir()) == {"payload-dir"}
+    assert sentinel.read_bytes() == b"external sentinel"
+    after = sentinel.stat()
+    assert (before.st_ino, before.st_mtime_ns, before.st_mode) == (
+        after.st_ino, after.st_mtime_ns, after.st_mode,
+    )
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX ordinary directory replacement")
+def test_lease_directory_uses_admitted_parent_not_reopened_path(tmp_path: Path, monkeypatch) -> None:
+    module = _paths_module()
+    root, replacement = tmp_path / "root", tmp_path / "replacement"
+    root.mkdir()
+    replacement.mkdir()
+    sentinel = replacement / "payload-dir"
+    sentinel.write_bytes(b"replacement sentinel")
+    before = sentinel.stat()
+    original = module.Directory
+
+    def substitute(path, *args, **kwargs):
+        assert path == root / ".publication-leases"
+        root.rename(tmp_path / "admitted-root")
+        replacement.rename(root)
+        return original(path, *args, **kwargs)
+
+    with original(root) as directory:
+        monkeypatch.setattr(module, "Directory", substitute)
+        with pytest.raises(ValueError, match="directory identity changed"):
+            directory.publish("payload-dir", b"not published")
+    assert set(path.name for path in root.iterdir()) == {"payload-dir"}
+    sentinel = root / "payload-dir"
+    assert sentinel.read_bytes() == b"replacement sentinel"
+    after = sentinel.stat()
+    assert (before.st_ino, before.st_mtime_ns, before.st_mode) == (
+        after.st_ino, after.st_mtime_ns, after.st_mode,
+    )
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX lease storage link adversaries")
+@pytest.mark.parametrize("fault", ["directory-link", "file-link", "file-hardlink"])
+def test_publication_refuses_unowned_lease_storage(tmp_path: Path, fault: str) -> None:
+    import hashlib
+
+    module = _paths_module()
+    root, external = tmp_path / "root", tmp_path / "external"
+    root.mkdir()
+    external.mkdir()
+    sentinel = external / "sentinel"
+    sentinel.write_bytes(b"external lease sentinel")
+    before = sentinel.stat()
+    lease_dir = root / ".publication-leases"
+    if fault == "directory-link":
+        lease_dir.symlink_to(external, target_is_directory=True)
+    else:
+        lease_dir.mkdir()
+        lease = lease_dir / (hashlib.sha256(b"redirects").hexdigest() + ".lock")
+        if fault == "file-link":
+            lease.symlink_to(sentinel)
+        else:
+            os.link(sentinel, lease)
+    entries = {path.name for path in lease_dir.iterdir()}
+    with module.Directory(root) as directory:
+        with pytest.raises((ValueError, OSError)):
+            directory.publish("payload-dir", b"not published")
+    assert not (root / "payload-dir").exists()
+    assert {path.name for path in external.iterdir()} == {"sentinel"}
+    assert {path.name for path in lease_dir.iterdir()} == entries
+    assert sentinel.read_bytes() == b"external lease sentinel"
+    after = sentinel.stat()
+    assert (before.st_ino, before.st_mtime_ns, before.st_mode) == (
+        after.st_ino, after.st_mtime_ns, after.st_mode,
+    )
+
+
 @pytest.mark.skipif(os.name == "nt", reason="POSIX link and inode adversaries")
 @pytest.mark.parametrize("fault", [
     "root-link", "ancestor-link", "lock-link", "lock-hardlink", "lock-directory",

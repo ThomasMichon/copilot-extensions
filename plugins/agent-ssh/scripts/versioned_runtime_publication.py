@@ -144,19 +144,23 @@ def lease_component() -> Any:
 
 
 @contextmanager
-def leases(root: Path, groups: list[str]) -> Iterator[None]:
+def leases(root: Path, groups: list[str], *,
+           open_lock: Callable[[Path, str], int] | None = None) -> Iterator[None]:
     with ExitStack() as stack:
         for key in sorted(set(groups)):
-            stack.enter_context(lease_component()._kernel_lease(root, key, kind="publication", shared=False))
+            stack.enter_context(lease_component()._kernel_lease(
+                root, key, kind="publication", shared=False, open_lock=open_lock,
+            ))
         yield
 
 
 @contextmanager
-def target_leases(root: Path, targets: list[Path]) -> Iterator[None]:
+def target_leases(root: Path, targets: list[Path], *,
+                  open_lock: Callable[[Path, str], int] | None = None) -> Iterator[None]:
     bindings = {(os.path.normcase(str(absolute(path).parent)), group(root, absolute(path))) for path in targets}
     with ExitStack() as stack:
         for parent, key in sorted(bindings):
-            stack.enter_context(leases(Path(parent), [key]))
+            stack.enter_context(leases(Path(parent), [key], open_lock=open_lock))
         yield
 
 

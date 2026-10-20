@@ -233,6 +233,12 @@ Explicit targets may include outside-root global commands; the lifecycle caller
 still owns scope, source admission and installation authority.
 
 Matching target-writer leases remain held until `keep()` or `rollback()`.
+`target_leases(root, targets, open_lock=None)` also accepts a pinned-directory
+opener for callers with an admitted no-follow namespace. The opener receives
+the lease-directory path and lock basename and returns an owned descriptor;
+the lease closes it. The caller must retain its verified directory handles
+through lease release. Default acquisition creates private lease storage,
+including under a permissive umask; it does not repair existing permissions.
 `verify()` checks the produced target states. A normalized no-op preserves the
 existing file's physical identity and grants no created-object ownership.
 The owner chooses the terminal operation from the actual runtime outcome:

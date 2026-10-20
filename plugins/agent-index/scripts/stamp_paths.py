@@ -1,7 +1,7 @@
 """No-follow, pinned-directory I/O for the session metadata transaction."""
 from __future__ import annotations
 
-from contextlib import ExitStack
+from contextlib import ExitStack, contextmanager
 import errno
 import importlib.util
 import os
@@ -9,7 +9,7 @@ from pathlib import Path
 import secrets
 import stat
 import sys
-from typing import Any
+from typing import Any, Iterator
 
 from stamp_repair import repairable, tighten_directories
 
@@ -287,7 +287,8 @@ class Directory:
         return fd
 
     def verify(self) -> None:
-        if os.name != "nt" and not _posix_private(os.fstat(self.fd)):
+        if not (_windows_owned(self.fd) if os.name == "nt" else
+                _posix_private(os.fstat(self.fd))):
             raise ValueError(f"stamp directory is not privately owned: {self.path}")
         for parent, path, fd in self.bindings:
             info = os.fstat(fd)
@@ -346,13 +347,31 @@ class Directory:
         with os.fdopen(fd, "rb") as stream:
             return stream.read()
 
+    @contextmanager
+    def _lease_directory(self) -> Iterator[Directory]:
+        self.verify()
+        directory = Directory(self.path / ".publication-leases")
+        with directory.stack:
+            directory.bindings = list(self.bindings)
+            directory.fd = directory._directory(directory.path, self.fd)
+            directory.verify()
+            yield directory
+
     def publish(self, name: str, data: bytes, *, executable: bool = False,
                 repair: bool = False, ownership_receipt: Path | None = None,
                 publication_root: Path | None = None) -> None:
         publication = publication_component()
         target = self.path / name
         root = publication.absolute(publication_root or self.path)
-        with publication.target_leases(root, [target]):
+        self.verify()
+        with ExitStack() as stack:
+            def open_lock(lock_dir: Path, filename: str) -> int:
+                if lock_dir != self.path / ".publication-leases":
+                    raise ValueError(f"unexpected stamp lease directory: {lock_dir}")
+                directory = stack.enter_context(self._lease_directory())
+                return directory.open(filename, create=True)
+
+            stack.enter_context(publication.target_leases(root, [target], open_lock=open_lock))
             receipt = publication.Receipt(ownership_receipt, root, [target], "session-stamp") if ownership_receipt else None
             try:
                 self._publish_locked(name, data, executable=executable, repair=repair, receipt=receipt)
