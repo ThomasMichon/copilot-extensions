@@ -339,6 +339,153 @@ def test_database_busy_is_explicit_without_partial_post(store, tmp_path):
     assert not post(store)["duplicate"]
 
 
+@pytest.mark.parametrize("payload", [
+    {"op": "join", "channel": "other", "actor": {"codename": "agent-b"}},
+    {"op": "leave", "channel": "room", "codename": "agent-a"},
+    {"op": "post", "channel": "room", "codename": "agent-a",
+     "text": "not committed", "request_id": "new-request"},
+    {"op": "read", "channel": "room", "codename": "agent-a"},
+    {"op": "cursor", "channel": "room", "codename": "agent-a",
+     "expected_cursor": 0, "next_cursor": 1},
+    {"op": "members", "channel": "room"},
+    {"op": "resolve", "codename": "agent-a"},
+    {"op": "wait", "channel": "room", "codename": "agent-a", "timeout": 0},
+    {"op": "scan", "codename": "agent-a", "epoch": None,
+     "after": [{"channel": "room", "event_id": 0}], "timeout": 0},
+])
+def test_drain_freezes_all_rpc_without_mutating_conversation(store, payload):
+    join(store)
+    event = post(store)["event"]
+    before = list(store._db.iterdump())
+    health = store.health()
+    expected = {
+        "state": "drained", "active_waiters": 0,
+        "storage_schema": 1, "installation_id": "example-installation",
+    }
+    assert store.drain() == expected
+    assert store.drain() == expected
+    with pytest.raises(ChatError) as caught:
+        store.dispatch(payload)
+    assert caught.value.code == "draining" and caught.value.status == 503
+    assert list(store._db.iterdump()) == before
+    assert store.health() == health
+    assert store.undrain() == {**expected, "state": "active"}
+    assert read(store)["messages"] == [event]
+    assert read(store)["cursor"] == 0
+    assert post(store) == {"event": event, "duplicate": True}
+
+
+@pytest.mark.parametrize("op", ["wait", "scan"])
+@pytest.mark.parametrize("rollback", [False, True])
+def test_drain_fences_held_waits_even_after_immediate_undrain(store, monkeypatch, op, rollback):
+    join(store)
+    entered = threading.Event()
+    original_wait = store._changed.wait
+    errors, pages = [], []
+
+    def waiting(timeout):
+        entered.set()
+        return original_wait(timeout)
+
+    def request():
+        try:
+            fields = {"channel": "room"} if op == "wait" else {
+                "epoch": None, "after": [{"channel": "room", "event_id": 0}],
+            }
+            pages.append(rpc(store, op, codename="agent-a", timeout=3, **fields))
+        except ChatError as error:
+            errors.append(error.code)
+
+    monkeypatch.setattr(store._changed, "wait", waiting)
+    thread = threading.Thread(target=request)
+    thread.start()
+    try:
+        assert entered.wait(1)
+        with store._changed:
+            state = store.drain()
+            assert state["state"] == "draining" and state["active_waiters"] == 1
+            if rollback:
+                assert store.undrain()["state"] == "active"
+                post(store)
+        thread.join(1)
+        assert not thread.is_alive()
+        assert errors == ["draining"] and pages == []
+        assert store.drain()["state"] == "drained"
+        assert store._active_waiters == 0
+        store.undrain()
+        event = post(store)["event"]
+        assert read(store)["cursor"] == 0
+        assert read(store)["messages"] == [event]
+        assert rpc(store, "wait", channel="room", codename="agent-a", timeout=0)["ready"]
+        assert scan(store)["events"][0]["id"] == event["id"]
+    finally:
+        store.close()
+        thread.join(3)
+
+
+def test_drain_waits_for_existing_write_commit_and_restart_preserves_it(store, tmp_path, monkeypatch):
+    join(store)
+    prepared, release, draining, drained = (threading.Event() for _ in range(4))
+    original_post = store._post
+
+    def held_post(request):
+        result = original_post(request)
+        prepared.set()
+        assert release.wait(3), "test write was not released"
+        return result
+
+    def drain():
+        draining.set()
+        result = store.drain()
+        drained.set()
+        return result
+
+    monkeypatch.setattr(store, "_post", held_post)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        writing = pool.submit(post, store)
+        try:
+            assert prepared.wait(1)
+            freezing = pool.submit(drain)
+            assert draining.wait(1)
+            assert not drained.wait(.05)
+        finally:
+            release.set()
+        event = writing.result(timeout=2)["event"]
+        assert freezing.result(timeout=2)["state"] == "drained"
+    store.close()
+    reopened = ChatStore(tmp_path / "data", "example-installation")
+    try:
+        assert reopened.log_epoch == store.log_epoch
+        assert post(reopened) == {"event": event, "duplicate": True}
+        assert read(reopened)["messages"] == [event]
+        assert read(reopened)["cursor"] == 0
+    finally:
+        reopened.close()
+
+
+@pytest.mark.parametrize("op", ["wait", "scan"])
+def test_waiter_failure_releases_lifecycle_count_and_capacity(store, monkeypatch, op):
+    join(store)
+
+    def fail(*args):
+        raise RuntimeError("synthetic waiter failure")
+
+    monkeypatch.setattr(store, "_unread" if op == "wait" else "_scan_page", fail)
+    fields = {"channel": "room"} if op == "wait" else {
+        "epoch": None, "after": [{"channel": "room", "event_id": 0}],
+    }
+    with pytest.raises(RuntimeError, match="synthetic waiter failure"):
+        rpc(store, op, codename="agent-a", timeout=0, **fields)
+    assert store.drain()["state"] == "drained"
+    held = [store._waiters.acquire(False) for _ in range(store.max_waiters)]
+    try:
+        assert all(held)
+    finally:
+        for acquired in held:
+            if acquired:
+                store._waiters.release()
+
+
 @pytest.mark.parametrize("body", [
     b'{"op":"read","op":"wait"}', b'{"actor":{"x":1,"x":2}}',
     b'{"x":NaN}', b'{"x":Infinity}', b'{"x":-Infinity}', b'{"x":1e999}',

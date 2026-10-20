@@ -227,6 +227,27 @@ graduation still requires the declared native and lifecycle guarantees.
 
 ## Journal
 
+### 2026-10-19 - Conversation-owned safe drain boundary
+
+- Added the core's callable drain/undrain seam for an existing hosting owner,
+  independently of the held client transport revision. It closes admission
+  after committed/rolled-back transactions and wakes/fences held wait/scan
+  generations, including immediate undrain. Stable requests, memberships,
+  semantic cursors and the durable epoch are preserved.
+- The local native Windows core portfolio passed 78 contracts in 6.25 seconds
+  within the unchanged 120-second contained budget. Seventeen focused
+  lifecycle/artifact cases passed separately, including an actual wheel after
+  fixture-source removal, a held transaction barrier, waiter cleanup and
+  restart preservation. Touched Python lint and whitespace checks passed.
+- This is a domain storage boundary, not a listener, transport flush receipt,
+  overlapping-writer/schema-migration contract, authenticated management route
+  or lifecycle installer. Current health remains local open-store liveness.
+  Passive preparation must not open the active store to fabricate readiness.
+- Reconciles to the reviewed service-lifecycle architecture, agent-chat
+  resilience intent and the graceful-daemon-cutover consumer contract.
+  Hosting, existing lifecycle-owner integration, native Linux qualification
+  and authorized live adoption remain open; no deployment was performed.
+
 ### 2026-10-19 - Trusted initialization and participant assignment
 
 - Integrated the [operator clarification](https://github.com/ThomasMichon/copilot-extensions/issues/7238#issuecomment-6278024161)

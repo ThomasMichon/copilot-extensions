@@ -36,7 +36,7 @@ FIELDS = {
 }
 STATUS = {
     "invalid": 400, "missing": 404, "conflict": 409,
-    "notjoined": 409, "capacity": 409, "busy": 503,
+    "notjoined": 409, "capacity": 409, "busy": 503, "draining": 503,
     "chat_owner_mismatch": 409,
     "scan_epoch_mismatch": 409, "scan_gap": 409,
 }
@@ -246,6 +246,9 @@ class ChatStore:
         self._waiters = threading.BoundedSemaphore(max_waiters)
         self._membership_generations = {}
         self._closed = False
+        self._draining = False
+        self._service_generation = object()
+        self._active_waiters = 0
         directory = Path(data_dir)
         directory.mkdir(parents=True, exist_ok=True)
         self._db = sqlite3.connect(
@@ -355,6 +358,53 @@ class ChatStore:
                 "version": VERSION, "installation_id": self.installation_id,
             }
 
+    def _check_serving(self, generation=None):
+        if self._closed:
+            raise ChatError("busy", "Store is closed.")
+        if self._draining or generation is not None and generation is not self._service_generation:
+            raise ChatError("draining", "Store is draining; reconnect through the owning service.")
+
+    @contextmanager
+    def _waiter(self):
+        if not self._waiters.acquire(blocking=False):
+            raise ChatError("busy", "Waiter capacity reached.")
+        admitted = False
+        try:
+            with self._locked():
+                self._check_serving()
+                generation = self._service_generation
+                self._active_waiters += 1
+                admitted = True
+            yield generation
+        finally:
+            if admitted:
+                with self._changed:
+                    self._active_waiters -= 1
+                    self._changed.notify_all()
+            self._waiters.release()
+
+    def _lifecycle_state(self):
+        return {
+            "state": ("draining" if self._active_waiters else "drained") if self._draining else "active",
+            "active_waiters": self._active_waiters,
+            "storage_schema": 1, "installation_id": self.installation_id,
+        }
+
+    def drain(self):
+        """Freeze RPC admission after committed transactions and invalidate held waits."""
+        with self._locked():
+            if not self._draining:
+                self._draining = True
+                self._service_generation = object()
+                self._changed.notify_all()
+            return self._lifecycle_state()
+
+    def undrain(self):
+        """Resume new admission without reviving waits from a drained generation."""
+        with self._locked():
+            self._draining = False
+            return self._lifecycle_state()
+
     def dispatch(self, request):
         op = validate_request(request)
         if op == "wait":
@@ -362,6 +412,7 @@ class ChatStore:
         if op == "scan":
             return self._scan(request)
         with self._locked():
+            self._check_serving()
             with self._transaction():
                 result = getattr(self, "_" + op)(request)
             if op == "leave":
@@ -602,9 +653,7 @@ class ChatStore:
         return result
 
     def _scan(self, request):
-        if not self._waiters.acquire(blocking=False):
-            raise ChatError("busy", "Waiter capacity reached.")
-        try:
+        with self._waiter() as service_generation:
             deadline = time.monotonic() + request.get("timeout", 30)
             batch_end = None
             with self._locked():
@@ -613,8 +662,7 @@ class ChatStore:
                     for p in request["after"]
                 }
                 while True:
-                    if self._closed:
-                        raise ChatError("busy", "Store is closed.")
+                    self._check_serving(service_generation)
                     with self._transaction():
                         for channel, generation in joined.items():
                             if self._membership_generation(channel, request["codename"]) is not generation:
@@ -627,13 +675,9 @@ class ChatStore:
                     if now >= end:
                         return result
                     self._changed.wait(end - now)
-        finally:
-            self._waiters.release()
 
     def _wait(self, request):
-        if not self._waiters.acquire(blocking=False):
-            raise ChatError("busy", "Waiter capacity reached.")
-        try:
+        with self._waiter() as service_generation:
             deadline = time.monotonic() + request.get("timeout", 30)
             batch_end = None
             with self._locked():
@@ -641,8 +685,7 @@ class ChatStore:
                     request["channel"], request["codename"]
                 )
                 while True:
-                    if self._closed:
-                        raise ChatError("busy", "Store is closed.")
+                    self._check_serving(service_generation)
                     if self._membership_generation(
                         request["channel"], request["codename"]
                     ) is not generation:
@@ -657,8 +700,6 @@ class ChatStore:
                     if now >= end:
                         return result
                     self._changed.wait(end - now)
-        finally:
-            self._waiters.release()
 
     def _members(self, request):
         channel = request["channel"]

@@ -66,6 +66,15 @@ try:
                           "after": [{"channel": "room", "event_id": 0}], "timeout": 0})
     assert "text" not in feed["events"][0]
     assert store.dispatch({"op": "read", "channel": "room", "codename": "agent-a"})["cursor"] == 0
+    assert store.drain()["state"] == "drained"
+    try:
+        store.dispatch(request)
+    except chat.ChatError as error:
+        assert error.code == "draining" and error.status == 503
+    else:
+        raise AssertionError("drained installed core accepted work")
+    assert store.undrain()["state"] == "active"
+    assert store.dispatch(request) == {"event": first["event"], "duplicate": True}
     print(json.dumps({"installed": True, "messages": len(page["messages"]),
                       "cursor": page["cursor"], "version": store.health()["version"]}))
 finally:

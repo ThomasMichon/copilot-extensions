@@ -122,6 +122,35 @@ refuses instead of reporting a healthy service. Health is not authentication,
 network reachability, storage capacity, future write readiness, process
 ownership or native listening proof.
 
+## Hosting-owner drain boundary
+
+The callable `ChatStore.drain()` / `undrain()` methods supply the conversation
+domain's safe boundary to an existing service/lifecycle owner. They are not RPC
+operations, management endpoints, a listener, an installer or another supervisor.
+The embedding host must authenticate any management surface it exposes.
+
+`drain()` serializes behind the store's current SQLite transaction, then refuses
+every new valid RPC with `ChatError("draining", ...)` and suggested HTTP status `503`.
+It wakes and invalidates held scans/waits without advancing semantic cursors,
+changing memberships or discarding committed post/request identities.
+Its result reports `state` (`draining` or `drained`), `active_waiters`,
+`storage_schema` and `installation_id`. Repeat calls preserve the admission
+freeze and report the current waiter count; `drained` means the store has no
+admitted wait/scan still unwinding and its prior transactions have committed
+or rolled back. It does not attest that an embedding HTTP handler has flushed
+its response or that a remote peer received it. The host still owns transport
+draining and lost-response reconciliation.
+
+`undrain()` reopens admission for the current instance, but never revives a
+wait from a drained generation, even during a rapid drain/undrain rollback.
+The existing `health()` remains an open-store/liveness observation, not serving
+readiness. Draining is instance-local; reopening the preserved store starts
+active and retains its durable epoch, events, stable requests and viewer state.
+An authorized lifecycle owner must therefore retain its own activation policy.
+Use one owning store instance per directory: these methods do not make
+overlapping writers or schema migration safe. A passive candidate must not open
+the active store to manufacture a health result.
+
 ## Validation
 
 Use the repository's contained standalone runner:
