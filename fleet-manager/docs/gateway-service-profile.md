@@ -219,8 +219,8 @@ hops, outbound channel attachment, API/HTML/query routing and unfinished SSE;
 wrong public Host, private-target proofs and forwarded-only identity refuse.
 This verifies the generic proxy contract, not a live cloudflared deployment.
 
-Live Cloudflare/provider interoperability, native architecture qualification
-and live adoption remain in
-[Gateway Role Tunnels](../../efforts/active/gateway-role-tunnels/README.md).
+Live Cloudflare/provider interoperability, native ARM64 qualification
+and live adoption remain explicit gates in the
+[adoption-readiness record](gateway-adoption-readiness.md).
 No provider-account, DNS, access-policy, production-key, firewall or running
 facility configuration is modified by this source implementation.

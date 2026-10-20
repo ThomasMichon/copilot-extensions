@@ -55,3 +55,6 @@ currently requires an existing native amd64 Linux engine and records the image's
 inspected architecture. ARM64 build, emulation and native execution remain
 separate evidence. Do not install privileged emulation to make that gate pass.
 This is not Cloudflare compatibility, managed installation or live deployment.
+The [adoption-readiness record](../../docs/gateway-adoption-readiness.md)
+separates the completed native amd64 proof from open architecture, provider,
+lifecycle and live-activation gates.

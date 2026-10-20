@@ -64,11 +64,12 @@ neither live enrollment nor deployment, destructive retirement or capacity acces
 
 ## Context
 
-The finite [Gateway Role Tunnels](../gateway-role-tunnels/README.md) sub-effort
-owns the reviewed initial service-manifest, live-reconciliation and outbound
-service-channel campaign. It preserves the Gateway/index/auth/provider and
-lifecycle boundaries below; its isolated proof does not complete this product
-or authorize adopter deployment.
+The completed finite [Gateway Role Tunnels](../../2026/10/19%20gateway-role-tunnels/README.md)
+sub-effort delivered the initial service manifest, live reconciliation, outbound
+service channels, reusable image and generic ingress. Its
+[readiness record](../../../fleet-manager/docs/gateway-adoption-readiness.md)
+retains explicit native-architecture, provider, lifecycle and adopter gates;
+isolated proof does not complete this product or authorize deployment.
 
 [Architecture proposal](architecture.md) records the recommendation, alternatives,
 authority boundaries and implementation gates. It reconciles the

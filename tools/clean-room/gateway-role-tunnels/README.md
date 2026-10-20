@@ -119,7 +119,9 @@ cancellation or uncertain-effect case from the in-process runtime portfolio.
 It does not prove a live identity provider, protected proxy/Cloudflare origin,
 production TLS/key custody, restart-safe accepted revision authority, managed
 install/update/rollback, ARM64 build/run, or live adoption. Successful inspected
-amd64 native execution must be reported as exactly that. ARM64 and ingress
-qualification remain open; container proof is a prerequisite, never deployment
-consent. See the [base image](../../../fleet-manager/containers/gateway/README.md)
-and [service profile](../../../fleet-manager/docs/gateway-service-profile.md).
+amd64 native execution must be reported as exactly that. ARM64 and live vendor
+ingress qualification remain open; the separate generic proxy tests do not
+change this lane's boundary. Container proof is a prerequisite, never deployment
+consent. See the [base image](../../../fleet-manager/containers/gateway/README.md),
+[service profile](../../../fleet-manager/docs/gateway-service-profile.md) and
+[adoption-readiness record](../../../fleet-manager/docs/gateway-adoption-readiness.md).

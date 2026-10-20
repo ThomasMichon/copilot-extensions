@@ -117,5 +117,5 @@ live trust rotation, connector revocation or a running service tunnel.
 ## Related
 
 - [Existing Gateway runtime](gateway-runtime.md)
-- [Gateway Role Tunnels plan](../../efforts/active/gateway-role-tunnels/README.md)
-- [Initial contract](../../efforts/active/gateway-role-tunnels/initial-contract.md)
+- [Gateway Role Tunnels record](../../efforts/2026/10/19%20gateway-role-tunnels/README.md)
+- [Initial contract](../../efforts/2026/10/19%20gateway-role-tunnels/initial-contract.md)

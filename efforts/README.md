@@ -11,7 +11,6 @@ that pattern to this repository.
 | Effort | Status | Coordination |
 |--------|--------|--------------|
 | [Acknowledged Execution Handoff](active/acknowledged-execution-handoff/README.md) | Blocked; generic contract reviewed and merged, implementation authorization and owner assignment next | #7268; no runtime implementation or adoption |
-| [Gateway Role Tunnels](active/gateway-role-tunnels/README.md) | Active; service runtime merged, native amd64 container witness passed; generic ingress, ARM64 and adopter readiness open | #7257; finite sub-effort of #6236, retained #6443/#5789 integration owners |
 | [Remote ACP Host Ownership](active/remote-acp-host-ownership/README.md) | Draft; reviewed host-worktree relationship and obligation plan before implementation | #7237; existing session, claims and dispatch owners retained |
 | [Agent Chat Graduation](active/agent-chat-graduation/README.md) | Draft; one vision/architecture/plugin/service/lifecycle proposal before implementation | #7238; existing fleet, service and session-host owners retained |
 | [ADO PR Stewardship](active/ado-pr-stewardship/README.md) | Draft; centralized provider/configuration/observation proposal before implementation | #7203; preserves #7051/#6007/#6818 owners |
@@ -126,6 +125,7 @@ that pattern to this repository.
 
 | Effort | Outcome | Coordination |
 |--------|---------|--------------|
+| [Gateway Role Tunnels](2026/10/19%20gateway-role-tunnels/README.md) | Done; reusable runtime/image and generic ingress merged, native amd64 isolated proof and readiness record; no rollout | #7257 retains native ARM64/live edge/provider gates; broader #6236/#6030 remain open |
 | [Remote ACP Provider Contributions](2026/10/20%20remote-acp-provider-contributions/README.md) | Done; generic target/scoped-auth source merged to dev, pending release; no rollout | #7218; host/adopter acceptance #7237, release #3336 |
 | [Maintenance-Safe Module Opt-In](2026/10/19%20maintenance-safe-module-optin/README.md) | Done; strict default-off consent and bounded native fixtures merged to dev, pending release; no rollout | #7213; residual reliability #7247 |
 | [Remote ACP Client Transport](2026/10/16%20remote-acp-client-transport/README.md) | Done; runtime merged to dev, pending release, no rollout | #6908; runtime #6997 |

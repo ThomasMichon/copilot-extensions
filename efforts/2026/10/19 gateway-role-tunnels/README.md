@@ -4,10 +4,10 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** serial, independently reviewed slices against `dev`
 - **Created:** 2026-10-19
-- **Status:** Active
-- **Vision:** [Declarative Fleet Gateway](../../../visions/machine-fleet/gateway/README.md), [Machine Fleet](../../../visions/machine-fleet/README.md)
+- **Status:** Done
+- **Vision:** [Declarative Fleet Gateway](../../../../visions/machine-fleet/gateway/README.md), [Machine Fleet](../../../../visions/machine-fleet/README.md)
 - **Umbrella issue:** #7257
-- **Parent effort:** [Fleet Control V2](../fleet-control-v2/README.md), #6236
+- **Parent effort:** [Fleet Control V2](../../../active/fleet-control-v2/README.md), #6236
 - **Related owners:** #6443, #5789, #6743, #7099, #6804, #6240, #6424, #5862, #6030
 
 ## Guiding Intent
@@ -66,8 +66,8 @@ atomic live configuration publication or reusable released Gateway container.
 Existing local admission snapshots and permits do not authenticate the
 configuration source or fence an external effect by themselves.
 
-The parent [Gateway/index slice](../fleet-control-v2/gateway-index-slice.md)
-and [authentication proposal](../fleet-control-v2/runtime-authentication.md)
+The parent [Gateway/index slice](../../../active/fleet-control-v2/gateway-index-slice.md)
+and [authentication proposal](../../../active/fleet-control-v2/runtime-authentication.md)
 retain their scopes. Existing Komodo/Periphery role-fleet validation is a
 deployment prerequisite, not proof that this new Gateway is already deployable.
 The initial proof must distinguish implemented code, isolated runtime behavior,
@@ -105,6 +105,13 @@ integration_scope=authorize-narrow-integration
 ```
 
 This settles that source-scope decision, not production trust or deployment.
+
+**Additional operator clarification, public-safe summary:** tunnel transport and
+optional edge access do not authenticate a caller to the Fleet. The Gateway owns
+its application authentication independently, with Entra and Authelia as intended
+provider options. This preserves the transport-only initial adapter scope;
+actual provider login/token interoperability stays separately tracked in #7257
+with the retained authentication owners.
 
 ## Plan
 
@@ -154,16 +161,18 @@ This settles that source-scope decision, not production trust or deployment.
 - [x] Prove one Gateway and two independently isolated service instances:
   expected-but-absent slots, actual routing, valid hot updates, denied hijacking,
   reconnect and stream behavior, with unchanged Gateway process identity.
-- [ ] Qualify declared image architectures, including the intended ARM64 host
+- [x] Blocked; transferred to `#7257`: qualify declared image architectures, including the intended ARM64 host
   shape, without silently installing privileged emulation or using amd64
   execution as ARM64 evidence. Record a concrete approval/capability blocker.
-- [ ] Produce adopter-owned rollout prerequisites, exact changes, rollback
+- [x] Produce adopter-owned rollout prerequisites, exact changes, rollback
   limits and readiness evidence. Do not perform live adoption under this plan.
+  The [readiness record](../../../../fleet-manager/docs/gateway-adoption-readiness.md)
+  distinguishes native amd64 proof from the explicit ARM64 capability gate.
 
 ### Completion
-- [ ] Resolve all Plan and Validation Plan items or transfer an explicit
+- [x] Resolve all Plan and Validation Plan items or transfer an explicit
   residual to a named tracked objective before marking Done and archiving.
-- [ ] Keep broader Fleet Control V2, provider integration and live adoption
+- [x] Keep broader Fleet Control V2, provider integration and live adoption
   open where this campaign has not actually resolved their gates.
 
 ## Validation Plan
@@ -187,9 +196,9 @@ This settles that source-scope decision, not production trust or deployment.
 - [x] **Containers:** separate Gateway/service containers prove routing and
   live configuration with synthetic secrets and no production mounts, host
   socket, public listener, live account or hidden privileged admission.
-- [ ] **Architecture:** distinguish image build, emulated run, native run and
+- [x] **Architecture:** distinguish image build, emulated run, native run and
   live target readiness. Unsupported or unavailable evidence stays explicit.
-- [ ] **Contribution:** targeted bounded tests, applicable repository guards,
+- [x] **Contribution:** targeted bounded tests, applicable repository guards,
   current-head review and actual merge cover each implementation phase.
 
 ## Proposal
@@ -287,7 +296,7 @@ provider credentials and production placement with their existing owners.
 
 ### 2026-10-19 - Native amd64 isolated container proof
 - Built the committed noneditable wheel/extra closure into the non-root base
-  image and executed the host-driven [container witness](../../../tools/clean-room/gateway-role-tunnels/README.md)
+  image and executed the host-driven [container witness](../../../../tools/clean-room/gateway-role-tunnels/README.md)
   on a native amd64 Linux engine. All ten assembled stages passed; the
   twenty-seven mechanical runner/ownership guards passed separately.
 - Independently isolated Gateway, two services and observer proved actual API,
@@ -342,3 +351,26 @@ provider credentials and production placement with their existing owners.
   bounded portfolio passes 1,678 cases with two platform skips and fourteen
   documented full-portfolio exclusions; packaging guards pass forty-three cases.
   Architecture qualification and adopter readiness remain the next gates.
+
+### 2026-10-19 - Ingress merged and finite campaign closed
+- Ingress PR #7336 merged as
+  `3697a55fc7e9274ea57ca7f5d74cefc71eea708b` after exact-head Copilot
+  approval and successful required CI. Review corrections make malformed private
+  origins and fleet/Gateway identifiers refuse through value-free diagnostics;
+  the final focused ingress portfolio passes thirty-seven cases.
+- Rebuilt the exact implementation candidate's noneditable image and repeated
+  all ten native amd64 isolated stages with complete cleanup. This is direct-TLS
+  compatibility evidence, separate from the actual dual-TLS proxy tests.
+- Completed the adopter-owned prerequisites, exact changes, capacity/identity/
+  state/lifecycle gates and rollback limits in the living readiness document.
+  No live activation, credential, provider, DNS, Access or network change occurred.
+- The qualified venue is native amd64. Builder-advertised ARM64 platforms do not
+  establish native execution; the current witness only supports local native
+  amd64. Native ARM64 qualification is explicitly blocked and transferred to
+  #7257, requiring an admitted native venue, reviewed runner support and its own
+  execution approval, not privileged emulation or inferred target readiness.
+- #7257 remains open for native architecture, supported cloudflared/live edge
+  evidence and Gateway-owned Entra/Authelia interoperability with #5789/#6804.
+  Durable restart/install custody remains #6240/#6424; actual deployment remains
+  #6030 under Fleet Control V2 #6236. The initial campaign is Done with those
+  named residuals, not a declaration that the broader product or fleet is ready.

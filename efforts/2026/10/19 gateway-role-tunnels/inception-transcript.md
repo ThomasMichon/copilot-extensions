@@ -42,3 +42,17 @@ effort_slug=gateway-role-tunnels
 Live infrastructure changes retain their ordinary exact approval gates. Planning
 and implementation do not themselves authorize DNS, edge policies, credentials,
 firewall changes, production service replacement or a second Gateway authority.
+
+## Independent transport and Gateway authentication
+
+Public-safe summary of the operator's subsequent clarification; the private
+reference deployment context is omitted:
+
+Tunnel transport does not directly authenticate a caller to the Fleet. The
+Gateway owns its application authentication independently. The same separation
+should support Cloudflare Tunnel/Zero Trust and Authelia, with Entra as another
+Gateway identity-provider option.
+
+Implementation boundary (agent-recommended within the existing initial scope):
+the portable ingress slice remains transport-only; real provider interoperability
+is separately tracked.

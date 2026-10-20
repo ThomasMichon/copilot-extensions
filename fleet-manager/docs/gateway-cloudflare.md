@@ -125,7 +125,7 @@ The direct-TLS portfolio remains the compatibility baseline.
 This is not vendor-account or deployed Cloudflare/Access/Entra/Authelia evidence.
 Native ARM64, provider login, origin network isolation and live adopter rollout
 remain separately qualified gates in the
-[Gateway effort](../../efforts/active/gateway-role-tunnels/README.md).
+[adoption-readiness record](gateway-adoption-readiness.md).
 
 Field semantics follow Cloudflare's
 [origin parameters](https://developers.cloudflare.com/tunnel/reference/origin-parameters/)
