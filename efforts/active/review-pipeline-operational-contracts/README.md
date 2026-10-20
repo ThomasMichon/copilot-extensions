@@ -95,6 +95,8 @@ and negative controls before implementation.
       mutation, elevated fallback or auth material in output/argv.
 
 ### Phase 3 - Windows terminal-host boundary
+- [x] Correct proven stale-parent PID attribution and retain native recurrence
+      diagnostics (#7310); this does not resolve the historical hosted cause.
 - [ ] Reproduce #6266 through the existing bounded runner and owned fixtures;
       compare effective launch flags/process identity with census assumptions.
 - [ ] Fix only the proven cause while retaining visible-window/focus,
@@ -112,6 +114,9 @@ and negative controls before implementation.
 
 ## Validation Plan
 
+- [x] Reused root/intermediate parent controls fail before the census correction;
+      conservative unavailable-identity, multiple-real-host and bounded native
+      interpreter/console controls pass after it (#7310, 21 cases).
 - [ ] Both installer shells: busy/rollback/old serving version or failed
       readiness cannot report completed activation; successful cutover proves
       expected version/protocol and parent result propagation.
@@ -134,6 +139,26 @@ authority-readiness and Windows process boundaries for review before
 implementation.
 
 ## Journal
+
+### 2026-10-20 - Bounded census correction merged; native causality retained
+
+- #7310 merged as `77e5d33d537968073d11ea3303c2715076717bac` after current-head
+  Copilot approval with no open findings and required checks passed. The source
+  worktree pulled forward and the Plan records only that bounded completion.
+- The historical hosted seven-host occurrence still needs discriminating native
+  evidence. Its hosted Python was 3.12.10; the existing local source run used
+  3.11.16, with the same psmux 3.3.8. The exact-version context comparison used
+  worktree-local Python 3.12.10 after the existing interpreter lookup failed,
+  without bin links or registry registration: 22 focused/native cases passed.
+  One paired corrected/original numeric-census native control also passed
+  (two cases); its temporary control was removed afterward. Neither reproduced
+  the historical seven-host occurrence or established its cause.
+- The remaining exact-context evidence is blocked on enrolled native Windows
+  container capacity in the existing portfolio (#1303), not on another local
+  retry. Keep #6266 open, preserve its claim and continue owner coordination;
+  do not reactivate a disabled hosted job or call local non-reproduction fixed.
+- Activation/readiness scope, exact Windows process/window/focus acceptance,
+  containing external-lane qualification and authorized rollout remain open.
 
 ### 2026-10-20 - Windows census attribution correction
 
