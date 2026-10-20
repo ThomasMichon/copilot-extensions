@@ -15,6 +15,13 @@ from engine import Engine
 from source import ProofError, fresh_run, materialize, private_root, save
 from witness import Witness
 
+TERMINATION_SIGNALS = (signal.SIGTERM, signal.SIGINT)
+
+
+def shield_termination() -> None:
+    for number in TERMINATION_SIGNALS:
+        signal.signal(number, signal.SIG_IGN)
+
 
 def report_template() -> dict:
     """Keep the existing clean-room report vocabulary and top-level shape."""
@@ -27,17 +34,19 @@ def report_template() -> dict:
 
 
 def run(repository: Path, ref: str, root: Path, build_timeout: int = 900) -> dict:
-    previous = signal.getsignal(signal.SIGTERM)
+    previous = {number: signal.getsignal(number) for number in TERMINATION_SIGNALS}
 
     def terminated(signum: int, frame: object) -> None:
-        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        shield_termination()
         raise ProofError("runner-terminated")
 
-    signal.signal(signal.SIGTERM, terminated)
+    for number in TERMINATION_SIGNALS:
+        signal.signal(number, terminated)
     try:
         return _run(repository, ref, root, build_timeout)
     finally:
-        signal.signal(signal.SIGTERM, previous)
+        for number, handler in previous.items():
+            signal.signal(number, handler)
 
 
 def _run(repository: Path, ref: str, root: Path, build_timeout: int) -> dict:
@@ -79,7 +88,7 @@ def _run(repository: Path, ref: str, root: Path, build_timeout: int) -> dict:
                                "hint": code})
     finally:
         # Repeated termination cannot interrupt exact-ID teardown or its receipts.
-        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        shield_termination()
         errors = engine.cleanup() if engine else []
         receipt["cleanup"] = "failed" if errors else "complete"
         if errors:

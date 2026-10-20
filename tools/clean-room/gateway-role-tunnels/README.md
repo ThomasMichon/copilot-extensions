@@ -75,9 +75,9 @@ IDs, and removes only that network ID. No force-remove, image removal,
 enumeration or prune is used. If creation has an uncertain outcome without an
 ID, it reports incomplete cleanup rather than guessing an ownership target.
 Log-write failures become classified failures without stopping subsequent
-teardown attempts. SIGTERM enters failure reporting and cleanup; repeated
-SIGTERM is ignored during teardown, and the previous handler is restored
-afterward. SIGKILL or host loss cannot run cleanup: retain the exact-ID receipts
+teardown attempts. SIGTERM and SIGINT enter failure reporting and cleanup;
+both signals are ignored during teardown, and their previous handlers are
+restored afterward. SIGKILL or host loss cannot run cleanup: retain the exact-ID receipts
 for explicit owner recovery rather than enumerating or pruning other resources.
 The image is retained and its immutable ID reported for explicit owner reuse.
 Results, logs, policies and synthetic credential references remain private in

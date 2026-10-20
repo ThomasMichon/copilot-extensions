@@ -277,7 +277,7 @@ def test_exec_refuses_arbitrary_commands_or_secret_arguments(tmp_path: Path) -> 
 
 
 def test_missing_docker_is_reported_not_skipped_or_installed(tmp_path: Path) -> None:
-    previous = signal.getsignal(signal.SIGTERM)
+    previous = {number: signal.getsignal(number) for number in RUN.TERMINATION_SIGNALS}
     with patch.object(RUN, "materialize", return_value={"source_commit": "a" * 40}), \
             patch.object(RUN.shutil, "which", return_value=None), \
             patch.object(RUN, "Engine") as engine:
@@ -286,11 +286,17 @@ def test_missing_docker_is_reported_not_skipped_or_installed(tmp_path: Path) -> 
     assert receipt["result"] == "fail" and receipt["cleanup"] == "complete"
     report = json.loads((tmp_path / "cr-report.json").read_text())
     assert report["failed"] == 1 and report["jams"][0]["hint"] == "docker-unavailable"
-    assert signal.getsignal(signal.SIGTERM) == previous
+    assert {number: signal.getsignal(number) for number in previous} == previous
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="Linux-only host runner")
-def test_sigterm_enters_cleanup_and_repeated_sigterm_cannot_interrupt_it(tmp_path: Path) -> None:
+@pytest.mark.parametrize("first,second", [
+    (signal.SIGTERM, signal.SIGTERM), (signal.SIGINT, signal.SIGINT),
+    (signal.SIGTERM, signal.SIGINT), (signal.SIGINT, signal.SIGTERM),
+], ids=["term-term", "int-int", "term-int", "int-term"])
+def test_termination_enters_cleanup_and_repeated_signals_cannot_interrupt_it(
+    tmp_path: Path, first: int, second: int,
+) -> None:
     script = """
 import json, signal, sys, time
 from pathlib import Path
@@ -330,9 +336,9 @@ subject.materialize = lambda *args: {
     "source_commit": "a" * 40, "source_manifest_sha256": "b" * 64,
     "image_id": "synthetic-image", "architecture": {},
 }
-previous = signal.getsignal(signal.SIGTERM)
+previous = {number: signal.getsignal(number) for number in subject.TERMINATION_SIGNALS}
 receipt = subject.run(root, "a" * 40, root)
-assert signal.getsignal(signal.SIGTERM) == previous
+assert {number: signal.getsignal(number) for number in previous} == previous
 print(json.dumps(receipt))
 """
     process = subprocess.Popen(
@@ -348,9 +354,9 @@ print(json.dumps(receipt))
 
     try:
         wait_for("witness-ready")
-        process.send_signal(signal.SIGTERM)
+        process.send_signal(first)
         wait_for("cleanup-started")
-        process.send_signal(signal.SIGTERM)
+        process.send_signal(second)
         (tmp_path / "release-cleanup").touch()
         stdout, stderr = process.communicate(timeout=5)
         assert process.returncode == 0, stderr
