@@ -1,0 +1,9 @@
+{
+  "comment": "Isolate unavailable-runtime CLI parity fixtures from sibling plugin provisioning and bound their subprocesses",
+  "changes": [
+    {
+      "plugin": "context-handoff",
+      "type": "patch"
+    }
+  ]
+}

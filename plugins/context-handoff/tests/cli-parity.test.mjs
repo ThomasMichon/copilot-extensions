@@ -1,4 +1,5 @@
 import {
+  cpSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -42,6 +43,19 @@ function withIsolatedHome(fn) {
   } finally {
     rmSync(home, { recursive: true, force: true });
   }
+}
+
+function withUnavailableWorktrees(fn) {
+  withIsolatedHome((homeEnv) => {
+    const installation = join(homeEnv.HOME, "payloads");
+    const copiedCore = join(installation, "context-handoff", "extensions", "context-handoff");
+    cpSync(dirname(cli), copiedCore, { recursive: true });
+    assert.equal(existsSync(join(installation, "agent-worktrees")), false);
+    fn(homeEnv, join(copiedCore, "handoff-cli.mjs"));
+    for (const runtime of [".agent-worktrees", ".agent-dispatch", ".agent-bridge"]) {
+      assert.equal(existsSync(join(homeEnv.HOME, runtime)), false, runtime);
+    }
+  });
 }
 
 test("payload-local CLI exposes the extension fallback flow", () => {
@@ -105,18 +119,23 @@ test("CLI handoff commands are never refused for mode=off -- only for unrelated 
       "mode: off\n",
     );
 
-    withIsolatedHome((homeEnv) => {
+    withUnavailableWorktrees((homeEnv, isolatedCli) => {
       for (const args of [
         ["save", "--session-id", "session-1", "--prompt", "handoff body"],
         ["trigger", "--session-id", "session-1", "--prompt", "handoff body"],
         ["consume", "--session-id", "session-1", "--task-id", "task-1"],
         ["retry-cutover", "--session-id", "session-1"],
       ]) {
-        const result = spawnSync(process.execPath, [cli, ...args], {
+        const result = spawnSync(process.execPath, [isolatedCli, ...args], {
           cwd: root,
           encoding: "utf8",
           env: { ...process.env, ...homeEnv },
+          windowsHide: true,
+          timeout: 4000,
         });
+        assert.equal(result.error, undefined, `${args[0]} must exit without a spawn error`);
+        assert.notEqual(result.status, null, `${args[0]} must exit normally`);
+        assert.match(result.stderr, new RegExp(`^handoff-cli ${args[0]}:`));
         assert.doesNotMatch(
           result.stderr,
           /context handoff is disabled/i,
@@ -227,15 +246,21 @@ test("get-previous-session requires a session id", () => {
 });
 
 test("list-sessions degrades honestly (never fabricates a chain) without agent-worktrees", () => {
-  withRepository((root) => withIsolatedHome((homeEnv) => {
+  withRepository((root) => withUnavailableWorktrees((homeEnv, isolatedCli) => {
     const result = spawnSync(
       process.execPath,
-      [cli, "list-sessions", "--json"],
-      { cwd: root, encoding: "utf8", env: { ...process.env, ...homeEnv } },
+      [isolatedCli, "list-sessions", "--json"],
+      {
+        cwd: root, encoding: "utf8", env: { ...process.env, ...homeEnv },
+        windowsHide: true, timeout: 4000,
+      },
     );
+    assert.equal(result.error, undefined, "list-sessions must exit without a spawn error");
     const parsed = JSON.parse(result.stdout);
     assert.equal(parsed.available, false);
     assert.equal(result.status, 1);
+    assert.equal(parsed.sessions, undefined);
+    assert.equal(parsed.chain, undefined);
   }));
 });
 

@@ -842,3 +842,12 @@ only knowable once the live token limit arrives, that final ordering check is
 deferred until then. Invalid config produces a visible warning and uses the
 55% / 70% / 79% defaults. If the runtime does not report a window size,
 percent-based tiers remain unknown, while absolute-token tiers still work.
+
+## CLI parity test isolation
+
+The unavailable-Worktrees cases in `tests/cli-parity.test.mjs` execute the real
+CLI from a copied payload with no sibling runtime plugins. An isolated HOME
+alone does not prevent source-tree sibling discovery. These cases bound each
+child to four seconds, reject spawn/timeout errors, and verify that no runtime
+root was created. They remain subprocess integration coverage, not enrollment
+in the in-process promotion unit packet.
