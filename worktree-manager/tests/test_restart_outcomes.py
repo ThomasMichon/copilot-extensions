@@ -567,3 +567,52 @@ def test_actual_daemon_loop_observes_under_active_lease_and_mutation_fence(froze
     assert mux_daemon.run_daemon_foreground(root, max_iterations=1) == 0
     assert events == ["observing", "lease-release"]
     assert len(calls) == 1
+
+
+def test_startup_at_full_capacity_still_advances_existing_owner_receipt(frozen, monkeypatch):
+    attempts, _ = frozen
+    root = attempts.path.parent.parent
+    journal = RecoveryJournal(root)
+    template = journal.snapshot()[0]
+    rows = []
+    for index in range(4095):
+        row = copy.deepcopy(template)
+        row["last_positive"]["worktree_id"] = f"retained-{index}"
+        rows.append(row)
+    full = attempts.freeze(rows, EPOCH)
+    assert len(full) == 4096
+    attempt = full[0]
+    attempts.record_outcome(attempt["attempt_id"], receipt(attempt, "launch-uncertain"))
+    evidence = {**template["last_positive"], "worktree_id": "new-after-capacity"}
+    journal.observe(PositiveEvidence(**evidence))
+    enable_outcome_observation(root)
+    calls = owner_receipts(monkeypatch, attempt, iter(["seed-acknowledged"]))
+    runtime = runtime_for(root)
+    try:
+        assert "limit reached" in runtime.status["blocker"]
+        runtime.pump(admitted=True)
+        retained = attempts.snapshot()
+        assert len(retained) == 4096
+        assert retained[0]["outcome"] == receipt(attempt, "seed-acknowledged")
+        assert {item["attempt_id"] for item in retained} == {item["attempt_id"] for item in full}
+        assert len(calls) == 1
+        assert runtime.status["outcome_observation"]["state"] == "seed-acknowledged"
+        assert "limit reached" in runtime.status["blocker"]
+    finally:
+        runtime.close()
+
+
+def test_unconfirmed_startup_evidence_cannot_admit_historical_observation(frozen, monkeypatch):
+    attempts, attempt = frozen
+    root = attempts.path.parent.parent
+    RecoveryJournal(root).path.write_bytes(b"corrupt startup evidence")
+    enable_outcome_observation(root)
+    calls = owner_receipts(monkeypatch, attempt, iter([]))
+    runtime = runtime_for(root)
+    try:
+        assert runtime.status["blocker"]
+        runtime.pump(admitted=True)
+        assert calls == []
+        assert attempts.snapshot() == [attempt]
+    finally:
+        runtime.close()

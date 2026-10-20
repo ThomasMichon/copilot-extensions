@@ -291,6 +291,9 @@ python tools/run_tests_in_devcontainer.py worktree-manager -k 'test_restart_outc
 The lane covers additive version-1 migration, unchanged frozen payload bytes,
 typed exact-request outcomes, monotonic state and immutable ACK binding,
 orphaned/malformed/oversized storage, write failure and capacity refusal.
+At the actual 4096-attempt boundary, failed freezing of a new candidate must
+still permit an existing uncertain receipt to advance, without eviction.
+Unconfirmed startup evidence still prevents that historical owner call.
 Real child processes crash before COMMIT or after publication, both during
 migration and later updates; concurrent owner observations retain the newer
 receipt without replacement or retry. Active opt-in polling is bounded and

@@ -177,7 +177,10 @@ class RestartNotificationRuntime:
                 return
             self._paused = False
             self._start()
-        if self._config.automatic_restore and self._attempts is not None:
+        if (
+            self._config.automatic_restore and self.observer.epoch is not None
+            and not self.observer.startup_result.get("blocker")
+        ):
             self.outcomes.observe(
                 self.observer.epoch,
                 can_admit=lambda: not self._paused and self._can_admit(),

@@ -575,6 +575,9 @@ most one unacknowledged attempt's owner receipt per twenty seconds, with a
 four-second owner-call timeout and the same no-update/no-reconcile read boundary
 as `--check-launch`. It rotates through retained same-environment attempts,
 preserving each historical target boot. Completed ACKs need no further probe.
+Refusing to freeze a new candidate at capacity does not strand existing
+receipts: observation requires confirmed startup evidence and epoch, and
+independently validates the retained database. The freeze blocker stays visible.
 Sampling runs in the ordinary loop's existing mutation fence, not on the native
 notification I/O thread or a parallel scheduler. Admission is rechecked after
 owner I/O before persistence: observed drain refuses the write, while an

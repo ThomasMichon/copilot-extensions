@@ -1143,3 +1143,11 @@ The umbrella effort remains Active independently of this slice's completion.
   focused gate remains open: actual native readiness/seed consumption,
   surviving-session adoption, task/producer/profile action-time admission and
   platform startup/enrollment remain unresolved, with no live rollout.
+- Provider review found that failed startup freezing at capacity also disabled
+  observation of valid existing attempts. A regression at the actual
+  4096-attempt boundary reproduced the stranded uncertain receipt. Historical
+  observation now requires confirmed startup evidence/epoch rather than
+  successful new freezing; it independently validates retained storage while
+  preserving the freeze blocker. Unconfirmed startup still makes no owner call.
+  The corrected final integrated recovery/mux lane passed 435 contracts with
+  the same seven explicit native/platform skips.

@@ -49,6 +49,9 @@ or resetting uncertainty. Owner errors and contradictory receipts remain
 visible, and acknowledged historical pickup is not current liveness or
 completed restoration. There is no parallel scheduler, automatic launch or
 retry. Default-off/passive paths perform no such owner reads or outcome writes.
+When startup evidence and epoch are confirmed, failed freezing of a new
+candidate does not disable observation of readable existing attempts. A full
+database still refuses new identities and retains its visible freeze blocker.
 
 `worktree-manager mux-daemon recovery-evidence` is read-only and includes the
 requested capability states. It does not connect to the system bus to establish
