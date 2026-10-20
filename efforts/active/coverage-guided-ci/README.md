@@ -820,6 +820,13 @@ _Pending review of this plan._
   failure exercise this exact path. The final focused consumer partition passes
   77 cases without skips on Windows (25.26 seconds) and 72 on Ubuntu with the
   same five existing Windows-only cleanup skips (50.00 seconds).
+- Review also found that a subsequent environment-audit failure could mask an
+  unreaped exception. The shared wrapper now preserves the unreaped error type,
+  reports both failures and retains its original cause. Ordinary audit failures
+  still propagate unchanged. The combined permission-error, unexpected-error
+  and cancellation cases prove retention versus normal cleanup; these and the
+  existing audit, cancellation and three sandbox-owner consumers pass eleven
+  targeted cases without skips on each OS (Windows 3.04 seconds, Ubuntu 12.54).
 
 ### 2026-10-20 - Land module isolation and admit fresh bounded storage accounting
 - C-MODULE #7353 actually merged as

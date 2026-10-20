@@ -927,6 +927,7 @@ def run_contained(
 ) -> int:
     """Run a contained tree and fail if it escapes into Windows environment state."""
     environment_snapshot = _read_registry_environment()
+    unreaped = None
     try:
         result = _run_contained_process(
             command,
@@ -935,14 +936,25 @@ def run_contained(
             sandbox=sandbox,
             limits=limits,
         )
+    except UnreapedProcessError as exc:
+        unreaped = exc
+        raise
     finally:
-        changed = _registry_environment_drift(environment_snapshot)
-        if changed:
-            print(
-                "[HOST-STATE] contained test changed persistent Windows "
-                f"environment state; detected without rollback: {', '.join(changed)}",
-                file=sys.stderr,
-            )
+        try:
+            changed = _registry_environment_drift(environment_snapshot)
+            if changed:
+                print(
+                    "[HOST-STATE] contained test changed persistent Windows "
+                    f"environment state; detected without rollback: {', '.join(changed)}",
+                    file=sys.stderr,
+                )
+        except BaseException as audit_error:
+            if unreaped is None:
+                raise
+            raise UnreapedProcessError(
+                f"{unreaped}; environment audit also failed: "
+                f"{type(audit_error).__name__}: {audit_error}"
+            ) from unreaped
     if changed:
         return 125
     return result

@@ -971,6 +971,50 @@ def test_native_cancellation_reaps_file_holding_descendant(tmp_path, monkeypatch
     held.unlink()
 
 
+@pytest.mark.parametrize("unreaped", [False, True])
+@pytest.mark.parametrize("audit_error", [
+    PermissionError("registry unreadable"), RuntimeError("audit failed"),
+    KeyboardInterrupt("audit interrupted"),
+])
+def test_environment_audit_failure_cannot_mask_unreaped_retention(
+    tmp_path, monkeypatch, unreaped, audit_error,
+):
+    original = plugin_test_containment.UnreapedProcessError("tree remains owned")
+    sandbox = plugin_test_containment.TestSandbox(dir=tmp_path)
+
+    def command(*args, **kwargs):
+        (kwargs["sandbox"] / "still-owned").write_text("preserve")
+        if unreaped:
+            raise original
+        return 0
+
+    def audit(snapshot):
+        raise audit_error
+
+    monkeypatch.setattr(plugin_test_containment, "_read_registry_environment", lambda: None)
+    monkeypatch.setattr(plugin_test_containment, "_registry_environment_drift", audit)
+    monkeypatch.setattr(plugin_test_containment, "_run_contained_process", command)
+    expected = plugin_test_containment.UnreapedProcessError if unreaped else type(audit_error)
+    with pytest.raises(expected) as raised:
+        with sandbox as directory:
+            plugin_test_containment.run_contained(
+                ["fake"], cwd=tmp_path, env={}, sandbox=Path(directory), limits=Limits(),
+            )
+    try:
+        assert sandbox.retained is unreaped
+        if unreaped:
+            assert (Path(sandbox.name) / "still-owned").read_text() == "preserve"
+            assert raised.value.__cause__ is original
+            assert "environment audit also failed" in str(raised.value)
+            assert type(audit_error).__name__ in str(raised.value)
+        else:
+            assert raised.value is audit_error
+            assert not Path(sandbox.name).exists()
+    finally:
+        if Path(sandbox.name).exists():
+            shutil.rmtree(sandbox.name)
+
+
 def test_run_contained_detects_and_fails_on_persistent_environment_drift(
     tmp_path, capfd, monkeypatch
 ):

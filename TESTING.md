@@ -1275,6 +1275,8 @@ active members before closing its handle. Uncertain termination raises
 collector retain their sandbox, detach automatic cleanup and report its path
 rather than deleting potentially owned files. Normal exit, deadline and
 cancellation retain the same reaping requirement and existing resource limits.
+If the environment audit also fails, the unreaped error retains precedence
+and reports both failures; an audit exception cannot authorize file deletion.
 
 Full dispatch execution in the CI smoke matrix (push, manual and promotion)
 distributes its complete file inventory across three independent jobs.
