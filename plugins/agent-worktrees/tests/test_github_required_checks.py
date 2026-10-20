@@ -349,11 +349,15 @@ def test_enterprise_authority_and_escaped_branch_are_preserved():
 
 
 @pytest.mark.parametrize("passed", [False, True])
-def test_actual_admin_merge_is_guarded_and_pins_the_verified_head(monkeypatch, passed):
+@pytest.mark.parametrize("base_ref_rules", [(), ("deletion", "non_fast_forward")])
+def test_actual_admin_merge_is_guarded_and_pins_the_verified_head(
+    monkeypatch: pytest.MonkeyPatch, passed: bool, base_ref_rules: tuple[str, ...],
+) -> None:
     from agent_worktrees.providers import github
 
     fixture = GitHubFixture()
     fixture.normal_merge_fails = True
+    fixture.rules.extend({"type": kind} for kind in base_ref_rules)
     if not passed:
         fixture.checks = [{"name": "policy", "bucket": "pass"}]
     monkeypatch.setattr(github, "run_cli", fixture.invoke)
@@ -378,6 +382,41 @@ def test_review_exception_requires_complete_clean_codeowner_evidence():
         expected_head_sha=HEAD,
     )
     assert evidence.head_sha == HEAD and evidence.base_ref == "dev"
+
+
+@pytest.mark.parametrize("base_ref_rules", [
+    ("deletion",), ("non_fast_forward",), ("deletion", "non_fast_forward"),
+])
+def test_nonmerge_base_ref_protections_preserve_review_exception(
+    base_ref_rules: tuple[str, ...],
+) -> None:
+    fixture = GitHubFixture()
+    fixture.rules.extend({"type": kind} for kind in base_ref_rules)
+    evidence = review_exception_evidence(
+        "owner/project", 7, invoke=fixture.invoke, host="github.com",
+        expected_head_sha=HEAD,
+    )
+    assert evidence.head_sha == HEAD
+    assert all(kind in evidence.rules_fingerprint for kind in base_ref_rules)
+
+
+@pytest.mark.parametrize("kind", [
+    "update", "creation", "required_signatures", "merge_queue", "future_merge_condition",
+])
+def test_nonmerge_base_ref_protections_do_not_hide_other_requirements(
+    monkeypatch: pytest.MonkeyPatch, kind: str,
+) -> None:
+    from agent_worktrees.providers import github
+
+    fixture = GitHubFixture()
+    fixture.normal_merge_fails = True
+    fixture.rules.extend({"type": value} for value in ("deletion", "non_fast_forward", kind))
+    monkeypatch.setattr(github, "run_cli", fixture.invoke)
+    result = github.GitHubProvider().merge_pull(
+        "owner/project", 7, admin=True, expected_head_sha=HEAD,
+    )
+    assert f"additional unverified merge requirement is active: {kind}" in result
+    assert not any("--admin" in argv for argv in fixture.calls)
 
 
 @pytest.mark.parametrize("mutation,match", [
@@ -604,6 +643,32 @@ def test_policy_change_between_guards_prevents_admin_retry(monkeypatch, source):
                 fixture.classic_protection[
                     "required_conversation_resolution"
                 ] = {"enabled": True}
+        return original(argv, **kwargs)
+
+    monkeypatch.setattr(github, "run_cli", change_after_review)
+    result = github.GitHubProvider().merge_pull(
+        "owner/project", 7, admin=True, expected_head_sha=HEAD,
+    )
+    assert "changed after review verification" in result
+    assert not any("--admin" in argv for argv in fixture.calls)
+
+
+@pytest.mark.parametrize("kind", ["deletion", "non_fast_forward"])
+def test_nonmerge_base_rule_change_still_invalidates_policy_snapshot(
+    monkeypatch: pytest.MonkeyPatch, kind: str,
+) -> None:
+    from agent_worktrees.providers import github
+
+    fixture = GitHubFixture()
+    fixture.normal_merge_fails = True
+    fixture.rules.append({"type": kind})
+    original = fixture.invoke
+
+    def change_after_review(
+        argv: list[str], **kwargs: object,
+    ) -> subprocess.CompletedProcess[str]:
+        if "/rules/branches/" in " ".join(argv) and fixture.rules_reads >= 1:
+            fixture.rules.append({"type": kind, "ruleset_id": 84})
         return original(argv, **kwargs)
 
     monkeypatch.setattr(github, "run_cli", change_after_review)

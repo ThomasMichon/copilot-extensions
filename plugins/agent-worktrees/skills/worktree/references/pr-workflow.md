@@ -115,6 +115,10 @@ or invent a flow.
   CODEOWNER approval is independent of `pr.prefer_auto_merge`: that setting
   selects direct versus native auto-completion, not review-rule authority.
   Both paths retain current-head, required-check and mutation-safety gates.
+  Target-branch deletion and non-fast-forward protections do not prohibit the
+  normal PR merge operation. They remain in the verified policy fingerprint;
+  their presence does not waive CI, review authority or any other merge
+  requirement, and a policy change before the write still refuses.
 - If `pr-merge` reports "no automerge_label" on a repo you **expected** to be
   `pr-agent-merge`, inspect its effective profile and resolved configuration.
   A stale binding is one possible cause; refresh it through the project's

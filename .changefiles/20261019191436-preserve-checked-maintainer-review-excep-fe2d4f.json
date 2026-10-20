@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve checked Maintainer review exceptions when the base branch has deletion or non-fast-forward protections, without waiving CI or policy revalidation.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

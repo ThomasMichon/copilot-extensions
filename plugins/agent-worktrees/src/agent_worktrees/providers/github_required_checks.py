@@ -296,6 +296,10 @@ def review_exception_evidence(
         for raw in page:
             rule = obj(raw, "branch rule")
             kind = rule.get("type")
+            if kind in ("deletion", "non_fast_forward"):
+                # A PR merge neither deletes nor force-updates its base ref.
+                # Keep these rules in the fingerprint rechecked before writing.
+                continue
             if kind == "required_status_checks":
                 params = obj(rule.get("parameters"), "required-status-check rule")
                 strict = params.get("strict_required_status_checks_policy")
