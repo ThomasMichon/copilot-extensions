@@ -681,6 +681,56 @@ def test_readback_completes_only_after_durable_pin_is_verified_withdrawn(tmp_pat
     controller._assert_receipt_available(rid)
 
 
+@pytest.mark.parametrize("operation", ["readback", "retirement"])
+@pytest.mark.parametrize("error_type", [PermissionError, OSError])
+def test_denied_selection_scan_retains_pin_and_receipt_fence(tmp_path, monkeypatch, operation, error_type):
+    h = RetentionHarness(tmp_path)
+    snapshot = h.generation("1")
+    rid = snapshot.to_dict()["registration"]["id"]
+    h.retention.select(snapshot, h.state)
+    controller = DefaultCompanionController(h.state, retention=h.retention, token_source=h.tokens.get)
+    pins = {path: path.read_bytes() for path in h.record_paths("selections")}
+    directory = h.policy.root / ".retention" / "selections"
+    scan = os.scandir
+    retired = []
+
+    def denied(path):
+        if os.fspath(path) == os.fspath(directory):
+            raise error_type("selection directory unavailable")
+        return scan(path)
+
+    if operation == "readback":
+        _unknown_operation(controller, rid)
+    else:
+        _receipt(controller, rid)
+        monkeypatch.setattr(controller, "_retire_receipt", lambda *args, **kwargs: retired.append(1))
+    monkeypatch.setattr(os, "scandir", denied)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        assert controller.reconcile_receipts_bounded(
+            set(), executor=pool, deadline=time.monotonic() + 2,
+        ) == {rid}
+        with pytest.raises(error_type, match="selection directory unavailable"):
+            controller._receipt_operations[rid].result(2)
+    assert controller._operation_record(rid)["state"] == "unknown"
+    assert all(path.read_bytes() == data for path, data in pins.items())
+    assert snapshot.runtimes[0].cell.exists()
+    assert retired == ([1] if operation == "retirement" else [])
+    with pytest.raises(CompanionIndeterminate, match="not confirmed"):
+        controller._assert_receipt_available(rid)
+
+
+@pytest.mark.parametrize("missing", [False, True])
+def test_accessible_empty_or_missing_selection_directory_confirms_absence(tmp_path, missing):
+    h = RetentionHarness(tmp_path)
+    snapshot = h.generation("1")
+    rid = snapshot.to_dict()["registration"]["id"]
+    h.retention.select(snapshot, h.state)
+    h.retention.forget(rid, h.state)
+    if missing:
+        (h.policy.root / ".retention" / "selections").rmdir()
+    assert h.retention.selection_withdrawn(rid, h.state, deadline=time.monotonic() + 2)
+
+
 def test_pin_absence_probe_bounds_root_lock_contention(tmp_path):
     h = RetentionHarness(tmp_path)
     snapshot = h.generation("1")

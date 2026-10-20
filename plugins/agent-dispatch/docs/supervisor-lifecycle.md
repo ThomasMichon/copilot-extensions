@@ -158,6 +158,10 @@ A generation with neither managed selection metadata nor a managed snapshot in
 its process receipt does not scan unrelated transition groups before retirement.
 Managed generations retain their selection/integrity validation, and every
 retirement still checks matching root selection pins before reporting completion.
+Selection-pin enumeration propagates access and I/O failures rather than
+interpreting an unreadable directory as empty. Failed observation retains the
+unknown operation and receipt-availability fence without deleting surviving pins;
+only a genuinely missing directory or a completed scan can confirm absence.
 
 Selection integrity is verified while its durable root pin remains published,
 outside the root-wide bookkeeping lock. Before withdrawal the same scope and

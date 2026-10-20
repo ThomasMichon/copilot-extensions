@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import fnmatch
 import os
 import time
 from collections.abc import Iterator
@@ -69,20 +70,23 @@ class SelectionWithdrawal:
         receipt_identity = os.path.normcase(str(receipt_dir.expanduser().absolute()))
         with _RootLock(root, **self._lock_budget(deadline)):
             _assert_safe_descendant(root, directory, description="managed selection pin directory")
-            if not directory.exists():
+            try:
+                entries = os.scandir(directory)
+            except FileNotFoundError:
                 _integrity_budget(deadline)
                 return True
-            if not directory.is_dir():
-                raise ManagedRuntimeError("managed selection pin directory is invalid")
-            for path in directory.glob("*.json"):
-                _integrity_budget(deadline)
-                record, _ = self._check_record(path, "selections", check_references=False)
-                scope = record["scope"]
-                if (
-                    scope["registration_id"] == registration_id
-                    and os.path.normcase(scope["receipt_dir"]) == receipt_identity
-                ):
-                    return False
+            with entries:
+                for entry in entries:
+                    _integrity_budget(deadline)
+                    if not fnmatch.fnmatch(entry.name, "*.json"):
+                        continue
+                    record, _ = self._check_record(Path(entry.path), "selections", check_references=False)
+                    scope = record["scope"]
+                    if (
+                        scope["registration_id"] == registration_id
+                        and os.path.normcase(scope["receipt_dir"]) == receipt_identity
+                    ):
+                        return False
             _integrity_budget(deadline)
             return True
 

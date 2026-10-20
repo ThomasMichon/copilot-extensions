@@ -2326,3 +2326,25 @@ requested contract.
   This is isolated first-touch evidence, not a system installer or live rollout.
   Fresh full resulting-head review, all current CI and actual merge remain
   outstanding; #7020's independent native cause and adopter gates remain open.
+
+### 2026-10-19 - Retain receipt fences on denied selection-pin scans
+
+- Full exact-head review `5579503395` finds one further Medium defect:
+  `Path.glob` suppresses a selection-directory `PermissionError`, so a surviving
+  durable root pin can be mistaken for confirmed withdrawal. Both real
+  readback and retirement consumers reproduce the incorrect completion before
+  correction. Generic I/O failures and genuine empty/missing controls are
+  retained alongside the denied-access cases.
+- The metadata-only pin scan now uses explicit directory enumeration under
+  the existing root lock and deadline. Only a genuinely missing directory is
+  accepted without completing a scan; access and I/O errors propagate, retain
+  unknown operation authority and prevent receipt availability. Surviving pins
+  and cells are untouched. This is a below-altitude correction to the existing
+  fail-closed contract, with no new recovery or deployment authority.
+- The complete bounded receipt, scheduling, managed retention and managed
+  companion cohort passes 243 cases with two platform skips in the contained
+  Windows runner. These include actual journal, pin and availability consumer
+  assertions, not just a directory helper mock. No install/bootstrap code
+  changes, so no additional installation clean-room or external rollout is
+  claimed; native library first-touch evidence remains unchanged. Fresh full
+  resulting-head review, current hosted CI and actual merge remain required.
