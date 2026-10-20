@@ -25,10 +25,13 @@ async def worktree_command(args: list[str], project: str | None) -> dict[str, An
     env = _agent_worktrees_environment()
     from agent_procutil import no_window_kwargs
 
-    proc = await asyncio.create_subprocess_exec(
-        *argv, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-        env=env, **no_window_kwargs(),
-    )
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *argv, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            env=env, **no_window_kwargs(),
+        )
+    except OSError as exc:
+        raise AcquisitionRefused("worktrees_unavailable", str(exc)) from exc
     try:
         stdout, stderr = await asyncio.wait_for(proc.communicate(), 120)
     except (TimeoutError, asyncio.TimeoutError) as exc:

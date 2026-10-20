@@ -2117,6 +2117,36 @@
           "sha256": "077eeeaa01db68b4c332692fb3b658a74575dfdf4a18cb968ca42fbad9aea667",
           "role": "Generation-42 independent expected-vector re-attestation: workspace-exact-owner-generation-42.json",
           "generation": 42
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/workspace-finalization-retry-generation-37.json",
+          "sha256": "46d9ac3f68871931a1b4b86c45f96cda379413748fb30d0d29a4d4a31775bd83",
+          "role": "Generation-37 keyed workspace finalization refuses retryably without replacing allocation or native history",
+          "generation": 37
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/workspace-finalization-retry-generation-38.json",
+          "sha256": "043e66e289328af9075063ab370c6efeea70784ca4ed938b8e85c3b97e927af9",
+          "role": "Generation-38 keyed workspace finalization refuses retryably while retaining immutable generation-37 evidence and all prior capability floors",
+          "generation": 38
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/workspace-finalization-retry-generation-39.json",
+          "sha256": "b91b38fab8b6b777890587e450d16d7d081194a7cb22f7c07df63d35b03d880c",
+          "role": "Generation-39 keyed workspace finalization refuses retryably while retaining immutable generation-37 and generation-38 evidence and all prior capability floors",
+          "generation": 39
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/workspace-finalization-retry-generation-40.json",
+          "sha256": "842a83513c03496951cb8575ff8843be175fdd8f851e3ff4bcd7d2c9c63ee024",
+          "role": "Generation-40 keyed workspace finalization refuses retryably while retaining all three earlier immutable captures and the original allocation and native-history boundaries",
+          "generation": 40
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/workspace-finalization-retry-generation-41.json",
+          "sha256": "11eef21c04f139077441e40b50e9c4446a91fbab73ae1ce5fae748c52ef11a46",
+          "role": "Generation-41 keyed workspace finalization retains the retryable refusal, original allocation and native history while preserving immutable generation-37 through generation-40 captures",
+          "generation": 41
         }
       ],
       "provenance": [
@@ -5127,6 +5157,46 @@
           "source_path": "plugins/agent-bridge/src/agent_bridge/singleton_resume.py",
           "source_git_blob": "44ae0445dae3347199a200f8d119e8ffb75eeaa5",
           "capture_method": "Exact committed source/blob and LF-normalized SHA-256 verification of the generation-42 producers, where current attention rows gain optional since/position behind attention_boundary 42. Re-attest the existing independently authored generation-41 expected vectors without deriving expected bytes from producer snapshots; only protocol_version advertisements advance to 42. Contained HTTP contract tests exercise model, client and route entry points, health 42, URL target floor 41, named remote ACP floor 38, receipt floor 39 and exact-native worktree resume floor 40 without live network or secret access. Historical generations and capability floors are unchanged."
+        },
+        {
+          "commit": "f00cc454af9e1f3ed9b0d385672a00918cc75b4a",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 37,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/workspace_creation.py",
+          "source_git_blob": "0761446cefbd51d4e663ce67ad7db56337cc7c54",
+          "capture_method": "Capture the production start_request adapter's retryable finalizing refusal with the isolated exact-owner creation rig; retain historical provider-creation captures and the original allocation/native-history contract."
+        },
+        {
+          "commit": "fc629da128fc847a4a0a61b17c801e721be85461",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 38,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/workspace_creation.py",
+          "source_git_blob": "0761446cefbd51d4e663ce67ad7db56337cc7c54",
+          "capture_method": "Re-attest the production start_request adapter's retryable finalizing refusal through the isolated exact-owner creation rig after integration with current generation 38; preserve the original allocation, native-history boundaries and generation-37 capture."
+        },
+        {
+          "commit": "fda4be76bf9d79a3b8e37025f8e6f3546b3cf737",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 39,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/workspace_creation.py",
+          "source_git_blob": "0761446cefbd51d4e663ce67ad7db56337cc7c54",
+          "capture_method": "Re-attest the production start_request adapter's retryable finalizing refusal through the isolated exact-owner creation rig after integration with receipt generation 39; preserve the original allocation, native-history boundaries and both earlier immutable captures."
+        },
+        {
+          "commit": "1c6a10da4ca84f9861e2e3ae0ba2b6155ec5a50a",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 40,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/workspace_creation.py",
+          "source_git_blob": "0761446cefbd51d4e663ce67ad7db56337cc7c54",
+          "capture_method": "Re-attest the unchanged production start_request adapter's retryable finalizing refusal through the isolated exact-owner creation rig at HTTP generation 40; retain all three earlier immutable captures, the original allocation and native-history boundaries."
+        },
+        {
+          "commit": "144c8abd6c0786023511ff98ed907e5e9e378ab8",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 41,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/workspace_creation.py",
+          "source_git_blob": "0761446cefbd51d4e663ce67ad7db56337cc7c54",
+          "capture_method": "Re-attest the unchanged production start_request adapter's retryable finalization refusal through the isolated exact-owner creation rig at HTTP generation 41; preserve all four historical captures, independently authored expected response bytes and original allocation/native-history boundaries."
         }
       ],
       "support_window": "HTTP generations 1 through 42 remain supported. Attention-row boundaries (since and position) begin at generation 42; direct URL endpoint targets retain floor 41, named remote ACP retains floor 38, receipts retain 39, and exact-native worktree resume retains 40. Historical independent fixtures remain immutable; generation-42 re-attestations retain their original capability floors.",
