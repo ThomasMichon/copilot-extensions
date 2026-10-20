@@ -153,6 +153,33 @@ if ($Action -eq 'publish-runtime-helpers' -and (
 }
 # === command-lifecycle: admission before staging ===
 if (-not $ContextualInstall -and $Action -in @('install', 'update', 'provision', 'stamp', 'uninstall', 'repair', 'dev', 'dev-release', 'publish-runtime-helpers')) {
+    # Admission and its shared human-output helper require Python 3.10+.
+    # Runtime construction independently selects its 3.11+ base interpreter.
+    $probeAdmissionPython = {
+        param([string]$Candidate, [string[]]$Prefix = @())
+        $previousErrorAction = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        try {
+            $output = & $Candidate @Prefix -I -B -X utf8 -c `
+                'import json,sys; sys.exit(1) if sys.version_info < (3, 10) else print(json.dumps(sys.executable, ensure_ascii=True))' 2>$null
+            $code = $LASTEXITCODE
+        } catch {
+            return $null
+        } finally {
+            $ErrorActionPreference = $previousErrorAction
+        }
+        if ($code -ne 0) { return $null }
+        try {
+            $resolved = ConvertFrom-Json -InputObject ($output -join "`n") -ErrorAction Stop
+        } catch {
+            return $null
+        }
+        if ($resolved -is [string] -and $resolved -and [IO.Path]::IsPathRooted($resolved) -and
+            [IO.File]::Exists($resolved)) {
+            return $resolved
+        }
+        return $null
+    }
     $admissionPayload = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
     $admissionSource = if ($env:COPILOT_EXTENSIONS_COMMAND_LIFECYCLE -and
         $env:COPILOT_PLUGIN_STAGED_FROM -and
@@ -167,33 +194,32 @@ if (-not $ContextualInstall -and $Action -in @('install', 'update', 'provision',
         if (-not [IO.Path]::IsPathRooted($BootstrapPython) -or -not [IO.File]::Exists($BootstrapPython)) {
             throw 'The supplied bootstrap Python must be an existing absolute executable.'
         }
-        $admissionPython = $BootstrapPython
+        $admissionPython = & $probeAdmissionPython -Candidate $BootstrapPython
+        if (-not $admissionPython) {
+            throw 'The supplied bootstrap Python must be a working Python 3.10+ executable.'
+        }
     }
     $admissionLauncher = if (-not $admissionPython) {
         Get-Command py -CommandType Application -ErrorAction SilentlyContinue |
             Select-Object -First 1
     } else { $null }
     if ($admissionLauncher) {
-        $admissionPreviousErrorAction = $ErrorActionPreference
-        $ErrorActionPreference = 'Continue'
-        try {
-            $candidate = & $admissionLauncher.Source -3 -I -B -X utf8 -c 'import sys; print(sys.executable)' 2>$null
-        } finally {
-            $ErrorActionPreference = $admissionPreviousErrorAction
-        }
-        if ($LASTEXITCODE -eq 0 -and $candidate -and [IO.File]::Exists([string]$candidate)) {
-            $admissionPython = [string]$candidate
+        foreach ($selector in @('-3', '-3.13', '-3.12', '-3.11', '-3.10')) {
+            $admissionPython = & $probeAdmissionPython -Candidate $admissionLauncher.Source -Prefix @($selector)
+            if ($admissionPython) { break }
         }
     }
     if (-not $admissionPython) {
         foreach ($name in @('python3', 'python')) {
-            $candidate = Get-Command $name -CommandType Application -ErrorAction SilentlyContinue |
-                Where-Object { $_.Source -notmatch '[\\/]WindowsApps[\\/]' } |
-                Select-Object -First 1
-            if ($candidate) { $admissionPython = $candidate.Source; break }
+            foreach ($candidate in @(Get-Command $name -All -CommandType Application -ErrorAction SilentlyContinue)) {
+                if ($candidate.Source -match '[\\/]WindowsApps[\\/]') { continue }
+                $admissionPython = & $probeAdmissionPython -Candidate $candidate.Source
+                if ($admissionPython) { break }
+            }
+            if ($admissionPython) { break }
         }
     }
-    if (-not $admissionPython) { throw 'Attributable runtime admission requires bootstrap Python.' }
+    if (-not $admissionPython) { throw 'Attributable runtime admission requires an existing Python 3.10+ executable.' }
     $admissionArgs = @(
         '-I', '-B', '-X', 'utf8', (Join-Path $admissionPayload 'scripts\command_binding.py'),
         '--payload-root', $admissionPayload, '--plugin-id', 'agent-worktrees',
