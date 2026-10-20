@@ -55,7 +55,7 @@ print(json.dumps({"installed_transport":checks}),flush=True)
     ]}
 
 
-def test_source_independent_wheel(tmp_path, rpc_endpoint, installed_chat):
+def test_source_independent_wheel(tmp_path, installed_chat):
     run = installed_chat.run
     probe = """
 import importlib.metadata
@@ -143,25 +143,6 @@ print(json.dumps({
     assert outputs["version"] == result["version"]
     assert outputs["catalog"] == catalog
     assert outputs["capability"]["version"] == 1
-    configuration = tmp_path / "client.json"
-    configuration.write_text(json.dumps({
-        "schema": "agent-chat.client", "version": 1,
-        "endpoint": rpc_endpoint.endpoint, "state_dir": str(tmp_path / "client-state"),
-        "actor": {"codename": "artifact-agent"},
-        "token_command": [str(installed_chat.interpreter), "-c", "print('synthetic-credential')"],
-    }), encoding="utf-8")
-    command = [str(console), "--config", str(configuration)]
-    assert json.loads(run([*command, "join", "room"], cwd=tmp_path))["membership"]["active"]
-    command = [*exact["argv"], "--config", str(configuration)]
-    members = json.loads(run([*command, "members", "room", "--limit", "1"], cwd=tmp_path))
-    assert [member["codename"] for member in members["members"]] == ["artifact-agent"]
-    assert members["more"] is False and members["next_after"] is None
-    posted = json.loads(run([
-        *command, "post", "room", "installed conversation", "--request-id", "installed-request",
-    ], cwd=tmp_path))["event"]
-    assert json.loads(run([*command, "read", "room"], cwd=tmp_path))["messages"] == [posted]
-    assert json.loads(run([*command, "read", "room"], cwd=tmp_path))["messages"] == []
-    assert not json.loads(run([*command, "leave", "room"], cwd=tmp_path))["active"]
 
 
 @pytest.mark.parametrize("shadow_source", ["cwd", "pythonpath"])

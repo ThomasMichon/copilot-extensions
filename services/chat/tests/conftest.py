@@ -1,3 +1,4 @@
+from concurrent.futures import ThreadPoolExecutor
 import http.server
 import json
 import os
@@ -43,15 +44,20 @@ def installed_chat(tmp_path_factory):
         source = root / name
         shutil.copytree(
             original, source,
-            ignore=shutil.ignore_patterns("build", "dist", "*.egg-info", "__pycache__",
+            ignore=shutil.ignore_patterns("build", "dist", "tests", "*.egg-info", "__pycache__",
                                          ".venv", ".pytest_cache"),
         )
         sources.append(source)
+
+    def build(source):
         run_artifact([
             sys.executable, "-I", "-c",
             "from setuptools.build_meta import build_wheel; import sys; build_wheel(sys.argv[1])",
             str(wheels),
         ], cwd=source)
+
+    with ThreadPoolExecutor(max_workers=4) as workers:
+        list(workers.map(build, sources))
     built = list(wheels.glob("agent_chat_service-*.whl"))
     assert len(built) == 1 and len(list(wheels.glob("*.whl"))) == 4
     assert all(len(list(wheels.glob(prefix + "-*.whl"))) == 1 for prefix in (
@@ -59,10 +65,8 @@ def installed_chat(tmp_path_factory):
     ))
     uv = shutil.which("uv")
     assert uv is not None, "Artifact qualification requires the repository's uv tool"
-    installations = {}
-    for name, role in (
-        ("core-installed", None), ("client-installed", "client"), ("service-installed", "service"),
-    ):
+    def install(item):
+        name, role = item
         target = root / name
         run_artifact([uv, "venv", "--python", sys.executable, "--no-python-downloads", str(target)])
         scripts = target / ("Scripts" if os.name == "nt" else "bin")
@@ -72,7 +76,12 @@ def installed_chat(tmp_path_factory):
             "--find-links", str(wheels),
             *([] if role else ["--no-deps"]), str(built[0]) + (f"[{role}]" if role else ""),
         ])
-        installations[name] = (target, scripts, interpreter)
+        return name, (target, scripts, interpreter)
+
+    with ThreadPoolExecutor(max_workers=3) as workers:
+        installations = dict(workers.map(install, (
+            ("core-installed", None), ("client-installed", "client"), ("service-installed", "service"),
+        )))
     for source in sources:
         shutil.rmtree(source)
         assert not source.exists()
@@ -100,6 +109,30 @@ def installed_chat(tmp_path_factory):
             "agent-chat-service.exe" if os.name == "nt" else "agent-chat-service"
         ),
     )
+
+
+@pytest.fixture
+def fixed_rpc_provider(tmp_path, installed_chat, rpc_endpoint):
+    script = tmp_path / "fixed-rpc.py"
+    script.write_text("""
+import sys
+from agent_chat_service.store import json_bytes,strict_json
+from agent_chat_service.transport import STDIO_REQUEST,STDIO_RESPONSE,_http_exchange
+request=strict_json(sys.stdin.buffer.read(65537))
+assert set(request)=={"schema","version","endpoint","payload"}
+assert request["schema"]==STDIO_REQUEST and type(request["version"]) is int and request["version"]==1
+assert request["endpoint"]==sys.argv[1]
+status,data=_http_exchange({
+    "endpoint":sys.argv[1],"payload":request["payload"],
+    "credential":"synthetic-credential","timeout":15,
+})
+sys.stdout.buffer.write(json_bytes({
+    "schema":STDIO_RESPONSE,"version":1,"status":status,
+    "result":strict_json(data,max_bytes=1048576),
+}))
+sys.stdout.buffer.flush()
+""", encoding="utf-8")
+    return [str(installed_chat.interpreter), "-I", str(script), rpc_endpoint.endpoint]
 
 
 @pytest.fixture

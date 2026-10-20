@@ -1157,7 +1157,7 @@ process-crash reader-lock recovery and source-independent core/client wheel
 installation run within the existing contained standalone harness. A fresh
 default-core environment proves the helper is absent; the separate offline
 client-role environment installs its declared canonical helper and uses the
-actual console after both fixture sources are removed. Temporary listeners
+actual console after all fixture source trees are removed. Temporary listeners
 and credentials are synthetic fixtures, not production authentication, model
 wake, plugin activation or managed service deployment.
 Auxiliary parser/offline dispatch checks run in-process, without replacing the
@@ -1167,13 +1167,27 @@ boundaries. Capacity setup seeds existing valid records; the actual final
 admission, overflow refusal and uncertain-request recovery still use the normal
 client and its durable writer at the unchanged 128-record boundary.
 
+The shared role fixture builds four independent wheels and installs three
+separate fresh environments with bounded parallel builders. Its source copies
+exclude test trees unrelated to wheel construction; package inputs, offline
+dependency resolution and source-removal assertions remain real. The healthy
+installed console/catalog exchange uses a fixed-route stdio provider forwarding
+to the fixture HTTP service. Installed credential/isolated-HTTP, caller death,
+worker shadow, uncertain replies, deadlines and raw capture bounds retain their
+own actual process cases. Exact CLI argument forwarding is checked cheaply
+against the client API rather than repeating those same full-stack operations
+for every parser variant. Preserve the real installed join before the
+console-death fault; cold startup is not part of its five-second read barrier.
+
 For a complete timing/value evaluation of the expanded matrix, use the
 standalone runner's existing allowance:
 `python tools/run-standalone-tests.py services/chat --prepare --timeout 600`.
 The [per-test assessment](efforts/active/agent-chat-graduation/test-portfolio.csv)
 and [measured comparison](efforts/active/agent-chat-graduation/README.md#journal)
 separate the full222-case snapshot from explicit42/221-case candidates measured
-under120s. Neither subset is full-matrix acceptance, and the evaluation does not
+under120s. Later230/236-case measurements and a65-pass/one-skip changed-path
+packet are recorded separately in that journal; none is a current full120s
+acceptance claim. Neither subset is full-matrix acceptance, and the evaluation does not
 change required CI, per-operation bounds, containment or the unfiltered source
 selection. Use pytest's built-in JUnit call-duration reporting plus
 `--durations=0 --durations-min=0` to retain every case and fixture cost; quote

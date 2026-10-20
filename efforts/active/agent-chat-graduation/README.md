@@ -297,6 +297,40 @@ compatible slices. Existing manual client
 use remains valuable while an unsupported native host seam is resolved; full
 graduation still requires the declared native and lifecycle guarantees.
 
+### Current native integration seams and retained owners
+
+The connection contributor's read-only inventory distinguishes actual callable
+foundations from the bindings this effort must still supply. The client
+baseline for that inventory is #7266 at
+`295de3cc39040262a428b4a90fd200ab4fb9245e`; the repository foundations were
+inspected at `03019a44d3cb16746a9a8bd95c6a40f65afae4a8`. SDK evidence is the
+declarations bundled with CLI `1.0.101-0`, not a claim about a newer runtime,
+an independent SDK version or live native qualification.
+
+| Boundary | Available foundation | Exact remaining binding and owner |
+| --- | --- | --- |
+| Trusted initialization and workspace | SDK `joinSession`, `sessionId` and `rpc.metadata.snapshot().workingDirectory`; Worktrees `find_worktree_id_by_cwd`, `head-session` and explicit anchor context | The client/service writer supplies the optional workspace binding: worktree identity across sessions, startup-session segmentation for anchors, and the existing head decision. The plugin forwards trusted initialization once; it does not add an environment-ID check or another registry. Ordinary standalone explicit actors remain independent of Worktrees. |
+| Recipient inbox and eligible sources | The client accepts explicit actor/channel controls; Bridge `inspect_live_inbox` projects direct-message receipts | No examined client API supplies authoritative Chat recipient/source assignment. The client/service writer coordinates that versioned assignment and its isolation/rebind errors with the existing local service/Bridge owner. A direct-message receipt projection is not this API. |
+| Shared notification intake | Bounded Chat `scan` v1; Bridge remote-event multiplexing and protocol13 `remote/events` | Remote runtime events do not subscribe to the conversation store. The service writer and existing host/Bridge owner must publish the Chat-feed registration, generation, finite callback, cancellation and quiescence binding. No per-session Python helper or continuous Node polling is an acceptable substitute. |
+| Native admission and completion | SDK `session.send`, primary final-ID semantics and optional `originatingMessageId`; bounded queue/event-log observations | Exact own primary correlation is usable. Unknown or non-primary admission remains held until its native host supplies authoritative reconciliation; queue absence, unrelated idle and expired history do not supply it. |
+| Commands, discovery and setup | SDK tools/commands, source-qualified extension identities and host-only reconciliation; installed client-catalog v1 with seven checked resources | The connection writer can expose the supported inert/manual surface. The client and existing lifecycle owners still owe governed selection/setup; a local wheel RECORD or a loaded tool is not that authority. Host reconciliation stays host-owned. |
+| Resident cost | The native host's ordinary extension process is the baseline | Existing service/host multiplexing owns shared listening. Measure increasing recipients, bounded callback time/bytes, zero quiet/self/irrelevant/reconnect-only model turns and exact deregistration separately from that baseline. |
+
+Repository API homes are `services/chat/src/agent_chat_service/`,
+`plugins/agent-worktrees/src/agent_worktrees/` and
+`plugins/agent-bridge/src/agent_bridge/`. The SDK declaration inventory names
+`extension.d.ts`, `session.d.ts`, `generated/rpc.d.ts`, `types.d.ts` and
+`session-events.d.ts`; declaration availability is not runtime execution proof.
+
+The original connection writer retains `plugins/agent-chat/` and its narrowly
+coordinated catalog/changefile entries. A later proposed connection lease is
+limited to that plugin's manifest, README, guidance/hooks, setup skill,
+session-guidance writer, extension/subscription modules and tests. It does not
+transfer client, service, shared-plan, workspace, Bridge, library or lifecycle
+source. Supported inert/manual work need not wait for unrelated platform
+qualification; native callbacks still require the actual assignment and
+shared-multiplex contracts above.
+
 ## Journal
 
 ### 2026-10-20 - Coherent collaboration and peer-conduct amendment
@@ -311,6 +345,48 @@ graduation still requires the declared native and lifecycle guarantees.
 - Retained the portable/adopter boundary, standard installation and Worktree
   Manager baseline, and existing Gateway/SSH, Vault and lifecycle owners.
   No runtime API, new process, deployment or permission grant is supplied.
+
+### 2026-10-20 - Literal platform result and measured portfolio follow-through
+
+- Independent native Linux qualification executed the exact published295
+  candidate through the normal standalone runner, with preparation and the
+  explicit120s limit, without filters or source changes. It emitted28 progress
+  dots and exited124 at the limit. Completed counts and skips are unknown;
+  prepared role resources are not a positive installed-consumer/lifetime or
+  Unix-host result. Canonical scoped cleanup completed, but observer cleanup
+  is not credited as a passing lifetime witness. No unchanged retry or merge
+  is authorized by that result.
+- The next test-only source packet retains the230 cases and adds six cheap
+  exact CLI-control checks. Independent wheel builds and three separate fresh
+  role installations use bounded parallel builders, without sharing installed
+  environments. Source fixtures omit unrelated test trees, not package inputs.
+  One real source-removed installed console/catalog exchange now covers the
+  producer, independent reader, ordinary forward reading and the fixed-route
+  stdio-to-HTTP provider. Core wheel/offline catalog qualification remains
+  separate; real credential/isolated-HTTP, death, shadow, lost-response,
+  deadline and raw-output cases are retained rather than replaced by parser
+  mocks. Member-page validation remains in its client/store/HTTP contracts.
+- A premature removal of the installed join before the console-death fault
+  exposed a real five-second startup-barrier failure. Restored that genuine
+  precondition; no synchronization or held-response bound was increased.
+  Actual death, lock reacquisition and recovery still occur before the
+  observer closes its Job and before the held-response watchdog expires.
+- An intermediate complete236-case packet passed235 with one native POSIX
+  skip in139.39s under the existing600s evaluation allowance. Later unchanged
+  120s attempts still timed out; that is not an acceptance pass. The final
+  changed-path packet (`test_cli or test_distribution`, also matching client
+  unit contracts) passed65 with one explicit POSIX skip in88.93s/120, with
+  170 cases deselected. Its installed exchange cost10.21s, shared artifact
+  setup6.43s, death call12.93s, lost-response call7.86s and installed CWD
+  shadow call8.83s. Shared setup is not charged only to its first user.
+  These are distinct measurements, not a current full-matrix120s claim.
+- The retained recommendation is a bounded native/installed/process contract
+  packet plus the exhaustive on-demand portfolio. It has not replaced the
+  explicit unfiltered qualification contract, changed CI/default selection or
+  waived any gate. The qualification coordinator retains that concrete
+  acceptance-contract decision; the source writer retains fixes and review.
+  The full parent, normal selection/setup, shared assignment/multiplexing,
+  independent lifecycle and actual adoption remain Active.
 
 ### 2026-10-20 - Review correction: private retained post creation
 

@@ -6,6 +6,7 @@ from pathlib import Path
 import subprocess
 import sys
 import time
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -45,30 +46,66 @@ def parsed_cli(path, *args, text=None):
     return json.loads(output.getvalue())
 
 
-def test_real_cli_provider_http_store_and_independent_forward_read(rpc_endpoint, tmp_path):
+def test_real_cli_provider_http_store_and_independent_forward_read(
+    rpc_endpoint, tmp_path, installed_chat, fixed_rpc_provider,
+):
     path = configuration(tmp_path, rpc_endpoint.endpoint)
     other = configuration(tmp_path, rpc_endpoint.endpoint, codename="agent-b")
-    assert parsed_cli(path, "join", "room")["membership"]["active"]
-    parsed_cli(other, "join", "room")
-    assert len(parsed_cli(path, "members", "room")["members"]) == 2
-    first = parsed_cli(path, "members", "room", "--limit", "1")
-    assert [member["codename"] for member in first["members"]] == ["agent-a"]
-    assert first["more"] is True and first["next_after"] == "agent-a"
-    last = parsed_cli(path, "members", "room", "--after", first["next_after"], "--limit", "1")
-    assert [member["codename"] for member in last["members"]] == ["agent-b"]
-    assert last["more"] is False and last["next_after"] is None
-    event = cli(path, "post", "room", "-", "--request-id", "request-1", text="Unicode \N{SNOWMAN}")["event"]
-    assert cli(path, "read", "room")["messages"] == [event]
-    assert parsed_cli(path, "read", "room")["messages"] == []
-    assert cli(other, "read", "room")["messages"] == [event]
-    controls = {"epoch": None, "after": [{"channel": "room", "event_id": 0}], "timeout": 0}
-    scan = parsed_cli(path, "scan", "--request-file", "-", text=json.dumps(controls))
-    assert scan["events"][0]["id"] == event["id"] and "text" not in scan["events"][0]
-    assert parsed_cli(path, "read", "room")["messages"] == []
-    assert not parsed_cli(path, "wait", "room", "--timeout", ".01", "--batch-ms", "0")["ready"]
-    assert parsed_cli(path, "resolve", "agent-a")["actor"]["codename"] == "agent-a"
-    assert not parsed_cli(path, "leave", "room")["active"]
+    for config_path in (path, other):
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+        del config["token_command"]
+        config["request_command"] = fixed_rpc_provider
+        config_path.write_text(json.dumps(config), encoding="utf-8")
+    assert all(not (installed_chat.root / name).exists() for name in (
+        "source", "helper-source", "lease-source", "endpoint-source",
+    ))
+    catalog = json.loads(installed_chat.run([str(installed_chat.console), "catalog"], cwd=tmp_path))
+
+    def installed(config_path, *args, text=None, console=False):
+        argv = [str(installed_chat.console)] if console else catalog["commands"][0]["argv"]
+        result = subprocess.run(
+            [*argv, "--config", str(config_path), *args],
+            input=text, text=True, encoding="utf-8", capture_output=True, timeout=20,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        )
+        assert result.returncode == 0, (result.stdout, result.stderr)
+        return json.loads(result.stdout)
+
+    for name in ("agent-a", "agent-b"):
+        rpc_endpoint.store.dispatch({"op": "join", "channel": "room", "actor": {"codename": name}})
+    event = installed(path, "post", "room", "-", "--request-id", "request-1",
+                      text="Unicode \N{SNOWMAN}", console=True)["event"]
+    assert installed(other, "read", "room")["messages"] == [event]
+    assert installed(other, "read", "room")["messages"] == []
+    independent = rpc_endpoint.store.dispatch({
+        "op": "read", "channel": "room", "codename": "agent-a",
+    })
+    assert independent["cursor"] == 0 and independent["messages"] == [event]
     assert rpc_endpoint.state.authenticated == len(rpc_endpoint.state.requests)
+
+
+@pytest.mark.parametrize("args, method, positional, controls, text", [
+    (["members", "room"], "members", ["room"], {"limit": None, "after": None}, None),
+    (["members", "room", "--limit", "1"], "members", ["room"], {"limit": 1, "after": None}, None),
+    (["members", "room", "--after", "agent-a", "--limit", "1"],
+     "members", ["room"], {"limit": 1, "after": "agent-a"}, None),
+    (["wait", "room", "--timeout", ".01", "--batch-ms", "0"],
+     "wait", ["room"], {"timeout": .01, "batch_ms": 0}, None),
+    (["resolve", "agent-a"], "resolve", ["agent-a"], {}, None),
+    (["scan", "--request-file", "-"], "scan", [],
+     {"epoch": None, "after": [{"channel": "room", "event_id": 0}], "timeout": 0},
+     '{"epoch":null,"after":[{"channel":"room","event_id":0}],"timeout":0}'),
+])
+def test_cli_dispatch_preserves_exact_client_controls(args, method, positional, controls, text):
+    calls = []
+
+    def invoke(*values, **fields):
+        calls.append((list(values), fields))
+        return {"dispatched": method}
+
+    with patch("agent_chat_service.cli.configured", return_value=SimpleNamespace(**{method: invoke})):
+        assert parsed_cli("explicit-fixture", *args, text=text) == {"dispatched": method}
+    assert calls == [(positional, controls)]
 
 
 def test_cli_lost_post_response_retains_original_and_explicit_recovery_deduplicates(rpc_endpoint, tmp_path):
@@ -143,7 +180,9 @@ def test_actual_installed_cli_death_releases_reader_lock_before_outer_cleanup(
         })["cursor"] == 0
         # The actual CLI is dead; the outer fixture Job is deliberately still open.
         assert json.loads(run([*command, "read", "room"], cwd=tmp_path))["messages"] == [event]
-        assert json.loads(run([*command, "read", "room"], cwd=tmp_path))["messages"] == []
+        assert rpc_endpoint.store.dispatch({
+            "op": "read", "channel": "room", "codename": "agent-a",
+        })["messages"] == []
     finally:
         rpc_endpoint.state.release_read.set()
         if process.poll() is None:
