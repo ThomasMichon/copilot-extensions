@@ -26,8 +26,10 @@ file can change the behavior being investigated.
 ## Bounded comparisons, not a deployment workaround
 
 1. Preserve the real launch shape and use the OS-correct no-window primitive;
-   see `agent-conduct-guidance:spawning-headless-processes`. Never pop up a
-   terminal to make a headless failure disappear.
+   on Windows use Python `CREATE_NO_WINDOW`, Node `windowsHide: true`, or .NET
+   `UseShellExecute = false` and `CreateNoWindow = true`. If installed, consult
+   `agent-conduct-guidance:spawning-headless-processes` for its full recipes.
+   Never pop up a terminal to make a headless failure disappear.
 2. Compare only the missing variable. For logging interference, compare the
    same harmless command with stderr discarded and with `ssh -E <private-log>`
    opening its own diagnostic file. `-q` can be a diagnostic control, but hides
@@ -35,8 +37,13 @@ file can change the behavior being investigated.
    file is not equivalent to SSH opening its own `-E` log.
 3. Keep stdin/stdout byte-transparent for framed protocols. Keep diagnostic
    output separate from protocol stdout, bound the probe deadline and log
-   retention, and treat the log as private. Invoke
-   `agent-conduct-guidance:using-scratch-space` before allocating it.
+   retention, and treat the log as private. Use a unique, timestamped task
+   directory beneath the configured scratch root or OS temporary location.
+   Verify ownership, restrictive inherited permissions and absence of symlink
+   or reparse redirection before writing; never use a loose shared-root file
+   or session-state directory. If privacy cannot be established, stop rather
+   than capture sensitive output. If installed, consult
+   `agent-conduct-guidance:using-scratch-space` for the full storage procedure.
 4. If the child is alive but stalled, an available native stack/IO capture of
    that owned child can distinguish logging completion waits from network or
    authentication waits. Do not install a debugger implicitly or attach to,

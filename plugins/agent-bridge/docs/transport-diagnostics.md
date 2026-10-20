@@ -47,9 +47,15 @@ unable to observe that service at all.
    negotiation must not launch a replacement agent, provision a runtime or
    invoke a mutating Bridge operation.
 4. On Windows, account for observer interference before blaming the network.
-   Invoke `agent-ssh:agent-ssh` and read its Windows stdio diagnostic reference.
-   A diagnostic stderr pipe or inherited file handle can itself stall SSH.
-   Do not assume production has the same handle setup.
+   If installed, invoke `agent-ssh:agent-ssh` and read its Windows stdio
+   diagnostic reference. No sibling installation is required: with the existing
+   OpenSSH executable, a bounded configuration-only `ssh -G <configured-alias>`
+   probe can isolate local startup without connecting. Check child liveness
+   separately from pipe EOF, drain piped streams concurrently, and compare
+   discarded stderr with an SSH-opened `-E` log only in verified private,
+   task-owned temporary storage. Preserve the caller's no-window launch
+   primitive. A diagnostic stderr pipe or inherited file handle can itself
+   stall SSH; do not assume production has the same handle setup.
 5. Report the original result separately from probe results, including what is
    still unknown. Reap only owned probes; preserve shared services and sessions.
 
