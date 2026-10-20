@@ -1,0 +1,9 @@
+{
+  "comment": "Link native Gateway qualification readiness to its completed effort archive",
+  "changes": [
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    }
+  ]
+}
