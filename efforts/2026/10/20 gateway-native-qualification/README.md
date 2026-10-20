@@ -4,11 +4,11 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** serial reviewed slices against `dev`
 - **Created:** 2026-10-20
-- **Status:** Active
-- **Vision:** [Declarative Fleet Gateway](../../../visions/machine-fleet/gateway/README.md), `thin-hosting-wrappers`
+- **Status:** Done
+- **Vision:** [Declarative Fleet Gateway](../../../../visions/machine-fleet/gateway/README.md), `thin-hosting-wrappers`
 - **Umbrella issue:** #7257
-- **Parent effort:** [Fleet Control V2](../fleet-control-v2/README.md), #6236
-- **Predecessor:** [Gateway Role Tunnels](../../2026/10/19%20gateway-role-tunnels/README.md)
+- **Parent effort:** [Fleet Control V2](../../../active/fleet-control-v2/README.md), #6236
+- **Predecessor:** [Gateway Role Tunnels](../19%20gateway-role-tunnels/README.md)
 
 ## Guiding Intent
 
@@ -61,7 +61,7 @@ concrete architecture gate transferred to #7257, not an image failure.
 Read-only venue inspection established an available native ARM64 Linux engine
 with ordinary non-root Docker access and sufficient available local resources
 for the bounded proof. No build, container, service or host configuration was
-changed by discovery. The [living readiness record](../../../fleet-manager/docs/gateway-adoption-readiness.md)
+changed by discovery. The [living readiness record](../../../../fleet-manager/docs/gateway-adoption-readiness.md)
 continues to distinguish native image execution from a production-ready target.
 
 ## Request
@@ -116,11 +116,11 @@ Detailed design, sequence and validation below are **agent-recommended**.
   touch unrelated workloads or claim a live target ready to force completion.
 
 ### Completion
-- [ ] Resolve every Plan/Validation item or transfer a concrete residual to a
+- [x] Resolve every Plan/Validation item or transfer a concrete residual to a
   named tracked objective before marking Done and archiving.
 - [x] Promote durable architecture truth into the living readiness docs, retaining
   #7257 provider/live-edge gates and existing lifecycle/deployment ownership.
-- [ ] Merge the implementation and completion record, settle owned remote/local
+- [x] Merge the implementation and completion record, settle owned remote/local
   resources, release effort focus and finalize the source worktree.
 
 ## Validation Plan
@@ -137,7 +137,7 @@ Detailed design, sequence and validation below are **agent-recommended**.
   replacement, restart/reconnect and revocation pass under stable Gateway identity.
 - [x] **Native ARM64:** the same real assembled assertions pass on native ARM64,
   not emulation, with source/image/process evidence and complete exact-ID cleanup.
-- [ ] **Contribution:** focused bounded tests, lint, relevant repository guards,
+- [x] **Contribution:** focused bounded tests, lint, relevant repository guards,
   complete current-head review and actual merge cover the changed source.
 - [x] **Boundary:** no production identity, key, DNS, Access, firewall, service,
   enrollment or deployment change is included or implied.
@@ -206,3 +206,28 @@ revision custody and real adoption remain separately tracked.
   native architectures. Implementation review/merge and final resource
   settlement remain open; provider/live-edge, lifecycle and adoption owners
   retain their existing gates.
+
+### 2026-10-20 - Qualified implementation reviewed and merged
+- PR #7393 merged as `05dcc4e8149d486439cf9e373bca969ec3fa9947`
+  after exact-head Copilot approval with no findings and successful required
+  CI. The final documentation-only delta did not change the qualified witness,
+  image inputs or runtime source.
+- Re-read this effort's completion gate after merge. Actual native proof and
+  contribution validation are complete; the closing record, remote task and
+  retained-source settlement remain the next bounded leg.
+
+### 2026-10-20 - Finite qualification complete
+- Confirmed the native qualifier's submitted result after independent host
+  verification and implementation merge. Normal landed-content checks
+  finalized its source and controller worktrees; explicitly authorized
+  exact-session retirement and exact-ID worktree cleanup completed.
+- Retained private receipts and both qualified images intentionally. No proof
+  containers or test network remain, no worker is left running, and no
+  production rollout was performed.
+- All qualification Plan and Validation items are resolved. Archive this
+  completion record through the ordinary review/merge gate, then release
+  coordinator focus and finalize its source worktree.
+- #7257 retains supported vendor ingress and Gateway-owned provider
+  interoperability. #5789/#6804 retain authentication/provider ownership,
+  #6240/#6424 retain accepted-revision/install lifecycle, #6030 retains
+  placement/adoption, and #6236 remains the broader integrated product.

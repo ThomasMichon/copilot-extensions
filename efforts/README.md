@@ -10,7 +10,6 @@ that pattern to this repository.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
-| [Gateway Native Qualification](active/gateway-native-qualification/README.md) | Active; plan review precedes explicit native amd64/ARM64 witness support and actual isolated qualification | #7257; source/qualification only, no live adoption or provider authority transfer |
 | [Acknowledged Execution Handoff](active/acknowledged-execution-handoff/README.md) | Blocked; generic contract reviewed and merged, implementation authorization and owner assignment next | #7268; no runtime implementation or adoption |
 | [Remote ACP Host Ownership](active/remote-acp-host-ownership/README.md) | Active; proposal and target-contribution prerequisite merged, qualified relationship claim integration next | #7237; existing session, claims and dispatch owners retained |
 | [Agent Chat Graduation](active/agent-chat-graduation/README.md) | Draft; one vision/architecture/plugin/service/lifecycle proposal before implementation | #7238; existing fleet, service and session-host owners retained |
@@ -125,6 +124,7 @@ that pattern to this repository.
 
 | Effort | Outcome | Coordination |
 |--------|---------|--------------|
+| [Gateway Native Qualification](2026/10/20%20gateway-native-qualification/README.md) | Done; explicit native selection and actual exact-source amd64/ARM64 assembled proofs merged, private evidence/images retained; no rollout | #7257 retains provider/live-edge gates; authentication, lifecycle and adoption owners unchanged |
 | [ADO PR Stewardship](2026/10/20%20ado-pr-stewardship/README.md) | Done; central ADO evidence/configuration/owner integration released, installed worker policy proved, consumer tool forks retired | #7203; separate #3336/#6007/#7051 obligations retained |
 | [Gateway Role Tunnels](2026/10/19%20gateway-role-tunnels/README.md) | Done; reusable runtime/image and generic ingress merged, native amd64 isolated proof and readiness record; no rollout | #7257 retains native ARM64/live edge/provider gates; broader #6236/#6030 remain open |
 | [Remote ACP Provider Contributions](2026/10/20%20remote-acp-provider-contributions/README.md) | Done; generic target/scoped-auth source merged to dev, pending release; no rollout | #7218; host/adopter acceptance #7237, release #3336 |

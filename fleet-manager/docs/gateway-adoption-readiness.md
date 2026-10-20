@@ -34,7 +34,7 @@ public examples do not contain provider credentials or deployment inventory.
 
 ## Native architecture qualification
 
-The follow-on [native qualification effort](../../efforts/active/gateway-native-qualification/README.md)
+The follow-on [native qualification effort](../../efforts/2026/10/20%20gateway-native-qualification/README.md)
 executed candidate `7a6e0614034814708297935660866b8e3eb7186d` separately on
 native Linux amd64 and ARM64. Both runs passed all ten assembled stages with
 selected architecture, engine, inspected image and installed process agreement.
