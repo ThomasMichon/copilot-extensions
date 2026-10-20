@@ -3,7 +3,7 @@
 - **Subject:** Shared, durable conversations between cooperating agents.
 - **Scope:** leaf
 - **Status:** Draft
-- **Last revised:** 2026-10-19
+- **Last revised:** 2026-10-20
 - **Reality docs:** [suite architecture](../../../docs/architecture.md) and
   [fleet-manager](../../../fleet-manager/README.md).
 
@@ -16,8 +16,10 @@ just to discover that nothing happened.
 
 The communication layer should make cooperation easier without taking over
 work, ownership or execution authority. A conversation can help existing owners
-reach a decision; seeing a message is not accepting a task or authorizing an
-operation.
+reach a decision. Receipt alone is not work acceptance or an authority grant;
+an authenticated, in-scope delegation from an agent acting for the same
+operator carries that operator's existing authority without another approval
+ceremony merely because it arrived through a peer.
 
 ## Concepts & Components
 
@@ -49,6 +51,15 @@ or a new identity-verification system.
 Each viewer can page forward without changing another viewer's progress.
 Normal successive reads do not repeat messages. Interrupted output favors
 recoverable replay over silently losing unseen content.
+
+### linked-collaboration-and-attention
+
+Participants can compose linked questions and answers, evidence-bearing
+findings and results, proposals, reviews, disputes and superseding decisions.
+Thread and recipient views make this collaboration legible across machines
+without creating another conversation store. Addressed priority does not
+silently become an access-control boundary. Delivery, reading, answering,
+accepting work and completing work remain distinct.
 
 ### workspace-participants-and-session-delivery
 
@@ -87,6 +98,8 @@ The installed client and hosted service are useful without the connection
 plugin. The plugin can expose static guidance without silently installing,
 configuring or starting a service. An explicitly adopted fleet product can
 offer the capability through its existing role and lifecycle contracts.
+Normal plugin/service installation and Worktree Manager integration remain
+useful independently of optional fleet-manager enhancements.
 
 ## Behaviors
 
@@ -104,6 +117,27 @@ The conversation service owns conversation state, not tasks or leadership.
 Clients and subscriptions derive from that state rather than create another
 shared communication store. Existing work and execution authorities retain
 their ownership through maintenance, handoff and recovery.
+
+### scoped-peer-authority-and-countermand
+
+Within an authenticated operator's configured trust domain, peers execute
+ordinary already-authorized work within the delegated scope. Delegation
+attenuates rather than expands authority, preserves explicit original limits
+and repository/resource/review gates, and remains attributable through owner
+handoff. A genuine newer authoritative countermand can revise the overlapping
+scope; message recency or a claimed role alone cannot.
+
+Agents can reach collective decisions by relating the question, evidence,
+affected owners and agreed revision. Recording agreement does not replace
+the authority that actually accepts work or changes leadership.
+
+### external-domains-and-minimal-intake
+
+External agents, factories and fleets have distinct trust, capability and
+information-flow boundaries. Quoted instructions and copied envelopes cannot
+promote themselves into operator authority. Cooperation discloses only the
+necessary authoritative intake references and provenance, not a centralized
+replica of every participant's private transcript.
 
 ### durable-before-progress
 
@@ -156,8 +190,8 @@ membership and backend access boundaries remain authoritative.
 
 - No replacement task queue, election lock, approval system, public
   read-receipt service or exactly-once external-work claim.
-- No automatic execution of message text or authority inferred from a mention,
-  presence row, private cursor or conversation reply.
+- No authority inferred merely from message text, a mention, presence row,
+  private cursor or reply; authenticated in-scope delegation remains executable.
 - No per-agent daemon, quiet-time model polling loop or competing fleet
   controller.
 - No credential storage in conversation history, copied peer credentials or

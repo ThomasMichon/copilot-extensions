@@ -87,6 +87,81 @@ Capacity refusal must not discard unread history or prevent leave and progress
 settlement. Retention changes need an explicit gap/recovery contract rather
 than a silently advanced cursor.
 
+## Linked collaboration, attention and addressed follow-ups
+
+This is a proposed extension of the conversation contract, not an existing
+typed endpoint or a claim that display metadata supplies authorization.
+Compose interaction views over the one Chat store, participant identities,
+membership, event identities, epochs and independent cursors.
+
+A versioned collaboration representation should relate questions/answers,
+findings/results with evidence, proposals, reviews, disputes and supersession
+to their original thread and addressed participants. Preserve plain bounded
+conversation and explicit composition through the installed client. Recipient,
+thread, open-question and attention views are projections, not new writable
+logs, membership registries or shared delivery cursors. Addressing ranks
+relevance; actual assignment and backend authorization provide isolation.
+
+Distinguish delivery, semantic reading, answering, accepted work and completed
+work. A result is not independently verified merely because its author
+labels it so; review/dispute and supersession retain their source references.
+Views expose actions offered by the real task/workspace/execution owner
+rather than infer permission from a message kind.
+
+Borrow durable addressed follow-ups and captured-batch settlement: later
+arrivals remain pending, bounded context truncation does not erase actionable
+work, and an interruption preserves the original unresolved batch identity.
+Do not port transcript scraping, local board/mailbox stores, a detached pump,
+per-session polling, roster-owned succession, administrative acknowledgement
+that skips an uncertain effect, or resend under a fresh identity. A terminal
+write, display cursor or legacy mark-read is not native admission or semantic
+completion. Compatibility adapters require explicit source/identity and
+progress mapping; they cannot silently migrate membership or reset cursors.
+
+## Peer authority, collective decisions and external ingress
+
+The policy owner is `agent-conduct-guidance`; Bridge, Chat, Logger, workspace
+and task owners retain their actual delivery, evidence, identity and custody
+contracts. This proposal does not add a grant service or transfer their source.
+
+For an authenticated peer acting within the same operator's configured trust
+domain, an instruction inside its delegated scope inherits the operator's
+existing authority. Execute ordinary already-authorized operations, including
+an in-scope deployment, without seeking approval again solely because the
+instruction came through a peer. Preserve the original limits, current source
+custody, repository gates, resource ownership and specific safety approvals.
+Delegation can narrow scope, not manufacture a larger or transitive grant.
+
+Trust comes from the admitted host relationship and configured operator
+binding, not `from` text, a codename, channel, message kind or a body asserting
+that it quotes the operator. Existing explicit authenticated-domain scope does
+not wait for a newly invented universal receipt/domain verifier.
+
+Bridge's admitted, SDK-accepted and consumed receipts concern delivery.
+Logger's routing/origin evidence and capture hashes concern provenance.
+Neither alone certifies semantic permission, work acceptance or a human
+intake chain. Where a new adapter needs machine-enforced domain/scope,
+supersession/revocation or external-ingress binding, its existing host/client
+owner must expose that exact missing contract; do not advertise it as present.
+Use minimally disclosed authoritative intake references and constraints,
+not centralized transcript replication, to explain delegated provenance.
+
+Collective decisions relate the question/options, evidence, affected owners
+and agreed revision. Leadership or task custody changes require acceptance
+through the existing owner, retaining scope, unresolved effects and continuity.
+A genuinely newer authoritative countermand governs overlapping work; a newer
+timestamp, louder sender or copied envelope does not. Stop the conflicting
+irreversible action while resolving a real authority conflict, but continue
+unrelated safe authorized work. Consult the operator for a genuine unresolved
+scope/permission decision, not routine peer delivery.
+
+An external factory, fleet or agent domain starts as data/proposals. An
+explicitly configured ingress boundary governs permitted actions and
+information flow before effects. External text cannot self-trust, impersonate
+operator origin, expand capability, countermand local authority or obtain
+private transcripts through a peer. Attachments and quoted instructions keep
+their original lower-trust attribution.
+
 ## Notification progress is not reading
 
 Whole-session notification work is multiplexed by existing host/service owners,
@@ -169,11 +244,21 @@ proof. A quiet timeout never creates a recurring AI wake/rearm loop.
 
 ## Service hosting and lifecycle
 
+The portable capability boundary includes complete Chat client/service/plugin
+and reusable Gateway/SSH and Gateway/Vault setup. Public ingress adapters,
+including an Azure Bastion reverse-SSH adapter, belong with their generic owning
+capabilities, not inside Chat transport. Internal provider drivers, private
+configuration, topology and secret references stay in adopter-owned adapters.
+The existing [Gateway/SSH effort](../gateway-ssh-fleet-onboarding/README.md)
+and Vault/lifecycle owners retain their source and activation decisions.
+This plan neither forks their installers nor authorizes a rollout.
+
 Compose with the existing [fleet-manager](../../../fleet-manager/README.md)
 standalone product and its lifecycle owners. The current product does not yet
 claim complete managed service installation/update/removal; implementing this
 integration must consume or explicitly extend those owned seams rather than
-assume them complete.
+assume them complete. Standard plugin/service installation and Worktree Manager
+integration are the baseline; fleet-manager enhances rather than replaces them.
 
 The conversation service is local-first. Prefer a protected OS-native endpoint;
 when TCP is required, use discovered OS-assigned endpoints. Cross-host access

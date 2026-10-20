@@ -37,6 +37,7 @@ Use #7238 to accept a slice and record its source boundary before editing it.
 | Proposal editor | Single vision/effort writer; service, client and lifecycle integration | #7238 and the proposal PR |
 | Plugin contributor | Supported native attachment, pending/admission state and plugin delivery contract | #7238; input integrated by the proposal editor |
 | Qualification contributor | Installed-consumer, native lifecycle and platform-boundary cases | #7238; input integrated by the proposal editor |
+| Conduct contributor | Generic scoped-peer ambient policy and discoverable rules-of-engagement skill, after the intent amendment clears review; no Chat/Bridge/Logger source | [Accepted disjoint scope](https://github.com/ThomasMichon/copilot-extensions/issues/7238#issuecomment-6303930285) |
 | Existing lifecycle owners | Review integration with fleet-manager, shared process utilities and service primitives | Their existing public issues, linked below |
 
 ## Coordination
@@ -87,6 +88,20 @@ real cooperation to improve robustness.
 This is an intent summary, not a verbatim transcript. The current contribution
 is the reviewed proposal. It does not claim completed qualification or grant
 permission to install, activate, migrate data or restart another owner.
+
+The collaboration amendment requests one canonical conversation store with
+linked typed collaboration, per-thread/recipient attention and multi-machine
+views; durable addressed follow-ups without transcript scraping or another
+delivery authority; same-operator authenticated in-scope peer authority without
+duplicate approval; collective decisions, attenuated delegation and genuine
+countermand; explicit external-domain capability/information-flow boundaries;
+and minimally disclosed authoritative intake provenance, not centralized
+transcripts. Complete generic Chat, Gateway/SSH (including public Azure Bastion
+ingress) and Gateway/Vault setup belong upstream; internal provider
+drivers, private configuration and secret references remain adopter-owned.
+Standard installation and Worktree Manager remain the baseline, with optional
+fleet-manager enhancement. These are public-safe intent summaries; adapter
+shapes and validation details below are agent-recommended realization.
 
 ## Plan
 
@@ -169,6 +184,24 @@ requirements.
   migration/removal authority after preserved state and consumers are proved.
 - [ ] Reconcile all Plan/Validation items and #7238 before marking Done.
 
+### Parallel track - Collaboration and scoped peer conduct
+
+- [ ] Review and land this single vision/architecture/plan amendment before
+  dependent realization. This gate is independent of the retained client
+  platform qualification and managed installer rollout.
+- [ ] The accepted conduct contributor implements only its claimed
+  `plugins/agent-conduct-guidance/` kernel, skill and ordinary declaration,
+  tests and changefile metadata after that intent gate. No new grant/domain
+  API, deployment, root policy edit or neighboring source is included.
+- [ ] The proposal editor defines the future versioned collaboration/thread/
+  attention representation over existing Chat state and installed composition;
+  agree extension points with the original client/service/plugin owners first.
+- [ ] Coordinate any required new domain/intake or external-ingress binding
+  with its actual host/client owner. State missing APIs precisely without
+  holding existing explicitly authorized same-domain work behind them.
+- [ ] Preserve Gateway/SSH, Vault, lifecycle, workspace and task ownership;
+  existing #6030/#6240/#6424/#6681 work is not reassigned by this amendment.
+
 ## Validation Plan
 
 - [ ] **Store and client:** monotonic event identity, independent viewers,
@@ -220,6 +253,21 @@ requirements.
 - [ ] **Publication:** public-only references and synthetic examples,
   documentation-impact review, required CI/review and unchanged open parent
   tracker until its actual completion gate is met.
+- [ ] **Collaboration projections:** linked answers/reviews/disputes/
+  supersession and multi-machine recipient/thread attention use one canonical
+  store; addressed priority does not supply isolation; delivery/read/answer/
+  accepted/completed states remain distinct and owner-offered actions stay owned.
+- [ ] **Scoped peer conduct:** discoverable policy/skill admits an existing
+  authenticated in-scope peer's ordinary authorized work without duplicate
+  approval, while preserving attenuated scope, source custody, repository and
+  resource gates, genuine authoritative countermand and accepted handoff.
+- [ ] **External ingress and intake:** copied envelopes, quoted instructions
+  and external bodies cannot promote themselves, expand capability, bypass
+  information-flow boundaries or request raw transcripts. Minimal provenance
+  references do not turn delivery/capture receipts into semantic grants.
+- [ ] **Compatibility and retained follow-ups:** context truncation, later
+  arrivals and unknown admission preserve captured-batch attribution and normal
+  reading; no second log, cursor reset, administrative skip or fresh-ID resend.
 
 ## Proposal
 
@@ -229,6 +277,19 @@ use remains valuable while an unsupported native host seam is resolved; full
 graduation still requires the declared native and lifecycle guarantees.
 
 ## Journal
+
+### 2026-10-20 - Coherent collaboration and peer-conduct amendment
+
+- Integrated the independently gathered interaction and authority lessons as
+  one generic intent revision, not a port of another controller or private
+  implementation. Existing Chat state remains authoritative; typed views,
+  collective decision links and scoped authority are proposed contracts.
+- Recorded the already-claimed conduct-only contributor boundary and its
+  reviewed-intent dependency. Policy realization follows this amendment's
+  normal review gate; unrelated client/native and lifecycle work stays separate.
+- Retained the portable/adopter boundary, standard installation and Worktree
+  Manager baseline, and existing Gateway/SSH, Vault and lifecycle owners.
+  No runtime API, new process, deployment or permission grant is supplied.
 
 ### 2026-10-20 - Independent local host artifact
 
