@@ -176,6 +176,30 @@ during Phase 2; any material expansion returns through proposal review first.
 
 ## Journal
 
+### 2026-10-20 - Current contribution policy and dependency repair
+
+- The former source head had a clean review but failed historical native
+  installer and Windows console jobs. Preserve the unresolved #7020 and #6266
+  causal investigations; a passing control is not a fix or accepted-flake waiver.
+- Actively unblocked the accepted #7020 repair owner with its exact existing
+  native source/interpreter location. The separate, proven Windows census
+  attribution defect merged through #7310, followed by reviewed effort
+  accounting in #7315. Neither claims the historical native causes are closed.
+- Current reviewed `dev` independently moved required PR validation to its
+  eligible-unit portfolio, with native integration retained separately. Apply
+  that repository policy normally rather than treating old-source jobs as a
+  permanent exception. No workflow, skip, deadline, forced rerun or bypass was
+  introduced by this contribution.
+- Kept a recovery ref and performed the ordinary managed source sync. Declared
+  HTTP41 source closure, expected bodies, historical vectors and floors remain
+  unchanged; all 265 contract fixtures pass. The current-base catalog, scoped
+  authentication, provider command, target contract and actual TLS peer lane
+  passes 154 cases.
+- Publish the legitimate rebase and await fresh current-head review and all
+  required CI before merge. Historical native causal/qualification obligations
+  remain with their tracked owners; release, installed rollout, credential
+  grants and real-endpoint acceptance are still separately gated.
+
 ### 2026-10-19 - Uncached snapshots and listener-disabled credentials
 
 - Fresh review confirmed cached project reconciliation but found that the
