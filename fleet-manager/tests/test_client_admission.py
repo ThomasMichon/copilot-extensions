@@ -293,6 +293,56 @@ def test_missing_persistent_ownership_file_cannot_create_a_second_lock_inode(tmp
     assert admission.inspect_client_admission(root, identity())["admitted"] is None
 
 
+@pytest.mark.parametrize("operation", ["inspect", "initialize"])
+def test_readonly_wal_refusal_preserves_database_and_directory(tmp_path, primitive, operation):
+    root = root_at(tmp_path)
+    admission.initialize_client_admission(root, identity())
+    with sqlite3.connect(root / admission.DATABASE) as connection:
+        assert connection.execute("PRAGMA journal_mode=WAL").fetchone() == ("wal",)
+    connection.close()
+    assert not (root / (admission.DATABASE + "-wal")).exists()
+    assert not (root / (admission.DATABASE + "-shm")).exists()
+    before = database_bytes(root), sorted(path.name for path in root.iterdir())
+    action = admission.inspect_client_admission if operation == "inspect" else admission.initialize_client_admission
+    with pytest.raises(PlanError, match="WAL database header"):
+        action(root, identity())
+    assert before == (database_bytes(root), sorted(path.name for path in root.iterdir()))
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX process-wide fcntl lock lifetime")
+def test_overlapping_readers_retain_sqlite_lock_against_independent_writer(tmp_path, primitive):
+    root = root_at(tmp_path)
+    admission.initialize_client_admission(root, identity())
+    script = """
+import sqlite3,sys
+c=sqlite3.connect(sys.argv[1],timeout=.1)
+try:
+    c.execute('BEGIN IMMEDIATE')
+    c.execute('UPDATE installation SET identity=identity')
+    c.commit()
+except sqlite3.OperationalError as error:
+    assert 'locked' in str(error)
+    c.rollback()
+    print('LOCKED')
+else:
+    print('COMMITTED')
+finally:
+    c.close()
+"""
+    with admission._root(root) as (path, database_root, unchanged):
+        with admission._connection(path, database_root=database_root, readonly=True) as first:
+            first.execute("BEGIN")
+            admission._read_state(first, identity())
+            with admission._connection(path, database_root=database_root, readonly=True) as second:
+                second.execute("BEGIN")
+                admission._read_state(second, identity())
+            result = run([sys.executable, "-I", "-c", script, str(root / admission.DATABASE)])
+            assert result.returncode == 0 and result.stdout.strip() == "LOCKED", result.stderr
+        unchanged()
+    result = run([sys.executable, "-I", "-c", script, str(root / admission.DATABASE)])
+    assert result.returncode == 0 and result.stdout.strip() == "COMMITTED", result.stderr
+
+
 @pytest.mark.parametrize("change,clock", [
     ({"minimum_sequence": 11}, 150), ({"valid_until": 150}, 150), ({}, 200),
 ])
@@ -481,7 +531,10 @@ elif value['operation'] == 'initialize':
             real_commit(connection)
         print('INITIALIZATION_BOUNDARY',flush=True)
         time.sleep(30)
-    admission._commit=interrupted_initialization
+    if value['pause']=='publication':
+        admission._sync_directory=interrupted_initialization
+    else:
+        admission._commit=interrupted_initialization
     print(json.dumps(admission.initialize_client_admission(root,value['identity'])),flush=True)
 else:
     fixture = value['fixture']
@@ -513,9 +566,9 @@ def child_input(tmp_path, root, fixture, *, pause=None):
             "pause": pause}
 
 
-@pytest.mark.parametrize("boundary", ["before", "after"])
+@pytest.mark.parametrize("boundary", ["before", "after", "publication"])
 def test_actual_initialization_death_can_retry_without_publishing_partial_state(
-    tmp_path, primitive, boundary,
+    tmp_path, primitive, boundary, monkeypatch,
 ):
     root = root_at(tmp_path)
     process = subprocess.Popen(
@@ -537,15 +590,30 @@ def test_actual_initialization_death_can_retry_without_publishing_partial_state(
         process.wait(timeout=10)
         process.stdout.close()
         process.stderr.close()
-    assert not (root / admission.DATABASE).exists()
+    assert (root / admission.DATABASE).exists() is (boundary == "publication")
     candidate = root / admission._initialization_name(identity())
-    assert (candidate / admission.DATABASE).is_file()
+    assert (candidate / admission.DATABASE).is_file() is (boundary != "publication")
     foreign = candidate / "foreign-state"
     foreign.write_bytes(b"must be retained")
     with pytest.raises(PlanError, match="foreign state"):
         admission.initialize_client_admission(root, identity())
     assert foreign.read_bytes() == b"must be retained"
     foreign.unlink()
+    sync = admission._sync_directory
+    clear = admission._clear_initialization
+    synced = []
+
+    def synced_directory(path):
+        sync(path)
+        synced.append(True)
+
+    def clear_after_sync(path):
+        if (root / admission.DATABASE).exists():
+            assert synced, "published database acknowledged before the directory durability barrier"
+        clear(path)
+
+    monkeypatch.setattr(admission, "_sync_directory", synced_directory)
+    monkeypatch.setattr(admission, "_clear_initialization", clear_after_sync)
     result = admission.initialize_client_admission(root, identity())
     assert result["status"] == "initialized" and result["mutations_performed"]
     assert not candidate.exists()

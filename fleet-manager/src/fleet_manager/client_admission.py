@@ -6,6 +6,8 @@ import os
 from pathlib import Path
 import sqlite3
 import stat
+import subprocess
+import sys
 import time
 
 from . import artifact_staging
@@ -24,6 +26,17 @@ _TABLES = {
                  "(singleton = 1), sequence INTEGER NOT NULL CHECK (sequence > 0), "
                  "receipt TEXT NOT NULL)",
 }
+_READ_HEADER = """
+import os,stat,sys
+fd=os.open(sys.argv[1],os.O_RDONLY|os.O_NONBLOCK|os.O_NOFOLLOW)
+try:
+    info=os.fstat(fd)
+    if not stat.S_ISREG(info.st_mode) or (info.st_dev,info.st_ino)!=(int(sys.argv[2]),int(sys.argv[3])):
+        raise SystemExit(2)
+    sys.stdout.buffer.write(os.read(fd,100))
+finally:
+    os.close(fd)
+"""
 
 
 def _identity(value):
@@ -198,8 +211,32 @@ def _owned(root):
                 yield path, database_root, unchanged
 
 
+def _check_database_header(path, expected, *, initializing):
+    if os.name == "nt":
+        with path.open("rb") as stream:
+            if artifact_staging._identity(os.fstat(stream.fileno())) != artifact_staging._identity(expected):
+                raise PlanError("client admission database identity changed")
+            header = stream.read(100)
+    else:
+        # A raw close in this process would drop sibling SQLite fcntl locks.
+        result = subprocess.run(
+            [sys.executable, "-I", "-S", "-B", "-c", _READ_HEADER, str(path),
+             str(expected.st_dev), str(expected.st_ino)],
+            capture_output=True, timeout=5,
+        )
+        if result.returncode != 0:
+            raise PlanError("client admission database header could not be read")
+        header = result.stdout
+    if initializing and expected.st_size == 0 and not header:
+        return
+    if len(header) != 100 or header[:16] != b"SQLite format 3\0":
+        raise PlanError("client admission database header is invalid")
+    if header[18:20] != b"\1\1":
+        raise PlanError("client admission refuses unsupported WAL database header")
+
+
 @contextmanager
-def _connection(root, *, database_root, readonly):
+def _connection(root, *, database_root, readonly, initializing=False):
     before = _ordinary_file(root / DATABASE)
     database = database_root / DATABASE
     for suffix in ("-wal", "-shm", "-journal"):
@@ -211,16 +248,14 @@ def _connection(root, *, database_root, readonly):
     with ExitStack() as stack:
         if os.name == "nt":
             stack.enter_context(_windows_handle(database))
-        else:
-            descriptor = os.open(database, os.O_RDONLY | os.O_NOFOLLOW)
-            stack.callback(os.close, descriptor)
-            if artifact_staging._identity(os.fstat(descriptor)) != artifact_staging._identity(before):
-                raise PlanError("client admission database identity changed")
+        _check_database_header(root / DATABASE, before, initializing=initializing)
         connection = sqlite3.connect(
             database.absolute().as_uri() + ("?mode=ro" if readonly else "?mode=rw"),
             uri=True, timeout=30, isolation_level=None,
         )
         try:
+            if artifact_staging._identity(_ordinary_file(root / DATABASE)) != artifact_staging._identity(before):
+                raise PlanError("client admission database identity changed")
             connection.execute("PRAGMA trusted_schema = OFF")
             if connection.execute("PRAGMA journal_mode").fetchone() != ("delete",):
                 raise PlanError("client admission requires the owned rollback-journal format")
@@ -305,6 +340,15 @@ def _clear_initialization(path):
     path.rmdir()
 
 
+def _sync_directory(path):
+    if os.name != "nt":
+        descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+
+
 def initialize_client_admission(root, identity):
     """Explicitly initialize an empty private root, or inspect its exact owned identity."""
     identity = _identity(identity)
@@ -333,7 +377,9 @@ def initialize_client_admission(root, identity):
                     unchanged()
                     cleared = (path / initialization).exists()
                     if cleared:
+                        _sync_directory(database_root)
                         _clear_initialization(path / initialization)
+                        _sync_directory(database_root)
                     return _report(identity, receipt, changed=cleared,
                                    status="admitted" if receipt else "initialized")
             if set(child.name for child in path.iterdir()) - {".construction-leases", initialization}:
@@ -344,7 +390,9 @@ def initialize_client_admission(root, identity):
             candidate.mkdir(mode=0o700)
             descriptor = os.open(candidate / DATABASE, os.O_CREAT | os.O_EXCL | os.O_RDWR, 0o600)
             os.close(descriptor)
-            with _connection(path / initialization, database_root=candidate, readonly=False) as connection:
+            with _connection(
+                path / initialization, database_root=candidate, readonly=False, initializing=True,
+            ) as connection:
                 connection.execute("BEGIN IMMEDIATE")
                 for sql in _TABLES.values():
                     connection.execute(sql)
@@ -360,16 +408,12 @@ def initialize_client_admission(root, identity):
             if database.exists():
                 raise PlanError("client admission database appeared during initialization")
             os.replace(candidate / DATABASE, database)
+            _sync_directory(database_root)
             _clear_initialization(path / initialization)
-            if os.name != "nt":
-                descriptor = os.open(database_root, os.O_RDONLY | os.O_DIRECTORY)
-                try:
-                    os.fsync(descriptor)
-                finally:
-                    os.close(descriptor)
+            _sync_directory(database_root)
             unchanged()
             return _report(identity, None, changed=True, status="initialized")
-    except (OSError, sqlite3.Error):
+    except (OSError, sqlite3.Error, subprocess.SubprocessError):
         raise PlanError("client admission initialization could not establish durable state") from None
 
 
@@ -384,7 +428,7 @@ def inspect_client_admission(root, identity):
                 unchanged()
                 return _report(identity, receipt, changed=False,
                                status="admitted" if receipt else "initialized")
-    except (OSError, sqlite3.Error):
+    except (OSError, sqlite3.Error, subprocess.SubprocessError):
         raise PlanError("client admission state could not be inspected without mutation") from None
 
 
@@ -401,7 +445,7 @@ def recover_client_admission(root, identity):
                 connection.execute("BEGIN IMMEDIATE")
                 _read_state(connection, identity)
                 unchanged()
-    except (OSError, sqlite3.Error):
+    except (OSError, sqlite3.Error, subprocess.SubprocessError):
         raise PlanError("client admission state could not be recovered under ownership") from None
 
 
@@ -458,5 +502,5 @@ def admit_client_release(root, identity, selection, staged, policy, *, clock=lam
                     raise PlanError("client admission commit reread differs; outcome is unknown")
                 unchanged()
                 return _report(identity, receipt, changed=True, status="admitted")
-    except (OSError, sqlite3.Error):
+    except (OSError, sqlite3.Error, subprocess.SubprocessError):
         raise PlanError("client release admission could not establish durable state") from None

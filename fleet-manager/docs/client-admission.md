@@ -34,6 +34,9 @@ Interrupted temporary initialization can be retried under the same construction
 lease; only its recognized ordinary database/journal files may be discarded.
 Unexpected temporary entries or a foreign final database remain refused and
 preserved.
+On POSIX, the temporary directory is retained until the final rename's parent
+directory has been synced. A retry after an interrupted publication completes
+that durability barrier before removing the temporary directory or succeeding.
 
 The selected-release input reuses `ReleaseSelection` with schema
 `fleet-manager.release-selection`, version `1`. It binds `decision`, positive
@@ -59,6 +62,12 @@ lease named `client-admission`, with persistent ownership metadata under
 an existing database without its expected lock refuses further admission.
 Read-only inspection remains a snapshot, not proof of exclusive ownership or
 permission to perform later effects.
+Unsupported WAL format is rejected from the database header before opening
+SQLite, so inspection cannot create WAL sidecars. POSIX header reads use a
+bounded, isolated standard-library helper process: closing an independent
+database descriptor in the inspecting process could release another live
+SQLite connection's process-wide `fcntl` locks. SQLite owns all database
+descriptors in the calling process; the helper does not execute candidate code.
 
 Admission holds exclusive ownership and a full-synchronous `BEGIN IMMEDIATE`
 transaction while freshly verifying current policy, signature lifetime,
