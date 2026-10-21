@@ -61,6 +61,9 @@ holding the selector lease. A partial write restores both previous selector
 states (including absence); prior selected/last-known-good runtimes remain
 retained until publication or recovery settles. Recovery never copies over
 foreign objects. An unsettled recovery retains custody rather than cutting over.
+Empty/whitespace-only prior selectors have no runtime to retain, but their
+existence and exact bytes remain rollback state. Target and nonblank prior slot
+names still receive canonical validation.
 
 PowerShell, CMD and Bash launch the selected slot through the canonical retention
 bootstrap in isolated mode, preserve its exit status, and never resolve or acquire

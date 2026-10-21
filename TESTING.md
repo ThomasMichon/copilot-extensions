@@ -1449,6 +1449,11 @@ That contract also removes only the selected marker from an otherwise healthy
 constructed installation: dry-run must plan repair, then apply must restore the
 selection using real installed health and unchanged origin/completion receipts.
 An unexpected constructor call fails the test rather than rebuilding silently.
+The same prepared installation is reused for empty and whitespace-only selector
+repair; it is not rebuilt for each state. `tests/test_manager_selector_states.py`
+uses real canonical file publication/recovery for both selector fields, including
+faults before/after the second replacement, exact blank-byte/absence rollback,
+held runtime/publication custody, and unchanged invalid-name/target refusal.
 `tests/test_companion_popup_runtime.py` separately executes the generated Ctrl+K
 popup command through the Windows command shell against a synthetic installed
 fixture CLI and real retention bootstrap (not a package-construction proof).

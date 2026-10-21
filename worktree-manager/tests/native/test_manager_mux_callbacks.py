@@ -64,7 +64,10 @@ def _await_mapping(root, project, worktree, *, removed):
                 + (log.read_text(encoding="utf-8") if log.exists() else "no callback log"))
 
 
-def test_missing_selector_is_planned_then_reuses_healthy_constructed_slot(installed, monkeypatch):
+@pytest.mark.parametrize("selector_state", ["missing", "blank", "whitespace"])
+def test_missing_selector_is_planned_then_reuses_healthy_constructed_slot(
+    installed, monkeypatch, selector_state,
+):
     directory, root, slot = (Path(installed[key]) for key in ("directory", "root", "slot"))
     env = _environment(directory)
     for name in ("HOME", "USERPROFILE", "AGENT_WORKTREES_CONTROL_PLANE_PROVIDERS_DIR"):
@@ -84,11 +87,20 @@ def test_missing_selector_is_planned_then_reuses_healthy_constructed_slot(instal
     launch_env = dict(env, WORKTREE_MANAGER_ROOT=str(root), UV_OFFLINE="1",
                       PATH="" if os.name == "nt" else "/usr/bin:/bin")
     marker = root / "current-version"
-    marker.unlink()
+    last_good = root / "last-known-good"
+    if selector_state == "missing":
+        marker.unlink()
+    elif selector_state == "blank":
+        marker.write_bytes(b"")
+        last_good.write_bytes(b"")
+    else:
+        marker.write_bytes(b"\t \r\n")
+        last_good.write_bytes(b"\r\n\t ")
+    selectors = {path: path.read_bytes() if path.exists() else None for path in (marker, last_good)}
     assert _run(launch, launch_env, directory).returncode != 0
     assert si.needs_install(version, root) is True
     assert si.self_install(payload, root=root, dry_run=True).action == "planned"
-    assert not marker.exists()
+    assert {path: path.read_bytes() if path.exists() else None for path in selectors} == selectors
     adapter = si._runtime_installer()
 
     def unexpected_construction(*args, **kwargs):
@@ -99,6 +111,7 @@ def test_missing_selector_is_planned_then_reuses_healthy_constructed_slot(instal
     assert result.action == "installed", result
     assert Path(result.slot) == slot
     assert marker.read_text().strip() == slot.name
+    assert last_good.read_text().strip() == slot.name
     assert si.needs_install(version, root) is False
     assert all((path.stat().st_ino, path.read_bytes()) == value for path, value in before.items())
     launched = _run(launch, launch_env, directory)

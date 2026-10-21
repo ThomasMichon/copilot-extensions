@@ -112,7 +112,8 @@ def activate(root: Path, version: str, *, expected: str | None) -> None:
     # Cleanup takes retention before publication. Acquire in that same order,
     # then compare both snapshots under publication to close the unlocked gap.
     with ExitStack() as custody:
-        generations = {version, *(data.decode("utf-8").strip() for data in contents.values())}
+        previous = {data.decode("utf-8").strip() for data in contents.values()}
+        generations = {version, *(previous - {""})}
         for generation in sorted(generations):
             # Canonical ordinary-slot validation also governs rollback references.
             runtime._validate_dev_previous_version(generation)
