@@ -42,6 +42,12 @@ class Governance:
         sys.modules[spec.name] = self.helper
         spec.loader.exec_module(self.helper)
         self.context = os.environ.get("COPILOT_EXTENSIONS_CONTEXT", "").strip()
+        self.project_root = (
+            Path(os.environ["COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT"]).resolve()
+            if os.environ.get("COPILOT_EXTENSIONS_COMMAND_LIFECYCLE")
+            and os.environ.get("COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT")
+            else None
+        )
         self.durable_home = (
             Path(self.context).parents[4] if self.context else
             Path(os.environ.get("USERPROFILE") or Path.home())
@@ -58,6 +64,7 @@ class Governance:
             "durable_home": self.durable_home,
         }
         if not self.context:
+            arguments["project_root"] = self.project_root
             state = self.helper.probe_legacy_entrypoint(**arguments)
             if state.get("allowMutation") is not True:
                 raise InstallationRefused(
@@ -99,6 +106,7 @@ class Governance:
             lease = binding._load_lifecycle().borrowed_lease(
                 binding._rules(), self.helper, payload_root=self.payload,
                 plugin_id="agent-worktrees", legacy_root=self.root,
+                project_root=self.project_root,
             )
             if lease is not None and lease.purpose["origin"] == "management":
                 return
@@ -236,6 +244,7 @@ def helper_publication_plan(path: Path, digest: str) -> dict:
         lease = binding._load_lifecycle().borrowed_lease(
             binding._rules(), governance.helper, payload_root=Path(plan["owner"]),
             plugin_id="agent-worktrees", legacy_root=governance.root,
+            project_root=governance.project_root,
         )
         if lease is None:
             raise InstallationRefused("Helper publication requires its existing borrowed lifecycle")

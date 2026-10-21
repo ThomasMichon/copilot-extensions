@@ -316,6 +316,50 @@ def test_actual_native_callback_preserves_owner_and_selected_runtime(
 
 
 @pytest.mark.parametrize(("shell", "executable"), native_hosts())
+@pytest.mark.parametrize("publication_case", ["legacy"], indirect=True)
+def test_native_callback_retains_project_only_source(
+    publication_case, monkeypatch, shell, executable,
+):
+    driver, root, slot, original_owner, content, _identity = publication_case
+    home = root.parent
+    owner = home / ".copilot/installed-plugins/example/agent-worktrees"
+    shutil.copytree(original_owner, owner)
+    project = home / "launch-project"
+    settings = project / ".github/copilot/settings.json"
+    settings.parent.mkdir(parents=True)
+    settings.write_text(json.dumps({
+        "extraKnownMarketplaces": {
+            "example": {"source": {"source": "github", "repo": "Project/Plugins"}},
+        },
+    }), encoding="utf-8")
+    binding = load(content / "scripts/command_binding.py", "project_callback_binding")
+    helper = load(
+        content / "scripts/installation-context/installation_context.py", "project_callback_context",
+    )
+    lifecycle = binding._load_lifecycle()
+    with lifecycle.legacy_lifecycle(
+        binding._rules(), helper, payload_root=owner, plugin_id="agent-worktrees",
+        legacy_root=root, project_root=project,
+    ) as lease:
+        monkeypatch.setenv(lifecycle.TICKET_ENV, json.dumps(lease.ticket))
+        monkeypatch.setenv("COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT", str(project))
+        monkeypatch.chdir(home)
+        governance = driver.Governance(root, owner)
+        with driver.runtime.retention_custody(
+            root, slot.name, payload_hash="candidate",
+        ) as (_slot, descriptor):
+            transaction = driver._publish_helpers(
+                governance, {"shell": shell, "executable": executable, "scope": "resolvers"},
+                content, slot, descriptor, timeout=20,
+                base_python=Path(sys._base_executable),
+            )
+            transaction.keep()
+        assert lease.owner["source"]["canonical"] == "github:project/plugins"
+        for name in ("resolve-runtime.sh", "resolve-runtime.ps1"):
+            assert (root / "bin" / name).read_bytes() == (content / "scripts" / name).read_bytes()
+
+
+@pytest.mark.parametrize(("shell", "executable"), native_hosts())
 @pytest.mark.parametrize("fault", ["owner", "stale-owner", "governance", "token"])
 def test_actual_callback_rejects_changed_authority(
     publication_case, monkeypatch, shell, executable, fault,

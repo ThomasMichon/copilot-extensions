@@ -808,6 +808,7 @@ def test_command_binding_native_manifest_publication_and_foreign_refusal(
             "PLUGIN_DIR=\"$TEST_PAYLOAD\"\nINSTALL_DIR=\"$TEST_RUNTIME\"\n"
             "VENV_PYTHON=\"$TEST_PYTHON\"\nLINK_DIR=\"$TEST_RUNTIME/.venv\"\n"
             "SCRIPT_DIR=\"$TEST_SOURCE_SCRIPTS\"\nSRC_VERSION='1.0.0'\n"
+            "__aw_admission_project=\"$PWD\"\n"
             '. "$SCRIPT_DIR/source-runtime.sh"\n_initialize_source_runtime\n'
             f"CONTEXTUAL_INSTALL={'true' if contextual else 'false'}\n"
             + function + "\nwrite_deploy_manifest\n"
@@ -830,6 +831,7 @@ def test_command_binding_native_manifest_publication_and_foreign_refusal(
             "$PluginDir=$env:TEST_PAYLOAD\n$InstallDir=$env:TEST_RUNTIME\n"
             "$VenvPython=$env:TEST_PYTHON\n$LinkDir=Join-Path $InstallDir '.venv'\n"
             "$ScriptDir=$env:TEST_SOURCE_SCRIPTS\n$SrcVersion='1.0.0'\n"
+            "$admissionProject=(Get-Location).Path\n"
             ". (Join-Path $ScriptDir 'source-runtime.ps1')\nInitialize-SourceRuntime\n"
             f"$ContextualInstall=${'true' if contextual else 'false'}\n"
             + function + "\nWrite-V3Manifest\n"

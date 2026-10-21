@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve launch-project source provenance across native installer staging, retained helper callbacks, and lifecycle publication.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

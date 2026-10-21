@@ -42,9 +42,9 @@ def _command(fixture: dict, shell: str, name: str) -> list[str]:
 
 def _adopter(fixture: dict, plugin: str, source: Path | None = None) -> dict[str, str]:
     payload = fixture["payload"].with_name(plugin)
-    payload.mkdir()
+    payload.mkdir(exist_ok=True)
     root = fixture["home"] / f".{plugin}"
-    root.mkdir()
+    root.mkdir(exist_ok=True)
     fixture.update(payload=payload, legacy=root)
     fixture["arguments"].update(payload_root=payload, plugin_id=plugin, legacy_root=root)
     if source is None:
@@ -459,6 +459,87 @@ def test_relocated_admission_retains_launch_project(
     assert result.returncode == 0, result.stdout + result.stderr
     smoke = json.loads((binding_fixture["legacy"] / "smoke.json").read_text(encoding="utf-8-sig"))
     assert smoke["staged"] is True
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+@pytest.mark.parametrize("source", ["project-only", "conflicting"])
+@pytest.mark.parametrize("publish", [False, True])
+def test_worktrees_self_stage_retains_launch_project(
+    binding_fixture: dict, shell: str, source: str, publish: bool,
+) -> None:
+    environment = _adopter(binding_fixture, "agent-worktrees")
+    project = binding_fixture["home"] / "launch-project"
+    _write(project / ".github/copilot/settings.json", {
+        "extraKnownMarketplaces": {
+            "example": {"source": {"source": "github", "repo": "Project/Plugins"}},
+        },
+    })
+    if source == "project-only":
+        _write(binding_fixture["home"] / ".copilot/settings.json", {})
+    if publish:
+        binding = binding_fixture["binding"]
+        arguments = {**binding_fixture["arguments"], "project_root": project}
+        with pytest.raises(RuntimeError, match="interrupted"):
+            with binding._load_lifecycle().legacy_lifecycle(
+                binding, binding_fixture["primitive"], **arguments,
+            ):
+                raise RuntimeError("interrupted")
+        suffix = "ps1" if shell == "powershell" else "sh"
+        installer = binding_fixture["payload"] / f"scripts/install.{suffix}"
+        text = installer.read_text(encoding="utf-8")
+        if shell == "powershell":
+            start = text.index("function Write-V3Manifest {")
+            publication = text[start:text.index("\nfunction Test-UvConfiguredIndex", start)]
+            seam = (
+                "if ($env:COPILOT_PLUGIN_INSTALL_SMOKE) {\n"
+                + publication
+                + "\nfunction New-V3Manifest { return @{schema_version=3; "
+                "service='agent-worktrees'; source=@{kind='fixture'}} }\n"
+                "function Write-ServiceOk { param($Message) }\n"
+                "$SourceRuntimeIdentity = ''\n"
+                "$PluginDir = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path\n"
+                "$VenvPython = $admissionPython\n"
+                "Write-V3Manifest\n}\n"
+            )
+        else:
+            start = text.index("write_deploy_manifest() {")
+            publication = text[start:text.index("\nshow_deploy_status()", start)]
+            manifest = json.dumps({
+                "schema_version": 3, "service": "agent-worktrees", "source": {"kind": "fixture"},
+            })
+            seam = (
+                'if [[ -n "${COPILOT_PLUGIN_INSTALL_SMOKE:-}" ]]; then\n'
+                + publication
+                + "\n_build_deploy_manifest_json() { printf '%s\\n' " + shlex.quote(manifest) + "; }\n"
+                "ok() { :; }\nerr() { printf '%s\\n' \"$*\" >&2; }\n"
+                "_source_kind() { printf fixture; }\n"
+                'INSTALL_DIR="$__aw_admission_root"\n'
+                'VENV_PYTHON="$__aw_admission_python"\n'
+                "write_deploy_manifest || exit $?\nfi\n"
+            )
+        marker = "# === install-contract:v4 smoke seam"
+        assert text.count(marker) == 1
+        installer.write_text(text.replace(marker, seam + marker), encoding="utf-8")
+    environment["COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT"] = str(binding_fixture["home"])
+    result = subprocess.run(
+        [*_command(binding_fixture, shell, "install"), "provision" if publish else "stamp"],
+        env=environment, cwd=project, capture_output=True, text=True, timeout=30,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    smoke = json.loads((binding_fixture["legacy"] / "smoke.json").read_text(encoding="utf-8-sig"))
+    assert smoke["staged"] is True
+    if publish:
+        manifest = json.loads((binding_fixture["legacy"] / "deploy-manifest.json").read_text())
+        if source == "conflicting":
+            assert "commandBinding" not in manifest
+            assert "commandLifecycle" not in manifest
+        else:
+            assert manifest["commandBinding"]["source"]["canonical"] == "github:project/plugins"
+            assert manifest["commandLifecycle"]["state"] == "complete"
+        assert json.loads((binding_fixture["legacy"] / "retained-state.json").read_text()) == {
+            "retained": True,
+        }
 
 
 @pytest.mark.skipif(os.name != "nt", reason="PowerShell filesystem provider location")
