@@ -2555,7 +2555,7 @@ _lifecycle_emit() {
     if [[ ! -f "$recorder" ]]; then
         recorder="$PLUGIN_DIR/../../libs/zdd/src/zdd/lifecycle.py"
     fi
-    if ! py="$(command -v python3 || command -v python)" || [[ ! -f "$recorder" ]]; then
+    if ! py="$(_bootstrap_python)" || [[ ! -f "$recorder" ]]; then
         _warn "Lifecycle record unavailable: bootstrap Python or payload recorder is missing"
         return 0
     fi

@@ -26,6 +26,9 @@ write this history. Dispatch honors its routing-directory override. Records
 include the installer PID, so the two events do not appear to come from
 unrelated Python helper processes. An interrupted or forcibly terminated
 installer can leave only `begin`; that is not success.
+Recorder execution uses each installer's existing bootstrap interpreter
+resolver, retaining runtime-only Bash and launcher/signed-base Windows support;
+it does not introduce another PATH-only discovery policy.
 
 These are **installer command outcomes**, not independent health or activation
 proof. Existing no-op, superseded-build, forwarded-route, cutover and rollback
@@ -33,6 +36,8 @@ policies are unchanged. The command-boundary regressions execute real shells,
 the actual dispatch/emission source and the actual durable recorder, with
 construction/service effects stubbed. They are not a full fresh-install,
 native-Windows, release or deployed-runtime qualification.
+Launcher/signature observations in the isolated PowerShell regression are
+synthetic; only the final recorder child and durable write execute for real.
 
 ### `zdd.routing` -- the routing table (no proxy)
 

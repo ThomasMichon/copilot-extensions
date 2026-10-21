@@ -23,14 +23,26 @@ def _function(text: str, name: str) -> str:
     return match.group(0)
 
 
+def _ps_function(text: str, name: str) -> str:
+    match = re.search(
+        rf"^function {re.escape(name)} \{{.*?^\}}$", text, re.MULTILINE | re.DOTALL
+    )
+    assert match, name
+    return match.group(0)
+
+
 def _run(tmp_path: Path, action: str, failure: str = "", *, blocked: bool = False,
-         powershell: bool = False) -> tuple[subprocess.CompletedProcess[str], list[dict]]:
+         powershell: bool = False, discovery: str = "") -> tuple[subprocess.CompletedProcess[str], list[dict]]:
     shell = shutil.which("pwsh" if powershell else "bash")
     if not shell or (not powershell and os.name == "nt"):
         pytest.skip("native shell unavailable")
     config = tmp_path / "state with spaces"
     if blocked:
         config.write_text("preserve", encoding="utf-8")
+    runtime = tmp_path / "runtime"
+    if discovery == "runtime":
+        (runtime / "bin").mkdir(parents=True)
+        (runtime / "bin" / "python").symlink_to(sys.executable)
     text = (PLUGIN / "scripts" / ("install.ps1" if powershell else "install.sh")).read_text(
         encoding="utf-8"
     )
@@ -51,9 +63,17 @@ def _run(tmp_path: Path, action: str, failure: str = "", *, blocked: bool = Fals
         script = (
             "Set-StrictMode -Version 2.0\n$ErrorActionPreference = 'Stop'\n"
             "$PluginDir = $env:TEST_PLUGIN\n$InstallDir = $env:TEST_CONFIG\n"
+            "$VenvDir = $env:TEST_RUNTIME\n$LinkDir = $env:TEST_RUNTIME\n"
             "$SrcVersion = '1.2.3'\n$Action = $env:TEST_ACTION\n"
             "$global:LASTEXITCODE = 47\n"
             + ". (Join-Path $PluginDir 'scripts/versioned_runtime_native.ps1')\n"
+            + _ps_function(text, "Get-BootstrapPython") + "\n"
+            + (_ps_function(text, "Get-SignedBasePython") + "\n"
+               if "function Get-SignedBasePython {" in text else "")
+            + (_launcher_fixture() if discovery == "launcher" else "")
+            + ("function Get-Command { param($Name, $CommandType, $ErrorAction) }\n"
+               if discovery == "missing" else "")
+            + (_store_alias_fixture() if discovery == "store-alias" else "")
             + mocks + "\n" + boundary
         )
         args = [shell, "-NoProfile", "-NonInteractive", "-File"]
@@ -70,8 +90,9 @@ def _run(tmp_path: Path, action: str, failure: str = "", *, blocked: bool = Fals
         )
         script = (
             "set -euo pipefail\nPLUGIN_DIR=\"$TEST_PLUGIN\"\nINSTALL_DIR=\"$TEST_CONFIG\"\n"
-            "SRC_VERSION=1.2.3\nACTION=\"$TEST_ACTION\"\n"
+            "SRC_VERSION=1.2.3\nACTION=\"$TEST_ACTION\"\nLINK_DIR=\"$TEST_RUNTIME\"\n"
             "_warn() { printf '%s\\n' \"$*\" >&2; }\n"
+            + _function(text, "_bootstrap_python") + "\n"
             + _function(text, "_lifecycle_emit") + "\n"
             + _function(text, "_lifecycle_finish") + "\n" + mocks + "\n" + boundary
         )
@@ -82,7 +103,11 @@ def _run(tmp_path: Path, action: str, failure: str = "", *, blocked: bool = Fals
     environment = {
         **os.environ, "TEST_PLUGIN": str(PLUGIN), "TEST_CONFIG": str(config),
         "TEST_ACTION": action, "AGENT_DISPATCH_ROUTING_DIR": "",
+        "TEST_RUNTIME": str(runtime), "TEST_PYTHON": sys.executable,
+        "TEST_LAUNCHER_USED": str(tmp_path / "launcher-used"),
     }
+    if not powershell and discovery in {"runtime", "missing"}:
+        environment["PATH"] = str(tmp_path / "empty-path")
     result = subprocess.run(
         [*args, str(harness)], env=environment, capture_output=True, text=True,
         timeout=25, check=False,
@@ -92,6 +117,77 @@ def _run(tmp_path: Path, action: str, failure: str = "", *, blocked: bool = Fals
     events = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()] \
         if log.is_file() else []
     return result, events
+
+
+def _launcher_fixture() -> str:
+    # Native launcher/signature observations are synthetic; the recorder still runs.
+    return r"""
+$env:OS = 'Windows_NT'
+$script:RealHidden = ${function:Invoke-Hidden}
+function Get-Command {
+    param($Name, $CommandType, $ErrorAction)
+    if ($Name -eq 'py') { return [pscustomobject]@{ Source = 'fixture-launcher' } }
+}
+function Get-AuthenticodeSignature {
+    param($Path)
+    return [pscustomobject]@{ Status = 'Valid' }
+}
+function Invoke-Hidden {
+    param([string]$FilePath, [string[]]$ArgList, [ref]$ErrorOutput)
+    if ($FilePath -eq 'fixture-launcher') {
+        if ($ArgList[0] -notlike '-3*') { throw 'unexpected launcher request' }
+        [IO.File]::WriteAllText($env:TEST_LAUNCHER_USED, $ArgList[0])
+        $global:LASTEXITCODE = 0
+        return $env:TEST_PYTHON + "`n"
+    }
+    return & $script:RealHidden -FilePath $FilePath -ArgList $ArgList -ErrorOutput $ErrorOutput
+}
+"""
+
+
+def test_runtime_only_bash_discovery_records_events(tmp_path: Path) -> None:
+    result, events = _run(tmp_path, "update", discovery="runtime")
+    assert result.returncode == 0, result.stderr
+    assert [event["outcome"] for event in events] == ["begin", "ok"]
+    assert not result.stderr
+
+
+def test_powershell_canonical_launcher_discovery_records_events(tmp_path: Path) -> None:
+    result, events = _run(tmp_path, "update", powershell=True, discovery="launcher")
+    assert result.returncode == 0, result.stderr
+    assert (tmp_path / "launcher-used").is_file()
+    assert [event["outcome"] for event in events] == ["begin", "ok"]
+    assert not result.stderr
+
+
+def _store_alias_fixture() -> str:
+    return r"""
+function Get-Command {
+    param($Name, $CommandType, $ErrorAction)
+    if ($Name -eq 'python3') {
+        return [pscustomobject]@{ Source = 'C:\WindowsApps\python.exe' }
+    }
+    if ($Name -eq 'python') {
+        return [pscustomobject]@{ Source = $env:TEST_PYTHON }
+    }
+}
+"""
+
+
+def test_powershell_store_alias_is_not_launched(tmp_path: Path) -> None:
+    result, events = _run(tmp_path, "update", powershell=True, discovery="store-alias")
+    assert result.returncode == 0, result.stderr
+    assert [event["outcome"] for event in events] == ["begin", "ok"]
+    assert not result.stderr
+
+
+@pytest.mark.parametrize("powershell", [False, True], ids=["bash", "powershell"])
+def test_missing_interpreter_is_advisory(tmp_path: Path, powershell: bool) -> None:
+    result, events = _run(tmp_path, "update", powershell=powershell, discovery="missing")
+    assert result.returncode == 0, result.stderr
+    assert not events
+    assert "Lifecycle record unavailable" in result.stderr
+    assert result.stdout == ""
 
 
 @pytest.mark.parametrize("powershell", [False, True], ids=["bash", "powershell"])
@@ -178,10 +274,11 @@ def test_shipped_exit_traps_preserve_status_and_cleanup(tmp_path: Path, exit_cod
         script = (
             "set -euo pipefail\n"
             "PLUGIN_DIR=\"$TEST_PLUGIN\"\nINSTALL_DIR=\"$TEST_CONFIG\"\n"
-            "SRC_VERSION=1.2.3\n_LIFECYCLE_ACTION=update\n"
+            "SRC_VERSION=1.2.3\n_LIFECYCLE_ACTION=update\nLINK_DIR=\"$INSTALL_DIR/runtime\"\n"
             "_warn() { printf '%s\\n' \"$*\" >&2; }\n"
             "_clear_update_marker() { echo marker; }\n"
             "_exit_install_lock() { echo lock; }\n"
+            + _function(text, "_bootstrap_python") + "\n"
             + _function(text, "_lifecycle_emit") + "\n"
             + _function(text, "_lifecycle_finish") + "\n"
             + f"trap {trap} EXIT\n_lifecycle_emit begin\nexit {exit_code}\n"

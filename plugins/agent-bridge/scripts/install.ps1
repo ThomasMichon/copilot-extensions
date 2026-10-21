@@ -485,7 +485,8 @@ function Get-BootstrapPython {
     $sb = Get-SignedBasePython
     if ($sb) { return $sb }
     foreach ($cand in 'python3', 'python') {
-        $c = Get-Command $cand -ErrorAction SilentlyContinue
+        $c = Get-Command $cand -CommandType Application -ErrorAction SilentlyContinue |
+            Where-Object { $_.Source -notmatch 'WindowsApps' } | Select-Object -First 1
         if ($c) { return $c.Source }
     }
     return $null
@@ -3505,12 +3506,7 @@ function Write-InstallerLifecycle {
 
     $savedExit = Get-Variable LASTEXITCODE -Scope Global -ValueOnly -ErrorAction SilentlyContinue
     try {
-        $python = $null
-        foreach ($name in @('python3', 'python')) {
-            $candidate = Get-Command $name -CommandType Application -ErrorAction SilentlyContinue |
-                Where-Object { $_.Source -notmatch 'WindowsApps' } | Select-Object -First 1
-            if ($candidate) { $python = $candidate.Source; break }
-        }
+        $python = Get-BootstrapPython
         $recorder = Join-Path $PluginDir 'libs/zdd/src/zdd/lifecycle.py'
         if (-not (Test-Path -LiteralPath $recorder -PathType Leaf)) {
             $recorder = Join-Path $PluginDir '../../libs/zdd/src/zdd/lifecycle.py'
