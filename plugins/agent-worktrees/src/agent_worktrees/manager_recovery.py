@@ -21,24 +21,7 @@ from pathlib import Path
 from agent_procutil import SyncProcessLaunchError, no_window_kwargs
 
 from . import control_plane_providers as providers, manager_launch_cli, output, update_events
-
-# Full bytes of Manager's published legacy and canonical generated launchers.
-# Edited commands are not adoption evidence, even if they retain a familiar header.
-_OWNED_STUBS = {
-    "worktree-manager.cmd": {
-        "fa96da97ca82f2f3ac72fc33bed22b04467ec1eee018e289bcc70d691766d858",
-        "db1f2e5c3e7df70d8eee1659fd08d465485d4ad49d0bc7fb9900ff8667dd8022",
-    },
-    "worktree-manager.ps1": {
-        "29c2bae43865a9307665f83fb2ed3c7e24c6d661b906dc47f44950d8900febbc",
-        "55d2077997a9d1528b5c1e9aba3a4eb04327366ba2460e9244254f42b42ba2db",
-        "fe7809ba94fa714b866ce6f6e33d136b4b3e877db909778c41181cdd4ad0b030",
-    },
-    "worktree-manager": {
-        "37836dbddadb559b209ec2ab08ba0f9fd062503f6794441c17c2cb9f44390ca2",
-        "c23fd51c53fd009783ff161163a76f7fef4674e3822278a7ff228529e508d5b2",
-    },
-}
+from .manager_launcher_ownership import _OWNED_STUBS as _OWNED_STUBS, owns_launcher
 
 
 class RecoveryRefused(RuntimeError):
@@ -220,7 +203,7 @@ def adopted_manager() -> Adoption | None:
     if stub.parent.resolve() != local_bin.resolve() or stub.name != primary:
         raise RecoveryRefused("Manager command is outside its registered local-bin ownership")
     _ordinary(stub)
-    if _digest(stub) not in _OWNED_STUBS[stub.name]:
+    if not owns_launcher(stub.name, _read(stub)):
         raise RecoveryRefused("Manager binstub is foreign or edited")
     paths = [*entries, stub, root / "current-version", root / "last-known-good", root / "config.toml"]
     snapshots = {path: _read(path) for path in paths}

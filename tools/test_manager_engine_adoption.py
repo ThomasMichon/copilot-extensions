@@ -73,7 +73,7 @@ def test_bare_bootstrap_does_not_resolve_a_project_before_construction(extension
 
 
 def test_recovery_fingerprints_match_manager_owned_templates():
-    source = REPO / "plugins" / "agent-worktrees" / "src" / "agent_worktrees" / "manager_recovery.py"
+    source = REPO / "plugins" / "agent-worktrees" / "src" / "agent_worktrees" / "manager_launcher_ownership.py"
     expected = next(
         ast.literal_eval(node.value) for node in ast.parse(source.read_text(encoding="utf-8")).body
         if isinstance(node, ast.Assign)

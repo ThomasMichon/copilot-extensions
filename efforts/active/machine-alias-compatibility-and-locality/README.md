@@ -384,6 +384,80 @@ unrelated service changes or a second machine registry.
 
 ## Journal
 
+### 2026-10-21 - Final producer qualification and authorized installed acceptance
+- Natural run `39602465019` completed in 12m07s for source
+  `68b58730fb829745c5ed351b6623833e2637638b`, containing #7592.
+  Its recorded Main landing `a6bef60126f7c031c54c9bd931f2157c1d466ff9`
+  has the exact qualified tree `c0c46b7b37408761da022914b361fb83cd193f30`.
+  The indexed source release includes Worktrees `1.24.132-dev1`,
+  Dispatch `0.18.23-dev1` and Bridge `0.9.87-dev1`.
+- The operator authorized deployments, migrations and required restarts at the
+  installed-acceptance gate. This permits normal updater execution and necessary
+  canonical report-first repair; it does not silently enable ordinary tuple
+  producers or replace receiving-space, backup and relationship checks.
+- The first updater attempt stopped on a confirmed missing Copilot installation
+  ledger entry. The supported activation-preserving installation wrapper
+  recovered that entry; normal update then recovered the other registered
+  payload entries without widening activation.
+- Runtime settlement exposed a separate normal-updater blocker tracked under
+  #1088: the published historical POSIX launcher matches the existing fixture
+  exactly, but its fingerprint is missing from the recovery allowlist.
+  The same gap affects the published historical PowerShell template.
+  The existing recovery module reproduced 20 failures at this precheck.
+  The bounded source repair adds only the verified historical fingerprints;
+  foreign or edited launchers remain refused. The separate bundled-wheel
+  traversal failure stays with #7619/#7623.
+- Extracted the full-byte decision into a dependency-free module used by actual
+  recovery and admitted 20 historical-template, edited-byte, unknown-name and
+  missing-body cases to the existing unit packet. This closes the fast-gate
+  coverage omission without enrolling filesystem, Git or installer integration.
+  The affected recovery/launch portfolio passed 31 tests with two conditional
+  skips, and the pure/canonical-template portfolio passed 25 tests.
+  Current-head unit evidence, review, release and renewed deployment remain;
+  no installed-reader or all-worktree acceptance is claimed.
+
+### 2026-10-21 - Producer runtime qualified and published; installed gate open
+- Natural promotion run `39599237595` succeeded for exact producer source
+  `238744f94affddd756c6f2a7ef3b1cc81ac1169e` (#7588), including the
+  preceding initial producer and retained-admission/repair implementation.
+  Its version-2 qualification names candidate
+  `3782ab95b91b7c7f03d220d5a84a973e6e3a68c8` and the source-unit packet;
+  the merged Main commit `10fb4909a585b73719b0e119312b11113cf3a2b6`
+  has the qualified tree `8a1589e0547234288a467e0a432acc522a262736`.
+- The source release is published, not draft, with 13 indexed runtime bundles.
+  Read-back of agent-worktrees `1.24.131-dev1` matches its index SHA-256 and
+  contains the actual gated identity, admission, anchor and retained-destination
+  code inside its first-party wheel. The annotated source-promotion tag resolves
+  to the exact landed Main commit. The natural run completed in 11m53s
+  (14m from source merge through its final tag record).
+- Reconciled the remaining source-coverage item against the reviewed producer,
+  admission/receipt, actual-Git repair, pending-request, adoption/controller and
+  resolver fixtures; the sub-plan now names that coverage map. The later
+  equivalence-only #7592 source is merged and its Dev CI passed, but this
+  qualification is explicitly for #7588, not a claim that #7592 itself was
+  promoted.
+- Installed reader acceptance and all-project Windows/WSL creation/resume
+  remain open with their existing owners. No updater, installation, registry
+  change, ordinary-default activation or real-record migration was performed.
+  Continue the remaining qualification and installed-reader gates; the containing
+  effort is Active.
+
+### 2026-10-21 - Source addressing equivalence merged; qualification remains
+- #7592 merged as `6d2ce18ad8b737bad8fd6037ee56b0566b533eaf`
+  after current-head approval of
+  `a150aff022a11527670774ecc0ea128cd3fa089a`, no review findings
+  and passing required CI. Managed completion reconciled its landed commit
+  and retained a pre-completion backup.
+- The actual one-term source-equivalence sub-item is complete: 48 new cases
+  and the affected 494-test portfolio passed with one conditional skip. The
+  exact reviewed source's existing guarded promotion packet passed 323 tests.
+- Continue the remaining source-coverage reconciliation and natural release
+  qualification, then installed-reader acceptance under its existing owners
+  and authorization boundaries. Neither metadata fixtures nor merged producer
+  source establishes the installed Windows/WSL all-worktree gate.
+  Ordinary defaults remain legacy; activation, rollout and migration remain
+  separately gated. The containing effort is Active.
+
 ### 2026-10-21 - Actual source addressing equivalence
 - Added 48 bounded metadata-fixture cases through the actual JSON `resolve`
   entry point: new tuple production, short-ID/read-only preview lookup,

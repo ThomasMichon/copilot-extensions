@@ -1,6 +1,7 @@
 """The normal updater repairs only its selected, already-adopted Manager."""
 
 from contextlib import contextmanager
+import hashlib
 import json
 import os
 from types import SimpleNamespace
@@ -12,24 +13,45 @@ from agent_procutil import SyncProcessLaunchError
 from agent_worktrees import manager_launch_cli as launch, manager_recovery as recovery
 
 
-def legacy_stub() -> tuple[str, str]:
-    if os.name == "nt":
-        return "worktree-manager.cmd", (
+LEGACY_STUBS = {
+    "worktree-manager.cmd": (
             "@echo off\r\nsetlocal\r\n"
             'set "PYTHONUTF8=1"\r\n'
             'if "%WORKTREE_MANAGER_ROOT%"=="" set "WORKTREE_MANAGER_ROOT=%USERPROFILE%\\.worktree-manager"\r\n'
             'set /p VER=<"%WORKTREE_MANAGER_ROOT%\\current-version"\r\n'
             'uv run --quiet --project "%WORKTREE_MANAGER_ROOT%\\versions\\%VER%" '
             "python -m worktree_manager %*\r\n"
-        )
-    return "worktree-manager", (
+    ),
+    "worktree-manager": (
         "#!/usr/bin/env bash\n"
         "# worktree-manager binstub (versioned) \u2014 resolves the current-version marker.\n"
         "set -euo pipefail\n"
         'root="${WORKTREE_MANAGER_ROOT:-$HOME/.worktree-manager}"\n'
         'ver="$(cat "$root/current-version")"\n'
         'exec uv run --quiet --project "$root/versions/$ver" python -m worktree_manager "$@"\n'
-    )
+    ),
+    "worktree-manager.ps1": (
+        "# worktree-manager binstub (versioned) \u2014 resolves the current-version marker.\n"
+        "$env:PYTHONUTF8 = '1'\n"
+        '$root = if ($env:WORKTREE_MANAGER_ROOT) { $env:WORKTREE_MANAGER_ROOT } '
+        'else { Join-Path $env:USERPROFILE ".worktree-manager" }\n'
+        '$ver = (Get-Content (Join-Path $root "current-version") -Raw).Trim()\n'
+        '$slot = Join-Path (Join-Path $root "versions") $ver\n'
+        "uv run --quiet --project $slot python -m worktree_manager @args\n"
+    ),
+}
+
+
+def legacy_stub() -> tuple[str, str]:
+    name = "worktree-manager.cmd" if os.name == "nt" else "worktree-manager"
+    return name, LEGACY_STUBS[name]
+
+
+@pytest.mark.parametrize("name,body", LEGACY_STUBS.items())
+def test_published_legacy_launcher_fingerprints_are_owned(name, body):
+    assert hashlib.sha256(body.encode("utf-8")).hexdigest() in recovery._OWNED_STUBS[name]
+    edited = (body + "\necho edited\n").encode("utf-8")
+    assert hashlib.sha256(edited).hexdigest() not in recovery._OWNED_STUBS[name]
 
 
 @pytest.fixture

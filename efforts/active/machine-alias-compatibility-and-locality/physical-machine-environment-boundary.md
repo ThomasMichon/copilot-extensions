@@ -313,26 +313,44 @@ Do not rewrite old receipts or backfill identity merely by replaying them.
   a replacement on retry or refusal in #7582.
 - [x] Wire new anchor and external-adoption records through the same opt-in
   boundary; prove existing records are returned byte-for-byte unchanged in #7588.
-- [ ] Prove source one-term equivalence through actual creation/lookup/resume
+- [x] Prove source one-term equivalence through actual creation/lookup/resume
   entry points: declared shorthand, physical plus explicit environment, custom
   execution key and configured aliases agree where permitted. Retain exact-key
-  precedence, ambiguity, conflicting-environment and foreign-space refusals.
-- [ ] Cover actual producer-to-tracking-to-JSON and pair/controller/reference
+  precedence, ambiguity, conflicting-environment and foreign-space refusals in #7592.
+- [x] Cover actual producer-to-tracking-to-JSON and pair/controller/reference
   flows for Windows, WSL and Linux. Include a physical name ending in a
   platform-like suffix, repeated historical prefixes, both suffix lengths,
   changed current registry spelling, removed checkout, pending reservation,
-  changed nonce and competing if-absent creation.
-- [ ] Run bounded source validation and required CI, review the final source
+  changed nonce and competing if-absent creation. The source map below names
+  the reviewed regressions; installed acceptance remains separate.
+- [x] Run bounded source validation and required CI, review the final source
   diff, and release through normal unit-only promotion. Pure decisions are unit
   candidates only when the actual effect/coverage closure admits them; real
   SQLite/filesystem/Git, cross-process and installed/native cases stay in
   existing bounded development/periodic lanes, not promotion prerequisites.
+  The final equivalence slice is included in natural qualification
+  `39602465019` for source `68b58730fb829745c5ed351b6623833e2637638b`;
+  its recorded Main landing has the exact qualified tree.
 - [ ] Verify released, installed reader acceptance in every relevant consumer
   before proposing ordinary producer-default activation. Source fixtures,
   merged adapters and artifact publication are not installed acceptance.
 - [ ] Review any ordinary-default activation separately, only after retained
   replay, one-term equivalence and installed-reader gates pass. Actual rollout
   remains separately authorized; no historical-record migration is implied.
+
+### Reviewed source coverage map
+
+All test paths below are under `plugins/agent-worktrees/tests/`; this is source
+coverage, not native or installed-consumer acceptance.
+
+| Obligation | Reviewed source coverage |
+|---|---|
+| Actual new session/bridge/system producers, tracking and JSON; physical names ending in a platform suffix | `test_tuple_creation.py` (#7572) |
+| Complete daemon admission, old/new receipt replay, removed checkout, owner/nonce/pair changes and partial tuple refusals | `test_launch_allocation.py` (#7582) |
+| Retained actual-Git paired repair, Windows/WSL/Linux metadata, both suffix lengths, historical prefixes, changed legacy registry spelling and repeated repair bytes | `test_retained_allocation_repair.py` (#7582) |
+| Pending/interrupted requests remain inspect-only; no repeated effects | `test_creation_requests.py`, exercised in the #7582 affected portfolio |
+| Actual new anchor/external adoption, YAML/JSON/controller/reference flows, retained history and competing if-absent winners | `test_tuple_adoption.py` (#7588) |
+| Actual one-term new/short-ID preview lookup/resume, alias and exact-key precedence, conflicting/foreign-space refusals | `test_tuple_resolve_equivalence.py` (#7592) |
 
 ## Validation Plan
 

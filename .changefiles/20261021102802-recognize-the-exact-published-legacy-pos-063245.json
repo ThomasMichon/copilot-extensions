@@ -1,0 +1,9 @@
+{
+  "comment": "Recognize the exact published legacy POSIX and PowerShell Manager launchers during owned update recovery",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
