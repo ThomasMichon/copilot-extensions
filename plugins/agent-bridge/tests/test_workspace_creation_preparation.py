@@ -90,6 +90,7 @@ async def test_cancelled_preparation_stays_pending_without_retry(creation_rig, m
 async def test_prepared_plan_reaches_host_once_and_spawn_failure_stays_pending(creation_rig, monkeypatch):
     rig = creation_rig
     calls = []
+    spawns = []
 
     async def resolve(target, **kwargs):
         calls.append(kwargs["session_id"])
@@ -99,11 +100,11 @@ async def test_prepared_plan_reaches_host_once_and_spawn_failure_stays_pending(c
         boundary = "local"
 
         async def spawn(self, args, *, cwd, env, session_id):
-            assert session_id == calls[0]
-            assert cwd == rig.row["path"] and env["PREPARED"] == "yes"
-            assert args[:3] == ["copilot", "--acp", "--stdio"]
-            assert rig.db.get_session(session_id) is not None
-            assert rig.db.execute_read("SELECT state FROM workspace_embodiments")[0]["state"] == "launching"
+            spawns.append((
+                list(args), cwd, dict(env), session_id,
+                rig.db.get_session(session_id) is not None,
+                rig.db.execute_read("SELECT state FROM workspace_embodiments")[0]["state"],
+            ))
             raise RuntimeError("spawn outcome unknown")
 
     monkeypatch.setattr(local_launch_preparation, "resolve_local_launch", resolve)
@@ -121,6 +122,11 @@ async def test_prepared_plan_reaches_host_once_and_spawn_failure_stays_pending(c
     with pytest.raises(AcquisitionRefused, match="reconciliation"):
         await workspace_creation.start(rig.manager, rig.target, key="logical-work")
     assert len(calls) == 1
+    assert len(spawns) == 1
+    args, cwd, env, session_id, registered, state = spawns[0]
+    assert args[:3] == ["copilot", "--acp", "--stdio"]
+    assert cwd == rig.row["path"] and env["PREPARED"] == "yes"
+    assert session_id == calls[0] and registered and state == "launching"
     assert len(rig.db.execute_read("SELECT * FROM sessions")) == 1
     assert rig.db.execute_read("SELECT state FROM workspace_embodiments")[0]["state"] == "launching"
 
