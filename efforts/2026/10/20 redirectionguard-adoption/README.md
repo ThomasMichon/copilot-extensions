@@ -4,7 +4,8 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent reviewed slices targeting `dev`
 - **Created:** 2026-10-20
-- **Status:** Active
+- **Status:** Done
+- **Completed:** 2026-10-20
 - **Vision:** Closes the existing installer vision's trustworthy front door and
   repair behavior; preserves uniform runtime resolution and Windows launch
   hardening rather than introducing another resolver or security exception.
@@ -25,7 +26,7 @@ Windows mitigations, configured dependency sources and seven-day seasoning.
 |-------------|---------------------|-------------|
 | Audit coordinator | Owns the audit, reviewed plan, integration and completion accounting. | Managed source worktree `oiled-blueprint`; #7445. |
 | Shared-interpreter implementer | Owns only the accepted shared base-interpreter repair and its canonical fan-out. | Managed source worktree `quiet-bearing`; #7445. |
-| Front-door implementer | Owns only the accepted bare-provider diagnostics and failure-result repair. | Separate managed source worktree allocated after plan review; #7445. |
+| Front-door implementer | Owns only the accepted bare-provider diagnostics and failure-result repair. | Managed source worktree `spry-coil`; #7445. |
 
 ## Coordination
 
@@ -54,9 +55,9 @@ Windows mitigations, configured dependency sources and seven-day seasoning.
 
 ## Context
 
-The canonical [uniform runtime resolution pattern](../../../docs/patterns/uniform-runtime-resolution.md)
+The canonical [uniform runtime resolution pattern](../../../../docs/patterns/uniform-runtime-resolution.md)
 already requires marker-selected concrete runtimes, with non-traversing legacy
-link handling. The [transport-provider contract](../../../plugins/agent-ssh/docs/transport-provider-contract.md)
+link handling. The [transport-provider contract](../../../../plugins/agent-ssh/docs/transport-provider-contract.md)
 also documents real Windows helper executables instead of WinGet-link reliance.
 Historical #765 and #108 record the earlier repairs.
 
@@ -93,18 +94,18 @@ not add Linux/WSL deployment work or authorize persistent security changes.
 
 ### Phase 2 - Shared base-interpreter adoption
 
-- [ ] Repair the uncovered shared interpreter path using non-traversing link
+- [x] Repair the uncovered shared interpreter path using non-traversing link
   target handling consistent with the existing contract. Preserve executable
   identity, console/windowless selection and venv import context; fail
   explicitly on unusable targets rather than selecting an unrelated Python.
-- [ ] Add focused regression coverage and synchronize canonical library copies
+- [x] Add focused regression coverage and synchronize canonical library copies
   through the existing tool, with the required release metadata.
 
 ### Phase 3 - Trustworthy failed front doors
 
-- [ ] Preserve a bounded, sanitized failed-provider probe cause; avoid an
+- [x] Preserve a bounded, sanitized failed-provider probe cause; avoid an
   unsupported stale-binstub diagnosis or a fallback that is not available.
-- [ ] Distinguish first-run onboarding, intentional headless use and an
+- [x] Distinguish first-run onboarding, intentional headless use and an
   installed-provider launch failure. Return a failure for the latter without
   changing unrelated successful launch behavior. Own only provider-health
   interpretation, factual diagnostics and bare-dispatch result handling;
@@ -112,35 +113,111 @@ not add Linux/WSL deployment work or authorize persistent security changes.
 
 ### Phase 4 - Integration and completion
 
-- [ ] Land the independently reviewed repairs, reconcile their exact merged
+- [x] Land the independently reviewed repairs, reconcile their exact merged
   heads and update the relevant contract documentation.
-- [ ] Record Main publication separately from Dev merge. Transfer any remaining
-  published-runtime adoption/recovery to its existing named objective #7305,
+- [x] Deferred to `#7305`: Record Main publication separately from Dev merge
+  and complete published-runtime adoption/recovery through its existing owner,
   without calling a source-only result deployed or fully recovered.
 
 ## Validation Plan
 
-- [ ] Run focused existing unit/contract selections for each changed helper and
+- [x] Run focused existing unit/contract selections for each changed helper and
   caller, including blocked link traversal and preserved venv context.
 - [x] Exercise the real interpreter helper in an inherited-RedirectionGuard
   Windows context, using a healthy real binary behind an inaccessible alias.
   Confirm the mitigation remains enabled and test two repeated invocations.
-- [ ] Exercise a real failed child provider through the bare-front-door
+- [x] Exercise a real failed child provider through the bare-front-door
   consumer, checking sanitized output, available fallback and exact exit status.
-- [ ] Run applicable canonical-copy, lint and install-contract guards through
+- [x] Run applicable canonical-copy, lint and install-contract guards through
   the repository's bounded test tooling. Record unavailable native/clean-room
   lanes explicitly rather than claiming they passed.
-- [ ] Re-read this effort after merges; resolve every item or transfer it to an
+- [x] Re-read this effort after merges; resolve every item or transfer it to an
   explicitly named tracked objective before marking the effort Done.
 
 ## Proposal
 
 The proposal passed automated review and merged in #7447. The bounded source
 implementation may proceed; production rollout remains separately qualified.
-The hunk-level independent front-door sequencing amendment requires its own
-review before that slice starts.
+The hunk-level independent front-door sequencing amendment passed review and
+merged in #7466 before that slice started.
 
 ## Journal
+
+### 2026-10-20 - Source audit complete; recovery owner retained
+
+- #7455 merged to Dev as `b0284a04b356d5f612bb98ef0d16db2f1253c89b`
+  after a clean current-head Copilot verdict, resolved threads, green required
+  checks and independent inherited-enforcement qualification. Its managed
+  implementation worktree was finalized.
+- Re-read this effort after both implementation merges. Integrated source
+  bytes for the interpreter helper, dependent consumers and bare front door
+  match their independently qualified candidate heads. The helper and SSH
+  library READMEs and Worktrees README document the resulting contracts,
+  consistent with the existing uniform-runtime pattern. Every source
+  implementation and validation item is resolved.
+- Main publication and authorized installed-consumer recovery remain explicitly
+  transferred to #7305, recorded in
+  [the source-prerequisite handback](https://github.com/ThomasMichon/copilot-extensions/issues/7305#issuecomment-6306143693).
+  Its existing complete-update, active-version/readiness and preserved-headed-CLI
+  acceptance criteria remain open. #7420 retains construction and installed
+  launcher ownership. No installed files, Windows mitigation, configured feeds
+  or seasoning policy were changed.
+- This effort is Done for its reviewed source-audit scope, not a declaration
+  that Main contains the repairs or that installed Manager environments have
+  recovered. Archive the completed source record through the normal review
+  gate.
+
+### 2026-10-20 - Front-door repair merged
+
+- #7469 merged to Dev as `62f37f0f71e71a52147868bfd255b19bdb9f2c8f`
+  after exact-head approval, green current required checks and independent
+  real-child qualification. Its managed implementation worktree was finalized.
+- Re-read the effort and resolved Phase 3. The shared-helper review/merge and
+  final source integration remain open; the installed Manager reconstruction
+  and published update/readiness proof remain with #7420/#7305.
+
+### 2026-10-20 - Final candidate qualification
+
+- The shared helper's final candidate passed 135 focused cases, with one
+  enforcement-specific skip in the ordinary suite, plus the SSH, Manager,
+  Worktrees and zipapp consumer selections. Canonical-copy and applicable
+  repository guards passed. Review also caught and corrected local-GUI link
+  fallback and equal-input/GUI-target console-selection edge cases.
+- Independently exercised that exact candidate in an inherited enforcement
+  context: all three APIs refused a blocked legacy configuration twice.
+  A fresh physical-home environment ran console and GUI children twice each,
+  preserving its prefix and selected-only import. Strict GUI selection and
+  unchanged native policy were checked; disposable scratch was removed.
+- The independent front-door candidate passed 174 focused cases and applicable
+  guards. Unknown explicit provider selections and ambiguous registries are
+  failures, and help-only output cannot mask failed provider health.
+- Independently exercised its real bare-dispatch consumer with a registered
+  Python child that exited 17. Two project and two no-project invocations
+  returned 1, retained the actionable cause and child exit, bounded stderr,
+  redacted synthetic URL credentials and promised no unavailable fallback.
+  Empty-registry first-run onboarding still returned 0. Only the terminal,
+  headless and bundled-UI availability seams were controlled; provider
+  discovery, the subprocess, health interpretation and result propagation
+  were real.
+- The fresh physical-home environment covers the first-touch helper contract,
+  not Manager installation. The enforced SSH lane provides native Windows
+  consumer evidence, not a full published installation. Full installer
+  reconstruction and authorized published-runtime recovery remain with
+  #7420/#7305; no installed runtime or security/dependency policy was changed.
+
+### 2026-10-20 - Independent diagnostics authorized
+
+- #7466 merged after exact-head approval with no findings and green required
+  checks. Synced the coordinator and assigned `spry-coil` to the reviewed
+  diagnostics-only slice.
+- Refreshed helper review identified two tightly coupled consumer assumptions:
+  Manager's existing daemon selection and SSH proxy GUI-intent detection
+  inferred identity from resolved filenames/directories. Correct those narrow
+  callers before merging the helper; do not treat the whole Manager namespace
+  as exclusive ownership of every unchanged function.
+- Existing Manager construction, publication, cancellation and installed
+  launcher ownership remain separate. No shared-helper merge is authorized
+  with an unresolved correctness finding.
 
 ### 2026-10-20 - Hunk-level sequencing correction
 

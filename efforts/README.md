@@ -10,7 +10,6 @@ that pattern to this repository.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
-| [RedirectionGuard Adoption](active/redirectionguard-adoption/README.md) | Active; helper qualification complete, independent diagnostics sequencing amendment proposed | #7445; preserves #7420/#7410 and #7305 consumer-recovery owners |
 | [Acknowledged Execution Handoff](active/acknowledged-execution-handoff/README.md) | Blocked; generic contract reviewed and merged, implementation authorization and owner assignment next | #7268; no runtime implementation or adoption |
 | [Remote ACP Host Ownership](active/remote-acp-host-ownership/README.md) | Active; proposal and target-contribution prerequisite merged, qualified relationship claim integration next | #7237; existing session, claims and dispatch owners retained |
 | [Agent Chat Graduation](active/agent-chat-graduation/README.md) | Draft; one vision/architecture/plugin/service/lifecycle proposal before implementation | #7238; existing fleet, service and session-host owners retained |
@@ -125,6 +124,7 @@ that pattern to this repository.
 
 | Effort | Outcome | Coordination |
 |--------|---------|--------------|
+| [RedirectionGuard Adoption](2026/10/20%20redirectionguard-adoption/README.md) | Done; shared interpreter and failed-front-door source repairs merged to Dev and qualified; no rollout | #7445; publication and installed-consumer recovery retained by #7305, construction by #7420 |
 | [Gateway Native Qualification](2026/10/20%20gateway-native-qualification/README.md) | Done; explicit native selection and actual exact-source amd64/ARM64 assembled proofs merged, private evidence/images retained; no rollout | #7257 retains provider/live-edge gates; authentication, lifecycle and adoption owners unchanged |
 | [ADO PR Stewardship](2026/10/20%20ado-pr-stewardship/README.md) | Done; central ADO evidence/configuration/owner integration released, installed worker policy proved, consumer tool forks retired | #7203; separate #3336/#6007/#7051 obligations retained |
 | [Gateway Role Tunnels](2026/10/19%20gateway-role-tunnels/README.md) | Done; reusable runtime/image and generic ingress merged, native amd64 isolated proof and readiness record; no rollout | #7257 retains native ARM64/live edge/provider gates; broader #6236/#6030 remain open |
