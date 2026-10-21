@@ -342,7 +342,19 @@ the **read-only** workflow token to verify their actual bytes. An upload result
 or a release-writer-only view is not availability proof. Authentication,
 publication, incomplete-set and byte-integrity failures fail the promotion job
 before any PR merge is attempted. A retry may fill missing assets but cannot replace
-existing bytes. The generated PR links its ready set, and merge authorization
+existing bytes.
+
+Missing assets in the same readiness release share one `gh release upload`
+invocation, without `--clobber`. After complete metadata validation, readiness
+and final-publication raw readback use at most four concurrent downloads, each
+with the same consumer token and 120-second deadline. Every download must
+finish and pass its exact digest check before a success receipt is emitted;
+worker failures propagate and all owned workers are joined. Release/tag/source
+validation and signer checks are unchanged and are not parallelized.
+These source helpers take effect only when the independently governed control
+selects a reviewed helper revision; a Dev merge alone does not change its pin.
+
+The generated PR links its ready set, and merge authorization
 and the merge waiter retain the SHA appended directly by the trusted promoter
 to the step's GitHub output file. A remote branch lookup never selects that
 identity: both the lookup and fetched ref must equal the promoter's SHA before

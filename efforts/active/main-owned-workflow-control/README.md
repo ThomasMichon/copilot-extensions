@@ -268,6 +268,12 @@ authorizes critical main-path acceptance or a bounded administrative change.
 
 ### Phase 1 - Earliest safe run and check reductions
 
+- [x] Land the bounded source-CI job consolidation and remove duplicate
+  report-only PR inventory (#7656), preserving real selected-unit outcomes,
+  every admitted unit, parallel guards and the independent release pass.
+  Natural source/push CI and the closed, unmerged narrative validation #7663
+  prove the actual conditional outcomes and retained push diagnostic.
+  This does not close the whole-flow measurement and release-cycle items.
 - [ ] Remove redundant release-shaped PR and main-push validation only where
   existing trusted gates and exact-SHA release evidence cover the removed work;
   first prove no generated-output coverage or required context is lost.
@@ -334,6 +340,13 @@ authorizes critical main-path acceptance or a bounded administrative change.
   acceptance remain open.
   The independent CLI-fixture correction merged in #7288; comparable Linux
   timing acceptance remains on #7075, with no production provisioning change.
+  The pinned unit-census and actual periodic-execution audit merged in #7506.
+  It distinguishes the admitted 236-node packet from the unfinished full unit
+  identity map and the still-unproved accepted repair initiation for #7377.
+  The Campaign driver initiated and merged #7546 for #7377's Containers
+  fixture family, preserving real disk-refusal coverage in a complementary
+  non-tmpfs run. Other failure families and a subsequent complete scheduled
+  execution remain open; this is not whole-portfolio acceptance.
 - [x] Land the dev implementation of reviewed, widen-only module-size baseline
   maintenance and remove its obsolete main exception from source (#6438).
 - [x] Verify a covering promotion activates the dev-owned baseline producer on
@@ -558,3 +571,4 @@ this contract. New evidence belongs in its date file, not another peer effort.
 - [2026-10-20](journal/2026/10.20.md)
 - [2026-10-20 - Independent upstream test repairs](journal/2026/10.20-test-repairs.md)
 - [2026-10-21 - Windows Dispatch base selection](journal/2026/10.21.md)
+- [2026-10-21 - Whole-flow CI consolidation](journal/2026/10.21-flow-consolidation.md)

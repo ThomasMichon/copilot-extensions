@@ -24,6 +24,83 @@ MANIFEST = ".github/promotion-units.json"
 NODE = "tools/promotion_unit_tests/test_example.py::test_example"
 
 
+@pytest.fixture
+def inline_readback(monkeypatch):
+    lifecycle = []
+
+    class Workers:
+        def __init__(self, *, max_workers):
+            assert max_workers == 4
+
+        def __enter__(self):
+            lifecycle.append("entered")
+            return self
+
+        def __exit__(self, *args):
+            lifecycle.append("exited")
+
+        def map(self, operation, assets):
+            return map(operation, assets)
+
+    monkeypatch.setattr(publisher, "ThreadPoolExecutor", Workers)
+    return lifecycle
+
+
+def test_raw_readback_requires_consumer_authority_and_every_exact_subject(
+    monkeypatch, inline_readback,
+):
+    observed = []
+    payloads = {1: b"first", 2: b"second", 3: b"third"}
+
+    def read(argv, **kwargs):
+        identifier = int(argv[1].rsplit("/", 1)[1])
+        observed.append(identifier)
+        assert argv == [
+            "api", f"repos/{REPOSITORY}/releases/assets/{identifier}",
+            "-H", "Accept: application/octet-stream",
+        ]
+        assert kwargs == {"verification": True, "binary": True, "timeout": 120}
+        return publisher.subprocess.CompletedProcess(argv, 0, payloads[identifier], b"")
+
+    monkeypatch.setattr(publisher, "_gh", read)
+    publisher.verify_asset_downloads(REPOSITORY, [
+        (f"subject-{identifier}", identifier, hashlib.sha256(raw).hexdigest())
+        for identifier, raw in payloads.items()
+    ])
+    assert observed == [1, 2, 3]
+    assert inline_readback == ["entered", "exited"]
+
+
+def test_raw_readback_cannot_ignore_a_later_corrupt_subject(monkeypatch, inline_readback):
+    observed = []
+
+    def read(argv, **kwargs):
+        identifier = int(argv[1].rsplit("/", 1)[1])
+        observed.append(identifier)
+        return publisher.subprocess.CompletedProcess(
+            argv, 0, b"expected" if identifier == 1 else b"corrupt", b"",
+        )
+
+    monkeypatch.setattr(publisher, "_gh", read)
+    digest = hashlib.sha256(b"expected").hexdigest()
+    with pytest.raises(publisher.PromotionArtifactError, match="second"):
+        publisher.verify_asset_downloads(REPOSITORY, [("first", 1, digest), ("second", 2, digest)])
+    assert observed == [1, 2]
+    assert inline_readback == ["entered", "exited"]
+
+
+def test_raw_readback_provider_refusal_never_becomes_success(monkeypatch, inline_readback):
+    monkeypatch.setattr(
+        publisher, "_gh",
+        lambda argv, **kwargs: publisher.subprocess.CompletedProcess(
+            argv, 1, b"", b"HTTP 403: Forbidden",
+        ),
+    )
+    with pytest.raises(publisher.PromotionArtifactError, match="gh failed"):
+        publisher.verify_asset_downloads(REPOSITORY, [("subject", 1, "f" * 64)])
+    assert inline_readback == ["entered", "exited"]
+
+
 def _producer():
     repository = {"id": 77, "full_name": REPOSITORY}
     return {

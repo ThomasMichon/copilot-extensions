@@ -64,15 +64,9 @@ def _verify_downloads(
 ) -> None:
     if assets.keys() != expected.keys():
         raise PromotionArtifactError(f"{tag}: candidate artifact publication is incomplete")
-    for name, digest in expected.items():
-        result = publisher._gh(
-            ["api", f"repos/{repository}/releases/assets/{assets[name]['id']}",
-             "-H", "Accept: application/octet-stream"],
-            verification=True, binary=True, timeout=120,
-        )
-        publisher._check(result)
-        if not isinstance(result.stdout, bytes) or hashlib.sha256(result.stdout).hexdigest() != digest:
-            raise PromotionArtifactError(f"{tag}: downloaded readiness asset digest mismatch: {name}")
+    publisher.verify_asset_downloads(repository, [
+        (f"{tag}/{name}", assets[name]["id"], digest) for name, digest in expected.items()
+    ])
 
 
 def _validated_set(
@@ -107,11 +101,10 @@ def prepare_artifacts(
     if release is None or publisher._tag_commit(repository, tag) != source:
         raise PromotionArtifactError(f"{tag}: candidate release/tag creation was not verified")
     assets = _assets(repository, release, expected)
-    for name in expected:
-        if name in assets:
-            continue
+    missing = [str(directory / name) for name in expected if name not in assets]
+    if missing:
         publisher._check(publisher._gh([
-            "release", "upload", tag, "--repo", repository, str(directory / name),
+            "release", "upload", tag, "--repo", repository, *missing,
         ], timeout=120))
     return verify_ready_artifacts(
         directory, repository=repository, candidate_commit=candidate_commit,

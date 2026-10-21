@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import subprocess
+import threading
 from pathlib import Path
 
 import pytest
@@ -14,6 +15,137 @@ import publish_python_artifacts as publisher
 import qualify_promotion_candidate as qualification
 from test_promotion_python_artifacts import DEV, MAIN, TREE, _publish_fixture, _write_index
 from verify_promotion_workflows import VerificationError
+
+
+def test_raw_readback_is_bounded_parallel_and_checks_every_exact_asset(monkeypatch) -> None:
+    payloads = {identifier: bytes([identifier]) for identifier in range(1, 10)}
+    expected = [
+        (f"release-{identifier}/payload.zip", identifier, hashlib.sha256(payload).hexdigest())
+        for identifier, payload in payloads.items()
+    ]
+    lock, first_wave = threading.Lock(), threading.Event()
+    active = peak = 0
+    observed = []
+
+    def download(argv, **kwargs):
+        nonlocal active, peak
+        identifier = int(argv[1].rsplit("/", 1)[1])
+        assert argv == [
+            "api", f"repos/example/plugins/releases/assets/{identifier}",
+            "-H", "Accept: application/octet-stream",
+        ]
+        assert kwargs == {"verification": True, "binary": True, "timeout": 120}
+        with lock:
+            active += 1
+            peak = max(peak, active)
+            observed.append(identifier)
+            if active == 4:
+                first_wave.set()
+        try:
+            assert first_wave.wait(5), "raw reads were serialized"
+            return subprocess.CompletedProcess(argv, 0, payloads[identifier], b"")
+        finally:
+            with lock:
+                active -= 1
+
+    monkeypatch.setattr(publisher, "_gh", download)
+    publisher.verify_asset_downloads("example/plugins", expected)
+    assert peak == 4 and active == 0
+    assert sorted(observed) == sorted(payloads)
+
+
+@pytest.mark.parametrize("failure", ["http", "digest", "text", "timeout"])
+def test_raw_readback_propagates_worker_failure_and_joins_all_workers(
+    monkeypatch, failure,
+) -> None:
+    active = 0
+    observed = []
+    lock, first_wave = threading.Lock(), threading.Event()
+    payload = b"expected"
+    digest = hashlib.sha256(payload).hexdigest()
+
+    def download(argv, **kwargs):
+        nonlocal active
+        identifier = int(argv[1].rsplit("/", 1)[1])
+        with lock:
+            active += 1
+            observed.append(identifier)
+            if active == 4:
+                first_wave.set()
+        try:
+            assert first_wave.wait(5)
+            if identifier == 1:
+                if failure == "timeout":
+                    raise subprocess.TimeoutExpired(argv, 120)
+                if failure == "http":
+                    return subprocess.CompletedProcess(argv, 1, b"", b"HTTP 403: Forbidden")
+                return subprocess.CompletedProcess(
+                    argv, 0, "expected" if failure == "text" else b"corrupt", b"",
+                )
+            return subprocess.CompletedProcess(argv, 0, payload, b"")
+        finally:
+            with lock:
+                active -= 1
+
+    monkeypatch.setattr(publisher, "_gh", download)
+    error = subprocess.TimeoutExpired if failure == "timeout" else artifacts.PromotionArtifactError
+    with pytest.raises(error):
+        publisher.verify_asset_downloads(
+            "example/plugins", [(f"subject-{i}", i, digest) for i in range(1, 10)],
+        )
+    assert active == 0
+    assert len(observed) == len(set(observed))
+
+
+@pytest.mark.parametrize("invalid_last_metadata", [False, True])
+def test_final_raw_reads_start_only_after_every_release_identity_is_validated(
+    tmp_path, monkeypatch, invalid_last_metadata,
+) -> None:
+    entries = [
+        {"plugin": name, "version": "1.0", "filename": f"{name}.zip", "sha256": str(i) * 64}
+        for i, name in enumerate(("first", "second"), 1)
+    ]
+    index = {"artifacts": entries}
+    monkeypatch.setattr(publisher, "validate_commit_artifacts", lambda *a, **kw: index)
+    monkeypatch.setattr(publisher, "_tag_commit", lambda *a: TREE)
+    bindings = []
+    monkeypatch.setattr(publisher, "_validate_tag_binding", lambda *a, **kw: bindings.append(a[1]))
+    downloads = []
+    monkeypatch.setattr(
+        publisher, "verify_asset_downloads", lambda *args: downloads.append((args, list(bindings))),
+    )
+
+    def metadata(argv, **kwargs):
+        assert kwargs.get("verification") and not kwargs.get("binary")
+        if "/releases/tags/" in argv[1]:
+            tag = argv[1].rsplit("/", 1)[1]
+            identifier = 1 if tag.startswith("first-") else 2
+            payload = {"draft": False, "tag_name": tag, "id": identifier, "assets": []}
+        else:
+            identifier = int(argv[-1].split("/releases/", 1)[1].split("/", 1)[0])
+            entry = entries[identifier - 1]
+            payload = [[{
+                "name": entry["filename"], "id": identifier, "state": "uploaded",
+                "digest": "sha256:" + (
+                    "0" * 64 if invalid_last_metadata and identifier == 2 else entry["sha256"]
+                ),
+            }]]
+        return subprocess.CompletedProcess(argv, 0, json.dumps(payload), "")
+
+    monkeypatch.setattr(publisher, "_gh", metadata)
+    kwargs = dict(
+        repository="example/plugins", candidate_commit=TREE, dev_head=DEV, repo=tmp_path,
+    )
+    if invalid_last_metadata:
+        with pytest.raises(artifacts.PromotionArtifactError):
+            publisher.verify_published_artifacts(tmp_path, **kwargs)
+        assert not downloads
+    else:
+        assert publisher.verify_published_artifacts(tmp_path, **kwargs) is index
+        assert downloads == [(("example/plugins", [
+            ("first-v1.0/first.zip", 1, "1" * 64),
+            ("second-v1.0/second.zip", 2, "2" * 64),
+        ]), entries)]
 
 
 class PublicationService:
@@ -45,16 +177,18 @@ class PublicationService:
             }
             return result()
         if argv[:2] == ["release", "upload"]:
-            tag, path = argv[2], Path(argv[-1])
+            tag = argv[2]
             assert "--clobber" not in argv
-            payload = path.read_bytes()
-            asset = {
-                "id": len(self.assets) + 1, "name": path.name, "state": "uploaded",
-                "digest": "sha256:" + hashlib.sha256(payload).hexdigest(),
-            }
-            assert not any(existing["name"] == path.name for existing in self.releases[tag]["assets"])
-            self.releases[tag]["assets"].append(asset)
-            self.assets[asset["id"]] = {**asset, "payload": payload, "tag": tag}
+            for filename in argv[argv.index("--repo") + 2:]:
+                path = Path(filename)
+                payload = path.read_bytes()
+                asset = {
+                    "id": len(self.assets) + 1, "name": path.name, "state": "uploaded",
+                    "digest": "sha256:" + hashlib.sha256(payload).hexdigest(),
+                }
+                assert not any(existing["name"] == path.name for existing in self.releases[tag]["assets"])
+                self.releases[tag]["assets"].append(asset)
+                self.assets[asset["id"]] = {**asset, "payload": payload, "tag": tag}
             return result()
         assert argv[0] == "api", argv
         endpoint = next(item for item in argv if item.startswith("repos/"))
