@@ -195,8 +195,11 @@ def _retained_inputs(inputs: FrozenInputs, uv: Path, python: Path, *, refresh: b
         environment.pop(name, None)
     with retain_uv_install(
         str(uv.resolve(strict=True)),
-        ["--python", str(python), "--no-sources", "--no-editable", "--link-mode", "copy",
-         *(["--reinstall"] if refresh else []), *map(str, inputs.packages)],
+        ["--python", str(python), "--no-editable", "--link-mode", "copy",
+         *(["--reinstall"] if refresh else []),
+         *(argument for package in inputs.packages
+           for argument in ("-r", str(package / "pyproject.toml"))),
+         *map(str, inputs.packages)],
         env=environment, cwd=inputs.plugin,
         trusted_source_roots=inputs.packages,
     ) as transaction:

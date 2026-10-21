@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import json
 import hashlib
+import os
 import shutil
+import subprocess
+import sys
 import tomllib
 from contextlib import contextmanager
 from pathlib import Path
@@ -72,7 +75,10 @@ def _bundled_wheel_source(tmp_path):
     return payload, root, wheel
 
 
-def test_bundled_wheel_reaches_real_manager_installation_inputs(tmp_path, monkeypatch):
+@pytest.mark.parametrize("platform,uses_wheel", [("linux", True), ("windows", False)])
+def test_bundled_wheel_reaches_real_manager_installation_inputs(
+    tmp_path, monkeypatch, platform, uses_wheel,
+):
     adapter = si._runtime_installer()
     payload, root, wheel = _bundled_wheel_source(tmp_path)
     contents = (payload / wheel).read_bytes()
@@ -99,6 +105,23 @@ def test_bundled_wheel_reaches_real_manager_installation_inputs(tmp_path, monkey
             if retained == inputs.plugin
         )
         assert inputs.transaction.source_hashes[original / wheel] == hashlib.sha256(contents).hexdigest()
+        command = list(inputs.transaction.argv)
+        assert "--no-sources" not in command
+        assert command[command.index("-r") + 1] == str(inputs.plugin / "pyproject.toml")
+        # Exercise the retained dependency resolver offline without building the
+        # fixture project or installing anything into the host interpreter.
+        command = [argument for argument in command if argument not in map(str, inputs.packages)]
+        command[command.index("--python") + 1] = sys.executable
+        command.extend(["--dry-run", "--offline", "--no-cache", "--python-platform", platform])
+        result = subprocess.run(
+            command, env=inputs.transaction.environment, cwd=inputs.transaction.cwd,
+            capture_output=True, text=True, timeout=30,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        diagnostic = result.stdout + result.stderr
+        assert ("dbus-next" in diagnostic) is uses_wheel
+        assert (wheel.name in diagnostic) is uses_wheel
         reached.append(inputs.plugin)
         raise InstallationReached
 
