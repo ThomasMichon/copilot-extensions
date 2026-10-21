@@ -190,9 +190,9 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/workspace_creation.py",
-          "sha256": "6ccf7f7a685ed260ce5c4e80c3ef192d2f25f4c665ecb50d8cccc22c2bf07228",
-          "semantic": true,
-          "non_semantic_reason": null
+          "sha256": "24f1dcc8600eeb2fbe50324527a1a20a5f7438addeae2c0884a260588c1dabcf",
+          "semantic": false,
+          "non_semantic_reason": "Internal keyed-start preparation ordering and retained-plan reuse; workspace-creation request, response and typed-refusal envelopes and protocol floor are unchanged."
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/provider_creation.py",
