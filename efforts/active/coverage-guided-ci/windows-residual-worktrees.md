@@ -87,7 +87,46 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Admitted fixture-semantic batches
 
+### B-PUBLISHED create/target/state consumers
+
+Baseline: the actual #7483 foundation merge
+`a74f203c3927dd392878662bd66d70dfac6b2d01`. Convert exactly
+27 named methods below: six in `TestCreatePR`, sixteen PUB-owned methods in
+the retained `test_pr_ops.py::TestPRPublication`, and five in
+`test_pr_publication_state.py`. Each changes only its fixture argument and
+unpack, removing the setup-only first `create_pr` and its success assertion
+where present. An AST comparison proves the remaining body and every
+decorator unchanged. The five state methods consume an already-published
+snapshot; their assertions concern provider/attribution/revision behavior,
+not the setup title or branch spelling.
+
+Both mixed PUB/LOAD methods retain their existing record reload behavior;
+no B-OBSERVATION changes are included. Fork setup, transport stubs and all
+subsequent native creates/pushes/refusals/locks remain under their original
+case bodies. Fresh-publication controls still use `pr_repo`. The legacy
+`test_pr_ops.py` path remains for exact-node selection compatibility.
+
+All three complete affected modules pass without skips on native Windows:
+31 create cases, 33 publication-target cases and 21 publication-state cases
+(85 total). Their two-worker diagnostic groups take 117.31, 146.97 and
+65.34 seconds, with 336.61 seconds including aggregate preparation/cleanup.
+The 30-second item, 240-second diagnostic group and existing resource limits
+are unchanged. No full-suite qualification is claimed.
+
+The eleven finalization consumers await the independently owned B-MUX
+fixture contract, while the rebase setup adapter needs its own scheme/title
+preservation check. Neither is silently credited by this consumer slice.
+Other fixture, production and selection waves and parent #5694/#5682 remain
+open. This ledger is the documentation impact; runtime/install/command
+behavior is unchanged. Provisioning clean-room and external-venue validation
+are inapplicable to these test-only substitutions; real native Git/provider
+boundary and race cases run in the complete affected modules.
+
 ### B-PUBLISHED foundation: private published topology, no consumer conversion
+
+**Actually merged:** #7483 as
+`a74f203c3927dd392878662bd66d70dfac6b2d01`. This settles only
+the foundation; consumer conversions remain separate.
 
 Baseline: the actual #7476 B-BASE merge
 `42ea761856e212becd1a758df0f637f77fc72cd6`. This slice adds only

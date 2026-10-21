@@ -16,13 +16,12 @@ class TestPRPublication(PRWorkflowSetup):
 
 
 
-    def test_a_branch_on_both_remotes_goes_where_the_prs_head_is(self, pr_repo, monkeypatch):
+    def test_a_branch_on_both_remotes_goes_where_the_prs_head_is(self, published_pr_repo, monkeypatch):
         """The state the old push-changes left behind: create-pr published the PR
         to the fork, a later push recreated its branch on origin and moved it. The
         provider's PR head (still the fork's tip) picks the fork."""
         from agent_worktrees import pr_publish
-        config, wid, wt_path, remote_dir = pr_repo
-        pr_ops.create_pr(wid, config, title="Add feature")
+        config, wid, wt_path, remote_dir = published_pr_repo
         rec = self._branch_on_both(config, wid, wt_path, remote_dir)
         pr_head = _git("rev-parse", f"refs/remotes/origin/{rec.pr.branch}", cwd=wt_path)
         (wt_path / "stray.txt").write_text("pushed to origin by the old push-changes\n")
@@ -36,11 +35,10 @@ class TestPRPublication(PRWorkflowSetup):
         monkeypatch.setattr(pr_publish, "_provider_head", lambda repo, pr: origin_tip)
         assert pr_publish.push_remote(repo, rec.pr, str(wt_path)) == "origin"
 
-    def test_a_branch_on_both_remotes_without_a_deciding_head_refuses(self, pr_repo, monkeypatch):
+    def test_a_branch_on_both_remotes_without_a_deciding_head_refuses(self, published_pr_repo, monkeypatch):
         from agent_worktrees import finalize as fin
         from agent_worktrees import pr_publish
-        config, wid, wt_path, remote_dir = pr_repo
-        pr_ops.create_pr(wid, config, title="Add feature")
+        config, wid, wt_path, remote_dir = published_pr_repo
         rec = self._branch_on_both(config, wid, wt_path, remote_dir)
         config = self._fork_config(config)
         repo = config.repos["ext"]
@@ -51,20 +49,18 @@ class TestPRPublication(PRWorkflowSetup):
         assert pr_publish.push_remote(repo, rec.pr, str(wt_path)) is None
         assert fin.push_changes(wid, config) is False
 
-    def test_without_a_fork_remote_the_repo_remote_is_used(self, pr_repo):
+    def test_without_a_fork_remote_the_repo_remote_is_used(self, published_pr_repo):
         from agent_worktrees import pr_publish
-        config, wid, wt_path, _ = pr_repo
-        pr_ops.create_pr(wid, config, title="Add feature")
+        config, wid, wt_path, _ = published_pr_repo
         rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
         assert pr_publish.push_remote(config.repos["ext"], rec.pr, str(wt_path)) == "origin"
 
-    def test_an_unreadable_fork_remote_refuses_rather_than_guessing(self, pr_repo):
+    def test_an_unreadable_fork_remote_refuses_rather_than_guessing(self, published_pr_repo):
         """A fork that can't be read might hold the PR's head: pushing to origin
         instead would recreate the stray branch. Nothing is pushed."""
         from agent_worktrees import finalize as fin
         from agent_worktrees import pr_publish
-        config, wid, wt_path, remote_dir = pr_repo
-        pr_ops.create_pr(wid, config, title="Add feature")
+        config, wid, wt_path, remote_dir = published_pr_repo
         rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
         branch = rec.pr.branch
         _git("remote", "add", "fork", str(remote_dir.parent / "no-such-fork.git"), cwd=wt_path)
@@ -74,14 +70,13 @@ class TestPRPublication(PRWorkflowSetup):
         assert fin.push_changes(wid, config) is False
         assert not _git("ls-remote", "--heads", "origin", branch, cwd=wt_path)
 
-    def test_a_disabled_fork_config_ignores_a_local_fork_remote(self, pr_repo):
+    def test_a_disabled_fork_config_ignores_a_local_fork_remote(self, published_pr_repo):
         """`pr.fork.remote` defaults to "fork" even when forking is off: an
         unrelated (here unreachable) local `fork` remote must not stop a plain
         repo's push-changes."""
         from agent_worktrees import finalize as fin
         from agent_worktrees import pr_publish
-        config, wid, wt_path, remote_dir = pr_repo
-        pr_ops.create_pr(wid, config, title="Add feature")
+        config, wid, wt_path, remote_dir = published_pr_repo
         rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
         _git("remote", "add", "fork", str(remote_dir.parent / "no-such-fork.git"), cwd=wt_path)
         assert pr_publish.push_remote(config.repos["ext"], rec.pr, str(wt_path)) == "origin"
@@ -90,13 +85,12 @@ class TestPRPublication(PRWorkflowSetup):
         _git("commit", "-m", "address feedback", cwd=wt_path)
         assert fin.push_changes(wid, config) is True
 
-    def test_a_recorded_fork_remote_that_is_gone_refuses(self, pr_repo):
+    def test_a_recorded_fork_remote_that_is_gone_refuses(self, published_pr_repo):
         """The PR was published to a fork (recorded at create-pr); that remote
         was renamed or removed since. Its updates must never fall back to origin."""
         from agent_worktrees import finalize as fin
         from agent_worktrees import pr_publish
-        config, wid, wt_path, remote_dir = pr_repo
-        pr_ops.create_pr(wid, config, title="Add feature")
+        config, wid, wt_path, remote_dir = published_pr_repo
         rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
         branch = rec.pr.branch
         self._move_head_to_fork(wt_path, remote_dir, branch, rec)
@@ -111,14 +105,13 @@ class TestPRPublication(PRWorkflowSetup):
         assert fin.push_changes(wid, config) is False
         assert not _git("ls-remote", "--heads", "origin", branch, cwd=wt_path)
 
-    def test_a_legacy_fork_pr_whose_configured_fork_remote_is_gone_refuses(self, pr_repo):
+    def test_a_legacy_fork_pr_whose_configured_fork_remote_is_gone_refuses(self, published_pr_repo):
         """A PR recorded before its remote was kept, published to the configured
         fork, whose `fork` remote was removed or renamed since: falling back to
         origin would recreate the stray branch, so nothing is pushed."""
         from agent_worktrees import finalize as fin
         from agent_worktrees import pr_publish
-        config, wid, wt_path, remote_dir = pr_repo
-        pr_ops.create_pr(wid, config, title="Add feature")
+        config, wid, wt_path, remote_dir = published_pr_repo
         rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
         branch = rec.pr.branch
         self._move_head_to_fork(wt_path, remote_dir, branch, rec)
@@ -136,12 +129,11 @@ class TestPRPublication(PRWorkflowSetup):
         assert not _git("ls-remote", "--heads", "origin", branch, cwd=wt_path)
 
 
-    def test_a_legacy_targets_tips_and_identity_are_one_locked_snapshot(self, pr_repo, monkeypatch):
+    def test_a_legacy_targets_tips_and_identity_are_one_locked_snapshot(self, published_pr_repo, monkeypatch):
         """A PR with no recorded remote is resolved by comparing branch tips, then
         reading the chosen fork's identity: a repoint can't land between them."""
         from agent_worktrees import pr_publish
-        config, wid, wt_path, remote_dir = pr_repo
-        pr_ops.create_pr(wid, config, title="Add feature")
+        config, wid, wt_path, remote_dir = published_pr_repo
         rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
         self._move_head_to_fork(wt_path, remote_dir, rec.pr.branch, rec)
         rec.pr.remote = ""
@@ -161,12 +153,11 @@ class TestPRPublication(PRWorkflowSetup):
         assert seen and all(seen)
 
     def test_retiring_a_pruned_pr_reads_its_remote_and_branch_in_one_locked_snapshot(
-            self, pr_repo, monkeypatch):
+            self, published_pr_repo, monkeypatch):
         """create-pr marks a live PR merged once its branch is gone from the remote
         holding it: a repoint between choosing that remote and checking the branch
         would find it "absent" on another fork and retire a live PR."""
-        config, wid, wt_path, _remote_dir = pr_repo
-        pr_ops.create_pr(wid, config, title="Add feature")
+        config, wid, wt_path, _remote_dir = published_pr_repo
         (wt_path / "c.txt").write_text("feedback\n")
         _git("add", "-A", cwd=wt_path)
         _git("commit", "-m", "address feedback", cwd=wt_path)
@@ -182,12 +173,11 @@ class TestPRPublication(PRWorkflowSetup):
         assert pr_ops.create_pr(wid, config, title="Add feature").get("success")
         assert seen and all(seen)
 
-    def test_a_deleted_head_is_gone_even_beside_an_archived_branch_of_the_same_name(self, pr_repo):
+    def test_a_deleted_head_is_gone_even_beside_an_archived_branch_of_the_same_name(self, published_pr_repo):
         """`ls-remote <branch>` is a tail glob: `archive/<branch>` must not keep
         a deleted PR head looking present to the retirement check."""
         from agent_worktrees import pr_publish
-        config, wid, wt_path, _remote_dir = pr_repo
-        pr_ops.create_pr(wid, config, title="Add feature")
+        config, wid, wt_path, _remote_dir = published_pr_repo
         rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
         branch = rec.pr.branch
         repo = config.repos["ext"]
@@ -196,12 +186,11 @@ class TestPRPublication(PRWorkflowSetup):
         _git("push", "origin", "--delete", branch, cwd=wt_path)
         assert pr_publish.head_branch_gone(repo, rec.pr, str(wt_path))
 
-    def test_the_publication_lock_is_reentrant_within_a_thread(self, pr_repo, monkeypatch):
+    def test_the_publication_lock_is_reentrant_within_a_thread(self, published_pr_repo, monkeypatch):
         from concurrent.futures import ThreadPoolExecutor
 
         from agent_worktrees import pr_publish
-        config, wid, wt_path, _remote_dir = pr_repo
-        pr_ops.create_pr(wid, config, title="Add feature")
+        config, wid, wt_path, _remote_dir = published_pr_repo
         rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
         monkeypatch.setattr(pr_publish, "PUBLISH_LOCK_ACQUIRE_TIMEOUT_S", 0.05)
         with pr_publish.publish_lock(str(wt_path)):
@@ -215,13 +204,12 @@ class TestPRPublication(PRWorkflowSetup):
         with ThreadPoolExecutor(max_workers=1) as pool:
             assert pool.submit(acquire_after_release).result(timeout=30)
 
-    def test_a_missing_fork_remote_decides_nothing_even_when_origin_matches(self, pr_repo, monkeypatch):
+    def test_a_missing_fork_remote_decides_nothing_even_when_origin_matches(self, published_pr_repo, monkeypatch):
         """A legacy PR whose configured fork remote is gone: origin holding the
         provider's head SHA isn't proof the head lives there (a stray copy can
         hold the same commit), so nothing is pushed until the remote is back."""
         from agent_worktrees import pr_publish
-        config, wid, wt_path, remote_dir = pr_repo
-        pr_ops.create_pr(wid, config, title="Add feature")
+        config, wid, wt_path, remote_dir = published_pr_repo
         rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
         rec.pr.remote = ""
         repo = self._fork_config(config).repos["ext"]  # fork configured, no `fork` remote here
@@ -233,11 +221,10 @@ class TestPRPublication(PRWorkflowSetup):
         monkeypatch.setattr(pr_publish, "_provider_head", lambda repo, pr: "0" * 40)  # elsewhere
         assert pr_publish.push_remote(repo, rec.pr, str(wt_path)) is None
 
-    def test_a_fork_remote_without_the_branch_resolves_a_usable_target(self, pr_repo):
+    def test_a_fork_remote_without_the_branch_resolves_a_usable_target(self, published_pr_repo):
         """The fork is present but doesn't hold the branch: origin, as a target."""
         from agent_worktrees import pr_publish
-        config, wid, wt_path, remote_dir = pr_repo
-        pr_ops.create_pr(wid, config, title="Add feature")
+        config, wid, wt_path, remote_dir = published_pr_repo
         rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
         rec.pr.remote = ""
         fork_dir = remote_dir.parent / "empty-fork.git"
@@ -248,12 +235,11 @@ class TestPRPublication(PRWorkflowSetup):
         assert isinstance(target, pr_publish.PushTarget) and target.remote == "origin"
         assert pr_publish.push_remote(repo, rec.pr, str(wt_path)) == "origin"
 
-    def test_the_reusing_fast_path_forwards_the_forks_identity(self, pr_repo, monkeypatch):
+    def test_the_reusing_fast_path_forwards_the_forks_identity(self, published_pr_repo, monkeypatch):
         """A live PR re-run with nothing new to squash re-pushes its feature branch;
         that push must carry the fork's immutable identity like the other re-run."""
         from agent_worktrees import pr_publish
-        config, wid, wt_path, _ = pr_repo
-        pr_ops.create_pr(wid, config, title="Add feature")
+        config, wid, wt_path, _ = published_pr_repo
         seen = {}
         monkeypatch.setattr(pr_publish, "update_remote",
                             lambda *a, **k: ("fork", "alice", "alice/ext", "github.com/alice/ext"))
@@ -644,12 +630,11 @@ class TestPRPublication(PRWorkflowSetup):
         rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
         assert rec.pr.remote == "fork"
 
-    def test_a_probe_matches_the_exact_branch_not_a_suffix(self, pr_repo):
+    def test_a_probe_matches_the_exact_branch_not_a_suffix(self, published_pr_repo):
         """ls-remote patterns are tail globs: a fork holding only
         `archive/<branch>` doesn't hold the PR's branch."""
         from agent_worktrees import pr_publish
-        config, wid, wt_path, remote_dir = pr_repo
-        pr_ops.create_pr(wid, config, title="Add feature")
+        config, wid, wt_path, remote_dir = published_pr_repo
         rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
         branch = rec.pr.branch
         fork_dir = remote_dir.parent / "fork.git"
@@ -679,14 +664,13 @@ class TestPRPublication(PRWorkflowSetup):
         monkeypatch.setattr(pr_publish.git_ops, "git", hang)
         assert pr_publish._tip("fork", "some-branch", str(wt_path)) is None
 
-    def test_a_role_overrides_fork_remote_is_found_too(self, pr_repo):
+    def test_a_role_overrides_fork_remote_is_found_too(self, published_pr_repo):
         """create-pr publishes through the role-resolved fork remote, which a
         role override can rename: push-changes must look there as well."""
         import dataclasses
 
         from agent_worktrees import pr_publish
-        config, wid, wt_path, remote_dir = pr_repo
-        pr_ops.create_pr(wid, config, title="Add feature")
+        config, wid, wt_path, remote_dir = published_pr_repo
         rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
         branch = rec.pr.branch
         fork_dir = remote_dir.parent / "myfork.git"
