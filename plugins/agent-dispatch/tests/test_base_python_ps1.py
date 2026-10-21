@@ -345,6 +345,9 @@ if ($script:InstallerDependencyPolicy -cne 'original-policy') {{ throw 'policy n
 def test_real_signed_base_and_candidate(
     tmp_path: Path, shell: str, record_property: Callable[[str, object], None],
 ) -> None:
+    import ctypes
+    from ctypes import wintypes
+
     from .test_windows_durable_launch_lifetime import DesktopProbe
 
     selected = os.environ.get("AGENT_DISPATCH_TEST_SIGNED_BASE")
@@ -366,7 +369,11 @@ def test_real_signed_base_and_candidate(
         "  $ArgList = @($ArgList)\n"
         "  $ArgList[-1] = $prefix + $ArgList[-1]\n"
         " }\n"
-        " & $script:realHidden -FilePath $FilePath -ArgList $ArgList -ErrorOutput $ErrorOutput\n"
+        f" $phase = Join-Path '{tmp_path}' 'construction-active'\n"
+        " $constructing = $ArgList -contains 'venv'\n"
+        " if ($constructing) { [IO.File]::WriteAllText($phase, '1') }\n"
+        " try { & $script:realHidden -FilePath $FilePath -ArgList $ArgList -ErrorOutput $ErrorOutput }\n"
+        " finally { if ($constructing) { [IO.File]::WriteAllText($phase, '0') } }\n"
         "}\n"
         f"$InstallDir = '{tmp_path / 'runtime'}'\n"
         "$env:AGENT_DISPATCH_BASE_PYTHON = $env:AGENT_DISPATCH_TEST_SIGNED_BASE\n"
@@ -376,7 +383,7 @@ def test_real_signed_base_and_candidate(
         "}\n"
         f"$candidate = '{tmp_path / 'candidate'}'\n"
         "$diagnostic = ''\n"
-        "$output = Invoke-Hidden -FilePath $base -ArgList @('-I','-B','-m','venv','--copies','--without-pip',$candidate) -ErrorOutput ([ref]$diagnostic)\n"
+        "$output = Invoke-Hidden -FilePath $base -ArgList @('-I','-B','-m','venv','--copies',$candidate) -ErrorOutput ([ref]$diagnostic)\n"
         "if ($LASTEXITCODE -ne 0) { throw \"$output$diagnostic\" }\n"
         "Assert-DispatchCandidateBase -Python (Join-Path $candidate 'Scripts\\python.exe') -BasePython $base\n"
         "if (Test-Path (Join-Path $InstallDir 'base-python.json')) { throw 'probe published preference' }\n"
@@ -385,12 +392,63 @@ def test_real_signed_base_and_candidate(
     )
     desktop = DesktopProbe()
     record_property("interactive_desktop_observation", desktop.available)
+    if not desktop.available:
+        pytest.skip("interactive desktop required for the opt-in visibility proof")
     stopped = threading.Event()
     observations: list[BaseException] = []
+    construction: set[int] = set()
+    nested_python: set[int] = set()
+
+    class Entry(ctypes.Structure):
+        _fields_ = [
+            ("size", wintypes.DWORD), ("usage", wintypes.DWORD),
+            ("pid", wintypes.DWORD), ("heap", ctypes.c_size_t),
+            ("module", wintypes.DWORD), ("threads", wintypes.DWORD),
+            ("parent", wintypes.DWORD), ("priority", wintypes.LONG),
+            ("flags", wintypes.DWORD), ("name", wintypes.WCHAR * 260),
+        ]
+
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.CreateToolhelp32Snapshot.argtypes = [wintypes.DWORD, wintypes.DWORD]
+    kernel.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
+    for name in ("Process32FirstW", "Process32NextW"):
+        getattr(kernel, name).argtypes = [wintypes.HANDLE, ctypes.POINTER(Entry)]
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+
+    def parents() -> dict[int, tuple[int, str]]:
+        snapshot = kernel.CreateToolhelp32Snapshot(2, 0)
+        if snapshot == ctypes.c_void_p(-1).value:
+            raise ctypes.WinError(ctypes.get_last_error())
+        try:
+            entry = Entry()
+            entry.size = ctypes.sizeof(entry)
+            result = {}
+            present = kernel.Process32FirstW(snapshot, ctypes.byref(entry))
+            while present:
+                result[entry.pid] = (entry.parent, entry.name.lower())
+                present = kernel.Process32NextW(snapshot, ctypes.byref(entry))
+            if ctypes.get_last_error() != 18:
+                raise ctypes.WinError(ctypes.get_last_error())
+            return result
+        finally:
+            kernel.CloseHandle(snapshot)
 
     def observe() -> None:
         try:
             while not stopped.wait(0.005):
+                processes = parents()
+                previous = -1
+                while previous != len(desktop.owned):
+                    previous = len(desktop.owned)
+                    desktop.owned.update(pid for pid, (parent, _) in processes.items() if parent in desktop.owned)
+                phase = tmp_path / "construction-active"
+                if phase.exists() and phase.read_text() == "1":
+                    construction.update(desktop.owned & processes.keys())
+                    nested_python.update(
+                        pid for pid in construction
+                        if pid in processes and processes[pid][1] == "python.exe"
+                        and processes.get(processes[pid][0], (0, ""))[1] == "python.exe"
+                    )
                 for receipt in tmp_path.glob("console-*.json"):
                     try:
                         document = json.loads(receipt.read_text())
@@ -403,20 +461,24 @@ def test_real_signed_base_and_candidate(
         except BaseException as error:
             observations.append(error)
 
-    observer = threading.Thread(target=observe)
-    observer.start()
-    try:
-        result = subprocess.run(
-            [shell, "-NoProfile", "-NonInteractive", "-File", str(harness)],
-            capture_output=True, text=True, timeout=25, creationflags=HEADLESS,
-        )
-    finally:
-        stopped.set()
-        observer.join()
+    with subprocess.Popen(
+        [shell, "-NoProfile", "-NonInteractive", "-File", str(harness)],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, creationflags=HEADLESS,
+    ) as process:
+        desktop.owned.add(process.pid)
+        observer = threading.Thread(target=observe)
+        observer.start()
+        try:
+            stdout, stderr = process.communicate(timeout=25)
+            result = subprocess.CompletedProcess(process.args, process.returncode, stdout, stderr)
+        finally:
+            stopped.set()
+            observer.join()
     assert not observations, observations
     assert result.returncode == 0, result.stdout + result.stderr
     assert "real-signed-base-and-candidate" in result.stdout
     assert len(list(tmp_path.glob("console-*.json"))) >= 4
-    if desktop.available:
-        assert not desktop.surfaced, desktop.surfaced
-        assert not desktop.focus, desktop.focus
+    assert nested_python, "ensurepip Python descendants were not observed during construction"
+    record_property("construction_processes_observed", len(construction))
+    assert not desktop.surfaced, desktop.surfaced
+    assert not desktop.focus, desktop.focus
