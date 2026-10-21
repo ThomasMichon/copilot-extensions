@@ -8,6 +8,7 @@ import re
 import shutil
 import textwrap
 from contextlib import contextmanager
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -706,6 +707,68 @@ def _copy_pr_repo(seed: Path, tmp_path: Path, monkeypatch):
 def pr_repo(tmp_path: Path, monkeypatch, _pr_repo_seed):
     """Private mutable Git topology and fresh tracking/config bindings per case."""
     return _copy_pr_repo(_pr_repo_seed, tmp_path, monkeypatch)
+
+
+@contextmanager
+def _published_seed_environment(tmp_path_factory):
+    """Session setup must not use the host HOME, Git config, or identity key."""
+    isolate_home = contextmanager(_isolate_agent_worktrees_home.__wrapped__)
+    with isolate_home(tmp_path_factory) as home, pytest.MonkeyPatch.context() as patch:
+        patch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+        patch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+        patch.setenv("AGENT_WORKTREES_STATUS_MONITOR", "0")
+        patch.setenv("AGENT_WORKTREES_IDENTITY_KEY", str(home / "absent-identity.key"))
+        yield patch
+
+
+@pytest.fixture(scope="session")
+def _published_pr_seed(tmp_path_factory, _pr_repo_seed):
+    from agent_worktrees import pr_ops
+
+    with _seed_directory(tmp_path_factory, "published") as (seed, build):
+        if build:
+            with _published_seed_environment(tmp_path_factory) as patch:
+                config, worktree_id, _, _ = _copy_pr_repo(_pr_repo_seed, seed, patch)
+                result = pr_ops.create_pr(worktree_id, config, title="Add feature")
+                assert result["success"], result
+        return seed
+
+
+@pytest.fixture
+def published_pr_repo(tmp_path: Path, monkeypatch, _published_pr_seed):
+    """Independent real-Git published state for post-publication behavior."""
+    return _copy_pr_repo(_published_pr_seed, tmp_path, monkeypatch)
+
+
+@pytest.fixture(scope="session")
+def _published_refspec_pr_seed(tmp_path_factory, _pr_repo_seed):
+    from agent_worktrees import pr_ops
+
+    with _seed_directory(tmp_path_factory, "published-refspec") as (seed, build):
+        if build:
+            with _published_seed_environment(tmp_path_factory) as patch:
+                config, worktree_id, _, _ = _copy_pr_repo(_pr_repo_seed, seed, patch)
+                config = replace(config, repos={"ext": replace(
+                    config.default_repo,
+                    pr=replace(config.default_repo.pr, head_scheme="refspec"),
+                )})
+                patch.setattr(cfg, "load_config", lambda *a, **k: config)
+                result = pr_ops.create_pr(worktree_id, config, title="Own change")
+                assert result["success"], result
+        return seed
+
+
+@pytest.fixture
+def published_refspec_pr_repo(tmp_path: Path, monkeypatch, _published_refspec_pr_seed):
+    config, wid, worktree, remote = _copy_pr_repo(
+        _published_refspec_pr_seed, tmp_path, monkeypatch,
+    )
+    config = replace(config, repos={"ext": replace(
+        config.default_repo,
+        pr=replace(config.default_repo.pr, head_scheme="refspec"),
+    )})
+    monkeypatch.setattr(cfg, "load_config", lambda *a, **k: config)
+    return config, wid, worktree, remote
 
 
 class _SubprocessRunInstaller:

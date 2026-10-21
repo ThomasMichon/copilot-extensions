@@ -87,7 +87,47 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Admitted fixture-semantic batches
 
+### B-PUBLISHED foundation: private published topology, no consumer conversion
+
+Baseline: the actual #7476 B-BASE merge
+`42ea761856e212becd1a758df0f637f77fc72cd6`. This slice adds only
+`_published_pr_seed`, `_published_refspec_pr_seed`, `published_pr_repo` and
+`published_refspec_pr_repo`, together with their isolated session environment
+and I's four published-copy cases. Existing consumers remain unchanged.
+Snapshot and refspec seeds each execute the real initial `create_pr` once
+under the run-local publication lock. Copies preserve the actual published
+head and repair their private tracking path, remote slug and rewrite identity.
+The refspec fixture returns and binds refspec configuration, not the base
+copy helper's snapshot default.
+
+Session setup precedes function-autouse isolation, so the shared setup context
+reuses the existing HOME isolation generator, disables global/system Git config
+and resident-monitor startup, and selects an absent identity key under that
+temporary home. It restores all bindings on both success and failure. Two
+native subprocess probes start with synthetic global signing/external-hook
+configuration, a registry sentinel and an invalid operator key; actual seed
+construction succeeds without using or changing that host-like state.
+
+All 83 focused cases pass without skips on native Windows in 128.19 seconds
+(134.27 inclusive of preparation and cleanup): the complete seed-cache,
+base/published-copy and publication-check modules. Exactly two work-stealing
+workers retain the 30-second item and unchanged resource limits under a
+240-second diagnostic group. Ruff F/E9 and the thirteen-plugin install-contract
+gate pass. This is fixture-contract evidence, not whole-suite qualification.
+Clean-room provisioning and an external venue are inapplicable to this
+test-only setup contract; the synthetic uncontained subprocess probes exercise
+first-touch session setup directly.
+
+Documentation impact: this ledger records the bounded test-fixture contract;
+no runtime, command, installed behavior or CI selection changes. The remaining
+B-PUBLISHED consumers, rebase/fork seeds and parent #5694/#5682 qualification
+are explicitly unimplemented by this slice.
+
 ### B-BASE: private copies of the base Git topology
+
+**Actually merged:** #7476 as
+`42ea761856e212becd1a758df0f637f77fc72cd6`. This settles the base
+copy contract only, not published/rebased/fork adoption or parent qualification.
 
 Baseline: Dev `66ec88c76c013a7833a9c48a9602c094caf4ca4c`, the actual
 #7471 B-SEED merge. Build the bare remote, anchor and two-commit linked

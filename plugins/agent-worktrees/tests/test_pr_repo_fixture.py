@@ -234,3 +234,146 @@ def test_copy_relocates_saved_record_and_fork_without_changing_seed(
             remote.parent / "fork.git"
         )
     assert _files(seed) == seed_files
+
+
+@pytest.fixture
+def published_repo(request):
+    name = request.param
+    repo = request.getfixturevalue(name)
+    seed_name = (
+        "_published_refspec_pr_seed"
+        if name == "published_refspec_pr_repo" else "_published_pr_seed"
+    )
+    scheme = "refspec" if name == "published_refspec_pr_repo" else "snapshot"
+    return repo, request.getfixturevalue(seed_name), scheme
+
+
+@pytest.mark.parametrize(
+    "published_repo", ["published_pr_repo", "published_refspec_pr_repo"], indirect=True,
+)
+@pytest.mark.parametrize("iteration", range(2))
+def test_published_pr_copy_preserves_state_and_isolates_updates(
+    published_repo, iteration,
+):
+    repo, seed, scheme = published_repo
+    config, wid, worktree, remote = repo
+    assert config.default_repo.pr.head_scheme == scheme
+    from agent_worktrees import config as cfg
+
+    assert cfg.load_config() is config
+    record = tracking.load_record_by_id(wid)
+    assert record is not None
+    assert record.worktree_path == str(worktree)
+    assert record.pr is not None and record.pr.state == "open"
+    assert record.pr.repo == git_ops.slug_from_url(str(remote))
+    assert record.pr.rewrite_identity == pr_publish.push_identity("origin", cwd=str(worktree))
+    branch = record.pr.branch
+    original_head = record.pr.head_sha
+    assert git_ops.git("rev-parse", "HEAD", cwd=worktree).stdout.strip() == original_head
+    assert git_ops.git(
+        "--git-dir", str(remote), "rev-parse", branch,
+    ).stdout.strip() == original_head
+    seed_files = _files(seed)
+
+    (worktree / "published-only.txt").write_text(f"copy {iteration}\n", encoding="utf-8")
+    git_ops.git("add", "published-only.txt", cwd=worktree)
+    git_ops.git("commit", "-m", "isolated publication update", cwd=worktree)
+    git_ops.git("push", "origin", f"HEAD:refs/heads/{branch}", cwd=worktree)
+    record.pr.head_sha = git_ops.git("rev-parse", "HEAD", cwd=worktree).stdout.strip()
+    tracking.save_record(record)
+    assert tracking.load_record_by_id(wid).pr.head_sha == record.pr.head_sha
+    assert record.pr.head_sha != original_head
+    assert git_ops.git(
+        "--git-dir", str(remote), "rev-parse", branch,
+    ).stdout.strip() == record.pr.head_sha
+    assert _files(seed) == seed_files
+
+
+@pytest.mark.parametrize("scheme", ["snapshot", "refspec"])
+def test_published_session_setup_isolates_home_git_identity_and_restores(tmp_path, scheme):
+    home = tmp_path / "launch-home"
+    home.mkdir()
+    hooks = home / "hooks"
+    hooks.mkdir()
+    marker = home / "hook-ran"
+    for name in ("pre-commit", "pre-push"):
+        hook = hooks / name
+        hook.write_text(f'#!/bin/sh\n: > "{marker.as_posix()}"\nexit 41\n')
+        hook.chmod(0o755)
+    global_config = home / ".gitconfig"
+    global_config.write_text(
+        f'[core]\n hooksPath = "{hooks.as_posix()}"\n'
+        f'[commit]\n gpgsign = true\n[gpg]\n program = "{(home / "absent-gpg").as_posix()}"\n',
+        encoding="utf-8",
+    )
+    registry = home / ".agent-worktrees"
+    registry.mkdir()
+    (registry / "projects.yaml").write_text("sentinel: untouched\n")
+    key = home / "operator-identity.key"
+    key.write_bytes(b"operator key must not be read")
+    original = _files(home)
+    script = """
+import os, sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+import conftest
+from agent_worktrees import config as cfg, git_ops
+root = Path(sys.argv[2])
+scheme = sys.argv[3]
+class Factory:
+    def mktemp(self, key):
+        from tempfile import mkdtemp
+        return Path(mkdtemp(prefix=key, dir=root))
+factory = Factory()
+assert git_ops.git('config', '--global', '--get', 'commit.gpgsign').stdout.strip() == 'true'
+before = dict(os.environ)
+path_home = Path.home()
+tracking_dir = cfg.tracking_dir
+load_config = cfg.load_config
+base = conftest._pr_repo_seed.__wrapped__(factory)
+builder = (
+    conftest._published_pr_seed if scheme == 'snapshot'
+    else conftest._published_refspec_pr_seed
+)
+seed = builder.__wrapped__(factory, base)
+assert (seed / 'tracking' / 'test-wt-20260618-aaaa.yaml').is_file()
+assert dict(os.environ) == before
+assert Path.home() == path_home
+assert cfg.tracking_dir is tracking_dir and cfg.load_config is load_config
+assert git_ops.git('config', '--global', '--get', 'commit.gpgsign').stdout.strip() == 'true'
+try:
+    with conftest._published_seed_environment(factory):
+        assert Path.home() != path_home
+        assert cfg._home() == Path.home()
+        assert os.environ['GIT_CONFIG_GLOBAL'] == os.devnull
+        assert os.environ['GIT_CONFIG_NOSYSTEM'] == '1'
+        assert os.environ['AGENT_WORKTREES_STATUS_MONITOR'] == '0'
+        assert Path(os.environ['AGENT_WORKTREES_IDENTITY_KEY']).parent == Path.home()
+        assert not Path(os.environ['AGENT_WORKTREES_IDENTITY_KEY']).exists()
+        raise RuntimeError('synthetic setup failure')
+except RuntimeError as exc:
+    assert str(exc) == 'synthetic setup failure'
+else:
+    raise AssertionError('failure did not propagate')
+assert dict(os.environ) == before and Path.home() == path_home
+assert not (root / 'hook-ran').exists()
+"""
+    builds = tmp_path / "builds"
+    builds.mkdir()
+    env = os.environ.copy()
+    env.update(
+        HOME=str(home), USERPROFILE=str(home), AGENT_HOME=str(home),
+        XDG_CONFIG_HOME=str(home / "xdg"), AGENT_WORKTREES_IDENTITY_KEY=str(key),
+    )
+    for name in (
+        "COPILOT_EXTENSIONS_TEST_CONTAINED", "COPILOT_EXTENSIONS_TEST_SANDBOX",
+        "GIT_CONFIG_GLOBAL", "GIT_CONFIG_NOSYSTEM",
+    ):
+        env.pop(name, None)
+    result = subprocess.run(
+        [sys.executable, "-c", script, str(Path(__file__).parent), str(builds), scheme],
+        env=env, capture_output=True, text=True, timeout=25, **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert _files(home) == original
+    assert not marker.exists()
