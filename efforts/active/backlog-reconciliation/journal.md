@@ -643,3 +643,48 @@ Canonical contract: [README.md](README.md).
   Oldest-first publication continues with batch twenty-nine; the effort stays
   Active. No product implementation, tests, native probes, deployment,
   process/service or live claim changes were made.
+
+## 2026-10-21 - Batches twenty-nine and thirty, 600 original issues reviewed
+
+- The complete paginated census at 14:47 UTC records **1,164 open issues**:
+  1,162 original-cohort issues and inflow #7556/#7587. **600 distinct originals
+  are reviewed; 295 were closed by this campaign**. Including unrelated #5610
+  and concurrent inflow, the live net reduction is 294. No campaign closure
+  was observed reopened. The fixed guidance checkpoint remains at most 729.
+- These two batches closed 17 trackers: four completed finite scopes and
+  thirteen requirement-preserving consolidations. Completed scopes are the
+  actionable pre-connect relay diagnostic, concurrent-update primary singleton,
+  actual detached child PATH/absolute-command propagation and ACP-child relay
+  environment parity with direct SSH. None claims universal authentication,
+  caller-death survival or native-runtime qualification.
+- Transfers: #4017/#4018/#4019 to #4016; #4021 to #4477;
+  #4024/#4025/#4026/#4027 and #4038/#4039/#4045 to #4023;
+  #4044 to #2530; and #4052 to #4051. Complete additive requirements were
+  read back before closing each source. Existing canonical bodies, inherited
+  transfers, reservations and implementation owners remain unchanged.
+- #4016 retains peer ACP, double-hop and CodeSpace bootstrap/sleep behavior,
+  capacity and both hosting tiers. #4023 directly preserves durable CLI work
+  after caller disconnect, retrievable terminal results after actual exit,
+  read-only represented events and both producer/downstream duplicate-event
+  expectations. Bounded consumer deduplication is credited without declaring
+  native producer emission exact-once or a launch ACK actual root consumption.
+- #2530's transferred discovery scope remains the whole mesh, any machine and
+  all projects, not only cross-machine discovery within one repository.
+  #4051 preserves resume identity, post-selection failure and phantom-cancel
+  acceptance. The grammar owner retains complete operation semantics,
+  documentation, skills and backward-compatible aliases.
+- Retained source gaps include the explicit worktree-capability boolean,
+  non-allocating target probes, existing-slot freshness/coherent registration,
+  localhost bind enforcement, native-Windows explicit-CWD command generation,
+  owned direct-command detach/tail, static provider-registry reload and
+  disconnect-versus-stop lifetime semantics. Real partial implementations are
+  credited rather than counted as the entire original outcome.
+- #4056's previously completed warmth baseline is not reopened or replaced by
+  a new latency benchmark: only its remaining update/eviction/stale-endpoint/
+  pool-poisoning chaos cases stay open. #4055 preserves its original diagnostic
+  facts and POSIX child-before-initial-record race while crediting the Windows
+  repair. Query-denied, absent and present native-task states remain distinct.
+- Four disjoint read-only researchers are supplied through batch thirty-eight.
+  Oldest-first publication continues with batch thirty-one; the effort stays
+  Active. No product implementation, tests, native probes, deployment,
+  process/service, credential or live custody changes were made.
