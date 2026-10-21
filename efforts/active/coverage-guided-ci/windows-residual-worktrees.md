@@ -87,7 +87,47 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Admitted fixture-semantic batches
 
+### B-CREATION private native creation anchors
+
+Baseline: the actual #7644 merge. Add only the named
+`_creation_anchor_seed`, adapted `_creation_fixture`/`native_creation` and
+`test_creation_anchor_copies_isolate_native_git_mutations`. Build the real
+template-free initial commit once under the existing hermetic environment
+and run-local seed lock; each native fixture physically copies independent
+harness/knowledge stores and assigns its own origin.
+Records, retained prompts, permissions, project configuration, tracking,
+worktree creation and actual creation-tail repair remain per-case.
+
+The fixture's empty machine topology is explicit on disk, not a reader
+stub or cache. Preserve the existing raw `native_git=True` entry point
+used by retained-allocation tests, including tuple/suffix identity and
+later legacy machine-config changes; it still builds its own actual Git
+history and does not acquire a shadowing empty topology.
+Two repeated guard cases prove local origins/config/topology, retained
+prompt, absent companion tracking and independent object files. Config,
+new-object and ref mutations in the harness leave every seed and knowledge
+byte unchanged. All 38 other existing functions and all original
+decorators remain AST-identical.
+
+Complete native Windows creation and retained-allocation modules: 66 passed,
+zero skips, 86.14 seconds pytest / 91.61 preparation-cleanup inclusive.
+Exactly two work-stealing workers retain the 30-second default item
+watchdog, existing native deadlines/marks and resource limits under a
+240-second diagnostic group. This includes real subprocess/kernel lease,
+first-touch CLI, native pairing and tuple/historical-allocation consumers.
+Ruff F/E9 and the 13-plugin install contract pass.
+No quiet-host, whole-suite or repeated same-head qualification is claimed.
+
+Documentation impact is this ledger only; runtime, command, installation
+and configuration contracts remain unchanged. The fresh actual CLI check
+is included above; provisioning clean-room and live external deployment
+are inapplicable to this test-fixture-only change. Parent #5694/#5682 and
+complete repeated same-head Windows qualification remain open.
+
 ### B-CONTEXT private context-resolution topology
+
+**Actually merged:** #7644 as
+`b724784e9325fd3d4e90d5fbb93e9812fe51351a`.
 
 Baseline: the actual #7639 merge. Add only the named session
 `_context_repo_seed`, `_copy_context_repo`, adapted `adopted_repo` and

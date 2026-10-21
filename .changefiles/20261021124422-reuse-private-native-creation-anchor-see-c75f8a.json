@@ -1,0 +1,9 @@
+{
+  "comment": "Reuse private native creation anchor seeds while preserving real per-case creation-tail repair and lease behavior.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

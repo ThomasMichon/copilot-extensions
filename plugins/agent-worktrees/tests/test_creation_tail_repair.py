@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
 import threading
@@ -19,9 +20,28 @@ from agent_worktrees import git_ops, installer, launch_seed_state, local_cache_r
 from agent_worktrees import launch_admission, maintenance_cli, permissions, repos, sessions, state_root
 from agent_worktrees import status_monitor_runtime, tracking, worktree_creation
 from agent_worktrees.worktree_machine_identity import WorktreeMachineIdentity
+from conftest import _published_seed_environment, _seed_directory
 
 
-def _creation_fixture(tmp_path, monkeypatch, *, native_git=False, tuple_identity=False, suffix="abcd"):
+@pytest.fixture(scope="session")
+def _creation_anchor_seed(tmp_path_factory):
+    """Reuse only immutable Git input, never live records or leases."""
+    with _seed_directory(tmp_path_factory, "creation-anchor") as (seed, build):
+        if build:
+            with _published_seed_environment(tmp_path_factory):
+                git_ops.git("init", "--template=", "-b", "main", cwd=seed)
+                git_ops.git(
+                    "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+                    "-c", "commit.gpgsign=false", "commit", "--allow-empty", "-m", "fixture",
+                    cwd=seed,
+                )
+        return seed
+
+
+def _creation_fixture(
+    tmp_path, monkeypatch, *, anchor_seed=None, native_git=False,
+    tuple_identity=False, suffix="abcd",
+):
     native_load_config = cfg.load_config
     platform = cfg.detect_platform()
     machine = "custom-space" if tuple_identity else "host-wsl" if platform == "wsl" else "host"
@@ -31,12 +51,21 @@ def _creation_fixture(tmp_path, monkeypatch, *, native_git=False, tuple_identity
     identity = f"{physical}-{short}-20261013-100000-{suffix}"
     anchors = {name: tmp_path / name for name in ("harness", "knowledge")}
     for anchor in anchors.values():
-        anchor.mkdir()
+        if anchor_seed is not None:
+            shutil.copytree(anchor_seed, anchor, copy_function=shutil.copyfile)
+            git_ops.git("remote", "add", "origin", str(anchor), cwd=anchor)
+        else:
+            anchor.mkdir()
         if tuple_identity:
             (anchor / "machines.yaml").write_text(
                 f"machines:\n  {machine}: {{physical_host: {physical}, execution_platform: {platform}}}\n",
             )
-        if native_git:
+        elif not native_git:
+            # Keep the empty fixture topology explicit; readers still resolve it freshly.
+            topology = anchor / cfg.INREPO_CONFIG_DIRNAME / "machines.yaml"
+            topology.parent.mkdir()
+            topology.write_text("machines: {}\n", encoding="utf-8")
+        if native_git and anchor_seed is None:
             git_ops.git("init", "-b", "main", cwd=anchor)
             git_ops.git(
                 "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
@@ -99,7 +128,7 @@ def _creation_fixture(tmp_path, monkeypatch, *, native_git=False, tuple_identity
         lambda path: local_cache_refresh.RefreshResult("ready"),
     )
     checkout = roots["harness"] / identity
-    if native_git:
+    if anchor_seed is not None or native_git:
         git_ops.create_worktree(str(anchors["harness"]), str(checkout), f"worktree/{identity}", "HEAD")
     else:
         checkout.mkdir(parents=True)
@@ -122,8 +151,51 @@ def creation(tmp_path, monkeypatch):
 
 
 @pytest.fixture
-def native_creation(tmp_path, monkeypatch):
-    return _creation_fixture(tmp_path, monkeypatch, native_git=True)
+def native_creation(tmp_path, monkeypatch, _creation_anchor_seed):
+    return _creation_fixture(tmp_path, monkeypatch, anchor_seed=_creation_anchor_seed)
+
+
+@pytest.mark.guard
+@pytest.mark.parametrize("iteration", range(2))
+def test_creation_anchor_copies_isolate_native_git_mutations(
+    native_creation, _creation_anchor_seed, iteration,
+):
+    creation = native_creation
+    anchor = creation.anchors["harness"]
+    unchanged = (_creation_anchor_seed, creation.anchors["knowledge"])
+    snapshots = {
+        root: {
+            path.relative_to(root): path.read_bytes()
+            for path in root.rglob("*") if path.is_file()
+        }
+        for root in unchanged
+    }
+    for name, private in creation.anchors.items():
+        assert git_ops.git("remote", "get-url", "origin", cwd=private).stdout.strip() == str(private)
+        assert (private / cfg.INREPO_CONFIG_DIRNAME / "machines.yaml").read_text() == "machines: {}\n"
+        assert creation.configs[name].default_repo.anchor == str(private)
+    assert not (creation.projects["knowledge"] / "worktrees").exists()
+    assert launch_seed_state.peek(creation.record.yaml_path) == creation.seed
+    for path in (_creation_anchor_seed / ".git" / "objects").rglob("*"):
+        if path.is_file():
+            relative = path.relative_to(_creation_anchor_seed)
+            assert not (anchor / relative).samefile(path)
+            assert not (anchor / relative).samefile(unchanged[1] / relative)
+    git_ops.git("config", "--local", "fixture.copy", str(iteration), cwd=anchor)
+    payload = anchor / "isolated-object.txt"
+    payload.write_text(f"creation-copy-only object {iteration}\n", encoding="utf-8")
+    oid = git_ops.git("hash-object", "-w", str(payload), cwd=anchor).stdout.strip()
+    git_ops.git("update-ref", "refs/fixture/creation-isolation", oid, cwd=anchor)
+    assert git_ops.git("config", "--local", "fixture.copy", cwd=anchor).stdout.strip() == str(iteration)
+    assert (anchor / ".git" / "refs" / "fixture" / "creation-isolation").read_text().strip() == oid
+    object_path = Path(".git") / "objects" / oid[:2] / oid[2:]
+    assert (anchor / object_path).is_file()
+    for root, before in snapshots.items():
+        assert not (root / object_path).exists()
+        assert {
+            path.relative_to(root): path.read_bytes()
+            for path in root.rglob("*") if path.is_file()
+        } == before
 
 
 def _args(creation, *, fix=False, **changes):
