@@ -501,6 +501,36 @@ def _pr_git(*args: str, cwd) -> str:
 
 
 @pytest.fixture
+def record_repo(tmp_path: Path, monkeypatch):
+    """Private persisted-record inputs without native Git setup."""
+    tracking_d = tmp_path / "tracking"
+    tracking_d.mkdir()
+    worktree_id = "test-wt-20260618-aaaa"
+    wt_root = tmp_path / "worktrees"
+    wt_path = wt_root / worktree_id
+    wt_path.mkdir(parents=True)
+    config = cfg.Config(
+        srcroot=str(tmp_path), machine="test", platform="linux",
+        repo_name="ext",
+        repos={"ext": cfg.RepoConfig(
+            anchor=str(tmp_path / "anchor"), worktree_root=str(wt_root),
+            default_branch="master", remote="origin",
+            pr=cfg.PRConfig(
+                enabled=True, provider="gitea", branch_prefix="feature",
+                head_scheme="snapshot", auto_open=False,
+            ),
+        )},
+    )
+    monkeypatch.setattr(cfg, "tracking_dir", lambda name=None: tracking_d)
+    monkeypatch.setattr(cfg, "load_config", lambda *args, **kwargs: config)
+    tracking.create_new_record(
+        worktree_id, f"worktree/{worktree_id}", str(wt_path),
+        "ext", "test", "linux", tracking_d,
+    )
+    return config, worktree_id, wt_path, tmp_path / "remote.git"
+
+
+@pytest.fixture
 def pr_repo(tmp_path: Path, monkeypatch):
     """A bare 'remote' + anchor + a worktree branch with two commits.
 
