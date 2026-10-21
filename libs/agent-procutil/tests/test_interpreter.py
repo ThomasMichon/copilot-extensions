@@ -136,6 +136,15 @@ def test_non_file_target_is_not_an_interpreter(tmp_path):
     assert physical_executable(str(tmp_path)) is None
 
 
+def test_root_targeted_executable_link_is_not_an_interpreter(monkeypatch, tmp_path):
+    python = tmp_path / "python.exe"
+    python.write_text("")
+    alias = tmp_path / "pythonw.exe"
+    _links(monkeypatch, {alias: Path(tmp_path.anchor)})
+    assert physical_executable(str(alias)) is None
+    assert pu.windowless_python(str(python)) == str(python)
+
+
 def test_parent_component_is_applied_after_reading_link(monkeypatch, tmp_path):
     base = tmp_path / "physical"
     (base / "nested").mkdir(parents=True)

@@ -46,6 +46,8 @@ def physical_executable(path: str) -> str | None:
                 target = os.path.join(current, target)
             remaining = list(Path(target).parts) + remaining
             current = remaining.pop(0)
+            if not remaining:
+                return None
             continue
         if remaining and not stat.S_ISDIR(info.st_mode):
             return None
