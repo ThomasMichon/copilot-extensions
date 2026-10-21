@@ -87,7 +87,46 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Admitted fixture-semantic batches
 
+### B-RESOURCE private finalization inputs
+
+Baseline: the actual #7668 merge. `_final_owner_seed` runs the original
+transitive-finalization `_env` builder under the existing run-local
+seed lock and hermetic setup environment. `_copy_final_owner` copies
+only the anchor and origin stores, relocates origin and constructs
+fresh configuration, tracking records and project/install paths.
+`final_owner` never copies mutable owner records or caches finalization
+authority.
+
+Two repeated isolation cases compare copied Git bytes and physical
+file identity, then commit and push only in the first copy, reserve
+and close a real producer claim, and actually finalize its owner.
+Every seed/sibling byte and sibling record remains unchanged. Both
+configurations and their nested repository objects are independent;
+all origins and administrative paths name the current copy.
+
+The four existing test functions, their decorators, all assertions,
+the cross-process lock regression and `_reserve` remain AST-identical.
+Complete native Windows resource-producer-finalization module:
+17 passed, zero skips, 58.68 seconds pytest / 77.56 preparation-cleanup
+inclusive. Exactly two work-stealing workers preserve the 30-second
+item watchdog, all original marks and resource limits under a
+240-second diagnostic group. This is functional integration, not
+quiet-host, whole-suite or repeated same-head qualification.
+
+This below-altitude test setup extraction changes no production,
+command, installation, configuration or architecture contract.
+Documentation impact is this ledger only. Clean-room provisioning
+and external-venue lanes do not apply to test-only preparation.
+Other fixture batches and S/F/G/P/R/A remain separately owned.
+
 ### B-CACHE-SEED private empty-Git workspaces
+
+Actual disposition: #7668 merged as
+`ffc220ecfdcec8397ce8d313f0cb3648e650ec80`; full Copilot review
+`5606637029` approved exact head
+`a569f57d69c9d35a5af063d58ea7179ef3395643`. Overview, inline/general
+channels and threads had no findings; required CI was green. The child
+worktree is finalized. N-STAT remains separately owned.
 
 Baseline: the actual #7665 merge. Prepare only an empty repository
 under the existing run-local seed lock and hermetic setup environment.
