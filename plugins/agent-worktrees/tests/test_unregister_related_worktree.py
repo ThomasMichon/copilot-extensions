@@ -58,7 +58,14 @@ def test_unadopt_preserves_related_repository_and_real_worktree_creation(
     foreign.write_text("foreign launcher; no ownership receipt\n", encoding="utf-8")
     launcher_before = foreign.read_bytes()
 
-    command = [sys.executable, "-m", "agent_worktrees", "--project", "sample"]
+    native_command = Path(sys.executable).parent / (
+        "agent-worktrees.exe" if os.name == "nt" else "agent-worktrees"
+    )
+    assert native_command.is_file()
+    foreign_command = bindir / ("agent-worktrees.cmd" if os.name == "nt" else "agent-worktrees")
+    foreign_command.write_text("this PATH command must never be invoked\n", encoding="utf-8")
+    monkeypatch.setenv("PATH", str(bindir) + os.pathsep + os.environ["PATH"])
+    command = [str(native_command), "--project", "sample"]
     _run([*command, "unregister", "--keep-repo-entry", "unchanged"], checkout)
 
     assert asdict(repos.read_registry().repos["sample"]) == retained
@@ -73,7 +80,13 @@ def test_unadopt_preserves_related_repository_and_real_worktree_creation(
         repo_path=str(checkout), adopted=False,
     )
     assert plan.editing_model == "worktree"
-    assert any("agent-worktrees --project sample create --json" in s for s in plan.steps)
+    assert any(
+        "<agent-worktrees catalog argv[0]> --project sample create --json" in s
+        for s in plan.steps
+    )
+    assert any("selected installation command from the catalog" in s for s in plan.steps)
+    assert any("never resolve it through PATH" in s for s in plan.steps)
+    assert not any("`agent-worktrees " in s for s in plan.steps)
     assert not any("register sample" in s for s in plan.steps)
 
     created = _run(
