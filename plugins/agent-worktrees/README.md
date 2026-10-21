@@ -129,6 +129,14 @@ context selection and WSL detection keep their existing precedence.
 Front-door Git discovery also uses the shared headless process helper for
 windowless callers.
 
+Bare interactive launch distinguishes an absent Manager from a registered
+provider whose health check fails. First-run installation guidance remains a
+successful onboarding result. A failed registered provider reports its bounded,
+credential-redacted startup stderr and returns nonzero when no fallback runs;
+it does not imply a stale launcher or promise an unavailable bundled Picker.
+Headless projects and invocations without an attached terminal retain their
+worktree-list/help behavior.
+
 Unified update performs local command/profile reconciliation once after
 runtime reconciliation and anchor synchronization. It binds command repair to
 the freshly selected payload rather than an inherited historical snapshot.

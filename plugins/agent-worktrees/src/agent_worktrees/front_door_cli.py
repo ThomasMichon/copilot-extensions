@@ -700,6 +700,7 @@ _provider_command_display_name = _mlc._provider_command_display_name
 _worktree_manager_path = _mlc._worktree_manager_path
 _launch_probe_env = _mlc._launch_probe_env
 _probe_worktree_manager_version = _mlc._probe_worktree_manager_version
+_worktree_manager_health = _mlc._worktree_manager_health
 _usable_worktree_manager = _mlc._usable_worktree_manager
 _worktree_manager_root = _mlc._worktree_manager_root
 _current_version_slot = _mlc._current_version_slot
