@@ -217,7 +217,9 @@ proxies:
 - [x] Canonical resume and two natural qualified cycles demonstrate stable
       source operation; client acceptance remains separate.
 - [ ] The first tournament records defect-detection value, coverage, runtime,
-      flakiness and maintenance cost, replacing rather than accumulating cases.
+      flakiness and maintenance cost, admitting valuable regressions within the
+      unchanged budget and replacing redundant cases when stronger evidence
+      supports removal.
 - [ ] Every issue in the manifest is resolved or transferred to a named tracked
       objective before the parent effort is declared complete.
 
