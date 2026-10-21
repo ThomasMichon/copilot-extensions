@@ -86,6 +86,12 @@ cadence limits follow the implementation review rather than this proposal.
   long-lived worker does not keep applying its original updater implementation
   after Manager self-update. Authentication must defer visibly rather than
   starting an unattended interactive credential ceremony.
+- [ ] Upgrade the resident worker's own scheduling and consent implementation
+  through the existing safe resident-lifecycle/singleton handover contract.
+  Preserve any active update until its safe completion, permit only one
+  scheduling owner and activate the qualified replacement without another
+  user logon. Failed replacement must preserve a healthy controller or report
+  the precise recovery outcome; updating the invoked CLI alone is insufficient.
 - [ ] Implement unelevated current-user Windows Autorun plus durable headless
   startup and the matching Linux/WSL user lifecycle.
 - [ ] Hand over only legacy suite-update responsibility. Preserve Agent Machines'
@@ -116,6 +122,7 @@ credential blocker must not become a success-shaped skip.
 | Default and consent | Fresh Manager installation starts no updater by default. Explicit user or trusted setup can enroll the addressed installation; repository discovery alone cannot. Repeated enrollment is idempotent and local disable remains effective. |
 | Setup completion | A real consuming-harness setup installs Manager, enrolls its approved owner and reports enabled/running or a precise activation/readiness blocker. A later fresh process observes the same local policy. |
 | Windows lifetime | Native unelevated enrollment writes only the current-user Autorun surface, requests no UAC and creates no scheduled task. Execute the exact registered startup command; prove worker survival after setup Job closure and zero visible-window/focus changes across at least two cycles. |
+| Worker upgrade | Native Windows and Linux replace a real old worker with the selected new implementation without another logon. Exercise an in-flight update, successor failure and concurrent replacement: preserve the active update, prevent overlapping scheduling owners and verify healthy continuation or an explicit recovery outcome. |
 | Linux/WSL lifetime | User-scoped registration, restart/logon behavior and current status work without an open Picker. Missing user-manager/session/WSL availability remains explicit. |
 | One owner | Manager and external-controller modes cannot update concurrently. Legacy fleet/self-suite paths hand over without suppressing unrelated machine/dependency convergence; unadopted standalone behavior remains intact. |
 | Recurring operation | Observe an unchanged cycle and an advancing update through the actual bounded canonical path in the scheduled/background context on Windows and Linux; no foreground setup or task-definition proxy counts as this proof. |

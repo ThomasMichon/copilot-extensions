@@ -262,6 +262,11 @@ administrative registration ceremony. Its platform lifecycle remains
 unobtrusive, and disabled, pending-activation, blocked and healthy operation are
 distinguishable.
 
+The maintenance controller itself stays current through a safe upgrade, not
+only its invoked updater. Replacement preserves an active update, permits only
+one scheduling owner and does not wait for the next user logon. A failed
+replacement preserves healthy operation or reports the precise recovery need.
+
 One owner maintains the suite. An explicitly selected external controller is
 an alternative to Manager-owned maintenance, not a concurrent updater.
 Ownership changes preserve the existing installation and update authorities;
