@@ -1,8 +1,12 @@
 """Isolation contracts for the reusable base PR repository seed."""
 
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
+from agent_procutil import no_window_kwargs
 
 from agent_worktrees import git_ops, pr_publish, tracking
 from conftest import _copy_pr_repo
@@ -13,6 +17,79 @@ def _files(root):
         path.relative_to(root): path.read_bytes()
         for path in root.rglob("*") if path.is_file()
     }
+
+
+def test_session_seed_ignores_global_git_config_and_restores_environment(tmp_path):
+    home = tmp_path / "launch-home"
+    home.mkdir()
+    hooks = home / "hooks"
+    hooks.mkdir()
+    marker = home / "hook-ran"
+    for name in ("pre-commit", "pre-push"):
+        hook = hooks / name
+        hook.write_text(f'#!/bin/sh\n: > "{marker.as_posix()}"\nexit 41\n')
+        hook.chmod(0o755)
+    global_config = home / ".gitconfig"
+    global_config.write_text(
+        f'[core]\n hooksPath = "{hooks.as_posix()}"\n'
+        f'[commit]\n gpgsign = true\n[gpg]\n program = "{(home / "absent-gpg").as_posix()}"\n',
+        encoding="utf-8",
+    )
+    before = global_config.read_bytes()
+    script = """
+import os, sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+from conftest import _pr_repo_seed
+from agent_worktrees import git_ops
+root = Path(sys.argv[2])
+class Factory:
+    def mktemp(self, key):
+        seed = root / key
+        seed.mkdir()
+        return seed
+assert git_ops.git('config', '--global', '--get', 'commit.gpgsign').stdout.strip() == 'true'
+before = dict(os.environ)
+seed = _pr_repo_seed.__wrapped__(Factory())
+assert dict(os.environ) == before
+worktree = seed / 'worktrees' / 'test-wt-20260618-aaaa'
+assert git_ops.git('rev-list', '--count', 'master..HEAD', cwd=worktree).stdout.strip() == '2'
+assert git_ops.git('config', '--global', '--get', 'commit.gpgsign').stdout.strip() == 'true'
+assert not (root / 'hook-ran').exists()
+"""
+    env = os.environ.copy()
+    env.update(HOME=str(home), USERPROFILE=str(home), XDG_CONFIG_HOME=str(home / "xdg"))
+    for name in (
+        "COPILOT_EXTENSIONS_TEST_CONTAINED", "COPILOT_EXTENSIONS_TEST_SANDBOX",
+        "GIT_CONFIG_GLOBAL", "GIT_CONFIG_NOSYSTEM",
+    ):
+        env.pop(name, None)
+    result = subprocess.run(
+        [sys.executable, "-c", script, str(Path(__file__).parent), str(home)],
+        env=env, capture_output=True, text=True, timeout=20, **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert global_config.read_bytes() == before
+    assert not marker.exists()
+
+
+def test_failed_session_seed_restores_git_environment(tmp_path_factory, monkeypatch):
+    import conftest
+
+    monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", "synthetic-user-config")
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "0")
+
+    def failed_builder(seed):
+        assert os.environ["GIT_CONFIG_GLOBAL"] == os.devnull
+        assert os.environ["GIT_CONFIG_NOSYSTEM"] == "1"
+        raise RuntimeError("synthetic build failure")
+
+    monkeypatch.setattr(conftest, "_build_pr_repo_seed", failed_builder)
+    with pytest.raises(RuntimeError, match="synthetic build failure"):
+        conftest._pr_repo_seed.__wrapped__(tmp_path_factory)
+    assert os.environ["GIT_CONFIG_GLOBAL"] == "synthetic-user-config"
+    assert os.environ["GIT_CONFIG_NOSYSTEM"] == "0"
 
 
 @pytest.mark.parametrize("iteration", range(2))

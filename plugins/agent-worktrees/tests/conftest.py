@@ -622,7 +622,11 @@ def _pr_repo_seed(tmp_path_factory):
     """Build immutable topology once per contained run; copy mutable test state."""
     with _seed_directory(tmp_path_factory, "base") as (seed, build):
         if build:
-            _build_pr_repo_seed(seed)
+            # Session fixtures precede the function-scoped HOME isolation.
+            with pytest.MonkeyPatch.context() as patch:
+                patch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+                patch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+                _build_pr_repo_seed(seed)
         return seed
 
 

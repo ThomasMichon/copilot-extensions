@@ -95,7 +95,9 @@ worktree once in the run-local seed. Each `pr_repo` call physically copies
 all Git stores and repairs administrative links, origin/fork URLs and saved
 record/rewrite identities. Config and tracking bindings remain per case.
 Empty Git templates leave private hook directories; automatic maintenance is
-disabled in this setup-only topology. No published/rebased/fork fixture
+disabled in this setup-only topology. Session construction temporarily ignores
+global/system Git configuration, restoring the environment even on failure:
+session fixtures run before function-scoped HOME isolation. No published/rebased/fork fixture
 adoption or provider observation caching is included.
 
 Only the existing `pr_repo` body changes; the other 25 existing conftest
@@ -109,9 +111,13 @@ a rewrite identity, stable stamped entry IDs, revision advancement and an
 unrelated PR entry that must not be relocated. These inputs are not live
 publication authority.
 
-All 36 focused cases pass without skips on native Windows in 14.82 seconds
-(19.17 inclusive): all five copy regressions, all 29 merged publication
-regressions and unchanged record-only/real create-pr controls. Exactly two
+All 38 focused cases pass without skips on native Windows in 20.86 seconds
+(25.33 inclusive): all five copy regressions, two config-isolation regressions,
+all 29 merged publication regressions and unchanged record-only/real create-pr controls.
+The native uncontained construction probe first observes synthetic global
+signing/external-hook settings, builds without using either and observes the
+unchanged restored settings afterward. Failure-path restoration is also covered.
+Exactly two
 work-stealing workers and unchanged 30-second item/resource limits apply,
 with a 240-second diagnostic group. Ruff F/E9 and thirteen-plugin
 install-contract checks pass.
