@@ -1053,6 +1053,21 @@ work. The project's own per-project state directory (`~/.<project>`) is left
 in place; remove it by hand, or with `uninstall --project <name>
 --remove-config --yes`, once it's no longer needed.
 
+To remove only full project adoption while retaining a related repository's
+editing class, agent preference and repository metadata, use:
+
+```
+agent-worktrees --project related-library unregister --keep-repo-entry unchanged
+```
+
+The bare `--keep-repo-entry` (or explicit `reference`) retains its legacy
+reference/no-agent behavior. `unchanged` leaves the repository registry entry
+untouched. Existing worktree/session/PR guards still apply, and an unowned or
+foreign launcher is not transferred or deleted. A retained local worktree-class
+repository remains usable through
+`agent-worktrees --project related-library create --json`; it does not need to
+rejoin `projects.yaml` merely to create and manage isolated worktrees.
+
 ## Effort Focus
 
 | Command | Description |

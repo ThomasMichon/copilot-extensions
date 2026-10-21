@@ -114,9 +114,11 @@ antidote to balking at a repo's size.
   tool call, use `<agent-worktrees catalog argv[0]> create` (prints the worktree path; cd in and
   edit in your current session -- no new session, no mux). `<name> --new`
   launches a fresh *interactive* muxed session and is refused without a TTY, so
-  it is for humans at a terminal, not agents. If the repo is worktree-class but
-  **not adopted**, adopt it first
-  (`<agent-worktrees catalog argv[0]> register <name>`).
+  it is for humans at a terminal, not agents. A related worktree-class repo
+  with a registered local checkout does **not** need full project adoption:
+  use `<agent-worktrees catalog argv[0]> --project <name> create --json` and
+  the same explicit `--project` for subsequent lifecycle commands. Adopt it
+  with `register <name>` only when full project membership is intended.
 
 Always read the repo's `CONTRIBUTING.md` / `AGENTS.md` and its narrative
 (`<agent-worktrees catalog argv[0]> related doc <name>`) before changing it -- orient at the root

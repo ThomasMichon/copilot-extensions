@@ -10,7 +10,7 @@ the multi-machine system interacts with its local checkout:
   isolation; one flow at a time.
 - **worktree** -- full agent-worktrees lifecycle; concurrent-flow safe,
   with edits/stages/commits isolated in per-task worktrees until push.
-  These are also adopted as ``projects.yaml`` projects.
+  Full project adoption in ``projects.yaml`` is optional and independent.
 - **knowledge** -- same worktree-capable mechanics as ``worktree`` (eligible
   for the ``-k`` paired-knowledge carve, see ``__main__._carve_paired_
   knowledge``), but exists only to be carved as another project's paired

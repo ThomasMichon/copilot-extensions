@@ -39,14 +39,14 @@ Reconciliation rules:
 5. ``name_collision`` -- a ``repos.yaml`` entry and a project share one anchor
    under different names.  Fix: rename the ``repos.yaml`` entry to the project
    (adoption) name -- that is the launchable identity.
-6. ``unadopted_worktree`` -- a ``worktree``/``singleton`` entry that is not
-   adopted (no launch/binstub).  **Report only** (adoption has side effects);
-   recommend ``agent-worktrees register <name>``.
-7. ``stale_path`` -- an entry whose path for this platform is missing on disk.
+6. ``stale_path`` -- an entry whose path for this platform is missing on disk.
    **Report only**; recommend re-cloning or removing.
-8. ``branch_drift`` -- ``repos.yaml`` and ``projects.yaml`` disagree on
+7. ``branch_drift`` -- ``repos.yaml`` and ``projects.yaml`` disagree on
    ``default_branch``.  Fix: align ``projects.yaml`` to ``repos.yaml`` (identity
    is the source of truth).
+
+An editable catalog entry need not be a full project. Absence from
+``projects.yaml`` alone is not drift and never triggers adoption.
 
 It also reconciles each adopted project's **machine-local overlay**
 (``~/.<project>/config.yaml``) against the registries + global config, so the
@@ -565,7 +565,7 @@ def _reconcile(fix: bool = False, plat: str | None = None) -> list[Finding]:
     """Diagnose drift and, when ``fix`` is set, reconcile the data-only cases.
 
     Returns the list of findings; each ``fixed`` flag reflects whether ``--fix``
-    resolved it.  ``unadopted_worktree`` and ``stale_path`` are reported but
+    resolved it.  ``stale_path`` findings are reported but
     never auto-fixed.
     """
     plat = plat or repos._current_platform()
@@ -746,18 +746,6 @@ def _reconcile(fix: bool = False, plat: str | None = None) -> list[Finding]:
                     fix_detail=("adopt inside WSL: run the agent-worktrees "
                                 "installer in the WSL distro"),
                 ))
-
-    # --- worktree/singleton entries that are not adopted --------------------
-    for name in sorted(registry.repos):
-        entry = registry.repos[name]
-        if entry.repo_class in ("worktree", "singleton") and name not in projects:
-            findings.append(Finding(
-                repo=name, kind="unadopted_worktree", severity=SEV_WARNING,
-                detail=(f"'{name}' is {entry.repo_class}-class but not adopted "
-                        "(no launch/binstub)"),
-                fixable=False,
-                fix_detail=f"adopt with: agent-worktrees register {name}",
-            ))
 
     # --- entries whose path is missing on disk ------------------------------
     for name in sorted(registry.repos):

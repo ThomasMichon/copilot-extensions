@@ -71,6 +71,7 @@ from .related_availability import (
     locus_here as _availability_locus_here,
     venue_machines as _availability_venue_machines,
 )
+from .related_editing import local_edit_steps
 
 # Repo-owned related-repo config moves toward the shared plugin namespace;
 # payload contributions retain the legacy in-payload ``.agent-worktrees/`` location.
@@ -1465,10 +1466,11 @@ def build_resolution(
     """Compute how to work on ``entry`` from the current machine.
 
     Pure planner -- the caller injects the current machine, the global-registry
-    class/path, whether the repo is adopted (has a launch binstub), and whether
+    class/path, whether the repo has full project adoption, and whether
     it is adopted as a **base_repo** (an enlistment / no-worktree monorepo, from
     projects.yaml).  It emits a structured plan (kind, availability, editing
-    model, delegation, concrete steps) but never executes anything.
+    model, delegation, concrete steps) but never executes anything. A registered
+    local checkout can use explicit-project worktree commands without adoption.
 
     A ``worktree``-class repo adopted as a ``base_repo`` is edited **in place**
     in the anchor enlistment (one flow at a time), never via ``--new`` worktree
@@ -1495,33 +1497,9 @@ def build_resolution(
         if base_repo:
             res.editing_model = "anchor"
         else:
-            res.editing_model = "worktree" if adopted else "worktree-unadopted"
+            res.editing_model = "worktree" if adopted or repo_path else "worktree-unadopted"
     else:
         res.editing_model = "unknown"
-
-    def _local_edit_steps() -> list[str]:
-        if cls == "reference":
-            return [f"Read-only (reference). Resolve the path with "
-                    f"`agent-worktrees repos find {name}`; do not edit it."]
-        if cls == "singleton" or (cls == "worktree" and base_repo):
-            loc = repo_path or f"(run `agent-worktrees repos find {name}`)"
-            kindword = ("base_repo enlistment" if cls == "worktree"
-                        else "singleton")
-            return [f"Edit the anchor checkout directly at {loc} "
-                    f"({kindword}: one flow at a time; no `--new` worktree)."]
-        if cls == "worktree":
-            if adopted:
-                return [f"Create an isolated worktree **programmatically** "
-                        f"(no mux, no session): `{name} create --json` -- start "
-                        f"Copilot in the returned path (or `cd` in and edit in "
-                        f"your current session), then `{name} push-changes` / "
-                        f"`{name} finalize`. **Never `{name} --new`** from a tool "
-                        f"call: it launches an interactive tmux/psmux session for "
-                        f"a human at a terminal."]
-            return [f"Adopt first: `agent-worktrees register {name}`, then "
-                    f"`{name} create --json` (never `{name} --new` -- that is the "
-                    f"interactive, human-only launch)."]
-        return [f"Resolve the checkout with `agent-worktrees repos find {name}`."]
 
     if kind == "codespace":
         res.available_here = True  # CodeSpaces are driven from any machine
@@ -1617,7 +1595,10 @@ def build_resolution(
     if kind == "machine":
         res.available_here = (machine_match or machine_matches)(target, current_machine)
         if res.available_here:
-            res.steps = _local_edit_steps()
+            res.steps = local_edit_steps(
+                name=name, repo_class=cls, repo_path=repo_path,
+                adopted=adopted, base_repo=base_repo,
+            )
         else:
             via = entry.delegate or "agent-bridge"
             res.steps = [
@@ -1652,7 +1633,10 @@ def build_resolution(
         return res
 
     res.available_here = True
-    res.steps = _local_edit_steps()
+    res.steps = local_edit_steps(
+        name=name, repo_class=cls, repo_path=repo_path,
+        adopted=adopted, base_repo=base_repo,
+    )
     return res
 
 

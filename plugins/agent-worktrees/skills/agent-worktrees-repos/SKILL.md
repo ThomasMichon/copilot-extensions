@@ -79,11 +79,18 @@ The two words that most often get mistaken for classes are **not** classes:
   hand the work to another machine / CodeSpace / container's agent — orthogonal
   to how the checkout is classed.
 
-A single repo is described by all three axes at once. Example: `copilot-extensions`
+A single repo is described by all three axes at once. Example: `example-library`
 is **class** `worktree` (edit in isolated worktrees), **role** `tooling` (what it
 is to a control repo), **locus** `local` + **delegate** `none` (worked in place),
-under an owner / direct-push **landing policy** (no PR). "worktree", "tooling",
+under a PR-required **landing policy**. "worktree", "tooling",
 and "owner" are three different answers, not one field.
+
+Editing class also does not imply agent exposure or full project membership.
+`repos.agent` controls repository-backed agent discovery; `projects.yaml`
+records full adoption with project binstubs and profiles. A related worktree
+repository can retain its agent and isolated editing without full adoption.
+See [project unadoption](../../docs/cli-reference.md#deregistering-a-project-unregister-vs-tearing-down-the-runtime-uninstall---remove-config)
+for preserving those choices when removing project membership.
 
 ## Editing a Worktree-Class Repo (Collision-Free)
 
@@ -92,7 +99,7 @@ to), do **not** edit the anchor checkout. Use the agent-worktrees
 lifecycle so concurrent flows stay isolated:
 
 ```bash
-# One-time: adopt the repo as an agent-worktrees project.
+# Optional: adopt the repo as a full agent-worktrees project.
 #   `register` takes the repo PATH from your CURRENT DIRECTORY (the git root of
 #   cwd -> its main checkout), so RUN IT FROM INSIDE the target repo's checkout.
 #   The <name> argument is only the project LABEL -- it does NOT locate the repo,
@@ -103,18 +110,19 @@ aw='<agent-worktrees catalog argv[0]>'
 cd <target-repo-checkout> && "$aw" register <name>   # cwd = the subject
 #   …or, from anywhere, name the path explicitly:
 <agent-worktrees catalog argv[0]> register <name> --repo-dir <path>
-<agent-worktrees catalog argv[0]> repos add <name> <path> --class worktree       # path-first alt
+# Or catalog a related worktree repo WITHOUT full project adoption:
+<agent-worktrees catalog argv[0]> repos add <name> <path> --class worktree
 
 # Per task: create an isolated worktree, edit there, push, finalize
 #   Agents/automation: create the worktree WITHOUT launching a session. This
 #   prints the worktree path; cd into it and edit in your CURRENT session.
-<agent-worktrees catalog argv[0]> create # prints id + path (add --json for a plan)
+<agent-worktrees catalog argv[0]> --project <name> create --json
 #   Interactive (human at a terminal) only: launch a fresh muxed session in a
 #   new worktree. Refused without a TTY -- never use it from a tool call.
-<repo> --new
+<repo> --new                             # requires full project adoption
 # ... edit, commit inside the worktree path ...
-<repo> push-changes                      # push to the remote default branch
-<repo> finalize                          # validate on upstream + clean up the worktree
+<agent-worktrees catalog argv[0]> --project <name> push-changes
+<agent-worktrees catalog argv[0]> --project <name> finalize
 ```
 
 Edits, stages, and commits live in the per-task worktree and only reach

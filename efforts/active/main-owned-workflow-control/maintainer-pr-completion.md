@@ -68,13 +68,23 @@ Repository editing class, agent exposure and Manager project membership are
 independent; a related worktree-class repository is not automatically a full
 Manager project. Concrete downstream classifications remain downstream.
 
-The first #7510 repair distinguishes an omitted repository class from an
+The first #7510 repair merged in #7547. It distinguishes an omitted repository class from an
 explicit reclassification, including `reference`, while retaining independent
 agent preferences and project membership. Its isolated registry, CLI and
 retained-reference unregister regressions cover persisted class changes,
-metadata retention and invalid-input rejection. The separate related-worktree
-unadoption path, historical launcher disposition and installed acceptance remain
-open; a class-only repair does not authorize those live transitions.
+metadata retention and invalid-input rejection.
+
+The remaining source repair adds explicit `unregister --keep-repo-entry unchanged`
+retention, preserving repository class, agent preference and metadata while
+removing only full project adoption and an owned project launcher. Existing
+blockers and foreign-launcher ownership checks remain. Registered local
+worktree repositories use the shared explicit-project lifecycle without
+readoption, and absence from the project registry alone is not diagnostic drift.
+Native isolated CLI regressions retain both agent choices, private state,
+related links and an unknown launcher, then create real isolated worktrees
+without recreating project membership. Historical launcher disposition and
+installed acceptance remain open; a reviewed source repair does not authorize
+live command transfer or state deletion.
 
 The #7441 per-review-layer authority fix is qualified by promotion #7448 and
 present in the selected, importable Worktrees 1.24.106-dev1 runtime. That is
