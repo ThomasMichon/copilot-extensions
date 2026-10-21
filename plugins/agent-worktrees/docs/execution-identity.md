@@ -118,7 +118,9 @@ lock. New launch receipts also retain the record's creation nonce and original
 owner/pair evidence. Retry and status refuse a replaced, retired, missing or
 conflicting allocation; an already-started creation never automatically carves
 again. Writer protocol version 6 prevents older handlers from consuming this
-new evidence. Old receipt formats remain readable and are not backfilled.
+new evidence. Receipt owner metadata is either fully versioned or wholly
+legacy: partial tuple fields refuse rather than invoking a legacy fallback.
+Old receipt formats remain readable and are not backfilled.
 
 New creation-key receipts retain the same original owner/pair evidence alongside
 their existing nonce. Completed replay preserves the original result and refuses

@@ -13,6 +13,14 @@ from .worktree_machine_identity import WorktreeMachineIdentity, parse_machine_id
 from .worktree_naming import prospective_session_worktree_id, session_worktree_id
 
 _RELATIONSHIP_FIELDS = ("owner_ref", "pair_id", "pair_role", "pair_ref", "pair_kind")
+_TUPLE_FIELDS = {"machine_identity_version", "environment", "execution_machine"}
+
+
+def _receipt_identity(fields: dict) -> WorktreeMachineIdentity | None:
+    present = set(fields) & _TUPLE_FIELDS
+    if present and present != _TUPLE_FIELDS:
+        raise ValueError("Incomplete tuple identity in creation receipt")
+    return parse_machine_identity(fields)
 
 
 def record_evidence(record: tracking.WorktreeRecord) -> dict:
@@ -25,15 +33,14 @@ def record_evidence(record: tracking.WorktreeRecord) -> dict:
 
 def validate_record_evidence(fields: object) -> dict:
     required = {"machine", "platform", *_RELATIONSHIP_FIELDS}
-    identity_keys = {"machine_identity_version", "environment", "execution_machine"}
     if (
         not isinstance(fields, dict) or not required.issubset(fields)
-        or set(fields) - required - identity_keys
+        or set(fields) - required - _TUPLE_FIELDS
         or any(not isinstance(fields[key], str) for key in ("machine", "platform"))
         or any(fields[key] is not None and not isinstance(fields[key], str) for key in _RELATIONSHIP_FIELDS)
     ):
         raise ValueError("Invalid retained creation record identity")
-    parse_machine_identity(fields)
+    _receipt_identity(fields)
     return fields
 
 
@@ -46,7 +53,7 @@ def require_result_identity(record: tracking.WorktreeRecord, result: dict) -> No
     """Use original projection evidence even when an old receipt has no snapshot."""
     if any(key in result for key in ("machine", "platform", "machine_identity_version",
                                      "environment", "execution_machine")):
-        if parse_machine_identity(result) != record.machine_identity:
+        if _receipt_identity(result) != record.machine_identity:
             raise ValueError("Stored allocation changed its original owner representation")
     current = {**record_evidence(record), "creation_nonce": record.creation_nonce}
     if any(key in result and result[key] != value for key, value in current.items()):
@@ -86,10 +93,9 @@ class AdmittedAllocation:
             "version", "project", "anchor", "worktree_root", "worktree_id", "branch",
             "path", "machine", "platform", "timestamp", "suffix",
         }
-        identity_keys = {"machine_identity_version", "environment", "execution_machine"}
         if (
             not isinstance(fields, dict) or not required.issubset(fields)
-            or set(fields) - required - identity_keys
+            or set(fields) - required - _TUPLE_FIELDS
             or type(fields["version"]) is not int or fields["version"] != 1
             or any(not isinstance(fields[key], str) or not fields[key] or "\0" in fields[key]
                    for key in required - {"version"})
@@ -98,7 +104,7 @@ class AdmittedAllocation:
             or re.fullmatch(r"[0-9a-f]{4}|[0-9a-f]{32}", fields["suffix"]) is None
         ):
             raise ValueError("Invalid complete admitted allocation")
-        identity = parse_machine_identity(fields)
+        identity = _receipt_identity(fields)
         expected = (
             prospective_session_worktree_id(identity, fields["timestamp"], fields["suffix"])
             if identity else session_worktree_id(

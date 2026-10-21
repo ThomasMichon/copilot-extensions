@@ -331,3 +331,59 @@ def test_direct_stage_cannot_accept_an_incomplete_allocation(tmp_path, monkeypat
             "fingerprint": "f" * 64, "text": "must not stage",
         })
     assert "accepted" not in launch_request._read_admission(directory, "a" * 32)
+
+
+@pytest.mark.parametrize("platform", ["windows", "wsl", "linux"])
+@pytest.mark.parametrize("missing", ["machine_identity_version", "environment", "execution_machine"])
+def test_incomplete_tuple_receipt_cannot_downgrade_a_lost_admission(
+    tmp_path, monkeypatch, authority, platform, missing,
+):
+    config = _setup(tmp_path, monkeypatch, physical="desk", execution="desk", platform=platform)
+    intent = _intent("new")
+    dispatch = launch_request._dispatch
+
+    def lose_response(verb, args):
+        result = dispatch(verb, args)
+        if verb == "launch_request_admit":
+            raise OSError("lost admission response")
+        return result
+
+    monkeypatch.setattr(launch_request, "_dispatch", lose_response)
+    with pytest.raises(OSError, match="lost admission"):
+        launch_request.execute(config, intent, identity_mode="tuple-v1")
+    directory = tmp_path / "tracking"
+    path = launch_request._admission_path(directory, intent["request_id"])
+    receipt = json.loads(path.read_text())
+    receipt["allocation"].pop(missing)
+    path.write_text(json.dumps(receipt))
+    before = path.read_bytes()
+    monkeypatch.setattr(launch_request, "_dispatch", dispatch)
+    with pytest.raises(ValueError):
+        launch_request.execute(config, intent, identity_mode="legacy")
+    with pytest.raises(ValueError):
+        launch_request.inspect(intent["request_id"])
+    assert path.read_bytes() == before
+    assert not list(directory.glob("*.yaml"))
+    assert not Path(config.default_repo.worktree_root).exists()
+
+
+@pytest.mark.parametrize("boundary", ["allocation", "record-evidence", "old-result"])
+@pytest.mark.parametrize("missing", ["machine_identity_version", "environment", "execution_machine"])
+def test_all_receipt_owner_boundaries_refuse_partial_tuple_metadata(
+    tmp_path, monkeypatch, boundary, missing,
+):
+    config = _setup(tmp_path, monkeypatch, physical="desk", execution="desk", platform="linux")
+    result = m._create_worktree_core(config, creation_key="snapshot", identity_mode="tuple-v1")
+    record = tracking.load_record(tmp_path / "tracking" / f"{result['worktree']['id']}.yaml")
+    if boundary == "allocation":
+        fields = creation_allocation.admit(config, "20261021-010203", "abcd", "tuple-v1").to_fields()
+        validate = creation_allocation.AdmittedAllocation.from_fields
+    elif boundary == "record-evidence":
+        fields = creation_allocation.record_evidence(record)
+        validate = creation_allocation.validate_record_evidence
+    else:
+        fields = result["worktree"].copy()
+        validate = lambda value: creation_allocation.require_result_identity(record, value)
+    fields.pop(missing)
+    with pytest.raises(ValueError, match="Incomplete tuple identity"):
+        validate(fields)

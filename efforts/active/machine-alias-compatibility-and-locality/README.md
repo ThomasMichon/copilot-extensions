@@ -399,7 +399,7 @@ unrelated service changes or a second machine registry.
   replacement during repair and preserves existing record and seed state.
 - Bounded source coverage includes actual daemon admission/replay and actual
   Git pair repair, with Windows/WSL/Linux metadata fixtures and both suffix
-  lengths: 515 affected tests passed with four conditional skips. This is not
+  lengths: 533 affected tests passed with four conditional skips. This is not
   native Windows or installed-consumer acceptance.
   Review/publication remains pending; ordinary defaults, anchor/external opt-in,
   one-term equivalence, release qualification and installed acceptance remain
