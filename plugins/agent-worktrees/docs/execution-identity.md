@@ -96,7 +96,9 @@ before allocation. Missing or conflicting local execution evidence refuses.
 Callers cannot supply arbitrary tuple metadata through this mode.
 
 New session and bridge names use the selected physical machine and environment;
-a physical name ending in a platform-like suffix is not truncated. System IDs
+a physical name ending in a platform-like suffix is not truncated. Names
+containing path separators or NUL refuse before allocation reservation or
+carving; identity metadata is not permission to create a nested ID. System IDs
 keep their existing `sys-...` form. Tracking, JSON and paired worktree records
 share the typed tuple; qualified companion references use its execution owner,
 including anchor companions. Completed creation-key replay retains its stored

@@ -41,6 +41,8 @@ def prospective_session_worktree_id(
     identity: WorktreeMachineIdentity, timestamp: str, suffix: str,
 ) -> str:
     """Name a new physical/environment tuple without stripping the physical name."""
+    if any(char in identity.machine for char in ("/", "\\")):
+        raise ValueError("physical machine name is not a single path component")
     return session_worktree_id(
         identity.machine, identity.environment, timestamp, suffix, physical_machine=True,
     )

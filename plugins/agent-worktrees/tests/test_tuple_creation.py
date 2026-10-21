@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
+import sqlite3
 from types import SimpleNamespace
 
 import pytest
@@ -195,3 +197,45 @@ def test_completed_key_cannot_replay_into_sibling_execution_space(
     with pytest.raises(RuntimeError, match="execution|platform"):
         m._create_worktree_core(native, creation_key="request", identity_mode="tuple-v1")
     assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize("physical", ["rack/desk", r"rack\desk"])
+@pytest.mark.parametrize("kind", ["session", "bridge"])
+@pytest.mark.parametrize("keyed", [False, True])
+def test_physical_path_separator_refuses_before_reservation_or_carve(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, physical: str, kind: str, keyed: bool,
+) -> None:
+    from agent_worktrees import creation_requests
+
+    config = _setup(tmp_path, monkeypatch, physical=physical)
+    effects = []
+    original_create = creation_requests.create
+
+    def create(
+        config: cfg.Config, key: str, facts: dict,
+        allocate: Callable[[Callable[[dict], None]], dict], *,
+        validate_record: Callable[[tracking.WorktreeRecord], None] | None = None,
+    ) -> dict:
+        def checked_allocate(reserve: Callable[[dict], None]) -> dict:
+            def checked_reserve(worktree: dict) -> None:
+                effects.append("reserve")
+                reserve(worktree)
+            return allocate(checked_reserve)
+        return original_create(config, key, facts, checked_allocate, validate_record=validate_record)
+
+    monkeypatch.setattr(creation_requests, "create", create)
+    monkeypatch.setattr(m.git_ops, "create_worktree", lambda *_a: effects.append("git"))
+    with pytest.raises(ValueError, match="physical machine.*path"):
+        m._create_worktree_core(
+            config, kind=kind, identity_mode="tuple-v1",
+            creation_key="request" if keyed else None,
+            creation_intent=None if keyed else lambda _allocation: effects.append("reserve"),
+        )
+    assert effects == []
+    assert not (tmp_path / "worktrees").exists()
+    assert not list((tmp_path / "tracking").rglob("*.yaml"))
+    if keyed:
+        with sqlite3.connect(tmp_path / "workspace-creation.sqlite3") as connection:
+            assert connection.execute("SELECT status, worktree FROM creations").fetchall() == [
+                ("refused", None),
+            ]
