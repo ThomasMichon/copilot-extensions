@@ -174,7 +174,7 @@ timestamp is not proof that the provider metadata was refreshed.
   not inferred from that Linux proof.
 - [ ] Keep marketplace, manifest, package, and runtime versions aligned.
 - [x] Publish the implemented slices through the repository's normal review
-  and self-merge flow, through #7065. Release/adoption remain separate gates.
+  and self-merge flow, through #7104. Release/adoption remain separate gates.
 - [ ] Deploy through the unified update path and verify source/runtime identity.
 
 ### Phase 6 - Agent-owned quota helper and pacing advice
@@ -198,9 +198,11 @@ timestamp is not proof that the provider metadata was refreshed.
 - [x] Document explicit, sparing cooperative pacing separately from read-only
   quota acquisition. Do not add automatic sleeps or suspension control in this
   slice.
-- [ ] Add regressions for changing allowance, selected-account mismatch,
+- [x] Add regressions for changing allowance, selected-account mismatch,
   malformed/missing/stale reset, unit ambiguity, cached metadata, and advice-only
-  behavior.
+  behavior. The isolated quota, provider-quota/pacing, session-identity and host
+  fixtures cover these contracts; live requesting-account qualification remains
+  separate.
 
 ### Phase 6a - Credential-free host integration
 
@@ -284,6 +286,30 @@ resilience. It does not become a historical billing ledger, model benchmark,
 promotion authority, task queue, or dashboard.
 
 ## Journal
+
+### 2026-10-20 - Reconcile merged installation proof and isolated regressions
+
+- PR [#7104](https://github.com/ThomasMichon/copilot-extensions/pull/7104)
+  merged on October 17 as `781763dd0f2d264acd011ba13b3d59470211f6ac`.
+  Its credential-free `budget-guidance-solo` run passed all five phases:
+  clean plugin-specific baseline, self-contained stamp, first-use provision
+  without the original copy, installed identity/offline posture, and the
+  installed extension's fake-SDK contract. This records the existing reviewed
+  run; it is not a new execution or a claim of native Windows acceptance.
+- Reconciled the isolated regression item against the existing
+  [quota tests](../../../plugins/budget-guidance/tests/test_quota.py),
+  [provider quota tests](../../../plugins/budget-guidance/tests/test_provider_quota.py),
+  [pacing tests](../../../plugins/budget-guidance/tests/test_provider_pacing.py),
+  [session identity tests](../../../plugins/budget-guidance/tests/test_session_identity.py)
+  and [host fixtures](../../../plugins/budget-guidance/tests/host-quota.test.mjs).
+  They exercise per-capture entitlement, withheld mismatched-session/account
+  values, invalid or untrusted reset/freshness, unit ambiguity and advice-only
+  behavior. This completion mark covers fixture coverage, not live acquisition.
+- Preserve the remaining gates: safe public raw-reset acquisition, live
+  requesting-account evidence, native Windows session-cue acceptance in #6644,
+  release/source-runtime alignment and authorized rollout. No provider account
+  values, current deployment result or atomic account/quota binding are claimed.
+  The effort remains Active and #2137 remains open.
 
 ### 2026-10-16 - Plugin-specific clean-slate check
 
