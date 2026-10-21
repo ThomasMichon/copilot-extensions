@@ -130,6 +130,14 @@ and blockers. A target must be explicitly owned/ready in the supplied inventory;
 the compiler neither creates a missing host nor treats template capacity as
 placement admission.
 
+Blockers are grouped by logical subject: each entry has `scope` (`fleet`,
+`provider` or `role`), nullable role/provider references and a `codes` list.
+All distinct diagnostics are preserved. At most one fleet group, 256 provider
+groups and 256 role groups fit the existing 513-item output collection bound;
+multiple failures on one subject do not overflow that bound or become invalid
+input. Compilation, saved-plan verification and CLI serialization use the same
+unchanged shared limits, without truncating diagnoses.
+
 Nonblocked status is `review-required`, never ready/installed. Evidence is
 `supplied-snapshots-and-provider-contracts-only`; activation, installed,
 live-readiness and mutation flags remain false, and cleanup is empty.

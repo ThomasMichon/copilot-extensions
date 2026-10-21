@@ -615,15 +615,26 @@ These bounded Windows selections are not a new full Windows-suite claim.
 - Unknown implementations/capabilities, aliased controller references, duplicate
   resource writers, dependency cycles and unadmitted/stale placement refuse or
   block. Unbound roles/providers remain preserved without new bootstrap work.
-- The focused role/provider and retained planner portfolio passed 135 cases,
+- The focused role/provider and retained planner portfolio passed 138 cases,
   including a real built wheel installed without dependencies and exercised
   with source and ambient site packages excluded. Network/process effects were
   forbidden in that installed consumer proof.
-- The complete required fast SDK portfolio passed 1,826 cases with three
-  platform skips and sixteen existing full-portfolio exclusions in 97.98 seconds,
+- The complete required fast SDK portfolio passed 1,829 cases with three
+  platform skips and sixteen existing full-portfolio exclusions in 98.49 seconds,
   under its unchanged 120-second boundary; owned cleanup completed. These are
   planning/packaging contracts, not manager or production adoption evidence.
 - Existing artifact publisher/assembly, release authentication, client
   construction/admission, shared CLI, operation and credential owners retain
   their paths. Actual Core/Gateway execution, installed health, useful real
   services and every live activation gate remain open under this campaign.
+- Review exposed diagnostic expansion beyond the shared collection bound for
+  valid high-cardinality inputs. Blockers now group every distinct code by
+  fleet/provider/role subject, fitting at most 513 groups without increasing
+  shared limits or truncating diagnoses. The 172/256-provider cases and actual
+  CLI serialization preserve blocked output and saved-plan refusal.
+- Updated only the explicit package-module allowlist in the existing
+  exact-source Gateway witness, admitting the new SDK modules and the
+  already-merged client-admission source. A committed-tree regression and all
+  89 retained runner/native-selection/probe guards pass. This fixes package
+  closure, not a new native container or production qualification claim;
+  Docker definitions, privileges and deadlines remain unchanged.

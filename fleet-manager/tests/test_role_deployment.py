@@ -19,6 +19,37 @@ from fleet_manager.role_deployment import ProviderContract, RoleProvider, plan_r
 from fleet_manager.role_plan import main
 
 
+def maximum_inputs(count: int) -> tuple[dict, dict, dict]:
+    template, config, inventory = inputs()
+    template["roles"] = {
+        f"role-{number}": {"kind": "service", "required": True, "available": False}
+        for number in range(count)
+    }
+    config["roles"] = {name: {} for name in template["roles"]}
+    config["extensions"]["role_bindings"] = {
+        "schema": "fleet-manager.role-bindings", "version": 1,
+        "providers": {
+            f"manager-{number}": {
+                "implementation": "unavailable", "instance_ref": f"core-{number}",
+                "target": "missing-host", "configuration_ref": "core-config",
+                "bootstrap_ref": "local-bootstrap",
+            }
+            for number in range(count)
+        },
+        "bindings": {
+            f"role-{number}": {
+                "implementation": "container.service", "provider": f"manager-{number}",
+                "target": "missing-host", "resource": f"resource-{number}",
+                "artifact_ref": "image", "configuration_ref": "config",
+                "depends_on": [f"role-{number - 1}"] if number else [],
+            }
+            for number in range(count)
+        },
+    }
+    inventory.update(complete=False, hosts=[])
+    return template, config, inventory
+
+
 def inputs() -> tuple[dict, dict, dict]:
     template = {
         "schema": "fleet-manager.template", "version": 1,
@@ -135,7 +166,7 @@ def test_role_deployment_unsupported_selection_blocks_without_fallback(change: s
         namespace["bindings"]["gateway"]["implementation"] = "komodo.core"
     result = compute(template, config, inventory)
     assert result["status"] == "blocked"
-    assert code in {blocker["code"] for blocker in result["blockers"]}
+    assert code in {item for blocker in result["blockers"] for item in blocker["codes"]}
     assert result["roles"][0]["projection"] is None
     with pytest.raises(PlanError, match="unresolved blockers"):
         verify_role_plan(
@@ -241,7 +272,10 @@ def test_role_deployment_blocks_dependents_of_unsupported_role_without_projectin
     config["extensions"]["role_bindings"]["bindings"]["gateway"]["requires"] = ["unavailable"]
     result = compute(template, config, inventory)
     assert all(role["projection"] is None and role["state"] == "blocked" for role in result["roles"])
-    assert {"code": "role-dependency-blocked", "role": "status", "provider": "manager"} in result["blockers"]
+    assert {
+        "scope": "role", "codes": ["role-dependency-blocked"],
+        "role": "status", "provider": "manager",
+    } in result["blockers"]
 
 
 @pytest.mark.parametrize("change", ["tamper", "config", "inventory", "contract", "expiry", "policy"])
@@ -290,6 +324,51 @@ def test_role_deployment_preserved_near_limit_configuration_keeps_existing_outpu
     result = compute(template, config, inventory)
     assert len(canonical(result, output=True)) > 700000
     assert result["suggested_config"] == config
+
+
+@pytest.mark.parametrize("count", [172, 256])
+def test_role_deployment_maximum_cardinality_preserves_every_diagnostic_within_shared_bounds(count: int) -> None:
+    template, config, inventory = maximum_inputs(count)
+    result = compute(template, config, inventory)
+    assert result["status"] == "blocked"
+    assert len(result["roles"]) == len(result["providers"]) == count
+    assert len(result["blockers"]) == 2 * count + 1
+    assert len(canonical(result, output=True)) < 4 * 1024 * 1024
+    diagnostics = {
+        (item["scope"], item["role"], item["provider"], code)
+        for item in result["blockers"] for code in item["codes"]
+    }
+    for number in range(count):
+        name, manager = f"role-{number}", f"manager-{number}"
+        assert ("provider", None, manager, "provider-implementation-unavailable") in diagnostics
+        assert ("provider", None, manager, "provider-target-not-admitted") in diagnostics
+        assert ("role", name, manager, "role-target-not-admitted") in diagnostics
+        assert ("fleet", None, None, "required-role-unsupported:" + name) in diagnostics
+        if number:
+            assert ("role", name, manager, "role-dependency-blocked") in diagnostics
+    with pytest.raises(PlanError, match="unresolved blockers"):
+        verify_role_plan(
+            result, template, config, inventory, providers={"komodo": KomodoRoleProvider()},
+            fleet_id="example", machine_limit=2, now=160,
+        )
+
+
+def test_role_deployment_maximum_cardinality_cli_returns_blocked_json_not_invalid_input(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    template, config, inventory = maximum_inputs(256)
+    now = int(time.time())
+    inventory.update(observed_at=now - 1, expires_at=now + 60)
+    for name, value in (("template", template), ("config", config), ("inventory", inventory)):
+        (tmp_path / f"{name}.json").write_text(json.dumps(value))
+    assert main([
+        "--template", str(tmp_path / "template.json"), "--config", str(tmp_path / "config.json"),
+        "--inventory", str(tmp_path / "inventory.json"), "--fleet-id", "example", "--machine-limit", "2",
+    ]) == 2
+    captured = capsys.readouterr()
+    result = json.loads(captured.out)
+    assert result["status"] == "blocked" and len(result["blockers"]) == 513
+    assert captured.err == ""
 
 
 def write_inputs(root: Path) -> tuple[list[str], dict[str, bytes]]:

@@ -94,18 +94,21 @@ def plan_role_deployment(
     admitted_targets = frozenset(
         host["id"] for host in inventory["hosts"] if host["owned"] and host["ready"]
     )
-    blockers = [{"code": code, "role": None, "provider": None} for code in base["blockers"]]
+    diagnostics: dict[tuple[str, str | None, str | None], set[str]] = {}
     registered: dict[str, tuple[RoleProvider, ProviderContract] | None] = {}
     contracts: dict[str, dict] = {}
     bootstraps = []
     selected: dict[str, tuple[RoleProvider, ProviderContract]] = {}
 
     def block(code: str, *, role: str | None = None, provider: str | None = None) -> None:
-        blockers.append({"code": code, "role": role, "provider": provider})
+        scope = "role" if role is not None else "provider" if provider is not None else "fleet"
+        diagnostics.setdefault((scope, role, provider), set()).add(code)
 
     def admitted(target: str) -> bool:
         return target in admitted_targets
 
+    for code in base["blockers"]:
+        block(code)
     for instance in instances:
         if instance.name not in bound_providers:
             continue
@@ -160,6 +163,13 @@ def plan_role_deployment(
             "state": "blocked" if projected is None else "configured-not-installed",
             "live_readiness_verified": False,
         })
+    blockers = [
+        {"scope": scope, "role": role, "provider": provider, "codes": sorted(codes)}
+        for (scope, role, provider), codes in sorted(
+            diagnostics.items(),
+            key=lambda item: tuple(value or "" for value in item[0]),
+        )
+    ]
     result = {
         "schema": "fleet-manager.role-plan", "version": 1, "fleet_id": fleet_id,
         "evidence": "supplied-snapshots-and-provider-contracts-only",
