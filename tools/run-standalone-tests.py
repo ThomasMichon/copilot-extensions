@@ -237,6 +237,13 @@ def export_chat_membership(
     else:
         report["membership_status"] = "available"
         result = outcome
+        execution = report.get("execution")
+        if outcome == 0 and (
+            not isinstance(execution, dict) or execution.get("status") != "complete"
+        ):
+            print("standalone tests: Chat qualification execution is incomplete", file=sys.stderr)
+            report["qualification_error"] = "execution-not-complete"
+            result = 1
     report.update(test_exit_code=outcome, exit_code=result)
     if destination is None:
         return result

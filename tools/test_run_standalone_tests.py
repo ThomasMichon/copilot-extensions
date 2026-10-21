@@ -351,7 +351,10 @@ def test_service_alias_uses_canonical_preparation_lease_and_tests(
         if canonical == "services/chat":
             report = kwargs["sandbox"] / "pytest" / "chat-membership.json"
             report.parent.mkdir()
-            report.write_text('{"nodes":{"fixture":"acceptance"}}', encoding="utf-8")
+            report.write_text(
+                '{"nodes":{"fixture":"acceptance"},"execution":{"status":"complete"}}',
+                encoding="utf-8",
+            )
         events.append(("run",))
         return 0
 
@@ -465,10 +468,13 @@ def exercise_native_legacy_service_cli(tmp_path, legacy, canonical):
     if canonical == "services/chat":
         (tests / "conftest.py").write_text(
             "import json\n"
-            "def pytest_collection_finish(session):\n"
+            "def pytest_sessionfinish(session):\n"
             "    root=session.config._tmp_path_factory.getbasetemp()\n"
+            "    terminal=session.config.pluginmanager.getplugin('terminalreporter')\n"
+            "    complete=len(terminal.stats.get('passed',[]))==len(session.items)\n"
             "    (root/'chat-membership.json').write_text(json.dumps({"
-            "'nodes':{item.nodeid:'acceptance' for item in session.items}}))\n",
+            "'nodes':{item.nodeid:'acceptance' for item in session.items},"
+            "'execution':{'status':'complete' if complete else 'incomplete'}}))\n",
             encoding="utf-8",
         )
     runner.REPO = tmp_path

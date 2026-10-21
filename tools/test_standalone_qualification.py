@@ -30,7 +30,10 @@ def test_chat_qualification_lane_defaults_preserve_full_collection(
         assert kwargs["limits"].wall_seconds == timeout
         report = kwargs["sandbox"] / "pytest" / "chat-membership.json"
         report.parent.mkdir()
-        report.write_text('{"nodes":{"fixture":"acceptance"}}', encoding="utf-8")
+        report.write_text(
+            '{"nodes":{"fixture":"acceptance"},"execution":{"status":"complete"}}',
+            encoding="utf-8",
+        )
         return outcome
 
     monkeypatch.setattr(runner, "run_contained", run)
@@ -41,6 +44,7 @@ def test_chat_qualification_lane_defaults_preserve_full_collection(
     assert runner.main(args) == outcome
     assert json.loads(report.read_text("utf-8")) == {
         "nodes": {"fixture": "acceptance"}, "membership_status": "available",
+        "execution": {"status": "complete"},
         "test_exit_code": outcome, "exit_code": outcome,
     }
     with pytest.raises(SystemExit) as error:
@@ -50,7 +54,9 @@ def test_chat_qualification_lane_defaults_preserve_full_collection(
 
 
 @pytest.mark.parametrize("outcome", [0, 4, 124])
-@pytest.mark.parametrize("map_state", ["missing", "collected", "partial", "wrong-type"])
+@pytest.mark.parametrize("map_state", [
+    "missing", "collected", "collection-only", "partial", "wrong-type", "execution-wrong-type",
+])
 @pytest.mark.parametrize("retain", [False, True])
 def test_membership_validation_preserves_original_failure_without_terminal_summary(
     tmp_path, monkeypatch, capsys, outcome, map_state, retain,
@@ -70,7 +76,9 @@ def test_membership_validation_preserves_original_failure_without_terminal_summa
             report = sandbox / "pytest" / "chat-membership.json"
             report.parent.mkdir()
             report.write_text({
-                "collected": '{"nodes":{"fixture":"acceptance"}}',
+                "collected": '{"nodes":{"fixture":"acceptance"},"execution":{"status":"complete"}}',
+                "collection-only": '{"nodes":{"fixture":"acceptance"},"execution":{"status":"pending"}}',
+                "execution-wrong-type": '{"nodes":{"fixture":"acceptance"},"execution":[]}',
                 "partial": '{"nodes":',
                 "wrong-type": '[]',
             }[map_state], encoding="utf-8")
@@ -86,15 +94,16 @@ def test_membership_validation_preserves_original_failure_without_terminal_summa
     if retain:
         report = json.loads(destination.read_text("utf-8"))
         assert report["test_exit_code"] == outcome and report["exit_code"] == expected
-        assert report["membership_status"] == (
-            "available" if map_state == "collected" else "unavailable"
-        )
-        if map_state != "collected":
+        available = map_state in {"collected", "collection-only", "execution-wrong-type"}
+        assert report["membership_status"] == ("available" if available else "unavailable")
+        if not available:
             assert "nodes" not in report
     else:
         assert not destination.exists()
-    if map_state != "collected":
+    if map_state in {"missing", "partial", "wrong-type"}:
         assert "membership unavailable" in capsys.readouterr().err
+    elif outcome == 0 and map_state != "collected":
+        assert "execution is incomplete" in capsys.readouterr().err
     assert all(not sandbox.exists() for sandbox in owned_sandboxes)
 
 

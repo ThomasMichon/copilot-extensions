@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import os
 from collections import Counter
 
 
@@ -180,3 +181,37 @@ def membership_digest(mapping):
     return hashlib.sha256(
         json.dumps(mapping, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
+
+
+def execution_summary(mapping, profile, reports):
+    if profile not in {"acceptance", "full"}:
+        raise ValueError("unknown Chat qualification lane")
+    expected = {
+        node for node, lane in mapping.items() if profile == "full" or lane == "acceptance"
+    }
+    allowed_skips = {
+        "test_client.py::test_posix_uncertain_post_is_private_under_umask_022_without_changing_test_process",
+    } if os.name == "nt" else set()
+    completed, called, skipped, rejected = [], [], [], []
+    for report in reports:
+        node = report.nodeid.removeprefix("tests/")
+        if report.when == "call" and report.outcome == "passed" and not hasattr(report, "wasxfail"):
+            called.append(node)
+        elif (
+            report.when == "setup" and report.outcome == "skipped"
+            and node in allowed_skips and not hasattr(report, "wasxfail")
+        ):
+            skipped.append(node)
+        else:
+            rejected.append(node)
+            continue
+        completed.append(node)
+    observed = set(completed)
+    missing, unexpected = sorted(expected - observed), sorted(observed - expected)
+    duplicate = len(completed) != len(observed)
+    return {
+        "status": "incomplete" if not expected or missing or unexpected or rejected or duplicate
+        else "complete",
+        "called": len(called), "skipped": sorted(skipped), "missing": missing,
+        "unexpected": unexpected, "rejected": sorted(rejected), "duplicate": duplicate,
+    }

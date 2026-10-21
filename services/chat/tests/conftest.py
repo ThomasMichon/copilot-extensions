@@ -31,7 +31,10 @@ def pytest_collection_modifyitems(config, items):
     current = [item.nodeid.removeprefix("tests/") for item in items]
     if config.option.keyword or config.option.markexpr or current != original:
         raise pytest.UsageError("Chat qualification requires unfiltered collection")
-    if config.option.collectonly or config.option.setuponly or config.option.setupplan:
+    if any((
+        config.option.collectonly, config.option.setuponly, config.option.setupplan,
+        config.option.showfixtures, config.option.show_fixtures_per_test,
+    )):
         raise pytest.UsageError("Chat qualification requires actual test execution")
     try:
         mapping = membership(original)
@@ -47,12 +50,36 @@ def pytest_collection_modifyitems(config, items):
         "schema": "agent-chat.test-membership", "version": 1, "profile": profile,
         "collected": len(mapping), "selected": len(selected),
         "membership_sha256": membership_digest(mapping), "nodes": mapping,
+        "execution": {"status": "pending"},
     }
+    persist_membership(config)
+    return result
+
+
+def persist_membership(config):
     path = config._tmp_path_factory.getbasetemp() / "chat-membership.json"
     temporary = path.with_suffix(".tmp")
     temporary.write_text(json.dumps(config._chat_membership, sort_keys=True), encoding="utf-8")
     temporary.replace(path)
-    return result
+
+
+@pytest.hookimpl(trylast=True)
+def pytest_sessionfinish(session, exitstatus):
+    from qualification import execution_summary
+
+    report = getattr(session.config, "_chat_membership", None)
+    if report is None:
+        return
+    terminal = session.config.pluginmanager.getplugin("terminalreporter")
+    reports = [
+        item for category in ("passed", "skipped", "failed", "error", "xfailed", "xpassed", "rerun")
+        for item in (terminal.stats.get(category, []) if terminal is not None else [])
+    ]
+    report["execution"] = execution_summary(report["nodes"], report["profile"], reports)
+    persist_membership(session.config)
+    if session.exitstatus == 0 and report["execution"]["status"] != "complete":
+        print("Chat qualification did not execute its selected test portfolio", file=sys.stderr)
+        session.exitstatus = pytest.ExitCode.TESTS_FAILED
 
 
 def pytest_terminal_summary(terminalreporter):
@@ -61,7 +88,8 @@ def pytest_terminal_summary(terminalreporter):
         path = terminalreporter.config._tmp_path_factory.getbasetemp() / "chat-membership.json"
         terminalreporter.write_line(
             f"Chat {report['profile']}: {report['selected']}/{report['collected']} nodes; "
-            f"membership_sha256={report['membership_sha256']}; map={path}"
+            f"membership_sha256={report['membership_sha256']}; "
+            f"execution={report['execution']['status']}; map={path}"
         )
 
 

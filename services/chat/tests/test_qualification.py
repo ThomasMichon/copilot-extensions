@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from conftest import pytest_runtest_logreport, run_artifact
-from qualification import PARAMETER_COUNTS, membership, membership_digest
+from qualification import PARAMETER_COUNTS, execution_summary, membership, membership_digest
 
 
 def original_nodes():
@@ -43,6 +43,33 @@ def test_membership_is_exact_and_full_retains_every_parameter(request, monkeypat
     changed = [node.replace("[case-", "[changed-") for node in original]
     assert membership_digest(mapping) != membership_digest(membership(changed))
     assert sum(PARAMETER_COUNTS.values()) == 236 + 6
+    for profile in ("acceptance", "full"):
+        selected = {
+            node for node, lane in mapping.items() if profile == "full" or lane == "acceptance"
+        }
+        reports = [
+            SimpleNamespace(nodeid="tests/" + node, when="call", outcome="passed")
+            for node in sorted(selected)
+        ]
+        assert execution_summary(mapping, profile, reports)["status"] == "complete"
+        for incomplete in (
+            [], reports[:-1], [*reports, reports[0]],
+            [*reports, SimpleNamespace(nodeid="foreign", when="call", outcome="passed")],
+            [*reports, SimpleNamespace(nodeid=reports[0].nodeid, when="teardown", outcome="failed")],
+            [*reports, SimpleNamespace(
+                nodeid=reports[0].nodeid, when="setup", outcome="skipped",
+            )],
+        ):
+            assert execution_summary(mapping, profile, incomplete)["status"] == "incomplete"
+        xfail = SimpleNamespace(**vars(reports[0]), wasxfail="synthetic")
+        assert execution_summary(mapping, profile, [xfail, *reports[1:]])["status"] == "incomplete"
+        assert execution_summary({}, profile, [])["status"] == "incomplete"
+        if os.name == "nt":
+            posix = next(
+                report for report in reports if "test_posix_uncertain_post" in report.nodeid
+            )
+            posix.when, posix.outcome = "setup", "skipped"
+            assert execution_summary(mapping, profile, reports)["status"] == "complete"
 
 
 @pytest.mark.parametrize("change", ["missing", "new", "duplicate", "parameter"])

@@ -1225,6 +1225,12 @@ explicit qualification environment remain unqualified and unpartitioned.
 Filters and collection/setup-only modes are rejected for either lane.
 The runner validates membership even without external report retention:
 an early zero exit such as pytest help/version is not qualification.
+Fixture-listing modes are also refused. At session completion, actual
+passed-call reports and the explicitly allowed native-platform skip must
+exactly cover the selected nodes, without duplicates, unexpected skips,
+xfails or failing phases. The map records pending/complete/incomplete
+execution separately from collection. A zero exit with collection alone
+refuses qualification, even if a map exists.
 
 The native caller-death case reuses the process utility's test-only birth-pinned
 Windows handle/Linux pidfd observer. It observes the actual installed provider,

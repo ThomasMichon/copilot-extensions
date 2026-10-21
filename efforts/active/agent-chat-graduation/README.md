@@ -340,6 +340,35 @@ shared-multiplex contracts above.
 
 ## Journal
 
+### 2026-10-21 - Qualification requires execution, not only collection
+
+- Reproduced the subsequent932 finding4332340681: inherited fixture-listing
+  mode returned zero after collecting209 of242 nodes without executing them.
+  The collected map was not execution proof; that result is retained as a
+  demonstrated false success, not qualified coverage.
+- Reject both fixture-listing options explicitly. In addition, session
+  completion now reconciles actual passed-call reports and the one declared
+  Windows/POSIX-permission setup skip against the exact selected node set.
+  Missing/unexpected/duplicate reports, failing phases, unexpected skips and
+  xfail outcomes cannot establish completion. The early map stays pending
+  until execution is reconciled; a zero result without completed execution
+  refuses with or without external retention. Existing nonzero outcomes stay
+  unchanged. This closes the no-execution class rather than relying only on
+  an ever-growing list of pytest options.
+- Pure execution cases cover both lane selections, no calls, missing/extra/
+  duplicate calls, bad phases, unexpected skips, xfail and the explicit native
+  platform skip. The combined runner contracts passed119 with one platform
+  skip, including collection-only and malformed execution data in both export
+  modes. Real fixture-listing tests cover both options, both lanes and both
+  retention choices: all eight refused with4, preserving both exit codes in
+  requested reports. No source assertion, operation deadline or budget changed.
+- Normal Windows acceptance without export passed208 with one POSIX skip/
+  33 deferred in106.65s/120; complete with retained proof passed241 with the
+  same skip in99.86s/600. Both collect242 with the unchanged050845af map and
+  explicit complete execution. All236 original nodes/six guards remain.
+  The replacement source still needs its own native Linux lanes and current
+  review/CI; previous932/271 results are not new-head credit.
+
 ### 2026-10-21 - Membership validation is mandatory, retention is optional
 
 - Addressed the subsequent current-head finding4332180223: normal commands
