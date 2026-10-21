@@ -446,3 +446,54 @@ Canonical contract: [README.md](README.md).
   research, with completed proposals undergoing chronological adjudication.
   The effort remains Active. No product implementation, tests, native probes,
   deployment or live claim/process/service changes were made.
+
+## 2026-10-21 - Batches twenty-one and twenty-two, 440 original issues reviewed
+
+- The complete paginated census at 12:30 UTC records **1,227 open issues**:
+  1,225 original-cohort issues and inflow #7556/#7587. **440 distinct originals
+  are reviewed; 232 were closed by this campaign**. Including the unrelated
+  #5610 closure and concurrent inflow, the live net reduction is 231. No campaign
+  closure was observed reopened. The fixed checkpoint remains at most 729.
+- Completed finite scopes: #2990's predecessor identity-guard regression;
+  #2991/#2993's actual registered contract source/fixture drift; #3086's owning-
+  repository update/stable-restore argv; #3090's coordinator decomposition;
+  #3220's inherited runtime-root sanitization and diagnostic; #3229's singleton
+  anchor targeting/refusal; #3235's SSH fixture data contract; #3239's turn-tail
+  JSON; #3346's detached observable/steerable venue session; and #3361's complete
+  named-library source/version parity.
+- The contract audit covered both current registries, actual source and capture
+  blobs, fixture hashes, provenance/generation and current semantic evidence;
+  it did not waive a live path by pretending it was retired. The library audit
+  covered all three named canonical libraries and every released 4/4/3 copy,
+  not one repaired file or a checker's exit status. No project tests or checks
+  were executed to obtain those source/data observations.
+- #3346 has specific historical multi-venue, browser, steering/rejoin and cleanup
+  witnesses in actual merged #3352, independently read alongside current source.
+  That is not a newly performed native trial, general credential-lifetime
+  completion, new-venue UI creation or full-marketplace startup certification.
+- Transfers: #2971 to #4418; #3001 to #3000; #3033 to #2173; #3331 to #2594;
+  and #3353 to #3458. Full additive checklists were read back before source
+  closure, retaining every canonical body and prior transfer.
+- #4418 retains the actual represented interactive-question answer roundtrip,
+  including observation-only attention, exact request/race semantics and
+  read-only permission prompts. #3000 retains its #1786 pre-ack candidate
+  contract plus task-terminal/ledger disagreement, stable retry, finalize and
+  focus acceptance; #2467 rightful-source authority remains separate.
+- #2173 retains actual full-body guidance admission/grounding, not merely
+  pointers or bytes. The archived navigation effort's accepted scope and closed
+  #3132 decision remain credited. #2594 retains seed-plus-usage on every custom
+  offer/trigger/decline branch without manufacturing a baton for native same-
+  owner context rollover. #3458 retains the relocated terminal-fragment split,
+  ordinary cap and exact obsolete-baseline ancestry, not the entire #2805 program.
+- #3114 was deliberately retained: its proposed retirement still requires the
+  terminal-reclamation custodian's acceptance and coverage of the general
+  ground-layer case. The complete candidate checklist remains on the original;
+  no #1488 transfer or #1918 claim expansion was performed.
+- #3303 retains its full 20/20 startup and inherited #1215 acceptance, not a
+  3/4 scoped hook pass. #3336 retains all #182/#184 obligations, current unit-only
+  policy and separately owned configured-feed qualification. #3360 credits the
+  production Picker boundary migration while retaining surviving compatibility,
+  development-tool and test callers; a renamed helper is not full retirement.
+- Research is supplied through batch twenty-six. The effort remains Active;
+  no implementation, tests, native probes, rollout, service or claim changes
+  were made, and another journal merge will not complete the parent objective.
