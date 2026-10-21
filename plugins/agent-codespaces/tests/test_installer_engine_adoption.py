@@ -35,6 +35,7 @@ from .installer_test_support import (
     assert_installer_isolated,
     guard_installer_payload,
     isolate_installer_environment,
+    snapshot_tree_manifest,
 )
 
 PLUGIN = Path(__file__).resolve().parents[1]
@@ -1321,6 +1322,23 @@ def codespaces_stamped_snapshot(tmp_path_factory, request):
             ),
         ):
             shutil.copytree(REPO / "libs" / lib, stage / "libs" / lib)
+    probe = payload / "snapshot-copy-probe"
+    (probe / "nested" / "empty-directory").mkdir(parents=True)
+    (probe / "nested" / ".binary-entry").write_bytes(bytes(range(256)))
+    (probe / "empty-file").write_bytes(b"")
+    probe_before = snapshot_tree_manifest(probe)
+    library_inputs = {}
+    project = tomllib.loads((payload / "pyproject.toml").read_text())
+    for spec in project["tool"]["uv"]["sources"].values():
+        name = Path(spec["path"]).name
+        source = payload / "libs" / name
+        if not (source / "pyproject.toml").is_file():
+            source = stage / "libs" / name
+        before = snapshot_tree_manifest(source)
+        expected = before.copy()
+        normalized = (source / "pyproject.toml").read_bytes().replace(b", editable = true }", b" }")
+        expected["pyproject.toml"] = ("file", hashlib.sha256(normalized).hexdigest())
+        library_inputs[name] = source, before, expected
     env = _env(tmp_path)
     if os.name == "nt":
         # The windowless bootstrap consumer needs an executable, not py.cmd.
@@ -1355,6 +1373,10 @@ def codespaces_stamped_snapshot(tmp_path_factory, request):
     )
     assert stamp.returncode == 0, stamp.stdout + stamp.stderr
     snapshot = Path((root / "payload-dir").read_text().strip())
+    assert snapshot_tree_manifest(snapshot / "snapshot-copy-probe") == probe_before
+    for name, (source, before, expected) in library_inputs.items():
+        assert snapshot_tree_manifest(source) == before
+        assert snapshot_tree_manifest(snapshot / "libs" / name) == expected
     for ext in ("sh", "ps1"):
         assert (snapshot / "scripts" / f"installer-engine.{ext}").read_bytes() == (
             ENGINE / f"installer-engine.{ext}"

@@ -2515,6 +2515,24 @@ guard-only empty-suite convention remains a skip.
 Within these automatic Codespaces partitions, pytest assertion exit `1` is sticky:
 later partitions still execute, but later passes cannot turn the plugin result
 green (#6917). Ordinary unpartitioned groups retain their fail-fast behavior.
+
+The native snapshot-copy contract is additionally exercised by
+`agent-codespaces/tests/test_snapshot_copy_contract.py` in canonical-source and
+real-materialized layouts. It compares fresh-destination copies with native
+`Copy-Item`, including complete binary/empty/hidden/read-only contents and
+root-reparse behavior; deterministic copy failures and linked canonical-input
+symbolic-link refusals must remain non-successful. Windows junction non-refusal
+is characterized rather than silently changed into a new policy. An unavailable
+actual symbolic-link capability blocks that required check; a junction, mock,
+privilege change or skip is not a substitute. Isolated no-op, omitted-entry, truncated
+content and wrong-destination mutations must fail the content oracle.
+The existing installer module retains its original node inventory while its
+real stamp fixture also compares complete library contents and a nested payload
+probe. No cache/metadata inputs are discarded to meet the native deadline.
+The shared PowerShell copy helper stays canonical on `dev`; normal release
+materialization, not checked-in per-plugin engine copies, supplies shipped bytes.
+Focused copy-contract results do not replace the complete automatic installer
+run or increase its existing native/item/group/aggregate limits.
 Interrupt/internal/usage failures, unfiltered empty collection, containment
 exceptions, resource failures and aggregate timeouts still abort immediately
 with their original status. The runner's multi-plugin policy is unchanged.
