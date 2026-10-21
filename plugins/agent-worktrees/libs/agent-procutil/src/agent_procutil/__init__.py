@@ -618,7 +618,9 @@ def no_window_kwargs() -> dict:
     return {}
 
 
-def windowless_python(executable: str | os.PathLike[str] | None = None) -> str:
+def windowless_python(
+    executable: str | os.PathLike[str] | None = None, *, require_windowless: bool = False,
+) -> str:
     """Return the interpreter for a fully detached Python daemon.
 
     A Windows venv ``python.exe`` is a console-subsystem launcher. Even when it
@@ -627,7 +629,9 @@ def windowless_python(executable: str | os.PathLike[str] | None = None) -> str:
     Prefer the base install's own ``pythonw.exe`` recorded in ``pyvenv.cfg``
     when available; otherwise fall back to the local ``pythonw.exe`` sibling.
     Off Windows, or when no windowless interpreter exists, return the requested
-    interpreter unchanged.
+    interpreter unchanged. On Windows, ``require_windowless=True`` instead
+    refuses that console fallback. GUI intent comes from selecting the
+    pythonw entry, not from the resolved target's filename.
     """
     python = os.fspath(executable) if executable is not None else sys.executable
     if not _is_windows():
@@ -636,7 +640,12 @@ def windowless_python(executable: str | os.PathLike[str] | None = None) -> str:
     if base_pythonw:
         return base_pythonw
     candidate = os.path.join(os.path.dirname(python), "pythonw.exe")
-    return _physical_executable(candidate) or python
+    physical = _physical_executable(candidate)
+    if physical:
+        return physical
+    if require_windowless:
+        raise RuntimeError("A Windows windowless Python interpreter is unavailable.")
+    return python
 
 
 def windowless_python_env(

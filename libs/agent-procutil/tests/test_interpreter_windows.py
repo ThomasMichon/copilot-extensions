@@ -72,6 +72,8 @@ def test_inner_junction_launch_twice_with_selected_venv(tmp_path, record_propert
                 for select in (pu.direct_python, pu.windowless_python, pu.windowless_python_env):
                     with pytest.raises(RuntimeError, match="physical Python home"):
                         select(original)
+                with pytest.raises(RuntimeError, match="physical Python home"):
+                    pu.windowless_python(original, require_windowless=True)
             # Only the disposable fixture models qualified runtime construction.
             # The selection API never rewrites an existing runtime's config.
             cfg.write_text(
@@ -79,7 +81,8 @@ def test_inner_junction_launch_twice_with_selected_venv(tmp_path, record_propert
                 encoding="utf-8",
             )
         console, extra = pu.direct_python(original)
-        gui = pu.windowless_python(original)
+        gui = pu.windowless_python(original, require_windowless=True)
+        assert gui == pu.windowless_python(original)
         assert os.path.samefile(console, base_python)
         assert os.path.samefile(gui, base_pythonw)
         assert extra == pu.windowless_python_env(original) == {"__PYVENV_LAUNCHER__": original}

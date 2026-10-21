@@ -1,5 +1,5 @@
 {
-  "comment": "Resolve inner Windows interpreter links and explicitly refuse venv homes blocked by RedirectionGuard",
+  "comment": "Resolve inner Windows interpreter links, refuse blocked venv homes, and preserve console and strict GUI intent in dependent callers",
   "changes": [
     {
       "plugin": "agent-bridge",

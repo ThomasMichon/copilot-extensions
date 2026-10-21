@@ -8,7 +8,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from agent_procutil import windowless_daemon_kwargs, windowless_python, windowless_python_env
+from agent_procutil import direct_python, windowless_daemon_kwargs
 from work_coalescing_singleton import client as wcs_client
 
 from .mux_mapping_registry import _try_lock_file_once, _unlock_file
@@ -72,22 +72,7 @@ def direct_daemon_python(executable: str) -> tuple[str, dict[str, str]]:
     to belong to the runtime itself. Recurring mux children need a console
     root under windowless_daemon_kwargs, not a GUI-subsystem interpreter.
     """
-    python = windowless_python(executable)
-    extra_env = windowless_python_env(executable)
-    config = os.path.join(os.path.dirname(os.path.dirname(executable)), "pyvenv.cfg")
-    if os.name == "nt" and os.path.isfile(config) and not extra_env:
-        raise RuntimeError(
-            "Cannot start mux daemon directly: the Windows venv's base "
-            "pythonw.exe is unavailable; repair the Python installation."
-        )
-    if os.name == "nt" and os.path.basename(python).lower() == "pythonw.exe":
-        python = os.path.join(os.path.dirname(python), "python.exe")
-        if not os.path.isfile(python):
-            raise RuntimeError(
-                "Cannot start mux daemon directly: the base python.exe "
-                "is unavailable; repair the Python installation."
-            )
-    return python, extra_env
+    return direct_python(executable)
 
 
 def spawn_detached(argv: list[str], *, cwd: Path | None = None) -> bool:

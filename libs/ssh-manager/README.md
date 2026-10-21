@@ -91,6 +91,10 @@ inheritance. POSIX environment handling is unchanged.
 The broker lives in the calling process and closes with its SSH root.
 `terminate_ssh_process_tree` also awaits broker cleanup on timeout or
 cancellation. No persistent broker service or cached loopback port is created.
+The Windows client requests strict GUI selection from `agent_procutil`.
+Renamed or relocated physical GUI targets are accepted based on that selection
+intent, not a filename check; an unavailable GUI interpreter is refused rather
+than substituting the ordinary console fallback.
 POSIX transports retain native ProxyCommand execution.
 
 ## As a Dependency

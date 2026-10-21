@@ -69,6 +69,7 @@ def test_inner_home_ancestor_and_final_links_preserve_intent(monkeypatch, tmp_pa
         base / "pythonw.exe": gui / "renamed.exe",
     })
     assert pu.windowless_python(python) == str(gui / "renamed.exe")
+    assert pu.windowless_python(python, require_windowless=True) == str(gui / "renamed.exe")
     assert pu.windowless_python_env(python) == {"__PYVENV_LAUNCHER__": python}
     assert pu.direct_python(python) == (
         str(base / "python.exe"), {"__PYVENV_LAUNCHER__": python},
@@ -110,6 +111,20 @@ def test_missing_physical_home_keeps_windowless_fallback(monkeypatch, tmp_path):
     assert pu.windowless_python_env(python) == {}
     with pytest.raises(RuntimeError, match="base pythonw.exe is unavailable"):
         pu.direct_python(python)
+
+
+def test_strict_windowless_refuses_console_fallback(monkeypatch, tmp_path):
+    python = _venv(tmp_path / "venv", tmp_path / "missing")
+    (Path(python).with_name("pythonw.exe")).unlink()
+    monkeypatch.setattr(pu, "_is_windows", lambda: True)
+    assert pu.windowless_python(python) == python
+    with pytest.raises(RuntimeError, match="windowless Python interpreter is unavailable"):
+        pu.windowless_python(python, require_windowless=True)
+
+
+def test_strict_windowless_is_still_noop_off_windows(monkeypatch):
+    monkeypatch.setattr(pu, "_is_windows", lambda: False)
+    assert pu.windowless_python("/synthetic/python", require_windowless=True) == "/synthetic/python"
 
 
 def test_link_cycle_is_explicit_not_a_fallback(monkeypatch, tmp_path):

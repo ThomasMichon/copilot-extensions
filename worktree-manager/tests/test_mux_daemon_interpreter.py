@@ -5,92 +5,100 @@ from __future__ import annotations
 import os
 import json
 import subprocess
+import stat
 import sys
 import time
 from types import SimpleNamespace
 
 import pytest
+import agent_procutil as interpreter
 
 from worktree_manager import mux_daemon_cutover, mux_daemon_process
 
 
-def _venv_python(tmp_path):
+def _venv_python(tmp_path, home="synthetic-base"):
     root = tmp_path / "venv"
     scripts = root / "Scripts"
     scripts.mkdir(parents=True)
-    (root / "pyvenv.cfg").write_text("home = synthetic-base\n", encoding="utf-8")
+    (root / "pyvenv.cfg").write_text(f"home = {home}\n", encoding="utf-8")
     return str(scripts / "python.exe")
 
 
 def test_direct_interpreter_preserves_windows_venv_environment(tmp_path, monkeypatch):
     executable = _venv_python(tmp_path)
-    monkeypatch.setattr(mux_daemon_process, "os", SimpleNamespace(name="nt", path=os.path))
     calls = []
 
-    def python(source):
+    def select(source):
         calls.append(source)
-        return "base-pythonw"
+        return "base-console", {"__PYVENV_LAUNCHER__": source}
 
-    def env(source):
-        calls.append(source)
-        return {"__PYVENV_LAUNCHER__": source}
-
-    monkeypatch.setattr(mux_daemon_process, "windowless_python", python)
-    monkeypatch.setattr(mux_daemon_process, "windowless_python_env", env)
+    monkeypatch.setattr(mux_daemon_process, "direct_python", select)
     assert mux_daemon_process.direct_daemon_python(executable) == (
-        "base-pythonw", {"__PYVENV_LAUNCHER__": executable},
+        "base-console", {"__PYVENV_LAUNCHER__": executable},
     )
-    assert calls == [executable, executable]
+    assert calls == [executable]
 
 
 def test_windows_venv_without_direct_interpreter_is_rejected(tmp_path, monkeypatch):
     executable = _venv_python(tmp_path)
-    monkeypatch.setattr(mux_daemon_process, "os", SimpleNamespace(name="nt", path=os.path))
-    monkeypatch.setattr(mux_daemon_process, "windowless_python", lambda _: "venv-pythonw")
-    monkeypatch.setattr(mux_daemon_process, "windowless_python_env", lambda _: {})
+    monkeypatch.setattr(interpreter, "_is_windows", lambda: True)
     with pytest.raises(RuntimeError, match="base pythonw.exe is unavailable"):
         mux_daemon_process.direct_daemon_python(executable)
 
 
 def test_direct_windows_interpreter_uses_console_base(tmp_path, monkeypatch):
-    executable = _venv_python(tmp_path)
     base = tmp_path / "base"
     base.mkdir()
+    executable = _venv_python(tmp_path, base)
     console = base / "python.exe"
     console.touch()
-    monkeypatch.setattr(mux_daemon_process, "os", SimpleNamespace(name="nt", path=os.path))
-    monkeypatch.setattr(
-        mux_daemon_process, "windowless_python", lambda _: str(base / "pythonw.exe"),
-    )
-    monkeypatch.setattr(
-        mux_daemon_process, "windowless_python_env",
-        lambda _: {"__PYVENV_LAUNCHER__": executable},
-    )
+    (base / "pythonw.exe").touch()
+    monkeypatch.setattr(interpreter, "_is_windows", lambda: True)
     assert mux_daemon_process.direct_daemon_python(executable) == (
         str(console), {"__PYVENV_LAUNCHER__": executable},
     )
 
 
 def test_direct_windows_interpreter_rejects_missing_console_base(tmp_path, monkeypatch):
-    executable = _venv_python(tmp_path)
-    monkeypatch.setattr(mux_daemon_process, "os", SimpleNamespace(name="nt", path=os.path))
-    monkeypatch.setattr(
-        mux_daemon_process, "windowless_python", lambda _: str(tmp_path / "pythonw.exe"),
-    )
-    monkeypatch.setattr(
-        mux_daemon_process, "windowless_python_env",
-        lambda _: {"__PYVENV_LAUNCHER__": executable},
-    )
+    base = tmp_path / "base"
+    base.mkdir()
+    (base / "pythonw.exe").touch()
+    executable = _venv_python(tmp_path, base)
+    monkeypatch.setattr(interpreter, "_is_windows", lambda: True)
     with pytest.raises(RuntimeError, match="base python.exe is unavailable"):
         mux_daemon_process.direct_daemon_python(executable)
 
 
 def test_posix_interpreter_selection_stays_unchanged(monkeypatch):
-    monkeypatch.setattr(mux_daemon_process, "os", SimpleNamespace(name="posix", path=os.path))
-    monkeypatch.setattr(mux_daemon_process, "windowless_python", lambda source: source)
-    monkeypatch.setattr(mux_daemon_process, "windowless_python_env", lambda _: {})
+    monkeypatch.setattr(interpreter, "_is_windows", lambda: False)
     assert mux_daemon_process.direct_daemon_python("/synthetic/bin/python") == (
         "/synthetic/bin/python", {},
+    )
+
+
+@pytest.mark.parametrize("gui_name", ["pythonw.exe", "gui-host.exe"], ids=["relocated", "renamed"])
+def test_linked_gui_keeps_console_and_venv_from_configured_home(tmp_path, monkeypatch, gui_name):
+    base = tmp_path / "base"
+    base.mkdir()
+    console = base / "python.exe"
+    console.touch()
+    executable = _venv_python(tmp_path, base)
+    gui_dir = tmp_path / "gui-only"
+    gui_dir.mkdir()
+    gui = gui_dir / gui_name
+    gui.touch()
+    alias = str(base / "pythonw.exe")
+    lstat = os.lstat
+    readlink = os.readlink
+    monkeypatch.setattr(interpreter, "_is_windows", lambda: True)
+    monkeypatch.setattr(os, "lstat", lambda path, *a, **k: (
+        SimpleNamespace(st_mode=stat.S_IFLNK) if os.fspath(path) == alias else lstat(path, *a, **k)
+    ))
+    monkeypatch.setattr(os, "readlink", lambda path: (
+        str(gui) if os.fspath(path) == alias else readlink(path)
+    ))
+    assert mux_daemon_process.direct_daemon_python(executable) == (
+        str(console), {"__PYVENV_LAUNCHER__": executable},
     )
 
 

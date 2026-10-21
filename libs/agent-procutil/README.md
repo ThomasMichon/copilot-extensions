@@ -57,6 +57,11 @@ environment mapping; it selects `python.exe` from the same configured home even
 when the GUI executable is itself a link elsewhere.
 Outside a venv, an available requested console sibling takes precedence; if a
 GUI-file alias has none, its physical target's `python.exe` sibling is used.
+Windows callers that cannot accept the ordinary console fallback can request
+`windowless_python(require_windowless=True)`. Selection then refuses if neither
+GUI entry exists, while accepting a GUI entry whose physical target is renamed
+or relocated. Callers must not infer GUI intent from that target's basename.
+The default and non-Windows behavior are unchanged.
 
 The selected venv's configured home must also remain traversable by CPython:
 `__PYVENV_LAUNCHER__` causes startup to read that same `pyvenv.cfg`. A healthy
