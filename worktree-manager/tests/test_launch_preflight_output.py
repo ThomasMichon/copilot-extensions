@@ -82,7 +82,8 @@ def test_preflight_frames_only_its_log_and_preserves_retry_contract(
         r"\[\d{2}:\d{2}:\d{2}\.\d{3}Z\] .+ \[(?:elapsed|duration) \d+\.\d+s\]", line,
     ) for line in lines)
     assert "ghp_" + "a" * 36 not in log.read_text()
-    assert f"launch/preflight/fixture {'done exit 0' if success_after else 'failed exit 7'}" in log.read_text()
+    assert f"launch/preflight/fixture {'done exit 0' if success_after else 'failed exit 1'}" in log.read_text()
+    assert log.read_text().count("(exit 7)") == (success_after - 1 if success_after else 3)
     assert "child-out-" in log.read_text()
     if stream_progress:
         assert result.stderr.count("child-err-") == (success_after or 3)

@@ -400,7 +400,7 @@ run_runtime_preflight() {
         _setup_progress_end done 'exit 0'
     else
         setup_log ERROR "$label failed after $max_attempts attempts -- continuing launch without it"
-        _setup_progress_end failed "exit $rc; continuing launch"
+        _setup_progress_end failed 'exit 1; continuing launch'
     fi
     _stop_setup_progress
     if ((rc != 0)); then
