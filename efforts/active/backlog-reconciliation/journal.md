@@ -595,3 +595,51 @@ Canonical contract: [README.md](README.md).
   oldest-first publication continues with batch twenty-seven. The effort stays
   Active. No product implementation, tests, native probes, deployment,
   process/service or custody changes were made.
+
+## 2026-10-21 - Batches twenty-seven and twenty-eight, 560 original issues reviewed
+
+- The complete paginated census at 14:09 UTC records **1,181 open issues**:
+  1,179 original-cohort issues and inflow #7556/#7587. **560 distinct originals
+  are reviewed; 278 were closed by this campaign**. Including unrelated #5610
+  and concurrent inflow, the live net reduction is 277. No campaign closure
+  was observed reopened. The fixed guidance checkpoint remains at most 729.
+- These two batches closed 19 trackers: ten completed finite scopes and nine
+  requirement-preserving consolidations. Completed scopes include Windows
+  coordinator cold-start, refreshed supervisor endpoint selection, process-pool
+  headless launch/reload, attributable inert startup cleanup and direct per-host
+  MCP endpoints; and configured handoff percentages, setup choice persistence,
+  listener-before-advertisement readiness, prevention of live-slot rewriting
+  and the Linux installer's advertised health-port selection.
+- Transfers: #3959 to #6389; #3960/#3961 to #3954; #3973 to #2594;
+  #3974/#3975/#3976 to #3972; #3984 to #3983; and #3986 to #3985.
+  Complete additive acceptance checklists were read back before closure.
+  Existing canonical bodies, inherited transfers and implementation owners
+  remain intact.
+- #3972 now directly preserves migration hooks, cold-start timeout and
+  read-only replacement diagnostics alongside the original pipeline ordering
+  and idempotency. Actionable diagnostics or a skip warning remain alternatives;
+  replacement policy and custody are not grants to force an operation.
+  #3954 retains the larger Windows dispatch program, including exact seed
+  delivery and general-pool capacity rather than only its individual repairs.
+- #3999 closes the finite causal in-place rewrite race, not a missing-export
+  theory: immutable construction refuses rewriting completed or failed slots
+  and rechecks under construction/retention ownership. Historical broken-slot
+  repair and the wider immutable-runtime program are not declared complete.
+  #3992's listener is already awaited before publication; the matching merged
+  follow-up explicitly rejects the proposed race diagnosis and bounds refusal
+  retries without claiming every Windows reliability issue solved.
+- #3988 closes operator choice and its persistence, not first-use runtime
+  provisioning. #3987 closes the exact configured-percentage comparison, not
+  usage-telemetry qualification. #4013 closes live advertised-port selection,
+  not ownership validation of every advertisement or serving-version convergence.
+  These source/history conclusions do not claim new native execution results.
+- Retained scopes preserve generic reverse-tunnel vault routing and owner-local
+  storage context, dynamic target discovery plus authorized unlock fan-out,
+  actionable headless unlock outcomes, one owned remote relay binding across
+  reconnect, seeded successor startup ordering, attributable CLI-child waiting,
+  existing-slot version freshness and typed occupied-venue failure guidance.
+  A provider, enrollment record or failed probe is not custody-transfer authority.
+- Four disjoint read-only researchers are supplied through batch thirty-six.
+  Oldest-first publication continues with batch twenty-nine; the effort stays
+  Active. No product implementation, tests, native probes, deployment,
+  process/service or live claim changes were made.
