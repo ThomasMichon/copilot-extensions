@@ -82,7 +82,10 @@ worktree repositories use the shared explicit-project lifecycle without
 readoption, and absence from the project registry alone is not diagnostic drift.
 Native isolated CLI regressions retain both agent choices, private state,
 related links and an unknown launcher, then create real isolated worktrees
-without recreating project membership. Historical launcher disposition and
+without recreating project membership. A fresh catalog-only installation-cell
+case initializes its repository identity independently of full adoption before
+loading lifecycle configuration; mismatched identity receipts remain rejected.
+Historical launcher disposition and
 installed acceptance remain open; a reviewed source repair does not authorize
 live command transfer or state deletion.
 

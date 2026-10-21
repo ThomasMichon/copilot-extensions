@@ -1070,6 +1070,10 @@ rejoin `projects.yaml` merely to create and manage isolated worktrees.
 Replace the placeholder with the selected installation's command from the
 session catalog, quoted and invoked for the current shell; do not resolve it
 through PATH.
+On installation-cell hosts, first `create` initializes or validates the
+registered repository's cell-local identity and state before loading lifecycle
+configuration. It does not add project membership or replace a mismatched
+identity receipt.
 
 ## Effort Focus
 
