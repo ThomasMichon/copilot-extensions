@@ -10,6 +10,7 @@ lane exercises real governed construction and installed-origin health.
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import time
 from pathlib import Path
@@ -72,6 +73,46 @@ def test_dry_run_writes_nothing(tmp_path, monkeypatch):
     assert res.version == "1.2.3"
     assert current_version(root) is None
     assert not (root / "current-version").exists()
+
+
+@pytest.mark.parametrize("marker", [None, "", "../outside"])
+def test_completed_slot_without_valid_selection_is_not_already_current(tmp_path, monkeypatch, marker):
+    pd = _fake_payload(tmp_path, "1.2.3")
+    root = tmp_path / "root"
+    _patch_local_bin(monkeypatch, tmp_path)
+    _patch_provider_registry(monkeypatch, tmp_path)
+    assert self_install(pd, root=root, dry_run=False).action == "installed"
+    selected = root / "current-version"
+    if marker is None:
+        selected.unlink()
+    else:
+        selected.write_text(marker)
+    assert self_install(pd, root=root, dry_run=True).action == "planned"
+    assert needs_install("1.2.3", root) is True
+    assert si._core_install_satisfied_gaps("1.2.3", root)
+
+
+@pytest.mark.parametrize("kind", ["repair", "source"])
+def test_valid_qualified_selection_keeps_package_equivalence(tmp_path, monkeypatch, kind):
+    pd = _fake_payload(tmp_path, "1.2.3")
+    root = tmp_path / "root"
+    _patch_local_bin(monkeypatch, tmp_path)
+    _patch_provider_registry(monkeypatch, tmp_path)
+    assert self_install(pd, root=root, dry_run=False).action == "installed"
+    adapter = si._runtime_installer()
+    generation = (
+        "1.2.3+repair." + "a" * 32 if kind == "repair"
+        else adapter.runtime_source.runtime_version("1.2.3", "a" * 40, "b" * 64)
+    )
+    shutil.copytree(
+        version_slot("1.2.3", root), version_slot(generation, root),
+        ignore=shutil.ignore_patterns(".install-complete.json"),
+    )
+    adapter.runtime.mark_complete(root, generation, payload_hash="a" * 64)
+    si._write_marker(root, generation)
+    assert needs_install("1.2.3", root) is False
+    assert self_install(pd, root=root, dry_run=True).action == "already-current"
+    assert si._core_install_satisfied_gaps("1.2.3", root) == []
 
 
 def test_apply_installs_marker_slot_and_binstub(tmp_path, monkeypatch):

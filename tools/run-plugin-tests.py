@@ -28,6 +28,8 @@ Design notes:
 * **State isolation.** Default suites receive runner-owned home, XDG, Copilot,
   plugin-state, and temporary roots. Credential-dependent end-to-end checks
   must opt into host state explicitly.
+* **Discovery.** Default file expansion honors the project's existing pytest
+  ``norecursedirs`` declaration; explicitly selected files remain available.
 * **Windows-safe temp.** Passes a randomized ``--basetemp`` so pytest's tmp
   cleanup does not trip the ``pytest-current`` junction ``PermissionError`` on
   Windows (teardown noise that would otherwise mask a green run).
@@ -43,10 +45,12 @@ Design notes:
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import json
 import math
 import os
 import shutil
+import shlex
 import stat
 import subprocess
 import sys
@@ -390,16 +394,33 @@ def _test_file_groups(
     name: str, max_files: int, *, filtered: bool = False,
     test_files: tuple[str, ...] = (),
 ) -> list[list[Path]]:
-    tests = _plugin_dir(name) / "tests"
+    root = _plugin_dir(name)
+    tests = root / "tests"
     if test_files:
         files = []
         for value in test_files:
-            candidate = validate_test_file(_plugin_dir(name), Path(value).as_posix())
+            candidate = validate_test_file(root, Path(value).as_posix())
             if candidate not in files:
                 files.append(candidate)
         files.sort()
     else:
-        files = sorted(tests.rglob("test_*.py"))
+        # Explicit file arguments bypass pytest's recursive-discovery filters.
+        # Apply its existing directory declaration only to our default expansion.
+        project = root / "pyproject.toml"
+        config = tomllib.loads(project.read_text(encoding="utf-8")) if project.is_file() else {}
+        ignored = config.get("tool", {}).get("pytest", {}).get("ini_options", {}).get("norecursedirs", [])
+        if isinstance(ignored, str):
+            ignored = shlex.split(ignored)
+        if not isinstance(ignored, list) or any(not isinstance(pattern, str) for pattern in ignored):
+            raise ValueError("pytest norecursedirs must be directory patterns")
+        files = sorted(
+            path for path in tests.rglob("test_*.py")
+            if not any(
+                fnmatch.fnmatch(parent.name, pattern) or parent.match(pattern)
+                for parent in path.relative_to(root).parents if parent != Path(".")
+                for pattern in ignored
+            )
+        )
     if filtered and files:
         return [files]
     independent = {tests / path for path in _INDEPENDENT_SUBSUITE_FILES.get(name, ())}

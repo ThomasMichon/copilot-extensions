@@ -64,6 +64,48 @@ def _await_mapping(root, project, worktree, *, removed):
                 + (log.read_text(encoding="utf-8") if log.exists() else "no callback log"))
 
 
+def test_missing_selector_is_planned_then_reuses_healthy_constructed_slot(installed, monkeypatch):
+    directory, root, slot = (Path(installed[key]) for key in ("directory", "root", "slot"))
+    env = _environment(directory)
+    for name in ("HOME", "USERPROFILE", "AGENT_WORKTREES_CONTROL_PLANE_PROVIDERS_DIR"):
+        monkeypatch.setenv(name, env[name])
+    monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(root))
+    payload = slot / "payload"
+    version = si.payload_version(payload)
+    assert si.needs_install(version, root) is False
+    files = [slot / ".install-complete.json", slot / ".runtime-input-origins.json",
+             slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")]
+    before = {path: (path.stat().st_ino, path.read_bytes()) for path in files}
+    bin_dir = Path(env["HOME"]) / ".local" / "bin"
+    if os.name == "nt":
+        launch = [os.environ["COMSPEC"], "/d", "/c", bin_dir / "worktree-manager.cmd", "--version"]
+    else:
+        launch = [shutil.which("bash"), bin_dir / "worktree-manager", "--version"]
+    launch_env = dict(env, WORKTREE_MANAGER_ROOT=str(root), UV_OFFLINE="1",
+                      PATH="" if os.name == "nt" else "/usr/bin:/bin")
+    marker = root / "current-version"
+    marker.unlink()
+    assert _run(launch, launch_env, directory).returncode != 0
+    assert si.needs_install(version, root) is True
+    assert si.self_install(payload, root=root, dry_run=True).action == "planned"
+    assert not marker.exists()
+    adapter = si._runtime_installer()
+
+    def unexpected_construction(*args, **kwargs):
+        pytest.fail("healthy constructed slot must be reused, not rebuilt")
+
+    monkeypatch.setattr(adapter.engine, "_construct", unexpected_construction)
+    result = si.self_install(payload, root=root, dry_run=False)
+    assert result.action == "installed", result
+    assert Path(result.slot) == slot
+    assert marker.read_text().strip() == slot.name
+    assert si.needs_install(version, root) is False
+    assert all((path.stat().st_ino, path.read_bytes()) == value for path, value in before.items())
+    launched = _run(launch, launch_env, directory)
+    assert launched.returncode == 0, launched.stdout + launched.stderr
+    assert launched.stdout.strip() == f"worktree-manager {version}"
+
+
 @pytest.mark.parametrize("shell", ["ps1", "sh"] if os.name == "nt" else ["sh"])
 def test_actual_retained_register_and_remove_without_uv(installed, tmp_path, monkeypatch, shell):
     directory, root, slot = (Path(installed[key]) for key in ("directory", "root", "slot"))

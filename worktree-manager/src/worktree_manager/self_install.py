@@ -408,13 +408,24 @@ def status(root: Path | None = None) -> SelfInstallStatus:
     )
 
 
+def _selected_runtime_slot(root: Path) -> Path | None:
+    selected = current_version(root)
+    if not selected:
+        return None
+    try:
+        _runtime_installer().runtime._validate_dev_previous_version(selected)
+    except (OSError, ImportError, RuntimeError, ValueError):
+        return None
+    return version_slot(selected, root)
+
+
 def _core_install_satisfied(version: str, root: Path | None = None) -> bool:
-    """Marker/slot/binstubs match ``version`` -- independent of the manifest."""
+    """A valid selection, slot and binstubs match the requested package."""
     r = root or default_root()
-    selected = current_version(r)
-    slot = version_slot(selected, r) if selected else version_slot(version, r)
+    slot = _selected_runtime_slot(r)
     return (
-        payload_version(slot / "payload") == version
+        slot is not None
+        and payload_version(slot / "payload") == version
         and _slot_is_complete(slot)
         and binstub_present() is not None
         and not _binstubs_are_stale()
@@ -435,9 +446,12 @@ def _core_install_satisfied_gaps(version: str, root: Path | None = None) -> list
     r = root or default_root()
     gaps: list[str] = []
     cur = current_version(r)
-    selected = version_slot(cur, r) if cur else version_slot(version, r)
+    valid_selection = _selected_runtime_slot(r)
+    selected = valid_selection or version_slot(version, r)
     matching_payload = payload_version(selected / "payload") == version
-    if cur != version and not matching_payload:
+    if valid_selection is None:
+        gaps.append(f"current-version marker is missing, empty or invalid: {cur!r}")
+    elif cur != version and not matching_payload:
         gaps.append(f"current-version marker is {cur!r}, not {version!r}")
     target = selected if matching_payload else version_slot(version, r)
     if not _slot_is_complete(target):

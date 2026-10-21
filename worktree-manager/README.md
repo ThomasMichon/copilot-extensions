@@ -52,6 +52,9 @@ receives canonical completion and becomes `current-version`. Construction failur
 leaves the previous selector and mux untouched. A legacy payload-only or
 interpreter-only slot is retained; repair constructs a distinct generation rather
 than rewriting an active runtime.
+A completed matching slot without a nonempty valid selection is not
+`already-current`: dry-run plans repair, while apply health-checks/reuses the
+canonical ready candidate and restores selection without rebuilding it.
 
 Selector publication uses canonical created-object receipts and recovery while
 holding the selector lease. A partial write restores both previous selector

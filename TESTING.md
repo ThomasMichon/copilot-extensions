@@ -1412,6 +1412,10 @@ is mocked. The assertions run through `run-plugin-tests.py` with explicit
 suite does not recurse into that prepared native lane. Report both ordinary
 orchestration/assembly units and this cold native acceptance before publishing
 a Manager installation change; neither is a substitute for the other.
+The runner's default file discovery honors the existing
+`[tool.pytest.ini_options].norecursedirs` declaration before passing explicit file
+groups to pytest. `--test-file` deliberately retains access to the prepared
+native lane; those tests still require their native driver's fixture data.
 The migration fixture requires Git history containing published pre-engine
 Manager `0.6.35-dev1` at `9c7a61518540787498c77a284f640c36bbe7d8e4`.
 It executes that release's controller against the new payload, witnesses the
@@ -1441,6 +1445,10 @@ real registry updates/tombstones against a private live rendezvous and an owned
 fake engine, not command-string assertions. A distinct contract avoids adding
 another cold construction plus consumer subprocesses to the original group,
 whose measured native Windows execution is already close to its unchanged bound.
+That contract also removes only the selected marker from an otherwise healthy
+constructed installation: dry-run must plan repair, then apply must restore the
+selection using real installed health and unchanged origin/completion receipts.
+An unexpected constructor call fails the test rather than rebuilding silently.
 `tests/test_companion_popup_runtime.py` separately executes the generated Ctrl+K
 popup command through the Windows command shell against a synthetic installed
 fixture CLI and real retention bootstrap (not a package-construction proof).
