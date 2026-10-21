@@ -10,7 +10,8 @@
   recoverable goals; plugin-services bounded work and single-owner lifecycle;
   registry-resolved configuration.
 - **Umbrella issue:** #6466
-- **Sub-issues:** #6467, #6470, #6471, #6793; coordinate #6185 and #6407.
+- **Sub-issues:** #6467, #6470, #6471, #6793; proposed Phase 7: #7486;
+  coordinate #6185 and #6407.
 
 ## Guiding Intent
 
@@ -30,6 +31,7 @@ Preserve the owning ground-layer, installer and configuration authorities.
 | Registry implementer | Named repository/resource bindings and validation | Dedicated implementation worktree for #6470 |
 | Source safety implementer | Trusted ownership snapshots and optional scoped GitHub authentication | `jittery-latch`, #6793 |
 | Existing scalar-repair owner | Preserve ownership of #6407 and its existing #6421 PR | Existing PR and its current source worktree |
+| Ordinary startup admission proposer | Prepare the proposed Phase 7 contract and bounded regression evidence; implementation remains review-gated | Coordinator and the existing #7486 public claim |
 
 ## Coordination
 
@@ -45,6 +47,12 @@ Preserve the owning ground-layer, installer and configuration authorities.
   owner and compose its released repair capability.
 - **Lifecycle owners:** Compose #5301 and #5655; do not add a competing watchdog,
   cleanup daemon, reservation store or repository registry.
+- **Proposed Phase 7:** Coordinate the bounded ordinary native-startup admission
+  amendment through #7486. Preserve #6467's master-supervisor scope and #6793's
+  source-safety scope, plus acquisition #6076, head-resume #6934 and remote
+  relationship #7237. Represented admission #1453 and remote-carrier response
+  loss #5843 remain separate owners. No implementation is authorized before
+  this amendment clears normal public review and merge.
 
 ## Context
 
@@ -102,6 +110,16 @@ Public-safe summary of the subsequently authorized repair:
 - Allow a source to explicitly select existing repository-scoped GitHub
   authentication, without switching global accounts, persisting credentials or
   exporting one account into the shared supervisor environment.
+
+### Proposed ordinary native-startup amendment
+
+Public-safe settled request summary, coordinated in #7486: preserve one ordinary
+startup turn across a lost response, including a response lost after the turn
+settled. Retain original allocation/session identity, distinguish historical
+receipt reads from permission for fresh work, and leave intentional unkeyed
+follow-up turns unchanged. The bounded design and validation matrix are in
+[ordinary-startup-admission.md](ordinary-startup-admission.md).
+This is a proposal, not an implementation or rollout authorization.
 
 ## Plan
 
@@ -186,6 +204,25 @@ Public-safe summary of the subsequently authorized repair:
 - [x] Leave task transfer (#6189), PR-ground-truth reconciliation (#2798),
   broader account-aware operations, and unrelated recovery owners unchanged.
 
+### Phase 7 - Ordinary native-startup keyed admission (PROPOSED)
+
+- [ ] Review and merge the [bounded contract](ordinary-startup-admission.md)
+  before runtime implementation; preserve every existing owner above.
+- [ ] Persist a stable invocation and exact fully rendered prompt with ready-agent
+  intent before first send; retain original allocation lineage across attempts.
+- [ ] Reuse the existing unique turn-delivery key and atomically persist immutable
+  binding facts and the admission receipt with the turn, without a new ledger or
+  delivery state machine.
+- [ ] Separate historical receipt reads from fresh permission: a queued g0
+  admission remains historical truth after a legitimate g1 claim.
+- [ ] Add capability-gated keyed native send without unkeyed fallback; retain
+  existing creation and protocol-floor preflight, not a new CREATE route.
+- [ ] Preserve the exact one-turn counterexample assertion, unkeyed follow-ups,
+  source/native safeguards and bounded supervision; qualify the reviewed fix
+  through the sibling validation matrix.
+- [ ] Keep normal publication, containing release and authorized rollout separate;
+  plan approval alone does not authorize deployment or clear acceptance.
+
 ## Validation Plan
 
 - [ ] Request read-back preserves category-only scope, no pruning, audit retention,
@@ -222,6 +259,12 @@ Public-safe summary of the subsequently authorized repair:
   Record native Windows results and available Linux CI separately from live
   adopter proof; a mock or source pass is not installed-consumer evidence.
 - [ ] Resolve or explicitly transfer every plan/validation item before Done.
+- [ ] Phase 7 proposal read-back preserves the g0/g1 distinction, original lineage,
+  exact prompt, atomic turn receipt, capability refusal and existing owners;
+  execute the [bounded matrix](ordinary-startup-admission.md#validation-matrix)
+  after this plan amendment clears review and merge, and before the runtime
+  repair lands. Retain the scoped passing control and honest failing
+  counterexample without publishing a known failing test as a completed repair.
 
 ## Proposal
 
