@@ -185,3 +185,6 @@ proposal.
   therefore not interchangeable with installed consumer first-launch evidence.
 - Existing installation repairs remain separately owned. No construction runner,
   workflow enforcement or feed secret has been activated by this proposal.
+- Reconciled the test-portfolio vision's blanket integration exclusions with
+  the same bounded construction/launch exception; unit eligibility, coverage
+  and the general periodic integration portfolio remain unchanged.
