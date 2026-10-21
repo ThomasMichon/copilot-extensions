@@ -18,7 +18,7 @@ from build_python_artifacts import resolve_vendored_libs  # noqa: E402
 from materialize_main import materialize_uv_editable_ref_into  # noqa: E402
 
 
-@pytest.mark.parametrize("plugin", ["agent-worktrees", "agent-dispatch"])
+@pytest.mark.parametrize("plugin", ["agent-worktrees", "agent-dispatch", "agent-bridge"])
 def test_consumer_source_graph_and_change_attribution(plugin):
     consumer = REPO / "plugins" / plugin
     assert dict(resolve_vendored_libs(consumer))["worktree-identity"] == (
@@ -40,7 +40,7 @@ def test_consumer_source_graph_and_change_attribution(plugin):
     assert metadata["project"]["dependencies"] == []
 
 
-@pytest.mark.parametrize("plugin", ["agent-worktrees", "agent-dispatch"])
+@pytest.mark.parametrize("plugin", ["agent-worktrees", "agent-dispatch", "agent-bridge"])
 def test_real_materialization_preserves_codec_and_rewrites_source(tmp_path, plugin):
     source = REPO / "plugins" / plugin
     destination = tmp_path / "standalone"

@@ -2202,6 +2202,7 @@ function Materialize-SnapshotVendoredLibs {
         'plugin-activation'    = (Resolve-VendoredLib -LibName 'plugin-activation')
         'remote-login-shell'   = (Resolve-VendoredLib -LibName 'remote-login-shell')
         'machine-transport'    = (Resolve-VendoredLib -LibName 'machine-transport')
+        'worktree-identity'    = (Resolve-VendoredLib -LibName 'worktree-identity')
     }
     foreach ($entry in $sources.GetEnumerator()) {
         $source = $entry.Value
@@ -2231,6 +2232,7 @@ function Materialize-SnapshotVendoredLibs {
             'agent-plugin-activation'    = 'plugin-activation'
             'agent-remote-login-shell'   = 'remote-login-shell'
             'agent-machine-transport'    = 'machine-transport'
+            'agent-worktree-identity'    = 'worktree-identity'
         }
         foreach ($entry in $rewrites.GetEnumerator()) {
             $oldLine = '{0} = {{ path = "../../libs/{1}", editable = true }}' -f $entry.Key, $entry.Value
@@ -2472,7 +2474,7 @@ function Invoke-InstallSlotBuild {
     # else. uv's local-path build cache is keyed by source path, not source
     # content -- see the matching install.sh comment / #2863 for the
     # confirmed incident this class of gap caused.
-    $bridgeResult = Invoke-UvPipInstallResilient @('--python', $VenvPython, "$PluginDir", '--reinstall-package', 'agent-bridge', '--refresh-package', 'agent-bridge', '--reinstall-package', 'agent-procutil', '--refresh-package', 'agent-procutil', '--reinstall-package', 'agent-plugin-resolve', '--refresh-package', 'agent-plugin-resolve', '--reinstall-package', 'agent-dropin-registry', '--refresh-package', 'agent-dropin-registry', '--reinstall-package', 'agent-plugin-activation', '--refresh-package', 'agent-plugin-activation', '--reinstall-package', 'agent-remote-login-shell', '--refresh-package', 'agent-remote-login-shell', '--reinstall-package', 'agent-machine-transport', '--refresh-package', 'agent-machine-transport', '--quiet')
+    $bridgeResult = Invoke-UvPipInstallResilient @('--python', $VenvPython, "$PluginDir", '--reinstall-package', 'agent-bridge', '--refresh-package', 'agent-bridge', '--reinstall-package', 'agent-procutil', '--refresh-package', 'agent-procutil', '--reinstall-package', 'agent-plugin-resolve', '--refresh-package', 'agent-plugin-resolve', '--reinstall-package', 'agent-dropin-registry', '--refresh-package', 'agent-dropin-registry', '--reinstall-package', 'agent-plugin-activation', '--refresh-package', 'agent-plugin-activation', '--reinstall-package', 'agent-remote-login-shell', '--refresh-package', 'agent-remote-login-shell', '--reinstall-package', 'agent-machine-transport', '--refresh-package', 'agent-machine-transport', '--reinstall-package', 'agent-worktree-identity', '--refresh-package', 'agent-worktree-identity', '--quiet')
     $bridgeOut = $bridgeResult.Output
     $installResult = $bridgeResult.ExitCode
     $ErrorActionPreference = $prevEAP
@@ -3184,7 +3186,7 @@ function Invoke-UpdateSlotBuild {
     }
     # --refresh-package agent-procutil: see the matching comment in the
     # initial-install path above.
-    $bridgeResult = Invoke-UvPipInstallResilient @('--python', $VenvPython, '--reinstall-package', 'agent-bridge', '--refresh-package', 'agent-bridge', '--reinstall-package', 'agent-procutil', '--refresh-package', 'agent-procutil', '--reinstall-package', 'agent-plugin-resolve', '--refresh-package', 'agent-plugin-resolve', '--reinstall-package', 'agent-dropin-registry', '--refresh-package', 'agent-dropin-registry', '--reinstall-package', 'agent-plugin-activation', '--refresh-package', 'agent-plugin-activation', '--reinstall-package', 'agent-remote-login-shell', '--refresh-package', 'agent-remote-login-shell', '--reinstall-package', 'agent-machine-transport', '--refresh-package', 'agent-machine-transport', "$PluginDir", '--quiet')
+    $bridgeResult = Invoke-UvPipInstallResilient @('--python', $VenvPython, '--reinstall-package', 'agent-bridge', '--refresh-package', 'agent-bridge', '--reinstall-package', 'agent-procutil', '--refresh-package', 'agent-procutil', '--reinstall-package', 'agent-plugin-resolve', '--refresh-package', 'agent-plugin-resolve', '--reinstall-package', 'agent-dropin-registry', '--refresh-package', 'agent-dropin-registry', '--reinstall-package', 'agent-plugin-activation', '--refresh-package', 'agent-plugin-activation', '--reinstall-package', 'agent-remote-login-shell', '--refresh-package', 'agent-remote-login-shell', '--reinstall-package', 'agent-machine-transport', '--refresh-package', 'agent-machine-transport', '--reinstall-package', 'agent-worktree-identity', '--refresh-package', 'agent-worktree-identity', "$PluginDir", '--quiet')
     $bridgeOut = $bridgeResult.Output
     $updateResult = $bridgeResult.ExitCode
     $ErrorActionPreference = $prevEAP

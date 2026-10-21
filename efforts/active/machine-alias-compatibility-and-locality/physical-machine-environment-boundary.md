@@ -190,6 +190,8 @@ implementation details**, proposed for review before execution.
   routing. Use the shared execution owner at one-term boundaries, retain
   physical/environment metadata separately, and refuse malformed explicit
   tuples before any ownership or routing effect.
+  Dispatch's reader and focus boundary landed in #7484; Bridge and Manager
+  remain open.
 - [ ] Keep task queues, sessions, relationships, transport profiles and
   historical rows untouched. This is tuple-wire adaptation, not a takeover of
   existing transport, task lifecycle, installer or Manager runtime work.
@@ -210,6 +212,7 @@ implementation details**, proposed for review before execution.
 - [ ] Test each actual consumer's raw JSON boundary with legacy, valid tuple
   and malformed tuple rows. Preserve full metadata without putting physical
   identity into one-term owner fields; filtering must not hide uncertainty.
+  Dispatch's raw reader and actual focus CLI have this coverage in #7484.
 - [x] Verify real first-party package construction, materialization and
   installed import boundaries through existing bounded tools, without adding
   networked or native integration work to the unit-only promotion packet.

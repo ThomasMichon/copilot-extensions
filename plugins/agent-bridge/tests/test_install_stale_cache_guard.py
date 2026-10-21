@@ -28,6 +28,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+import tomllib
 
 _PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 _INSTALL_SH = (_PLUGIN_ROOT / "scripts" / "install.sh").read_text(encoding="utf-8")
@@ -35,17 +36,9 @@ _INSTALL_PS1 = (_PLUGIN_ROOT / "scripts" / "install.ps1").read_text(encoding="ut
 
 _LOCAL_PATH_PACKAGES = (
     "agent-bridge",
-    "agent-procutil",
-    "agent-ssh-manager",
-    "agent-credential-relay",
-    "agent-zdd",
-    "agent-single-instance-lease",
-    "agent-config-migrate",
-    "agent-plugin-resolve",
-    "agent-dropin-registry",
-    "agent-plugin-activation",
-    "agent-remote-login-shell",
-    "agent-machine-transport",
+    *tomllib.loads((_PLUGIN_ROOT / "pyproject.toml").read_text(encoding="utf-8"))[
+        "tool"
+    ]["uv"]["sources"],
 )
 
 

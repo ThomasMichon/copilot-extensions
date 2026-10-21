@@ -365,6 +365,48 @@ unrelated service changes or a second machine registry.
 
 ## Journal
 
+### 2026-10-20 - Bridge venue-owner adapter source slice
+- The venue controller's raw Worktrees row is decoded through the same pure
+  codec before comparing its execution owner to `caller_owner_ref`. Physical
+  host equality does not authorize a native or guest checkout. Existing
+  project, session, path, terminal-state and ambiguity checks remain in place;
+  malformed explicit tuples refuse before provider or transport effects.
+- The unadapted controller/cache portfolio reproduced 14 failures with one
+  passing legacy control and one conditional skip. The corrected affected
+  venue portfolio passed 129 tests with one conditional skip. Raw tuple
+  metadata stays unchanged, and unversioned rows retain legacy interpretation.
+- The new dependency is included in both PowerShell snapshot tables and both
+  platforms' initial/update cache-refresh calls. A real contained PowerShell
+  materializer baseline exposed the omitted mapping; its corrected fixture
+  verifies every actual declared library, byte-identical codec source and an
+  isolated import after removing the authoring source. The module passed two
+  checks with three native-Windows-only skips, not native Windows acceptance.
+- Seven canonical package graph/materialization/import checks passed across
+  Worktrees, Dispatch and Bridge. Current-head review and required Source CI
+  are still pending. Manager's raw source/action boundary remains next; task,
+  session, transport, producer and rollout ownership is unchanged.
+
+### 2026-10-20 - Dispatch adapter merged; Bridge boundary next
+- #7484 merged as `1e9ddfa939d5437e7373fe9aaf5dd54f1304b15e`
+  after exact-head approval of
+  `7d0fdcb5e335b6ea02697e41eebe64dca7a35be8`, resolution of its
+  stamping finding and passing required Source CI. An author-description
+  edit temporarily removed the source marker; the managed metadata repair and
+  one operator-authorized metadata-job retry cleared that gate without a code
+  change. The managed completion path preserved a backup and reconciled the
+  two landed commits onto the actual merge.
+- The complete affected installer fixture module passed 61 contained host
+  PowerShell contracts after its inventory correction. Source-graph,
+  materialization, identity and focus checks remain source proof only.
+- A separate broad live declaration audit was stopped with operator consent
+  after remaining unfinished. Its bounded replacement inventoried the two
+  actual new-library declarations but timed out fetching live age evidence.
+  No zero-declaration or timeout result counts as a passing age audit; the
+  existing seven-day install policy was not changed or bypassed.
+- Bridge's raw venue-plugin owner checks are the next slice, followed by
+  Manager's raw source/action routing. The combined adapter, prospective
+  producer, retained-replay, release and installed-acceptance gates stay open.
+
 ### 2026-10-20 - Dispatch raw-row adapter source slice
 - Dispatch's Worktrees reader validates explicit tuples before filtering and
   selects the shared execution owner, keeping raw physical/environment

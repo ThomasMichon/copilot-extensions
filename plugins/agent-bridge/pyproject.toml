@@ -45,9 +45,11 @@ dependencies = [
     "agent-plugin-activation",
     "agent-remote-login-shell",
     "agent-machine-transport",
+    "agent-worktree-identity",
 ]
 
 [tool.uv.sources]
+agent-worktree-identity = { path = "../../libs/worktree-identity", editable = true }
 # Always resolve the vendored lib from the local path, never an index.
 # The distribution is named agent-ssh-manager (not the squatted PyPI name
 # "ssh-manager") to prevent dependency-confusion; the import module stays

@@ -11,6 +11,7 @@ from pathlib import Path
 
 from plugin_resolve.reflection import build_plan, build_prepare_script, parse_prepared, selection_spec
 from plugin_resolve.target import requires_repository_binding
+from worktree_identity import execution_machine_from_fields
 
 
 async def local_plugin_request(target, workspace: str, environment: dict[str, str]) -> dict | None:
@@ -188,7 +189,7 @@ async def resolve_controller_cwd(
             raise ValueError("controller worktree is not tracked")
         row = rows[0]
         if (
-            row.get("repo") != project or row.get("machine") != machine
+            row.get("repo") != project or execution_machine_from_fields(row) != machine
             or row.get("status") in {"finalized", "complete", "completed", "archived"}
             or not isinstance(row.get("path"), str)
         ):

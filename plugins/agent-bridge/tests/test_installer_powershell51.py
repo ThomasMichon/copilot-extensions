@@ -3,10 +3,11 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
-
+import tomllib
 
 PLUGIN = Path(__file__).resolve().parents[1]
 INSTALLER = PLUGIN / "scripts" / "install.ps1"
@@ -24,6 +25,84 @@ def _function_source(source: str, name: str, next_marker: str) -> str:
     end = source.index(next_marker, start + len(start_marker))
     assert end > start, f"{next_marker!r} does not follow {start_marker!r}"
     return source[start:end]
+
+
+@pytest.mark.skipif(
+    not (shutil.which("pwsh") or shutil.which("powershell.exe")),
+    reason="PowerShell is unavailable",
+)
+def test_codec_snapshot_embeds_every_declared_library_under_real_powershell(tmp_path):
+    references = tomllib.loads((PLUGIN / "pyproject.toml").read_text(encoding="utf-8"))[
+        "tool"
+    ]["uv"]["sources"]
+    libraries = {package: Path(source["path"]).name for package, source in references.items()}
+    sources = tmp_path / "authoring-libs"
+    sources.mkdir()
+    codec = PLUGIN.parents[1] / "libs/worktree-identity"
+    for package, name in libraries.items():
+        destination = sources / name
+        if name == "worktree-identity":
+            shutil.copytree(codec, destination, ignore=shutil.ignore_patterns(
+                "build", "dist", "__pycache__", "*.egg-info", ".pytest_cache", ".ruff_cache",
+            ))
+        else:
+            destination.mkdir()
+            (destination / "pyproject.toml").write_text(
+                f'[project]\nname = "{package}"\nversion = "1.0.0"\n', encoding="utf-8",
+            )
+    snapshot = tmp_path / "standalone"
+    snapshot.mkdir()
+    shutil.copy2(PLUGIN / "pyproject.toml", snapshot / "pyproject.toml")
+    source = INSTALLER.read_text(encoding="utf-8")
+    materializer = _function_source(
+        source, "Materialize-SnapshotVendoredLibs", "\nfunction Materialize-SnapshotInstallerEngine {",
+    )
+    root = str(sources).replace("'", "''")
+    target = str(snapshot).replace("'", "''")
+    script = f"""
+$ErrorActionPreference = 'Stop'
+$utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+$LibraryRoot = '{root}'
+function Resolve-SshManager {{ return Join-Path $LibraryRoot 'ssh-manager' }}
+function Resolve-CredentialRelay {{ return Join-Path $LibraryRoot 'credential-relay' }}
+function Resolve-Zdd {{ return Join-Path $LibraryRoot 'zdd' }}
+function Resolve-SingleInstanceLease {{ return Join-Path $LibraryRoot 'single-instance-lease' }}
+function Resolve-ConfigMigrate {{ return Join-Path $LibraryRoot 'config-migrate' }}
+function Resolve-VendoredLib {{ param($LibName) return Join-Path $LibraryRoot $LibName }}
+{materializer}
+Materialize-SnapshotVendoredLibs -SnapshotDir '{target}'
+"""
+    result = subprocess.run(
+        [
+            shutil.which("pwsh") or shutil.which("powershell.exe"),
+            "-NoProfile", "-NonInteractive", "-Command", script,
+        ],
+        capture_output=True, text=True, timeout=30,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    project = tomllib.loads((snapshot / "pyproject.toml").read_text(encoding="utf-8"))
+    assert project["tool"]["uv"]["sources"] == {
+        package: {"path": f"libs/{name}"} for package, name in libraries.items()
+    }
+    for name in libraries.values():
+        assert (snapshot / "libs" / name / "pyproject.toml").is_file()
+    embedded = snapshot / "libs/worktree-identity/src/worktree_identity/__init__.py"
+    assert embedded.read_bytes() == (codec / "src/worktree_identity/__init__.py").read_bytes()
+    shutil.move(str(sources), str(tmp_path / "authoring-unavailable"))
+    imported = subprocess.run(
+        [
+            sys.executable, "-I", "-S", "-c",
+            "import sys; sys.path.insert(0,sys.argv[1]); "
+            "from worktree_identity import WorktreeMachineIdentity,parse_machine_identity; "
+            "identity=WorktreeMachineIdentity('host','wsl','guest'); "
+            "assert parse_machine_identity(identity.to_record_fields()) == identity",
+            str(snapshot / "libs/worktree-identity/src"),
+        ],
+        capture_output=True, text=True, timeout=20,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    assert imported.returncode == 0, imported.stderr
 
 
 def test_first_use_installer_captures_python_probes_and_bootstraps_uv():
