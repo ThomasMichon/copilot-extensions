@@ -124,9 +124,8 @@ Fifteen existing function bodies and all original decorators are
 AST-identical; the only other old-body changes are the named setup adapter,
 legacy fixture input and additive seed-preservation assertions.
 Ruff F/E9 and the 13-plugin install contract pass.
-Initial new regression failures incorrectly expected a stale remote-tracking
-tip: the anchor's actual push updates refs shared with its linked worktree.
-The corrected cases require the newer tip and the exact common original
+The anchor's actual push updates refs shared with its linked worktree.
+The cases require the newer tip and the exact common original
 base of the published and upstream commits, while source HEAD stays old.
 No quiet-host, full-suite or repeated same-head qualification is claimed.
 
