@@ -624,6 +624,7 @@ def plan_pre_launch() -> dict:
             diagnostics.append(
                 {
                     "service": "agent-worktrees",
+                    "phase": "runtime",
                     "reason": "installation-context-invalid",
                     "message": str(error),
                 }
@@ -641,7 +642,18 @@ def plan_pre_launch() -> dict:
                 staleness = svc.check_marketplace_staleness(wm_manifest, aw_plugin_dir)
             else:
                 staleness = svc.check_staleness(wm_manifest, repo_dir)
+        diagnostic = None
         if staleness != "current":
+            diagnostic = _reconcile.publication_diagnostic(
+                "agent-worktrees", aw_plugin_dir, aw_runtime_root,
+                context=(
+                    Path(aw_environment["COPILOT_EXTENSIONS_CONTEXT"])
+                    if "COPILOT_EXTENSIONS_CONTEXT" in aw_environment else None
+                ),
+            )
+            if diagnostic is not None:
+                diagnostics.append(diagnostic)
+        if staleness != "current" and diagnostic is None:
             installer = next(
                 (
                     aw_plugin_dir / "scripts" / name
@@ -663,6 +675,8 @@ def plan_pre_launch() -> dict:
                 updates: list[dict] = [
                     {
                         "service": "agent-worktrees",
+                        "phase": "runtime",
+                        "payload_root": str(aw_plugin_dir),
                         "staleness": staleness,
                         "command": cmd,
                         "argv": cmd_argv,

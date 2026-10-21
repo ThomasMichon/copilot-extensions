@@ -12,12 +12,15 @@ from typing import Any
 import pytest
 from agent_procutil import no_window_kwargs
 
-from agent_worktrees import reconcile, reconcile_deployment
+from agent_worktrees import reconcile, reconcile_deployment, update_cli, update_stage
 from test_reconcile import env as env
 
 
 @pytest.fixture
-def deployment(env: Any, monkeypatch: pytest.MonkeyPatch) -> Any:
+def deployment(
+    env: Any, monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest,
+) -> Any:
+    plugin = getattr(request, "param", "agent-index")
     monkeypatch.setenv("HOME", str(env.home))
     monkeypatch.setenv("USERPROFILE", str(env.home))
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: env.home))
@@ -46,23 +49,23 @@ def deployment(env: Any, monkeypatch: pytest.MonkeyPatch) -> Any:
         )
 
     monkeypatch.setattr(reconcile.subprocess, "run", isolated_probe)
-    env.write_settings({f"agent-index@{reconcile.MARKETPLACE}": True})
-    env.payload = env.install_payload("agent-index", "2.0.0", scope="universal")
-    env.deploy_runtime("agent-index", "1.0.0")
-    env.root = env.home / ".agent-index"
+    env.write_settings({f"{plugin}@{reconcile.MARKETPLACE}": True})
+    env.payload = env.install_payload(plugin, "2.0.0", scope="universal")
+    env.deploy_runtime(plugin, "1.0.0")
+    env.root = env.home / f".{plugin}"
     env.context = None
 
     def policy(state: str) -> None:
-        helper = reconcile._installation_context_helper("agent-index", env.payload)
+        helper = reconcile._installation_context_helper(plugin, env.payload)
         resolution = reconcile._run_installation_mode_helper(
-            "agent-index", env.payload, helper, env.home / ".agent-index",
+            plugin, env.payload, helper, env.home / f".{plugin}",
             context=env.context,
         )
         owner = {
             "sourceFingerprint": "sha256:" + hashlib.sha256(
                 reconcile._CORE_SOURCE_RECORD.encode("utf-8"),
             ).hexdigest(),
-            "pluginId": "agent-index", "mode": resolution["actualMode"],
+            "pluginId": plugin, "mode": resolution["actualMode"],
             "runtimeRoot": str(env.root), "environment": resolution["environment"],
         }
         if state == "foreign":
@@ -317,3 +320,116 @@ def test_aliased_home_retains_installation_policy_scope(
     for value in (None, "", "relative", 1, str(alias.parent / "foreign")):
         assert not reconcile_deployment._matching_path(value, alias)
     assert not reconcile_deployment._matching_path(str(physical_home), None)
+
+
+@pytest.mark.parametrize("deployment", ["agent-worktrees"], indirect=True)
+@pytest.mark.parametrize("current", [False, True])
+@pytest.mark.parametrize(
+    ("state", "reason"),
+    [
+        ("missing", None), ("standalone", None),
+        ("managed", "deployment-managed"),
+        ("invalid", "deployment-policy-invalid"),
+        ("unsupported", "deployment-policy-version-unsupported"),
+        ("foreign", "deployment-policy-invalid"),
+    ],
+)
+def test_prelaunch_retains_custom_bootstrap_but_gates_runtime(
+    deployment: Any, monkeypatch: pytest.MonkeyPatch,
+    state: str, reason: str | None, current: bool,
+) -> None:
+    from types import SimpleNamespace
+
+    if state != "missing":
+        deployment.policy(state)
+    (deployment.payload / "scripts" / "install.ps1").write_text("# installer\n", encoding="utf-8")
+    installer = deployment.repo / "custom.ps1"
+    installer.write_text("# custom bootstrap\n", encoding="utf-8")
+    service = SimpleNamespace(name="custom", installer_path="custom.ps1")
+    config = SimpleNamespace(default_repo=SimpleNamespace(
+        service_paths=None, bootstrap_services=["custom"],
+    ))
+    monkeypatch.setattr(update_cli.worktree_identity, "_find_repo_dir", lambda: deployment.repo)
+    monkeypatch.setattr(update_cli.cfg, "load_config", lambda **kwargs: config)
+    monkeypatch.setattr(update_cli, "_resolve_environment", lambda config: "test")
+    monkeypatch.setattr(update_cli.svc, "discover_services", lambda *args, **kwargs: [service])
+    monkeypatch.setattr(
+        update_cli.svc, "check_staleness", lambda *args: "current" if current else "behind",
+    )
+    monkeypatch.setattr(
+        update_cli.svc, "get_service_status",
+        lambda *args: SimpleNamespace(staleness="behind"),
+    )
+    before = _snapshot(deployment.home)
+    plan = update_cli.plan_pre_launch()
+    assert _snapshot(deployment.home) == before
+    assert [step["service"] for step in plan["updates"]] == (
+        ["agent-worktrees", "custom"] if reason is None and not current else ["custom"]
+    )
+    if current:
+        assert "diagnostics" not in plan
+    elif reason is None:
+        step = plan["updates"][0]
+        assert step["phase"] == "runtime"
+        assert step["payload_root"] == str(deployment.payload)
+        assert step["runtime_root"] == str(deployment.root)
+        assert reconcile_deployment.execution_diagnostic(step) is None
+    else:
+        assert plan["diagnostics"][0]["reason"] == reason
+        assert plan["diagnostics"][0]["message"]
+
+
+@pytest.mark.parametrize("deployment", ["agent-worktrees"], indirect=True)
+@pytest.mark.parametrize("state", ["missing", "standalone", "managed", "invalid", "probe-error"])
+@pytest.mark.parametrize("trigger", ["drift", "payload", "current"])
+def test_stage_refreshes_payload_without_republishing_managed_runtime(
+    deployment: Any, monkeypatch: pytest.MonkeyPatch, state: str, trigger: str,
+) -> None:
+    if state == "probe-error":
+        def failed_probe(*args: Any, **kwargs: Any) -> None:
+            raise RuntimeError("publication probe failed")
+        monkeypatch.setattr(reconcile, "publication_diagnostic", failed_probe)
+    elif state != "missing":
+        deployment.policy(state)
+    if trigger != "drift":
+        deployment.deploy_runtime("agent-worktrees", "2.0.0")
+    monkeypatch.setattr(
+        update_stage, "discover_plugin_dir", lambda home: (deployment.payload, "marketplace"),
+    )
+    calls: list[str] = []
+
+    def refresh() -> tuple[bool, str]:
+        calls.append("payload-refresh")
+        if trigger == "payload":
+            manifest = deployment.payload / "plugin.json"
+            data = json.loads(manifest.read_text(encoding="utf-8"))
+            data["refreshed"] = True
+            manifest.write_text(json.dumps(data), encoding="utf-8")
+        return True, "payload refreshed"
+
+    monkeypatch.setattr(update_stage, "_run_copilot_update", refresh)
+    from agent_worktrees import __main__ as core
+    monkeypatch.setattr(core, "plan_pre_launch", lambda: {"action": "continue"})
+    before = _snapshot(deployment.root)
+    result = update_stage.stage(
+        status=deployment.home / "stage-status.json",
+        lock=deployment.home / "stage-lock", home=deployment.home,
+    )
+    assert calls == ["payload-refresh"]
+    manifest = json.loads((deployment.payload / "plugin.json").read_text(encoding="utf-8"))
+    assert manifest.get("refreshed", False) is (trigger == "payload")
+    assert _snapshot(deployment.root) == before
+    assert result["venv_drift"] is (trigger == "drift")
+    assert result["plugin_changed"] is (
+        state in {"missing", "standalone"} and trigger != "current"
+    )
+    if state in {"managed", "invalid"} and trigger != "current":
+        assert result["runtime_apply_blocked"] == (
+            "deployment-managed" if state == "managed" else "deployment-policy-invalid"
+        )
+        assert result["runtime_apply_diagnostic"]["message"]
+    elif state == "probe-error" and trigger != "current":
+        assert result["runtime_apply_blocked"] == "venv-drift-check-failed"
+        assert "publication probe failed" in result["venv_drift_error"]
+    else:
+        assert "runtime_apply_blocked" not in result

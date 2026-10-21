@@ -134,6 +134,22 @@ plans, session bootstrap and indirect first use still need their own admission
 at the actual mutation seam, including explicit management authorization.
 Those remaining paths and positive retained-hook assertions keep Phase 3 open.
 
+### Launcher producer admission
+
+Worktrees' `pre-launch` planner checks its actual governed installation before
+emitting a stale-runtime installer action. Allowed actions carry the runtime
+phase and owning payload/root/context metadata used by execution admission.
+Other repository bootstrap services retain their existing independent actions.
+Already-current runtimes do not require publication permission.
+
+Background staging continues marketplace refresh and fingerprinting in managed
+mode. Only the runtime-application request is suppressed, with the canonical
+reason and recovery diagnostic retained in its status. Payload changes and
+venv-version drift are checked independently; drift repair cannot override a
+deployment refusal. These checks prepare new plans, not authorize execution of
+old ones. Native launcher consumers must still revalidate cached actions at
+execution; this producer slice does not close that boundary.
+
 ## Source-qualified lifecycle admission
 
 The shared legacy lifecycle now composes the canonical deployment decision

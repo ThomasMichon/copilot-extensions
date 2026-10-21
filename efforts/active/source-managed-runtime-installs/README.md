@@ -133,6 +133,8 @@ publication and command-ownership boundaries; it does not disable whole hooks.
   publication gates using existing governance and lock custody.
 - [x] Authenticate Worktrees' explicit managed-cell installation through the existing
   genesis/install custody across native staging, candidate handover and callbacks.
+- [x] Gate Worktrees' pre-launch and staged runtime-update planning without suppressing marketplace refreshes, healthy reuse or unrelated repository bootstrap actions.
+- [ ] Revalidate cached launcher plans immediately before native execution, including older standalone compatibility and policy changes after planning.
 - [ ] Keep adapters thin and enforce drift-compatible service interaction without implicit runtime replacement.
 
 ### Phase 4 - Integrate Manager-owned runtime source selection
@@ -536,3 +538,16 @@ onto one branch.
 - Settlement now rechecks immediately after acquiring cutover, after readiness/retention preparation and before selector publication. Waiting does not renew borrowed authority. The existing retained transition settlement and rollback ownership remain unchanged.
 - The expanded owner-exit/custody/overlap selection passes 57 cases with five platform skips on Windows and 59 with three skips on Linux. Seventy-nine focused settlement/rollback checks pass. Real managed construction and retained callbacks remain valid on Windows PowerShell 7 and Linux Bash after the new checks. These are fixture results, not source-selection integration, a host rollout or completion of the parent effort.
 - A concurrent native installer origin-detection correction required human-output declaration reconciliation during rebase. Both native code changes were preserved and the declaration was recomputed through its canonical helper. The eleven opt-in installer resolution/source-origin regressions pass on each native platform; this is not a reason to repeat unrelated all-adopter qualification.
+
+### 2026-10-21 - Explicit custody merged; launcher execution next
+- PR #7489 merged as `777134cc41f0eb93ec910f367bea631dfcc66eb9` after exact-head Copilot approval with no open findings and successful required checks. Canonical completion reconciled the worktree to the merged development source.
+- Re-read the Plan and Validation Plan. Worktrees' explicit managed-cell custody item is qualified, including birth-bound ownership, namespace-before-cutover ordering and revalidation after a blocking wait. This does not close the wider publication, hook or skew gates.
+- The next slice covers Manager's native launcher execution of pre-launch and reconciliation plans, plus their planning/staging callers. Reuse the existing execution admission rather than introducing another policy parser or updater; preserve marketplace staging, unrelated bootstrap actions and standalone compatibility.
+- Independent Manager/service source selection, source-backed maintenance and native adoption remain open. No installed policy, source binding, service, startup entry or cadence changed.
+
+### 2026-10-21 - Launcher producer admission
+- Worktrees' bootstrap-staleness planner now uses the shared installation-owned publication decision before emitting its own runtime update. Permitted updates retain explicit runtime phase and payload/root/context metadata; unrelated repository bootstrap actions remain executable.
+- Background staging still downloads marketplace content. A payload change or independently detected venv drift can request runtime application only after the same publication decision; drift recovery cannot restore an action denied by policy. Healthy unchanged runtimes do not acquire a publication requirement.
+- The real-helper regressions cover missing and explicit standalone policy, managed/invalid/unsupported/foreign refusal, custom bootstrap preservation, read-only runtime inventories and independent payload-change/venv-drift triggers. The first payload-trigger fixture changed an intentionally un-fingerprinted text file; it now changes the real plugin manifest without changing its package version.
+- A probe-failure regression first reproduced drift recovery restoring an action after the stage's error handler refused it. The final application decision now preserves every recorded refusal. The complete producer/reconciliation/probe selection passes 119 cases on Windows and 113 with six Windows-only skips on Linux, under the existing bounded runner.
+- This producer boundary is a separate coherent slice from execution admission. A previously prepared launcher plan still needs policy/root/context revalidation immediately before native execution; that remains the next explicit Plan item, not a claimed completion of Phase 3.

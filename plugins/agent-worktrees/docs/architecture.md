@@ -1296,11 +1296,21 @@ agent-worktrees register dotfiles --repo-dir ~/src/dotfiles
 On **every** session launch the wrapper stages an agent-worktrees marketplace
 pull in the background (`stage-update`) and, once the picker closes, joins and
 applies it (`Invoke-UpdateApply` / `invoke_update_apply`): it runs the runtime
-installer **iff** the staged download changed the payload (fingerprint diff) or
-the deployed runtime version drifted from the payload, then the pre-launch
+installer only when the staged download changed the payload (fingerprint diff)
+or the deployed runtime version drifted from the payload, **and** the addressed
+installation permits plugin-triggered publication. Managed or invalid deployment
+policy retains the marketplace refresh but suppresses that runtime request,
+including drift-only repair; the status retains its refusal and recovery
+diagnostic. It then runs the pre-launch
 self-update and a plugin reconcile. This path is deliberately lightweight -- it
 only touches agent-worktrees -- so it is **not** relied on to fully update
 sibling plugins or modules.
+
+The `pre-launch` planner applies the same decision before emitting Worktrees'
+own stale-runtime action, without suppressing unrelated configured repository
+bootstrap actions. Healthy unchanged runtimes need no publication permission.
+Planning admission does not authorize executing a cached action after the
+policy changes; launcher-side execution revalidation remains a separate boundary.
 
 Skip with `--no-update` or `WORKTREE_NO_UPDATE=1`. The Picker reports
 **Updates paused** for that launch and suppresses the refresh action, regardless

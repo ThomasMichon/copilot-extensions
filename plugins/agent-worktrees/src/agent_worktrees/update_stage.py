@@ -366,6 +366,7 @@ def stage(
         # written by the installer) against the payload version and force an
         # apply when they diverge, so a lagging venv self-heals on the next boot.
         venv_drift = False
+        deployment_diagnostic = None
         try:
             from . import reconcile
 
@@ -389,6 +390,14 @@ def stage(
             venv_drift = bool(
                 payload_ver and deployed_ver and payload_ver != deployed_ver
             )
+            if plugin_changed or venv_drift:
+                deployment_diagnostic = reconcile.publication_diagnostic(
+                    "agent-worktrees", plugin_dir, runtime_root,
+                    context=(
+                        Path(installer_environment["COPILOT_EXTENSIONS_CONTEXT"])
+                        if "COPILOT_EXTENSIONS_CONTEXT" in installer_environment else None
+                    ),
+                )
         except ValueError as error:
             result["venv_drift_error"] = str(error)
             result["runtime_apply_blocked"] = "installation-context-invalid"
@@ -401,6 +410,11 @@ def stage(
         if venv_drift and not plugin_changed:
             plugin_changed = True
             result["plugin_changed_reason"] = "venv-drift"
+        if deployment_diagnostic is not None:
+            result["runtime_apply_blocked"] = deployment_diagnostic["reason"]
+            result["runtime_apply_diagnostic"] = deployment_diagnostic
+        if result.get("runtime_apply_blocked"):
+            plugin_changed = False
 
         result["plugin_changed"] = plugin_changed
         result["copilot_output"] = copilot_output
