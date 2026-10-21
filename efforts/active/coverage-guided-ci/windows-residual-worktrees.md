@@ -87,7 +87,51 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Admitted fixture-semantic batches
 
+### B-LEASE-SEED private released histories
+
+Baseline: the actual #7662 merge. Extract `_settings` without changing
+its values; prepare one real acquire/renew/release history per worker
+session under the existing hermetic setup environment. The source
+fixture is process-private, not a mutable run-wide lease authority.
+`_copy_released_history` physically copies its bare Git store and
+deep-copies all three snapshots; `released_history` returns fresh
+settings naming only that case's private remote.
+
+Only the collapse, kind-filter and mid-sweep race consumers reuse this
+history. The race acquires/inspects the prepared `stale-history` key;
+the real force-with-lease race, generation/token and live-holder checks
+remain intact. All old test names, assertions and decorators remain.
+The other 23 functions are AST-identical, including the standalone
+idempotence and dry-run cases. B-LEASE-ASSERT consolidation is excluded.
+
+Two repeated isolation cases check exact acquire/renew/release ancestry,
+all copied remote bytes, independent origins and nested mutable snapshot
+records. They then execute real squash and reacquisition against the
+first copy. Every seed/sibling byte and snapshot must stay unchanged,
+without alternates or shared object files. Each consumer performs its
+own current observation and mutation; no lease/store authority is cached.
+
+Complete native Windows lease-store module: 21 passed, zero skips,
+70.92 seconds pytest / 81.75 preparation-cleanup inclusive. Exactly
+two work-stealing workers preserve the 30-second item watchdog, original
+marks and resource ceilings under a 240-second diagnostic group.
+This is functional Git integration, not quiet-host, whole-suite or
+repeated same-head qualification. Production and other fixture contracts
+are unchanged.
+
+Documentation impact is this ledger only; no command, runtime, install,
+configuration or architecture contract changes. Clean-room provisioning
+and external-venue lanes are inapplicable to test-only preparation.
+
 ### B-LANDING private-copy consumers
+
+Actual disposition: #7662 merged as
+`86f055d12f95f5162d1adc8ff681cf071fe5a493`; full Copilot review
+`5606270816` approved exact head
+`c5636a9e62c713b922350683e3fd871bf4618eb6`. Overview, inline/general
+channels and threads had no findings; required CI was green. The child
+worktree is finalized. Assertion consolidation and unused-OID cleanup
+remain separate, not waived.
 
 Baseline: the actual #7661 foundation merge. The function-scoped `env`
 now copies the private base seed. Add `merged_env` and `handmade_env`

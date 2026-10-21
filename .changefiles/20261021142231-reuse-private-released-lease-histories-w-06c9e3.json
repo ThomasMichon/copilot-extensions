@@ -1,0 +1,9 @@
+{
+  "comment": "Reuse private released-lease histories with isolated mutable snapshots",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
