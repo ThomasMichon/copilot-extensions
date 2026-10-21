@@ -1,0 +1,9 @@
+{
+  "comment": "Prepare private landing-test topologies without changing existing consumers",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

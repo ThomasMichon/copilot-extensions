@@ -15,12 +15,14 @@ from __future__ import annotations
 
 import subprocess
 import shlex
+import shutil
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from agent_worktrees import finalize, finalize_landing, finalize_ref
+from conftest import _published_seed_environment, _seed_directory
 
 
 pytestmark = pytest.mark.usefixtures("git_only_mux")
@@ -62,6 +64,103 @@ def env(tmp_path: Path) -> SimpleNamespace:
     _git("checkout", "-q", "-b", f"worktree/{worktree_id}", "origin/main", cwd=clone)
     return SimpleNamespace(tmp_path=tmp_path, origin=origin, seed=seed, clone=clone,
                            worktree_id=worktree_id, slug="pr/landing")
+
+
+@pytest.fixture(scope="session")
+def _landing_seed(tmp_path_factory) -> Path:
+    with _seed_directory(tmp_path_factory, "finalize-landing") as (root, build):
+        if build:
+            with _published_seed_environment(tmp_path_factory):
+                _build_landing_seed(root)
+        return root
+
+
+def _build_landing_seed(root: Path) -> None:
+    origin = root / "origin.git"
+    _git("init", "-q", "--template=", "--bare", "-b", "main", str(origin), cwd=root)
+    seed = root / "seed"
+    _git("init", "-q", "--template=", "-b", "main", str(seed), cwd=root)
+    _identity(seed)
+    _commit(seed, "a.txt", "one\ntwo\nthree\nfour\nfive\nsix\nseven\neight\n")
+    _git("remote", "add", "origin", str(origin), cwd=seed)
+    _git("push", "-q", "origin", "main", "main:dev", cwd=seed)
+    clone = root / "clone"
+    _git("clone", "-q", "--template=", str(origin), str(clone), cwd=root)
+    _identity(clone)
+    _git("checkout", "-q", "-b", "worktree/wt-landing", "origin/main", cwd=clone)
+
+
+def _copy_landing_env(source: Path, tmp_path: Path) -> SimpleNamespace:
+    """Preserve all objects, refs and creation reflogs in private stores."""
+    shutil.copytree(source, tmp_path, dirs_exist_ok=True, copy_function=shutil.copyfile)
+    origin = tmp_path / "origin.git"
+    seed = tmp_path / "seed"
+    clone = tmp_path / "clone"
+    for repo in (seed, clone):
+        _git("remote", "set-url", "origin", str(origin), cwd=repo)
+    return SimpleNamespace(tmp_path=tmp_path, origin=origin, seed=seed, clone=clone,
+                           worktree_id="wt-landing", slug="pr/landing")
+
+
+def _topology_snapshot(root: Path) -> dict[Path, bytes]:
+    return {
+        path.relative_to(root): path.read_bytes()
+        for path in root.rglob("*") if path.is_file()
+    }
+
+
+@pytest.mark.parametrize(
+    "seed_fixture", ["_landing_seed", "_merged_landing_seed", "_handmade_landing_seed"],
+)
+def test_landing_copies_preserve_topology_and_isolate_mutations(tmp_path, request, seed_fixture):
+    source = request.getfixturevalue(seed_fixture)
+    source_before = _topology_snapshot(source)
+    first = _copy_landing_env(source, tmp_path / "first")
+    second = _copy_landing_env(source, tmp_path / "second")
+    unchanged = {source: source_before, second.tmp_path: _topology_snapshot(second.tmp_path)}
+    for env_copy in (first, second):
+        for repo in (env_copy.seed, env_copy.clone):
+            assert _git("remote", "get-url", "origin", cwd=repo) == str(env_copy.origin)
+        for relative, data in source_before.items():
+            if relative.name != "config":
+                assert (env_copy.tmp_path / relative).read_bytes() == data
+        main = _git("--git-dir", str(env_copy.origin), "rev-parse", "main", cwd=env_copy.origin)
+        dev = _git("--git-dir", str(env_copy.origin), "rev-parse", "dev", cwd=env_copy.origin)
+        branch = _git("branch", "--show-current", cwd=env_copy.clone)
+        if seed_fixture == "_landing_seed":
+            assert _git("rev-parse", "HEAD", cwd=env_copy.clone) == main == dev
+            assert branch == f"worktree/{env_copy.worktree_id}"
+            assert not (env_copy.tmp_path / "published-head").exists()
+        else:
+            head = (env_copy.tmp_path / "published-head").read_text(encoding="ascii")
+            assert _git("rev-parse", f"{head}~2", cwd=env_copy.clone) == main != dev
+            assert (env_copy.clone / "a.txt").read_text() == SQUASHED
+            if seed_fixture == "_merged_landing_seed":
+                assert branch == f"worktree/{env_copy.worktree_id}"
+                assert _git("rev-parse", "HEAD", cwd=env_copy.clone) == dev
+                assert (env_copy.clone / "b.txt").read_text() == "another PR on dev\n"
+                assert _git("rev-parse", "HEAD^", cwd=env_copy.clone) != main
+            else:
+                assert branch == "pr/hand-made"
+                assert _git("rev-parse", "HEAD", cwd=env_copy.clone) == head
+                assert _git("rev-parse", f"worktree/{env_copy.worktree_id}", cwd=env_copy.clone) == main
+                assert not (env_copy.clone / "b.txt").exists()
+    previous = _git("--git-dir", str(first.origin), "rev-parse", "dev", cwd=first.origin)
+    _commit(first.clone, "isolated.txt", "only in the first copy\n")
+    head = _git("rev-parse", "HEAD", cwd=first.clone)
+    _git("push", "-q", "origin", "HEAD:refs/heads/copy-only", cwd=first.clone)
+    assert _git("--git-dir", str(first.origin), "rev-parse", "copy-only", cwd=first.origin) == head
+    _git("checkout", "-q", "-b", "isolation-publisher", "origin/dev", cwd=first.seed)
+    _commit(first.seed, "seed-only.txt", "only in the copied publisher\n")
+    publisher_head = _git("rev-parse", "HEAD", cwd=first.seed)
+    _git("push", "-q", "origin", "HEAD:refs/heads/dev", cwd=first.seed)
+    assert _git("--git-dir", str(first.origin), "rev-parse", "dev", cwd=first.origin) == publisher_head != previous
+    for root, snapshot in unchanged.items():
+        assert _topology_snapshot(root) == snapshot
+        for relative in snapshot:
+            if "objects" in relative.parts:
+                assert relative.name != "alternates"
+                assert not (first.tmp_path / relative).samefile(root / relative)
 
 
 def _two_commit_change(clone: Path) -> str:
@@ -171,6 +270,32 @@ def _merge_into_dev_and_pull_forward(env) -> str:
     _git("fetch", "-q", "origin", cwd=env.clone)
     _git("reset", "-q", "--hard", "origin/dev", cwd=env.clone)
     return head
+
+
+@pytest.fixture(scope="session")
+def _merged_landing_seed(tmp_path_factory, _landing_seed) -> Path:
+    with _seed_directory(tmp_path_factory, "finalize-dev-merged") as (root, build):
+        if build:
+            with _published_seed_environment(tmp_path_factory):
+                copied = _copy_landing_env(_landing_seed, root)
+                head = _merge_into_dev_and_pull_forward(copied)
+                (root / "published-head").write_text(head, encoding="ascii")
+        return root
+
+
+@pytest.fixture(scope="session")
+def _handmade_landing_seed(tmp_path_factory, _landing_seed) -> Path:
+    with _seed_directory(tmp_path_factory, "finalize-handmade") as (root, build):
+        if build:
+            with _published_seed_environment(tmp_path_factory):
+                copied = _copy_landing_env(_landing_seed, root)
+                _git("checkout", "-q", "-b", "pr/hand-made", cwd=copied.clone)
+                head = _two_commit_change(copied.clone)
+                _squash_onto(copied.seed, "dev", SQUASHED)
+                _git("checkout", "-q", "main", cwd=copied.seed)
+                _git("fetch", "-q", "origin", cwd=copied.clone)
+                (root / "published-head").write_text(head, encoding="ascii")
+        return root
 
 
 def test_a_pr_merged_into_dev_while_main_is_behind_is_landed_on_its_base(env, provider):

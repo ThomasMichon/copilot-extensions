@@ -87,7 +87,53 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Admitted fixture-semantic batches
 
+### B-LANDING foundation: private base, merged and handmade inputs
+
+Baseline: the actual #7653 merge. Add only the named `_landing_seed`,
+`_build_landing_seed`, `_copy_landing_env`, `_merged_landing_seed` and
+`_handmade_landing_seed` foundation plus three copy-isolation cases.
+The existing `env` fixture, all 37 old functions/classes and their
+decorators remain AST-identical, including `_commit`'s OID return.
+Consumer conversion is a later B-LANDING slice. B-LANDING-ASSERT's
+consolidation is excluded: all old tests remain separately collected.
+
+Use the existing hermetic environment and run-local seed lock to build
+real main/dev history. Copy complete physical object stores, refs and
+creation reflogs without alternates or hardlinks, relocate both origin
+URLs, and retain each derived topology's known `published-head` marker.
+The base has main/dev/worktree at one commit; the merged topology has
+main behind dev and the worktree reset to dev after its two-commit PR;
+the handmade topology keeps the worktree at main while `pr/hand-made`
+holds that PR's original head. No landing decision is cached.
+
+Each of the three cases makes two private copies, checks every seed byte
+except the relocated Git configs, checks branch/content/OID relationships,
+then commits and pushes from both the first checkout and its publisher.
+Every seed and second-copy byte must remain unchanged; copied object
+files must not share identity with either source. The original consumer
+tests continue building and evaluating their own real Git histories.
+
+Complete native Windows landing module: 33 passed, zero skips,
+177.77 seconds pytest / 192.09 preparation-cleanup inclusive. Exactly two
+work-stealing workers preserve the 30-second default item watchdog,
+original marks and resource limits under a 240-second diagnostic group.
+This is functional real-Git integration, not quiet-host or repeated
+same-head whole-suite performance qualification. Production S/F/G/P/R/A,
+B-INCONCLUSIVE, selection changes and all other fixture batches are excluded.
+
+Documentation impact is this ledger only: no runtime, command, install,
+configuration, architecture or adopter behavior changes. Clean-room and
+external-venue lanes are inapplicable to test-only seed preparation.
+
 ### B-REFSPEC private unlanded finalization inputs
+
+Actual disposition: #7653 merged as
+`56574e1510e0c2a24e7dfe49924b82e55d8b4c32`. Copilot's full review
+`5605763035` approved exact head
+`5cf9caa13260f3bc342288bae5aabc26ce711bee`; overview, inline and
+general channels had no findings, required CI was green, and the child
+worktree was finalized. This settles this fixture slice only, not the
+whole-suite qualification gate.
 
 Baseline: the actual #7649 merge. Add only the named
 `_refspec_worktree_seed`, `_copy_refspec_worktree`, adapted
