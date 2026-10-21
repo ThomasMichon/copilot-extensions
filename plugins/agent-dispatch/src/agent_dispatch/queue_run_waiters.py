@@ -684,11 +684,11 @@ class QueueRunWaitersMixin:
             while True:
                 row = conn.execute(
                     "SELECT * FROM run_waiter_wakes WHERE status = 'pending' AND not_before <= ?"
-                    " AND NOT EXISTS (SELECT 1 FROM execution_admission_closures c"
+                    " AND (sender = ? OR NOT EXISTS (SELECT 1 FROM execution_admission_closures c"
                     " JOIN tasks t ON t.repo = c.repo AND t.source = c.source"
-                    " WHERE t.id = run_waiter_wakes.task_id)"
+                    " WHERE t.id = run_waiter_wakes.task_id))"
                     " ORDER BY created_at ASC, id ASC LIMIT 1",
-                    (ts,),
+                    (ts, CLAIM_RELEASE_SENDER),
                 ).fetchone()
                 if row is None:
                     conn.execute("COMMIT")

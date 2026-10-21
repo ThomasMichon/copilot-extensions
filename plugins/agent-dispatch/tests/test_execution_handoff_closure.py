@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 
@@ -11,6 +12,7 @@ from agent_dispatch.execution_effect_adapter import EffectRevocation, ExecutionS
 from agent_dispatch.queue import TaskQueue
 from agent_dispatch.queue_execution_handoff import ExecutionAdmissionClosed
 from agent_dispatch.queue_records import TaskError
+from agent_dispatch.run_waiter_wake import drain_run_waiter_wakes
 from tests._helpers import OTHER_REPO, TEST_REPO
 
 
@@ -61,6 +63,55 @@ def test_execution_handoff_closure_replays_after_restart(setup):
     assert restarted.get(task.id) == queue.get(task.id)
     with pytest.raises(ExecutionAdmissionClosed):
         restarted.claim_one("worker", task_id=task.id)
+
+
+def test_execution_handoff_closure_allows_cleanup_only_waiter_release(setup):
+    queue, request, create = setup
+    completed = create("cleanup")
+    waiting = create("still-waiting")
+    for task in (completed, waiting):
+        queue.claim_one("worker", task_id=task.id)
+        queue.start(task.id, "worker", owner_session_id=f"native-{task.id}")
+        queue.suspend(task.id, "worker", reason="waiting")
+        waiter = queue.register_run_waiter(
+            task.id, pid=101, host="test-host", start_token="token",
+            resume_worktree="machine/worktree", command=["sleep", "1"], now=1,
+        )
+        if task.id == waiting.id:
+            queue.recover_dead_run_waiter(
+                task.id, generation=waiter["generation"], reason="interrupted",
+                message="resume owner", sender="recovery", now=2,
+            )
+    close(queue, request)
+    queue.complete(completed.id, "worker", result_ref="done")
+    releases = []
+    deliveries = []
+
+    async def scenario():
+        drainer = asyncio.create_task(drain_run_waiter_wakes(
+            queue, interval=0.01,
+            deliver=lambda *args: deliveries.append(args) or True,
+            release_claim=lambda *args: releases.append(args) or {"released": True},
+        ))
+        try:
+            for _ in range(200):
+                if queue.list_run_waiter_wakes(completed.id)[0].status == "delivered":
+                    return
+                await asyncio.sleep(0.01)
+            raise AssertionError("closed-scope cleanup-only claim release did not drain")
+        finally:
+            drainer.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await drainer
+
+    asyncio.run(scenario())
+    assert deliveries == []
+    assert releases == [(f"{completed.id}:1", "test-host", "worktree", TEST_REPO)]
+    assert queue.get(completed.id).status == "completed"
+    assert queue.get(waiting.id).status == "suspended"
+    assert queue.list_run_waiter_wakes(waiting.id)[0].status == "pending"
+    assert queue.claim_due_run_waiter_wake() is None
+    assert queue.execution_closure_inventory(request.scope)["acknowledged"] is False
 
 
 @pytest.mark.parametrize("field,value", [

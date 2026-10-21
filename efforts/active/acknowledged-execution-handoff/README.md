@@ -154,6 +154,9 @@ handoff support.
 - Evaluator rejection cannot restore submitted-task ownership after closure;
   an exact rejection accepted before closure remains replayable without another
   mutation or wake.
+- Cleanup-only detached-waiter claim releases remain deliverable after closure,
+  including terminal completion. A regression verifies claim release without
+  owner resumption while a genuine wake in the same scope stays blocked.
 - No HTTP/CLI control, acknowledgement, destination activation or handback is
   exposed. Runtime enrollment, already admitted launches/deliveries, legacy
   qualification and adopter effects remain explicit barriers. Continue those

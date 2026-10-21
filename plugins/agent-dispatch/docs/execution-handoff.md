@@ -89,7 +89,9 @@ Create-and-claim, steering-triggered resumes and evaluator rejection restoring
 submitted-task ownership use the same admission fence;
 exact accepted-request replays remain readable without repeating those effects.
 Both ordinary and detached-waiter wake claims exclude closed scopes while
-leaving unrelated scopes eligible.
+leaving unrelated scopes eligible. Detached waiter claim-release-only records
+remain deliverable: they release the retained hibernation worktree claim without
+resuming its owner. Terminal completion and housekeeping are not new execution.
 
 This remains a construction API with **no HTTP/CLI exposure**, acknowledgement,
 manual destination admission, cancellation, handback or automatic reopening.
