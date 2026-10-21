@@ -37,6 +37,14 @@ physical association never authorizes access to a sibling's ledger.
 Identity probes refuse an invalid explicit registered source rather than
 advertising the physical host or another platform's key.
 
+`reconcile-plugins --repo <checkout> --peek` and `--apply` select their own
+repository and do not require the caller's current directory to resolve an
+adopted project. Both `--repo <checkout>` and `--repo=<checkout>` are accepted.
+This keeps detached provisioning from a neutral/HOME directory on the same
+front-door route as the already repo-aware handler. Without an explicit repo,
+ordinary project resolution remains required; the change does not start
+reconciliation or installation merely by resolving the route.
+
 ## How It Works
 
 On Windows, ordinary and passive status-monitor starts bypass the venv Python

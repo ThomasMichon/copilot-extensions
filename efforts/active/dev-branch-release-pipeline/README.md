@@ -1127,6 +1127,27 @@ proposal.
 
 ## Journal
 
+### 2026-10-21 - First runtime cohort detects the routing regression
+- The reviewed cohort plan merged in #7543 after its additive-policy closure
+  wording was reconciled. Its scope remains genuine in-process units within
+  the existing budget, with the original reporter and periodic ownership kept.
+- Moving the existing project-routing and live turn-folding definitions into
+  closed-import leaves preserved their AST bodies/constants before the fix.
+  Original import/facade paths remain exports of the same implementations.
+- The actual pre-fix cohort produced four failing explicit-repo reconciliation
+  assertions and 82 passing controls. The canonical effect-fenced packet then
+  passed its 236 existing cases and rejected the first new regression, rather
+  than accepting an enrollment-only or mocked passing reproduction.
+- The narrow #5610 predicate repair accepts explicit `--repo` argument forms
+  while preserving missing-repo and other routing. The candidate adds 86
+  runtime cases: 322 units, 966 passing phases, 23 production coverage files
+  and no prohibited effects in 8.603 seconds mechanically, versus 8.355 for
+  the baseline. Immutable committed-source qualification remains separate.
+- Affected contained compatibility portfolios passed 645 Worktrees tests with
+  two conditional skips and 131 Bridge tests with one conditional skip,
+  including real front-door dispatch from a neutral cwd and facade identity.
+  No installed/native acceptance or completed periodic repair is inferred.
+
 ### 2026-10-21 - First contributor-regression admission cohort proposed
 - The operator requested more tests using the now-short release flow,
   particularly regressions reported by `mikedelgaudio`, `jamesyu5421` and

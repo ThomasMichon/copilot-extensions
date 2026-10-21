@@ -298,6 +298,50 @@ def test_installer_registry_commands_run_without_project(
     assert len(called) == 1
 
 
+def test_project_routing_facade_exports_the_actual_decision():
+    from agent_worktrees import project_routing
+
+    assert _fdc._NO_PROJECT_COMMANDS is project_routing._NO_PROJECT_COMMANDS
+    assert _fdc._is_no_project_invocation is project_routing._is_no_project_invocation
+    assert m._is_no_project_invocation is project_routing._is_no_project_invocation
+
+
+@pytest.mark.parametrize("inline", [False, True])
+@pytest.mark.parametrize("operation", ["--peek", "--apply"])
+def test_reconcile_explicit_repo_reaches_real_front_door_from_neutral_cwd(
+    monkeypatch, tmp_path, inline, operation,
+):
+    m.cfg.set_active_project(None)
+    monkeypatch.delenv("WORKTREE_PROJECT", raising=False)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        m, "_resolve_active_project",
+        lambda _project: pytest.fail("explicit repo tried to resolve a CWD project"),
+    )
+    calls = []
+    monkeypatch.setitem(
+        m.COMMAND_MAP, "reconcile-plugins", lambda args: calls.append(args) or 0,
+    )
+    repo = str(tmp_path / "selected-repo")
+    selector = [f"--repo={repo}"] if inline else ["--repo", repo]
+    assert m.main(["reconcile-plugins", *selector, operation]) == 0
+    assert len(calls) == 1
+    assert calls[0].repo == repo
+    assert getattr(calls[0], operation.removeprefix("--")) is True
+
+
+def test_reconcile_without_repo_keeps_normal_project_routing(monkeypatch, capsys):
+    m.cfg.set_active_project(None)
+    monkeypatch.delenv("WORKTREE_PROJECT", raising=False)
+    monkeypatch.setattr(m, "_resolve_active_project", lambda _project: (None, None))
+    monkeypatch.setitem(
+        m.COMMAND_MAP, "reconcile-plugins",
+        lambda _args: pytest.fail("unscoped reconcile reached handler without a project"),
+    )
+    assert m.main(["reconcile-plugins", "--peek"]) == 1
+    assert "Could not resolve a project" in capsys.readouterr().err
+
+
 def test_project_flag_bare_invocation_uses_install_trigger_without_manager(monkeypatch):
     monkeypatch.delenv("WORKTREE_PROJECT", raising=False)
     monkeypatch.setattr(m, "_worktree_manager_health", lambda: _mlc._ManagerHealth("absent"))

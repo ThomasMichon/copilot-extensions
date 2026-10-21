@@ -11,8 +11,8 @@ How to run the plugin test suites, the fast gates to run before a push, and the
 
 The reviewed [promotion burndown](efforts/active/dev-branch-release-pipeline/promotion-burndown.md)
 supersedes the historical full-suite promotion requirement below. Source CI
-implements this packet; the active Main controller has not yet migrated.
-No local packet result means Main is qualified.
+and the independently governed Main control consume the unit-profile contract.
+A local packet result alone does not qualify Main or prove candidate reuse.
 
 `tools/run-promotion-unit-tests.py` executes only the exact nodes declared by
 `tools/promotion-unit-manifest.json`, in one Python process with coverage.
@@ -55,6 +55,16 @@ after immutable Dev/candidate byte equivalence and independent provider
 run/attempt/job/upload/archive checks. Main's metadata-only CI supplies no test
 proof. Historical `legacy-ci-v1` verification remains separate and is never an
 implicit fallback for missing unit evidence.
+
+The first runtime-regression cohort in
+`tools/promotion_unit_tests/test_runtime_regressions.py` exercises actual
+project-routing, mux-result, anchor-guard and parent/sub-agent turn decisions.
+Its closed production imports and relevant production calls are admitted
+explicitly in the same manifest; it is not a generic plugin-suite invocation.
+Synthetic repository-state evidence does not create or access Git storage.
+Real front-door, missing-socket, installed-hook, SDK-forwarding and JavaScript
+delivery counterparts retain their existing periodic ownership. No Python
+classifier assertion is treated as proof of a native or shell boundary.
 
 ## Copilot Code Review setup staging
 
