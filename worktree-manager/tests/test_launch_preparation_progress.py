@@ -399,6 +399,19 @@ def test_native_maintenance_reports_outcomes_and_replans(tmp_path, shell, curren
 @pytest.mark.parametrize("admission", ["allowed", "managed", "old-engine", "malformed"])
 @pytest.mark.parametrize("blocking", [True, False])
 def test_blocking_marketplace_installer_keeps_native_frames_and_exit(tmp_path, shell, exit_code, admission, blocking):
+    _exercise_marketplace_installer(tmp_path, shell, exit_code, admission, blocking)
+
+
+@pytest.mark.parametrize("exit_code", [0, 7])
+def test_detached_installer_recreates_sink_rotated_before_start(tmp_path, exit_code):
+    _exercise_marketplace_installer(
+        tmp_path, "pwsh", exit_code, "allowed", False, rotate_before_start=True,
+    )
+
+
+def _exercise_marketplace_installer(
+    tmp_path, shell, exit_code, admission, blocking, *, rotate_before_start=False,
+):
     if not blocking and admission == "allowed" and shell == "bash":
         pytest.skip("Streaming fixture is synchronous; refused detached execution is covered")
     if shell == "bash" and os.name != "posix":
@@ -413,6 +426,8 @@ def test_blocking_marketplace_installer_keeps_native_frames_and_exit(tmp_path, s
     marker = tmp_path / "executed"
     gate = tmp_path / "installer-continue"
     detached_pid = tmp_path / "detached-pid"
+    sink_path = tmp_path / "observer-sink-path"
+    rotated = tmp_path / "sink-was-rotated"
     stage = tmp_path / "home" / ".agent-worktrees" / "updater-status.json"
     runtime_root = tmp_path / "runtime root caf\u00e9"
     (package / "__main__.py").write_text(
@@ -497,6 +512,12 @@ def test_blocking_marketplace_installer_keeps_native_frames_and_exit(tmp_path, s
                 "$ArgumentList[1] -ne 'pwsh.exe' -or $ArgumentList[2] -ne '-NoProfile' -or "
                 "$ArgumentList[3] -ne '-EncodedCommand' -or $WindowStyle -ne 'Hidden'){throw 'detached launch changed'}\n"
                 "if(($FilePath.Length + ($ArgumentList -join ' ').Length) -ge 32767){throw 'Windows command line limit exceeded'}\n"
+                f"[IO.File]::WriteAllText('{sink_path}',$installerLog)\n"
+                + (
+                    "[IO.File]::Delete($installerLog)\n"
+                    f"[IO.File]::WriteAllText('{rotated}','rotated')\n"
+                    if rotate_before_start else ""
+                ) +
                 "$child=Microsoft.PowerShell.Management\\Start-Process -FilePath $FilePath "
                 "-ArgumentList $ArgumentList -WindowStyle $WindowStyle -PassThru\n"
                 f"[IO.File]::WriteAllText('{detached_pid}',[string]$child.Id)\n"
@@ -566,18 +587,23 @@ def test_blocking_marketplace_installer_keeps_native_frames_and_exit(tmp_path, s
     assert result.stderr == ""
     installer_log = None
     if not blocking and admission == "allowed":
-        sinks = list(tmp_path.glob("setup.*.installer.log"))
-        assert len(sinks) == 1, "detached installer needs exactly one output sink"
-        installer_log = sinks[0]
+        installer_log = Path(sink_path.read_text(encoding="utf-8"))
+        assert installer_log.parent == tmp_path
+        assert re.fullmatch(r"setup\.[a-f0-9]{32}\.installer\.log", installer_log.name)
+        assert rotated.exists() is rotate_before_start
         assert f"output: {installer_log}" in log.read_text(encoding="utf-8-sig")
         try:
             deadline = time.monotonic() + 10
             while time.monotonic() < deadline:
-                report = installer_log.read_text(encoding="utf-8-sig")
+                report = (
+                    installer_log.read_text(encoding="utf-8-sig")
+                    if installer_log.exists() else ""
+                )
                 if "installer-detail [elapsed " in report:
                     break
                 time.sleep(.02)
             assert "installer-detail [elapsed " in report, "detached progress was not persisted"
+            assert list(tmp_path.glob("setup.*.installer.log")) == [installer_log]
             assert "Installer update done" not in report and "Installer update failed" not in report
             assert not gate.exists(), "launcher waited for installer completion"
             with pytest.raises(PermissionError) as error:

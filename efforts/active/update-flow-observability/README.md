@@ -234,6 +234,25 @@ bounded source delta inspection.
 
 ## Journal
 
+### 2026-10-21 - Close the detached sink's startup rotation gap
+
+- The first #7683 review identified a real gap between the launcher's empty
+  sink preparation and the observer's sharing handle. Rotation in that gap
+  could remove the file, making the observer exit before running the
+  installer even though the parent had reported a successful spawn.
+- Added a deterministic native consumer regression that deletes the exact
+  prepared sidecar at the actual detached-spawn seam. Both success and
+  exit-7 scenarios first reproduced the missing progress/installation.
+  Reuse the same fixture's argument, environment, hidden-console, output,
+  active-rotation and shutdown assertions rather than creating another
+  installation path.
+- The observer now atomically opens or creates its own sink before invoking
+  the original installer. Its existing sharing handle still excludes
+  deletion during the invocation; no retry loop, parent wait, new authority
+  or containment change is needed. All nine affected detached/startup native
+  cases passed with the original limits. Source review, current-head CI and merge
+  remain required for this pending boundary.
+
 ### 2026-10-21 - Give the detached Windows installer an owned output sink
 
 - Traced the original `conhost --headless pwsh -File` launch: its console

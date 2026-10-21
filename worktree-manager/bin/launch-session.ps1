@@ -705,8 +705,9 @@ $script:ShowLaunchStatus = $false
         "`$data = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('$encodedData')) | ConvertFrom-Json`n" +
         "`$script:SetupLog = `$data.log`n" +
         ($functions -join "`n") + "`n" +
-        # Allow appends/readers, but not log rotation deleting an active sink.
-        "`$sink = [IO.File]::Open(`$script:SetupLog, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)`n" +
+        # Rotation can remove the empty preparation file before observer start.
+        # Recreate it atomically, then deny deletion while permitting appends.
+        "`$sink = [IO.File]::Open(`$script:SetupLog, [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)`n" +
         "try { `$code = Invoke-SetupCommand -CommandArgv @(`$data.argv) -Scope 'launch/installer' -Label 'Installer update' }`n" +
         "finally { `$sink.Dispose() }`n" +
         "exit `$code"

@@ -193,8 +193,10 @@ the original installer's exit outcome using the same formatter. The separate
 sink avoids competing appenders after launch maintenance continues. It retains
 already-framed output and does not echo into quiet or protocol streams. The
 active sink permits readers and appends but is held against log rotation until
-the observer exits. The observer ends with the original invocation, not with
-the launching shell, and
+the observer exits. The observer atomically opens or recreates the prepared
+file before starting the installer, so rotation during observer startup cannot
+prevent the installation. The observer ends with the original invocation, not
+with the launching shell, and
 keeps the existing headless `conhost` and containment behavior. Literal argument
 data is carried separately from observer code; the installer still executes
 through its original `pwsh -NoProfile -File` command and inherited staged
