@@ -86,7 +86,7 @@ if ($stored.python -ceq $other) { throw 'unpublished override changed stored cho
 
 
 @pytest.mark.parametrize("invalid", [
-    "missing", "relative", "unsigned", "publisher", "version", "implementation", "architecture", "probe",
+    "missing", "relative", "unsigned", "publisher", "version", "implementation", "architecture", "probe", "array",
 ])
 def test_invalid_choice_fails_closed(tmp_path: Path, shell: str, invalid: str) -> None:
     mutation = {
@@ -117,6 +117,11 @@ $script:probes++; $global:LASTEXITCODE=0
 return (@{implementation='cpython';version=@(3,13,0);machine='unsupported';bits=64;
     executable=$base;base_executable=$base} | ConvertTo-Json -Compress)
 }""",
+        "array": """function Invoke-Hidden { param($FilePath,$ArgList,[ref]$ErrorOutput)
+$script:probes++; $global:LASTEXITCODE=0
+return ('[' + (@{implementation='cpython';version=@(3,13,0);machine='AMD64';bits=64;
+    executable=$base;base_executable=$base} | ConvertTo-Json -Compress) + ']')
+}""",
     }[invalid]
     result = native(tmp_path, shell, mutation + """
 $env:AGENT_DISPATCH_BASE_PYTHON = $base
@@ -131,10 +136,12 @@ if (Test-Path (Join-Path $InstallDir 'base-python.json')) { throw 'failure publi
     assert result.returncode == 0, result.stdout + result.stderr
 
 
-@pytest.mark.parametrize("document", ["bad-json", '{"version":2,"python":"missing"}', '{"version":1}', '{"version":1,"python":7}'])
+@pytest.mark.parametrize("document", ["bad-json", '{"version":2,"python":"missing"}', '{"version":1}', '{"version":1,"python":7}', "array"])
 def test_invalid_stored_preference_refuses(
     tmp_path: Path, shell: str, document: str,
 ) -> None:
+    if document == "array":
+        document = json.dumps([{"version": 1, "python": str(tmp_path / "runtime" / "python.exe")}])
     result = native(tmp_path, shell, f"""
 [IO.File]::WriteAllText((Join-Path $InstallDir 'base-python.json'), '{document}')
 $refused = $false

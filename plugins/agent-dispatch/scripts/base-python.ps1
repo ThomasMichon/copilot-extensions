@@ -18,7 +18,11 @@ function Get-DispatchPythonIdentity {
     if ($LASTEXITCODE -ne 0) {
         throw "Dispatch base Python probe failed (exit ${LASTEXITCODE}): $output$diagnostic"
     }
-    $identity = "$output" | ConvertFrom-Json -ErrorAction Stop
+    $identityJson = "$output"
+    if (-not $identityJson.TrimStart().StartsWith('{')) {
+        throw 'Dispatch base Python probe must return a JSON object'
+    }
+    $identity = $identityJson | ConvertFrom-Json -ErrorAction Stop
     if ($identity.implementation -cne 'cpython' -or
         @($identity.version).Count -ne 3 -or
         $identity.version[0] -ne 3 -or $identity.version[1] -lt 10 -or
@@ -59,7 +63,11 @@ function Resolve-DispatchBasePython {
     $preference = Get-DispatchBasePreferencePath
     $python = $env:AGENT_DISPATCH_BASE_PYTHON
     if (-not $python -and [IO.File]::Exists($preference)) {
-        $document = [IO.File]::ReadAllText($preference) | ConvertFrom-Json -ErrorAction Stop
+        $content = [IO.File]::ReadAllText($preference)
+        if (-not $content.TrimStart().StartsWith('{')) {
+            throw "Invalid Dispatch base Python preference (expected a JSON object): $preference"
+        }
+        $document = $content | ConvertFrom-Json -ErrorAction Stop
         if (-not $document -or ($document.version -isnot [int] -and $document.version -isnot [long]) -or $document.version -ne 1 -or
             $document.python -isnot [string] -or -not $document.python.Trim()) {
             throw "Invalid Dispatch base Python preference: $preference"
