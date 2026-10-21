@@ -621,6 +621,9 @@ def _build_parser() -> argparse.ArgumentParser:
     publication_parser = subparsers.add_parser("probe-plugin-publication")
     _add_mode_arguments(publication_parser)
 
+    management_parser = subparsers.add_parser("probe-management-publication")
+    _add_mode_arguments(management_parser)
+
     probe_parser = subparsers.add_parser("probe-legacy")
     _add_mode_arguments(probe_parser)
 
@@ -905,6 +908,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             }
             if arguments.action == "status":
                 result = resolve_installation_mode(**mode_arguments)
+            elif arguments.action == "probe-management-publication":
+                borrow_runtime_publication(**mode_arguments)
+                result = resolve_runtime_deployment(**mode_arguments)
+                result["managementPublication"] = True
             elif arguments.action in {"deployment-status", "probe-plugin-publication"}:
                 result = resolve_runtime_deployment(**mode_arguments)
             else:

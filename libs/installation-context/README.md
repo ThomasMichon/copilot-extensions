@@ -75,6 +75,50 @@ of Windows device basenames.
 All successful actions emit one JSON object. Ambiguous or mismatched evidence
 writes an actionable error to stderr and exits nonzero.
 
+### Explicit runtime publication custody (Python)
+
+`runtime_publication_lease(**mode_arguments)` is an explicit management context
+manager for an already selected namespaced installation. It requires an
+explicit `context`, the existing payload/plugin/legacy-root resolution inputs
+and canonical installation policy. It holds the existing genesis then install
+locks; it does not create another lock namespace, choose runtime source, run an
+installer or enable maintenance.
+
+The yielded environment patch carries the context and a ticket selecting those
+live owners. Pass it to the caller's existing installer process flow and wait
+for that flow to finish before leaving the context manager.
+`borrow_runtime_publication(**mode_arguments)` authenticates the owners without
+acquiring or releasing them. Its returned lock handles are borrowed inspection
+handles, never caller-owned locks to release. Durable management/publication
+purpose binds the source, installation, context and receipt/activation
+generations; both owners must have the exact tokens, same live local PID and
+current valid governance. A ticket alone, a stale owner, another purpose or an
+invalid deployment policy cannot authorize publication.
+
+The Python-only `probe-management-publication` CLI action exposes the same
+read-only borrower check with the usual mode-resolution arguments. Worktrees'
+native installers call it only for an explicit management ticket, using the
+caller's existing `-BootstrapPython` or `--runtime-publication-python`. Ordinary
+standalone native installation gains no interpreter prerequisite. The backend
+borrows the same locks through construction, retained candidate handover and
+native helper callbacks; it never reacquires an outer manager's locks.
+Manager/source-selection integration remains separate from this custody API.
+
+The bounded `payload-invocation` portfolio contains T2 borrower/native-admission
+regressions and explicit T3 real construction/callback tests. From the repository
+root:
+
+```text
+python tools/run-plugin-tests.py payload-invocation --test-file tests/test_cell_management.py
+python tools/run-plugin-tests.py payload-invocation --allow-explicit-tiers --test-file tests/test_cell_management_install.py -k pwsh
+```
+
+For real construction select one native shell at a time (`pwsh`,
+`powershell.exe` or `bash`) to retain the per-run wall limit.
+These tests require that shell and `uv`, use synthetic installation cells, and
+assert immutable completion/selection, native resolver publication, predecessor
+preservation and continued ownership of the outer management locks.
+
 PowerShell callers may opt into `status -WithContextValidation`, with both
 `-ExpectedPluginId` and `-ExpectedPayloadRoot`. For an eligible namespaced
 installation, the runner performs the independent context validation **after**

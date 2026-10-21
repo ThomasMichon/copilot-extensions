@@ -277,6 +277,32 @@ if [[ -n "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
     }
     context_publication_allowed() {
         local publication allowed allowed_type publication_root
+        if [[ -n "${COPILOT_EXTENSIONS_RUNTIME_PUBLICATION:-}" ]]; then
+            local management_python="" management_index
+            for ((management_index=0; management_index<${#__aw_args[@]}; management_index++)); do
+                if [[ "${__aw_args[$management_index]}" == --runtime-publication-python ]]; then
+                    management_python="$(__aw_shell_path "${__aw_args[$((management_index+1))]}")" || return 1
+                fi
+            done
+            [[ -n "$management_python" ]] || {
+                printf '%s\n' 'ERROR: Runtime publication management requires explicit --runtime-publication-python' >&2
+                return 1
+            }
+            publication="$("$management_python" -I -B \
+                "$SCRIPT_DIR/installation-context/installation_context.py" \
+                probe-management-publication "${__aw_status_args[@]:1}")" || return 1
+            allowed="$(__aw_context_value "$publication" managementPublication)" || return 1
+            allowed_type="$(LC_ALL=C awk -f "$__aw_json_query" -v mode=type \
+                -v query_path=managementPublication <<<"$publication")" || return 1
+            publication_root="$(__aw_context_value "$publication" runtimeRoot)" || return 1
+            publication_root="$(__aw_shell_path "$publication_root")" || return 1
+            [[ "$allowed_type" == boolean && "$allowed" == true &&
+               "$publication_root" == "$__aw_status_root" ]] || {
+                printf '%s\n' 'ERROR: Runtime publication management returned an invalid decision' >&2
+                return 1
+            }
+            return
+        fi
         publication="$(__aw_context_query probe-plugin-publication "${__aw_status_args[@]:1}")" || {
             printf 'ERROR: Runtime publication refused: %s. Use explicit installation management.\n' \
                 "$publication" >&2

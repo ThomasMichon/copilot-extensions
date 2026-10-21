@@ -88,6 +88,9 @@ class Governance:
         if Path(actual_root).resolve() != self.root:
             raise InstallationRefused("Runtime deployment policy names another root")
         policy = decision["deployment"]
+        if self.context and os.environ.get(self.helper.RUNTIME_PUBLICATION_ENV):
+            self.helper.borrow_runtime_publication(**arguments)
+            return
         if policy["allowPluginPublication"] is True:
             return
         if not self.context and policy["state"] == "valid" and policy["managed"] is True:
@@ -137,7 +140,13 @@ class Governance:
         with ExitStack() as stack:
             locks = []
             receipt = self.initial[1]
-            if receipt is not None:
+            if receipt is not None and os.environ.get(self.helper.RUNTIME_PUBLICATION_ENV):
+                locks.extend(self.helper.borrow_runtime_publication(
+                    legacy_root=Path.home() / ".agent-worktrees", payload_root=self.payload,
+                    plugin_id="agent-worktrees", durable_home=self.durable_home,
+                    context=self.context,
+                ))
+            elif receipt is not None:
                 marketplace = receipt["marketplaceId"]
                 locks.append(stack.enter_context(self.helper._DirectoryLock(
                     self.durable_home / "marketplaces" / ".locks" / f"{marketplace}.genesis",
@@ -279,7 +288,10 @@ def _publish_helpers(
                 pin["runtime_source"]["package_version"] if pin else identity["build_info"]["version"]
             ), "governance": governance.signature(),
             "locks": [dict(lock._owner()) for lock in governance.publication_locks],
-            "pid": os.getpid(), "result": str(result_path),
+            "pid": (
+                governance.publication_locks[0]._owner()["pid"]
+                if governance.publication_locks else os.getpid()
+            ), "result": str(result_path),
             "copies": str(copies_path), "copies_identity": [copies_state.device, copies_state.inode],
             "bindings": helper_publication.declared_copies(
                 content, governance.root, frontend["scope"], frontend["shell"], bool(governance.context),

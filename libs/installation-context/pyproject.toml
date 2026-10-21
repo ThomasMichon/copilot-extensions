@@ -36,6 +36,7 @@ py-modules = [
     "_installation_context_maintenance",
     "_installation_context_mode_cli",
     "_installation_context_deployment",
+    "_installation_context_publication",
 ]
 
 [project.optional-dependencies]

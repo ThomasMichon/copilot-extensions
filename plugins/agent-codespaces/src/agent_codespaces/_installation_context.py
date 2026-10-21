@@ -21,6 +21,7 @@ _FRAGMENT_FILES = (
     "_installation_context_maintenance.py",
     "_installation_context_mode_cli.py",
     "_installation_context_deployment.py",
+    "_installation_context_publication.py",
 
 )
 

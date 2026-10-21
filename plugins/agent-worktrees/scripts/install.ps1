@@ -381,6 +381,26 @@ if ($ContextualInstall) {
     }
 
     function Assert-ContextPublication {
+        if ($env:COPILOT_EXTENSIONS_RUNTIME_PUBLICATION) {
+            if (-not $BootstrapPython) {
+                throw 'Runtime publication management requires explicit -BootstrapPython.'
+            }
+            $managementHelper = Join-Path $PSScriptRoot 'installation-context\installation_context.py'
+            $managementJson = @(& $BootstrapPython -I -B $managementHelper probe-management-publication `
+                --context $contextPath --durable-home $contextDurableHome `
+                --payload-root $contextPayload --plugin-id agent-worktrees `
+                --legacy-root (Join-Path $env:USERPROFILE '.agent-worktrees'))
+            if ($LASTEXITCODE -ne 0) {
+                throw 'Runtime publication management custody was refused.'
+            }
+            $management = ($managementJson -join "`n") | ConvertFrom-Json -ErrorAction Stop
+            if ($management.managementPublication -isnot [bool] -or
+                -not $management.managementPublication -or
+                [string]$management.runtimeRoot -cne $InstallDir) {
+                throw 'Runtime publication management returned an invalid decision.'
+            }
+            return
+        }
         $publicationArgs = $contextStatusArgs.Clone()
         $publicationArgs.Action = 'probe-plugin-publication'
         $publicationJson = @(& $contextHelper @publicationArgs)

@@ -131,7 +131,7 @@ publication and command-ownership boundaries; it does not disable whole hooks.
   publication gates, retaining standalone reconciliation and healthy dispatch.
 - [x] Qualify Worktrees' cell-installer pre-staging and retained-backend
   publication gates using existing governance and lock custody.
-- [ ] Authenticate explicit managed-cell installation through the existing
+- [x] Authenticate Worktrees' explicit managed-cell installation through the existing
   genesis/install custody across native staging, candidate handover and callbacks.
 - [ ] Keep adapters thin and enforce drift-compatible service interaction without implicit runtime replacement.
 
@@ -502,3 +502,15 @@ onto one branch.
 - The operator selected implementation and adoption after plan review. Manager owns background suite maintenance; Agent Machines retains general dependency/host work, and an external controller remains an exclusive alternative.
 - This bounded trigger/enrollment slice can use today's canonical selected update path. It does not close Phase 3/4 source-management prerequisites or authorize unfinished source-backed publication.
 - Reused #7028 for public coordination. Review precedes implementation, and this proposal registers no startup entry, launches no worker and changes no adopter policy.
+
+### 2026-10-20 - Cell admission merged; explicit custody next
+- PR #7477 merged as `49f7e83d1a4b9b3c6e20eb3177630618a4c68c52` after exact-head Copilot approval, explicit resolution of the Windows Bash finding and successful required checks.
+- Re-read both Plan and Validation Plan. The narrow cell-installer admission item is qualified; explicit managed-cell installation remains unchecked. Next authenticate management purpose on the existing genesis/install owners and borrow that custody through native staging, retained candidate handover and helper publication.
+- This is not Manager source-selection integration or native adoption. No installed policy, source binding, service or maintenance setting changed.
+
+### 2026-10-20 - Explicit managed-cell custody
+- Added a stdlib-only management context manager and read-only borrower on the existing genesis/install locks. Durable publication purpose binds exact source/installation/context generations and live common ownership; environment tickets only select that evidence. No new updater, lock namespace or legacy reservation was introduced.
+- Worktrees' native installers authenticate custody before staging and runtime-input writes. The backend borrows instead of reacquiring those locks and helper plans record the actual outer owner PID, preserving authorization through candidate handover and native callbacks.
+- Real non-smoke repair construction, immutable completion, selection and native helper callbacks pass on Windows PowerShell 7, Windows PowerShell 5.1 and Windows Git Bash, plus Linux Bash and PowerShell. Each leaves the broken predecessor unchanged, publishes both native resolvers without legacy global binstubs, and retains the original management owners until the complete child flow returns.
+- The first Windows fixture used a deeply nested test-node home and reached a dependency installer's extended-path comparison failure. A compact supervised temporary home produced the real qualification; these results do not establish arbitrary long-root support. This toolchain boundary remains part of #7030's deployment-readiness assessment rather than an inferred successful native rollout.
+- Re-read the Plan and Validation Plan. Only Worktrees' explicit managed-cell custody item closes. Remaining caller/launcher and skew gates, independent Manager/service sources, maintenance and native adoption remain open.

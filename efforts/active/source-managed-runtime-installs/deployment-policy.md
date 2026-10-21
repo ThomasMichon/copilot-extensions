@@ -167,10 +167,11 @@ does not bypass policy. Retained bootstraps include the canonical command-bindin
 and lifecycle companions so legacy management can authenticate its existing live
 publication-purpose lease without importing source code.
 
-This is plugin-publication admission, not explicit managed-cell installation.
-That separate integration still needs authenticated durable management purpose
-on the existing namespace custody throughout staging, candidate handover and
-callbacks. A context receipt or staging environment flag alone remains
+Explicit managed-cell installation now composes the canonical
+[Python publication custody API](../../../libs/installation-context/README.md#explicit-runtime-publication-custody-python).
+Worktrees' native staging, backend construction, retained candidate handover
+and native callbacks authenticate and borrow the same live genesis/install
+owners. A context receipt or staging environment flag alone remains
 insufficient; namespaced installs are not coerced into legacy command binding.
 Manager source selection and other caller/launcher gates remain open.
 
