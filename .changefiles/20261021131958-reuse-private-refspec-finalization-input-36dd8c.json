@@ -1,0 +1,9 @@
+{
+  "comment": "Reuse private refspec finalization input stores and preserve real per-case landing and refusal checks.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

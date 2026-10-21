@@ -87,7 +87,45 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Admitted fixture-semantic batches
 
+### B-REFSPEC private unlanded finalization inputs
+
+Baseline: the actual #7649 merge. Add only the named
+`_refspec_worktree_seed`, `_copy_refspec_worktree`, adapted
+`refspec_worktree` and copy-isolation regression with its snapshot helper.
+Build actual init/commit/push/clone/fix history under the existing hermetic
+environment and run-local seed lock. Copy every object/ref/reflog into
+independent stores, relocating the publisher and worktree origin URLs.
+The copied input remains unlanded: origin/master is the base, worktree
+HEAD is its one fix child, and neither local nor remote PR branch exists.
+Each test still performs its actual landing/refusal/finalization decision.
+
+Two repeated cases require exact branch/content/base topology and every
+copied input byte except the intentionally relocated Git configs.
+Commit/push from the first worktree advances only its origin/master;
+commit/push from its publisher creates only that copy's publisher ref.
+Every seed and second-copy byte remains unchanged, with no alternates
+or shared object files. All 54 other existing top-level functions/classes
+and all original decorators are AST-identical. In particular the five
+inconclusive-evidence cases remain separate: no B-INCONCLUSIVE, G/S/F,
+production, selection or timeout change is absorbed.
+
+Complete native Windows precondition module: 65 passed, zero skips,
+81.71 seconds pytest / 97.89 preparation-cleanup inclusive. Exactly two
+work-stealing workers retain the original 30-second default item watchdog,
+marks and resource limits under a 240-second diagnostic group.
+Ruff F/E9 and the 13-plugin install contract pass.
+This is real Git consumer integration, not quiet-host, whole-suite or
+repeated same-head performance qualification.
+
+Documentation impact is this ledger only; runtime/command/install/config
+contracts are unchanged. Provisioning clean-room and external deployment
+are inapplicable to this fixture-only change. Parent #5694/#5682 and
+complete repeated same-head native qualification remain open.
+
 ### B-DOCTOR isolate unrelated daemon reporting
+
+**Actually merged:** #7649 as
+`b6ff25d16a2d237e122aaf5d06e26614c1fccd5f`.
 
 Baseline: the actual #7647 merge. Add only the named local
 `daemon_health.doctor_report` replacement to
