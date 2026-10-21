@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent, sequential PRs against `dev`
 - **Created:** 2026-10-19
-- **Status:** Blocked
+- **Status:** Active
 - **Vision:** [Dispatch execution handoff](../../../visions/plugins/agent-dispatch/README.md#acknowledged-execution-handoff), preserving [reviewer lineage](../../../visions/plugins/agent-dispatch/reviewer/README.md#one-review-one-lineage)
 - **Umbrella issue:** [#7268](https://github.com/ThomasMichon/copilot-extensions/issues/7268)
 
@@ -15,8 +15,9 @@ without overlapping writers, losing existing tasks or interrupting unrelated
 work. An accepted request is not an acknowledged handoff. Dispatch owns task
 admission and execution accounting; the adopter owns domain effects and policy.
 
-**Current authorization is design-only.** A reviewed plan does not authorize
-implementation, deployment, process termination or any live handoff.
+**Source-and-test implementation is authorized.** Installation, live transitions,
+process termination and deployment remain separately gated. A reviewed source
+change is not an acknowledged or adopted handoff.
 
 ## Participants
 
@@ -24,13 +25,13 @@ implementation, deployment, process termination or any live handoff.
 |-------------|---------------------|-------------|
 | Proposal owner | Generic contract, proposal PR and issue coordination | Assigned owner of #7268 |
 | Independent reviewer | Review the proposal through the normal repository gate | Proposal PR review |
-| Implementation owner | Future runtime and validation slices, only after authorization | Not assigned |
+| Implementation owner | Generic runtime and validation slices | Assigned owner of #7268 |
 
 ## Coordination
 
-- **Topology:** one proposal PR, then separately authorized implementation PRs.
-- **Host (owns PRs):** Proposal owner.
-- **Delegates:** Independent reviewer owns review only; no implementation lane.
+- **Topology:** reviewed proposal, followed by independent sequential source PRs.
+- **Host (owns PRs):** Proposal owner, continuing as Implementation owner.
+- **Delegates:** Independent reviewer owns review only.
 - **Handoff:** Record decisions and blockers here and in #7268. Preserve existing
   lifecycle, remote-driver and task-session-resume owners; do not take their work.
 - This public effort is canonical for the generic contract. Adopter-specific
@@ -65,6 +66,11 @@ status preamble omitted:
 > facility details and would not implement, deploy, or activate takeover controls.
 
 The operator confirmed the slug `acknowledged-execution-handoff`.
+Subsequent source-and-test authorization is captured here as a public-safe
+summary: the same owner may implement the reviewed generic Dispatch adapter
+through normal reviewed PRs, after the adopter-owned effect-contract prerequisite
+clears review. That prerequisite is complete. No adopter identifiers or private
+operational evidence are part of this public effort.
 The [contract proposal](contract.md), phased implementation decomposition and
 validation matrix below are **agent-recommended**, not additional operational
 grants.
@@ -79,11 +85,14 @@ grants.
 - [x] Record proposal landing and the next authorization boundary.
 
 ### Phase 2 - Separately authorize implementation
-- [ ] Obtain explicit implementation scope and assign an implementation owner.
+- [x] Obtain explicit implementation scope and assign an implementation owner.
 - [ ] Extend the existing coordinator/supervisor admission and drain accounting,
       including complete existing-assignment enumeration and legacy refusal.
 - [ ] Define the adopter effect-fence adapter and implement generation-bound
       mutation admission without conflating effect authority with task ownership.
+      The first source slice defines and validates the optional
+      [effect adapter boundary](../../../plugins/agent-dispatch/docs/execution-handoff.md);
+      durable coordinator admission and adopter mutation wiring remain open.
 - [ ] Implement durable recovery, observation and explicit handback using the
       same tasks, workspaces and recorded session lineage.
 
@@ -121,10 +130,23 @@ grants.
 Read [contract.md](contract.md). It is prospective design, not a supported
 command or an instruction to operate a running system. The design landed in
 [#7270](https://github.com/ThomasMichon/copilot-extensions/pull/7270).
-The next action is explicit implementation authorization and owner assignment
-under #7268. Until then, Phase 2 is blocked; review approval is not that grant.
+Implementation ownership and source/test scope are recorded under #7268.
+Continue Phase 2 through the existing coordinator and supervisor authorities;
+do not treat a validated adapter response as complete task admission or live
+handoff support.
 
 ## Journal
+
+### 2026-10-20 - Source/test scope accepted; adapter construction started
+- The existing proposal owner accepted implementation ownership under #7268.
+  The adopter-owned effect-contract review prerequisite is complete.
+- The initial adapter boundary binds responses to the complete qualified scope,
+  operation, execution direction and retiring generation. Unsupported adapters,
+  incomplete enumeration, unresolved effects and legacy writers cannot satisfy
+  its acknowledgement prerequisite. Transport errors remain errors.
+- This construction slice does not wire the coordinator or supervisor, close
+  execution admission, grant a task, perform an adopter mutation or advertise a
+  live transition command. Those Plan and Validation Plan obligations stay open.
 
 ### 2026-10-19 - Proposal landed; implementation gated
 - #7270 merged to `dev` as `cb27a321a1f6066fe910176e647e3b72f860091a`

@@ -17,6 +17,11 @@ Held housekeeping on a completed task has a separate preview-first
 [`reservations retry-cleanup` recovery flow](docs/cleanup-recovery.md).
 It preserves failure and attachment history and never rearms completed work.
 
+The optional [execution effect adapter](docs/execution-handoff.md) is a
+construction-stage library boundary for acknowledged execution handoff.
+It does not yet close coordinator/supervisor admission or expose a live handoff
+command; ordinary execution is unchanged.
+
 Internal coordinator deployment accepts optional `conditional`/`routing_dir`
 keyword arguments using the shared
 [conditional cutover contract](../../libs/zdd/README.md#conditional-owner-operation-partial-lifecycle-support).
