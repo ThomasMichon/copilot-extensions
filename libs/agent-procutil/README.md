@@ -46,9 +46,9 @@ allocate a visible console.
 ### Windows inner-base interpreter selection
 
 `windowless_python()` prefers the `pyvenv.cfg` home's physical `pythonw.exe`.
-It reads junction/symlink targets component by component with `lstat` and
-`readlink`, including ancestors and final executable links, before inspecting
-descendants. This avoids traversing aliases blocked by Windows RedirectionGuard;
+It reads name-surrogate junction/symlink targets component by component with
+`lstat` and `readlink`, including ancestors and final executable links, before
+inspecting descendants. This avoids traversing aliases blocked by Windows RedirectionGuard;
 it does not change runtime-marker selection or disable mitigation.
 Pass `windowless_python_env()` into the child environment when using that base
 interpreter: `__PYVENV_LAUNCHER__` retains the original selected venv's import
@@ -60,9 +60,9 @@ GUI-file alias has none, its physical target's `python.exe` sibling is used.
 
 The selected venv's configured home must also remain traversable by CPython:
 `__PYVENV_LAUNCHER__` causes startup to read that same `pyvenv.cfg`. A healthy
-physical executable alone does not make a blocked home usable. After physical
-selection, an explicit home-access check refuses WinError 448 with a runtime
-reconstruction diagnostic rather than returning a success-shaped selection.
+physical executable alone does not make a blocked home usable. After the
+configuration is read, an explicit home-access check refuses WinError 448 with
+a runtime reconstruction diagnostic rather than returning a success-shaped selection.
 Runtime construction must record a usable physical home. These helpers never
 rewrite an installed configuration, substitute another venv, or override
 `PYTHONHOME`/`PYTHONPATH` to disguise an unusable one.

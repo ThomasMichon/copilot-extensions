@@ -36,8 +36,7 @@ def physical_executable(path: str) -> str | None:
             return None
         if (
             stat.S_ISLNK(info.st_mode)
-            or getattr(info, "st_reparse_tag", 0)
-            or getattr(info, "st_file_attributes", 0) & 0x400
+            or getattr(info, "st_reparse_tag", 0) & 0x20000000
         ):
             links += 1
             if links > 40:

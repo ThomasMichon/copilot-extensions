@@ -57,7 +57,7 @@ def test_inner_junction_launch_twice_with_selected_venv(tmp_path, record_propert
         site.mkdir(parents=True, exist_ok=True)
         (site / "inner_home_context.py").write_text("identity = 'selected-venv'\n")
         original = str(root / "Scripts" / "python.exe")
-        if require_guard:
+        if before & 1:
             with pytest.raises(OSError) as blocked:
                 os.stat(alias / "python.exe")
             assert blocked.value.winerror == 448

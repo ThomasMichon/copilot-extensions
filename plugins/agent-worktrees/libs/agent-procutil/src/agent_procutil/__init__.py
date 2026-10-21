@@ -60,8 +60,6 @@ import time
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any, BinaryIO
 
-from ._interpreter import physical_executable as _physical_executable
-
 if TYPE_CHECKING:
     from .daemon_broker import WindowsDaemonProcess
 
@@ -543,6 +541,14 @@ def spawn_sync_in_kill_on_close_job(
     return process, job_handle
 
 
+def _physical_executable(path: str) -> str | None:
+    # Minimal bundles and installer loaders use short-lived helpers without
+    # packaging interpreter-selection dependencies.
+    from ._interpreter import physical_executable
+
+    return physical_executable(path)
+
+
 def _venv_home_python(python: str, filename: str) -> str | None:
     venv_root = os.path.dirname(os.path.dirname(python))
     cfg_path = os.path.join(venv_root, "pyvenv.cfg")
@@ -557,20 +563,22 @@ def _venv_home_python(python: str, filename: str) -> str | None:
         return None
     # Keep resolution outside the optional-config read: access errors, unreadable
     # reparse points and cycles are not evidence that an interpreter is absent.
-    physical = _physical_executable(os.path.join(home, filename)) if home else None
-    if physical:
-        # CPython rereads this home through __PYVENV_LAUNCHER__. A physical
-        # executable alone cannot make a blocked venv configuration usable.
-        try:
-            os.stat(home)
-        except OSError as exc:
-            if getattr(exc, "winerror", None) == 448:
-                raise RuntimeError(
-                    "Cannot preserve the Windows venv: pyvenv.cfg home is blocked "
-                    "by RedirectionGuard; rebuild the runtime with a physical Python home."
-                ) from exc
-            raise
-    return physical
+    if not home:
+        return None
+    # CPython rereads this home through __PYVENV_LAUNCHER__, even if the
+    # requested executable is missing. Validate independently of selection.
+    try:
+        os.stat(home)
+    except (FileNotFoundError, NotADirectoryError):
+        return None
+    except OSError as exc:
+        if getattr(exc, "winerror", None) == 448:
+            raise RuntimeError(
+                "Cannot preserve the Windows venv: pyvenv.cfg home is blocked "
+                "by RedirectionGuard; rebuild the runtime with a physical Python home."
+            ) from exc
+        raise
+    return _physical_executable(os.path.join(home, filename))
 
 
 def _venv_home_pythonw(python: str) -> str | None:

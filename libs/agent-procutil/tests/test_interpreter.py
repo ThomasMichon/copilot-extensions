@@ -31,7 +31,9 @@ def _links(monkeypatch, links):
     def lstat(path, *args, **kwargs):
         key = os.path.normcase(os.fspath(path))
         if key in normalized:
-            return SimpleNamespace(st_mode=stat.S_IFDIR, st_file_attributes=0x400)
+            return SimpleNamespace(
+                st_mode=stat.S_IFDIR, st_file_attributes=0x400, st_reparse_tag=0xA0000003,
+            )
         assert not any(key.startswith(link + os.sep) for link in normalized)
         return real_lstat(path, *args, **kwargs)
 
@@ -95,6 +97,15 @@ def test_broken_home_keeps_windowless_fallback_but_direct_refuses(monkeypatch, t
     alias = tmp_path / "minor"
     python = _venv(tmp_path / "venv", alias)
     _links(monkeypatch, {alias: tmp_path / "missing"})
+    assert pu.windowless_python(python) == str(Path(python).with_name("pythonw.exe"))
+    assert pu.windowless_python_env(python) == {}
+    with pytest.raises(RuntimeError, match="base pythonw.exe is unavailable"):
+        pu.direct_python(python)
+
+
+def test_missing_physical_home_keeps_windowless_fallback(monkeypatch, tmp_path):
+    python = _venv(tmp_path / "venv", tmp_path / "missing")
+    monkeypatch.setattr(pu, "_is_windows", lambda: True)
     assert pu.windowless_python(python) == str(Path(python).with_name("pythonw.exe"))
     assert pu.windowless_python_env(python) == {}
     with pytest.raises(RuntimeError, match="base pythonw.exe is unavailable"):
@@ -197,12 +208,13 @@ def test_nonvenv_gui_link_without_either_console_refuses(monkeypatch, tmp_path):
 @pytest.mark.parametrize(
     "select", [pu.windowless_python, pu.windowless_python_env, pu.direct_python],
 )
+@pytest.mark.parametrize("with_gui", [False, True])
 def test_blocked_cfg_home_refuses_even_when_physical_base_is_healthy(
-    monkeypatch, tmp_path, select,
+    monkeypatch, tmp_path, select, with_gui,
 ):
     base = tmp_path / "base"
     base.mkdir()
-    for name in ("python.exe", "pythonw.exe"):
+    for name in ("python.exe", "pythonw.exe") if with_gui else ("python.exe",):
         (base / name).write_text("")
     alias = tmp_path / "minor"
     python = _venv(tmp_path / "venv", alias)
@@ -217,3 +229,22 @@ def test_blocked_cfg_home_refuses_even_when_physical_base_is_healthy(
     monkeypatch.setattr(os, "stat", blocked)
     with pytest.raises(RuntimeError, match="rebuild the runtime with a physical Python home"):
         select(python)
+
+
+@pytest.mark.parametrize("tag", [0x80000017, 0x9000001A], ids=["wof", "cloud"])
+def test_non_link_reparse_metadata_is_not_read_as_a_link(monkeypatch, tmp_path, tag):
+    base = tmp_path / "base"
+    base.mkdir()
+    executable = base / "python.exe"
+    executable.write_text("")
+    real_lstat = os.lstat
+    def lstat(path, *args, **kwargs):
+        info = real_lstat(path, *args, **kwargs)
+        if str(path) in (str(base), str(executable)):
+            return SimpleNamespace(st_mode=info.st_mode, st_file_attributes=0x400, st_reparse_tag=tag)
+        return info
+    monkeypatch.setattr(os, "lstat", lstat)
+    monkeypatch.setattr(
+        os, "readlink", lambda _: pytest.fail("non-name-surrogate reparse point is not a link"),
+    )
+    assert physical_executable(str(executable)) == str(executable)
