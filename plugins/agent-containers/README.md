@@ -936,6 +936,15 @@ with `--internal`; `host`, the default `bridge`, and `container:<name>` sharing
 are rejected. This lets a higher-level workflow attach a narrow proxy (for
 example, one model endpoint) without granting ambient host or internet reach.
 
+## Native launch-storage tests
+
+Run `tools/run-plugin-tests.py agent-containers --test-file tests/test_launch_storage.py`
+from the repository root. These Linux regressions inspect the actual filesystem:
+`/tmp` is not necessarily disk-backed. Disk-only refusal cases explicitly skip
+when their temporary directory is on tmpfs; complete disk-refusal qualification
+also needs a non-tmpfs run. RAM, symlink and permission witnesses remain active
+on the tmpfs layout. A prerequisite skip is not a passing disk witness.
+
 ## Discovery
 
 Containers are recognised as fleet members (in priority order) by:

@@ -37,6 +37,15 @@ def _ram_temporary_directory() -> tempfile.TemporaryDirectory[str]:
         ) from exc
 
 
+def _require_non_tmpfs(directory: Path) -> None:
+    filesystem = subprocess.run(
+        ["stat", "-f", "-c", "%T", str(directory)],
+        capture_output=True, text=True, check=True, timeout=5,
+    ).stdout.strip()
+    if filesystem == "tmpfs":
+        pytest.skip("disk refusal needs a non-tmpfs test directory")
+
+
 @pytest.fixture
 def ram_root(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[Path]:
     with _ram_temporary_directory() as root:
@@ -69,6 +78,34 @@ def test_unexpected_ram_creation_error_is_not_silently_skipped(
     monkeypatch.setattr(tempfile, "TemporaryDirectory", unexpected)
     with pytest.raises(OSError, match="synthetic unexpected failure"):
         _ram_temporary_directory()
+
+
+@pytest.mark.parametrize("filesystem", ["tmpfs", "overlayfs"])
+def test_disk_prerequisite_uses_actual_filesystem(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, filesystem: str,
+) -> None:
+    def stat(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        assert args[-1] == str(tmp_path)
+        assert kwargs["check"] is True
+        return subprocess.CompletedProcess(args, 0, filesystem + "\n", "")
+
+    monkeypatch.setattr(subprocess, "run", stat)
+    if filesystem == "tmpfs":
+        with pytest.raises(pytest.skip.Exception, match="non-tmpfs test directory"):
+            _require_non_tmpfs(tmp_path)
+    else:
+        _require_non_tmpfs(tmp_path)
+
+
+def test_unexpected_disk_probe_error_is_not_silently_skipped(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def failed_stat(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        raise subprocess.CalledProcessError(1, ["stat"], stderr="synthetic probe failure")
+
+    monkeypatch.setattr(subprocess, "run", failed_stat)
+    with pytest.raises(subprocess.CalledProcessError):
+        _require_non_tmpfs(tmp_path)
 
 
 @pytest.fixture
@@ -107,12 +144,7 @@ def test_disk_home_never_receives_launch_inputs(
 def test_disk_storage_refuses_before_creating_or_writing(
     tmp_path: Path, local_transport: list, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    filesystem = subprocess.run(
-        ["stat", "-f", "-c", "%T", str(tmp_path)],
-        capture_output=True, text=True, check=True, timeout=5,
-    ).stdout.strip()
-    if filesystem == "tmpfs":
-        pytest.skip("disk refusal needs a non-tmpfs test directory")
+    _require_non_tmpfs(tmp_path)
     monkeypatch.setattr(launch_storage, "RAM_ROOT", str(tmp_path))
     with pytest.raises(RuntimeError, match="private, non-symlink tmpfs"):
         ssh_transport.write_remote_env("fixture", "user", {"SECRET": "synthetic-only"})
@@ -199,6 +231,8 @@ def test_disk_or_symlink_cleanup_owner_refuses_before_source(
     if symlink:
         directory = tmp_path / "linked"
         directory.symlink_to(ram_root, target_is_directory=True)
+    else:
+        _require_non_tmpfs(directory)
     monkeypatch.setattr(
         auth, "resolve_copilot_cli_token_or_raise",
         lambda *args: pytest.fail("must refuse before acquiring the credential"),
@@ -300,6 +334,7 @@ def test_session_host_cleanup_checks_actual_parent_before_any_deletion(
     from agent_containers import __main__ as cli
 
     if unsafe == "disk":
+        _require_non_tmpfs(tmp_path)
         disk = tmp_path / "disk"
         disk.mkdir()
         monkeypatch.setattr(launch_storage, "RAM_ROOT", str(disk))
