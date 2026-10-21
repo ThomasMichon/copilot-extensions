@@ -56,6 +56,13 @@ def test_no_production_call_is_rejected_by_the_collector_and_packet_verifier(tmp
         "run-promotion-unit-tests.py", "--source-sha", "a" * 40,
         "--manifest", str(manifest_path), "--output-dir", str(output),
     ])
+    real_pytest_main = pytest.main
+
+    def scoped_collection(arguments, **kwargs):
+        assert Path(arguments[arguments.index("--confcutdir") + 1]) == root
+        return real_pytest_main(arguments, **kwargs)
+
+    monkeypatch.setattr(pytest, "main", scoped_collection)
     with pytest.raises(UnitEvidenceError, match="production call coverage"):
         RUNNER.main()
     with pytest.raises(UnitEvidenceError, match="production call coverage"):

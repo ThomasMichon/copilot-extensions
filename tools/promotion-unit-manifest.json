@@ -347,7 +347,7 @@
     "tools/promotion_unit_effects.py": "bc724db0e33571f32fc80b016eb7a852935adeb08a7aa0cd4bfa4ca4513c3519",
     "tools/promotion_unit_packet.py": "9ece0640290877c82c6c4268b221eeb8a1df726ccf366985065726bd16f7e5af",
     "tools/promotion_unit_tests/test_ci_contract.py": "cbe755f12aa2701dbe5840d6c0b8d90a2029f49b6a51014042de993f215ecdcb",
-    "tools/promotion_unit_tests/test_collector.py": "9ca276093c23b2a99095c73e1c7003d44b6bc2accfa5718d11020339e2421281",
+    "tools/promotion_unit_tests/test_collector.py": "66fd596a5a33689c878d01826aab61aa1a3b8c8c348985dd6b7f06f37023738d",
     "tools/promotion_unit_tests/test_contract.py": "179c625d29162f49c1ebacf30255484973f32af9b11b991bf1fc9b833916503c",
     "tools/promotion_unit_tests/test_dispatch.py": "ea6025b25daa8810be340a0f7ad53f453ad5c3667e0a8b245607b7d890dba7ff",
     "tools/promotion_unit_tests/test_effects.py": "b22b7cb72fcc69bfe306288f97b5b7d983f95d9e4636412c1b1d0a4b33f4dd0e",
@@ -358,7 +358,7 @@
     "tools/promotion_unit_tests/test_selection.py": "cc0c254e2c96dd2594f772e7181e3b2f501b69c09aab6d468b55046b738fe94b",
     "tools/publish_python_artifacts.py": "bf6e057686697ac0af887c07bba73367af64eb5d0f41c77d65e011e24c260011",
     "tools/qualify_promotion_candidate.py": "2e636eb5e52536650d95df489248cf4cea74ddbb08989c322a4958b842cace98",
-    "tools/run-promotion-unit-tests.py": "b379bcca5dacf2d26f4e7a687507a5b24649e0e5f40d753df16e0fe611747363",
+    "tools/run-promotion-unit-tests.py": "66c205e4c53da7763435b90f89fa16a9780afc3221622ba7553123dbdb83c8bf",
     "tools/validate_materialized_candidate.py": "d840c5a4755f5b2be4fb528588f2065f554e466e8c2b9ade7cd66270d2fb7cea",
     "tools/verify_promotion_workflows.py": "ca25386904c1337d781fd9b6524701e2278cb6f15be229da8b3252a0faba1990"
   },

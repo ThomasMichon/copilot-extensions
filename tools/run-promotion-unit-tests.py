@@ -100,7 +100,8 @@ def main() -> int:
                     "-q", "-x", "--capture=sys", "-c", os.devnull, "-p", "no:cacheprovider",
                     "--noconftest", "--import-mode=importlib", "--assert=plain",
                     "--log-file", str(Path(temporary) / "pytest.log"),
-                    "--rootdir", str(ROOT), "--basetemp", str(Path(temporary) / "pytest"),
+                    "--rootdir", str(ROOT), "--confcutdir", str(ROOT),
+                    "--basetemp", str(Path(temporary) / "pytest"),
                     *[str(ROOT) + "/" + node for node in manifest["nodes"]],
                 ], plugins=[run])
             finally:

@@ -31,6 +31,11 @@ python tools/run-promotion-unit-tests.py --source-sha <full-source-commit> --out
 ```
 
 The command requires the existing `pytest` and `coverage` test dependencies.
+Their interpreter environment must live outside the checkout: dependency
+sources inside a repository-local venv are correctly treated as unadmitted
+local imports. The runner scopes pytest collection to the declared source root
+as well as selecting exact nodes; unrelated ancestor directories are not
+collection inputs, including on mounted filesystems.
 It emits a profile-bound `unit-proof.json` and contextual `coverage.json` from
 that same execution. It neither starts general plugin suites nor widens
 selection on unknown inputs. Enrollment changes require review of the exact
