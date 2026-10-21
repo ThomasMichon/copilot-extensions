@@ -188,6 +188,14 @@ agent-recommended evidence and implementation decomposition are recorded in
 [Test validation burndown](test-validation-burndown.md). This extends the
 existing portfolio audit, not the release writer's ownership or authority.
 
+**2026-10-19 - Upstream repairs need not wait for Main (verbatim):**
+
+> Ideally we don't wait on main activation. Fixing tests upstream will help unblock main
+
+Take independently owned upstream test repairs through ordinary Dev review
+without treating Main activation as a prerequisite. Existing contributors'
+reserved hunks and release/control authority remain unchanged.
+
 The operator confirmed the explicit main-owned control/dev-owned content model.
 The detailed decomposition and validation cases below are **agent-recommended**,
 reconciled with the other planning agent's public handoff on #6237.
@@ -312,6 +320,11 @@ authorizes critical main-path acceptance or a bounded administrative change.
   every Main release, and scheduled Dev integration/multiprocess runs with a
   named repair owner. Coordinate the implementation with the existing release
   and test-portfolio owners; do not activate a superseded full-corpus profile.
+  The bounded history sweep and requested contract merged in #7275; suite
+  classification, coverage selection, scheduled repair and live timing
+  acceptance remain open.
+  The independent CLI-fixture correction merged in #7288; comparable Linux
+  timing acceptance remains on #7075, with no production provisioning change.
 - [x] Land the dev implementation of reviewed, widen-only module-size baseline
   maintenance and remove its obsolete main exception from source (#6438).
 - [x] Verify a covering promotion activates the dev-owned baseline producer on
@@ -532,4 +545,6 @@ this contract. New evidence belongs in its date file, not another peer effort.
 - [2026-10-18](journal/2026/10.18.md)
 - [2026-10-19](journal/2026/10.19.md)
 - [2026-10-19 - Metadata source delivery](journal/2026/10.19-metadata-source.md)
+- [2026-10-19 - Test burndown contract and measured evidence](journal/2026/10.19-test-burndown.md)
 - [2026-10-20](journal/2026/10.20.md)
+- [2026-10-20 - Independent upstream test repairs](journal/2026/10.20-test-repairs.md)

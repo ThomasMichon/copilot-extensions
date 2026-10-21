@@ -65,6 +65,12 @@ that coverage selection, schedules or repair supervision are already live.
 
 ## Initial measured evidence
 
+The requested contract and this bounded audit merged through #7275 at
+`2026-10-19T22:20:54Z` as `3c8aeb12428f8b8f2c4f37b2242ee915132d0c2a`.
+This closes the initial evidence/plan publication, not unit classification,
+coverage selection, integration scheduling, repair supervision or live timing
+acceptance. See the [delivery journal](journal/2026/10.19-test-burndown.md).
+
 The read-only promotion sample contains 60 newest runs from October 18-19,
 not the entire requested seven-day population; the API reported 294 matching
 runs. Twelve job inventories and four failure logs were examined. Source
@@ -123,3 +129,96 @@ Ranked evidence was delivered to the retained implementation owner on #7249.
 Its former complete-corpus proposal is explicitly superseded and held as a
 draft; it is not the current activation policy. This audit does not take over
 its runner, coverage, candidate-controller or workflow files.
+
+## Current unit census and periodic acceptance - October 21
+
+This is a bounded source-and-execution audit, not an enrollment change or a
+claim that the parent acceptance criteria are complete. The pinned source is
+Dev `1538d76d8dbbdf0470344118d2878eafce21f477`; the independently resolved Main
+control snapshot is `dd4284a4c7caf7cfb7689f44e6f412734d92ee6c`.
+
+### Exact packet completeness is not a complete unit census
+
+Both snapshots declare **236 parameterized nodes in nine test modules** under
+`tools/promotion_unit_tests/`, with 28 declared source files, 18 production
+coverage targets and a 300-second whole-packet budget. All 18 targets are
+repository tools; no plugin or shared-library production module is listed.
+The collector, admission contract and packet verifier have identical Git blobs
+in these two snapshots.
+
+The contract correctly requires exact admitted collection, passing setup/call/
+teardown, no skips or prohibited effects, unchanged admitted source bytes and
+production call coverage. Retain those controls. They prove the declared
+packet, not a bijection between every historical unit and a release-executed
+node. The manifest has no full-corpus classification or original-node mapping.
+
+The raw trees contain 2,111 and 2,940 Python `test_*.py` paths respectively.
+These are different snapshots/layouts, including materialized copies, not
+deduplicated unit populations. They exclude other languages and do not account
+for parameterization or dynamic collection. Do not turn them into unit counts
+or coverage percentages.
+
+One concrete out-of-packet review candidate is
+`libs/lazy-cli-dispatch/tests/test_dispatch.py`: fourteen unchanged cases cover
+the actual dispatcher, `self_override` and `core_helper`, using fake modules,
+callbacks and captured parser output. Neither these identities nor the
+production module is admitted by the current packet. The inspected test and
+production bytes match the pinned source.
+
+This is a **candidate**, not an eligibility certificate. A supplemental
+contained Windows run with the unchanged `UnitRun` observer was rejected
+before collection: pytest's `colorama` startup attempted `ctypes.dlopen`.
+It supplied no passing test or unit-eligibility result. No preload, observer
+exception, test move, manifest change or CI enrollment was used to manufacture
+a positive result.
+
+The remaining unit gate is an owner-reviewed, deduplicated classification and
+identity map: every unit must map to release execution, with unknown and
+unavailable closure explicit. Review the candidate cohort's actual fixture/
+import/effect closure before admitting it. A nine-module packet or a
+filename/tier label cannot stand in for that census.
+
+### Scheduled execution is real; repair initiation is not yet established
+
+The current Dev and Main snapshots carry byte-identical periodic workflow and
+residual inventory declarations. They select nine default-full Linux plugin
+invocations through the hardened container route. Windows remains literally
+disabled and supplies no native-platform qualification. Independent libraries,
+root tools, standalone Manager/chat, explicit-tier/native stress, network
+first-touch and unprovided filesystem tiers remain explicit residuals.
+
+The actual scheduled [run 39439577296](https://github.com/ThomasMichon/copilot-extensions/actions/runs/39439577296)
+used control `f348e5a0cc596f69d462b454c7c60e9ff22cd30b` and separately recorded
+tested Dev `9ad401dd8c4827a44e2ca5ed1e3bcbd13f94eca8`. Six Linux jobs succeeded,
+three failed, the Windows job was skipped and the detection/report job
+succeeded. This is not a same-source flaky-test comparison.
+
+For all three failed jobs, the preserved execution record reports the actual
+wrapper invocation and tested source. The downloaded container profile and
+inventory bytes independently match that immutable Dev tree and their
+recorded SHA-256 values. Logs reached real test failures, not only a missing
+Docker/devcontainer prerequisite.
+
+| Failed job | Observed failure family | Execution boundary |
+|------------|-------------------------|--------------------|
+| [Containers](https://github.com/ThomasMichon/copilot-extensions/actions/runs/39439577296/job/118685704039) | Two `test_launch_storage.py` cleanup/refusal cases reached the test's forbidden credential/deletion callbacks | Stopped in group 1/3; that group reported 2 failed, 518 passed, 7 skipped |
+| [Logger](https://github.com/ThomasMichon/copilot-extensions/actions/runs/39439577296/job/118685703726) | Three `test_source_runtime_reselection.py` helper-copy failure/rollback cases reported state inequality | Reached group 3/3; the failing group reported 3 failed, 566 passed, 8 skipped |
+| [Worktrees](https://github.com/ThomasMichon/copilot-extensions/actions/runs/39439577296/job/118685703935) | Three POSIX first-install/namespace-health/watchdog cases failed | Reached group 5/22; the failing group reported 3 failed, 751 passed, 13 skipped |
+
+These are observations, not root-cause or platform-availability diagnoses.
+Failure-group counts are not complete-plugin pass counts; skipped cases and
+unreached groups do not become passing evidence.
+
+The report created [#7377](https://github.com/ThomasMichon/copilot-extensions/issues/7377).
+At this audit's readback it had no assignee, comment or visible agent claim;
+neither checked local repository lane contained its canonical issue key.
+That does not exclude work on another coordinator. It does mean that the
+visible detection issue and generic portfolio-owner role do not establish the
+required accepted agent repair, initiation or escalation.
+
+The direct #1303/portfolio-owner follow-through is to identify the actual
+repair task/agent and route each exact failure family without duplicating
+claimed work. Keep source, outcome, repair initiation and eventual resolution
+linked. Until that evidence exists, retain the parent scheduled-repair item
+as open. This audit changes no workflow, runner, selection, deadline, capacity
+or release gate.
