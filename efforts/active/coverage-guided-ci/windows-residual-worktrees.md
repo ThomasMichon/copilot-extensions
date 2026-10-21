@@ -87,7 +87,45 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Admitted fixture-semantic batches
 
+### B-LANDING private-copy consumers
+
+Baseline: the actual #7661 foundation merge. The function-scoped `env`
+now copies the private base seed. Add `merged_env` and `handmade_env`
+to copy their derived seed plus the known original published-head marker.
+Six consumer functions (seven parametrized cases) use those prepared
+inputs instead of rebuilding the identical merge history. Their real
+landing, provider-base, refusal, pull-forward, report and finalization
+decisions still execute separately with fresh provider/tracking state.
+
+All existing test names, assertions and decorators are retained. The
+37 other existing functions/classes are AST-identical, including the
+OID-returning commit helper, creation-point/reset/shadowing helpers and
+the three foundation isolation regressions. No external test module
+imports this module. In particular `test_the_probe_moves_no_ref` and
+the default-base/provider-call-zero test remain separately collected:
+B-LANDING-ASSERT consolidation is not included.
+
+Complete native Windows landing module: 33 passed, zero skips,
+145.53 seconds pytest / 159.91 preparation-cleanup inclusive. Exactly
+two work-stealing workers retain the original 30-second item watchdog,
+marks and resource ceilings under a 240-second diagnostic group.
+This is real per-case Git consumer integration, not quiet-host,
+whole-suite or repeated same-head performance qualification. No production
+S/F/G/P/R/A/B-INCONCLUSIVE, selection, skip or timeout change is included.
+
+Documentation impact is this ledger; commands, runtime, configuration,
+architecture and installation are unchanged. Clean-room and external
+venue lanes are inapplicable to test-only fixture reuse.
+
 ### B-LANDING foundation: private base, merged and handmade inputs
+
+Actual disposition: #7661 merged as
+`a51b337947f6d1a1f0a6430b624c267e6d958086`; full Copilot review
+`5606060042` approved exact head
+`16d755f32a855f064e8c09d9926b9fe8b5bbb31e`. Overview, inline/general
+channels and threads had no findings; required CI was green. The child
+worktree is finalized. This settles the foundation, not its consumers
+or whole-suite qualification.
 
 Baseline: the actual #7653 merge. Add only the named `_landing_seed`,
 `_build_landing_seed`, `_copy_landing_env`, `_merged_landing_seed` and

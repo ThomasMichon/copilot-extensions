@@ -1,6 +1,6 @@
 """Landing detection across a PR's bases (``finalize_landing`` / ``finalize_ref``).
 
-Real temporary repositories, one per case:
+Real temporary repositories, independently copied from a session seed per case:
 
 - a multi-commit branch squash-merged, after which upstream edits the same file
   (neither ``git cherry`` on the branch's own commits nor the blob comparison
@@ -46,24 +46,10 @@ def _commit(repo: Path, name: str, content: str, message: str = "") -> str:
 
 
 @pytest.fixture
-def env(tmp_path: Path) -> SimpleNamespace:
+def env(tmp_path: Path, _landing_seed: Path) -> SimpleNamespace:
     """``origin.git`` with ``main`` and ``dev``; ``seed`` publishes upstream
     changes; ``clone`` is the worktree checkout on ``worktree/<id>``."""
-    origin = tmp_path / "origin.git"
-    _git("init", "-q", "--bare", "-b", "main", str(origin), cwd=tmp_path)
-    seed = tmp_path / "seed"
-    _git("init", "-q", "-b", "main", str(seed), cwd=tmp_path)
-    _identity(seed)
-    _commit(seed, "a.txt", "one\ntwo\nthree\nfour\nfive\nsix\nseven\neight\n")
-    _git("remote", "add", "origin", str(origin), cwd=seed)
-    _git("push", "-q", "origin", "main", "main:dev", cwd=seed)
-    clone = tmp_path / "clone"
-    _git("clone", "-q", str(origin), str(clone), cwd=tmp_path)
-    _identity(clone)
-    worktree_id = "wt-landing"
-    _git("checkout", "-q", "-b", f"worktree/{worktree_id}", "origin/main", cwd=clone)
-    return SimpleNamespace(tmp_path=tmp_path, origin=origin, seed=seed, clone=clone,
-                           worktree_id=worktree_id, slug="pr/landing")
+    return _copy_landing_env(_landing_seed, tmp_path)
 
 
 @pytest.fixture(scope="session")
@@ -298,8 +284,23 @@ def _handmade_landing_seed(tmp_path_factory, _landing_seed) -> Path:
         return root
 
 
-def test_a_pr_merged_into_dev_while_main_is_behind_is_landed_on_its_base(env, provider):
-    head = _merge_into_dev_and_pull_forward(env)
+@pytest.fixture
+def merged_env(tmp_path: Path, _merged_landing_seed: Path) -> SimpleNamespace:
+    copied = _copy_landing_env(_merged_landing_seed, tmp_path)
+    copied.head = (tmp_path / "published-head").read_text(encoding="ascii")
+    return copied
+
+
+@pytest.fixture
+def handmade_env(tmp_path: Path, _handmade_landing_seed: Path) -> SimpleNamespace:
+    copied = _copy_landing_env(_handmade_landing_seed, tmp_path)
+    copied.head = (tmp_path / "published-head").read_text(encoding="ascii")
+    return copied
+
+
+def test_a_pr_merged_into_dev_while_main_is_behind_is_landed_on_its_base(merged_env, provider):
+    env = merged_env
+    head = env.head
     provider.head_sha, provider.base_ref = head, "dev"
     record = _record(env, head_sha=head, state="merged", number=7)
 
@@ -308,10 +309,11 @@ def test_a_pr_merged_into_dev_while_main_is_behind_is_landed_on_its_base(env, pr
     assert (ok, err) == (True, None)
 
 
-def test_without_the_pr_base_a_dev_merge_is_refused_with_its_evidence(env, provider):
+def test_without_the_pr_base_a_dev_merge_is_refused_with_its_evidence(merged_env, provider):
     """The provider doesn't say where the PR went: only the default branch is
     tested, and the refusal names what was checked."""
-    head = _merge_into_dev_and_pull_forward(env)
+    env = merged_env
+    head = env.head
     provider.head_sha, provider.base_ref = head, ""
     record = _record(env, head_sha=head, state="merged", number=7)
 
@@ -333,8 +335,9 @@ def test_the_pr_base_is_asked_only_when_the_default_branch_lacks_the_work(env, p
     assert ok is True and provider.calls == 0
 
 
-def test_explain_reports_every_base_and_check(env, provider):
-    head = _merge_into_dev_and_pull_forward(env)
+def test_explain_reports_every_base_and_check(merged_env, provider):
+    env = merged_env
+    head = env.head
     provider.head_sha, provider.base_ref = head, "dev"
     report = finalize_landing.explain(
         _record(env, head_sha=head, state="merged", number=7), _repo(), str(env.clone), str(env.clone))
@@ -534,11 +537,12 @@ def test_a_local_branch_shadowing_the_pr_base_never_certifies_its_commits(env, p
 # -- pr-status pull-forward advice -------------------------------------------------------
 
 
-def test_pull_forward_targets_the_base_a_pr_merged_into(env, provider):
+def test_pull_forward_targets_the_base_a_pr_merged_into(merged_env, provider):
     from agent_worktrees import pr_pull_forward
     from agent_worktrees.tracking import PRRecord
 
-    head = _merge_into_dev_and_pull_forward(env)
+    env = merged_env
+    head = env.head
     _git("reset", "-q", "--hard", head, cwd=env.clone)
     provider.head_sha, provider.base_ref = head, "dev"
     record = SimpleNamespace(worktree_path=str(env.clone), repo="")
@@ -599,11 +603,11 @@ def test_the_pull_forward_advice_runs_cleanly_past_a_squash_that_a_plain_rebase_
                           cwd=str(env.clone)).returncode == 0
 
 
-def test_no_command_is_generated_without_a_verified_merge_boundary(env, provider):
+def test_no_command_is_generated_without_a_verified_merge_boundary(merged_env, provider):
     from agent_worktrees import pr_pull_forward
     from agent_worktrees.tracking import PRRecord
 
-    _merge_into_dev_and_pull_forward(env)
+    env = merged_env
     provider.head_sha, provider.base_ref = "f" * 40, "dev"  # not in this checkout's history
     _git("reset", "-q", "--hard", "HEAD~1", cwd=env.clone)
     rec = pr_pull_forward.pull_forward_recommendation(
@@ -623,7 +627,7 @@ def test_explain_with_an_empty_worktree_path_reads_the_anchor(env, provider):
 
 @pytest.mark.parametrize("operation", ["explain", "finalize"])
 def test_a_pr_tracked_without_its_branch_finalizes_where_explain_says_it_landed(
-        env, provider, monkeypatch, operation):
+        handmade_env, provider, monkeypatch, operation):
     """The work was committed on a hand-made branch (the tracked ``worktree/<id>``
     never moved) and the PR recorded by URL and number only, so its ``branch`` is
     empty; it squash-merged into dev while main is behind. ``--explain-landing``
@@ -633,14 +637,11 @@ def test_a_pr_tracked_without_its_branch_finalizes_where_explain_says_it_landed(
     from agent_worktrees import tracking
 
     monkeypatch.setattr(finalize, "_warn_of_codespace_claims_for_worktree", lambda *_: None)
+    env = handmade_env
     tracking_d = env.tmp_path / "tracking"
     tracking_d.mkdir()
     monkeypatch.setattr("agent_worktrees.config.tracking_dir", lambda: tracking_d)
-    _git("checkout", "-q", "-b", "pr/hand-made", cwd=env.clone)
-    head = _two_commit_change(env.clone)
-    _squash_onto(env.seed, "dev", SQUASHED)
-    _git("checkout", "-q", "main", cwd=env.seed)
-    _git("fetch", "-q", "origin", cwd=env.clone)
+    head = env.head
     provider.head_sha, provider.base_ref = head, "dev"
 
     pr = tracking.PRRecord(state="merged", number=7, repo="owner/repo", provider="github")

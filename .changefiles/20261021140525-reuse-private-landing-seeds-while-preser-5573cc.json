@@ -1,0 +1,9 @@
+{
+  "comment": "Reuse private landing seeds while preserving per-case consumer decisions",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
