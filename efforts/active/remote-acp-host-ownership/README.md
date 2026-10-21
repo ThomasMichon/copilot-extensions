@@ -21,6 +21,7 @@ development workspace merely to obtain tracking.
 | Participant | Role in this effort | Reached via |
 |-------------|---------------------|-------------|
 | welded-piston | Proposal, integrated implementation, validation and publication | Public issue #7237 and its claimed managed worktree |
+| grimy-gizmo | Writer-qualification amendment review only; no runtime implementation | Public issue #7237; bounded proposal worktree under the coordinating participant |
 
 ## Coordination
 
@@ -83,6 +84,24 @@ all release, runtime, credential and live-request holds.
 Neither this plan nor a `dev` merge authorizes promotion, installed-runtime
 updates, daemon restarts, credential grants or live external requests.
 
+**Writer-qualification follow-up, verbatim selection:**
+
+> Prepare a source-only writer-exclusion design for review before enabling transfer (recommended)
+
+The [writer-qualification amendment](writer-qualification.md) is
+**agent-recommended design**. It must clear review before its new exclusion
+mechanism is implemented. This selection does not authorize runtime changes or
+relax the existing transfer, rollout or live-request gates.
+
+**Validation-policy follow-up, verbatim:**
+
+> Yes, give protocol-validation tests greater timeouts, and create separate perf-focused validation flows.
+
+**Settled validation direction (summary):** Protocol correctness and startup
+performance use separate flows. The operator selected measure-then-baseline;
+the controlled blocking performance baseline remains deferred. This permits no
+production-deadline change, containment/review/CI waiver or invented perf pass.
+
 ## Plan
 
 ### Phase 1 - Reviewed relationship contract
@@ -109,6 +128,14 @@ updates, daemon restarts, credential grants or live external requests.
 - [ ] Preserve standalone programmatic use without a worktree: absent managed
   ownership is reported as unowned. Supplied but invalid ownership is a refusal,
   not an unowned fallback.
+
+### Writer-qualification proposal
+
+- [ ] Review and merge the source-only
+  [writer-qualification amendment](writer-qualification.md) before implementing
+  a new old-writer exclusion mechanism.
+- [ ] Implement and qualify its Bridge/Worktrees writer closure and lifecycle
+  activation/rollback boundary before advertising retained transfer.
 
 ### Phase 3 - Lifecycle and continuity
 
@@ -155,8 +182,12 @@ All detail below is **agent-recommended**.
   database; assert zero workspace allocation, process launch or peer termination.
 - [ ] Standalone bridge tests retain explicit unowned operation; a managed
   request refuses when required claim authority or daemon capability is absent.
+- [ ] The writer-qualification amendment's old/new, already-open connection,
+  preparation, quiescence and rollback matrix passes without claiming a schema
+  stamp or one compatible command excludes every participating writer.
 - [ ] Existing remote transport/auth/session, worktree obligations/handoff and
-  contract suites pass through canonical runners without widening thresholds.
+  contract suites pass through canonical runners under the authorized separate
+  protocol/performance policy, without changing production deadlines or gates.
 - [ ] Record clean-room and live-venue tier availability with explicit skip
   reasons. No unauthorized endpoint, grant, deployment or restart is a test.
 - [ ] Public artifacts contain generic fixtures and masked source attribution;
@@ -201,6 +232,20 @@ It does not change the available version-1 disposable ABI or authorize coding
 before the proposal clears review.
 
 ## Journal
+
+### 2026-10-20 - Propose writer exclusion before retained-transfer activation
+
+- The operator selected a source-only writer-exclusion design for review.
+  Added the focused amendment and explicit implementation/activation gate.
+  This proposal-only worktree does not publish the pending transfer code.
+- The proposed boundary combines Bridge-owned SQLite mutation exclusion with
+  the existing lifecycle's confirmed quiescence and independent Worktrees
+  writer qualification. Persistent database protection alone cannot stop an
+  already-active peer client or qualify a different plugin's ledger writers.
+- New production exclusion code, public transfer/provider activation,
+  installed updates, restarts, release work, credentials and live requests
+  remain outside this change. Unknown writer/lifecycle proof keeps the feature
+  disabled. Implementation follows only after the amendment clears review.
 
 ### 2026-10-20 - Separate protocol timeouts from performance qualification
 
