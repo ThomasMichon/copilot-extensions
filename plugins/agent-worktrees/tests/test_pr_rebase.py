@@ -16,6 +16,7 @@ import pytest
 from agent_worktrees import config as cfg
 from agent_worktrees import finalize, git_collab, git_ops, pr_ops, pr_publish, tracking
 from agent_worktrees import pr_rebase
+from conftest import _copy_pr_repo, _published_seed_environment, _seed_directory
 
 # Each case exercises multiple real publications and bounded Git graph probes.
 pytestmark = pytest.mark.timeout(180)
@@ -33,8 +34,50 @@ def _record(wid):
     return tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
 
 
+@pytest.fixture(scope="session")
+def _rebase_snapshot_pr_seed(tmp_path_factory, _pr_repo_seed):
+    # The general snapshot fixture publishes "Add feature", not "Own change".
+    with _seed_directory(tmp_path_factory, "rebase-snapshot") as (seed, build):
+        if build:
+            with _published_seed_environment(tmp_path_factory) as patch:
+                config, wid, _, _ = _copy_pr_repo(_pr_repo_seed, seed, patch)
+                first = pr_ops.create_pr(wid, config, title="Own change")
+                assert first["success"], first
+        return seed
+
+
+@pytest.fixture
+def pr_repo(request):
+    params = getattr(getattr(request.node, "callspec", None), "params", {})
+    if params.get("branch") is not None:
+        seed = request.getfixturevalue("_pr_repo_seed")
+    elif (
+        params.get("scheme") == "snapshot"
+        or request.node.originalname
+        == "test_owned_pr_rebase_publishes_legacy_checked_out_private_head"
+    ):
+        seed = request.getfixturevalue("_rebase_snapshot_pr_seed")
+    else:
+        return request.getfixturevalue("published_refspec_pr_repo")
+    return _copy_pr_repo(
+        seed, request.getfixturevalue("tmp_path"), request.getfixturevalue("monkeypatch"),
+    )
+
+
 def _prepare(pr_repo, scheme="refspec", branch=None):
     config, wid, path, remote = pr_repo
+    record = _record(wid)
+    published = record.pr
+    expected_branch = pr_ops.feature_branch_name(
+        "pr" if scheme == "refspec" else config.default_repo.pr.branch_prefix,
+        "Own change", wid,
+    )
+    if (
+        branch is None and config.default_repo.pr.head_scheme == scheme
+        and record.title == "Own change"
+        and published is not None and published.branch == expected_branch
+    ):
+        return config, wid, path, remote, published.branch, published.head_sha
     repo = dataclasses.replace(
         config.default_repo, pr=dataclasses.replace(config.default_repo.pr, head_scheme=scheme),
     )
@@ -42,6 +85,71 @@ def _prepare(pr_repo, scheme="refspec", branch=None):
     first = pr_ops.create_pr(wid, config, title="Own change", branch=branch)
     assert first["success"], first
     return config, wid, path, remote, first["branch"], first["head_sha"]
+
+
+@pytest.mark.parametrize("scheme", ["snapshot", "refspec"])
+@pytest.mark.parametrize("branch", [None, "feature/custom-rebase"])
+def test_rebase_setup_preserves_publication_scheme_title_and_custom_branch(
+    pr_repo, monkeypatch, scheme, branch,
+):
+    config, wid, path, remote = pr_repo
+    before = _record(wid).pr
+    create_pr = pr_ops.create_pr
+    calls = []
+
+    def observe(*args, **kwargs):
+        calls.append(kwargs)
+        return create_pr(*args, **kwargs)
+
+    monkeypatch.setattr(pr_ops, "create_pr", observe)
+    prepared, _, _, _, actual_branch, head = _prepare(pr_repo, scheme, branch)
+    assert prepared.default_repo.pr.head_scheme == scheme
+    assert actual_branch == (
+        branch or {"snapshot": "feature/own-change-aaaa", "refspec": "pr/own-change-aaaa"}[scheme]
+    )
+    assert _git("--git-dir", str(remote), "rev-parse", actual_branch, cwd=path) == head
+    assert _record(wid).pr.head_sha == head
+    if branch is None:
+        assert before is not None and before.head_sha == head
+        assert calls == []
+    else:
+        assert before is None
+        assert calls == [{"title": "Own change", "branch": branch}]
+    assert _record(wid).title == "Own change"
+    assert _git("log", "-1", "--format=%s", head, cwd=path) == "Own change"
+    assert _git("rev-parse", "HEAD", cwd=path) == head
+    local_head = git_ops.git("show-ref", "--verify", f"refs/heads/{actual_branch}", cwd=path, check=False)
+    assert (local_head.returncode == 0) is (scheme == "snapshot")
+
+
+@pytest.mark.parametrize("mismatch", ["scheme", "title", "branch"])
+def test_rebase_setup_does_not_reuse_mismatched_publication(pr_repo, monkeypatch, mismatch):
+    config, wid, path, remote = pr_repo
+    if mismatch == "scheme":
+        config = dataclasses.replace(config, repos={"ext": dataclasses.replace(
+            config.default_repo,
+            pr=dataclasses.replace(config.default_repo.pr, head_scheme="snapshot"),
+        )})
+    else:
+        record = _record(wid)
+        if mismatch == "title":
+            record.title = "Add feature"
+        else:
+            record.pr.branch = "pr/add-feature-aaaa"
+        monkeypatch.setattr(sys.modules[__name__], "_record", lambda _: record)
+    calls = []
+
+    def create(*args, **kwargs):
+        calls.append((args, kwargs))
+        return {"success": True, "branch": "new-branch", "head_sha": "new-head"}
+
+    monkeypatch.setattr(pr_ops, "create_pr", create)
+    prepared = _prepare((config, wid, path, remote))
+    assert prepared[-2:] == ("new-branch", "new-head")
+    assert len(calls) == 1
+    args, kwargs = calls[0]
+    assert args[0] == wid and args[1].default_repo.pr.head_scheme == "refspec"
+    assert kwargs == {"title": "Own change", "branch": None}
 
 
 def _advance(config, path, filename="upstream.txt"):

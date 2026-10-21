@@ -1,0 +1,9 @@
+{
+  "comment": "Reuse matching published setup in rebase tests without changing scheme, title or custom-branch publication",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

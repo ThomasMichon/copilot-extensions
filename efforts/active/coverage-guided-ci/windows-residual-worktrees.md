@@ -87,7 +87,50 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Admitted fixture-semantic batches
 
+### B-PUBLISHED rebase setup adapter
+
+Baseline: the actual #7509 finalization-consumer merge. This slice adds
+only the module-private published-state adapter in `test_pr_rebase.py`.
+Default/refspec cases copy the existing real refspec publication; snapshot
+cases, including the legacy checked-out-head case, copy a separately built
+snapshot publication with the original `Own change` title. The general
+`Add feature` snapshot seed is deliberately not substituted: that would
+change the published branch and commit subject. The new session seed uses
+the existing run-local locking and hermetic HOME/Git/identity setup.
+
+`_prepare` reuses only a matching scheme, title and derived branch when no
+explicit branch is requested. Custom-branch cases copy the unpublished base
+and still execute the real first publication. Four real-Git cases check both
+schemes, title/branch/head/record preservation, snapshot-only local head refs,
+and the absence or presence of the real `create_pr` call. Three refusal
+canaries independently vary scheme, title and branch. AST comparison proves
+all 21 original test bodies/decorators and other existing helpers unchanged.
+There is no rebase-result cache, partial-success seed, production batching,
+new skip or deadline change in this slice.
+
+Native Windows diagnostics cover all 46 cases with exactly two work-stealing
+workers. The setup/publication group passes 12 cases in 76.12 seconds
+(80.38 including preparation/cleanup); the remaining groups pass 18, 10
+and five non-native cases. The opt-in native consoleless two-cycle case
+initially failed before observation because the cached test interpreter
+lacked the newly declared `agent-worktree-identity` dependency. Restoring
+that dependency, without source changes, lets that case pass in 13.78
+seconds (16.80 inclusive). Every group stays below 240 seconds with the
+existing resource limits and item marks. These are complete case diagnostics
+across groups, not a single complete-module or whole-suite budget proof;
+parent #5694/#5682 qualification remains open.
+
+Documentation impact is confined to this execution ledger: no public command,
+runtime, installation or configuration contract changes. Clean-room
+provisioning and external deployment tests are inapplicable to this test-only
+adapter. Its real publication/rebase consumers and native observer exercise
+the changed setup directly; Linux/container evidence is not claimed.
+
 ### B-PUBLISHED finalization consumers
+
+**Actually merged:** #7509 as
+`f0f2cda72af7caeeefb6f66d5eff29945e7278dc`. Rebase setup adapters and
+the remaining fixture/production contracts are not included in that merge.
 
 Baseline: the actual #7497 B-MUX merge
 `91e6b9bbea7e65e958a8903016e03a710dfe9d87`, following the
