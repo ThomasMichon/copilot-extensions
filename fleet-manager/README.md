@@ -50,6 +50,13 @@ memory/CPU admission or proof all roles fit on one host. Deployment must still
 resolve service budgets, storage, credentials and host roles before activation.
 No host is retired to free capacity; insufficient capacity remains blocked.
 
+The explicit installed-package [role/provider compiler](docs/role-deployment-plans.md)
+joins selected role bindings with this same planner and code-registered provider
+contracts. Its Komodo projection names resources and independent bootstrap
+requirements without contacting Core, installing a manager or authorizing
+effects. Default planning preserves its optional configuration namespace without
+selecting it; actual managed lifecycle and production readiness remain separate.
+
 ## Output and safety
 
 The JSON `fleet-manager.plan` includes preserved suggested config, per-role

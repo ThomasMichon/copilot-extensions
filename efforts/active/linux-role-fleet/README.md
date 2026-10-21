@@ -189,6 +189,9 @@ Implementation sequencing below is **agent-recommended**:
   first readiness, remaining attended prerequisites and non-secret outcomes.
 
 ### Phase 3 - Named role deployment
+- [x] Supply explicit configuration-selected role/provider reference planning
+  in the installed SDK, preserving custom declarations and bootstrap evidence
+  requirements. This is not an external manager mutation or installed role.
 - [ ] Publish independently runnable role artifacts using existing service
   distributions and lifecycle contracts, without a Copilot process dependency.
 - [ ] Resolve named role placement through the manager's declared deployment
@@ -599,3 +602,28 @@ These bounded Windows selections are not a new full Windows-suite claim.
   lifecycle, authorization, useful roles, persistence and safe cutover remain
   unresolved. No plugin/runtime update, enrollment, capacity acquisition or
   service migration is authorized or performed by this journal update.
+
+### 2026-10-21 - Explicit role/provider planning boundary
+- Added strict optional role bindings to the preserved adopter configuration,
+  immutable provider contracts and an explicit installed-package module CLI.
+  Providers are registered by trusted code, never imported from configuration.
+  The default client entry point and dependency set remain unchanged.
+- The first Komodo projection names a Stack and its selected references.
+  It does not contact Core, create resources, construct artifacts, acquire keys
+  or execute deployment. Manager bootstrap remains an independently owned,
+  unverified requirement rather than a fabricated installation receipt.
+- Unknown implementations/capabilities, aliased controller references, duplicate
+  resource writers, dependency cycles and unadmitted/stale placement refuse or
+  block. Unbound roles/providers remain preserved without new bootstrap work.
+- The focused role/provider and retained planner portfolio passed 135 cases,
+  including a real built wheel installed without dependencies and exercised
+  with source and ambient site packages excluded. Network/process effects were
+  forbidden in that installed consumer proof.
+- The complete required fast SDK portfolio passed 1,826 cases with three
+  platform skips and sixteen existing full-portfolio exclusions in 97.98 seconds,
+  under its unchanged 120-second boundary; owned cleanup completed. These are
+  planning/packaging contracts, not manager or production adoption evidence.
+- Existing artifact publisher/assembly, release authentication, client
+  construction/admission, shared CLI, operation and credential owners retain
+  their paths. Actual Core/Gateway execution, installed health, useful real
+  services and every live activation gate remain open under this campaign.
