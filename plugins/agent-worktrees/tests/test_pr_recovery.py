@@ -9,9 +9,33 @@ from types import SimpleNamespace
 import pytest
 
 from agent_worktrees import config as cfg
-from agent_worktrees import finalize, git_collab, git_ops, pr_ops, pr_rebase, pr_recovery, tracking
+from agent_worktrees import finalize, git_collab, git_ops, pr_ops, pr_publish, pr_rebase, pr_recovery, tracking
+from conftest import _copy_pr_repo, _published_seed_environment, _seed_directory
 
 pytestmark = pytest.mark.timeout(180)
+
+
+@pytest.fixture(scope="session")
+def _advanced_pr_seed(tmp_path_factory, _pr_repo_seed):
+    with _seed_directory(tmp_path_factory, "recovery-advanced") as (seed, build):
+        if build:
+            with _published_seed_environment(tmp_path_factory) as patch:
+                config, wid, _, _ = _copy_pr_repo(_pr_repo_seed, seed, patch)
+                first = pr_ops.create_pr(wid, config, title="Owned change")
+                assert first["success"], first
+                _advance_upstream(config)
+        return seed
+
+
+@pytest.fixture
+def pr_repo(tmp_path, monkeypatch, _advanced_pr_seed):
+    """Copy actual published history and setup-only upstream advancement."""
+    return _copy_pr_repo(_advanced_pr_seed, tmp_path, monkeypatch)
+
+
+@pytest.fixture
+def legacy_pr_repo(tmp_path, monkeypatch, _pr_repo_seed):
+    return _copy_pr_repo(_pr_repo_seed, tmp_path, monkeypatch)
 
 
 def _git(*args, cwd):
@@ -22,22 +46,128 @@ def _record(wid):
     return tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
 
 
-def _prepare(pr_repo, *, legacy=False):
-    config, wid, path, remote = pr_repo
-    branch = f"user/developer/topic-{git_ops.worktree_suffix(wid)}" if legacy else None
-    first = pr_ops.create_pr(wid, config, title="Owned change", branch=branch)
-    assert first["success"], first
-    if legacy:
-        record = _record(wid)
-        record.branch = wid
-        record.pr.base_sha = record.pr.patch_id = ""
-        tracking.save_record(record)
+def _advance_upstream(config):
     anchor = Path(config.default_repo.anchor)
     (anchor / "upstream.txt").write_text("new upstream work\n")
     _git("add", "upstream.txt", cwd=anchor)
     _git("commit", "-m", "advance upstream", cwd=anchor)
     _git("push", "origin", "master", cwd=anchor)
+
+
+def _prepare(pr_repo, *, legacy=False):
+    config, wid, path, remote = pr_repo
+    if not legacy:
+        published = _record(wid).pr
+        assert published is not None and published.state == "open"
+        return config, wid, path, remote, published.branch, published.head_sha
+    branch = f"user/developer/topic-{git_ops.worktree_suffix(wid)}"
+    first = pr_ops.create_pr(wid, config, title="Owned change", branch=branch)
+    assert first["success"], first
+    record = _record(wid)
+    record.branch = wid
+    record.pr.base_sha = record.pr.patch_id = ""
+    tracking.save_record(record)
+    _advance_upstream(config)
     return config, wid, path, remote, first["branch"], first["head_sha"]
+
+
+@pytest.mark.parametrize("iteration", range(2))
+def test_advanced_recovery_copy_preserves_publication_and_private_upstream(
+    pr_repo, _advanced_pr_seed, iteration, tmp_path, monkeypatch,
+):
+    config, wid, path, remote = pr_repo
+    record = _record(wid)
+    assert cfg.load_config() is config
+    assert config.default_repo.pr.head_scheme == "snapshot"
+    assert record.worktree_path == str(path) and record.title == "Owned change"
+    assert record.pr.state == "open" and record.pr.branch == "feature/owned-change-aaaa"
+    assert record.pr.repo == git_ops.slug_from_url(str(remote))
+    assert record.pr.rewrite_identity == pr_publish.push_identity("origin", cwd=str(path))
+    old = record.pr.head_sha
+    assert _git("rev-parse", "HEAD", cwd=path) == old
+    assert _git("log", "-1", "--format=%s", cwd=path) == "Owned change"
+    assert _git("--git-dir", str(remote), "rev-parse", record.pr.branch, cwd=path) == old
+    advanced = _git("--git-dir", str(remote), "rev-parse", "master", cwd=path)
+    assert advanced != record.pr.base_sha
+    assert _git("rev-parse", "origin/master", cwd=path) == advanced
+    assert _git("rev-parse", f"{advanced}^", cwd=path) == record.pr.base_sha
+    assert _git("rev-parse", f"{old}^", cwd=path) == record.pr.base_sha
+    assert _git("rev-parse", "master", cwd=config.default_repo.anchor) == advanced
+    assert (Path(config.default_repo.anchor) / "upstream.txt").read_text() == "new upstream work\n"
+    assert not (path / "upstream.txt").exists()
+    assert not pr_recovery._path(str(path)).exists()
+    assert not pr_recovery._pending_path(str(path)).exists()
+    seed_files = {
+        entry.relative_to(_advanced_pr_seed): entry.read_bytes()
+        for entry in _advanced_pr_seed.rglob("*") if entry.is_file()
+    }
+    sibling_root = tmp_path / "sibling"
+    with monkeypatch.context() as patch:
+        _, _, sibling, sibling_remote = _copy_pr_repo(_advanced_pr_seed, sibling_root, patch)
+        assert _record(wid).pr.head_sha == old
+        assert _git("rev-parse", "HEAD", cwd=sibling) == old
+        assert _git("--git-dir", str(sibling_remote), "rev-parse", "master", cwd=sibling) == advanced
+    assert cfg.load_config() is config
+    sibling_files = {
+        entry.relative_to(sibling_root): entry.read_bytes()
+        for entry in sibling_root.rglob("*") if entry.is_file()
+    }
+    (remote / "hooks" / "copy-only").write_text("private hook\n")
+    _git("--git-dir", str(remote), "config", "fixture.private", str(iteration), cwd=path)
+    (path / "copy-only.txt").write_text(f"private feedback {iteration}\n")
+    _git("add", "copy-only.txt", cwd=path)
+    _git("commit", "-m", "private recovery feedback", cwd=path)
+    changed = _git("rev-parse", "HEAD", cwd=path)
+    _git("push", "origin", f"HEAD:refs/heads/{record.pr.branch}", cwd=path)
+    record.pr.head_sha = changed
+    tracking.save_record(record)
+    assert _record(wid).pr.head_sha == changed != old
+    assert _git("--git-dir", str(remote), "rev-parse", record.pr.branch, cwd=path) == changed
+    assert {
+        entry.relative_to(_advanced_pr_seed): entry.read_bytes()
+        for entry in _advanced_pr_seed.rglob("*") if entry.is_file()
+    } == seed_files
+    assert {
+        entry.relative_to(sibling_root): entry.read_bytes()
+        for entry in sibling_root.rglob("*") if entry.is_file()
+    } == sibling_files
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+def test_recovery_setup_preserves_original_title_branch_and_legacy_publication(
+    legacy, request, monkeypatch,
+):
+    repo = request.getfixturevalue("legacy_pr_repo" if legacy else "pr_repo")
+    config, wid, path, remote = repo
+    before = _record(wid).pr
+    assert (before is None) is legacy
+    create = pr_ops.create_pr
+    calls = []
+
+    def publish(*args, **kwargs):
+        calls.append(kwargs)
+        return create(*args, **kwargs)
+
+    monkeypatch.setattr(pr_ops, "create_pr", publish)
+    _, _, _, _, branch, old = _prepare(repo, legacy=legacy)
+    assert calls == (
+        [{"title": "Owned change", "branch": "user/developer/topic-aaaa"}] if legacy else []
+    )
+    record = _record(wid)
+    assert record.title == "Owned change" and record.pr.head_sha == old
+    assert branch == ("user/developer/topic-aaaa" if legacy else "feature/owned-change-aaaa")
+    assert _git("--git-dir", str(remote), "rev-parse", branch, cwd=path) == old
+    assert _git("log", "-1", "--format=%s", old, cwd=path) == "Owned change"
+    assert (record.branch == wid) is legacy
+    assert bool(record.pr.base_sha) is not legacy
+    assert bool(record.pr.patch_id) is not legacy
+    assert (Path(config.default_repo.anchor) / "upstream.txt").read_text() == "new upstream work\n"
+    advanced = _git("--git-dir", str(remote), "rev-parse", "master", cwd=path)
+    assert advanced == _git(
+        "rev-parse", "origin/master", cwd=path,
+    )
+    assert _git("rev-parse", f"{advanced}^", cwd=path) == _git("rev-parse", f"{old}^", cwd=path)
+    assert _git("rev-parse", "HEAD", cwd=path) == old
 
 
 def _point(path, *, pending=False):
@@ -85,9 +215,9 @@ def test_backup_failure_prevents_rebase_contract(tmp_path, monkeypatch, capsys):
 
 @pytest.mark.parametrize("checkout_head", [False, True], ids=["worktree", "private-head"])
 def test_backed_sync_publishes_legacy_pr_without_replay_journals(
-    pr_repo, monkeypatch, capsys, checkout_head,
+    legacy_pr_repo, monkeypatch, capsys, checkout_head,
 ):
-    config, wid, path, remote, branch, old = _prepare(pr_repo, legacy=True)
+    config, wid, path, remote, branch, old = _prepare(legacy_pr_repo, legacy=True)
     if checkout_head:
         _git("checkout", "-B", branch, old, cwd=path)
         record = _record(wid)
@@ -181,8 +311,11 @@ def test_recovery_ref_writes_ignore_inherited_foreign_git_context(pr_repo, monke
     )
 
 
-def test_unrelated_branch_sync_keeps_completed_private_pr_authority(pr_repo):
+def test_unrelated_branch_sync_keeps_completed_private_pr_authority(pr_repo, _advanced_pr_seed):
     config, wid, path, remote, branch, _ = _prepare(pr_repo)
+    seed_record = _advanced_pr_seed / "tracking" / f"{wid}.yaml"
+    seed_tracking = seed_record.read_bytes()
+    seed_refs = _git("--git-dir", str(_advanced_pr_seed / "remote.git"), "show-ref", cwd=path)
     assert git_collab.sync_forward(wid, config)
     completed = _point(path)
     tip = _git("rev-parse", "HEAD", cwd=path)
@@ -194,6 +327,8 @@ def test_unrelated_branch_sync_keeps_completed_private_pr_authority(pr_repo):
     _git("checkout", f"worktree/{wid}", cwd=path)
     assert finalize.push_changes(wid, config)
     assert _git("--git-dir", str(remote), "rev-parse", branch, cwd=path) == tip
+    assert seed_record.read_bytes() == seed_tracking
+    assert _git("--git-dir", str(_advanced_pr_seed / "remote.git"), "show-ref", cwd=path) == seed_refs
 
 
 def test_another_live_pr_checkpoint_does_not_replace_older_publication_authority(pr_repo):

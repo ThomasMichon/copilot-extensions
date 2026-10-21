@@ -87,7 +87,59 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Admitted fixture-semantic batches
 
+### B-ADVANCED private upstream advancement for recovery consumers
+
+Baseline: the actual #7634 merge. Add only the named recovery seed,
+module-private copied `pr_repo`, raw `legacy_pr_repo`, extracted upstream
+advancement and setup adapter in `test_pr_recovery.py`. Construction uses the
+existing hermetic HOME/Git/identity context and run-local seed locking.
+It executes actual initial publication and upstream commit/push once.
+The copy preserves the recorded old head/base and newer shared remote-tracking
+default tip; synchronization/rebase/checkpoint/publication remains each case's
+operation, not shared completed authority.
+
+Unlike the preserved candidate's generic `Add feature` published input,
+construction retains the original `Owned change` title and
+`feature/owned-change-aaaa` branch. Legacy inputs remain unpublished raw
+copies, so the actual custom-head publication, legacy record adjustment and
+upstream advancement still occur independently in those cases.
+Two adapter cases prove zero/one actual create calls for prepared/legacy
+inputs, exact title/branch and legacy base/patch metadata.
+
+Two repeated copy cases check exact published/source/base topology, relocated
+record/remote identity, absent recovery checkpoints and private state.
+Changing one copy's hook, config, source commit, remote ref and record leaves
+all seed and sibling bytes unchanged. The existing unrelated-branch sync
+consumer additionally preserves seed record and refs through actual sync and
+publication. Existing recovery/refusal bodies remain unchanged apart from
+that additive preservation check and the legacy fixture argument/input.
+The separate atomic-retention failure stub remains on `git_ops.git`; no
+A/R/P batching or dependent stub conversion is absorbed.
+
+The complete affected module passes on native Windows: 21 passed, zero
+skips, 191.28 seconds pytest / 198.56 preparation-cleanup inclusive, exactly
+two work-stealing workers under a 240-second diagnostic group with unchanged
+30-second default item watchdog, 180-second module mark and resource limits.
+Fifteen existing function bodies and all original decorators are
+AST-identical; the only other old-body changes are the named setup adapter,
+legacy fixture input and additive seed-preservation assertions.
+Ruff F/E9 and the 13-plugin install contract pass.
+Initial new regression failures incorrectly expected a stale remote-tracking
+tip: the anchor's actual push updates refs shared with its linked worktree.
+The corrected cases require the newer tip and the exact common original
+base of the published and upstream commits, while source HEAD stays old.
+No quiet-host, full-suite or repeated same-head qualification is claimed.
+
+Documentation impact is this ledger only; runtime, command, installation and
+configuration contracts remain unchanged. Provisioning clean-room and
+external deployment are inapplicable to this test-only fixture slice.
+Parent #5694/#5682 and repeated complete same-head native qualification
+remain open.
+
 ### B-AUTH-PROFILE private authority installation profile
+
+**Actually merged:** #7634 as
+`af49d9ee8d183ff46097a7be789e06250114cc4d`.
 
 Baseline: the actual #7559 merge. Add only the named function-autouse
 `_isolated_authority_profile` fixture in `test_pr_publication_state.py`.
