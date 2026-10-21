@@ -101,18 +101,21 @@ return @{Status='Valid';SignerCertificate=$cert}
 }""",
         "version": """function Invoke-Hidden { param($FilePath,$ArgList,[ref]$ErrorOutput)
 $script:probes++; $global:LASTEXITCODE=0
-return '{"implementation":"cpython","version":[3,9,0],"machine":"AMD64","bits":64}'
+return (@{implementation='cpython';version=@(3,9,0);machine='AMD64';bits=64;
+    executable=$base;base_executable=$base} | ConvertTo-Json -Compress)
 }""",
         "probe": """function Invoke-Hidden { param($FilePath,$ArgList,[ref]$ErrorOutput)
 $script:probes++; $global:LASTEXITCODE=17; return 'not Python'
 }""",
         "implementation": """function Invoke-Hidden { param($FilePath,$ArgList,[ref]$ErrorOutput)
 $script:probes++; $global:LASTEXITCODE=0
-return '{"implementation":"pypy","version":[3,13,0],"machine":"AMD64","bits":64}'
+return (@{implementation='pypy';version=@(3,13,0);machine='AMD64';bits=64;
+    executable=$base;base_executable=$base} | ConvertTo-Json -Compress)
 }""",
         "architecture": """function Invoke-Hidden { param($FilePath,$ArgList,[ref]$ErrorOutput)
 $script:probes++; $global:LASTEXITCODE=0
-return '{"implementation":"cpython","version":[3,13,0],"machine":"unsupported","bits":64}'
+return (@{implementation='cpython';version=@(3,13,0);machine='unsupported';bits=64;
+    executable=$base;base_executable=$base} | ConvertTo-Json -Compress)
 }""",
     }[invalid]
     result = native(tmp_path, shell, mutation + """

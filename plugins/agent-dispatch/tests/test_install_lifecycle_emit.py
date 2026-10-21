@@ -67,6 +67,7 @@ def _run(tmp_path: Path, action: str, failure: str = "", *, blocked: bool = Fals
             "$SrcVersion = '1.2.3'\n$Action = $env:TEST_ACTION\n"
             "$global:LASTEXITCODE = 47\n"
             + ". (Join-Path $PluginDir 'scripts/versioned_runtime_native.ps1')\n"
+            + ". (Join-Path $PluginDir 'scripts/base-python.ps1')\n"
             + _ps_function(text, "Get-BootstrapPython") + "\n"
             + (_ps_function(text, "Get-SignedBasePython") + "\n"
                if "function Get-SignedBasePython {" in text else "")

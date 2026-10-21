@@ -706,9 +706,11 @@ function Remove-ConsoleTrampolines {
 # === install-contract:v4 marker/toss helpers (#935) ===
 function Get-BootstrapPython {
     <# A python to run the stdlib-only versioned_runtime.py helper (#935).
-       Prefers a base Python via the launcher or PATH, avoiding Windows
+       Honors the validated Dispatch selection before launcher or PATH, avoiding Windows
        Store aliases, then considers an existing slot interpreter.
        Returns $null if none. #>
+    $selected = Resolve-DispatchBasePython
+    if ($selected) { return $selected }
     $launcher = Get-Command py -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($launcher) {
         $exe = (Invoke-Hidden -FilePath $launcher.Source -ArgList @('-3', '-c', 'import sys; print(sys.executable)') | Out-String).Trim()
