@@ -1,0 +1,13 @@
+{
+  "comment": "Keep the approved bundled Manager wheel as a fingerprinted artifact rather than traversing it as a source project.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import json
+import hashlib
+import shutil
+import tomllib
 from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
@@ -51,6 +54,80 @@ def test_adapter_delegates_construction_health_and_retention_without_selecting(t
         assert options["construction_callable"] == "worktree_manager.runtime_candidate:prepare_runtime_candidate"
         assert options["base_python"].is_file()
         assert options["expected_source_identity"] == {}
+
+
+def _bundled_wheel_source(tmp_path):
+    payload, root, _ = _source(tmp_path)
+    manager = Path(__file__).resolve().parents[1]
+    data = tomllib.loads((manager / "pyproject.toml").read_text(encoding="utf-8"))
+    declaration = data["tool"]["uv"]["sources"]["dbus-next"]
+    wheel = Path(declaration["path"])
+    (payload / wheel).parent.mkdir(parents=True)
+    shutil.copyfile(manager / wheel, payload / wheel)
+    with (payload / "pyproject.toml").open("a", encoding="utf-8") as stream:
+        stream.write(
+            'dependencies = ["dbus-next==0.2.3 ; sys_platform == \'linux\'"]\n'
+            '[tool.uv.sources]\ndbus-next = {path = ' + json.dumps(wheel.as_posix()) + '}\n'
+        )
+    return payload, root, wheel
+
+
+def test_bundled_wheel_reaches_real_manager_installation_inputs(tmp_path, monkeypatch):
+    adapter = si._runtime_installer()
+    payload, root, wheel = _bundled_wheel_source(tmp_path)
+    contents = (payload / wheel).read_bytes()
+    frozen = adapter.engine.freeze_inputs(payload, tmp_path / "frozen")
+    assert (frozen.plugin / wheel).read_bytes() == contents
+    files = adapter.engine._source_files(frozen.packages)
+    assert frozen.plugin / wheel in files
+    assert frozen.payload_hash != adapter.runtime.fingerprint_source(
+        tuple(path for path in files if path != frozen.plugin / wheel),
+    )
+    uv = shutil.which("uv")
+    assert uv is not None, "Manager construction requires UV"
+    reached = []
+
+    class InstallationReached(Exception):
+        pass
+
+    def inspect_installation(inputs, *args, **kwargs):
+        assert inputs.transaction is not None
+        assert all(package.is_dir() for package in inputs.packages)
+        assert (inputs.plugin / wheel).read_bytes() == contents
+        original = next(
+            source for source, retained in inputs.transaction.sources.items()
+            if retained == inputs.plugin
+        )
+        assert inputs.transaction.source_hashes[original / wheel] == hashlib.sha256(contents).hexdigest()
+        reached.append(inputs.plugin)
+        raise InstallationReached
+
+    # Keep assembly, numbered discovery and retained dependency admission real;
+    # stop only at the boundary that would execute venv/UV installation.
+    monkeypatch.setattr(adapter.engine, "_construct", inspect_installation)
+    with pytest.raises(InstallationReached):
+        with adapter.candidate(frozen.plugin, root, assemble=si._copy_payload, uv=Path(uv)):
+            pytest.fail("installation boundary did not stop construction")
+    assert len(reached) == 1
+    assert not (tmp_path / "root" / "current-version").exists()
+
+
+def test_real_manager_discovery_rejects_modified_bundled_wheel(tmp_path, monkeypatch):
+    adapter = si._runtime_installer()
+    payload, root, relative_wheel = _bundled_wheel_source(tmp_path)
+    wheel = payload / relative_wheel
+    wheel.write_bytes(wheel.read_bytes() + b"modified")
+    uv = tmp_path / "uv"
+    uv.touch()
+
+    def unexpected_installation(*args, **kwargs):
+        pytest.fail("modified wheel reached installation")
+
+    monkeypatch.setattr(adapter.engine, "_construct", unexpected_installation)
+    with pytest.raises(adapter.engine.DependencyPolicyError, match="local UV artifacts"):
+        with adapter.candidate(payload, root, assemble=si._copy_payload, uv=uv):
+            pytest.fail("modified wheel was admitted")
+    assert not (tmp_path / "root" / "current-version").exists()
 
 
 @pytest.mark.parametrize("name,accepted", [
