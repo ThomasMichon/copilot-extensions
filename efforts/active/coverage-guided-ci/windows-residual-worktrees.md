@@ -95,7 +95,9 @@ Add the opt-in `git_only_mux` fixture and apply it only to
 sessions. Discovery and mux termination return absent without contacting the
 host service. The handmade-PR landing case additionally checks the exact
 worktree ID/path passed to its synthetic mux/process termination doubles.
-Its real `validate_and_finalize` result assertion is unchanged.
+Arguments are recorded and asserted after finalization returns, outside
+production's broad cleanup exception handler; each expected call must occur
+exactly once. Its real `validate_and_finalize` result assertion is unchanged.
 
 Two regression cases put failing canaries behind the original discovery and
 termination bindings, prove the fixture cannot reach either, and prove
@@ -111,6 +113,15 @@ under the unchanged 240-second group bound, 266.05 seconds including aggregate
 preparation/cleanup. Runtime clean-room/external deployment testing is
 inapplicable to this test-only isolation boundary. No complete-suite
 qualification is claimed.
+
+Review found that an assertion inside the process-termination double was
+swallowed by production's broad exception handler. After moving both argument
+checks outside cleanup, all 26 boundary/landing cases pass without skips in
+114.54 seconds. A disposable in-memory wrong-cleanup-path wrapper then makes
+the real finalization case fail at the external path assertion, as intended
+(31.12 seconds); no production file is edited. Both runs retain exactly two
+workers and unchanged bounds; 156.70 seconds includes their preparation and
+cleanup. The mutation helper is removed afterward.
 
 Documentation impact is this ledger's explicit fixture scope and evidence
 limits; no command/install/runtime behavior changes. B-PUBLISHED finalization

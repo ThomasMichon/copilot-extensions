@@ -483,17 +483,22 @@ def test_a_pr_tracked_without_its_branch_finalizes_where_explain_says_it_landed(
         assert (report["content_ref"], report["landed"]) == ("pr/hand-made", True)
     else:
         # This Git-only fixture never starts a mux or a background process.
+        mux_calls = []
+        process_calls = []
+
         def absent_mux(worktree_id):
-            assert worktree_id == env.worktree_id
+            mux_calls.append(worktree_id)
             return False
 
         def no_owned_processes(worktree_path):
-            assert Path(worktree_path) == env.clone
+            process_calls.append(Path(worktree_path))
             return []
 
         monkeypatch.setattr(finalize.sessions, "kill_tmux_session", absent_mux)
         monkeypatch.setattr(finalize.procs, "terminate_processes_under", no_owned_processes)
         assert finalize.validate_and_finalize(env.worktree_id, config) is True
+        assert mux_calls == [env.worktree_id]
+        assert process_calls == [env.clone]
 
 
 def test_a_pr_is_tracked_by_its_branch_or_its_number_and_only_with_prs_enabled(env):
