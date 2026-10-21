@@ -25,12 +25,10 @@ REPO = PLUGIN.parents[1]
 ENGINE = REPO / "libs" / "installer-engine"
 PWSH = shutil.which("pwsh") or shutil.which("powershell")
 LIBRARIES = {
-    "agent-zdd": "zdd",
-    "agent-procutil": "agent-procutil",
-    "agent-dropin-registry": "dropin-registry",
-    "agent-plugin-resolve": "plugin-resolve",
-    "agent-single-instance-lease": "single-instance-lease",
-    "agent-plugin-activation": "plugin-activation",
+    package: Path(source["path"]).name
+    for package, source in tomllib.loads(
+        (PLUGIN / "pyproject.toml").read_text(encoding="utf-8"),
+    )["tool"]["uv"]["sources"].items()
 }
 
 
@@ -817,8 +815,12 @@ if (@(Get-ChildItem (Join-Path $InstallDir 'snapshots') -Directory).Count -ne {1
     assert project["tool"]["uv"]["sources"] == {
         package: {"path": f"libs/{lib}"} for package, lib in LIBRARIES.items()
     }
-    for lib in LIBRARIES.values():
-        assert (snapshot / "libs" / lib / "pyproject.toml").is_file()
+    for package, lib in LIBRARIES.items():
+        embedded = snapshot / "libs" / lib
+        assert (embedded / "pyproject.toml").is_file()
+        assert (embedded / "src/fixture.py").read_bytes() == (
+            plugin / sources[package]["path"] / "src/fixture.py"
+        ).read_bytes()
     nested = tomllib.loads((snapshot / "libs/plugin-activation/pyproject.toml").read_text())
     assert nested["tool"]["uv"]["sources"]["agent-dropin-registry"] == {
         "path": "../dropin-registry"
@@ -931,20 +933,20 @@ if ($script:InstallerDependencyPolicy -cne $originalPolicy) {{ throw 'caller pol
         assert not Path(env["TEST_UV_LOG"]).exists()
         return
     calls = [json.loads(line) for line in Path(env["TEST_UV_LOG"]).read_text().splitlines()]
-    assert len(calls) == (7 if acquired_uv else 8)
+    assert len(calls) == (8 if acquired_uv else 9)
     expected_sources = set(json.loads(env["TEST_UV_EXPECTED_SOURCES"]).values()) | {f"{snapshot}[mcp]"}
     sources = [
         next(arg for arg in call if arg in expected_sources)
         for call in calls
     ]
-    assert sources[:6] == [
+    assert sources[:7] == [
         str(snapshot / "libs" / lib)
         for lib in (
             "zdd", "dropin-registry", "plugin-resolve",
-            "single-instance-lease", "agent-procutil", "plugin-activation",
+            "single-instance-lease", "agent-procutil", "worktree-identity", "plugin-activation",
         )
     ]
-    assert sources[6:] == [f"{snapshot}[mcp]"] * (1 if acquired_uv else 2)
+    assert sources[7:] == [f"{snapshot}[mcp]"] * (1 if acquired_uv else 2)
     for call in calls:
         assert "--exclude-newer" in call
         cutoff = datetime.fromisoformat(call[call.index("--exclude-newer") + 1].replace("Z", "+00:00"))

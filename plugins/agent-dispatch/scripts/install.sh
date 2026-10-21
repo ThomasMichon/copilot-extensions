@@ -1150,8 +1150,8 @@ _ensure_runtime() {
     # again -- covering agent-dispatch itself AND its own local
     # `[tool.uv.sources]` workspace path deps (agent-procutil, agent-zdd,
     # agent-dropin-registry, agent-plugin-activation, agent-plugin-resolve,
-    # agent-single-instance-lease), which are equally local PATH sources and
-    # equally vulnerable. #2863 also flagged a second, same-class ImportError
+    # agent-single-instance-lease, agent-worktree-identity), which are equally
+    # local PATH sources and vulnerable. #2863 also flagged a same-class ImportError
     # in the self-update fallback (`from agent_procutil import ...`) --
     # agent-procutil is exactly one of these.
     _STALE_CACHE_REFRESH_PACKAGES=(
@@ -1162,6 +1162,7 @@ _ensure_runtime() {
         agent-plugin-activation
         agent-plugin-resolve
         agent-single-instance-lease
+        agent-worktree-identity
     )
     _scrub_payload_build_artifacts() {
         # Installing FROM the pristine payload directory ("$PLUGIN_DIR",

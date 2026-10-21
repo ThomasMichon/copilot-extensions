@@ -378,6 +378,14 @@ unrelated service changes or a second machine registry.
   passing. The affected identity/focus portfolio then passed 58 tests; five
   real graph/materialization/import contracts passed for the shared package
   and its consumers. These are bounded source checks, not installed acceptance.
+- Review identified a separate PowerShell checkout-stamping table omitted by
+  the generic packaging checks. The real stamping baseline reproduced one
+  checkout failure with one release control passing. The corrected table,
+  library preinstall and paired cache-refresh declarations passed 16 contained
+  PowerShell contracts, including authoring-checkout removal. The fixture now
+  derives its complete library inventory from the actual package metadata.
+  Container PowerShell skips were not counted as executed proof; these host
+  PowerShell checks are not native Windows installed acceptance.
 - The canonical dependency adds no Worktrees or machine-transport runtime
   import. Task queues, sessions, task ownership and transport profiles are
   untouched. Current-head review and required Source CI remain pending;

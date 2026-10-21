@@ -201,6 +201,9 @@ under `machine_identity`. Unversioned rows keep the historical output shape.
 Malformed explicit tuples fail visibly before filtering or summary omission,
 rather than returning an apparently empty or partial focus view. This changes
 neither stored worktree records nor task ownership, queues or transport routing.
+Checkout-based PowerShell stamping embeds the codec and rewrites its source
+mapping into the standalone snapshot; installer cache refresh includes the
+declared library on both platforms.
 
 When an adopting repository enables this opt-in, remove any superseded
 hand-written **Worktree Focus** prose from its instructions. This coordination

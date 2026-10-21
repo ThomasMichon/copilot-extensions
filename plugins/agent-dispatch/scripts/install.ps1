@@ -1168,6 +1168,7 @@ function Materialize-DispatchSnapshot {
         'agent-dropin-registry' = 'dropin-registry'
         'agent-plugin-resolve' = 'plugin-resolve'
         'agent-single-instance-lease' = 'single-instance-lease'
+        'agent-worktree-identity' = 'worktree-identity'
         'agent-plugin-activation' = 'plugin-activation'
     }
     $libsDir = Join-Path $SnapshotDir 'libs'
@@ -1830,6 +1831,7 @@ function Install-Runtime {
         @{ Dir = 'plugin-resolve'; Pkg = 'agent-plugin-resolve'; Display = 'plugin-resolve' },
         @{ Dir = 'single-instance-lease'; Pkg = 'agent-single-instance-lease'; Display = 'single-instance-lease' },
         @{ Dir = 'agent-procutil'; Pkg = 'agent-procutil'; Display = 'agent-procutil' },
+        @{ Dir = 'worktree-identity'; Pkg = 'agent-worktree-identity'; Display = 'worktree-identity' },
         @{ Dir = 'plugin-activation'; Pkg = 'agent-plugin-activation'; Display = 'plugin-activation' }
     )) {
         $libDir = Resolve-VendoredLib -LibName $lib.Dir -LibRoot $BuildSrcDir
@@ -1870,8 +1872,8 @@ function Install-Runtime {
     # again -- covering agent-dispatch itself AND its own local
     # `[tool.uv.sources]` workspace path deps (agent-procutil, agent-zdd,
     # agent-dropin-registry, agent-plugin-activation, agent-plugin-resolve,
-    # agent-single-instance-lease), which are equally local PATH sources and
-    # equally vulnerable. #2863 also flagged a second, same-class ImportError
+    # agent-single-instance-lease, agent-worktree-identity), which are equally
+    # local PATH sources and vulnerable. #2863 also flagged a same-class ImportError
     # in the self-update fallback (`from agent_procutil import ...`) --
     # agent-procutil is exactly one of these.
     $StaleCacheRefreshPackages = @(
@@ -1881,7 +1883,8 @@ function Install-Runtime {
         'agent-dropin-registry',
         'agent-plugin-activation',
         'agent-plugin-resolve',
-        'agent-single-instance-lease'
+        'agent-single-instance-lease',
+        'agent-worktree-identity'
     )
     $installPkg = {
         param([string]$Spec)
