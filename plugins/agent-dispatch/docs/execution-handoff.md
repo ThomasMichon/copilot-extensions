@@ -133,8 +133,16 @@ contradictory or late result. A successful send is not proof of task completion,
 process exit or adopter-effect settlement. The closure inventory retains every
 send, including those associated with terminal tasks.
 
-This API is **not wired to production senders**. Runtime enrollment, coordinator
-authentication, final integration of fresh and already admitted launches,
+Fresh custody now requires a retained coordinator runtime enrollment matching
+the exact qualified scope, repository, source and current producer generation,
+checked inside the same admission transaction. An arbitrary runtime string,
+another source's runtime or a retired producer's enrollment cannot admit a new
+send. Existing custody remains observable and settleable without retroactively
+enrolling a legacy runtime; replay never grants another send. This accounting
+check does not authenticate the in-process caller or prove process liveness.
+
+This API is **not wired to production senders**. Complete runtime enrollment,
+authenticated sender integration, fresh and already admitted launches,
 strict resumes, ordinary/restricted transports, redrives and both wake outboxes
 remain gates. Runtime callers must enforce the new-versus-replayed distinction
 at their actual send boundary and reconcile ambiguous responses through the

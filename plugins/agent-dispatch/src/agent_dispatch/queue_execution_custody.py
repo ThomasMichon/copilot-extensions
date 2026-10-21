@@ -1,4 +1,4 @@
-"""Internal send accounting; not runtime enrollment or a handoff capability."""
+"""Internal enrolled-runtime send accounting, not a handoff capability."""
 
 from __future__ import annotations
 
@@ -158,6 +158,14 @@ class QueueExecutionCustodyMixin:
                 raise TaskError(
                     "execution send already has custody; observe its existing identity"
                 )
+            runtime = conn.execute(
+                "SELECT 1 FROM execution_runtime_enrollments"
+                " WHERE scope_key = ? AND runtime_id = ? AND repo = ? AND source = ?"
+                " AND producer_generation = ? AND role = 'coordinator'",
+                (key, identity.runtime_id, repo, source, expected_producer_generation),
+            ).fetchone()
+            if runtime is None:
+                raise TaskError("fresh execution send requires a matching enrolled runtime")
             ts = self._now(now)
             conn.execute(
                 "INSERT INTO execution_send_custody VALUES"

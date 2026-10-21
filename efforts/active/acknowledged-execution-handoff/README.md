@@ -91,8 +91,9 @@ grants.
       The internal queue construction slice persists closure and inventories
       tasks, reservations and wakes under existing transactions. Control-only
       coordinator scope resolution now binds canonical installation receipts and
-      existing managed producers; runtime enrollment and final launch gates
-      remain open. Internal reservation-send custody also serializes first admission
+      existing managed producers; coordinator enrollment is retained, while
+      supervisor enrollment and final launch gates remain open.
+      Internal reservation-send custody also serializes first admission
       with closure and retains pending/ambiguous transport outcomes; it is not
       yet wired to production senders. An empty inventory is never an
       acknowledgement.
@@ -144,6 +145,17 @@ do not treat a validated adapter response as complete task admission or live
 handoff support.
 
 ## Journal
+
+### 2026-10-21 - Bind fresh custody to retained runtime enrollment
+- Fresh reservation-send custody now requires an existing coordinator runtime
+  in the exact scope, source, repository and current producer generation under
+  the same queue transaction. Caller-selected runtime strings are not enrollment.
+- Existing custody replays and settlement remain available without replacing
+  legacy participants or granting another send. Complete enrollment, caller
+  authentication, actual sender mediation and acknowledgement remain open.
+- #7628 merged coordinator runtime accounting to `dev` as
+  `bdc81aad6d022b02936dda9da6c7fb2fb856e82a`; source landing does not establish
+  release, installation, running adoption or a live handoff.
 
 ### 2026-10-21 - Coordinator runtime accounting construction
 - Added control-only enrollment of the coordinator's own OS-observed process

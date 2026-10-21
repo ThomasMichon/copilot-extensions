@@ -8,12 +8,29 @@ from threading import Barrier
 
 import pytest
 
-from agent_dispatch.execution_effect_adapter import EffectRevocation, ExecutionScope
+from agent_dispatch.execution_effect_adapter import EffectRevocation
+from agent_dispatch.execution_scope_binding import resolve_execution_installation
 from agent_dispatch.queue import TaskQueue
 from agent_dispatch.queue_execution_custody import ExecutionSendIdentity
 from agent_dispatch.queue_execution_handoff import ExecutionAdmissionClosed
+from agent_dispatch.queue_execution_runtimes import CoordinatorExecutionRuntime
 from agent_dispatch.queue_records import TaskError
 from tests._helpers import TEST_REPO
+from tests.test_execution_scope_binding import _governance
+
+
+def enroll(queue, *, source="scheduled", generation=1, incarnation="runtime-a"):
+    installation = resolve_execution_installation(_governance())
+    binding = queue.bind_execution_scope(
+        installation,
+        repo=TEST_REPO,
+        source=source,
+        expected_producer_generation=generation,
+    )
+    runtime = queue.enroll_coordinator_execution_runtime(
+        binding, installation, CoordinatorExecutionRuntime(incarnation, 1234, "start-a")
+    )
+    return binding.scope, runtime["runtime_id"]
 
 
 @pytest.fixture
@@ -34,13 +51,9 @@ def setup(tmp_path):
     )
     reservation, acquired = queue.reserve_spawn(task.id)
     assert acquired
-    with queue._connect() as conn:
-        coordinator = conn.execute(
-            "SELECT identity FROM workspace_queue_identity WHERE singleton = 1"
-        ).fetchone()["identity"]
-    scope = ExecutionScope("installation-a", coordinator, TEST_REPO, "registration-a")
+    scope, runtime_id = enroll(queue)
     identity = ExecutionSendIdentity(
-        scope, "send-a", "runtime-a", reservation.key, task.generation, "launch"
+        scope, "send-a", runtime_id, reservation.key, task.generation, "launch"
     )
     return queue, identity, task
 
@@ -209,9 +222,11 @@ def test_other_qualified_source_can_admit_while_first_scope_is_closed(setup):
         producer_request_id="other",
     )
     reservation, _ = queue.reserve_spawn(task.id)
+    scope, runtime_id = enroll(queue, source="other")
     other = replace(
         identity,
-        scope=replace(identity.scope, producer_registration="registration-b"),
+        scope=scope,
+        runtime_id=runtime_id,
         send_id="send-b",
         reservation_key=reservation.key,
         task_generation=task.generation,
@@ -259,8 +274,10 @@ def test_producer_rollover_preserves_old_custody_without_blocking_current_scope(
         producer_request_id="new",
     )
     reservation, _ = queue.reserve_spawn(task.id)
+    _, runtime_id = enroll(queue, generation=2)
     current = replace(
         identity,
+        runtime_id=runtime_id,
         send_id="send-b",
         reservation_key=reservation.key,
         task_generation=task.generation,
@@ -347,3 +364,49 @@ def test_invalid_settlement_cannot_erase_pending_send(setup, outcome, detail):
     with pytest.raises(TaskError):
         queue.settle_execution_send(identity, outcome=outcome, detail=detail)
     assert admit(queue, identity).state == "pending"
+
+
+def test_fresh_send_refuses_unknown_runtime_without_creating_custody(setup):
+    queue, identity, _ = setup
+    with pytest.raises(TaskError, match="enrolled runtime"):
+        admit(queue, replace(identity, runtime_id="caller-selected"))
+    with queue._connect() as conn:
+        assert conn.execute("SELECT count(*) FROM execution_send_custody").fetchone()[0] == 0
+
+
+def test_runtime_from_another_scope_cannot_authorize_this_send(setup):
+    queue, identity, _ = setup
+    queue.handoff_producer_scope(
+        TEST_REPO, "other", producer_id="producer-b", expected_generation=0
+    )
+    _, runtime_id = enroll(queue, source="other")
+    with pytest.raises(TaskError, match="enrolled runtime"):
+        admit(queue, replace(identity, runtime_id=runtime_id))
+
+
+def test_retired_producer_runtime_cannot_admit_a_new_generation_send(setup):
+    queue, identity, _ = setup
+    queue.handoff_producer_scope(
+        TEST_REPO, "scheduled", producer_id="producer-b", expected_generation=1
+    )
+    with pytest.raises(TaskError, match="enrolled runtime"):
+        queue.admit_execution_send(identity, source="scheduled", expected_producer_generation=2)
+
+
+def test_legacy_custody_replay_and_settlement_do_not_require_new_enrollment(setup):
+    queue, identity, _ = setup
+    admit(queue, identity)
+    with queue._connect() as conn:
+        conn.execute("DELETE FROM execution_runtime_enrollments")
+    close(queue, identity)
+    reopened = TaskQueue(queue.db_path)
+    assert admit(reopened, identity).replayed is True
+    assert (
+        reopened.settle_execution_send(
+            identity, outcome="unknown", detail="legacy transport outcome unresolved"
+        ).state
+        == "unknown"
+    )
+    assert reopened.execution_closure_inventory(identity.scope)["acknowledged"] is False
+    with pytest.raises(ExecutionAdmissionClosed):
+        admit(reopened, replace(identity, send_id="other-stage", kind="deliver"))

@@ -1,0 +1,9 @@
+{
+  "comment": "Require matching retained runtime enrollment for fresh execution send custody while preserving historical observation and settlement.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}
