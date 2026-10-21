@@ -200,8 +200,13 @@ def test_registry_validator_reuses_code_but_revalidates_context(monkeypatch, tmp
 
     assert config.install_dir() == plugin_root
     first = sys.modules["_agent_worktrees_registry_installation_context"]
+    original_code = dict(first._registry_compiled_sources)
     assert registry_paths.installation_context()["pluginRoot"] == str(plugin_root)
-    assert sys.modules["_agent_worktrees_registry_installation_context"] is first
+    second = sys.modules["_agent_worktrees_registry_installation_context"]
+    assert second is not first
+    assert original_code
+    assert all(second._registry_compiled_sources[name][2] is entry[2]
+               for name, entry in original_code.items())
 
     context.write_text("{}\n", encoding="utf-8")
     with pytest.raises(ValueError):
@@ -238,6 +243,40 @@ def test_registry_validator_reloads_changed_code_with_same_stat(
     second = sys.modules["_agent_worktrees_registry_installation_context"]
     assert second is not first
     assert second.CACHE_PROBE == "after!"
+
+
+def test_registry_validator_does_not_retain_interleaved_fragment_code(monkeypatch, tmp_path):
+    payload = _payload(tmp_path, "payload")
+    context, plugin_root = _stamp(
+        tmp_path / "durable", payload,
+        marketplace="interleaved", repository="Example-Org/Interleaved-Validator",
+    )
+    _select(monkeypatch, context, payload)
+    monkeypatch.setattr(registry_paths.sys, "prefix", str(tmp_path / "uninstalled"))
+    fragment = payload / "scripts" / "installation-context" / "_installation_context_base.py"
+    original = fragment.read_text(encoding="utf-8") + "\nCACHE_PROBE = 'original'\n"
+    fragment.write_text(original, encoding="utf-8")
+    read_text = Path.read_text
+
+    def interleaved_read(path, *args, **kwargs):
+        if path == fragment:
+            path.write_text(original.replace("'original'", "'interleaved'"), encoding="utf-8")
+            try:
+                return read_text(path, *args, **kwargs)
+            finally:
+                path.write_text(original, encoding="utf-8")
+        return read_text(path, *args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "read_text", interleaved_read)
+        assert config.install_dir() == plugin_root
+        first = sys.modules["_agent_worktrees_registry_installation_context"]
+        assert first.CACHE_PROBE == "interleaved"
+
+    assert config.install_dir() == plugin_root
+    second = sys.modules["_agent_worktrees_registry_installation_context"]
+    assert second is not first
+    assert second.CACHE_PROBE == "original"
 
 
 def test_binstub_arbitration_is_shared_across_validated_cells(monkeypatch, tmp_path):

@@ -3127,12 +3127,10 @@ deploy_copilot_plugin() {
         return
     fi
 
-    # Detect if we are running from the installed plugin directory
-    local installed_plugins_dir="$HOME/.copilot/installed-plugins"
     local running_from_installed=false
-    case "$PLUGIN_DIR" in
-        "$installed_plugins_dir"*) running_from_installed=true ;;
-    esac
+    if [[ "$(_source_kind "$PLUGIN_DIR")" == marketplace ]]; then
+        running_from_installed=true
+    fi
 
     # 1. Register marketplace if not present
     if ! "$copilot_path" plugin marketplace list 2>/dev/null | grep -q 'copilot-extensions'; then

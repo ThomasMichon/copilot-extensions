@@ -87,6 +87,72 @@ def shlex_quote(value: str) -> str:
 @pytest.mark.portfolio_tier("T3")
 @pytest.mark.effect("process")
 @pytest.mark.effect("filesystem")
+@pytest.mark.parametrize(
+    ("payload", "origin", "expected_updates"),
+    [
+        ("stage/agent-worktrees", ".copilot/installed-plugins/example/agent-worktrees", 0),
+        (".copilot/installed-plugins/example/agent-worktrees", "", 0),
+        ("stage/agent-worktrees", "source/agent-worktrees", 1),
+        (".copilot/installed-plugins-backup/agent-worktrees", "", 1),
+    ],
+)
+def test_bash_payload_refresh_uses_original_source(
+    tmp_path: Path,
+    native_bash: str,
+    payload: str,
+    origin: str,
+    expected_updates: int,
+) -> None:
+    executable = tmp_path / "copilot"
+    calls = tmp_path / "calls"
+    executable.write_text(
+        '#!/usr/bin/env bash\n'
+        'printf "%s\\n" "$*" >> "$CALLS"\n'
+        'case "$*" in\n'
+        '  "plugin marketplace list") printf "copilot-extensions\\n" ;;\n'
+        '  "plugin list") printf "agent-worktrees@copilot-extensions\\n" ;;\n'
+        '  "plugin update agent-worktrees@copilot-extensions") ;;\n'
+        '  *) exit 9 ;;\n'
+        'esac\n',
+        encoding="utf-8",
+    )
+    executable.chmod(0o755)
+    source = INSTALL_SH.read_text(encoding="utf-8")
+    functions = []
+    for name in ("_source_kind", "deploy_copilot_plugin"):
+        body = source.split(f"{name}() {{", 1)[1].split("\n}\n", 1)[0]
+        functions.append(f"{name}() {{" + body + "\n}\n")
+    script = (
+        "set -euo pipefail\n"
+        + f"PATH={shlex_quote(_bash_path(native_bash, tmp_path))}:$PATH\n"
+        + _bash_resolver_source()
+        + "\n".join(functions)
+        + "\nok() { :; }; changed() { :; }; warn() { echo \"$*\" >&2; exit 8; }\n"
+        + "err() { echo \"$*\" >&2; exit 8; }\n"
+        + "deploy_copilot_plugin\n"
+    )
+    result = run_headless(
+        [native_bash, "-c", script],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        env={
+            **os.environ,
+            "HOME": _bash_path(native_bash, tmp_path),
+            "PLUGIN_DIR": _bash_path(native_bash, tmp_path / payload),
+            "COPILOT_PLUGIN_STAGED_FROM": _bash_path(native_bash, tmp_path / origin) if origin else "",
+            "CALLS": _bash_path(native_bash, calls),
+        },
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    invocations = calls.read_text(encoding="utf-8").splitlines()
+    assert invocations.count("plugin update agent-worktrees@copilot-extensions") == expected_updates
+
+
+@pytest.mark.portfolio_tier("T3")
+@pytest.mark.effect("process")
+@pytest.mark.effect("filesystem")
 def test_powershell_resolver_handles_command_types_and_rejects_function(
     tmp_path: Path, native_powershell: str,
 ) -> None:
