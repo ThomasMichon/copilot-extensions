@@ -123,9 +123,8 @@ contract is absorbed.
 Actual disposition: #7684 merged as
 `272c89f28a7483d7105ed1750c0512924859e102`; full Copilot review
 `5607391353` approved exact head
-`ce90ea97e6e0231fbad99911043d9e04b1396696`. The overview's unspecified
-Low documentation nit was assessed against the final documentation impact;
-inline/general channels and threads had no findings. Required CI was green.
+`ce90ea97e6e0231fbad99911043d9e04b1396696`.
+Inline/general channels and threads had no findings. Required CI was green.
 The child worktree is finalized.
 
 Baseline: the actual #7681 merge. `graph.committed_config` returns an
