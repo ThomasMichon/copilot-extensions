@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from test_command_binding import ROOT, _write, binding_fixture as binding_fixture
+from test_command_binding import ROOT, _snapshot, _write, binding_fixture as binding_fixture
 from test_installer_publication import _cell, _policy, backend as backend
 
 pytestmark = [
@@ -53,7 +53,7 @@ def test_real_managed_cell_repair_and_callbacks(
         "name": "Fixture", "plugins": [{"name": "agent-worktrees", "source": "plugins/agent-worktrees"}],
     })
     # Cell/version paths must leave room for native dependency script names.
-    home = tmp_path_factory.mktemp("c") / "h"
+    home = tmp_path_factory.mktemp("c") / "h-\u5b89"
     home.mkdir()
     if os.name != "nt":
         # Only OS-profile lookup is isolated. Policy, custody and publication are real.
@@ -68,10 +68,29 @@ def test_real_managed_cell_repair_and_callbacks(
         native.write_text(native.read_text(encoding="utf-8").replace(
             "$passwdHome = [CePosixAccount]::Home()", "$passwdHome = $env:HOME",
         ), encoding="utf-8")
+    foreign = tmp_path / "foreign-repository"
+    foreign.mkdir()
+    clean_git_environment = {
+        key: value for key, value in os.environ.items() if not key.startswith("GIT_")
+    }
+    subprocess.run(
+        [git, "-C", str(foreign), "init", "-q"], env=clean_git_environment,
+        check=True, capture_output=True, timeout=30,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    foreign_before = _snapshot(foreign)
+    for key, value in {
+        "GIT_DIR": str(foreign / ".git"), "GIT_WORK_TREE": str(foreign),
+        "GIT_INDEX_FILE": str(foreign / "foreign-index"),
+        "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "core.bare", "GIT_CONFIG_VALUE_0": "true",
+    }.items():
+        monkeypatch.setenv(key, value)
     environment = {
-        **os.environ, "HOME": str(home), "USERPROFILE": str(home), "AGENT_HOME": str(home),
+        **{key: value for key, value in os.environ.items() if not key.startswith("GIT_")},
+        "HOME": str(home), "USERPROFILE": str(home), "AGENT_HOME": str(home),
         "PSModuleAnalysisCachePath": os.devnull, "PYTHONDONTWRITEBYTECODE": "1",
     }
+    assert not any(key.startswith("GIT_") for key in environment)
     for key in (
         "COPILOT_EXTENSIONS_CONTEXT", "COPILOT_EXTENSIONS_COMMAND_LIFECYCLE",
         "COPILOT_EXTENSIONS_RUNTIME_PUBLICATION", "COPILOT_PLUGIN_ROOT",
@@ -158,7 +177,8 @@ def test_real_managed_cell_repair_and_callbacks(
     with primitive.runtime_publication_lease(**arguments) as patch:
         result = subprocess.run(
             command, env={**environment, **patch}, cwd=fixture["home"], capture_output=True,
-            text=True, timeout=240, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            text=True, encoding="utf-8", timeout=240,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
         assert result.returncode == 0, result.stdout + result.stderr
         selected = (root / "current-version").read_text().strip()
@@ -178,3 +198,4 @@ def test_real_managed_cell_repair_and_callbacks(
         })
         assert all(lock._owner()["pid"] == os.getpid() for lock in borrowed)
         assert not list((root / ".installer-inputs").glob("helper-publication-*"))
+    assert _snapshot(foreign) == foreign_before

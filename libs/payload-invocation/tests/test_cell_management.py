@@ -48,6 +48,27 @@ def test_management_lease_borrows_exact_existing_locks(binding_fixture: dict, st
     assert all(not lock.path.exists() for lock in locks)
 
 
+@pytest.mark.parametrize("state", ["missing", "standalone", "managed"])
+def test_management_retains_active_cell_when_mode_policy_is_disabled(
+    binding_fixture: dict, state: str,
+) -> None:
+    primitive = binding_fixture["primitive"]
+    root, arguments = _cell(binding_fixture, {})
+    _policy(binding_fixture, root, arguments, state)
+    _write(binding_fixture["home"] / ".copilot-extensions/installation-mode.json", {
+        "schema": "copilot-extensions.installation-mode", "version": 1,
+        "installationMode": {"enabled": False, "marketplaces": {}},
+    })
+    decision = primitive.resolve_runtime_deployment(**arguments)
+    assert decision["status"] == "deactivation-required"
+    assert decision["actualMode"] == "namespaced"
+    assert decision["deployment"]["state"] in {"missing", "valid"}
+    with primitive.runtime_publication_lease(**arguments) as patch:
+        primitive.borrow_runtime_publication(**{
+            **arguments, "environment": {**arguments["environment"], **patch},
+        })
+
+
 @pytest.mark.parametrize("state", ["invalid", "foreign", "future"])
 def test_management_refuses_bad_policy_before_lock_writes(
     binding_fixture: dict, state: str,
@@ -149,13 +170,19 @@ def test_management_rechecks_after_both_real_locks(
     assert not (root / "versions").exists()
 
 
+@pytest.mark.parametrize("mode_enabled", [True, False])
 def test_backend_borrows_outer_management_without_reacquiring(
-    binding_fixture: dict, backend, monkeypatch: pytest.MonkeyPatch,
+    binding_fixture: dict, backend, monkeypatch: pytest.MonkeyPatch, mode_enabled: bool,
 ) -> None:
     primitive = binding_fixture["primitive"]
     environment = {}
     root, arguments = _cell(binding_fixture, environment)
     _policy(binding_fixture, root, arguments, "managed")
+    if not mode_enabled:
+        _write(binding_fixture["home"] / ".copilot-extensions/installation-mode.json", {
+            "schema": "copilot-extensions.installation-mode", "version": 1,
+            "installationMode": {"enabled": False, "marketplaces": {}},
+        })
     monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", environment["COPILOT_EXTENSIONS_CONTEXT"])
     with primitive.runtime_publication_lease(**arguments) as patch:
         monkeypatch.setenv(primitive.RUNTIME_PUBLICATION_ENV, patch[primitive.RUNTIME_PUBLICATION_ENV])
@@ -181,19 +208,27 @@ def _installer_command(fixture: dict, shell: str, root: Path, python: Path) -> l
     wrapper.write_text(
         "& (Join-Path $PSScriptRoot 'install.ps1') update -InstallDir '"
         + str(root).replace("'", "''") + "' -BootstrapPython '"
-        + str(python).replace("'", "''") + "'\n", encoding="utf-8",
+        + str(python).replace("'", "''") + "'\n", encoding="utf-8-sig",
     )
     return _command(fixture, shell, "managed-cell-probe")
 
 
 @pytest.mark.parametrize("shell", SHELLS)
+@pytest.mark.parametrize("mode_enabled", [True, False])
 def test_native_management_borrows_custody_before_and_after_staging(
-    binding_fixture: dict, shell: str, powershell_host,
+    binding_fixture: dict, shell: str, mode_enabled: bool, powershell_host,
 ) -> None:
     fixture, primitive = binding_fixture, binding_fixture["primitive"]
     environment = _installer_environment(fixture, shell)
-    root, arguments = _cell(fixture, environment)
+    root, arguments = _cell(
+        fixture, environment, durable_home=fixture["home"] / "custody-\u5b89",
+    )
     _policy(fixture, root, arguments, "managed")
+    if not mode_enabled:
+        _write(fixture["home"] / ".copilot-extensions/installation-mode.json", {
+            "schema": "copilot-extensions.installation-mode", "version": 1,
+            "installationMode": {"enabled": False, "marketplaces": {}},
+        })
     python = Path(sys.executable) if os.name == "nt" else fixture["home"] / "test-bin/python3"
     command = _installer_command(fixture, shell, root, python)
     with primitive.runtime_publication_lease(**arguments) as patch:
@@ -215,7 +250,9 @@ def test_native_management_refuses_without_live_custody_before_writes(
 ) -> None:
     fixture, primitive = binding_fixture, binding_fixture["primitive"]
     environment = _installer_environment(fixture, shell)
-    root, arguments = _cell(fixture, environment)
+    root, arguments = _cell(
+        fixture, environment, durable_home=fixture["home"] / "custody-\u5b89",
+    )
     _policy(fixture, root, arguments, "managed")
     if ticket == "expired":
         with primitive.runtime_publication_lease(**arguments) as patch:
@@ -237,15 +274,25 @@ def test_native_management_refuses_without_live_custody_before_writes(
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Native Windows Git Bash")
-def test_windows_bash_management_borrows_native_paths(binding_fixture: dict) -> None:
+@pytest.mark.parametrize("mode_enabled", [True, False])
+def test_windows_bash_management_borrows_native_paths(
+    binding_fixture: dict, mode_enabled: bool,
+) -> None:
     fixture, primitive = binding_fixture, binding_fixture["primitive"]
     git = shutil.which("git")
     bash = Path(git).resolve().parent.parent / "bin/bash.exe" if git else None
     if bash is None or not bash.is_file():
         pytest.skip("Native Windows Git Bash is unavailable")
     environment = _installer_environment(fixture, "bash")
-    root, arguments = _cell(fixture, environment)
+    root, arguments = _cell(
+        fixture, environment, durable_home=fixture["home"] / "custody-\u5b89",
+    )
     _policy(fixture, root, arguments, "managed")
+    if not mode_enabled:
+        _write(fixture["home"] / ".copilot-extensions/installation-mode.json", {
+            "schema": "copilot-extensions.installation-mode", "version": 1,
+            "installationMode": {"enabled": False, "marketplaces": {}},
+        })
     command = [
         str(bash), "-c",
         'exec bash "$1" update --install-dir "$(cygpath -u "$2")" '

@@ -35,8 +35,10 @@ def _installer_environment(fixture: dict, shell: str) -> dict:
     return environment
 
 
-def _cell(fixture: dict, environment: dict) -> tuple[Path, dict]:
-    cell = _activate(fixture, fixture["payload"])
+def _cell(
+    fixture: dict, environment: dict, *, durable_home: Path | None = None,
+) -> tuple[Path, dict]:
+    cell = _activate(fixture, fixture["payload"], durable_home=durable_home)
     _write(fixture["home"] / ".copilot-extensions/installation-mode.json", {
         "schema": "copilot-extensions.installation-mode", "version": 1,
         "installationMode": {"enabled": True, "marketplaces": {}},
@@ -45,7 +47,7 @@ def _cell(fixture: dict, environment: dict) -> tuple[Path, dict]:
     root = Path(cell["pluginRoot"])
     arguments = {
         **fixture["arguments"], "context": cell["installReceipt"],
-        "durable_home": fixture["home"] / ".copilot-extensions",
+        "durable_home": durable_home or fixture["home"] / ".copilot-extensions",
     }
     return root, arguments
 
@@ -106,12 +108,18 @@ def test_cell_installer_refuses_before_staging(
 
 @pytest.mark.parametrize("shell", SHELLS)
 @pytest.mark.parametrize("state", ["missing", "standalone"])
+@pytest.mark.parametrize("mode_enabled", [True, False])
 def test_cell_installer_standalone_still_stages(
-    binding_fixture: dict, shell: str, state: str, powershell_host,
+    binding_fixture: dict, shell: str, state: str, mode_enabled: bool, powershell_host,
 ) -> None:
     environment = _installer_environment(binding_fixture, shell)
     root, arguments = _cell(binding_fixture, environment)
     _policy(binding_fixture, root, arguments, state)
+    if not mode_enabled:
+        _write(binding_fixture["home"] / ".copilot-extensions/installation-mode.json", {
+            "schema": "copilot-extensions.installation-mode", "version": 1,
+            "installationMode": {"enabled": False, "marketplaces": {}},
+        })
     if shell == "powershell":
         (binding_fixture["payload"] / "scripts/cell-installer-probe.ps1").write_text(
             "& (Join-Path $PSScriptRoot 'install.ps1') update -InstallDir '"

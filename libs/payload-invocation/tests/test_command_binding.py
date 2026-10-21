@@ -238,13 +238,14 @@ def test_command_binding_blocked_governance_never_selects(
     assert result["installation"] is None
 
 
-def _activate(fixture: dict, payload: Path) -> dict:
+def _activate(fixture: dict, payload: Path, *, durable_home: Path | None = None) -> dict:
     primitive = fixture["primitive"]
     environment = fixture["environment"]
     stamped = primitive.stamp_context(
         payload_version="1.0.0", payload_origin="installed",
         expected_namespace_generation=0, expected_install_generation=0,
         payload_root=payload, plugin_id=PLUGIN_ID, environment=environment,
+        durable_home=durable_home,
     )
     activated = primitive.compare_and_swap_activation(
         context=stamped["installReceipt"],
@@ -257,6 +258,7 @@ def _activate(fixture: dict, payload: Path) -> dict:
         legacy_disposition="absent",
         legacy_probe={"declared": True, "result": "absent", "checkedAt": "2026-01-01T00:00:00Z"},
         legacy_root=fixture["legacy"], environment=environment,
+        durable_home=durable_home,
     )
     return {**stamped, **activated}
 

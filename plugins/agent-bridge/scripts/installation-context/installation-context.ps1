@@ -4180,7 +4180,9 @@ function Get-RuntimeDeploymentOwner(
     }
     $identity = Source-Identity $evidence.source $evidence.readableName
     Assert-PluginId $evidence.pluginId
-    if ($Resolution.status -cne 'ready' -or
+    if (($Resolution.status -cne 'ready' -and
+            -not ($Resolution.status -ceq 'deactivation-required' -and
+                $Resolution.actualMode -ceq 'namespaced')) -or
         $Resolution.actualMode -cnotin @('legacy', 'namespaced') -or
         $identity.marketplaceId -cne $Resolution.marketplaceId -or
         $evidence.pluginId -cne $Resolution.pluginId) {

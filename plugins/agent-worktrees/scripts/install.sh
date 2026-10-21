@@ -157,7 +157,7 @@ if [[ -n "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
     esac
     __aw_context_query() {
         if [[ -n "$__aw_context_python" ]]; then
-            "$__aw_context_python" -I -B "$SCRIPT_DIR/installation-context/installation_context.py" "$@"
+            "$__aw_context_python" -I -B -X utf8 "$SCRIPT_DIR/installation-context/installation_context.py" "$@"
         else
             bash "$__aw_context_helper" "$@"
         fi
@@ -288,7 +288,7 @@ if [[ -n "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
                 printf '%s\n' 'ERROR: Runtime publication management requires explicit --runtime-publication-python' >&2
                 return 1
             }
-            publication="$("$management_python" -I -B \
+            publication="$("$management_python" -I -B -X utf8 \
                 "$SCRIPT_DIR/installation-context/installation_context.py" \
                 probe-management-publication "${__aw_status_args[@]:1}")" || return 1
             allowed="$(__aw_context_value "$publication" managementPublication)" || return 1
@@ -1127,7 +1127,7 @@ _bootstrap_python() {
             __resolved_bin_real="$(cd "$(dirname "$__resolved")" 2>/dev/null && pwd -P)"
             [[ -n "$__resolved_bin_real" && "$__resolved_bin_real" == "$venv_real"/* ]] && continue
         fi
-        __resolved="$("$__resolved" -I -B -c \
+        __resolved="$("$__resolved" -I -B -X utf8 -c \
             'import sys; assert sys.version_info >= (3, 11); print(sys.executable)' 2>/dev/null)" \
             || continue
         case "${OSTYPE:-}" in
@@ -1183,12 +1183,12 @@ _deploy_python_runtime() {
         case "${OSTYPE:-}" in
             msys*|cygwin*) [[ "$publisher" == *.exe || ! -f "$publisher.exe" ]] || publisher+=".exe" ;;
         esac
-        publisher="$("$base" -I -c 'import pathlib,sys; print(pathlib.Path(sys.argv[1]).resolve())' "$publisher")" || return 1
+        publisher="$("$base" -I -X utf8 -c 'import pathlib,sys; print(pathlib.Path(sys.argv[1]).resolve())' "$publisher")" || return 1
         local frontend
-        frontend="$("$base" -I -c 'import json,sys; print(json.dumps({"shell":"sh","executable":sys.argv[1],"scope":sys.argv[2]}))' "$publisher" "$scope")" || return 1
+        frontend="$("$base" -I -X utf8 -c 'import json,sys; print(json.dumps({"shell":"sh","executable":sys.argv[1],"scope":sys.argv[2]}))' "$publisher" "$scope")" || return 1
         mode_args+=(--frontend "$frontend")
     fi
-    "$base" -I -B "$SCRIPT_DIR/runtime_install.py" \
+    "$base" -I -B -X utf8 "$SCRIPT_DIR/runtime_install.py" \
         --root "$INSTALL_DIR" --plugin "$runtime_inputs" \
         --payload "$origin_payload" --uv "$uv_path" --base-python "$base" \
         --result "$result_path" --expected-source-identity "$source_pin" \
@@ -1198,7 +1198,7 @@ _deploy_python_runtime() {
         err "Python runtime lifecycle failed"
         return "$runtime_rc"
     fi
-    parsed="$("$base" -I -c '
+    parsed="$("$base" -I -X utf8 -c '
 import json, sys
 result = json.load(open(sys.argv[1], encoding="utf-8"))
 assert result.get("deployment_manifest_published") is True, \
@@ -3275,11 +3275,11 @@ fi
 
 case "$ACTION" in
     publish-runtime-helpers)
-        publication="$("$RUNTIME_PUBLICATION_PYTHON" -I -B "$SCRIPT_DIR/runtime_install.py" \
+        publication="$("$RUNTIME_PUBLICATION_PYTHON" -I -B -X utf8 "$SCRIPT_DIR/runtime_install.py" \
             --root "$INSTALL_DIR" --plugin "$PLUGIN_DIR" \
             --inspect-helper-publication "$RUNTIME_PUBLICATION_PLAN" \
             --publication-digest "$RUNTIME_PUBLICATION_DIGEST")" || exit 1
-        fields="$("$RUNTIME_PUBLICATION_PYTHON" -I -c \
+        fields="$("$RUNTIME_PUBLICATION_PYTHON" -I -X utf8 -c \
             'import json,sys; d=json.loads(sys.argv[1]); print(d["scope"]); print(d["python"]); print(d["copies"])' "$publication")" || exit 1
         fields="${fields//$'\r'/}"
         scope="${fields%%$'\n'*}"; fields="${fields#*$'\n'}"
@@ -3300,7 +3300,7 @@ case "$ACTION" in
             done
             deploy_tool_binstub || exit 1
         fi
-        "$RUNTIME_PUBLICATION_PYTHON" -I -B "$SCRIPT_DIR/runtime_install.py" \
+        "$RUNTIME_PUBLICATION_PYTHON" -I -B -X utf8 "$SCRIPT_DIR/runtime_install.py" \
             --root "$INSTALL_DIR" --plugin "$PLUGIN_DIR" \
             --complete-helper-publication "$RUNTIME_PUBLICATION_PLAN" \
             --publication-digest "$RUNTIME_PUBLICATION_DIGEST" || exit 1

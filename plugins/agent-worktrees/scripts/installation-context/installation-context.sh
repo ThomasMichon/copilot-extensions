@@ -4725,7 +4725,9 @@ deployment_policy_snapshot() {
     source_marketplace="$(snapshot_value "$source_snapshot" marketplaceId)"
     source_plugin="$(snapshot_value "$source_snapshot" pluginId)"
     source_fingerprint="$(snapshot_value "$source_snapshot" sourceFingerprint)"
-    [[ "$status" == ready && ( "$actual_mode" == legacy || "$actual_mode" == namespaced ) &&
+    [[ ( "$status" == ready ||
+         ( "$status" == deactivation-required && "$actual_mode" == namespaced ) ) &&
+       ( "$actual_mode" == legacy || "$actual_mode" == namespaced ) &&
        "$source_marketplace" == "$RESOLVED_MARKETPLACE_ID" &&
        "$source_plugin" == "$RESOLVED_PLUGIN_ID" ]] ||
         fail "Runtime deployment requires a resolved installation owner."
