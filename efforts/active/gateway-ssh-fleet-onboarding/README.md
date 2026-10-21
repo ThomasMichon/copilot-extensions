@@ -18,6 +18,11 @@ authentication, operation and SSH owners remain authoritative.
 
 This is an integration slice of the existing Linux Role Fleet, Fleet Control V2
 and routing campaigns, not a replacement for their implementation or ownership.
+The governing [Machine Fleet vision](../../../visions/machine-fleet/README.md)
+places reusable Gateway, native OpenSSH, optional public Azure Bastion
+reachability and the complete Chat capability in the shared suite. Adopters
+supply inventory, loadout, policy and secret references; organization-specific
+resource acquisition and identity bindings remain external adapters.
 
 ## Participants
 
@@ -27,7 +32,7 @@ and routing campaigns, not a replacement for their implementation or ownership.
 | Existing #6030 / #6240 / #6424 owners | Construction, role lifecycle and installation | Retained owner accepted the exclusive source leaves; ordered shared wiring remains with that owner |
 | Existing #5789 / #6443 / #6804 owners | Routing, authentication, enrollment and Gateway integration | Their existing issue threads |
 | Existing #6241 owner | Operation admission and receipt authority | Existing Fleet Control V2 coordination |
-| `wobbly-contraption` | Retained construction/admission/lifecycle integration | Existing #6030 / #6240 / #6424 source custody |
+| `wobbly-contraption` | Retained construction/admission/lifecycle and setup-consumer integration, not generic artifact publication | Existing #6030 / #6240 / #6424 source custody |
 
 ## Coordination
 
@@ -50,6 +55,13 @@ and routing campaigns, not a replacement for their implementation or ownership.
   integration participant. Shared CLI, staging, admission, manifests and
   lifecycle files remain with the construction owner. Source-leaf acceptance
   is not deployment or an implemented setup hook.
+- Generic artifact publication needs an explicit participant and
+  operation reservation before shared setup wiring consumes it. That appointment
+  remains unassigned; proposal hosting, construction lineage, pure policy/runtime
+  leaves and client admission do not confer publishing or signing custody.
+- Use existing owner contacts for operation reservations. Publishing a contract
+  amendment does not transfer the source or effect authority described by those
+  reservations.
 
 ## Context
 
@@ -62,6 +74,14 @@ The current fleet-manager surfaces distinguish planning, authenticated artifact
 staging, operation journals and credential-controller subscriptions from
 managed role installation and desired-state execution. A setup flow cannot
 truthfully be assembled by renaming those existing surfaces as apply.
+
+Reuse the reviewed service-role Gateway, connector and container specifications
+and their [adoption-readiness record](../../../fleet-manager/docs/gateway-adoption-readiness.md).
+The [native qualification campaign](../../2026/10/20%20gateway-native-qualification/README.md)
+proves exact-source amd64/ARM64 isolated behavior. Those retained images are not
+released registry artifacts, an installation or a managed migration. New setup
+must consume the owning release and lifecycle contracts rather than rebuild
+that Gateway or convert its witness into a deployment mechanism.
 
 This closes the machine-fleet vision's driver-selected reachability,
 owner-directed named reconciliation and recoverable lifecycle intent, while
@@ -83,6 +103,48 @@ The following contract decomposition and validation techniques are
 **agent-recommended** implementation proposals, not additional operator grants.
 
 ## Proposed Contract
+
+### Portable setup modules and operation ownership
+
+Gateway and Vault setup are Fleet Manager modules composed through normal
+role selection, installation, supervision, credential providers and optional
+plugin/Worktree Manager clients. An installed client or enabled plugin does not
+host a service, enroll a machine, authorize a publisher or create another
+supervisor. Independently runnable services and standalone clients remain
+supported without Worktree Manager or Copilot.
+
+The Gateway module consumes the selected shared Gateway and connector
+distribution, existing routing/authentication owners and explicit transport
+policy. No relay product is mandatory: native OpenSSH, a supported Bastion path
+or another selected provider must qualify its own contract without a silent
+fallback. The Vault module composes its existing custody and service lifecycle;
+it does not create a new credential issuer, export long-lived secrets or turn
+fleet membership into credential authority.
+
+| Operation | Retained owner or prerequisite |
+|-----------|-------------------------------|
+| Release selection and complete role closure | #6240's existing contract; pure release-selection data is not publication |
+| Generic artifact publication | Explicit participant and operation reservation still required; unassigned |
+| Ordered construction, admission, lifecycle and later setup-hook wiring | `wobbly-contraption`, within retained #6424/#6240 scope |
+| Routing, authentication, enrollment and provider interoperability | Existing #5789/#6443/#6804 owners |
+| Target-local profile emission, source audit and canonical aliases | Existing agent-ssh owner |
+| Operation admission, uncertainty and receipts | Existing #6241 owner |
+
+Before effectful integration, the artifact publisher and setup consumer must
+agree the actual release/source seam: selected immutable input, role/platform
+closure, provenance and verification, supported distribution and compatible
+rollback. Record the participant and reservation here when accepted. Historical
+Python artifact pipeline failures under #6535/#6632 or trusted-control ownership
+under #6237 are not current generic transport-artifact receipts or an appointment.
+Do not infer custody from their mere presence or create another publisher to
+fill the gap.
+
+Adopter-private generic prototypes migrate into the shared implementation and
+are retired only after qualified replacement, preserved state, reconnect and
+compatible rollback. Retain the working predecessor until those gates pass;
+removing configuration or a requirement does not authorize immediate teardown.
+Complete Chat implementation remains with #7238 and its existing service,
+client and plugin owners, not a second backend in this integration slice.
 
 ### Accepted source-leaf boundary
 
@@ -182,6 +244,11 @@ onboarded merely because its source is published.
 - Client-only, interactive-session, headless-service and constrained-guest roles
   have explicit supported behavior. An unavailable or unsupported role is not
   silently omitted or given another transport as an unapproved fallback.
+- User-owned interactive connections follow the user's logon lifetime; no
+  prelogin, SYSTEM or privileged service account is required. Separately adopted
+  service-host roles retain their own availability contract. Normal provider
+  issuance/relay renewal connects authorized donors and consumers without
+  copying accounts, widening direction policy or granting new identity rights.
 
 ### Setup, persistence and reconciliation
 
@@ -235,11 +302,17 @@ onboarded merely because its source is published.
 ### Phase 1 - Reviewed integration and ownership
 
 - [x] Reconcile this proposal with the existing parent plans and current source.
-- [x] Obtain the retained setup/construction/admission/execution owners' exact
-  interface and exclusive-file agreement.
+- [x] Obtain the retained construction/admission owner's exact policy/runtime
+  leaf interface and exclusive-file agreement.
 - [x] Turn available adopter evidence into public synthetic failure fixtures;
   retain private machine inventory only in its private elaboration.
 - [x] Clear this proposal's normal review/publication gate before runtime work.
+- [x] Adopt #7513's reviewed portable ownership, module and qualified-migration
+  intent without a duplicate vision or private engine.
+- [ ] Obtain the actual generic artifact publisher participant/operation
+  reservation and its accepted #6240 release/source seam before setup wiring.
+- [ ] Review the coherent integration-contract amendment against retained
+  lifecycle, routing, authentication, credential and Chat scopes.
 
 ### Phase 2 - Driver and directional policy
 
@@ -286,6 +359,12 @@ onboarded merely because its source is published.
 - [ ] Unit/schema: controller/provider selection, mutually exclusive canonical
   aliases, directional allow/deny rules, constrained guest hops and unsupported
   role refusal.
+- [ ] Artifact/source boundary: require the accepted publisher reservation and
+  actual selected role/platform/provenance input; reject data-only admission,
+  source merge or isolated image proof as publication or execution authority.
+- [ ] Module composition: Gateway/Vault use their existing installation,
+  supervision and credential owners; thin-client/plugin/Manager selection has
+  no implicit hosting, enrollment, credential export or alternate executor.
 - [ ] Native Windows and Linux first-touch; include architecture/interpreter
   differences and a thin-client-only negative test with no hosting effects.
 - [ ] Real provider module -> registry -> agent-ssh emitter/audit -> ordinary
@@ -441,3 +520,28 @@ takeover or implementation completion is asserted.
   pending. These focused
   validation items do not complete the parent integration, provider, setup,
   admission, lifecycle or controlled-adoption plans.
+
+### 2026-10-21 - Reviewed portable intent and integration operation boundaries
+
+- #7513 merged the existing Machine Fleet vision amendment as
+  `a2aaad649fab7c98cbfd4a7079e9503f4a0c3f64` after exact-head approval and
+  required CI. This effort consumes that canonical intent rather than opening
+  another vision or implementing a replacement controller.
+- Retained `wobbly-contraption` construction/lifecycle custody identifies the
+  setup consumer, not a generic artifact publisher. The publisher participant
+  and operation reservation remain an explicit pre-execution gate.
+- Inspected #6240's pure release-selection receipt and the historical
+  #6535/#6632 pipeline failure records; none establishes current generic
+  Gateway/OpenSSH/Bastion artifact publication. #6237's trusted-control role
+  likewise does not appoint this slice's publisher.
+- Reused the existing Gateway source and native qualification/readiness
+  boundaries. Separate exact-source native images are useful prior art, not
+  released artifact, managed installation or live adoption proof.
+- The binding implementation is now published in harness-knowledge
+  `0.1.2-dev1`; its effect-free version-1 preservation/pair capability is
+  available. Earlier paused-Main and unavailable-1.1 journal entries remain
+  historical. Installed selection and actual adopter rollout remain separate.
+- Reconciled Gateway/Vault module consumption, user-logon availability,
+  independent directions, normal credential renewal and qualified prototype
+  retirement while retaining existing source and effect owners. No executor,
+  artifact signing grant, enrollment, credential action or rollout occurred.
