@@ -62,6 +62,8 @@ stdin/file decoding, using `mixed_native_invocation`. Canonical parser defaults
 flags remain accepted; they do not replace the frozen invocation or start a
 different delivery mode. Real-parser refusal probes require zero input reads
 and zero requests and replay the independently expected CLI refusal vector.
+An explicitly empty invocation selector remains keyed intent, never an unkeyed
+fallback, and is refused before input reads or client preflight.
 
 The independently authored `ordinary-native-admission-generation-45.json`
 vectors run through the typed public ASGI routes and actual turn journal with

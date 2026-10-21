@@ -48,6 +48,13 @@
     "reason": "mixed_native_invocation",
     "error": "keyed native invocation cannot mix alternate prompt/delivery options"
   },
+  "cli_empty_selector_refusal": {
+    "outcome": "refused_invalid",
+    "target": "bridge-a",
+    "retryable": false,
+    "reason": "invalid_native_invocation",
+    "error": "invalid UTF-8 native invocation request"
+  },
   "scope": "Independently authored synthetic HTTP vectors, replayed through ASGI and the real turn journal with a mock SDK. Admission is not execution or native-source qualification.",
   "evidence_family": "ordinary-native-keyed-admission-v1"
 }

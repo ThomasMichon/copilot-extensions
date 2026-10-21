@@ -119,6 +119,36 @@ def test_real_parser_default_keyed_send_and_receipt_preserve_wire(
     ]
 
 
+@pytest.mark.parametrize("options", [
+    [], ["alternate prompt"], ["--notify"], ["--receipt-only"],
+])
+def test_real_parser_empty_native_selector_never_falls_back(monkeypatch, capsys, options):
+    from agent_bridge import __main__ as core
+    vector = _keyed_cli_vector()
+    args = core.build_parser().parse_args([
+        "--json", "send", "bridge-a", *options, "--native-invocation-file", "",
+        "--expected-native-session-id", "native-a",
+    ])
+    assert args.native_invocation_file == ""
+    client = MagicMock()
+    get_client = MagicMock(side_effect=AssertionError("empty keyed selector reached client/ordinary handling"))
+    monkeypatch.setattr(core, "_get_client", get_client)
+
+    def forbidden_read(*_args, **_kwargs):
+        pytest.fail("empty keyed selector must refuse without input reads")
+
+    monkeypatch.setattr(Path, "read_text", forbidden_read)
+    monkeypatch.setattr("sys.stdin", SimpleNamespace(buffer=SimpleNamespace(read=forbidden_read)))
+    with pytest.raises(SystemExit) as refused:
+        args.func(args)
+    assert refused.value.code == 2
+    expected = ("cli_mixed_option_refusal" if options in (["alternate prompt"], ["--notify"])
+                else "cli_empty_selector_refusal")
+    assert json.loads(capsys.readouterr().out) == vector[expected]
+    get_client.assert_not_called()
+    client._request.assert_not_called()
+
+
 @pytest.fixture
 def keyed(session_manager, tmp_db, mock_acp_client):
     session = prepare(session_manager, tmp_db, mock_acp_client)

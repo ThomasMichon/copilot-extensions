@@ -42,6 +42,10 @@ def validate_options(args: argparse.Namespace) -> None:
         raise SendRefused("refused_invalid", reason="mixed_native_invocation",
                           retryable=False, target=args.target,
                           error="keyed native invocation cannot mix alternate prompt/delivery options")
+    if getattr(args, "native_invocation_file", None) == "":
+        raise SendRefused("refused_invalid", reason="invalid_native_invocation",
+                          retryable=False, target=args.target,
+                          error="invalid UTF-8 native invocation request")
 
 
 def send(args: argparse.Namespace, client: BridgeClient) -> None:

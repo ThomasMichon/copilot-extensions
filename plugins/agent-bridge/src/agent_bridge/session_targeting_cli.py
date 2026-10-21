@@ -102,7 +102,7 @@ def _send(args: argparse.Namespace) -> None:
     from .send_outcome import SendRefused
 
     core = _core()
-    if getattr(args, "native_invocation_file", None):
+    if getattr(args, "native_invocation_file", None) is not None:
         from .native_keyed_client import send, validate_options
         validate_options(args)
         send(args, core._get_client())
