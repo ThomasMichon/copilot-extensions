@@ -191,6 +191,12 @@ Reclassify any entry by re-adding it with the right class:
 <agent-worktrees catalog argv[0]> repos add copilot-extensions 'D:\Src\copilot-extensions' --class worktree
 ```
 
+Omitting `--class` preserves an existing entry's class; a new entry defaults to
+`reference`. An explicit `--class reference` changes an existing entry to
+read-only. Reclassification preserves the existing agent preference unless
+`--agent` or `--no-agent` is supplied, and does not add or remove project
+membership in `projects.yaml`.
+
 ### Set up source roots
 
 ```bash

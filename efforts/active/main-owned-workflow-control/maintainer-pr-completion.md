@@ -68,6 +68,14 @@ Repository editing class, agent exposure and Manager project membership are
 independent; a related worktree-class repository is not automatically a full
 Manager project. Concrete downstream classifications remain downstream.
 
+The first #7510 repair distinguishes an omitted repository class from an
+explicit reclassification, including `reference`, while retaining independent
+agent preferences and project membership. Its isolated registry, CLI and
+retained-reference unregister regressions cover persisted class changes,
+metadata retention and invalid-input rejection. The separate related-worktree
+unadoption path, historical launcher disposition and installed acceptance remain
+open; a class-only repair does not authorize those live transitions.
+
 The #7441 per-review-layer authority fix is qualified by promotion #7448 and
 present in the selected, importable Worktrees 1.24.106-dev1 runtime. That is
 caller delivery evidence, not whole-update acceptance: Bridge cutover, Dispatch

@@ -38,6 +38,7 @@ def _repos_usage() -> None:
     print("     [--class C] [--remote URL] [--default-branch B]")
     print("     [--account LOGIN] [--tags a,b] [--contributing PATH]")
     print("     [--agent|--no-agent] [--visibility private|internal|public]")
+    print("     Omitted class preserves an existing class; new repos default to reference.")
     print("  set-visibility <name> <tier>         Set a repo's audience-exposure tier")
     print("     (private|internal|public -- see docs/identifier-blocklist.md)")
     print("  remove <name>                       Remove a repo from the registry")
@@ -227,7 +228,6 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
             )
             return 1
         name, path = rest[0], rest[1]
-        rclass = "reference"
         remote = ""
         default_branch = ""
         tags: list[str] = []
@@ -240,7 +240,20 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
                     return rest[idx + 1]
             return None
 
-        rclass = _opt("--class") or _opt("--type") or rclass
+        for flag in ("--class", "--type"):
+            if flag not in rest:
+                continue
+            value = _opt(flag)
+            if value is None or value.startswith("--"):
+                output.err(f"repos add: {flag} requires a class value")
+                return 1
+            if value.strip().lower() not in (*repos.VALID_CLASSES, "project", "repo"):
+                output.err(
+                    f"repos add: invalid class '{value}' -- must be one of: "
+                    + ", ".join(repos.VALID_CLASSES)
+                )
+                return 1
+        rclass = _opt("--class") or _opt("--type")
         remote = _opt("--remote") or remote
         default_branch = _opt("--default-branch") or default_branch
         if not default_branch:

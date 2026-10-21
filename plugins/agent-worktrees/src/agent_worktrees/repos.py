@@ -703,7 +703,7 @@ def add_repo(
     name: str,
     path: str,
     *,
-    repo_class: str = "reference",
+    repo_class: str | None = None,
     remote: str = "",
     default_branch: str = "",
     tags: list[str] | None = None,
@@ -713,21 +713,22 @@ def add_repo(
     visibility: str = "",
     plat: str | None = None,
 ) -> RepoEntry:
-    """Register a repo at a known path.  Merges with existing entry."""
+    """Merge a registration; omitted class preserves an existing choice.
+
+    New entries default to reference. An explicit class, including reference,
+    changes only the editing model, not an existing agent preference.
+    """
     plat = plat or _current_platform()
     registry = read_registry()
-    repo_class = normalize_class(repo_class)
+    normalized_class = normalize_class(repo_class)
 
     existing = registry.repos.get(name)
     if existing:
         existing.paths[plat] = path
         if remote:
             existing.remote = remote
-        # Only override class when explicitly upgraded away from the
-        # default; this lets `add` re-register a path without clobbering
-        # a deliberate classification.
-        if repo_class != "reference":
-            existing.repo_class = repo_class
+        if repo_class is not None:
+            existing.repo_class = normalized_class
         if default_branch:
             existing.default_branch = default_branch
         if tags:
@@ -744,13 +745,13 @@ def add_repo(
     else:
         entry = RepoEntry(
             name=name,
-            repo_class=repo_class,
+            repo_class=normalized_class,
             remote=remote,
             default_branch=default_branch,
             tags=list(tags) if tags else [],
             contributing=contributing,
             account=account,
-            agent=agent if agent is not None else (repo_class != "reference"),
+            agent=agent if agent is not None else (normalized_class != "reference"),
             visibility=normalize_visibility(visibility),
             paths={plat: path},
         )
