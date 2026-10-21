@@ -85,7 +85,8 @@ def test_preparation_metadata_does_not_turn_a_local_target_into_a_provider():
     restored.static_plugin_args = None
     restored.local_plugin_preparation = False
     assert not SpawnTarget.from_json(restored.to_json()).local_plugin_preparation
-    assert "plugin_preparation" not in json.loads(restored.to_json())["venue"][REQUEST_OVERRIDES_KEY]
+    overrides = json.loads(restored.to_json())["venue"][REQUEST_OVERRIDES_KEY]
+    assert "plugin_preparation" not in overrides
 
 
 def test_invalid_preparation_metadata_fails_explicitly():

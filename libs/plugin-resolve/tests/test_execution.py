@@ -116,8 +116,11 @@ def test_batch_executable_path_is_literal_data_not_cmd_syntax(tmp_path, folder):
 
 
 @pytest.mark.parametrize("emitted", [False, True])
+@pytest.mark.parametrize("quoted", [
+    False, pytest.param(True, marks=pytest.mark.skipif(os.name != "nt", reason="Windows PATH quotes")),
+])
 def test_default_installer_uses_original_execution_cwd_before_neutral_installation(
-    tmp_path, monkeypatch, emitted,
+    tmp_path, monkeypatch, emitted, quoted,
 ):
     repo, daemon, home = (tmp_path / name for name in ("checkout", "daemon", "home"))
     init_checkout(repo)
@@ -141,8 +144,8 @@ def test_default_installer_uses_original_execution_cwd_before_neutral_installati
     environment = {
         **os.environ, "HOME": str(home), "USERPROFILE": str(home),
         "COPILOT_HOME": str(preferences.parent), "VENUE_CALL_LOG": str(calls),
-        "COPILOT_PATH": os.path.relpath(installer, execution),
-        "PATH": os.pathsep.join(["bin", os.environ.get("PATH", "")]),
+        "COPILOT_PATH": installer.name if quoted else os.path.relpath(installer, execution),
+        "PATH": os.pathsep.join(['"bin"' if quoted else "bin", os.environ.get("PATH", "")]),
     }
     request = {
         "repo": str(execution),

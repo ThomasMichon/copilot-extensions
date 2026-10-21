@@ -286,6 +286,13 @@ or a reason to create a daemon.
   containing spaces, preserve the productive environment, and retain literal
   quote characters on POSIX. The full contained shared suite passes 284 cases
   with one explicit platform skip; the shipped vendored helper remains identical.
+  The focused lookup selection also passes 14 cases with one platform skip,
+  including real installation through both direct and emitted consumers with
+  quoted Windows PATH entries.
+- Authenticated native Codespace revalidation passes on committed source
+  `9d4a450898081e9b0f78cb3b716955d55cfe9212`: one selected-skill task, identical
+  retry message 3, unchanged productive preferences and verified owned cleanup.
+  The venue was recovered and stopped without deletion or shared runtime updates.
 - The supported HTTP range and capability floors are unchanged. Current-head
   native acceptance, review, CI and merge remain required; no previously pinned
   merge permission transfers to the amended head.
