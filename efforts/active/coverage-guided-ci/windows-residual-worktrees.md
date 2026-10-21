@@ -87,7 +87,46 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Admitted fixture-semantic batches
 
+### B-PROVIDER-RECORD persisted provider inputs
+
+Baseline: the actual #7684 merge. `provider_record_repo` constructs fresh
+configuration and a real tracking record per case, without Git setup.
+`_open_record` persists a creating PR and calls the real
+`_finish_auto_open`; five attribution-focused cases use that boundary.
+Four ready/legacy-hold cases use the same record fixture and real `set_pr`
+before invoking `pr_ready`. Provider, attribution, frozen-policy,
+record-writing and ready-state decisions are not replaced.
+
+All 246 existing tests, assertions and decorators remain. Actual
+`create_pr` publication integrations, default attribution propagation,
+draft/hold creation and duplicate malformed-marker assertions remain
+unchanged. The separate B-PROVIDER-ASSERT consolidation is not absorbed.
+The historical `test_attribution_keys_are_consistent` is absent from
+both the current baseline and preserved source, so there is no fixture
+parameter to remove from that symbol here.
+
+Complete native Windows provider module: 246 passed, zero skips,
+129.09 seconds pytest / 143.23 preparation-cleanup inclusive. Exactly
+two work-stealing workers retain the original 30-second item watchdog,
+all marks/resource ceilings and the 240-second diagnostic group.
+This is functional integration, not quiet-host, whole-suite or
+repeated same-head qualification.
+
+This below-altitude test setup adaptation changes no production,
+command, configuration, installation or architecture contract.
+Documentation impact is this ledger. Clean-room provisioning and
+external-venue lanes are inapplicable; no other B/N or S/F/G/P/R/A
+contract is absorbed.
+
 ### B-LEGACY-CONFIG fixture-owned committed-layer absence
+
+Actual disposition: #7684 merged as
+`272c89f28a7483d7105ed1750c0512924859e102`; full Copilot review
+`5607391353` approved exact head
+`ce90ea97e6e0231fbad99911043d9e04b1396696`. The overview's unspecified
+Low documentation nit was assessed against the final documentation impact;
+inline/general channels and threads had no findings. Required CI was green.
+The child worktree is finalized.
 
 Baseline: the actual #7681 merge. `graph.committed_config` returns an
 empty committed layer only for this fixture's named plain anchors

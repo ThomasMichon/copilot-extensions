@@ -23,6 +23,27 @@ from agent_worktrees.providers import (
 # base: credential resolution + registry + scope builder
 # ---------------------------------------------------------------------------
 
+@pytest.fixture
+def provider_record_repo(tmp_path, monkeypatch):
+    tracking_dir = tmp_path / "tracking"
+    tracking_dir.mkdir()
+    config = cfg.Config(
+        srcroot=str(tmp_path), machine="test", platform="linux", repo_name="ext",
+        repos={"ext": cfg.RepoConfig(
+            anchor=str(tmp_path / "anchor"), worktree_root=str(tmp_path),
+            pr=cfg.PRConfig(enabled=True, provider="gitea"),
+        )},
+    )
+    monkeypatch.setattr(cfg, "tracking_dir", lambda name=None: tracking_dir)
+    monkeypatch.setattr(cfg, "load_config", lambda *args, **kwargs: config)
+    wid = "provider-record-test"
+    tracking.create_new_record(
+        wid, f"worktree/{wid}", str(tmp_path / "worktree"),
+        "ext", "test", "linux", tracking_dir,
+    )
+    return config, wid, tmp_path / "worktree", tmp_path / "remote"
+
+
 class TestResolveToken:
     def test_token_env(self, monkeypatch):
         monkeypatch.setenv("MY_TOKEN", "secret123")
@@ -2628,6 +2649,25 @@ class _FakeReadyProvider:
 
 
 class TestCreatePRAutoOpen:
+    def _open_record(self, wid, config, *, body=None, attribution=None):
+        record = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        target = tracking.PRRecord(
+            state="creating", branch="feature/add-feature", repo="o/r",
+            provider="gitea", head_sha="published-head",
+        )
+        record.prs = [target]
+        tracking.save_record(record)
+        result = {
+            "success": True, "branch": target.branch, "repo": target.repo,
+            "head_sha": target.head_sha,
+        }
+        pr_ops._finish_auto_open(
+            result, config, record, target, title="Add feature", body=body,
+            worktree_id=wid, head_sha=target.head_sha, open_pr=None,
+            draft=False, attribution=attribution, prcfg=config.default_repo.pr,
+        )
+        return result
+
     def _enable_open(self, config, *, source_attribution=False):
         import dataclasses
         repo = config.repos["ext"]
@@ -2700,11 +2740,11 @@ class TestCreatePRAutoOpen:
         assert attribution.parse_marker(fake.captured["scope"].body) is None
 
     def test_codename_mode_embeds_codename_and_encrypted_identity(
-        self, pr_repo, monkeypatch, keyed_identity_payload,
+        self, provider_record_repo, monkeypatch, keyed_identity_payload,
     ):
         """Initial PR publication sends identity through the cipher, not raw fields."""
         from agent_worktrees import providers
-        config, wid, _wt, _ = pr_repo
+        config, wid, _wt, _ = provider_record_repo
         rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
         rec.codename = "harbor-lattice"
         # codename-attribution-by-default: may_publish_codename requires a
@@ -2717,7 +2757,7 @@ class TestCreatePRAutoOpen:
         fake = _FakeProvider()
         monkeypatch.setattr(providers, "get_provider", lambda name: fake)
 
-        res = pr_ops.create_pr(wid, config, title="Add feature")
+        res = self._open_record(wid, config)
 
         assert res["success"] is True
         body = fake.captured["scope"].body
@@ -2806,7 +2846,7 @@ class TestCreatePRAutoOpen:
         assert attribution.parse_marker(body) is None
 
     def test_codename_mode_backfills_a_missing_codename(
-        self, pr_repo, monkeypatch,
+        self, provider_record_repo, monkeypatch,
     ):
         """If the worktree has no assigned codename yet (a pre-Phase-2 or
         never-touched record), `codename` mode must backfill one via the
@@ -2815,7 +2855,7 @@ class TestCreatePRAutoOpen:
         marker just because `create-pr` happens to be the first thing to
         touch this record."""
         from agent_worktrees import providers
-        config, wid, _wt, _ = pr_repo
+        config, wid, _wt, _ = provider_record_repo
         rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
         assert rec.codename is None
         config = self._enable_open(config, source_attribution="codename")
@@ -2823,7 +2863,7 @@ class TestCreatePRAutoOpen:
         fake = _FakeProvider()
         monkeypatch.setattr(providers, "get_provider", lambda name: fake)
 
-        res = pr_ops.create_pr(wid, config, title="Add feature")
+        res = self._open_record(wid, config)
 
         assert res["success"] is True
         fields = attribution.parse_marker(fake.captured["scope"].body)
@@ -2833,7 +2873,7 @@ class TestCreatePRAutoOpen:
         assert rec_after.codename == fields["codename"]
 
     def test_codename_backfill_failure_degrades_to_skip_not_crash(
-        self, pr_repo, monkeypatch,
+        self, provider_record_repo, monkeypatch,
     ):
         """`ensure_codename` can raise (notably `TimeoutError` if its
         cross-process allocation lock can't be acquired in time) -- this is
@@ -2841,7 +2881,7 @@ class TestCreatePRAutoOpen:
         this PR" (the pre-existing skip behavior), never crash the
         provider-open flow and abort the whole PR."""
         from agent_worktrees import codename_tracking, providers
-        config, wid, _wt, _ = pr_repo
+        config, wid, _wt, _ = provider_record_repo
         rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
         assert rec.codename is None
         config = self._enable_open(config, source_attribution="codename")
@@ -2853,7 +2893,7 @@ class TestCreatePRAutoOpen:
             raise TimeoutError("lock contended")
         monkeypatch.setattr(codename_tracking, "ensure_codename", _boom)
 
-        res = pr_ops.create_pr(wid, config, title="Add feature")
+        res = self._open_record(wid, config)
 
         assert res["success"] is True
         assert res.get("pr_opened") is True
@@ -2862,7 +2902,7 @@ class TestCreatePRAutoOpen:
         assert rec_after.codename is None
 
     def test_codename_mode_skip_strips_a_stale_marker_from_the_body(
-        self, pr_repo, monkeypatch,
+        self, provider_record_repo, monkeypatch,
     ):
         """When codename mode skips publishing (a MALFORMED, not merely
         missing, codename -- a missing one is now backfilled and
@@ -2871,7 +2911,7 @@ class TestCreatePRAutoOpen:
         must be stripped -- not left in place, where it could still carry
         raw identifiers."""
         from agent_worktrees import providers
-        config, wid, _wt, _ = pr_repo
+        config, wid, _wt, _ = provider_record_repo
         rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
         rec.codename = "not a handle --> <script>"
         tracking.save_record(rec)
@@ -2882,19 +2922,19 @@ class TestCreatePRAutoOpen:
         stale_marker = attribution.build_marker("stale-worktree-id", machine="m")
         body = f"Some description.\n\n{stale_marker}\n"
 
-        res = pr_ops.create_pr(wid, config, title="Add feature", body=body)
+        res = self._open_record(wid, config, body=body)
 
         assert res["success"] is True
         assert attribution.parse_marker(fake.captured["scope"].body) is None
         assert "stale-worktree-id" not in fake.captured["scope"].body
 
     def test_attribution_disabled_strips_a_stale_marker_from_the_body(
-        self, pr_repo, monkeypatch,
+        self, provider_record_repo, monkeypatch,
     ):
         """With attribution disabled entirely, a pre-existing source marker
         in the caller-supplied body must also be stripped."""
         from agent_worktrees import providers
-        config, wid, _wt, _ = pr_repo
+        config, wid, _wt, _ = provider_record_repo
         config = self._enable_open(config)  # source_attribution=False (default)
         monkeypatch.setenv("EXT_TOKEN", "tok")
         fake = _FakeProvider()
@@ -2902,7 +2942,7 @@ class TestCreatePRAutoOpen:
         stale_marker = attribution.build_marker("stale-worktree-id", machine="m")
         body = f"Some description.\n\n{stale_marker}\n"
 
-        res = pr_ops.create_pr(wid, config, title="Add feature", body=body)
+        res = self._open_record(wid, config, body=body)
 
         assert res["success"] is True
         assert attribution.parse_marker(fake.captured["scope"].body) is None
@@ -3063,13 +3103,12 @@ class TestCreatePRAutoOpen:
         return config, wid
 
     def _track_pr(self, wid, config):
-        pr_ops.create_pr(wid, config, title="Add feature")
         pr_ops.set_pr(
             wid, url="https://h/gitea/o/r/pulls/99", number=99, provider="gitea",
         )
 
-    def test_pr_ready_undrafts_draft_pr(self, pr_repo, monkeypatch):
-        config, wid = self._ready_config(pr_repo)
+    def test_pr_ready_undrafts_draft_pr(self, provider_record_repo, monkeypatch):
+        config, wid = self._ready_config(provider_record_repo)
         monkeypatch.setenv("EXT_TOKEN", "tok")
         self._track_pr(wid, config)
         fake = _FakeReadyProvider(
@@ -3089,8 +3128,8 @@ class TestCreatePRAutoOpen:
         # It must NOT touch the legacy hold label on the draft path.
         assert fake.removed is None
 
-    def test_pr_ready_errors_when_mark_ready_fails(self, pr_repo, monkeypatch):
-        config, wid = self._ready_config(pr_repo)
+    def test_pr_ready_errors_when_mark_ready_fails(self, provider_record_repo, monkeypatch):
+        config, wid = self._ready_config(provider_record_repo)
         monkeypatch.setenv("EXT_TOKEN", "tok")
         self._track_pr(wid, config)
         fake = _FakeReadyProvider(
@@ -3103,9 +3142,9 @@ class TestCreatePRAutoOpen:
         assert res["success"] is False
         assert "un-draft failed" in res["error"]
 
-    def test_pr_ready_errors_when_not_draft(self, pr_repo, monkeypatch):
+    def test_pr_ready_errors_when_not_draft(self, provider_record_repo, monkeypatch):
         # A no-op must never masquerade as success (issue #2779).
-        config, wid = self._ready_config(pr_repo)
+        config, wid = self._ready_config(provider_record_repo)
         monkeypatch.setenv("EXT_TOKEN", "tok")
         self._track_pr(wid, config)
         fake = _FakeReadyProvider(
@@ -3120,10 +3159,10 @@ class TestCreatePRAutoOpen:
         assert fake.marked_ready is None
         assert fake.removed is None
 
-    def test_pr_ready_removes_legacy_hold_label(self, pr_repo, monkeypatch):
+    def test_pr_ready_removes_legacy_hold_label(self, provider_record_repo, monkeypatch):
         # Backward-compat: a non-draft PR carrying the retired do-not-merge hold
         # label is released by removing the label (the equivalent transition).
-        config, wid = self._ready_config(pr_repo)
+        config, wid = self._ready_config(provider_record_repo)
         monkeypatch.setenv("EXT_TOKEN", "tok")
         self._track_pr(wid, config)
         fake = _FakeReadyProvider(
