@@ -121,11 +121,10 @@ thirteen-plugin install-contract guard pass with zero violations.
 No provider double, production code, seed reuse, native-operation assertion,
 test tier or CI admission changes enter this batch.
 
-Review identified a masked backfill precondition: an initially populated
-`head_identity` was restored by the record merge before the stale writer loaded.
-The shared synthetic fixture now leaves that identity absent from its first
-persisted state; the case explicitly asserts both loaded snapshots still lack
-it before the other writer backfills. All 45 cases then pass without skips in
+The shared synthetic fixture leaves `head_identity` absent from its first
+persisted state. Record merging restores a nonempty durable identity, so
+the case explicitly asserts both loaded snapshots lack it before the other
+writer backfills. All 45 cases pass without skips in
 18.18 seconds (22.17 inclusive); final collection takes 14.38 seconds inclusive.
 A separate contained in-memory mutation suppressing only identity backfill
 causes this case to fail at its original final preservation assertion, not
