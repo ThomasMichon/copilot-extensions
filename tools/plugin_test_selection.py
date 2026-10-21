@@ -10,6 +10,7 @@ EXTERNAL_TEST_ROOTS = {
     "worktree-manager": Path("worktree-manager"),
     "payload-invocation": Path("libs/payload-invocation"),
     "runtime-source": Path("libs/versioned-runtime"),
+    "worktree-identity": Path("libs/worktree-identity"),
 }
 
 

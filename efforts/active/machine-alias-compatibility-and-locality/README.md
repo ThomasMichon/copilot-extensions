@@ -365,6 +365,38 @@ unrelated service changes or a second machine registry.
 
 ## Journal
 
+### 2026-10-20 - Shared codec extraction source slice
+- The strict wire decoder now lives in dependency-free
+  `libs/worktree-identity`; Worktrees retains its old module as imports of
+  the same classes and functions. Supported canonical environments, explicit
+  version validation, error messages and absent-version legacy behavior stay
+  unchanged. No producer, tracking serializer or authority fence changes.
+- Worktrees declares an ordinary canonical editable dependency. Existing
+  materialization and first-party graph attribution discover it without a
+  new registry or sibling-runtime requirement. The bounded runner has an
+  explicit library target; no promotion packet or required test job expands.
+- Source validation passed 72 library contracts, 114 affected Worktrees
+  contracts and four packaging/runner checks. A real artifact-helper wheel
+  build and offline, no-dependency installation passed an isolated roundtrip
+  without Worktrees or machine-transport installed. Materialization preserves
+  the library bytes and rewrites the dependency to the embedded release path.
+- This slice still owes current-head review and required Source CI. Dispatch,
+  Bridge and Manager adapters, prospective producers, retained replay,
+  qualified release and installed Windows/WSL acceptance remain open.
+
+### 2026-10-20 - Shared codec plan reviewed; extraction starts
+- #7440 merged as `db0fc0a3ec3f5415013d95f03b2192f35517744c` after
+  exact-head approval of `68d77869f2ee70929c2561e208a9aa13afa25675`
+  and passing required checks. The canonical source is reconciled onto that
+  reviewed plan; an earlier failed review attempt was not counted as approval.
+- The first implementation slice extracts the strict dependency-free decoder,
+  retains the Worktrees compatibility import, and proves standalone package
+  construction and self-contained materialization. Consumer adapters follow
+  only after that shared boundary is available; tuple producers stay disabled.
+- The independent Windows recovery lane is converging on the already merged
+  front-door repair and preserves its runtime owners. No source merge here is
+  a claim of published adoption or installed Windows/WSL acceptance.
+
 ### 2026-10-20 - Shared pure codec selected for external consumers
 - The operator selected a shared dependency-free codec rather than copied
   local readers. Dispatch currently has no machine-transport or Worktrees

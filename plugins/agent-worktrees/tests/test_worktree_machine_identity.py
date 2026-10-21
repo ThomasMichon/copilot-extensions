@@ -5,11 +5,22 @@ from __future__ import annotations
 from copy import deepcopy
 
 import pytest
+import worktree_identity
 
 from agent_worktrees.worktree_machine_identity import (
     WorktreeMachineIdentity, WorktreeMachineIdentityError, parse_machine_identity,
 )
 from agent_worktrees.worktree_naming import prospective_session_worktree_id
+
+
+def test_compatibility_exports_are_the_shared_objects() -> None:
+    from agent_worktrees import worktree_machine_identity
+
+    for name in (
+        "MACHINE_IDENTITY_VERSION", "WorktreeMachineIdentity", "WorktreeMachineIdentityError",
+        "parse_machine_identity", "execution_machine_from_fields", "projected_machine_fields",
+    ):
+        assert getattr(worktree_machine_identity, name) is getattr(worktree_identity, name)
 
 
 @pytest.mark.parametrize("environment", ["windows", "wsl", "linux"])

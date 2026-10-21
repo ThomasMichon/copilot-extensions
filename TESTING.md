@@ -176,6 +176,14 @@ added for this periodic/manual benchmark.
 
 ## The turn-key runner
 
+The dependency-free worktree identity codec has the explicit
+`worktree-identity` target, backed by `libs/worktree-identity/tests`. Run it
+through `tools/run_tests_in_devcontainer.py worktree-identity` with the same
+bounded supervisor used for plugin suites. Worktrees' compatibility and
+consumer tests remain in its own target; repository packaging contracts live
+in `tools/test_worktree_identity_packaging.py`. These periodic/source checks
+do not enroll new tests in the unit-only promotion packet.
+
 The local runner measures each plugin from dependency preparation through final
 sandbox removal. Its aggregate timeout cannot turn a slow cleanup into a pass.
 After containment verifies that a group's processes are gone, one cleanup worker

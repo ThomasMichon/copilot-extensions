@@ -1306,6 +1306,7 @@ def test_external_targets_are_explicit_and_contained_in_repository(monkeypatch, 
     assert runner._plugin_dir("worktree-manager") == tmp_path / "worktree-manager"
     assert runner._plugin_dir("payload-invocation") == tmp_path / "libs" / "payload-invocation"
     assert runner._plugin_dir("runtime-source") == tmp_path / "libs" / "versioned-runtime"
+    assert runner._plugin_dir("worktree-identity") == tmp_path / "libs" / "worktree-identity"
     assert runner.EXTERNAL_TEST_DEPENDENCIES["payload-invocation"] == ("pyyaml>=6.0.3",)
     assert runner.EXTERNAL_TEST_DEPENDENCIES["runtime-source"] == ("pyyaml>=6.0.3",)
 

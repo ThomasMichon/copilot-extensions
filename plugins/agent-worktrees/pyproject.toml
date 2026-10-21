@@ -30,10 +30,12 @@ dependencies = [
     "agent-lazy-cli-dispatch",
     "agent-remote-login-shell",
     "agent-machine-transport",
+    "agent-worktree-identity",
     "agent-update-telemetry",
 ]
 
 [tool.uv.sources]
+agent-worktree-identity = { path = "../../libs/worktree-identity", editable = true }
 # Always resolve the vendored config-schema-migration lib from the local path,
 # never an index. Distribution name is namespaced (agent-config-migrate, not the
 # squattable "config-migrate") to prevent dependency-confusion; the import
