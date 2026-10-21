@@ -112,32 +112,47 @@ def run_windows_owned(
         raise subprocess.TimeoutExpired(argv, timeout)
     request["timeout"] = remaining
     payload = (json.dumps(request, ensure_ascii=True) + "\n").encode("ascii")
-    with _caller_owned._lifetime_lock:
-        process = subprocess.Popen(  # noqa: S603 - explicit GUI interpreter, no shell
-            _owner_command(str(python), mapped.stdout.rstrip("\r\n")),
-            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            bufsize=0, **no_window_kwargs(),
-        )
-        writer = process.stdin.fileno()
-        _caller_owned._lifetime_writers.add(writer)
+    process = None
+    writer = None
     try:
+        with _caller_owned._lifetime_lock:
+            try:
+                process = subprocess.Popen(  # noqa: S603 - explicit GUI interpreter, no shell
+                    _owner_command(str(python), mapped.stdout.rstrip("\r\n")),
+                    stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                    bufsize=0, **no_window_kwargs(),
+                )
+                writer = process.stdin.fileno()
+                _caller_owned._lifetime_writers.add(writer)
+            except BaseException:
+                # Retire partial registration before another thread can fork.
+                if writer is not None:
+                    _caller_owned._lifetime_writers.discard(writer)
+                    writer = None
+                if process is not None:
+                    process.stdin.close()
+                raise
         try:
             response = _exchange(process, payload, deadline)
         except TimeoutError as error:
             raise subprocess.TimeoutExpired(argv, timeout) from error
     finally:
-        with _caller_owned._lifetime_lock:
-            _caller_owned._lifetime_writers.remove(writer)
-            process.stdin.close()
-        try:
-            process.wait(timeout=3)
-        except subprocess.TimeoutExpired as error:
-            process.kill()
-            process.wait(timeout=3)
-            raise RuntimeError("Windows owner exit is unconfirmed; do not replay") from error
-        finally:
-            process.stdout.close()
-            process.stderr.close()
+        if process is not None:
+            try:
+                with _caller_owned._lifetime_lock:
+                    if writer is not None:
+                        _caller_owned._lifetime_writers.discard(writer)
+                    process.stdin.close()
+            finally:
+                try:
+                    process.wait(timeout=3)
+                except subprocess.TimeoutExpired as error:
+                    process.kill()
+                    process.wait(timeout=3)
+                    raise RuntimeError("Windows owner exit is unconfirmed; do not replay") from error
+                finally:
+                    process.stdout.close()
+                    process.stderr.close()
     return _completed(argv, timeout, response, process.returncode)
 
 

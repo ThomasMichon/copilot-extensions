@@ -365,6 +365,9 @@ caller exit, hard death or interruption closes it, and the Windows owner exits,
 releasing the self-Job and its descendants. Creation, registration and closure
 of its writer share the POSIX caller owner's fork lock and lifetime registry;
 unrelated fork children close inherited writers instead of extending ownership.
+Setup interruption also closes the pipe and waits for owner exit before
+propagating, including when the caller catches and retains the exception's
+traceback before any request has been sent.
 This is a bounded command helper,
 not a persistent service or a POSIX-group claim over Windows processes.
 

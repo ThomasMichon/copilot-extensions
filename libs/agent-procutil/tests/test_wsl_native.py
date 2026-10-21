@@ -243,3 +243,72 @@ def test_real_windows_tree_is_gone_before_outer_job_cleanup(tmp_path, case):
             _exercise_case(directory, case)
     assert observer.surfaced == {}, f"visible console windows: {observer.surfaced}"
     assert observer.focus_changes == {}, f"foreground transitions: {observer.focus_changes}"
+
+
+def test_setup_sigint_retires_windows_owner_while_caller_retains_traceback(tmp_path):
+    from test_spawn_daemon_windows_integration import _configure_win32, _WindowObserver
+
+    distro = os.environ["AGENT_PROCUTIL_WSL_TEST_DISTRO"]
+    source = Path(
+        os.environ.get("AGENT_PROCUTIL_WSL_TEST_PACKAGE_ROOT")
+        or Path(__file__).resolve().parents[1] / "src"
+    )
+    fixture = Path(__file__).with_name("wsl_caller_fixture.py")
+    pythonw = Path(sys._base_executable).with_name("pythonw.exe")
+    with _WindowObserver(*_configure_win32()) as observer:
+        for cycle in range(2):
+            directory = tmp_path / str(cycle)
+            directory.mkdir()
+            ready, gate, config = (
+                directory / name for name in ("ready.json", "interrupt", "request.json")
+            )
+            config.write_text(json.dumps({
+                "case": "setup-sigint", "source": _linux_path(source, distro),
+                "pythonw": _linux_path(pythonw, distro),
+                "gate": _linux_path(gate, distro), "ready": str(ready),
+                "argv": [str(pythonw), "-c", "raise RuntimeError('target must not start')"],
+            }))
+            process, outer_job = spawn_sync_in_kill_on_close_job(
+                ["wsl.exe", "-d", distro, "--exec", "/usr/bin/python3", "-B",
+                 _linux_path(fixture, distro), _linux_path(config, distro)],
+                require_job=True, allow_breakaway=False,
+                stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                text=True, **no_window_kwargs(),
+            )
+            owned = None
+            try:
+                deadline = time.monotonic() + 12
+                while not ready.exists() and process.poll() is None and time.monotonic() < deadline:
+                    time.sleep(.01)
+                assert ready.exists(), (
+                    "owner did not enter its pre-request boundary",
+                    process.communicate(timeout=1) if process.poll() is not None else "caller alive",
+                )
+                owned = _open_owned(json.loads(ready.read_text()))
+                kernel, handle = owned
+                assert kernel.WaitForSingleObject(handle, 0) == 258
+                gate.write_text("interrupt")
+                caught = gate.with_name("caught.json")
+                deadline = time.monotonic() + 5
+                while not caught.exists() and process.poll() is None and time.monotonic() < deadline:
+                    time.sleep(.01)
+                assert caught.exists() and json.loads(caught.read_text()) == {"retained": True}
+                assert process.poll() is None, "caller exited before owner observation"
+                assert kernel.WaitForSingleObject(handle, 3000) == 0
+                assert process.poll() is None, "outer cleanup masked owner retirement"
+            finally:
+                gate.write_text("interrupt")
+                gate.with_name("stop").write_text("stop")
+                if owned is not None:
+                    kernel, handle = owned
+                    if kernel.WaitForSingleObject(handle, 0) == 258:
+                        kernel.TerminateProcess(handle, 1)
+                        kernel.WaitForSingleObject(handle, 3000)
+                    kernel.CloseHandle(handle)
+                if outer_job is not None:
+                    outer_job.terminate_and_wait(3)
+                process.wait(timeout=3)
+                process.stdout.close()
+                process.stderr.close()
+    assert observer.surfaced == {}, f"visible console windows: {observer.surfaced}"
+    assert observer.focus_changes == {}, f"foreground transitions: {observer.focus_changes}"

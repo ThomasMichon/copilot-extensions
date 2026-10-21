@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import subprocess
 import sys
 import time
@@ -335,3 +336,76 @@ def test_lifetime_writer_is_fork_safe_through_creation_and_cleanup(tmp_path, mon
     assert observed["writer"] not in _caller_owned._lifetime_writers
     with pytest.raises(OSError):
         os.fstat(observed["writer"])
+
+
+@pytest.mark.skipif(os.name == "nt", reason="real POSIX owner pipe and SIGINT")
+@pytest.mark.parametrize("phase", ["fileno", "add-before", "add-after", "exchange"])
+def test_setup_interrupt_closes_owner_with_retained_traceback(tmp_path, monkeypatch, phase):
+    from agent_procutil import _caller_owned
+
+    pythonw = tmp_path / "pythonw.exe"
+    pythonw.touch()
+    monkeypatch.setattr(wsl.platform, "release", lambda: "microsoft-test")
+    monkeypatch.setattr(
+        wsl, "run_owned", lambda *a, **k: subprocess.CompletedProcess(a[0], 0, str(tmp_path), ""),
+    )
+    monkeypatch.setattr(wsl, "_owner_command", lambda *_: [
+        sys.executable, "-I", "-c", "import sys;sys.stdin.buffer.read()",
+    ])
+    real_popen = subprocess.Popen
+    observed = {}
+
+    class Writers(set):
+        def add(self, writer):
+            if phase == "add-before":
+                signal.raise_signal(signal.SIGINT)
+            super().add(writer)
+            if phase == "add-after":
+                signal.raise_signal(signal.SIGINT)
+
+    writers = Writers(_caller_owned._lifetime_writers)
+    monkeypatch.setattr(_caller_owned, "_lifetime_writers", writers)
+
+    def launch(*args, **kwargs):
+        process = real_popen(*args, **kwargs)
+        stream = process.stdin
+        observed.update(process=process, stream=stream, writer=stream.fileno())
+
+        def fileno():
+            if phase == "fileno":
+                signal.raise_signal(signal.SIGINT)
+            return stream.fileno()
+
+        process.stdin = SimpleNamespace(fileno=fileno, close=stream.close)
+        return process
+
+    def exchange(*args):
+        signal.raise_signal(signal.SIGINT)
+
+    monkeypatch.setattr(wsl.subprocess, "Popen", launch)
+    monkeypatch.setattr(wsl, "_exchange", exchange)
+    previous = signal.signal(signal.SIGINT, signal.default_int_handler)
+    retained = None
+    try:
+        try:
+            wsl.run_windows_owned(["synthetic.exe"], windows_python=str(pythonw), timeout=3)
+        except KeyboardInterrupt:
+            retained = sys.exc_info()
+        assert retained is not None and retained[2] is not None
+        process = observed["process"]
+        assert process.wait(timeout=.5) == 0, "owner survived caught setup interruption"
+        assert observed["stream"].closed
+        assert process.stdout.closed and process.stderr.closed
+        assert observed["writer"] not in writers
+        with pytest.raises(OSError):
+            os.fstat(observed["writer"])
+    finally:
+        signal.signal(signal.SIGINT, previous)
+        if observed:
+            observed["stream"].close()
+            process = observed["process"]
+            if process.poll() is None:
+                process.kill()
+            process.wait(timeout=2)
+            process.stdout.close()
+            process.stderr.close()

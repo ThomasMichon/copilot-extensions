@@ -10,6 +10,32 @@ import sys
 import threading
 import time
 from pathlib import Path
+from types import SimpleNamespace
+
+_SETUP_OWNER = """
+import ctypes,json,pathlib,sys
+from ctypes import wintypes
+sys.path.insert(0,sys.argv[1])
+from agent_procutil import wsl
+read_request=wsl._read_request
+def record_then_read():
+    kernel=ctypes.WinDLL('kernel32',use_last_error=True)
+    kernel.GetCurrentProcess.restype=wintypes.HANDLE
+    kernel.GetProcessTimes.argtypes=[wintypes.HANDLE]+[ctypes.POINTER(wintypes.FILETIME)]*4
+    kernel.GetProcessTimes.restype=wintypes.BOOL
+    times=[wintypes.FILETIME() for _ in range(4)]
+    if not kernel.GetProcessTimes(kernel.GetCurrentProcess(),*[ctypes.byref(t) for t in times]):
+        raise ctypes.WinError(ctypes.get_last_error())
+    ready=pathlib.Path(sys.argv[2])
+    staging=ready.with_suffix('.staging')
+    staging.write_text(json.dumps({
+        'pid':wsl.os.getpid(),'created':(times[0].dwHighDateTime<<32)|times[0].dwLowDateTime,
+    }))
+    staging.replace(ready)
+    return read_request()
+wsl._read_request=record_then_read
+wsl._windows_main()
+"""
 
 
 def _publish(path: Path, value: dict) -> None:
@@ -44,10 +70,59 @@ def keep_unrelated_fork_alive(gate: Path) -> None:
         raise RuntimeError("Unrelated fork child did not establish its native identity")
 
 
+def setup_interrupt(config: dict) -> None:
+    from agent_procutil import wsl
+
+    real_popen = subprocess.Popen
+    gate = Path(config["gate"])
+    original_owner_command = wsl._owner_command
+
+    def command(python, package):
+        original = original_owner_command(python, package)
+        return [*original[:5], _SETUP_OWNER, package, config["ready"]]
+
+    def launch(*args, **kwargs):
+        process = real_popen(*args, **kwargs)
+        if args[0][0] != config["pythonw"]:
+            return process
+        stream = process.stdin
+
+        def fileno():
+            deadline = time.monotonic() + 12
+            while not gate.exists() and time.monotonic() < deadline:
+                time.sleep(.01)
+            if not gate.exists():
+                raise RuntimeError("Setup interruption gate did not open")
+            signal.raise_signal(signal.SIGINT)
+
+        process.stdin = SimpleNamespace(fileno=fileno, close=stream.close)
+        return process
+
+    wsl._owner_command = command
+    wsl.subprocess.Popen = launch
+    retained = None
+    try:
+        wsl.run_windows_owned(
+            config["argv"], windows_python=config["pythonw"], timeout=30,
+        )
+    except KeyboardInterrupt:
+        retained = sys.exc_info()
+    if retained is None or retained[2] is None:
+        raise RuntimeError("Setup interruption was not retained by the live caller")
+    _publish(gate.with_name("caught.json"), {"retained": True})
+    deadline = time.monotonic() + 12
+    while not gate.with_name("stop").exists() and time.monotonic() < deadline:
+        time.sleep(.01)
+
+
 def main() -> None:
     config = json.loads(Path(sys.argv[1]).read_text())
     sys.path.insert(0, config["source"])
     from agent_procutil.wsl import run_windows_owned
+
+    if config["case"] == "setup-sigint":
+        setup_interrupt(config)
+        return
 
     caller = os.fork() if config["case"] == "caller-death-with-fork" else 0
     if caller:
