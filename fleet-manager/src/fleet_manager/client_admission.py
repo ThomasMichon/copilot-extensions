@@ -289,20 +289,39 @@ def _commit(connection):
         ) from None
 
 
+def _initialization_name(identity):
+    return ".client-initialization-" + hashlib.sha256(canonical(identity)).hexdigest()
+
+
+def _clear_initialization(path):
+    artifact_staging._directory(path)
+    children = list(path.iterdir())
+    for child in children:
+        if child.name not in {DATABASE, DATABASE + "-journal"}:
+            raise PlanError("client initialization contains foreign state")
+        _ordinary_file(child)
+    for child in children:
+        child.unlink()
+    path.rmdir()
+
+
 def initialize_client_admission(root, identity):
     """Explicitly initialize an empty private root, or inspect its exact owned identity."""
     identity = _identity(identity)
+    initialization = _initialization_name(identity)
     try:
         with _root(root) as (path, database_root, unchanged):
             _lease_shape(path)
-            if (path / DATABASE).exists():
+            if (path / DATABASE).exists() and not (path / initialization).exists():
                 with _connection(path, database_root=database_root, readonly=True) as connection:
                     connection.execute("BEGIN")
                     receipt = _read_state(connection, identity)
                     unchanged()
                     return _report(identity, receipt, changed=False,
                                    status="admitted" if receipt else "initialized")
-            if set(child.name for child in path.iterdir()) - {".construction-leases"}:
+            if not (path / DATABASE).exists() and (
+                set(child.name for child in path.iterdir()) - {".construction-leases", initialization}
+            ):
                 raise PlanError("client admission initialization refuses a nonempty foreign root")
             unchanged()
         with _owned(root) as (path, database_root, unchanged):
@@ -312,13 +331,20 @@ def initialize_client_admission(root, identity):
                     connection.execute("BEGIN")
                     receipt = _read_state(connection, identity)
                     unchanged()
-                    return _report(identity, receipt, changed=False,
+                    cleared = (path / initialization).exists()
+                    if cleared:
+                        _clear_initialization(path / initialization)
+                    return _report(identity, receipt, changed=cleared,
                                    status="admitted" if receipt else "initialized")
-            if set(child.name for child in path.iterdir()) != {".construction-leases"}:
+            if set(child.name for child in path.iterdir()) - {".construction-leases", initialization}:
                 raise PlanError("client admission initialization refuses a nonempty foreign root")
-            descriptor = os.open(database, os.O_CREAT | os.O_EXCL | os.O_RDWR, 0o600)
+            if (path / initialization).exists():
+                _clear_initialization(path / initialization)
+            candidate = database_root / initialization
+            candidate.mkdir(mode=0o700)
+            descriptor = os.open(candidate / DATABASE, os.O_CREAT | os.O_EXCL | os.O_RDWR, 0o600)
             os.close(descriptor)
-            with _connection(path, database_root=database_root, readonly=False) as connection:
+            with _connection(path / initialization, database_root=candidate, readonly=False) as connection:
                 connection.execute("BEGIN IMMEDIATE")
                 for sql in _TABLES.values():
                     connection.execute(sql)
@@ -330,7 +356,19 @@ def initialize_client_admission(root, identity):
                 _commit(connection)
                 _read_state(connection, identity)
                 unchanged()
-                return _report(identity, None, changed=True, status="initialized")
+            unchanged()
+            if database.exists():
+                raise PlanError("client admission database appeared during initialization")
+            os.replace(candidate / DATABASE, database)
+            _clear_initialization(path / initialization)
+            if os.name != "nt":
+                descriptor = os.open(database_root, os.O_RDONLY | os.O_DIRECTORY)
+                try:
+                    os.fsync(descriptor)
+                finally:
+                    os.close(descriptor)
+            unchanged()
+            return _report(identity, None, changed=True, status="initialized")
     except (OSError, sqlite3.Error):
         raise PlanError("client admission initialization could not establish durable state") from None
 

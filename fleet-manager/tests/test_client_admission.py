@@ -474,6 +474,15 @@ value = json.loads(sys.stdin.read())
 root = pathlib.Path(value['root'])
 if value['operation'] == 'inspect':
     print(json.dumps(admission.inspect_client_admission(root,value['identity'])),flush=True)
+elif value['operation'] == 'initialize':
+    real_commit=admission._commit
+    def interrupted_initialization(connection):
+        if value['pause']=='after':
+            real_commit(connection)
+        print('INITIALIZATION_BOUNDARY',flush=True)
+        time.sleep(30)
+    admission._commit=interrupted_initialization
+    print(json.dumps(admission.initialize_client_admission(root,value['identity'])),flush=True)
 else:
     fixture = value['fixture']
     parent = pathlib.Path(value['parent'])
@@ -502,6 +511,46 @@ def child_input(tmp_path, root, fixture, *, pause=None):
     return {"operation": "admit", "root": str(root), "identity": identity(),
             "fixture": fixture, "selection": selection(fixture), "parent": str(parent),
             "pause": pause}
+
+
+@pytest.mark.parametrize("boundary", ["before", "after"])
+def test_actual_initialization_death_can_retry_without_publishing_partial_state(
+    tmp_path, primitive, boundary,
+):
+    root = root_at(tmp_path)
+    process = subprocess.Popen(
+        [sys.executable, "-c", CHILD, str(REPOSITORY)], stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, **FLAGS,
+    )
+    try:
+        process.stdin.write(json.dumps({
+            "operation": "initialize", "root": str(root), "identity": identity(),
+            "pause": boundary,
+        }))
+        process.stdin.close()
+        assert process.stdout.readline().strip() == "INITIALIZATION_BOUNDARY"
+        process.kill()
+        assert process.wait(timeout=10) != 0
+    finally:
+        if process.poll() is None:
+            process.kill()
+        process.wait(timeout=10)
+        process.stdout.close()
+        process.stderr.close()
+    assert not (root / admission.DATABASE).exists()
+    candidate = root / admission._initialization_name(identity())
+    assert (candidate / admission.DATABASE).is_file()
+    foreign = candidate / "foreign-state"
+    foreign.write_bytes(b"must be retained")
+    with pytest.raises(PlanError, match="foreign state"):
+        admission.initialize_client_admission(root, identity())
+    assert foreign.read_bytes() == b"must be retained"
+    foreign.unlink()
+    result = admission.initialize_client_admission(root, identity())
+    assert result["status"] == "initialized" and result["mutations_performed"]
+    assert not candidate.exists()
+    assert admission.inspect_client_admission(root, identity())["admitted"] is None
+    assert not admission.initialize_client_admission(root, identity())["mutations_performed"]
 
 
 @pytest.mark.parametrize("boundary", ["before", "after"])

@@ -28,6 +28,12 @@ Initialization refuses a nonempty foreign directory, mismatched identity or
 corrupt/unsupported existing state. It never repairs permissions or resets an
 admitted sequence. Inspection does not create missing state, acquire a
 construction lease, stage artifacts or obtain credentials.
+The initial SQLite transaction is committed in an identity-qualified private
+temporary directory before atomic publication at the final database path.
+Interrupted temporary initialization can be retried under the same construction
+lease; only its recognized ordinary database/journal files may be discarded.
+Unexpected temporary entries or a foreign final database remain refused and
+preserved.
 
 The selected-release input reuses `ReleaseSelection` with schema
 `fleet-manager.release-selection`, version `1`. It binds `decision`, positive
