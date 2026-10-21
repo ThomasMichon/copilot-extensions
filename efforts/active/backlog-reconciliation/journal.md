@@ -306,3 +306,51 @@ Canonical contract: [README.md](README.md).
 - Batch fifteen is under research/adjudication and batch sixteen is being
   supplied. The campaign remains Active, with no product implementation,
   tests, native probes, deployment or live claim/process/service changes.
+
+## 2026-10-21 - Batches fifteen and sixteen, 320 original issues reviewed
+
+- The full paginated census at 11:12 UTC records **1,272 open issues**:
+  1,271 original-cohort issues and #7556 inflow. **320 distinct original issues
+  are reviewed; 186 were closed by this campaign**. The unrelated #5610 closure
+  and coordination inflow still cancel in net accounting; no campaign closure
+  was observed reopened. The guidance checkpoint remains at most 729.
+- Completed scopes: #2394's standalone changefile detection and promotion
+  coverage; #2405's uncached identity startup; #2426's ambiguous-project and
+  SSH child-CWD routing; #2513's Codespaces writer output classification;
+  #2545's new-child reciprocal-obligation reopening; and #2548's configurable
+  absolute-token thresholds. These are bounded current-source and merged-history
+  conclusions, not newly executed tests, native probes or rollout claims.
+- Transfers: #2380/#2422 to #6086; #2385 to #5820; #2396 to #2173 and #2256;
+  #2397 to #2106; #2406 to #2320; #2440 to #2530; #2446 to #566; #2523 to
+  #2256; and #2547 to #2598. Complete additive acceptance was recorded and read
+  back before closure, with all canonical successors still open.
+- The Windows resident dtssh payload-lock tail is distinct from temporary
+  per-unit watchdog maintenance. #5820 retains the complete supervised native
+  update case; #2395 remains open for scoped inhibition, automatic cleanup or
+  safe expiry, interruption recovery and unrelated-unit continuity.
+- #2173 retains complete all-enabled command catalogs and exact Windows
+  spaces/quotes/Unicode/empty/metacharacter fidelity. CMD warnings are not a
+  waiver. #2256 retains the separate source/conformance and cross-repository
+  reference-formatting checklists; #1096's assigned installation/cell authority
+  and native adoption custody remain unchanged.
+- #2320 retains the full canonical/shared-copy BSD descriptor-identity matrix
+  plus both Index/Machines supported macOS update outcomes. The genuine #4917
+  private-installer repair is credited without treating it as canonical-helper
+  or native Apple Silicon acceptance.
+- #2530 retains both discovery axes and now the full companion-identity
+  targeting/help matrix. #566 retains a separately scored elevated-local opaque
+  launch failure, distinct from remote Windows initialize/first-turn #2106.
+  No common cause, universal identifier interchangeability or launch authority
+  was inferred.
+- #2423 retains all #2087/#2208 contracts and the five #2357 deferred design
+  mappings. #2464 retains every accumulated lifetime transfer, exactly-once
+  terminal proof, actual consumer accounting and native qualification. A scoped
+  model, dormancy, replay or producer fix does not complete either umbrella.
+- Retained original tokens include #2386, #2395, #2398/#2399, #2400/#2401/#2402,
+  #2404, #2423/#2427/#2437, #2453/#2457/#2463/#2464/#2465/#2467, #2475/#2476/#2477,
+  #2530, #2546/#2549/#2551. These preserve generation retirement, runtime
+  freshness, real UI delivery, archival trace, held cutover authority, async
+  process-only reaping, foreign target binding and dirty-file/process custody.
+- Batch seventeen is under research/adjudication and batch eighteen is being
+  supplied. The campaign remains Active; no product implementation, tests,
+  native probes, deployment or live claim/process/service changes were made.
