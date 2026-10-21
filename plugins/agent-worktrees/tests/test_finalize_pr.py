@@ -29,10 +29,9 @@ class TestPRFinalize(PRWorkflowSetup):
         assert ok is False
         assert "not upstream" in err
 
-    def test_precondition_ok_after_create_pr(self, pr_repo):
+    def test_precondition_ok_after_create_pr(self, published_pr_repo):
         from agent_worktrees import finalize as fin
-        config, wid, wt_path, _ = pr_repo
-        pr_ops.create_pr(wid, config, title="Add feature")
+        config, wid, wt_path, _ = published_pr_repo
         rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
         import dataclasses
         repo = config.default_repo
@@ -41,10 +40,9 @@ class TestPRFinalize(PRWorkflowSetup):
         assert ok is True, err
         assert err is None
 
-    def test_precondition_detects_unpushed(self, pr_repo):
+    def test_precondition_detects_unpushed(self, published_pr_repo):
         from agent_worktrees import finalize as fin
-        config, wid, wt_path, _ = pr_repo
-        pr_ops.create_pr(wid, config, title="Add feature")
+        config, wid, wt_path, _ = published_pr_repo
         # Add a local commit on the feature branch without pushing (create-pr
         # returns HEAD to the base branch (#1804), so check out the feature
         # branch first to add a feedback commit to it).
@@ -60,10 +58,9 @@ class TestPRFinalize(PRWorkflowSetup):
         assert ok is False
         assert "unpushed" in err
 
-    def test_precondition_ok_after_merge(self, pr_repo):
+    def test_precondition_ok_after_merge(self, published_pr_repo):
         from agent_worktrees import finalize as fin
-        config, wid, wt_path, _ = pr_repo
-        pr_ops.create_pr(wid, config, title="Add feature")
+        config, wid, wt_path, _ = published_pr_repo
         feature = "feature/add-feature-aaaa"
         self._simulate_squash_merge(config, wid, feature)
         # origin/<feature> is stale (pre-merge); the OLD check would false-block.
@@ -75,14 +72,13 @@ class TestPRFinalize(PRWorkflowSetup):
         assert ok is True, err
         assert err is None
 
-    def test_finalize_refuses_dirty_worktree_at_merged_head(self, pr_repo):
+    def test_finalize_refuses_dirty_worktree_at_merged_head(self, published_pr_repo):
         # #4400 review finding: _pr_finalize_precondition only inspects
         # commits, never the working tree -- a modified/untracked file at an
         # otherwise-safe merged head must still block finalize, or the
         # destructive cleanup that follows would silently discard it.
         from agent_worktrees import finalize as fin
-        config, wid, wt_path, _ = pr_repo
-        pr_ops.create_pr(wid, config, title="Add feature")
+        config, wid, wt_path, _ = published_pr_repo
         feature = "feature/add-feature-aaaa"
         self._simulate_squash_merge(config, wid, feature)
         rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
@@ -94,7 +90,7 @@ class TestPRFinalize(PRWorkflowSetup):
         assert ok is False
         assert (wt_path / "uncommitted.txt").exists()
 
-    def test_finalize_reruns_precondition_after_lock_acquired(self, pr_repo, monkeypatch):
+    def test_finalize_reruns_precondition_after_lock_acquired(self, published_pr_repo, monkeypatch):
         # #4400 round 14: the merged-head precondition previously ran only
         # BEFORE the finalize lock was acquired -- a commit landing in that
         # TOCTOU window (between the preflight and the destructive cleanup)
@@ -102,8 +98,7 @@ class TestPRFinalize(PRWorkflowSetup):
         # SAME precondition immediately after the lock is held.
         from agent_worktrees import finalize as fin
         from agent_worktrees import finalize_lock
-        config, wid, wt_path, _ = pr_repo
-        pr_ops.create_pr(wid, config, title="Add feature")
+        config, wid, wt_path, _ = published_pr_repo
         feature = "feature/add-feature-aaaa"
         self._simulate_squash_merge(config, wid, feature)
         rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
@@ -127,7 +122,7 @@ class TestPRFinalize(PRWorkflowSetup):
         assert (wt_path / "raced_in.txt").exists()
 
     def test_finalize_catches_race_commit_landing_during_process_termination(
-        self, pr_repo, monkeypatch,
+        self, published_pr_repo, monkeypatch,
     ):
         # #4400 round 15: round 14's re-check ran ONCE, immediately after the
         # finalize lock was acquired -- but further code (record reload,
@@ -138,8 +133,7 @@ class TestPRFinalize(PRWorkflowSetup):
         # operation -- proven here by racing a commit in AFTER process
         # termination, later than round 14's check point.
         from agent_worktrees import finalize as fin
-        config, wid, wt_path, _ = pr_repo
-        pr_ops.create_pr(wid, config, title="Add feature")
+        config, wid, wt_path, _ = published_pr_repo
         feature = "feature/add-feature-aaaa"
         self._simulate_squash_merge(config, wid, feature)
         rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
@@ -162,7 +156,7 @@ class TestPRFinalize(PRWorkflowSetup):
         assert (wt_path / "raced_in_late.txt").exists()
 
     def test_finalize_rechecks_precondition_before_reconciliation(
-        self, pr_repo, monkeypatch,
+        self, published_pr_repo, monkeypatch,
     ):
         # #4400 round 16: reconciliation (`_reconcile_merged_pointers`)
         # rebases the worktree branch onto upstream -- and git's rebase
@@ -177,8 +171,7 @@ class TestPRFinalize(PRWorkflowSetup):
         # down across git versions) rather than assuming a specific git
         # rebase outcome.
         from agent_worktrees import finalize as fin
-        config, wid, _wt_path, _ = pr_repo
-        pr_ops.create_pr(wid, config, title="Add feature")
+        config, wid, _wt_path, _ = published_pr_repo
         feature = "feature/add-feature-aaaa"
         self._simulate_squash_merge(config, wid, feature)
         rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
@@ -211,10 +204,9 @@ class TestPRFinalize(PRWorkflowSetup):
             f"precondition recheck must run BEFORE reconciliation, got {call_order}"
         )
 
-    def test_precondition_ok_after_merge_remote_branch_deleted(self, pr_repo):
+    def test_precondition_ok_after_merge_remote_branch_deleted(self, published_pr_repo):
         from agent_worktrees import finalize as fin
-        config, wid, wt_path, _ = pr_repo
-        pr_ops.create_pr(wid, config, title="Add feature")
+        config, wid, wt_path, _ = published_pr_repo
         feature = "feature/add-feature-aaaa"
         self._simulate_squash_merge(config, wid, feature)
         # Provider deleted the remote feature branch on merge.
@@ -225,10 +217,9 @@ class TestPRFinalize(PRWorkflowSetup):
         ok, err = fin._pr_finalize_precondition(rec, repo, str(wt_path), repo.anchor)
         assert ok is True, err
 
-    def test_reconcile_aligns_worktree_base_after_merge(self, pr_repo):
+    def test_reconcile_aligns_worktree_base_after_merge(self, published_pr_repo):
         from agent_worktrees import finalize as fin
-        config, wid, wt_path, _ = pr_repo
-        pr_ops.create_pr(wid, config, title="Add feature")
+        config, wid, wt_path, _ = published_pr_repo
         feature = "feature/add-feature-aaaa"
         # Drift scenario: HEAD checked out on the feature branch. create-pr
         # returns HEAD to the base branch (#1804), so establish the drift here.
@@ -250,10 +241,9 @@ class TestPRFinalize(PRWorkflowSetup):
         # The live feature checkout is untouched.
         assert _git("rev-parse", "--abbrev-ref", "HEAD", cwd=wt_path) == feature
 
-    def test_reconcile_fast_forwards_anchor_default_branch(self, pr_repo):
+    def test_reconcile_fast_forwards_anchor_default_branch(self, published_pr_repo):
         from agent_worktrees import finalize as fin
-        config, wid, wt_path, _ = pr_repo
-        pr_ops.create_pr(wid, config, title="Add feature")
+        config, wid, wt_path, _ = published_pr_repo
         feature = "feature/add-feature-aaaa"
         self._simulate_squash_merge(config, wid, feature)
         repo = config.default_repo
@@ -268,15 +258,14 @@ class TestPRFinalize(PRWorkflowSetup):
         assert _git("rev-parse", "master", cwd=anchor) == \
             _git("rev-parse", "origin/master", cwd=anchor)
 
-    def test_reconcile_fast_forwards_base_when_head_on_base(self, pr_repo):
+    def test_reconcile_fast_forwards_base_when_head_on_base(self, published_pr_repo):
         """#1804: create-pr leaves HEAD on worktree/<id> at the squashed commit,
         so after the squash-merge the base is *diverged* (1 ahead + behind).
         Reconcile realigns it in place to origin/master once the content is
         confirmed on upstream -- HEAD never leaves worktree/<id>, no work lost.
         (Same in-place path the refspec scheme uses.)"""
         from agent_worktrees import finalize as fin
-        config, wid, wt_path, _ = pr_repo
-        pr_ops.create_pr(wid, config, title="Add feature")
+        config, wid, wt_path, _ = published_pr_repo
         feature = "feature/add-feature-aaaa"
         wt_branch = f"worktree/{wid}"
         # create-pr leaves HEAD on the worktree base branch.

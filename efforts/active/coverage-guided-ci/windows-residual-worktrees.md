@@ -87,7 +87,35 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Admitted fixture-semantic batches
 
+### B-PUBLISHED finalization consumers
+
+Baseline: the actual #7497 B-MUX merge
+`91e6b9bbea7e65e958a8903016e03a710dfe9d87`, following the
+#7483 published-fixture foundation. Convert only the eleven named
+`test_finalize_pr.py::TestPRFinalize` methods in the PUB inventory below.
+Each substitutes the private published fixture argument/unpack and removes
+its setup-only first `create_pr`. AST comparison proves all remaining body
+statements, decorators and seven other cases unchanged.
+
+The complete eighteen-case module and both mux-binding canaries pass
+without skips on native Windows: 20 passed in 79.97 seconds, 91.20 including
+preparation/cleanup. Exactly two work-stealing workers preserve the
+30-second item, 240-second diagnostic group and existing resource limits.
+Actual merge/reconciliation, dirty-state refusal and each race check remain
+in their original test bodies. This is not whole-suite qualification.
+
+Only this ledger needs documentation: runtime/command/install behavior
+does not change. Provisioning clean-room and external deployment testing
+are inapplicable to this test-only setup substitution; the native finalization
+consumer module exercises the changed contract directly. Rebase setup
+scheme/title preservation, landing reuse/consolidation and all other
+residual contracts remain independent. Parent #5694/#5682 stays open.
+
 ### B-MUX: explicit no-mux boundary for Git-only finalization fixtures
+
+**Actually merged:** #7497 as
+`91e6b9bbea7e65e958a8903016e03a710dfe9d87`. The separate
+B-PUBLISHED finalization substitutions are not included in that merge.
 
 Add the opt-in `git_only_mux` fixture and apply it only to
 `test_finalize_pr.py`, `test_finalize_diverged_branch.py` and
