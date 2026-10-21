@@ -87,7 +87,40 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Admitted fixture-semantic batches
 
+### B-AUTH-PROFILE private authority installation profile
+
+Baseline: the actual #7559 merge. Add only the named function-autouse
+`_isolated_authority_profile` fixture in `test_pr_publication_state.py`.
+It points `cfg.install_dir` at the case's own temporary authority profile;
+it does not substitute the authority guard, file lock, publication operation
+or persisted record. Every existing test body and decorator remains unchanged,
+including real subprocess contention, lock-through-I/O and post-wait
+authority revalidation checks.
+
+Two repeated cases require the exact private profile to start absent, acquire
+the real guard, observe its actual lock file and retain only their own case
+marker. No process/native boundary, test selection, skip, timeout, resource
+limit, production or publication contract changes are included.
+
+The complete affected module passes on native Windows: 23 passed, zero
+skips, 74.19 seconds pytest / 95.43 including host launch, preparation and
+owned cleanup. Exactly two work-stealing workers retain the 30-second default
+item watchdog, original 120-second module mark and resource limits under
+the 240-second diagnostic group. All 16 existing functions/classes and their
+decorators are AST-identical. Ruff F/E9 and the 13-plugin install contract
+pass. This is bounded functional evidence without a quiet-host or whole-suite
+performance qualification claim.
+
+Documentation impact is this ledger only; runtime, command, installation and
+configuration documentation stays accurate. Clean-room provisioning and
+external deployment are inapplicable to this test-only profile isolation.
+Parent #5694/#5682 and complete repeated same-head Windows qualification
+remain open.
+
 ### B-PARTIAL private accepted-head fixture and refusal consumers
+
+**Actually merged:** #7559 as
+`842038a9a54d0c085b19a28311c5ed337c0226bc`.
 
 Baseline: the actual #7544 merge. Add only the named session
 `_partial_success_seed` and per-case `partial_success_repo` in
@@ -125,6 +158,13 @@ Ruff F/E9, unchanged-body AST comparison and the 13-plugin install contract
 pass. This focused family is functional evidence, not full-module or
 whole-suite qualification; the outstanding complete rebase-module budget
 remains tracked by #5682.
+
+The combined coordination window including normal commit/publication and
+turn gaps exceeded its separate 240-second total cap: 15,990.83 seconds
+at release. The original message claiming that total was under 240 was
+explicitly corrected to both peers. No wait time was excluded and no
+total-window, quiet-host or whole-suite performance credit is taken.
+The 91.42-second functional test-group result is separate.
 
 Documentation impact is this ledger only: command, runtime, installation and
 configuration contracts remain unchanged. Provisioning clean-room and external

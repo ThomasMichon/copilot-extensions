@@ -23,6 +23,22 @@ pytestmark = [
 ]
 
 
+@pytest.fixture(autouse=True)
+def _isolated_authority_profile(tmp_path, monkeypatch):
+    monkeypatch.setattr(cfg, "install_dir", lambda: tmp_path / "authority-profile")
+
+
+@pytest.mark.parametrize("iteration", range(2))
+def test_authority_profile_and_real_lock_are_function_private(tmp_path, iteration):
+    profile = tmp_path / "authority-profile"
+    assert cfg.install_dir() == profile
+    assert not profile.exists()
+    with pr_authority.guard(timeout=0):
+        assert (profile / "pr-rewrite-authority.lock").is_file()
+        (profile / "case.txt").write_text(str(iteration), encoding="utf-8")
+    assert (profile / "case.txt").read_text(encoding="utf-8") == str(iteration)
+
+
 def load(wid):
     return tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
 
