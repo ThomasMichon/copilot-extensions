@@ -205,7 +205,7 @@ requirements.
 
 ### Parallel track - Collaboration and scoped peer conduct
 
-- [ ] Review and land this single vision/architecture/plan amendment before
+- [x] Review and land this single vision/architecture/plan amendment before
   dependent realization. This gate is independent of the retained client
   platform qualification and managed installer rollout.
 - [ ] The accepted conduct contributor implements only its claimed
@@ -339,6 +339,11 @@ shared-multiplex contracts above.
 
 ### 2026-10-20 - Coherent collaboration and peer-conduct amendment
 
+- The amendment merged through #7454 at
+  `406e7731e2dac161abebd2a886835e98c00ad7ee`, with an exact-head approving
+  review and required CI. Its intent gate is satisfied; the accepted
+  conduct-only contributor can realize that scope through normal review.
+  This is not runtime adoption or completion of the parent effort.
 - Integrated the independently gathered interaction and authority lessons as
   one generic intent revision, not a port of another controller or private
   implementation. Existing Chat state remains authoritative; typed views,
