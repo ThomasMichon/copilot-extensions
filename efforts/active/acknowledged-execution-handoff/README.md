@@ -157,6 +157,10 @@ handoff support.
 - Cleanup-only detached-waiter claim releases remain deliverable after closure,
   including terminal completion. A regression verifies claim release without
   owner resumption while a genuine wake in the same scope stays blocked.
+- Admission closure preserves already-successful start and non-adopting resume
+  retries without relaxing owner, generation or session fences. New starts,
+  resumes and adoption remain blocked; regression coverage exercises response
+  loss followed by closure before replay.
 - No HTTP/CLI control, acknowledgement, destination activation or handback is
   exposed. Runtime enrollment, already admitted launches/deliveries, legacy
   qualification and adopter effects remain explicit barriers. Continue those

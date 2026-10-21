@@ -742,8 +742,6 @@ class QueueLifecycleMixin(QueueProgressMixin):
                 validate_start(
                     conn, task, (extra or {}).get("owner_session_id"), start_acquisition_authority,
                 )
-            if to == Status.STARTED:
-                require_execution_admission(conn, task_id)
             try:
                 _check_expected_status(task, expected_status)
             except TaskError:
@@ -777,6 +775,8 @@ class QueueLifecycleMixin(QueueProgressMixin):
                 raise TaskError(
                     f"cannot {note or to} a {task.status!r} task (allowed: {sorted(allowed_set)})"
                 )
+            if to == Status.STARTED:
+                require_execution_admission(conn, task_id)
             if require_owner and worker_id is not None and task.owner not in (None, worker_id):
                 conn.execute("COMMIT")
                 raise TaskError(f"task {task_id!r} owned by {task.owner!r}, not {worker_id!r}")

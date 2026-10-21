@@ -88,6 +88,9 @@ remain unresolved until their actual runtime is reconciled.
 Create-and-claim, steering-triggered resumes and evaluator rejection restoring
 submitted-task ownership use the same admission fence;
 exact accepted-request replays remain readable without repeating those effects.
+An already-started task also preserves its existing start and non-adopting resume
+replays, with the same owner and optional generation/session checks. A new start,
+resume or owner adoption is not a replay and remains fenced.
 Both ordinary and detached-waiter wake claims exclude closed scopes while
 leaving unrelated scopes eligible. Detached waiter claim-release-only records
 remain deliverable: they release the retained hibernation worktree claim without

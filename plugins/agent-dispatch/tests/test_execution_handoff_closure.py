@@ -187,6 +187,42 @@ def test_execution_handoff_closure_accounts_for_previously_accepted_claim(setup)
     assert inventory["blockers"]
 
 
+@pytest.mark.parametrize("transition", ["start", "resume"])
+@pytest.mark.parametrize("fenced", [False, True])
+def test_execution_handoff_closure_preserves_started_replay(setup, transition, fenced):
+    queue, request, create = setup
+    task = create()
+    queue.claim_one("worker", task_id=task.id)
+    if transition == "resume":
+        queue.start(task.id, "worker", owner_session_id="native-session")
+        queue.suspend(task.id, "worker", reason="waiting")
+    before = queue.get(task.id)
+    fence = ({
+        "expected_generation": before.generation,
+        "expected_owner_session_id": before.owner_session_id,
+    } if fenced else {})
+    method = getattr(queue, transition)
+    accepted = method(task.id, "worker", **fence)
+    close(queue, request)
+    assert method(task.id, "worker", **fence) == accepted
+    with pytest.raises(TaskError, match="cannot .* a 'started' task"):
+        method(task.id, "other-worker", **fence)
+    for stale in (
+        {"expected_generation": accepted.generation + 1,
+         "expected_owner_session_id": accepted.owner_session_id},
+        {"expected_generation": accepted.generation,
+         "expected_owner_session_id": "other-session"},
+    ):
+        with pytest.raises(TaskError, match="cannot .* a 'started' task"):
+            method(task.id, "worker", **stale)
+    if transition == "resume":
+        with pytest.raises(TaskError, match="cannot resume a 'started' task"):
+            method(task.id, "worker", adopt_owner_session_id="successor-session")
+    assert queue.get(task.id) == accepted
+    assert queue.list_wakes(task.id) == []
+    assert queue.execution_closure_inventory(request.scope)["acknowledged"] is False
+
+
 def test_execution_handoff_closure_keeps_reserved_spawn_visible(setup):
     queue, request, create = setup
     task = create()
