@@ -545,9 +545,19 @@ function Publish-LegacySnapshotSource {
         [Parameter(Mandatory)][string]$PayloadRoot,
         [Parameter(Mandatory)][string]$PluginId,
         [Parameter(Mandatory)][string]$RuntimeRoot,
-        [Parameter(Mandatory)][string]$ProjectRoot
+        [Parameter(Mandatory)][string]$ProjectRoot,
+        [string]$SnapshotId,
+        [string]$PayloadVersion
     )
     if ($env:COPILOT_EXTENSIONS_CONTEXT) { return }
+    if ([bool]$SnapshotId -ne [bool]$PayloadVersion) {
+        throw 'Snapshot identity and payload version must be supplied together.'
+    }
+    $receiptVersion = if ($SnapshotId) { 2 } else { 1 }
+    if ($receiptVersion -eq 2 -and
+        ($SnapshotId -cnotmatch '^[A-Za-z0-9._+-]+$' -or $PayloadVersion -cnotmatch '^[A-Za-z0-9._+-]+$')) {
+        throw 'Snapshot identity and payload version must be safe identifiers.'
+    }
     $helper = Join-Path $HelperDirectory 'installation-context\installation-context.ps1'
     $resolved = @(& $helper -Action resolve -PayloadRoot $PayloadRoot `
         -PluginId $PluginId -ProjectRoot $ProjectRoot)
@@ -568,7 +578,10 @@ function Publish-LegacySnapshotSource {
         $previous = Get-Content -LiteralPath $receipt -Raw | ConvertFrom-Json -ErrorAction Stop
         if ($previous.schema -cne 'copilot-extensions.legacy-snapshot-source' -or
             ($previous.version -isnot [int] -and $previous.version -isnot [long]) -or
-            $previous.version -ne 1 -or
+            $previous.version -ne $receiptVersion -or
+            ($receiptVersion -eq 2 -and
+                ($previous.snapshotId -isnot [string] -or $previous.payloadVersion -isnot [string] -or
+                    $previous.snapshotId -cne $SnapshotId -or $previous.payloadVersion -cne $PayloadVersion)) -or
             $previous.resolution.sourceFingerprint -cne $resolution.sourceFingerprint -or
             $previous.resolution.pluginId -cne $resolution.pluginId) {
             throw 'Existing snapshot source belongs to another owner or is invalid.'
@@ -577,9 +590,14 @@ function Publish-LegacySnapshotSource {
     }
     $document = [ordered]@{
         schema = 'copilot-extensions.legacy-snapshot-source'
-        version = 1
+        version = $receiptVersion
         resolution = $resolution
-    } | ConvertTo-Json -Depth 30
+    }
+    if ($receiptVersion -eq 2) {
+        $document.snapshotId = $SnapshotId
+        $document.payloadVersion = $PayloadVersion
+    }
+    $document = $document | ConvertTo-Json -Depth 30
     $temporary = Join-Path $SnapshotDir ('.source-provenance-' + [guid]::NewGuid().ToString('N'))
     try {
         [IO.File]::WriteAllText($temporary, $document, [Text.UTF8Encoding]::new($false))
@@ -599,7 +617,10 @@ function Write-SimpleBinstub {
         [Parameter(Mandatory)][string]$SnapshotInstallerPath,
         [Parameter(Mandatory)][string]$NoSelfProvisionEnv,
         [string]$ResolverPs1Source,
-        [string]$ResolverShSource
+        [string]$ResolverShSource,
+        [string]$SnapshotSourcePath,
+        [string]$SnapshotId,
+        [string]$PayloadVersion
     )
 
     function Publish-SimpleBinstubFile {
@@ -625,22 +646,25 @@ function Write-SimpleBinstub {
             throw "Binstub resolver source is unavailable: $source"
         }
     }
-    if ($ResolverPs1Source -and (Test-Path -LiteralPath (Join-Path $RuntimeRoot 'payload-dir') -PathType Leaf)) {
-        $snapshot = ([IO.File]::ReadAllText((Join-Path $RuntimeRoot 'payload-dir'))).Trim()
-        $snapshotParent = [IO.Path]::GetFullPath((Join-Path $RuntimeRoot 'snapshots')) +
-            [IO.Path]::DirectorySeparatorChar
-        if ([IO.Path]::GetFullPath($snapshot).StartsWith($snapshotParent, [StringComparison]::OrdinalIgnoreCase)) {
-            $helperDirectory = Split-Path -Parent $ResolverPs1Source
-            $sourcePayload = if ($env:COPILOT_PLUGIN_STAGED_FROM) {
-                $env:COPILOT_PLUGIN_STAGED_FROM
-            } else { Split-Path -Parent $helperDirectory }
-            $sourceProject = if ($env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT) {
-                $env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT
-            } else { (Get-Location).ProviderPath }
-            Publish-LegacySnapshotSource -SnapshotDir $snapshot -HelperDirectory $helperDirectory `
-                -PayloadRoot $sourcePayload -PluginId $CommandName -RuntimeRoot $RuntimeRoot `
-                -ProjectRoot $sourceProject
+    if ($SnapshotSourcePath) {
+        if (-not $ResolverPs1Source) { throw 'Snapshot source capture requires the owning resolver source.' }
+        $snapshotParent = [IO.Path]::GetFullPath((Split-Path -Parent $SnapshotSourcePath))
+        $expectedParent = [IO.Path]::GetFullPath((Join-Path $RuntimeRoot 'snapshots'))
+        if (-not $snapshotParent.Equals($expectedParent, [StringComparison]::OrdinalIgnoreCase) -or
+            -not (Test-Path -LiteralPath $SnapshotSourcePath -PathType Container) -or
+            ((Get-Item -LiteralPath $SnapshotSourcePath -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+            throw 'Snapshot source capture requires an ordinary runtime snapshot candidate.'
         }
+        $helperDirectory = Split-Path -Parent $ResolverPs1Source
+        $sourcePayload = if ($env:COPILOT_PLUGIN_STAGED_FROM) {
+            $env:COPILOT_PLUGIN_STAGED_FROM
+        } else { Split-Path -Parent $helperDirectory }
+        $sourceProject = if ($env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT) {
+            $env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT
+        } else { (Get-Location).ProviderPath }
+        Publish-LegacySnapshotSource -SnapshotDir $SnapshotSourcePath -HelperDirectory $helperDirectory `
+            -PayloadRoot $sourcePayload -PluginId $CommandName -RuntimeRoot $RuntimeRoot `
+            -ProjectRoot $sourceProject -SnapshotId $SnapshotId -PayloadVersion $PayloadVersion
     }
     if (-not (Test-Path $LocalBin)) { New-Item -ItemType Directory -Path $LocalBin -Force -ErrorAction Stop | Out-Null }
     if (-not (Test-Path $InstallBinDir)) { New-Item -ItemType Directory -Path $InstallBinDir -Force -ErrorAction Stop | Out-Null }

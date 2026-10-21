@@ -426,6 +426,14 @@ EOF
 publish_legacy_snapshot_source() {
     [[ -z "${COPILOT_EXTENSIONS_CONTEXT:-}" ]] || return 0
     local snapshot="$1" helper_directory="$2" payload="$3" plugin="$4" runtime_root="$5" project="$6"
+    local snapshot_id="${7:-}" payload_version="${8:-}" receipt_version=1
+    if [[ -n "$snapshot_id" || -n "$payload_version" ]]; then
+        [[ -n "$snapshot_id" && -n "$payload_version" ]] || {
+            _fail 'Snapshot identity and payload version must be supplied together.'
+            return 1
+        }
+        receipt_version=2
+    fi
     local resolution receipt previous_fingerprint fingerprint previous_plugin temporary schema version version_type
     local helper="$helper_directory/installation-context/installation-context.sh"
     local query="$helper_directory/installation-context/json-query.awk"
@@ -453,15 +461,34 @@ publish_legacy_snapshot_source() {
         previous_plugin="$(LC_ALL=C awk -f "$query" -v mode=get \
             -v query_path=$'resolution\034pluginId' "$receipt")" || return 1
         if [[ "$schema" != copilot-extensions.legacy-snapshot-source || "$version_type" != number ||
-              "$version" != 1 || "$previous_fingerprint" != "$fingerprint" || "$previous_plugin" != "$plugin" ]]; then
+              "$version" != "$receipt_version" || "$previous_fingerprint" != "$fingerprint" || "$previous_plugin" != "$plugin" ]]; then
             _fail 'Existing snapshot source belongs to another owner or is invalid.'
             return 1
+        fi
+        if [[ "$receipt_version" == 2 ]]; then
+            local previous_id previous_version
+            previous_id="$(LC_ALL=C awk -f "$query" -v mode=get -v query_path=snapshotId "$receipt")" || return 1
+            previous_version="$(LC_ALL=C awk -f "$query" -v mode=get -v query_path=payloadVersion "$receipt")" || return 1
+            [[ "$previous_id" == "$snapshot_id" && "$previous_version" == "$payload_version" ]] || {
+                _fail 'Existing snapshot source describes another snapshot selection.'
+                return 1
+            }
         fi
         return 0
     fi
     temporary="$(mktemp "$snapshot/.source-provenance.XXXXXX")" || return 1
-    if ! printf '{"schema":"copilot-extensions.legacy-snapshot-source","version":1,"resolution":%s}\n' \
-        "$resolution" > "$temporary" || ! ln -- "$temporary" "$receipt"; then
+    local selection=""
+    if [[ "$receipt_version" == 2 ]]; then
+        # These values are identifiers, not filesystem paths.
+        [[ "$snapshot_id" =~ ^[A-Za-z0-9._+-]+$ && "$payload_version" =~ ^[A-Za-z0-9._+-]+$ ]] || {
+            rm -f -- "$temporary"
+            _fail 'Snapshot identity and payload version must be safe identifiers.'
+            return 1
+        }
+        selection=",\"snapshotId\":\"$snapshot_id\",\"payloadVersion\":\"$payload_version\""
+    fi
+    if ! printf '{"schema":"copilot-extensions.legacy-snapshot-source","version":%s,"resolution":%s%s}\n' \
+        "$receipt_version" "$resolution" "$selection" > "$temporary" || ! ln -- "$temporary" "$receipt"; then
         rm -f -- "$temporary"
         _fail 'Cannot atomically publish canonical snapshot source.'
         return 1
@@ -472,6 +499,7 @@ publish_legacy_snapshot_source() {
 write_simple_binstub() {
     local command_name="$1" module_name="$2" runtime_root="$3" local_bin="$4" install_bin_dir="$5" snapshot_installer_rel="$6" no_self_provision_env="$7"
     local resolver_ps1_source="${8:-}" resolver_sh_source="${9:-}"
+    local snapshot_source_path="${10:-}" snapshot_id="${11:-}" payload_version="${12:-}"
     local runtime_root_literal snapshot_installer_literal
     printf -v runtime_root_literal '%q' "$runtime_root" || return 1
     printf -v snapshot_installer_literal '%q' "$snapshot_installer_rel" || return 1
@@ -482,17 +510,22 @@ write_simple_binstub() {
             return 1
         fi
     done
-    if [[ -n "$resolver_sh_source" && -f "$runtime_root/payload-dir" ]]; then
-        local snapshot helper_directory source_payload source_project
-        snapshot="$(cat "$runtime_root/payload-dir")" || return 1
-        case "$snapshot" in "$runtime_root"/snapshots/*)
-            helper_directory="$(dirname "$resolver_sh_source")"
-            source_payload="${COPILOT_PLUGIN_STAGED_FROM:-$(dirname "$helper_directory")}"
-            source_project="${COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT:-$PWD}"
-            publish_legacy_snapshot_source "$snapshot" "$helper_directory" "$source_payload" \
-                "$command_name" "$runtime_root" "$source_project" || return 1
-            ;;
-        esac
+    if [[ -n "$snapshot_source_path" ]]; then
+        [[ -n "$resolver_sh_source" ]] || {
+            _fail 'Snapshot source capture requires the owning resolver source.'
+            return 1
+        }
+        [[ "$(dirname -- "$snapshot_source_path")" == "$runtime_root/snapshots" &&
+            -d "$snapshot_source_path" && ! -L "$snapshot_source_path" ]] || {
+            _fail 'Snapshot source capture requires an ordinary runtime snapshot candidate.'
+            return 1
+        }
+        local helper_directory source_payload source_project
+        helper_directory="$(dirname "$resolver_sh_source")"
+        source_payload="${COPILOT_PLUGIN_STAGED_FROM:-$(dirname "$helper_directory")}"
+        source_project="${COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT:-$PWD}"
+        publish_legacy_snapshot_source "$snapshot_source_path" "$helper_directory" "$source_payload" \
+            "$command_name" "$runtime_root" "$source_project" "$snapshot_id" "$payload_version" || return 1
     fi
     mkdir -p "$local_bin" "$install_bin_dir" || {
         _fail "Binstub directories cannot be prepared: $local_bin"; return 1;

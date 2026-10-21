@@ -31,7 +31,7 @@ cells. Mutation remains explicit and non-automatic:
   Healthy current runtimes remain a read-only no-op; independent session hooks
   retain their separate invocation. An older helperless bootstrap retains
   standalone behavior only when its deployment policy is absent.
-  Logger and the shared Pull Requests/Vault installed first-use wrappers also
+  Logger and the shared Pull Requests/SSH/Vault installed first-use wrappers also
   call this adapter before cold trace or provisioning-lock writes. Their
   [ready-only resolver probes](../versioned-runtime/README.md) retain healthy
   managed dispatch without granting cold publication. Vault's payload dispatcher
@@ -61,20 +61,28 @@ remain mandatory when selecting or managing a cell. Catalog integration is a
 separate consumer change, not implied by this API's presence.
 
 Selected legacy snapshots may retain `snapshot-provenance.json` with schema
-`copilot-extensions.legacy-snapshot-source`, version 1 and a `resolution` captured
+`copilot-extensions.legacy-snapshot-source` and a `resolution` captured
 from the canonical read-only `resolve` operation at publication. All three
 adapters require an ordinary sidecar under the selected `snapshots/<id>`, matching
 ordinary `payload-dir` and `stamped-version` markers, the payload's plugin name,
 and a re-normalized source whose record, fingerprint and marketplace id agree.
+Version 1 requires `<id>` to equal the stamped package version. Version 2
+separately binds string `snapshotId` and `payloadVersion` fields to that selected
+directory and version marker, preserving SSH's timestamped immutable snapshot
+IDs without changing package-version drift detection. Unsupported versions,
+missing fields and array-shaped selection values are refused, not coerced.
 The original publisher and declaration need not remain available. Captured cell
 paths are documentary, not context receipts or management authority. This
 evidence preserves source identity only: the live installation/environment owner,
 mode, deployment policy and lifecycle custody still govern every mutation.
 Namespaced snapshots retain their existing separate provenance contract.
 The canonical installer engine owns legacy sidecar publication for Logger and
-the shared Pull Requests/Vault wrapper producers. It captures evidence only in
-retained runtime snapshots, never in an ordinary publisher payload. Windows
-Vault stamping publishes its selected snapshot before its generated wrapper.
+the shared Pull Requests/SSH/Vault wrapper producers. Producers explicitly name
+their prepared candidate; the wrapper writer never infers a new source from the
+previous `payload-dir`. Evidence is captured only in retained runtime snapshots,
+never in an ordinary publisher payload. Stamps publish their wrapper before
+changing redirects or replacing a selected fixed-name snapshot, so failed
+wrapper publication preserves the prior selection and its source evidence.
 
 `stamp` creates or
 updates only `namespace.json` and `install.json`. `activation-cas` explicitly

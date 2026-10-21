@@ -767,6 +767,7 @@ _snapshot_is_reusable() {
     local current_snapshot="$1" source_kind="$2" source_path="$3" source_version="$4"
     [[ "$source_kind" != "local" ]] || return 1
     [[ -n "$current_snapshot" && -d "$current_snapshot" ]] || return 1
+    [[ -n "$SOURCE_RUNTIME_IDENTITY" || -f "$current_snapshot/snapshot-provenance.json" ]] || return 1
     local rel
     for rel in \
         "scripts/installer-engine.sh" \
@@ -797,7 +798,7 @@ _deploy_binstub() {
         "scripts/install.sh" \
         "AGENT_SSH_NO_SELFPROVISION" \
         "$SCRIPT_DIR/resolve-runtime.ps1" \
-        "$SCRIPT_DIR/resolve-runtime.sh"
+        "$SCRIPT_DIR/resolve-runtime.sh" "${1:-}" "${2:-}" "${3:-}"
 }
 
 # === install-transaction lock (fail-closed) ===
@@ -997,12 +998,16 @@ if [[ "$ACTION" == "stamp" ]]; then
     CURRENT_SNAPSHOT="$(_current_snapshot)"
     if _published_snapshot_is_newer "$CURRENT_SNAPSHOT" "$SOURCE_PATH" "$SRC_VERSION"; then
         _skip "Published snapshot $CURRENT_SNAPSHOT is newer than $SRC_VERSION; leaving payload-dir unchanged"
-        _write_stamped_version_marker
         _deploy_binstub
         exit 0
     fi
     if _snapshot_is_reusable "$CURRENT_SNAPSHOT" "$SOURCE_KIND" "$SOURCE_PATH" "$SRC_VERSION"; then
         _assert_source_runtime_identity "$CURRENT_SNAPSHOT" || exit 1
+        if [[ -n "$SOURCE_RUNTIME_IDENTITY" ]]; then
+            _deploy_binstub || exit 1
+        else
+            _deploy_binstub "$CURRENT_SNAPSHOT" "${CURRENT_SNAPSHOT##*/}" "$SRC_VERSION" || exit 1
+        fi
         if [[ -n "$SOURCE_RUNTIME_IDENTITY" ]]; then
             source_python="$(_source_python)" || exit 1
             _assert_source_runtime_identity || exit 1
@@ -1014,7 +1019,6 @@ if [[ "$ACTION" == "stamp" ]]; then
             mv -f "$INSTALL_DIR/payload-dir.$$.tmp" "$INSTALL_DIR/payload-dir"
             _write_stamped_version_marker
         fi
-        _deploy_binstub
         _ok "Stamped: reused snapshot $CURRENT_SNAPSHOT"
         exit 0
     fi
@@ -1052,13 +1056,17 @@ if [[ "$ACTION" == "stamp" ]]; then
     if _published_snapshot_is_newer "$CURRENT_SNAPSHOT" "$SOURCE_PATH" "$SRC_VERSION"; then
         rm -rf "$SNAPSHOT_TMP"
         _skip "Published snapshot $CURRENT_SNAPSHOT is newer than $SRC_VERSION; skipping older snapshot publication"
-        _write_stamped_version_marker
         _deploy_binstub
         exit 0
     fi
     mv -f "$SNAPSHOT_TMP" "$SNAPSHOT_DIR"
     _assert_source_runtime_identity "$SNAPSHOT_DIR" || exit 1
     _assert_source_runtime_identity || exit 1
+    if [[ -n "$SOURCE_RUNTIME_IDENTITY" ]]; then
+        _deploy_binstub || exit 1
+    else
+        _deploy_binstub "$SNAPSHOT_DIR" "${SNAPSHOT_DIR##*/}" "$SRC_VERSION" || exit 1
+    fi
     if [[ -n "$SOURCE_RUNTIME_IDENTITY" ]]; then
         source_python="$(_source_python)" || exit 1
         "$source_python" -I -B "$SCRIPT_DIR/versioned_runtime.py" --root "$INSTALL_DIR" \
@@ -1069,7 +1077,6 @@ if [[ "$ACTION" == "stamp" ]]; then
         mv -f "$INSTALL_DIR/payload-dir.$$.tmp" "$INSTALL_DIR/payload-dir"
         _write_stamped_version_marker
     fi
-    _deploy_binstub
     _ok "Stamped: binstub on PATH; runtime provisions on first use."
     exit 0
 fi
@@ -1164,7 +1171,7 @@ else
     _skip 'Venv already exists'
 fi
 
-if ! _install_agent_ssh_package; then
+if ! (cd -- "$PLUGIN_DIR" && _install_agent_ssh_package); then
     _fail 'Failed to install agent-ssh package into venv'
     exit 1
 fi

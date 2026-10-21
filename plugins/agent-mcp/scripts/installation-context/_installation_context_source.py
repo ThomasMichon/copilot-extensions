@@ -653,7 +653,8 @@ def _resolve_legacy_snapshot_evidence(
         "copilot-extensions.legacy-snapshot-source"
     ):
         return None
-    if type(_property(receipt, "version")) is not int or receipt["version"] != 1:
+    version = _property(receipt, "version")
+    if type(version) is not int or version not in (1, 2):
         _fail("Legacy snapshot source has an unsupported version.")
     snapshots = payload.parent
     root = snapshots.parent
@@ -663,10 +664,18 @@ def _resolve_legacy_snapshot_evidence(
         root / "payload-dir", label="Legacy snapshot redirect", require_stable_identity=True,
     ).decode("utf-8").strip()
     stamped = _read_runtime_marker(root / "stamped-version", "Legacy snapshot version")
+    snapshot_id = payload.name
+    payload_version = payload.name
+    if version == 2:
+        snapshot_id = _string_property(receipt, "snapshotId")
+        payload_version = _string_property(receipt, "payloadVersion")
+        if not snapshot_id or not payload_version:
+            _fail("Legacy snapshot source requires snapshot identity and payload version.")
     if (
         not _path_is_fully_qualified(selected)
         or not paths_equal(selected, payload)
-        or stamped != payload.name
+        or snapshot_id != payload.name
+        or stamped != payload_version
     ):
         _fail("Legacy snapshot source does not describe the selected snapshot.")
     resolution = _property(receipt, "resolution")

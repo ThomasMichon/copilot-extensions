@@ -156,6 +156,8 @@ if (-not $env:COPILOT_PLUGIN_INSTALL_STAGED -or
                 $__wdChild = Start-Process -FilePath $__selfStageExe -PassThru -NoNewWindow `
                     -WorkingDirectory $env:USERPROFILE `
                     -ArgumentList $__selfStageArgs
+                # Windows PowerShell must retain the handle before waiting to preserve ExitCode.
+                $null = $__wdChild.Handle
                 if ($__wdDeadline -gt 0 -and -not $__wdChild.WaitForExit($__wdDeadline * 1000)) {
                     try { & taskkill.exe /PID $__wdChild.Id /T /F 2>&1 | Out-Null } catch {}
                     try { Stop-Process -Id $__wdChild.Id -Force -ErrorAction SilentlyContinue } catch {}
@@ -239,22 +241,30 @@ function Install-AgentSshPackage {
     )
 
     if ($UvCommand) {
-        $resolvedVenueCopilot = Resolve-VenueCopilot
-        $dependencyArgs = @('--python', $Python, '--quiet', 'pyyaml>=6.0.3') + $Dependencies
-        if ($resolvedVenueCopilot -and $Dependencies -contains $resolvedVenueCopilot) {
-            $dependencyArgs += @('--reinstall-package', 'agent-venue-copilot')
-        }
-        $depResult = Invoke-UvPipInstallResilient -UvCommand $UvCommand -Arguments $dependencyArgs
-        if ($depResult.ExitCode -ne 0) {
-            if ($depResult.Output) { Write-Host ($depResult.Output | Out-String) }
-            Write-Fail 'Selected dependency installation failed'
+        $previousDirectory = [IO.Directory]::GetCurrentDirectory()
+        Push-Location -LiteralPath $Source
+        try {
+            [IO.Directory]::SetCurrentDirectory($Source)
+            $resolvedVenueCopilot = Resolve-VenueCopilot
+            $dependencyArgs = @('--python', $Python, '--quiet', 'pyyaml>=6.0.3') + $Dependencies
+            if ($resolvedVenueCopilot -and $Dependencies -contains $resolvedVenueCopilot) {
+                $dependencyArgs += @('--reinstall-package', 'agent-venue-copilot')
+            }
+            $depResult = Invoke-UvPipInstallResilient -UvCommand $UvCommand -Arguments $dependencyArgs
+            if ($depResult.ExitCode -ne 0) {
+                if ($depResult.Output) { Write-Host ($depResult.Output | Out-String) }
+                Write-Fail 'Selected dependency installation failed'
+                return $false
+            }
+            $pkgResult = Invoke-UvPipInstallResilient -UvCommand $UvCommand -PayloadDirToScrub $Source -Arguments @('--python', $Python, $Source, '--quiet')
+            if ($pkgResult.ExitCode -eq 0) { return $true }
+            if ($pkgResult.Output) { Write-Host ($pkgResult.Output | Out-String) }
+            Write-Fail "Canonical dependency installation exited $($pkgResult.ExitCode)"
             return $false
+        } finally {
+            Pop-Location
+            [IO.Directory]::SetCurrentDirectory($previousDirectory)
         }
-        $pkgResult = Invoke-UvPipInstallResilient -UvCommand $UvCommand -PayloadDirToScrub $Source -Arguments @('--python', $Python, $Source, '--quiet')
-        if ($pkgResult.ExitCode -eq 0) { return $true }
-        if ($pkgResult.Output) { Write-Host ($pkgResult.Output | Out-String) }
-        Write-Fail "Canonical dependency installation exited $($pkgResult.ExitCode)"
-        return $false
     }
 
     Write-Fail 'uv is required; unrestricted pip fallback is not supported'
@@ -647,6 +657,7 @@ function Get-GitInfo {
 }
 
 function Write-Binstubs {
+    param([string]$SnapshotSourcePath, [string]$SnapshotId, [string]$PayloadVersion)
     Write-SimpleBinstub `
         -CommandName 'agent-ssh' `
         -ModuleName 'agent_ssh' `
@@ -656,7 +667,8 @@ function Write-Binstubs {
         -SnapshotInstallerPath 'scripts\install.ps1' `
         -NoSelfProvisionEnv 'AGENT_SSH_NO_SELFPROVISION' `
         -ResolverPs1Source (Join-Path $PSScriptRoot 'resolve-runtime.ps1') `
-        -ResolverShSource (Join-Path $PSScriptRoot 'resolve-runtime.sh')
+        -ResolverShSource (Join-Path $PSScriptRoot 'resolve-runtime.sh') `
+        -SnapshotSourcePath $SnapshotSourcePath -SnapshotId $SnapshotId -PayloadVersion $PayloadVersion
     if ($env:OS -ne 'Windows_NT') {
         $stubPath = Join-Path $LocalBin 'agent-ssh'
         $singleQuote = [string][char]39
@@ -797,6 +809,10 @@ function Test-SnapshotReusable {
     )
     if ($SourceKind -eq 'local') { return $false }
     if (-not $SnapshotDir -or -not (Test-Path $SnapshotDir)) { return $false }
+    if (-not $SourceRuntimeIdentity -and
+        -not (Test-Path -LiteralPath (Join-Path $SnapshotDir 'snapshot-provenance.json') -PathType Leaf)) {
+        return $false
+    }
     foreach ($rel in @(
         'scripts\installer-engine.sh',
         'scripts\installer-engine.ps1',
@@ -868,6 +884,12 @@ function Invoke-Stamp {
         if (Test-SnapshotReusable -SnapshotDir $currentSnapshot -SourceKind $sourceKind -SourcePath $sourcePath -SourceVersion $SrcVersion) {
             Assert-SourceRuntimeIdentity -Payload $currentSnapshot
             if ($SourceRuntimeIdentity) {
+                Write-Binstubs
+            } else {
+                Write-Binstubs -SnapshotSourcePath $currentSnapshot `
+                    -SnapshotId (Split-Path -Leaf $currentSnapshot) -PayloadVersion $SrcVersion
+            }
+            if ($SourceRuntimeIdentity) {
                 $py = Get-BootstrapPython
                 if (-not $py) { throw 'Source redirect publication requires a bootstrap Python interpreter' }
                 Assert-SourceRuntimeIdentity
@@ -884,7 +906,6 @@ function Invoke-Stamp {
                 [System.IO.File]::WriteAllText($payloadTmp, $currentSnapshot, $utf8NoBom)
                 Move-Item -LiteralPath $payloadTmp -Destination (Join-Path $InstallDir 'payload-dir') -Force
             }
-            Write-Binstubs
             Write-Ok "Stamped: reused snapshot $currentSnapshot"
             return
         }
@@ -926,6 +947,12 @@ function Invoke-Stamp {
         Assert-SourceRuntimeIdentity -Payload $snapDir
         Assert-SourceRuntimeIdentity
         if ($SourceRuntimeIdentity) {
+            Write-Binstubs
+        } else {
+            Write-Binstubs -SnapshotSourcePath $snapDir `
+                -SnapshotId (Split-Path -Leaf $snapDir) -PayloadVersion $SrcVersion
+        }
+        if ($SourceRuntimeIdentity) {
             $py = Get-BootstrapPython
             if (-not $py) { throw 'Source redirect publication requires a bootstrap Python interpreter' }
             $nativeError = ''
@@ -945,7 +972,6 @@ function Invoke-Stamp {
             Move-Item -LiteralPath $versionTmp -Destination (Join-Path $InstallDir 'stamped-version') -Force
         }
         Write-Ok "Snapshot: $snapDir"
-        Write-Binstubs
         Write-Ok 'Stamped: agent-ssh binstub on PATH; runtime provisions on first use.'
     } finally {
         if ($stampPublicationLock) { $stampPublicationLock.Dispose() }

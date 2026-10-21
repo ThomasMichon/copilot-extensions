@@ -626,11 +626,18 @@ if [[ "$ACTION" == "stamp" ]]; then
     fi
     _source_runtime_unchanged || exit 1
     mkdir -p "$(dirname "$snap_dir")"
-    rm -rf -- "$snap_dir"
-    mv "$snap_tmp" "$snap_dir"
     if [[ -z "$SOURCE_RUNTIME_IDENTITY" ]]; then
-        printf '%s\n' "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" > "$snap_dir/.payload-source"
+        printf '%s\n' "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" > "$snap_tmp/.payload-source"
     fi
+    fi
+    candidate=""
+    [[ -n "$SOURCE_RUNTIME_IDENTITY" ]] || candidate="$snap_tmp"
+    write_simple_binstub \
+        "agent-pull-requests" "agent_pull_requests" "$INSTALL_DIR" "$LOCAL_BIN" "$INSTALL_DIR/bin" "scripts/install.sh" "AGENT_PULL_REQUESTS_NO_SELFPROVISION" \
+        "$SCRIPT_DIR/resolve-runtime.ps1" "$SCRIPT_DIR/resolve-runtime.sh" "$candidate" || exit 1
+    if [[ -n "${snap_tmp:-}" ]]; then
+        rm -rf -- "$snap_dir"
+        mv "$snap_tmp" "$snap_dir"
     fi
     _source_runtime_unchanged || exit 1
     if [[ -n "$SOURCE_RUNTIME_IDENTITY" ]]; then
@@ -643,9 +650,6 @@ if [[ "$ACTION" == "stamp" ]]; then
         printf '%s\n' "$SRC_VERSION" > "$INSTALL_DIR/stamped-version"
     fi
     _ok "Snapshot: $snap_dir"
-    write_simple_binstub \
-        "agent-pull-requests" "agent_pull_requests" "$INSTALL_DIR" "$LOCAL_BIN" "$INSTALL_DIR/bin" "scripts/install.sh" "AGENT_PULL_REQUESTS_NO_SELFPROVISION" \
-        "$SCRIPT_DIR/resolve-runtime.ps1" "$SCRIPT_DIR/resolve-runtime.sh"
     _install_hook_files
     _ok "Stamped: binstub on PATH; runtime provisions on first use."
     exit 0

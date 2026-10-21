@@ -187,6 +187,8 @@ if (-not $env:COPILOT_PLUGIN_INSTALL_STAGED -or
                 $__wdChild = Start-Process -FilePath $__selfStageExe -PassThru -NoNewWindow `
                     -WorkingDirectory $env:USERPROFILE `
                     -ArgumentList $__selfStageArgs
+                # Windows PowerShell must retain the handle before waiting to preserve ExitCode.
+                $null = $__wdChild.Handle
                 if ($__wdDeadline -gt 0 -and -not $__wdChild.WaitForExit($__wdDeadline * 1000)) {
                     try { & taskkill.exe /PID $__wdChild.Id /T /F 2>&1 | Out-Null } catch {}
                     try { Stop-Process -Id $__wdChild.Id -Force -ErrorAction SilentlyContinue } catch {}
@@ -685,6 +687,7 @@ function Test-KeePassXCCli {
 }
 
 function Write-Binstubs {
+    param([string]$SnapshotSourcePath)
     foreach ($name in @('resolve-runtime.ps1', 'resolve-runtime.sh')) {
         if (-not (Test-Path -LiteralPath (Join-Path $PSScriptRoot $name) -PathType Leaf)) {
             throw "Required Vault runtime helper is unavailable: $name"
@@ -702,7 +705,8 @@ function Write-Binstubs {
         -SnapshotInstallerPath 'scripts\install.ps1' `
         -NoSelfProvisionEnv 'AGENT_VAULT_NO_SELFPROVISION' `
         -ResolverPs1Source (Join-Path $PSScriptRoot 'resolve-runtime.ps1') `
-        -ResolverShSource (Join-Path $PSScriptRoot 'resolve-runtime.sh')
+        -ResolverShSource (Join-Path $PSScriptRoot 'resolve-runtime.sh') `
+        -SnapshotSourcePath $SnapshotSourcePath
     } catch {
         [Console]::Error.WriteLine("Vault binstub publication failed: $($_.Exception.Message)")
         throw
@@ -1080,8 +1084,8 @@ function Invoke-Stamp {
     $snapDir = Join-Path (Join-Path $InstallDir 'snapshots') $SrcVersion
     Assert-SourceRuntime
     if ($script:SourceRuntimeIdentity) {
-        Publish-SourcePayload
         Write-Binstubs
+        Publish-SourcePayload
         Write-Ok 'Stamped: agent-vault binstub on PATH; runtime provisions on first use.'
         return
     }
@@ -1094,11 +1098,11 @@ function Invoke-Stamp {
     }
     Materialize-SnapshotLibs -SnapshotDir $snapTmp
     Materialize-SnapshotInstallerEngine -SnapshotDir $snapTmp
+    Write-Binstubs -SnapshotSourcePath $snapTmp
     if (Test-Path $snapDir) { Remove-Item $snapDir -Recurse -Force -ErrorAction SilentlyContinue }
     Move-Item -LiteralPath $snapTmp -Destination $snapDir -Force
     [System.IO.File]::WriteAllText((Join-Path $InstallDir 'payload-dir'), $snapDir, $utf8NoBom)
     [System.IO.File]::WriteAllText((Join-Path $InstallDir 'stamped-version'), $SrcVersion, $utf8NoBom)
-    Write-Binstubs
     Write-Ok "Snapshot: $snapDir"
     Write-Ok 'Stamped: agent-vault binstub on PATH; runtime provisions on first use.'
 }

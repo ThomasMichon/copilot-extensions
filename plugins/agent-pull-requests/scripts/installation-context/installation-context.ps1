@@ -2578,7 +2578,7 @@ function Resolve-LegacySnapshotEvidence([string]$ResolvedPayload, [string]$Reque
     }
     $version = Get-PropertyValue $receipt 'version'
     Assert-PositiveInteger $version 'legacy snapshot source version'
-    if ($version -ne 1) { Fail 'Legacy snapshot source has an unsupported version.' }
+    if ($version -notin @(1, 2)) { Fail 'Legacy snapshot source has an unsupported version.' }
     $snapshots = Split-Path -Parent $ResolvedPayload
     $root = Split-Path -Parent $snapshots
     if ((Split-Path -Leaf $snapshots) -cne 'snapshots' -or
@@ -2589,9 +2589,24 @@ function Resolve-LegacySnapshotEvidence([string]$ResolvedPayload, [string]$Reque
         'Legacy snapshot redirect' -RequireSameIdentity
     $selected = $strictUtf8.GetString([byte[]]$selectedBytes.bytes).Trim()
     $stamped = Read-RuntimeMarker (Join-Path $root 'stamped-version') 'Legacy snapshot version'
+    $snapshotId = Split-Path -Leaf $ResolvedPayload
+    $payloadVersion = $snapshotId
+    if ($version -eq 2) {
+        foreach ($field in @('snapshotId', 'payloadVersion')) {
+            if (-not (Has-ExactProperty $receipt $field) -or
+                $receipt.PSObject.Properties[$field].Value -isnot [string]) {
+                Fail 'Legacy snapshot source requires string snapshot identity and payload version.'
+            }
+        }
+        $snapshotId = Get-StringProperty $receipt 'snapshotId'
+        $payloadVersion = Get-StringProperty $receipt 'payloadVersion'
+        if (-not $snapshotId -or -not $payloadVersion) {
+            Fail 'Legacy snapshot source requires snapshot identity and payload version.'
+        }
+    }
     if (-not [IO.Path]::IsPathRooted($selected) -or
         -not (Paths-Equal $selected $ResolvedPayload) -or
-        $stamped -cne (Split-Path -Leaf $ResolvedPayload)) {
+        $snapshotId -cne (Split-Path -Leaf $ResolvedPayload) -or $stamped -cne $payloadVersion) {
         Fail 'Legacy snapshot source does not describe the selected snapshot.'
     }
     $resolution = Get-PropertyValue $receipt 'resolution'

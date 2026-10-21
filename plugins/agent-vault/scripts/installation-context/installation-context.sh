@@ -1502,7 +1502,7 @@ resolve_legacy_snapshot_evidence() {
     [[ "$schema" == copilot-extensions.legacy-snapshot-source ]] || return 0
     assert_json_type "$receipt" version number 'legacy snapshot source version'
     version="$(json_optional_path "$receipt" version)"
-    [[ "$version" == 1 ]] || fail 'Legacy snapshot source has an unsupported version.'
+    [[ "$version" == 1 || "$version" == 2 ]] || fail 'Legacy snapshot source has an unsupported version.'
     snapshots="$(dirname -- "$payload")"
     root="$(dirname -- "$snapshots")"
     [[ "${snapshots##*/}" == snapshots && -f "$receipt" && ! -L "$receipt" ]] ||
@@ -1511,8 +1511,15 @@ resolve_legacy_snapshot_evidence() {
         fail 'Legacy snapshot redirect must be an ordinary file.'
     selected="$(cat -- "$root/payload-dir")" || fail 'Cannot read legacy snapshot redirect.'
     read_runtime_marker_into stamped "$root/stamped-version" 'Legacy snapshot version'
+    local snapshot_id="${payload##*/}" payload_version="${payload##*/}"
+    if [[ "$version" == 2 ]]; then
+        json_optional_string_into snapshot_id "$receipt" snapshotId
+        json_optional_string_into payload_version "$receipt" payloadVersion
+        [[ -n "$snapshot_id" && -n "$payload_version" ]] ||
+            fail 'Legacy snapshot source requires snapshot identity and payload version.'
+    fi
     is_absolute "$selected" && paths_equal "$selected" "$payload" &&
-        [[ "$stamped" == "${payload##*/}" ]] ||
+        [[ "$snapshot_id" == "${payload##*/}" && "$stamped" == "$payload_version" ]] ||
         fail 'Legacy snapshot source does not describe the selected snapshot.'
     json_optional_string_into action "$receipt" "$(path_join resolution action)"
     assert_json_type "$receipt" "$(path_join resolution operative)" boolean 'resolution operative'

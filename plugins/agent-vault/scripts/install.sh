@@ -563,12 +563,12 @@ do_stamp() {
     mkdir -p "$INSTALL_DIR" "$LOCAL_BIN" || {
         _fail "Stamp directories cannot be prepared: $INSTALL_DIR"; return 1;
     }
+    _deploy_binstub || return 1
     if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
         _stamp_source_payload || return 1
     else
         printf '%s\n' "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" > "$INSTALL_DIR/payload-dir" || return 1
     fi
-    _deploy_binstub || return 1
     _ok "Stamped: binstub on PATH; runtime provisions on first use."
 }
 

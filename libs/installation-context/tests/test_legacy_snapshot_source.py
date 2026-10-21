@@ -10,12 +10,16 @@ from test_runtime_deployment_adapters import _run_adapter
 
 
 @pytest.mark.parametrize("runner", ALL_RUNNERS)
-@pytest.mark.parametrize("case", [
-    "standalone", "directory", "managed", "fingerprint", "source", "plugin", "version",
-    "selected", "stamped", "record",
-])
+@pytest.mark.parametrize(("receipt_version", "case"), [
+    (version, case) for version in (1, 2) for case in (
+        "standalone", "directory", "managed", "fingerprint", "source", "plugin", "version",
+        "selected", "stamped", "record",
+    )
+] + [(2, case) for case in (
+    "snapshot-id", "payload-version", "id-array", "payload-version-array", "missing-selection",
+)])
 def test_snapshot_source_revalidates_identity_and_live_policy(
-    tmp_path: Path, runner: str, case: str,
+    tmp_path: Path, runner: str, case: str, receipt_version: int,
 ) -> None:
     module = _load_module()
     publisher = tmp_path / "publisher"
@@ -30,14 +34,16 @@ def test_snapshot_source_revalidates_identity_and_live_policy(
         marketplace_key="example", environment={},
     )
     root = tmp_path / "runtime"
-    snapshot = root / "snapshots/1.2.3"
+    snapshot = root / "snapshots" / ("1.2.3-20261021T000000-42" if receipt_version == 2 else "1.2.3")
     _write_json(snapshot / "plugin.json", {"name": "agent-example", "version": "1.2.3"})
     (root / "payload-dir").write_text(str(snapshot), encoding="utf-8")
     (root / "stamped-version").write_text("1.2.3", encoding="utf-8")
     receipt = {
-        "schema": "copilot-extensions.legacy-snapshot-source", "version": 1,
+        "schema": "copilot-extensions.legacy-snapshot-source", "version": receipt_version,
         "resolution": captured,
     }
+    if receipt_version == 2:
+        receipt.update(snapshotId=snapshot.name, payloadVersion="1.2.3")
     path = snapshot / "snapshot-provenance.json"
     _write_json(path, receipt)
     publisher.rmdir()
@@ -67,6 +73,16 @@ def test_snapshot_source_revalidates_identity_and_live_policy(
         (root / "stamped-version").write_text("9.8.7", encoding="utf-8")
     elif case == "record":
         captured["source"]["record"] = "wrong"
+    elif case == "snapshot-id":
+        receipt["snapshotId"] = "other-snapshot"
+    elif case == "payload-version":
+        receipt["payloadVersion"] = "9.8.7"
+    elif case == "id-array":
+        receipt["snapshotId"] = [snapshot.name]
+    elif case == "payload-version-array":
+        receipt["payloadVersion"] = ["1.2.3"]
+    elif case == "missing-selection":
+        receipt.pop("snapshotId")
     _write_json(path, receipt)
     before = {str(entry): entry.read_bytes() for entry in root.rglob("*") if entry.is_file()}
     result = _run_adapter(runner, [

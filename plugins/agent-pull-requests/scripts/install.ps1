@@ -178,6 +178,8 @@ if (-not $env:COPILOT_PLUGIN_INSTALL_STAGED -or
                 $__wdChild = Start-Process -FilePath $__selfStageExe -PassThru -NoNewWindow `
                     -WorkingDirectory $env:USERPROFILE `
                     -ArgumentList $__selfStageArgs
+                # Windows PowerShell must retain the handle before waiting to preserve ExitCode.
+                $null = $__wdChild.Handle
                 if ($__wdDeadline -gt 0 -and -not $__wdChild.WaitForExit($__wdDeadline * 1000)) {
                     try { & taskkill.exe /PID $__wdChild.Id /T /F 2>&1 | Out-Null } catch {}
                     try { Stop-Process -Id $__wdChild.Id -Force -ErrorAction SilentlyContinue } catch {}
@@ -674,8 +676,22 @@ function Invoke-Stamp {
         throw 'Stamped source snapshot identity changed; redirects were not published'
     }
     Test-SourceRuntimeUnchanged
-    if (Test-Path $snapDir) { Remove-Item $snapDir -Recurse -Force -ErrorAction SilentlyContinue }
-    Move-Item -LiteralPath $snapTmp -Destination $snapDir -Force
+    }
+    $candidate = if ($SourceRuntimeIdentity) { '' } else { $snapTmp }
+    Write-SimpleBinstub `
+        -CommandName 'agent-pull-requests' `
+        -ModuleName 'agent_pull_requests' `
+        -RuntimeRoot $InstallDir `
+        -LocalBin $LocalBin `
+        -InstallBinDir (Join-Path $InstallDir 'bin') `
+        -SnapshotInstallerPath 'scripts\install.ps1' `
+        -NoSelfProvisionEnv 'AGENT_PULL_REQUESTS_NO_SELFPROVISION' `
+        -ResolverPs1Source (Join-Path $PSScriptRoot 'resolve-runtime.ps1') `
+        -ResolverShSource (Join-Path $PSScriptRoot 'resolve-runtime.sh') `
+        -SnapshotSourcePath $candidate
+    if (-not $reuseSnapshot) {
+        if (Test-Path $snapDir) { Remove-Item $snapDir -Recurse -Force -ErrorAction SilentlyContinue }
+        Move-Item -LiteralPath $snapTmp -Destination $snapDir -Force
     }
     Test-SourceRuntimeUnchanged
     if ($SourceRuntimeIdentity) {
@@ -694,16 +710,6 @@ function Invoke-Stamp {
         [System.IO.File]::WriteAllText((Join-Path $InstallDir 'stamped-version'), $SrcVersion, $utf8NoBom)
     }
     Write-Ok "Snapshot: $snapDir"
-    Write-SimpleBinstub `
-        -CommandName 'agent-pull-requests' `
-        -ModuleName 'agent_pull_requests' `
-        -RuntimeRoot $InstallDir `
-        -LocalBin $LocalBin `
-        -InstallBinDir (Join-Path $InstallDir 'bin') `
-        -SnapshotInstallerPath 'scripts\install.ps1' `
-        -NoSelfProvisionEnv 'AGENT_PULL_REQUESTS_NO_SELFPROVISION' `
-        -ResolverPs1Source (Join-Path $PSScriptRoot 'resolve-runtime.ps1') `
-        -ResolverShSource (Join-Path $PSScriptRoot 'resolve-runtime.sh')
     Install-HookFiles
     Write-Ok 'Stamped: agent-pull-requests binstub on PATH; runtime provisions on first use.'
 }
