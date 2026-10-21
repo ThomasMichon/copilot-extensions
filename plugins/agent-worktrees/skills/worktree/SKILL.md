@@ -217,9 +217,12 @@ ancestry, by each commit's patch, by the whole branch as one patch (a squash
 merge, even after upstream edits the same files again), or by file content.
 Commits a branch was created on top of from a remote-tracking branch (its
 reflog's `Created from origin/...`) are published history, never its own
-work. A later reset to a tip independently recorded in that same source's
+work. A later reset to a tip independently recorded in that source's
 remote-tracking reflog advances this published boundary, even after earlier
-local commits. Every commit beyond that boundary and every other tracked
+local commits. The configured default or provider-confirmed PR base on the
+original remote can supply the same exact historical-tip proof for a cross-base
+reset; arbitrary remote branches and locally shadowed names cannot. Every commit
+beyond that boundary and every other tracked
 PR branch still receives its own check; missing remote-tip proof does not
 authorize retirement. A PR tracked only by its URL and number (`set-pr`
 without `--branch`, for work pushed from a hand-made branch) is still decided

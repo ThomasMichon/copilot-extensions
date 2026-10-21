@@ -76,13 +76,14 @@ def squash_landed(branch: str, upstream: str, cwd: str) -> bool | None:
     return lines[0].startswith("-")
 
 
-def creation_point(ref: str, cwd: str) -> str:
+def creation_point(ref: str, cwd: str, *, published_bases: tuple[str, ...] = ()) -> str:
     """The commit local branch *ref* was created at, when it was created from a
     remote-tracking branch (its reflog's oldest entry, ``branch: Created from
     origin/main``) that is proven to have held that commit: everything reachable
     from it was already published when the branch was made, so it is never this
     branch's own work -- even after that remote rewrites its history. A later
-    reset to a proven tip of that same source advances this published boundary
+    reset to a proven tip of that same source or a caller-qualified landing base
+    on the same remote advances this published boundary
     (:func:`_later_resets_to_source`), including after earlier local work.
 
     The reflog message alone doesn't prove where the commit came from (a local
@@ -123,19 +124,29 @@ def creation_point(ref: str, cwd: str) -> str:
         held_now = git_ops.git("for-each-ref", "--count=1", "--contains", sha, "--format=%(refname)",
                                f"refs/remotes/{remote}/", cwd=cwd, check=False)
         created = sha if held_now.returncode == 0 and held_now.stdout.strip() else ""
-    return _later_resets_to_source(entries, created, source, cwd) if created else ""
+    return _later_resets_to_source(entries, created, source, published_bases, cwd) if created else ""
 
 
-def _later_resets_to_source(entries: list[str], created: str, source: str, cwd: str) -> str:
-    """Find the latest reset to an independently proven tip of the original source.
+def _later_resets_to_source(
+    entries: list[str], created: str, source: str, published_bases: tuple[str, ...], cwd: str,
+) -> str:
+    """Find the latest reset to an independently proven source/landing-base tip.
 
     Earlier local work does not make a subsequent published tip unpublished.
     Commits beyond that tip remain outside this boundary, including empty or
     reverted commits; other tracked PR branches are checked separately.
     """
-    tips = git_ops.git("reflog", "show", "--format=%H", f"refs/remotes/{source}", "--",
-                       cwd=cwd, check=False)
-    held = {ln.strip() for ln in tips.stdout.splitlines()} if tips.returncode == 0 else set()
+    prefix = f"refs/remotes/{source.partition('/')[0]}/"
+    sources = {f"refs/remotes/{source}"} | {b for b in published_bases if b.startswith(prefix)}
+    held: set[str] = set()
+    for qualified in sources:
+        short = qualified.removeprefix("refs/remotes/")
+        if git_ops.git("rev-parse", "--verify", "-q", f"refs/heads/{short}", cwd=cwd,
+                       check=False).returncode == 0:
+            continue
+        tips = git_ops.git("reflog", "show", "--format=%H", qualified, "--", cwd=cwd, check=False)
+        if tips.returncode == 0:
+            held.update(ln.strip() for ln in tips.stdout.splitlines())
     point = created
     for entry in reversed(entries[:-1]):  # oldest first, after the creation
         sha, _, subject = entry.partition("\t")
@@ -288,4 +299,3 @@ def warn_if_tracked_branch_diverged(
         f"preserved (not deleted) through cleanup."
     )
     return True
-

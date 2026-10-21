@@ -332,6 +332,82 @@ def test_a_later_reset_without_remote_tip_proof_does_not_certify_work(
     assert ok is False and "further commits" in err
 
 
+def _historical_cross_base_reset(env: SimpleNamespace, merged_base: str = "dev") -> tuple[str, str]:
+    _git("checkout", "-q", "--detach", "origin/dev", cwd=env.clone)
+    _git("branch", "-D", f"worktree/{env.worktree_id}", cwd=env.clone)
+    _git("checkout", "-q", "-b", f"worktree/{env.worktree_id}", "origin/dev", cwd=env.clone)
+    head = _two_commit_change(env.clone)
+    _git("checkout", "-q", "-b", env.slug, cwd=env.clone)
+    _squash_onto(env.seed, merged_base, SQUASHED)
+    tip = _sync_worktree_branch_to_a_newer_main(env)
+    _git("checkout", "-q", f"worktree/{env.worktree_id}", cwd=env.clone)
+    return head, tip
+
+
+@pytest.mark.parametrize("later_work", ["none", "commit", "empty", "revert", "other-pr-branch"])
+@pytest.mark.parametrize(("default_branch", "pr_base"), [("main", "dev"), ("dev", "main")])
+def test_a_historical_reset_from_dev_to_the_release_base(
+    env: SimpleNamespace, provider: SimpleNamespace, later_work: str, default_branch: str, pr_base: str,
+) -> None:
+    head, tip = _historical_cross_base_reset(env, pr_base)
+    if later_work in ("commit", "revert"):
+        _commit(env.clone, "mine.txt", "later local work\n", "after the release reset")
+    elif later_work == "empty":
+        _git("commit", "-q", "--allow-empty", "-m", "later empty commit", cwd=env.clone)
+    if later_work == "revert":
+        _git("revert", "--no-edit", "HEAD", cwd=env.clone)
+    elif later_work == "other-pr-branch":
+        _git("checkout", "-q", env.slug, cwd=env.clone)
+        _commit(env.clone, "mine.txt", "unpublished follow-up\n", "after the merged PR")
+        _git("checkout", "-q", f"worktree/{env.worktree_id}", cwd=env.clone)
+    _rewrite_main(env)
+    _git("fetch", "-q", "-f", "origin", cwd=env.clone)
+    provider.head_sha, provider.base_ref = head, pr_base
+    record = _record(env, number=7, state="merged", head_sha=head)
+    repo = _repo(default_branch)
+
+    report = finalize_landing.explain(record, repo, str(env.clone), str(env.clone))
+    ok, err = finalize._pr_finalize_precondition(
+        record, repo, str(env.clone), str(env.clone))
+
+    if later_work == "none":
+        assert report["created_from"] == tip
+        assert report["landed"] is True
+        assert (ok, err) == (True, None)
+    else:
+        assert report["landed"] is False
+        assert ok is False and "further commits" in err
+
+
+@pytest.mark.parametrize("invalid_proof", ["missing", "shadow", "other-remote", "unqualified"])
+def test_a_cross_base_reset_requires_an_unambiguous_qualified_base(
+    env: SimpleNamespace, provider: SimpleNamespace, invalid_proof: str,
+) -> None:
+    head, tip = _historical_cross_base_reset(env)
+    _rewrite_main(env)
+    _git("fetch", "-q", "-f", "origin", cwd=env.clone)
+    if invalid_proof in ("missing", "other-remote"):
+        _git("reflog", "expire", "--expire=now", "refs/remotes/origin/main", cwd=env.clone)
+    if invalid_proof == "shadow":
+        _git("branch", "origin/main", tip, cwd=env.clone)
+    elif invalid_proof == "other-remote":
+        _git("remote", "add", "secondary", str(env.origin), cwd=env.clone)
+        _git("update-ref", "--create-reflog", "refs/remotes/secondary/main", tip, cwd=env.clone)
+    provider.head_sha, provider.base_ref = head, "dev"
+    repo = _repo("dev" if invalid_proof == "unqualified" else "main")
+    record = _record(env, number=7, state="merged", head_sha=head)
+    bases = ("refs/remotes/secondary/main",) if invalid_proof == "other-remote" else ()
+
+    assert finalize_ref.creation_point(
+        f"worktree/{env.worktree_id}", str(env.clone), published_bases=bases) != tip
+    report = finalize_landing.explain(record, repo, str(env.clone), str(env.clone))
+    ok, err = finalize._pr_finalize_precondition(
+        record, repo, str(env.clone), str(env.clone))
+    assert report["created_from"] != tip
+    assert report["landed"] is False
+    assert ok is False and "further commits" in err
+
+
 def test_a_commit_after_a_sync_still_counts(env, provider):
     _git("checkout", "-q", "--detach", cwd=env.clone)
     tip = _sync_worktree_branch_to_a_newer_main(env)

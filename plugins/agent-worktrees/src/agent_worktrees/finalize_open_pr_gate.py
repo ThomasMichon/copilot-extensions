@@ -709,10 +709,11 @@ def _extra_commit_count(
     from .finalize_ref import creation_point
     if not git_ops.ref_exists(content_ref, cwd=cwd):
         return None
-    created = creation_point(content_ref, cwd)  # already published when the branch was made
+    bases = (upstream,) if isinstance(upstream, str) else upstream
+    created = creation_point(content_ref, cwd, published_bases=bases)
     extra = git_ops.git(
         "rev-list", "--count", content_ref, f"^{head_sha}",
-        *(f"^{u}" for u in ((upstream,) if isinstance(upstream, str) else upstream)),
+        *(f"^{u}" for u in bases),
         *([f"^{created}"] if created else []), cwd=cwd, check=False,
     )
     if extra.returncode != 0:
