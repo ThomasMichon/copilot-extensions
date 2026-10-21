@@ -138,6 +138,22 @@ def _terminate_group(process: subprocess.Popen) -> None:
         time.sleep(0.05)
 
 
+def _child_exited_unreaped(pid: int) -> bool:
+    waitid = getattr(os, "waitid", None)
+    if waitid is not None:
+        return waitid(os.P_PID, pid, os.WEXITED | os.WNOHANG | os.WNOWAIT) is not None
+    # Python 3.11/3.12 on macOS lack waitid. ps observes zombie state without
+    # reaping our direct child, keeping its PID/PGID reserved through cleanup.
+    observation = subprocess.run(
+        ["ps", "-o", "stat=", "-p", str(pid)],
+        stdin=subprocess.DEVNULL, capture_output=True, text=True, check=True, timeout=5,
+    )
+    states = observation.stdout.split()
+    if len(states) != 1:
+        raise RuntimeError("Cannot observe unreaped installer child state")
+    return states[0].startswith("Z")
+
+
 def _supervise(owner_fd: int, argv: list[str]) -> int:
     process = None
     try:
@@ -147,18 +163,17 @@ def _supervise(owner_fd: int, argv: list[str]) -> int:
         # Observe exit without reaping the group leader. Its unreaped identity
         # prevents PID/PGID reuse before owned descendants are terminated.
         while True:
-            settled = os.waitid(
-                os.P_PID, process.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT,
-            )
-            if settled is not None:
+            if _child_exited_unreaped(process.pid):
                 break
             if select.select([owner_fd], [], [], 0.05)[0] and not os.read(owner_fd, 1):
                 raise RuntimeError("Installer owner exited during child construction")
-        return settled.si_status if settled.si_code == os.CLD_EXITED else 128 + settled.si_status
     finally:
         if process is not None:
             _settle(lambda: _terminate_group(process))
         os.close(owner_fd)
+    if process is None or process.returncode is None:
+        raise RuntimeError("Installer child cleanup returned without an exit status")
+    return process.returncode if process.returncode >= 0 else 128 - process.returncode
 
 
 if __name__ == "__main__":

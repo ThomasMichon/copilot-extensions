@@ -94,6 +94,22 @@ def test_child_preserves_canonical_transaction_environment_and_cwd(engine, monke
     )
 
 
+def test_frozen_procutil_imports_its_siblings_without_cross_root_reuse(engine, tmp_path):
+    loaded = []
+    for name in ("first", "second"):
+        root = _package(tmp_path / name, "agent-procutil")
+        package = root / "src" / "agent_procutil"
+        package.mkdir()
+        (package / "__init__.py").write_text("from .sibling import VALUE\n", encoding="utf-8")
+        (package / "sibling.py").write_text(f"VALUE = {name!r}\n", encoding="utf-8")
+        module = engine._procutil(engine.FrozenInputs(root, (root,), "unused"))
+        assert module.VALUE == name
+        sibling = sys.modules[module.__name__ + ".sibling"]
+        assert Path(sibling.__file__).is_relative_to(root)
+        loaded.append(module.__name__)
+    assert loaded[0] != loaded[1]
+
+
 @pytest.mark.parametrize("windows", [False, True])
 def test_process_creation_failure_has_a_distinct_os_error_type(procutil, monkeypatch, windows):
     failure = OSError(193, "not an executable", "broken-python")
@@ -502,10 +518,9 @@ def build_inputs(tmp_path, monkeypatch):
         (package / "src" / "module.py").unlink()
         if name == "agent-procutil":
             target = package / "src" / module
-            target.mkdir()
-            shutil.copyfile(
-                root / "libs" / "agent-procutil" / "src" / "agent_procutil" / "__init__.py",
-                target / "__init__.py",
+            shutil.copytree(
+                root / "libs" / "agent-procutil" / "src" / "agent_procutil", target,
+                ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
             )
         else:
             (package / "src" / f"{module}.py").write_text(

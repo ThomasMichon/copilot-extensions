@@ -386,8 +386,9 @@ def test_venv_install_invokes_resolved_uv_path():
 )) or [None])
 @pytest.mark.parametrize("complete", [False, True])
 @pytest.mark.parametrize("exit_code", [0, 7])
+@pytest.mark.parametrize("contextual", [False, True])
 def test_python_runtime_resolves_one_uv_application(
-    tmp_path: Path, host: str | None, complete: bool, exit_code: int,
+    tmp_path: Path, host: str | None, complete: bool, exit_code: int, contextual: bool,
 ):
     if os.name != "nt" or host is None:
         pytest.skip("native Windows PowerShell application discovery")
@@ -399,6 +400,10 @@ def test_python_runtime_resolves_one_uv_application(
     slot.mkdir(parents=True)
     if complete:
         (slot / ".install-complete.json").write_text("{}", encoding="utf-8")
+    staged = tmp_path / "staged-plugin"
+    original = tmp_path / "live-plugin"
+    staged.mkdir()
+    original.mkdir()
     script = r"""
 $ErrorActionPreference = 'Stop'
 $source = Get-Content -LiteralPath $env:INSTALLER -Raw
@@ -416,6 +421,8 @@ foreach ($name in @('Get-ApplicationPath', 'Resolve-WinGetPackageExecutable', 'D
 $InstallDir = $env:FIXTURE_ROOT
 $VenvDir = Join-Path $InstallDir 'versions\fixture'
 $PluginDir = Get-Item -LiteralPath $env:FIXTURE_PLUGIN
+$RuntimeInputPlugin = $env:FIXTURE_LIVE
+$ContextualInstall = $env:FIXTURE_CONTEXTUAL -eq '1'
 $ScriptDir = Join-Path $PluginDir 'scripts'
 $Action = 'update'
 $before = @((Get-Command uv -CommandType Application).Source)
@@ -425,12 +432,22 @@ function Ensure-Uv { $script:ensured = $true; return $true }
 function Ensure-UvIndex { $script:indexed = $true }
 function Ensure-InstallDir { param($Path) [void][IO.Directory]::CreateDirectory($Path) }
 function Assert-SourceRuntime { }
+function Assert-ContextPublication { $script:publicationChecked = $true }
 function Write-ServiceOk { }
 function Invoke-Hidden {
     param($FilePath, $ArgList, $ErrorOutput)
     $uvIndex = [Array]::IndexOf($ArgList, '--uv')
     if ($uvIndex -lt 0 -or $ArgList[$uvIndex + 1] -ne $before[0] -or
         $ArgList[$uvIndex + 2] -ne '--base-python') { throw 'uv argument is not scalar' }
+    $pluginIndex = [Array]::IndexOf($ArgList, '--plugin')
+    if ($pluginIndex -lt 0 -or $ArgList[$pluginIndex + 1] -ne $env:FIXTURE_PLUGIN) {
+        throw 'ordinary update did not preserve its staged construction input'
+    }
+    $payloadIndex = [Array]::IndexOf($ArgList, '--payload')
+    if ($ArgList[$payloadIndex + 1] -ne $env:FIXTURE_ORIGIN) {
+        throw 'update lost its original payload provenance'
+    }
+    if ($ArgList -notcontains '--recover-adopted-manager') { throw 'missing recovery handoff' }
     $resultIndex = [Array]::IndexOf($ArgList, '--result')
     $result = @{
         runtime_version = 'fixture'; runtime_python = $env:FIXTURE_PYTHON
@@ -441,6 +458,7 @@ function Invoke-Hidden {
     $global:LASTEXITCODE = [int]$env:FIXTURE_EXIT
 }
 Deploy-PythonRuntime
+if ($ContextualInstall -and -not $script:publicationChecked) { throw 'missing publication check' }
 if ($env:FIXTURE_COMPLETE -eq '0' -and (-not $script:ensured -or -not $script:indexed)) {
     throw 'Missing preparation'
 }
@@ -456,9 +474,12 @@ if (@((Get-Command uv -CommandType Application).Source).Count -ne $before.Count)
         capture_output=True, encoding="utf-8", errors="replace", timeout=20,
         env={
             **os.environ, "INSTALLER": str(INSTALLER),
-            "FIXTURE_ROOT": str(tmp_path / "root"), "FIXTURE_PLUGIN": str(PLUGIN),
+            "FIXTURE_ROOT": str(tmp_path / "root"), "FIXTURE_PLUGIN": str(staged),
+            "FIXTURE_LIVE": str(original), "FIXTURE_CONTEXTUAL": str(int(contextual)),
+            "FIXTURE_ORIGIN": str(original if contextual else staged),
             "FIXTURE_PYTHON": sys.executable, "FIXTURE_EXIT": str(exit_code),
-            "FIXTURE_COMPLETE": str(int(complete)), "COPILOT_PLUGIN_STAGED_FROM": "",
+            "FIXTURE_COMPLETE": str(int(complete)),
+            "COPILOT_PLUGIN_STAGED_FROM": str(original) if contextual else "",
             "PATH": os.pathsep.join([str(tmp_path / "first"), str(tmp_path / "second"),
                                     os.environ.get("PATH", "")]),
         },

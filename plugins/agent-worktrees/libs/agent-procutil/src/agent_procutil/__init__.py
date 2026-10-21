@@ -60,6 +60,8 @@ import time
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any, BinaryIO
 
+from ._spawn_errors import SyncProcessLaunchError, SyncProcessNotFoundError
+
 if TYPE_CHECKING:
     from .daemon_broker import WindowsDaemonProcess
 
@@ -459,16 +461,6 @@ async def spawn_in_kill_on_close_job(
     return process, job_handle
 
 
-class SyncProcessLaunchError(OSError):
-    """Process creation failed before any child or Job handle was returned."""
-
-    def __init__(self, error: OSError):
-        super().__init__(*error.args)
-        for name in ("errno", "strerror", "filename", "filename2", "winerror"):
-            if hasattr(error, name):
-                setattr(self, name, getattr(error, name))
-
-
 def spawn_sync_in_kill_on_close_job(
     argv: list[str] | str,
     *,
@@ -519,7 +511,8 @@ def spawn_sync_in_kill_on_close_job(
         try:
             return subprocess.Popen(argv, **kwargs), None  # noqa: S603 - argv list, no shell
         except OSError as error:
-            raise SyncProcessLaunchError(error) from error
+            kind = SyncProcessNotFoundError if isinstance(error, FileNotFoundError) else SyncProcessLaunchError
+            raise kind(error) from error
 
     spawn_kwargs = dict(kwargs)
     spawn_kwargs["creationflags"] = (
@@ -528,7 +521,8 @@ def spawn_sync_in_kill_on_close_job(
     try:
         process = subprocess.Popen(argv, **spawn_kwargs)  # noqa: S603 - argv list, no shell
     except OSError as error:
-        raise SyncProcessLaunchError(error) from error
+        kind = SyncProcessNotFoundError if isinstance(error, FileNotFoundError) else SyncProcessLaunchError
+        raise kind(error) from error
     job_handle: JobHandle | None = None
     try:
         pid = process.pid

@@ -2798,7 +2798,7 @@ function Deploy-PythonRuntime {
     $modeArgs = @()
     if ($Action -eq 'update') { $modeArgs += '--recover-adopted-manager' }
     if ($Action -in @('repair', 'dev', 'dev-release')) { $modeArgs = @('--mode', $Action) }
-    $runtimeInputs = if ($modeArgs.Count) { $RuntimeInputPlugin } else { $PluginDir.ToString() }
+    $runtimeInputs = if ($Action -in @('repair', 'dev', 'dev-release')) { $RuntimeInputPlugin } else { $PluginDir.ToString() }
     if ($Owner) { $modeArgs += @('--owner', $Owner) }
     if ($Action -ne 'dev-release') {
         $scope = if ($Action -in @('install', 'update')) { 'wrappers' } else { 'resolvers' }

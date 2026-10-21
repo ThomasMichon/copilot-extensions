@@ -87,6 +87,8 @@ def _ps1_binstub() -> str:
     probe = _legacy_runtime_probe()
     return (
         "# worktree-manager binstub (versioned) — resolves the current-version marker.\n"
+        "$ErrorActionPreference = 'Stop'\n"
+        "$PSNativeCommandUseErrorActionPreference = $false\n"
         "$env:PYTHONUTF8 = '1'\n"
         "$env:__PYVENV_LAUNCHER__ = $null\n"
         '$root = if ($env:WORKTREE_MANAGER_ROOT) { $env:WORKTREE_MANAGER_ROOT } '

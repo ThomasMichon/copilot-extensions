@@ -32,6 +32,7 @@ _OWNED_STUBS = {
     "worktree-manager.ps1": {
         "29c2bae43865a9307665f83fb2ed3c7e24c6d661b906dc47f44950d8900febbc",
         "55d2077997a9d1528b5c1e9aba3a4eb04327366ba2460e9244254f42b42ba2db",
+        "fe7809ba94fa714b866ce6f6e33d136b4b3e877db909778c41181cdd4ad0b030",
     },
     "worktree-manager": {
         "37836dbddadb559b209ec2ab08ba0f9fd062503f6794441c17c2cb9f44390ca2",

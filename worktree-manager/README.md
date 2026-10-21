@@ -69,6 +69,8 @@ PowerShell, CMD and Bash launch the selected slot through the canonical retentio
 bootstrap in isolated mode, preserve its exit status, and never resolve or acquire
 dependencies during ordinary launch. Mux cutover uses that same constructed
 interpreter, not an old interpreter with the new source on `PYTHONPATH`.
+The PowerShell entry fails nonzero if that interpreter cannot start and
+preserves the actual exit status when it runs.
 Mux routes and target readiness use the constructed slot's immutable generation,
 including repair/source qualifiers. Health preserves the semantic package
 `version` and separately reports `runtime_generation` from its own interpreter

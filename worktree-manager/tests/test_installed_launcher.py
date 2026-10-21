@@ -201,6 +201,62 @@ def test_missing_runtime_does_not_attempt_project_resolution(launcher, tmp_path)
     assert not result.stdout.strip()
 
 
+@pytest.mark.parametrize("damage", ["missing", "unexecutable"])
+def test_retained_launcher_cannot_report_success_without_starting_interpreter(launcher, tmp_path, damage):
+    argv, env, slot = launcher
+    bootstrap = slot / ".runtime-bootstrap" / "runtime_launcher.py"
+    bootstrap.parent.mkdir()
+    bootstrap.write_text("raise SystemExit(0)\n", encoding="utf-8")
+    if damage == "unexecutable":
+        python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+        python.parent.mkdir()
+        python.write_bytes(b"not an executable")
+        python.chmod(0o755)
+    result = _run(argv, env=env, cwd=tmp_path)
+    assert result.returncode != 0
+    assert result.stderr.strip()
+
+
+@pytest.mark.parametrize("exit_code", [0, 7])
+def test_retained_launcher_preserves_executed_child_status(launcher, tmp_path, exit_code):
+    argv, env, slot = launcher
+    venv.EnvBuilder(with_pip=False).create(slot)
+    bootstrap = slot / ".runtime-bootstrap" / "runtime_launcher.py"
+    bootstrap.parent.mkdir()
+    bootstrap.write_text(
+        f"import sys\nsys.stderr.write('fixture diagnostic\\n')\nraise SystemExit({exit_code})\n",
+        encoding="utf-8",
+    )
+    result = _run(argv, env=env, cwd=tmp_path)
+    assert result.returncode == exit_code, result.stdout + result.stderr
+    assert "fixture diagnostic" in result.stderr
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows PowerShell 5.1 native stderr semantics")
+@pytest.mark.parametrize("exit_code", [0, 7])
+def test_retained_powershell51_forwards_native_diagnostic_and_status(tmp_path, exit_code):
+    host = shutil.which("powershell")
+    assert host, "Windows PowerShell 5.1 is required for this native contract"
+    root = tmp_path / "manager"
+    slot = root / "versions" / "1.2.3"
+    venv.EnvBuilder(with_pip=False).create(slot)
+    (root / "current-version").write_text(slot.name, encoding="utf-8")
+    bootstrap = slot / ".runtime-bootstrap" / "runtime_launcher.py"
+    bootstrap.parent.mkdir()
+    bootstrap.write_text(
+        f"import sys\nsys.stderr.write('fixture diagnostic\\n')\nraise SystemExit({exit_code})\n",
+        encoding="utf-8",
+    )
+    launcher = tmp_path / "manager.ps1"
+    launcher.write_text(si._ps1_binstub(), encoding="utf-8")
+    result = _run(
+        [host, "-NoProfile", "-NonInteractive", "-File", str(launcher)],
+        env={**os.environ, "WORKTREE_MANAGER_ROOT": str(root)}, cwd=tmp_path,
+    )
+    assert result.returncode == exit_code, result.stdout + result.stderr
+    assert "fixture diagnostic" in result.stderr
+
+
 def test_unconstructed_launcher_requires_explicit_canonical_bootstrap(launcher, tmp_path):
     argv, env, slot = launcher
     _payload(slot)

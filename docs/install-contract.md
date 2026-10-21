@@ -2895,6 +2895,11 @@ source identity, and records the transaction's actual non-editable installation
 origins, not a second snapshot's paths. `freeze_inputs()` remains an explicit
 source-copy utility for packaging fixtures, not the construction path.
 The bootstrap requires Python 3.11 or newer.
+The POSIX guardian observes its direct child without reaping it until the
+owned process group is settled. Python 3.11/3.12 on macOS lack `os.waitid`;
+there it uses the existing `ps` process-state dependency to observe zombie
+state without releasing the child's PID/PGID. It does not raise the declared
+Python floor or use a reaping `Popen.poll()` fallback.
 Worktrees' Windows pre-lifecycle admission independently requires Python 3.10+,
 the declared minimum for its payload and shared human-output helper, before
 reserving ownership or staging the installer. A working but older `py -3`
@@ -2925,7 +2930,9 @@ Reused installed-health failures request distinct-generation repair when the
 probe exits unsuccessfully, cannot create its child, or reaches its deadline
 after every owned writer has settled. Process creation is distinguished by
 `agent_procutil.SyncProcessLaunchError`; the installer propagates a separate
-settled-child timeout type. Ownership, Job admission and cleanup failures are
+settled-child timeout type. Missing-file launch errors also remain
+`FileNotFoundError` instances, preserving missing authentication-tool detection.
+Ownership, Job admission and cleanup failures are
 not repair licenses. Fresh construction still fails its health gate rather
 than reporting an unhealthy candidate ready.
 
