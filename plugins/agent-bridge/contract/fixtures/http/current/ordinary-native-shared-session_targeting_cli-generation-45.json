@@ -48,18 +48,25 @@
     "reason": "mixed_native_invocation",
     "error": "keyed native invocation cannot mix alternate prompt/delivery options"
   },
+  "cli_empty_selector_refusal": {
+    "outcome": "refused_invalid",
+    "target": "bridge-a",
+    "retryable": false,
+    "reason": "invalid_native_invocation",
+    "error": "invalid UTF-8 native invocation request"
+  },
   "scope": "Independently authored synthetic HTTP vectors, replayed through ASGI and the real turn journal with a mock SDK. Admission is not execution or native-source qualification.",
   "evidence_family": "ordinary-native-keyed-admission-v1",
   "shared_operation_evidence": {
     "path": "plugins/agent-bridge/contract/fixtures/http/current/ordinary-native-admission-generation-45.json",
-    "sha256": "f49908b39ccce150c6cab6476e7e5628bb2410f7b407ae8191faf840fb1884f5"
+    "sha256": "02db74cd05d1a2a951e575d9fcd6ccbed5162e8dc6712723f56a4d87c6f6a883"
   },
   "captured_from": {
-    "commit": "d24a6fd0f3d3cf5ee2943fb2900915e46f7e5266",
+    "commit": "7fbaa183ecdeaf2d3167144fece169f729960e52",
     "plugin_version": "0.4.1-dev3",
     "source_path": "plugins/agent-bridge/src/agent_bridge/session_targeting_cli.py",
-    "source_git_blob": "7f06810a2de0792d9d1170a80d09eeb8d21b21f0",
+    "source_git_blob": "d6e4a63998f9cf27b4457bc05dbf04edfbb33693",
     "protocol_generation": 45,
-    "source_sha256": "5414ab71fa17a81c150ec0e6c593144d8a857b880a7924e559c4644e63973b44"
+    "source_sha256": "a7b84b3db1ec555adcd10a46ba86e0da8f386efd903e4ef9a616fcb29595a36a"
   }
 }

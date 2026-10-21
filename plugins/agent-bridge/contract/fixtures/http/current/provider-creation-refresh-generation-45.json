@@ -44,7 +44,7 @@
     "required_provider_capability": "instance_pinned_exec"
   },
   "captured_from": {
-    "commit": "d24a6fd0f3d3cf5ee2943fb2900915e46f7e5266",
+    "commit": "7fbaa183ecdeaf2d3167144fece169f729960e52",
     "plugin_version": "0.4.1-dev3",
     "source_path": "plugins/agent-bridge/src/agent_bridge/session_core.py",
     "source_git_blob": "4c54b8eb33e5a48c69eccade796be238feef4641",

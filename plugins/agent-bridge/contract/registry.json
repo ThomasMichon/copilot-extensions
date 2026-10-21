@@ -488,13 +488,13 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/native_keyed_client.py",
-          "sha256": "630a28783a3646811f243e8117e567691a0d93c010695f0f72b4bf10d408acfd",
+          "sha256": "98a839dcf60825c58f00ad771b58e174de789f7ea2c4fec46bc37fe8234564ce",
           "semantic": true,
           "non_semantic_reason": null
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/session_targeting_cli.py",
-          "sha256": "5414ab71fa17a81c150ec0e6c593144d8a857b880a7924e559c4644e63973b44",
+          "sha256": "a7b84b3db1ec555adcd10a46ba86e0da8f386efd903e4ef9a616fcb29595a36a",
           "semantic": true,
           "non_semantic_reason": null
         },
@@ -3106,7 +3106,7 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/ordinary-native-admission-generation-45.json",
-          "sha256": "f49908b39ccce150c6cab6476e7e5628bb2410f7b407ae8191faf840fb1884f5",
+          "sha256": "02db74cd05d1a2a951e575d9fcd6ccbed5162e8dc6712723f56a4d87c6f6a883",
           "role": "Shared new keyed-operation evidence, replayed by bounded model-free public-HTTP, turn-journal and production client/parser probes; not independent runtime captures.",
           "generation": 45
         },
@@ -3130,61 +3130,61 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/ordinary-native-shared-native_keyed_client-generation-45.json",
-          "sha256": "c46213083dd9af2a86e3587139921664bb2733a6cf9049f1f6317f771e77f66e",
+          "sha256": "43404137c9cf6b8d032c3a2c06b6d60109d5b0efc0379a0ae6e16fad472ac434",
           "role": "Shared new keyed-operation evidence, replayed by bounded model-free public-HTTP, turn-journal and production client/parser probes; not independent runtime captures.",
           "generation": 45
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/ordinary-native-shared-session_targeting_cli-generation-45.json",
-          "sha256": "863e8f5cb35adc1a25a82b98633ac726428b248e06a330fb85be9e151fcc221e",
+          "sha256": "faaf9b1f40ff01356310bb25d32d3df34d46b650ee6df7d39458fbced25c7d35",
           "role": "Shared new keyed-operation evidence, replayed by bounded model-free public-HTTP, turn-journal and production client/parser probes; not independent runtime captures.",
           "generation": 45
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/ordinary-native-shared-routes-prompts-generation-45.json",
-          "sha256": "7f6ccfcd2ef78727f5d3694a66fd4c299dbbf98bfac8b652a1692dafd2990f74",
+          "sha256": "93c2c3ce4ea4c71c2f9bdb707d37b13e29a6520c6ceefedbb9eaf38ad83e9fce",
           "role": "Shared new keyed-operation evidence, replayed by bounded model-free public-HTTP, turn-journal and production client/parser probes; not independent runtime captures.",
           "generation": 45
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/ordinary-native-shared-session_prompts-generation-45.json",
-          "sha256": "d626940fd720a0a8a24a2671c220d785035431b6e7fa42d220f4e2602f8e6a19",
+          "sha256": "2d03e3c1b6f19719e857a99be0424aba7c2ea45a9c7ac96ef277577763049619",
           "role": "Shared new keyed-operation evidence, replayed by bounded model-free public-HTTP, turn-journal and production client/parser probes; not independent runtime captures.",
           "generation": 45
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/ordinary-native-shared-db_schema-generation-45.json",
-          "sha256": "b059efa0a102b2950f58bc33566c66b96f6a416bf3d4cee1bee2dd1087740e72",
+          "sha256": "e9a80349376fb7ad5ef244c69408630ada823bd9a937ebd316454faaa473d4b5",
           "role": "Shared new keyed-operation evidence, replayed by bounded model-free public-HTTP, turn-journal and production client/parser probes; not independent runtime captures.",
           "generation": 45
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/ordinary-native-shared-db_events-generation-45.json",
-          "sha256": "f47f1a9e2b0225e75b5eacc6c93644e541bfaee5e106785b2ef294350f310917",
+          "sha256": "ccacb3fb57ffa56f987794391a60c42eaa0c68f57b1f00f9c421afa543679eba",
           "role": "Shared new keyed-operation evidence, replayed by bounded model-free public-HTTP, turn-journal and production client/parser probes; not independent runtime captures.",
           "generation": 45
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/workspace-creation-cli-generation-45.json",
-          "sha256": "e2d6e3c2cb5de620332b5381d454969410c3f3e5b81e955e35605d384474fa38",
+          "sha256": "5108d0d7bdd605652c00b1aa6dec218a560bed9e8f632991596e497878a9bd60",
           "role": "Real CLI/parser/client creation builder and complete-receipt consumer, plus per-attempt floor-45 refusal; synthetic peer, no allocation/backend execution.",
           "generation": 45
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/native-bound-extracted-routes-prompts-generation-45.json",
-          "sha256": "1e8c242d7a5d40c83530af9aa628e510438f02e457fd9e90be94b4aca3825c31",
+          "sha256": "1d20143f2845f14262a84151226876089170ab63b7180d87fa5559b5a1217f6a",
           "role": "Same-source predecessor-family preservation at HTTP-45; frozen legacy native/drain/provider-refresh expectations are not a new runtime capture.",
           "generation": 45
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/managed-drain-generation-45.json",
-          "sha256": "718754249f27163f2268257c6b3533a83d73ead2d9d1c144ada578010e368db5",
+          "sha256": "f9c651381d6e9465f978c0956a1703e39beae63bb436dde5e537b65aa78de03c",
           "role": "Same-source predecessor-family preservation at HTTP-45; frozen legacy native/drain/provider-refresh expectations are not a new runtime capture.",
           "generation": 45
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-refresh-generation-45.json",
-          "sha256": "00240f0263f8a0a2a55b32253254017920f050a349694c97d730503b21345642",
+          "sha256": "298a14bcda3815cc978c1d779c9e4c4cfe2aeac663864f03845a381dd032a800",
           "role": "Same-source predecessor-family preservation at HTTP-45; frozen legacy native/drain/provider-refresh expectations are not a new runtime capture.",
           "generation": 45
         }
@@ -8224,6 +8224,78 @@
         },
         {
           "commit": "d24a6fd0f3d3cf5ee2943fb2900915e46f7e5266",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 45,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_core.py",
+          "source_git_blob": "4c54b8eb33e5a48c69eccade796be238feef4641",
+          "capture_method": "Same-source predecessor-family preservation at HTTP-45; frozen legacy native/drain/provider-refresh expectations are not a new runtime capture."
+        },
+        {
+          "commit": "7fbaa183ecdeaf2d3167144fece169f729960e52",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 45,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/native_keyed_admission.py",
+          "source_git_blob": "fce4792c6e54c321181ff68e9314af13cddf5ce6",
+          "capture_method": "Shared new keyed-operation evidence, replayed by bounded model-free public-HTTP, turn-journal and production client/parser probes; not independent runtime captures."
+        },
+        {
+          "commit": "7fbaa183ecdeaf2d3167144fece169f729960e52",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 45,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/native_keyed_client.py",
+          "source_git_blob": "142ca2e35db995444ef7775bff391af341dd1bd0",
+          "capture_method": "Shared new keyed-operation evidence, replayed by bounded model-free public-HTTP, turn-journal and production client/parser probes; not independent runtime captures."
+        },
+        {
+          "commit": "7fbaa183ecdeaf2d3167144fece169f729960e52",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 45,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_targeting_cli.py",
+          "source_git_blob": "d6e4a63998f9cf27b4457bc05dbf04edfbb33693",
+          "capture_method": "Shared new keyed-operation evidence, replayed by bounded model-free public-HTTP, turn-journal and production client/parser probes; not independent runtime captures."
+        },
+        {
+          "commit": "7fbaa183ecdeaf2d3167144fece169f729960e52",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 45,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/prompts.py",
+          "source_git_blob": "4d5a40d53b8846ad584765f7d3561d8441efe490",
+          "capture_method": "Shared new keyed-operation evidence, replayed by bounded model-free public-HTTP, turn-journal and production client/parser probes; not independent runtime captures. Also preserves the same-source linked unkeyed/native/drain predecessor family. These are two operation families, not two independent captures."
+        },
+        {
+          "commit": "7fbaa183ecdeaf2d3167144fece169f729960e52",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 45,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_prompts.py",
+          "source_git_blob": "dc4c9f20477c925d24547ef8b20941f424dea8ac",
+          "capture_method": "Shared new keyed-operation evidence, replayed by bounded model-free public-HTTP, turn-journal and production client/parser probes; not independent runtime captures. Also preserves the same-source linked unkeyed/native/drain predecessor family. These are two operation families, not two independent captures."
+        },
+        {
+          "commit": "7fbaa183ecdeaf2d3167144fece169f729960e52",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 45,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/db_schema.py",
+          "source_git_blob": "34fbd4bae0effaa5398e352574012ff08fbe2b1d",
+          "capture_method": "Shared new keyed-operation evidence, replayed by bounded model-free public-HTTP, turn-journal and production client/parser probes; not independent runtime captures."
+        },
+        {
+          "commit": "7fbaa183ecdeaf2d3167144fece169f729960e52",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 45,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/db_events.py",
+          "source_git_blob": "d92e67f51a7ba2bc2c8fbd5b5e350b9818eaefd6",
+          "capture_method": "Shared new keyed-operation evidence, replayed by bounded model-free public-HTTP, turn-journal and production client/parser probes; not independent runtime captures."
+        },
+        {
+          "commit": "7fbaa183ecdeaf2d3167144fece169f729960e52",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 45,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/workspace_creation_cli.py",
+          "source_git_blob": "e34368a3bc620f55c3d0e97032ccf8c1e117c9f3",
+          "capture_method": "Real CLI/parser/client creation builder and complete-receipt consumer, plus per-attempt floor-45 refusal; synthetic peer, no allocation/backend execution."
+        },
+        {
+          "commit": "7fbaa183ecdeaf2d3167144fece169f729960e52",
           "plugin_version": "0.4.1-dev3",
           "generation": 45,
           "source_path": "plugins/agent-bridge/src/agent_bridge/session_core.py",
