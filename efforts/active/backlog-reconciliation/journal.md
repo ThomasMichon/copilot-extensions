@@ -549,3 +549,49 @@ Canonical contract: [README.md](README.md).
 - Four disjoint read-only researchers are supplied through batch twenty-seven.
   The effort remains Active. No product implementation, tests, native probes,
   deployment, process/service or live claim changes were made.
+
+## 2026-10-21 - Batches twenty-five and twenty-six, 520 original issues reviewed
+
+- The complete paginated census at 13:30 UTC records **1,200 open issues**:
+  1,198 original-cohort issues and inflow #7556/#7587. **520 distinct originals
+  are reviewed; 259 were closed by this campaign**. Including unrelated #5610
+  and concurrent inflow, the live net reduction is 258. No campaign closure
+  was observed reopened. The fixed guidance checkpoint remains at most 729.
+- Completed finite scopes: #3642's reviewed five-phase capture umbrella;
+  #3685's represented interactive idle-state contradiction; #3717's actual
+  native compaction-event representation; #3730's isolated nudge fixture;
+  #3812's unsupported-verb rolling-upgrade repair; #3897's complete worker
+  procedures and recorded six-run behavioral gate; #3899's explicit bound-but-
+  not-head diagnostic; #3915's ambient-SSH fixture isolation; #3918's held-
+  worktree filtering; and #3928's seven Windows robustness cases. These are
+  source/history conclusions, not new tests, native probes or installed claims.
+- Transfers: #3716 to #3584; #3751 to #3761; #3947 to #2256; and #3948 to
+  #2173. Full additive checklists were read back before source closure,
+  retaining every canonical body and prior transfer.
+- #3642 closes only through the already-reviewed Done-by-transfer decision.
+  Open #3698 directly retains genuinely leased capture, unchanged lease and
+  same-hub obligations, including the conflict with current active-hold
+  deferral. A deferred capture is not a native PASS or permission to bypass
+  the holder. Consumer-owned periodic invocation remains the accepted design.
+- #3751 credits measured production-path fleet-read timing, not an invented
+  sustained CPU-percent result. #3812 distinguishes explicit unsupported,
+  non-executed fallback from an ambiguous possibly-executed mutation; the latter
+  remains non-retryable. #3730 preserves UNKNOWN rather than manufacturing LIVE.
+- #3872 remains assigned to its collaborator, with both non-default edge cases
+  and owner acknowledgement intact. #3905 credits the retired pointer mechanism
+  and complete historical non-editable proof while retaining its later claimed
+  source-removal/all-adopter qualification, including the independent Manager.
+- #2256 retains complete agent-instruction/Markdown class accounting and
+  actionable size diagnostics, with advisory permissionless delivery budgets
+  separate from blocking safety/ownership checks. #2173 retains full reliable
+  guidance admission and deterministic conflict outcomes through the accepted
+  current delivery, never a revived custom aggregation authority.
+- Retained reports credit actual CWD, marketplace-resolution, alias fallback,
+  lease/incarnation and packaging repairs rather than claiming those foundations
+  absent. Remaining original-site, runtime-notification, double-initialization,
+  configurable-theme, teardown and acceptance uncertainties stay explicit.
+  No additional native qualification is claimed from source-text fixtures.
+- Four disjoint read-only researchers are supplied through batch thirty-three;
+  oldest-first publication continues with batch twenty-seven. The effort stays
+  Active. No product implementation, tests, native probes, deployment,
+  process/service or custody changes were made.
