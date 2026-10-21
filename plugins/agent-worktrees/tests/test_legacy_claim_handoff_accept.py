@@ -83,6 +83,17 @@ def graph(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, request: pytest.Fixtu
         )
         paths[role] = record.yaml_path
         anchors[role] = anchor
+    load_committed = cfg.inrepo_config_source.load_inrepo_config_from_committed_ref
+
+    def committed_config(anchor, *args, **kwargs):
+        # Only these plain fixture directories have no committed Git layer.
+        if Path(anchor) in anchors.values() and not (Path(anchor) / ".git").exists():
+            return {}
+        return load_committed(anchor, *args, **kwargs)
+
+    monkeypatch.setattr(
+        cfg.inrepo_config_source, "load_inrepo_config_from_committed_ref", committed_config,
+    )
     source = "native-alias/source-project/wt-source"
     consumer = "example-host/consumer-project/wt-consumer"
     child_ref = "generated-host/child-project/wt-child"
@@ -99,6 +110,54 @@ def graph(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, request: pytest.Fixtu
         root=tmp_path, paths=paths, anchors=anchors, source=source, consumer=consumer,
         child_ref=child_ref, projected=request.param == "projected",
     )
+
+
+def test_committed_config_adapter_keeps_other_anchors_and_git_reads_real(graph, monkeypatch):
+    source = cfg.inrepo_config_source
+    probe = source._offline_remote_head_branch
+    observed = []
+
+    def observe(anchor, remote, deadline):
+        observed.append((Path(anchor), remote))
+        return probe(anchor, remote, deadline)
+
+    monkeypatch.setattr(source, "_offline_remote_head_branch", observe)
+    candidates = (Path("fixture-config.yaml"),)
+    for anchor in graph.anchors.values():
+        assert source.load_inrepo_config_from_committed_ref(anchor, candidates) == {}
+    assert observed == []
+    external = graph.root / "external"
+    external.mkdir()
+    assert source.load_inrepo_config_from_committed_ref(external, candidates) == {}
+    assert observed == [(external, "origin")]
+
+    for anchor in (external, graph.anchors["source"]):
+        def git(*args):
+            return subprocess.run(
+                ["git", *args], cwd=anchor, check=True, capture_output=True,
+                text=True, **no_window_kwargs(),
+            ).stdout.strip()
+
+        git("init", "--template=", "-q", "-b", "main")
+        git("config", "user.name", "Test")
+        git("config", "user.email", "test@example.com")
+        for value in ("first", "second"):
+            (anchor / candidates[0]).write_text(f"value: {value}\n", encoding="utf-8")
+            git("add", str(candidates[0]))
+            git("commit", "-q", "-m", f"fixture {value}")
+            git("update-ref", "refs/remotes/fixture/main", "HEAD")
+            git("symbolic-ref", "refs/remotes/fixture/HEAD", "refs/remotes/fixture/main")
+            parsed = []
+
+            def parser(text):
+                parsed.append(text)
+                return yaml.safe_load(text)
+
+            assert source.load_inrepo_config_from_committed_ref(
+                anchor, candidates, "fixture", parser=parser,
+            ) == {"value": value}
+            assert parsed == [f"value: {value}\n"]
+            assert observed[-1] == (anchor, "fixture")
 
 
 def _offer(graph: SimpleNamespace) -> claim_handoffs.ClaimBundle:

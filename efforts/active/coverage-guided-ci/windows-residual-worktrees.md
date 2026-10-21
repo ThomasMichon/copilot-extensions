@@ -87,7 +87,43 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Admitted fixture-semantic batches
 
+### B-LEGACY-CONFIG fixture-owned committed-layer absence
+
+Baseline: the actual #7681 merge. `graph.committed_config` returns an
+empty committed layer only for this fixture's named plain anchors
+without a `.git` entry. Every other anchor, including a fixture anchor
+after it becomes a real Git repository, delegates to the original
+committed-ref reader with unchanged arguments and keyword options.
+On-disk configuration and transaction-scoped receiving-authority
+behavior are unchanged.
+
+The new regression runs under both existing graph variants. It proves
+owned plain anchors avoid Git probes, a foreign plain anchor still
+delegates, and both a foreign Git repo and a now-Git fixture anchor
+read actual committed configuration. Two successive ref updates
+return their fresh values through the forwarded remote/parser options.
+All old test functions, decorators and assertions remain AST-identical.
+
+Complete native Windows historical-handoff module: 74 passed, zero
+skips, 54.34 seconds pytest / 64.66 preparation-cleanup inclusive.
+Exactly two work-stealing workers retain the original 30-second
+watchdog, all marks/resource ceilings and a 240-second diagnostic group.
+This is functional integration, not quiet-host, whole-suite or
+repeated same-head qualification.
+
+Documentation impact is this ledger. This below-altitude fixture
+adaptation changes no production, command, installation, configuration
+or architecture contract. Clean-room provisioning and external-venue
+lanes are inapplicable. No other B/N or S/F/G/P/R/A contract is absorbed.
+
 ### B-TERMINAL private-copy consumers
+
+Actual disposition: #7681 merged as
+`cbce035cb15ee3c80708956e937b7cdd1cf1a8c7`; full Copilot review
+`5607240222` approved exact head
+`82dc9c46985e6a1b036809a4d1ea73dbd6b48938`. Overview, inline/general
+channels and threads had no findings; required CI was green. The child
+worktree is finalized.
 
 Baseline: the actual #7678 foundation merge. `_worker` now returns
 `_copy_worker` output from the immutable session seed. Explicitly
