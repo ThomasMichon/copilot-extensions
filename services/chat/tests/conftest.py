@@ -6,7 +6,6 @@ import os
 from pathlib import Path
 import shutil
 import socket
-import subprocess
 import sys
 import threading
 import time
@@ -15,6 +14,7 @@ from types import SimpleNamespace
 import pytest
 
 from agent_chat_service import ChatError, ChatStore, json_bytes, strict_json
+from agent_procutil.owned_process import run_caller_owned
 
 
 @pytest.hookimpl(wrapper=True, tryfirst=True)
@@ -48,6 +48,10 @@ def pytest_collection_modifyitems(config, items):
         "collected": len(mapping), "selected": len(selected),
         "membership_sha256": membership_digest(mapping), "nodes": mapping,
     }
+    path = config._tmp_path_factory.getbasetemp() / "chat-membership.json"
+    temporary = path.with_suffix(".tmp")
+    temporary.write_text(json.dumps(config._chat_membership, sort_keys=True), encoding="utf-8")
+    temporary.replace(path)
     return result
 
 
@@ -55,10 +59,17 @@ def pytest_terminal_summary(terminalreporter):
     report = getattr(terminalreporter.config, "_chat_membership", None)
     if report is not None:
         path = terminalreporter.config._tmp_path_factory.getbasetemp() / "chat-membership.json"
-        path.write_text(json.dumps(report, sort_keys=True), encoding="utf-8")
         terminalreporter.write_line(
             f"Chat {report['profile']}: {report['selected']}/{report['collected']} nodes; "
             f"membership_sha256={report['membership_sha256']}; map={path}"
+        )
+
+
+def pytest_runtest_logreport(report):
+    if os.environ.get("AGENT_CHAT_TEST_SUITE") and report.failed:
+        print(
+            f"\nChat failure: {report.nodeid} [{report.when}]\n{report.longreprtext}",
+            file=sys.stderr, flush=True,
         )
 
 
@@ -72,13 +83,19 @@ def caller_observer(monkeypatch):
         yield observer
 
 
-def run_artifact(argv, *, cwd=None):
-    environment = dict(os.environ)
-    environment.pop("PYTHONPATH", None)
-    options = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
-    result = subprocess.run(
-        argv, cwd=cwd, env=environment, capture_output=True, text=True,
-        timeout=30, check=False, **options,
+def run_artifact(argv, *, cwd=None, input_text=None, timeout=30):
+    result = run_caller_owned(
+        [
+            sys.executable, "-I", "-c",
+            "import os,subprocess,sys; cwd=sys.argv.pop(1); "
+            "os.chdir(cwd) if cwd else None; os.environ.pop('PYTHONPATH',None); "
+            "sys.exit(subprocess.call(sys.argv[1:],"
+            "stdin=sys.stdin.buffer,stdout=sys.stdout.buffer,stderr=sys.stderr.buffer,"
+            "creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0))",
+            str(cwd) if cwd is not None else "", *map(str, argv),
+        ],
+        timeout=timeout, input_text=input_text,
+        max_stdout_bytes=4 * 1024 * 1024, max_stderr_bytes=4 * 1024 * 1024,
     )
     assert result.returncode == 0, result.stdout + result.stderr
     return result.stdout

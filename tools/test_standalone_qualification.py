@@ -40,12 +40,68 @@ def test_chat_qualification_lane_defaults_preserve_full_collection(
         args.extend(("--timeout", str(timeout)))
     assert runner.main(args) == outcome
     assert json.loads(report.read_text("utf-8")) == {
-        "nodes": {"fixture": "acceptance"}, "exit_code": outcome,
+        "nodes": {"fixture": "acceptance"}, "membership_status": "available",
+        "test_exit_code": outcome, "exit_code": outcome,
     }
     with pytest.raises(SystemExit) as error:
         runner.main(args)
     assert error.value.code == 2
     assert json.loads(report.read_text("utf-8"))["exit_code"] == outcome
+
+
+@pytest.mark.parametrize("outcome", [0, 4, 124])
+@pytest.mark.parametrize("map_state", ["missing", "collected", "partial", "wrong-type"])
+def test_membership_export_preserves_original_failure_without_terminal_summary(
+    tmp_path, monkeypatch, capsys, outcome, map_state,
+):
+    monkeypatch.setattr(runner, "REPO", tmp_path)
+    (tmp_path / "services" / "chat" / "tests").mkdir(parents=True)
+    python = runner.default_python("services/chat")
+    python.parent.mkdir(parents=True)
+    python.touch()
+    monkeypatch.setattr(runner, "acquire", lambda *_: type("Lease", (), {"release": lambda _: None})())
+    owned_sandboxes = []
+
+    def run(command, **kwargs):
+        sandbox = kwargs["sandbox"]
+        owned_sandboxes.append(sandbox)
+        if map_state != "missing":
+            report = sandbox / "pytest" / "chat-membership.json"
+            report.parent.mkdir()
+            report.write_text({
+                "collected": '{"nodes":{"fixture":"acceptance"}}',
+                "partial": '{"nodes":',
+                "wrong-type": '[]',
+            }[map_state], encoding="utf-8")
+        return outcome
+
+    monkeypatch.setattr(runner, "run_contained", run)
+    destination = tmp_path / "retained.json"
+    expected = outcome if map_state == "collected" else outcome or 1
+    assert runner.main([
+        "services/chat", "--chat-suite", "acceptance",
+        "--chat-membership-report", str(destination),
+    ]) == expected
+    report = json.loads(destination.read_text("utf-8"))
+    assert report["test_exit_code"] == outcome and report["exit_code"] == expected
+    assert report["membership_status"] == (
+        "available" if map_state == "collected" else "unavailable"
+    )
+    if map_state != "collected":
+        assert "nodes" not in report
+        assert "membership unavailable" in capsys.readouterr().err
+    assert all(not sandbox.exists() for sandbox in owned_sandboxes)
+
+
+def test_membership_export_destination_failure_preserves_original_nonzero_result(tmp_path, capsys):
+    sandbox = tmp_path / "sandbox"
+    (sandbox / "pytest").mkdir(parents=True)
+    (sandbox / "pytest" / "chat-membership.json").write_text('{"nodes":{}}', encoding="utf-8")
+    destination = tmp_path / "occupied.json"
+    destination.write_text("retain", encoding="utf-8")
+    assert runner.export_chat_membership(sandbox, destination, "full", 124) == 124
+    assert destination.read_text("utf-8") == "retain"
+    assert "membership export failed" in capsys.readouterr().err
 
 
 def test_chat_lane_refuses_other_consumers_before_admission(monkeypatch):

@@ -14,6 +14,7 @@ import pytest
 from agent_chat_service import Client, ClientError
 from agent_chat_service.cli import SCAN_CAPABILITY, main
 from agent_chat_service.transport import GatewayTransport
+from agent_procutil.owned_process import run_caller_owned
 
 
 def configuration(root: Path, endpoint: str, *, codename="agent-a") -> Path:
@@ -28,10 +29,10 @@ def configuration(root: Path, endpoint: str, *, codename="agent-a") -> Path:
 
 
 def cli(path, *args, text=None, expected=0):
-    result = subprocess.run(
+    result = run_caller_owned(
         [sys.executable, "-m", "agent_chat_service.cli", "--config", str(path), *args],
-        input=text, text=True, encoding="utf-8", capture_output=True, timeout=20,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        input_text=text, timeout=20,
+        max_stdout_bytes=4 * 1024 * 1024, max_stderr_bytes=4 * 1024 * 1024,
     )
     assert result.returncode == expected, (result.stdout, result.stderr)
     return json.loads(result.stdout if expected == 0 else result.stderr)
@@ -63,13 +64,11 @@ def test_real_cli_provider_http_store_and_independent_forward_read(
 
     def installed(config_path, *args, text=None, console=False):
         argv = [str(installed_chat.console)] if console else catalog["commands"][0]["argv"]
-        result = subprocess.run(
+        output = installed_chat.run(
             [*argv, "--config", str(config_path), *args],
-            input=text, text=True, encoding="utf-8", capture_output=True, timeout=20,
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+            cwd=tmp_path, input_text=text, timeout=20,
         )
-        assert result.returncode == 0, (result.stdout, result.stderr)
-        return json.loads(result.stdout)
+        return json.loads(output)
 
     for name in ("agent-a", "agent-b"):
         rpc_endpoint.store.dispatch({"op": "join", "channel": "room", "actor": {"codename": name}})

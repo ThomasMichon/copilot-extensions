@@ -208,10 +208,13 @@ requirements.
 - [x] Review and land this single vision/architecture/plan amendment before
   dependent realization. This gate is independent of the retained client
   platform qualification and managed installer rollout.
-- [ ] The accepted conduct contributor implements only its claimed
+- [x] The accepted conduct contributor implements only its claimed
   `plugins/agent-conduct-guidance/` kernel, skill and ordinary declaration,
   tests and changefile metadata after that intent gate. No new grant/domain
   API, deployment, root policy edit or neighboring source is included.
+  Source merged in #7464 at `e620c95778df579b706f709b07af91df1f4203aa`;
+  declarative decision cases and fresh-adopter delivery were qualified,
+  not actual model behavior, runtime enforcement or live policy adoption.
 - [ ] The proposal editor defines the future versioned collaboration/thread/
   attention representation over existing Chat state and installed composition;
   agree extension points with the original client/service/plugin owners first.
@@ -336,6 +339,50 @@ qualification; native callbacks still require the actual assignment and
 shared-multiplex contracts above.
 
 ## Journal
+
+### 2026-10-21 - Preserve failure evidence and bound fixture command ownership
+
+- Addressed the current optional-report finding at its failure boundary.
+  Membership is atomically persisted after complete validated collection, not
+  deferred until terminal summary. Timeout before summary retains that map;
+  incomplete/unreadable collection exports explicit unavailable membership.
+  The original nonzero containment result survives reporting failure, and
+  missing membership after a zero test exit refuses qualification. Reports
+  distinguish test and final runner exit codes and never overwrite old files.
+- Thirteen added runner regressions cover timeout124 with a collected map but
+  no terminal summary, pre-collection failure, missing/partial/wrong-type maps,
+  zero-exit refusal and failed export. The combined runner contracts passed95
+  with one platform skip. A real five-second pre-collection timeout exported
+  unavailable membership with the original124, not an invented zero count.
+  A later actual120s timeout retained available validated membership and124.
+- Follow-up Windows runs exposed fixture subprocess stalls; those failures
+  remain failures. A native stack dump found parallel fresh-role preparation
+  and a CLI invocation waiting in `subprocess.run` pipe-reader joins. Focused
+  and complete diagnostics passed between failures, so they were not used to
+  relabel the failed runs or infer failed case names from progress dots.
+- Bounded artifact/CLI test commands now use the published caller-owned API,
+  without a utility fork or new lifecycle owner. A finite child adapter
+  supplies the artifact CWD/PYTHONPATH behavior that API does not expose;
+  explicit inherited streams preserve input/output and avoid another capture
+  layer. The initial Windows exec-overlay adapter returned before its target,
+  and its first waiting adapter failed to forward stdin; both failed
+  regressions were corrected, not hidden. A real CWD/stdin/environment
+  contract now protects that path. Existing20/30s helper limits,5s readiness,
+  10s hold and the direct death/pinned-before-cleanup witness remain unchanged.
+- Immediate failed-phase evidence is flushed before a possible outer timeout.
+  All236 original exact parameter nodes remain, with six qualification/helper
+  guards. Final normal Windows acceptance:208 passed, one native POSIX skip,
+  33 deselected,85.88s/120. Complete:241 passed, the same one skip,118.62s/600.
+  Both maps collect242 with digest
+  `050845afbf586fc645f7e5a113102014e2cb2324beeb6ae72f951060398e917e`.
+  The new source still requires its own independent native Linux lanes and
+  current-head review/CI; historical460 qualification is not final-head credit.
+- Separately, the accepted conduct-only slice merged through #7464 after the
+  reviewed #7454 intent. Its87 passing contracts,21 new decision/delivery
+  cases and two explicit producer-platform skips prove declarative policy
+  and fresh-adopter delivery, not model behavior or a deployed grant API.
+  Source ownership was normally finalized; broader collaboration, native
+  assignment/multiplexing, lifecycle, migration and adoption remain Active.
 
 ### 2026-10-20 - Coherent collaboration and peer-conduct amendment
 

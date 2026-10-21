@@ -217,6 +217,33 @@ def prepare(component: str, python: Path, *, smoke: bool = False) -> None:
         )
 
 
+def export_chat_membership(sandbox: Path, destination: Path, profile: str, outcome: int) -> int:
+    try:
+        report = json.loads((sandbox / "pytest" / "chat-membership.json").read_text("utf-8"))
+        if not isinstance(report, dict):
+            raise ValueError("membership report must be an object")
+    except (OSError, UnicodeError, ValueError) as error:
+        print(f"standalone tests: Chat membership unavailable: {error}", file=sys.stderr)
+        report = {
+            "schema": "agent-chat.test-membership", "version": 1, "profile": profile,
+            "membership_status": "unavailable",
+            "reason": "collection-not-complete" if isinstance(error, FileNotFoundError)
+            else "membership-report-unreadable",
+        }
+        result = outcome or 1
+    else:
+        report["membership_status"] = "available"
+        result = outcome
+    report.update(test_exit_code=outcome, exit_code=result)
+    try:
+        with destination.open("x", encoding="utf-8") as output:
+            json.dump(report, output, sort_keys=True)
+    except OSError as error:
+        print(f"standalone tests: Chat membership export failed: {error}", file=sys.stderr)
+        return outcome or 1
+    return result
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -358,10 +385,9 @@ def main(argv: list[str] | None = None) -> int:
                 limits=limits,
             )
             if args.chat_membership_report:
-                report = json.loads((sandbox / "pytest" / "chat-membership.json").read_text("utf-8"))
-                report["exit_code"] = outcome
-                with args.chat_membership_report.open("x", encoding="utf-8") as output:
-                    json.dump(report, output, sort_keys=True)
+                return export_chat_membership(
+                    sandbox, args.chat_membership_report, chat_suite, outcome,
+                )
             return outcome
         except UnreapedProcessError:
             temporary.retain()

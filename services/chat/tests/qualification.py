@@ -113,6 +113,7 @@ test_quiet_wait_and_plural_post_batch_do_not_consume_reading
     "test_qualification.py": """
 test_membership_is_exact_and_full_retains_every_parameter
 test_membership_refuses_missing_unassigned_or_duplicate_nodes
+test_artifact_helper_preserves_cwd_stdin_and_environment
 """,
 }
 

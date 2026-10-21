@@ -1179,6 +1179,15 @@ against the client API rather than repeating those same full-stack operations
 for every parser variant. Preserve the real installed join before the
 console-death fault; cold startup is not part of its five-second read barrier.
 
+Finite artifact/CLI fixture commands use the published caller-owned process
+API with their unchanged 20/30-second bounds and separate raw capture limits.
+Its API has no CWD/environment parameters, so the artifact fixture's finite
+child adapter sets its own CWD and removes `PYTHONPATH`, explicitly forwards
+stdin/stdout/stderr, and waits for the actual target. It does not change the
+test process's global CWD/environment or implement another cleanup authority.
+The canonical helper owns the entire bounded tree; the explicit console-death
+test still performs its fault and pinned observations before external cleanup.
+
 Chat qualification requires **both lanes on the same immutable candidate**:
 
 ```text
@@ -1201,9 +1210,14 @@ Every collected parameter node must map to exactly one family with its retained
 parameter count; new, missing or duplicate families/nodes and lost parameter
 cases fail qualification instead of silently disappearing.
 Each lane reports the same complete membership digest, collected/selected
-counts and a parameter-level JSON map within its contained sandbox. Supply
+counts and a parameter-level JSON map, atomically persisted when collection
+finishes rather than waiting for the terminal summary. Supply
 `--chat-membership-report <new-file>` to retain that map, including the actual
-runner exit code, after sandbox cleanup. Its parent directory must already
+runner and test-process exit codes, after sandbox cleanup. A killed test
+process retains its collected map. A failure before completed collection
+exports explicit unavailable membership rather than fabricated empty nodes;
+reporting never replaces an original nonzero containment result. Missing
+membership after a zero exit refuses qualification. Its parent directory must already
 exist and an existing report is never overwritten. The
 acceptance collection explicitly deselects full-only families, while `full`
 executes their union. Direct pytest/partial diagnostics without the runner's
