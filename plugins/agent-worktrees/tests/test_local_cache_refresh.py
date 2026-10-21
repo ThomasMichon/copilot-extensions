@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 import json
 import os
 from pathlib import Path
+import shutil
 import stat
 import subprocess
 import threading
@@ -15,6 +16,7 @@ import pytest
 
 from agent_worktrees import context_cli, knowledge_plugins, local_cache_refresh as lcr
 from agent_worktrees import resolve_cli, static_instructions as static
+from conftest import _published_seed_environment, _seed_directory
 
 pytestmark = [
     pytest.mark.portfolio_tier("T2"),
@@ -29,15 +31,65 @@ def write_json(path, data):
 
 
 @pytest.fixture
-def copy_workspace(tmp_path, monkeypatch):
+def copy_workspace(tmp_path, monkeypatch, _copy_workspace_seed):
     root, home = tmp_path / "repo", tmp_path / "home"
-    root.mkdir()
+    shutil.copytree(_copy_workspace_seed, root, copy_function=shutil.copyfile)
     home.mkdir()
-    subprocess.run(["git", "init", "--quiet", str(root)], check=True, capture_output=True)
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("USERPROFILE", str(home))
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
     return root, home
+
+
+@pytest.fixture(scope="session")
+def _copy_workspace_seed(tmp_path_factory):
+    """Reuse only empty Git setup, never payloads or publication state."""
+    with _seed_directory(tmp_path_factory, "local-cache-empty-repo") as (seed, build):
+        root = seed / "repo"
+        if build:
+            with _published_seed_environment(tmp_path_factory):
+                subprocess.run(["git", "init", "--quiet", str(root)], check=True, capture_output=True)
+        return root
+
+
+@pytest.mark.guard
+@pytest.mark.parametrize("iteration", range(2))
+def test_copy_workspace_stores_are_independent(copy_workspace, _copy_workspace_seed, tmp_path, iteration):
+    root, home = copy_workspace
+    sibling = tmp_path / "sibling"
+    shutil.copytree(_copy_workspace_seed, sibling, copy_function=shutil.copyfile)
+
+    def contents(path):
+        return {
+            file.relative_to(path): file.read_bytes()
+            for file in path.rglob("*") if file.is_file()
+        }
+
+    before = contents(_copy_workspace_seed)
+    assert contents(root) == contents(sibling) == before
+    for relative in before:
+        assert not (root / relative).samefile(_copy_workspace_seed / relative)
+        assert not (root / relative).samefile(sibling / relative)
+    (root / "tracked.txt").write_text(f"independent worktree {iteration}\n", encoding="ascii")
+    with (root / ".git" / "config").open("a", encoding="utf-8") as handle:
+        handle.write("\n[fixture]\n\tisolated = true\n")
+    with (root / ".git" / "info" / "exclude").open("a", encoding="utf-8") as handle:
+        handle.write("\n/fixture-only/\n")
+    subprocess.run(
+        ["git", "-C", str(root), "add", "tracked.txt"], check=True, capture_output=True,
+    )
+    subprocess.run([
+        "git", "-C", str(root), "-c", "user.name=Fixture",
+        "-c", "user.email=fixture@example.invalid", "-c", "commit.gpgsign=false",
+        "commit", "--quiet", "-m", "Independent fixture",
+    ], check=True, capture_output=True)
+    assert (root / ".git" / "index").is_file()
+    assert any((root / ".git" / "objects").rglob("??/*"))
+    assert any((root / ".git" / "refs" / "heads").iterdir())
+    assert not (root / ".git" / "objects" / "info" / "alternates").exists()
+    assert contents(sibling) == before
+    assert contents(_copy_workspace_seed) == before
+    assert not list(home.iterdir())
 
 
 def provider(root, home, name="demo", *, content=b'---\r\napplyTo: "**"\r\n---\r\nOpaque \xff\n'):

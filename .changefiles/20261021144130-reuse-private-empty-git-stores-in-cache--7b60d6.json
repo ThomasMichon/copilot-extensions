@@ -1,0 +1,9 @@
+{
+  "comment": "Reuse private empty Git stores in cache-refresh fixtures",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

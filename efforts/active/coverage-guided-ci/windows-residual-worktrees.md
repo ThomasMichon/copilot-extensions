@@ -87,7 +87,43 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Admitted fixture-semantic batches
 
+### B-CACHE-SEED private empty-Git workspaces
+
+Baseline: the actual #7665 merge. Prepare only an empty repository
+under the existing run-local seed lock and hermetic setup environment.
+Each `copy_workspace` physically copies that store and creates its own
+empty HOME. Provider payloads, settings, output caches and all current
+refresh/launch decisions remain test-local; no authority is cached.
+
+Two repeated guard cases compare every seed/copied byte and reject
+shared physical files. They then change the first copy's worktree,
+config, info/exclude, index, objects and refs through an actual commit.
+Every seed/sibling byte remains unchanged and the isolated home remains
+empty; no object alternates are introduced.
+
+All 45 other existing functions/classes and decorators remain
+AST-identical, including the native-stat/FIFO simulation. N-STAT is not
+absorbed. Complete native Windows cache-refresh module: 94 passed,
+four unchanged native-POSIX-FIFO skips, 46.67 seconds pytest /
+62.50 preparation-cleanup inclusive. No new skip or selection change.
+Exactly two work-stealing workers preserve the original 30-second
+watchdog, T2/process/filesystem marks and resource ceilings under a
+240-second diagnostic group. Actual discovery/copy/index protection/
+refresh/launch consumers execute. This is functional integration, not
+quiet-host, whole-suite or repeated same-head qualification.
+
+Documentation impact is this ledger only; runtime, command, install,
+configuration and architecture contracts stay unchanged. Clean-room
+provisioning and external-venue lanes do not apply to test-only setup.
+
 ### B-LEASE-SEED private released histories
+
+Actual disposition: #7665 merged as
+`85ff7d66cddb174a5ff91aa45b9d68bfbc2345aa`; full Copilot review
+`5606458404` approved exact head
+`f34ae3c0aeb29b67765da655994f16e2b2a4191c`. Overview, inline/general
+channels and threads had no findings; required CI was green. The child
+worktree is finalized. B-LEASE-ASSERT remains separately owned.
 
 Baseline: the actual #7662 merge. Extract `_settings` without changing
 its values; prepare one real acquire/renew/release history per worker
