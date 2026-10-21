@@ -146,7 +146,33 @@ including legacy anchor callers using a nondefault tracking directory.
 The timestamp/suffix-only `allocation` input still cannot admit a new tuple;
 the complete admitted value is required. These source APIs are not CLI flags,
 settings or rollout switches. Ordinary create, anchor admission and externally
-adopted checkout producers still emit legacy records. One-term equivalence
-and installed-reader acceptance stay gated
+adopted checkout producers still emit legacy records. Installed one-term
+equivalence and reader acceptance stay gated
 before ordinary-default activation. No historical ID, path, stored reference
 or session is rewritten.
+
+### Source addressing equivalence
+
+The JSON `resolve` entry point uses the same declared selection for `--new`,
+read-only `--worktree-id ... --dry-run` lookup and ordinary resume. A declared
+`<machine>-wsl` shorthand, physical machine plus `--environment wsl`, exact
+custom execution key and configured alias select the same local guest where
+the registry permits them. The selector does not change `Config.machine`:
+tuple creation still derives from the registered current execution owner,
+and resume independently checks the retained record's authority.
+
+Exact registered keys retain precedence over an inferred legacy spelling,
+including when the key names a foreign target that must produce a remote plan.
+Ambiguous declared aliases, invalid topology collisions and conflicting
+environments refuse before local allocation or resume writes. A physical-host
+match never makes a sibling environment's retained record mutable.
+Linux has no inferred legacy `-linux` address: such a spelling must itself be
+declared as a key or compatibility alias. A generated worktree ID ending in
+`-linux-...` is not execution authority.
+
+`test_tuple_resolve_equivalence.py` drives these actual source entry points,
+injecting the existing opt-in only at the new-producer call boundary. It checks
+tracking YAML, JSON, short-ID lookup, read-only preview, resume mutation,
+retained nonce/identity and remote plans across Windows/WSL/Linux metadata
+fixtures. It does not activate ordinary tuple creation or claim installed or
+native-platform acceptance.

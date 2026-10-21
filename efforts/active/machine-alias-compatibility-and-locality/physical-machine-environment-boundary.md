@@ -311,8 +311,8 @@ Do not rewrite old receipts or backfill identity merely by replaying them.
 - [x] Wire complete launch admission, creation-key replay and retained tail
   repair; exercise both old receipts and new tuple receipts without allocating
   a replacement on retry or refusal in #7582.
-- [ ] Wire new anchor and external-adoption records through the same opt-in
-  boundary; prove existing records are returned byte-for-byte unchanged.
+- [x] Wire new anchor and external-adoption records through the same opt-in
+  boundary; prove existing records are returned byte-for-byte unchanged in #7588.
 - [ ] Prove source one-term equivalence through actual creation/lookup/resume
   entry points: declared shorthand, physical plus explicit environment, custom
   execution key and configured aliases agree where permitted. Retain exact-key

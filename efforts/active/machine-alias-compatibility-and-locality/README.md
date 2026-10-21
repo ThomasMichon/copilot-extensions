@@ -384,6 +384,44 @@ unrelated service changes or a second machine registry.
 
 ## Journal
 
+### 2026-10-21 - Actual source addressing equivalence
+- Added 48 bounded metadata-fixture cases through the actual JSON `resolve`
+  entry point: new tuple production, short-ID/read-only preview lookup,
+  ordinary resume and remote plan construction. The fixture injects the
+  already-reviewed internal opt-in only at the new-producer boundary;
+  registry selection, record lookup, mutation fences and tracking/JSON
+  serialization remain real.
+- Declared WSL shorthand, physical plus explicit environment, exact custom
+  execution key and configured alias agree. The matrix retains exact-key
+  precedence for foreign targets, conflicting-environment and ambiguous-alias
+  refusals, same-physical sibling mutation refusal, original nonce/identity
+  and unchanged bytes on preview/refusal.
+- Windows remote commands are checked after decoding their existing
+  PowerShell transport encoding. Linux's optional `-linux` spelling is a
+  declared compatibility alias, not newly inferred suffix authority; an
+  undeclared spelling and a conflicting declared topology are refused.
+- The affected producer/resolver portfolio passed 494 tests with one
+  conditional skip. No runtime logic or ordinary defaults changed; this is
+  source fixture evidence, not native execution or installed acceptance.
+  Review/publication remains next; release and installed-reader gates remain
+  open and the containing effort is Active.
+
+### 2026-10-21 - Anchor and external-adoption source merged; equivalence next
+- #7588 merged as `238744f94affddd756c6f2a7ef3b1cc81ac1169e`
+  after current-head approval of
+  `b9fb26572c594a4600b15d4c7a4d2150eac625cb`, the destination
+  finding resolved and passing required CI. Managed completion reconciled
+  both landed commits and retained its pre-completion backup.
+- Only the anchor/external-adoption source sub-item is complete. The final
+  affected portfolio passed 823 tests with one conditional skip; the exact
+  reviewed source's guarded unit packet passed 322 tests.
+- Continue actual one-term creation, lookup and resume equivalence through
+  the existing shared selection boundaries, including shorthand, physical plus
+  explicit environment, custom keys, aliases and demonstrated refusals.
+  Release qualification, installed acceptance and ordinary-default activation
+  remain gated. The containing effort is Active; no rollout or migration
+  occurred.
+
 ### 2026-10-21 - New anchor and external-adoption source slice
 - Added the reviewed internal legacy-default mode to the actual anchor and
   external linked-worktree producers. A lazy identity factory runs only after
