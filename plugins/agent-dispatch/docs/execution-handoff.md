@@ -174,3 +174,30 @@ or activates a destination. Responses explicitly report `runtime_enrolled:
 false` and `acknowledged: false`. Runtime enrollment and integration of every
 actual sender and both wake outboxes remain required before any supported
 handoff control or universal-fencing claim.
+
+## Coordinator runtime enrollment construction
+
+The control-only `POST /execution-scopes/enroll-coordinator` accepts the same
+managed producer selector as scope resolution. It records **this coordinator's**
+process, using the existing OS process-start observer, a server-created
+application incarnation and canonical installation governance checked before
+and after insertion. Callers cannot supply a PID, runtime identity or scope.
+Data/task credentials and an unconfigured control authority cannot enroll.
+The application incarnation is not a native conversation UUID.
+
+Enrollment extends the existing queue's scope accounting, not a separate
+process registry or scheduler. The same write transaction as admission closure
+retains each producer-generation-qualified runtime. A replay observes the same
+record, including after closure, without permission to send. A new enrollment
+after closure is refused. PID reuse, application restart and producer rollover
+cannot erase or reuse an old incarnation; retained records survive queue
+reopening and remain in the complete closure inventory. A failed final
+provenance recheck returns an explicit conflict and preserves the accounting,
+rather than deleting a possibly relevant participant.
+
+`runtime_enrolled: true` covers only that recorded coordinator. It does not
+assert the process has exited, that other runtimes are enrolled or that a
+sender uses custody. `send_admission` and `acknowledged` remain false. Supervisor
+enrollment, all actual launch/resume/delivery/redrive boundaries, both wake
+paths, legacy qualification, effect settlement and handback remain open.
+Ordinary execution is unchanged and no live transition command is exposed.

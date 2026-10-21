@@ -1,0 +1,9 @@
+{
+  "comment": "Retain control-authenticated coordinator runtime enrollment without granting send or handoff authority",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

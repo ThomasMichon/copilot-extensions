@@ -207,6 +207,11 @@ class QueueExecutionHandoffMixin:
                 " WHERE scope_key = ? ORDER BY created_at, send_id",
                 (key,),
             ).fetchall()
+            runtimes = conn.execute(
+                "SELECT * FROM execution_runtime_enrollments"
+                " WHERE scope_key = ? ORDER BY created_at, runtime_id",
+                (key,),
+            ).fetchall()
             conn.commit()
         return {
             "request": json.loads(closure["request"]),
@@ -220,8 +225,9 @@ class QueueExecutionHandoffMixin:
             "wakes": [dict(row) for row in wakes],
             "run_waiter_wakes": [dict(row) for row in run_waiter_wakes],
             "sends": [dict(row) for row in sends],
+            "runtimes": [dict(row) for row in runtimes],
             "blockers": [
-                "runtime enrollment and final launch barrier not implemented",
+                "complete runtime enrollment and final launch barrier not implemented",
                 "legacy execution associations not qualified",
                 "adopter effect barrier not observed",
             ],

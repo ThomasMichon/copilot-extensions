@@ -145,6 +145,20 @@ handoff support.
 
 ## Journal
 
+### 2026-10-21 - Coordinator runtime accounting construction
+- Added control-only enrollment of the coordinator's own OS-observed process
+  and server-created application incarnation against the canonical installation
+  and managed producer binding. Caller-selected processes are not qualification.
+- Enrollment and closure share the queue write lock. Exact retries are
+  observation-only; closure refuses new incarnations. The inventory retains all
+  recorded producer generations and process incarnations without claiming exit.
+- Supervisor enrollment and every actual sender/wake boundary remain open,
+  together with legacy qualification, adopter effects and handback. Recording
+  one coordinator is not complete enrollment, send admission or acknowledgement.
+- #7621 merged authenticated scope resolution to `dev` as
+  `de1cff37325562ee327da0c14917c1612abd1753`; release and running adoption remain
+  separate gates.
+
 ### 2026-10-21 - Authenticated scope-binding construction
 - Added control-authenticated resolution through canonical installation-governance
   receipt validation and the existing queue/managed-producer authorities.

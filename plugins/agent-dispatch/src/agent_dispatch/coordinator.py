@@ -51,6 +51,7 @@ from .coordinator_loops import (
 )
 from .coordinator_registries import register_registry_routes
 from .coordinator_execution_scopes import register_execution_scope_routes
+from .coordinator_execution_runtime import register_execution_runtime_routes
 from .coordinator_spawn import register_spawn_routes
 from .coordinator_status import _slot_descriptor, register_status_routes
 from .coordinator_tasks import register_task_routes
@@ -943,6 +944,7 @@ def create_app(
     )
     register_registry_routes(app, queue, control_token=control_token)
     register_execution_scope_routes(app, queue, bus, control_token=control_token)
+    register_execution_runtime_routes(app, queue, bus, control_token=control_token)
     register_worktree_status_routes(app, relay)
 
     if mcp_app is not None:
