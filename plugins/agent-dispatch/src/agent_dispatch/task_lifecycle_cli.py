@@ -5,6 +5,8 @@ from __future__ import annotations
 import argparse
 import sys
 
+from worktree_identity import WorktreeMachineIdentityError, parse_machine_identity
+
 from .loop_commands import _resolve_cli_module
 
 
@@ -415,6 +417,14 @@ def _cmd_progress(args: argparse.Namespace) -> int:
         )
 
 def _cmd_focus(args: argparse.Namespace) -> int:
+    try:
+        return _focus_from_status_core(args)
+    except WorktreeMachineIdentityError as exc:
+        print(f"agent-dispatch: cannot read worktree focus: {exc}", file=sys.stderr)
+        return 1
+
+
+def _focus_from_status_core(args: argparse.Namespace) -> int:
     # worktree-status-core convergence: a worktree's "focus" IS its status-core
     # summary on the worktree record (the single owning layer). There is no
     # parallel focus store -- writes forward through the `agent-worktrees status`
@@ -424,12 +434,16 @@ def _cmd_focus(args: argparse.Namespace) -> int:
     from .identity import aw_list_records, aw_set_summary
 
     def _focus_row(w: dict) -> dict:
-        return {
-            "machine": w.get("machine"),
+        identity = parse_machine_identity(w)
+        row: dict[str, object] = {
+            "machine": identity.execution_machine if identity is not None else w.get("machine"),
             "worktree": w.get("id"),
             "focus": (w.get("summary") or "").strip(),
             "updated_at": w.get("status_note_at"),
         }
+        if identity is not None:
+            row["machine_identity"] = identity.to_record_fields()
+        return row
 
     if args.list:
         rows = [

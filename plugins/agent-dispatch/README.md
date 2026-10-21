@@ -193,6 +193,15 @@ status-core summary; agent-worktrees conduct and regular
 `agent-worktrees status --summary` remain authoritative for ongoing disposition
 and retain their normal cadence. Agent-dispatch maintains no parallel store.
 
+Focus reads use the shared dependency-free identity codec. For explicit
+version-1 Worktrees rows, `focus --list --machine <owner>` selects the execution
+owner, not the physical host shared by native and guest environments. Focus JSON
+keeps its one-term `machine` owner and includes the original validated tuple
+under `machine_identity`. Unversioned rows keep the historical output shape.
+Malformed explicit tuples fail visibly before filtering or summary omission,
+rather than returning an apparently empty or partial focus view. This changes
+neither stored worktree records nor task ownership, queues or transport routing.
+
 When an adopting repository enables this opt-in, remove any superseded
 hand-written **Worktree Focus** prose from its instructions. This coordination
 hint is not a safety policy, so it needs no static fallback on launch paths that

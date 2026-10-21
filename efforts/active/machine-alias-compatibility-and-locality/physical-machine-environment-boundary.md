@@ -172,16 +172,16 @@ implementation details**, proposed for review before execution.
 
 ### Bounded implementation
 
-- [ ] Extract the existing pure decoder into `libs/worktree-identity`
+- [x] Extract the existing pure decoder into `libs/worktree-identity`
   (distribution `agent-worktree-identity`, import `worktree_identity`) using
   ordinary first-party library packaging, with no runtime dependencies.
   Preserve the existing version-1 fields, supported canonical environments,
   exception behavior and absent-version legacy interpretation. Do not add a
   second machine map, environment inference or a broader platform contract.
-- [ ] Retain `agent_worktrees.worktree_machine_identity` as a compatibility
+- [x] Retain `agent_worktrees.worktree_machine_identity` as a compatibility
   import of the same implementation and types. Keep tracking serialization,
   identity fences and every already-merged Worktrees guard unchanged.
-- [ ] Declare the shared package through the repository's canonical local
+- [x] Declare the shared package through the repository's canonical local
   dependency, materialization and artifact-attribution mechanisms. Never
   require an installed sibling plugin or copy the decoder into each consumer.
   Preserve package sources, dependency seasoning and standalone installation.
@@ -199,18 +199,18 @@ implementation details**, proposed for review before execution.
 
 ### Required validation
 
-- [ ] Exercise the extracted package using only the standard library at import
+- [x] Exercise the extracted package using only the standard library at import
   time, without Worktrees, machine-transport, configuration, I/O or subprocess
   discovery. Verify the compatibility module exports the same classes and
   functions, not a parallel implementation.
-- [ ] Preserve valid version-1 and legacy behavior; cover boolean/unknown
+- [x] Preserve valid version-1 and legacy behavior; cover boolean/unknown
   versions, missing dimensions, conflicting platform/environment and invalid
   owner fields. A physical name shared by native and guest records cannot
   substitute for the execution owner.
 - [ ] Test each actual consumer's raw JSON boundary with legacy, valid tuple
   and malformed tuple rows. Preserve full metadata without putting physical
   identity into one-term owner fields; filtering must not hide uncertainty.
-- [ ] Verify real first-party package construction, materialization and
+- [x] Verify real first-party package construction, materialization and
   installed import boundaries through existing bounded tools, without adding
   networked or native integration work to the unit-only promotion packet.
 - [ ] Pass affected bounded suites, dependency/install-contract and module

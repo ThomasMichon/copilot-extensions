@@ -25,6 +25,8 @@ import shutil
 import subprocess
 from functools import lru_cache
 
+from worktree_identity import execution_machine_from_fields
+
 from .procutil import run_agent_worktrees_capture
 
 
@@ -107,11 +109,14 @@ def aw_set_summary(summary: str) -> bool:
 
 
 def aw_list_records(machine: str | None = None) -> list[dict]:
-    """Return this machine's worktree records from ``agent-worktrees list --json``.
+    """Read raw worktree records from ``agent-worktrees list --json``.
 
     Used to *derive* the focus view from the status core instead of a parallel
     focus table (the vision's derive-don't-duplicate rule). Optionally filtered
-    to one machine. Empty when agent-worktrees is absent or the read fails.
+    to one execution owner. Explicit tuples are validated before filtering;
+    malformed tuple metadata raises rather than looking like an empty result.
+    Raw physical/environment fields are returned unchanged. Empty when
+    agent-worktrees is absent or the read fails.
     """
     result = run_agent_worktrees_capture("list", "--json", timeout=20)
     if result is None:
@@ -130,7 +135,8 @@ def aw_list_records(machine: str | None = None) -> list[dict]:
     for w in rows:
         if not isinstance(w, dict):
             continue
-        if machine and w.get("machine") != machine:
+        owner = execution_machine_from_fields(w)
+        if machine and owner != machine:
             continue
         out.append(w)
     return out

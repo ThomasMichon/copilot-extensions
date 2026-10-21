@@ -8,6 +8,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 TOOLS = Path(__file__).resolve().parent
 REPO = TOOLS.parent
 sys.path.insert(0, str(TOOLS))
@@ -16,8 +18,9 @@ from build_python_artifacts import resolve_vendored_libs  # noqa: E402
 from materialize_main import materialize_uv_editable_ref_into  # noqa: E402
 
 
-def test_worktrees_source_graph_and_change_attribution():
-    consumer = REPO / "plugins" / "agent-worktrees"
+@pytest.mark.parametrize("plugin", ["agent-worktrees", "agent-dispatch"])
+def test_consumer_source_graph_and_change_attribution(plugin):
+    consumer = REPO / "plugins" / plugin
     assert dict(resolve_vendored_libs(consumer))["worktree-identity"] == (
         REPO / "libs" / "worktree-identity"
     ).resolve()
@@ -27,7 +30,7 @@ def test_worktrees_source_graph_and_change_attribution():
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    assert module._vendored_consumers()["worktree-identity"] == ["agent-worktrees"]
+    assert plugin in module._vendored_consumers()["worktree-identity"]
     from uv_editable_ref import tomllib
 
     metadata = tomllib.loads(
@@ -37,14 +40,16 @@ def test_worktrees_source_graph_and_change_attribution():
     assert metadata["project"]["dependencies"] == []
 
 
-def test_real_materialization_preserves_codec_and_rewrites_source(tmp_path):
-    source = REPO / "plugins" / "agent-worktrees"
+@pytest.mark.parametrize("plugin", ["agent-worktrees", "agent-dispatch"])
+def test_real_materialization_preserves_codec_and_rewrites_source(tmp_path, plugin):
+    source = REPO / "plugins" / plugin
     destination = tmp_path / "standalone"
     destination.mkdir()
     shutil.copy2(source / "pyproject.toml", destination / "pyproject.toml")
-    shutil.copytree(source / "libs", destination / "libs", ignore=shutil.ignore_patterns(
-        "__pycache__", ".pytest_cache", ".venv", "build", "*.egg-info",
-    ))
+    if (source / "libs").is_dir():
+        shutil.copytree(source / "libs", destination / "libs", ignore=shutil.ignore_patterns(
+            "__pycache__", ".pytest_cache", ".venv", "build", "*.egg-info",
+        ))
     log = materialize_uv_editable_ref_into(
         source_consumer_dir=source, dest_consumer_dir=destination, canonical_root=REPO,
     )

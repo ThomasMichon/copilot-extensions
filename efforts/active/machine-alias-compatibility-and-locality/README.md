@@ -365,6 +365,38 @@ unrelated service changes or a second machine registry.
 
 ## Journal
 
+### 2026-10-20 - Dispatch raw-row adapter source slice
+- Dispatch's Worktrees reader validates explicit tuples before filtering and
+  selects the shared execution owner, keeping raw physical/environment
+  metadata unchanged. Focus keeps its one-term owner field and places the
+  validated tuple in a separate `machine_identity` object; legacy output
+  remains unchanged.
+- Malformed explicit tuples fail the complete read before machine filtering
+  or summary omission. The focus CLI reports a nonzero diagnostic without
+  emitting a partial or apparently empty success.
+- The unadapted baseline reproduced 30 failures with one legacy control
+  passing. The affected identity/focus portfolio then passed 58 tests; five
+  real graph/materialization/import contracts passed for the shared package
+  and its consumers. These are bounded source checks, not installed acceptance.
+- The canonical dependency adds no Worktrees or machine-transport runtime
+  import. Task queues, sessions, task ownership and transport profiles are
+  untouched. Current-head review and required Source CI remain pending;
+  Bridge and Manager raw consumers are the next implementation slices.
+
+### 2026-10-20 - Shared codec extraction merged; raw consumers next
+- #7481 merged as `78953b59bba68aa02bc878f5259aefa2a3365b41`
+  after exact-head approval of
+  `18315333929fd802501ba5815eb90c9d26a5723f` and passing required
+  Source CI, with no open review findings. The managed completion path
+  reconciled the landed source and preserved its pre-completion backup.
+- The linked shared-boundary checklist records only the extraction,
+  compatibility and package-construction items this slice proved. The
+  containing Phase 3d item stays open.
+- The next source slice adapts Dispatch's raw Worktrees filtering and focus
+  fields to the shared execution owner, retaining physical/environment
+  metadata and explicit malformed-tuple refusal. Bridge and Manager follow;
+  ordinary tuple producers, replay, release and installed acceptance remain open.
+
 ### 2026-10-20 - Shared codec extraction source slice
 - The strict wire decoder now lives in dependency-free
   `libs/worktree-identity`; Worktrees retains its old module as imports of
