@@ -2576,7 +2576,12 @@ function Resolve-LegacySnapshotEvidence([string]$ResolvedPayload, [string]$Reque
     if ((Get-StringProperty $receipt 'schema') -cne 'copilot-extensions.legacy-snapshot-source') {
         return $null
     }
-    $version = Get-PropertyValue $receipt 'version'
+    if (-not (Has-ExactProperty $receipt 'version') -or
+        ($receipt.PSObject.Properties['version'].Value -isnot [int] -and
+            $receipt.PSObject.Properties['version'].Value -isnot [long])) {
+        Fail 'Legacy snapshot source has an unsupported version.'
+    }
+    $version = $receipt.PSObject.Properties['version'].Value
     Assert-PositiveInteger $version 'legacy snapshot source version'
     if ($version -notin @(1, 2)) { Fail 'Legacy snapshot source has an unsupported version.' }
     $snapshots = Split-Path -Parent $ResolvedPayload

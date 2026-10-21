@@ -13,7 +13,7 @@ from test_runtime_deployment_adapters import _run_adapter
 @pytest.mark.parametrize(("receipt_version", "case"), [
     (version, case) for version in (1, 2) for case in (
         "standalone", "directory", "managed", "fingerprint", "source", "plugin", "version",
-        "selected", "stamped", "record",
+        "selected", "stamped", "record", "version-array",
     )
 ] + [(2, case) for case in (
     "snapshot-id", "payload-version", "id-array", "payload-version-array", "missing-selection",
@@ -67,6 +67,8 @@ def test_snapshot_source_revalidates_identity_and_live_policy(
         captured["pluginId"] = "agent-other"
     elif case == "version":
         receipt["version"] = True
+    elif case == "version-array":
+        receipt["version"] = [receipt_version]
     elif case == "selected":
         (root / "payload-dir").write_text(str(root / "snapshots/other"), encoding="utf-8")
     elif case == "stamped":
