@@ -404,7 +404,7 @@ function Resolve-AgentWorktreesRuntime {
         $env:COPILOT_EXTENSIONS_BOOT_TRACE_PLUGIN = 'agent-worktrees'
     }
     $env:AGENT_RT_ROOT = $runtimeRoot
-    . $runtimeResolver
+    . $runtimeResolver -TraceMode ready
     return $AgentRtPy
 }
 
@@ -417,7 +417,7 @@ function Assert-PluginRuntimePublication {
     $probeCode = $LASTEXITCODE
     try {
         $decision = ($probe -join "`n") | ConvertFrom-Json -ErrorAction Stop
-        $expectedRoot = if ($actualMode -ceq 'legacy') {
+        $expectedRoot = if ($actualMode -ceq 'legacy' -or $simplePolicyLegacy) {
             [string]$resolution.legacy.root
         } else {
             [string]$resolution.runtimeRoot

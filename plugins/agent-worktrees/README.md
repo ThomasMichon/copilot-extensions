@@ -85,7 +85,10 @@ provisioning. These paths use the canonical deployment probe before publication;
 first use repeats admission under its existing provision lock. A refusal leaves
 the hook's other components and healthy runtime dispatch usable and reports
 explicit installation-management recovery. Absent policy retains standalone
-behavior. This protects these native entrypoints, not every installer or launcher
+behavior through the existing canonical legacy-admission fallback, including an
+unattributed payload when that fallback permits it. Preliminary resolution
+suppresses durable traces on a miss; healthy dispatch retains its resolver
+trace phases. This protects these native entrypoints, not every installer or launcher
 publication path. The [canonical deployment policy contract](../../libs/installation-context/README.md)
 owns the policy schema and decision semantics.
 

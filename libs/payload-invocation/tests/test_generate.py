@@ -917,7 +917,7 @@ def test_worktrees_releases_provision_lock_before_runtime_dispatch(
     ]
     assert [event["path"] for event in dispatch] == [branch]
     callers = status_callers.read_text(encoding="utf-8").splitlines()
-    assert len(callers) == (2 if branch == "locked-fast" else 3)
+    assert len(callers) == (3 if branch == "locked-fast" else 5)
     assert set(callers) == {str(dispatch[0]["pid"])}
 
 
@@ -1477,6 +1477,13 @@ def test_agent_worktrees_posix_interrupt_reaps_provisioner_before_unlock(
     mode_runner = payload / "scripts" / "installation-context" / "installation-context.sh"
     mode_runner.write_text(
         "#!/usr/bin/env bash\n"
+        "if [ \"${1:-}\" = probe-plugin-publication ]; then\n"
+        "  printf '%s\\n' "
+        f"'{{\"actualMode\":\"namespaced\",\"deployment\":{{"
+        f"\"path\":\"{plugin_root}/runtime-deployment.json\","
+        "\"allowPluginPublication\":true}}'\n"
+        "  exit 0\n"
+        "fi\n"
         "printf '%s\\n' "
         f"'{{\"status\":\"ready\",\"reason\":\"namespaced-active\","
         f"\"actualMode\":\"namespaced\",\"desiredMode\":\"namespaced\","
@@ -1557,6 +1564,13 @@ def test_agent_worktrees_posix_revalidates_after_provisioning(
     mode_runner = payload / "scripts" / "installation-context" / "installation-context.sh"
     mode_runner.write_text(
         "#!/usr/bin/env bash\n"
+        "if [ \"${1:-}\" = probe-plugin-publication ]; then\n"
+        "  printf '%s\\n' "
+        f"'{{\"actualMode\":\"namespaced\",\"deployment\":{{"
+        f"\"path\":\"{plugin_root}/runtime-deployment.json\","
+        "\"allowPluginPublication\":true}}'\n"
+        "  exit 0\n"
+        "fi\n"
         "if [ \"${1:-}\" = validate ]; then\n"
         "  printf '%s\\n' '{\"namespaceGeneration\":1,\"generation\":1}'\n"
         "  exit 0\n"

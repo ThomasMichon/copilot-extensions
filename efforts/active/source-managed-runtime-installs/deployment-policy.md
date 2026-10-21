@@ -171,6 +171,20 @@ the existing provision lock after checking for a now-available runtime. Both
 native adapters validate the decision's type and governed policy path, including
 canonical home aliases and active-cell versus legacy-root scope.
 
+An unattributed standalone payload can have a null mode/root in the canonical
+diagnostic result. Bootstrap composes `probe-legacy` admission rather than
+accepting all null modes; first use retains its already-admitted simple legacy
+fallback and uses `legacy.root`. Explicit mode policy, ownership tombstones and
+receipt safeguards are not relaxed.
+
+The bespoke resolver's `read-only` trace mode lets bootstrap inspect a selected
+runtime without writing diagnostics into the installation. First-use resolution
+uses `ready` trace mode: it buffers durable resolver events and emits them only
+after a complete selected interpreter is found. Missing-runtime refusal
+therefore leaves even an existing policy-only root unchanged, while healthy
+dispatch retains its marker/slot trace phases. Normal resolver callers keep
+their existing tracing behavior.
+
 Focused native regressions exercise real policy adapters and inventory all
 product writes on refusal. They separately preserve standalone first stamping
 and legacy lib-copy replacement, healthy dispatch, and policy changes at the

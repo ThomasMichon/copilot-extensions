@@ -48,7 +48,7 @@ $InstallDir = Join-Path $env:USERPROFILE '.agent-worktrees'
 $LibDir     = Join-Path $InstallDir 'lib'
 $PkgDst     = Join-Path $LibDir 'agent_worktrees'
 $_r         = Join-Path $InstallDir 'bin\resolve-runtime.ps1'
-$VenvPython = if (Test-Path -LiteralPath $_r) { . $_r; $AwPy } else { $null }
+$VenvPython = if (Test-Path -LiteralPath $_r) { . $_r -TraceMode read-only; $AwPy } else { $null }
 $Manifest   = Join-Path $InstallDir 'deploy-manifest.json'
 
 function Assert-BootstrapPublication {
@@ -77,13 +77,22 @@ function Assert-BootstrapPublication {
     $probeCode = $LASTEXITCODE
     try {
         $decision = ($probe -join "`n") | ConvertFrom-Json -ErrorAction Stop
-        if ($probeCode -eq 0 -and $decision.actualMode -ceq 'legacy' -and
+        if ($probeCode -eq 0 -and
             $decision.deployment.allowPluginPublication -is [bool] -and
             $decision.deployment.allowPluginPublication -and
             $decision.legacy.root -is [string] -and $decision.legacy.root -and
             [string]$decision.deployment.path -ceq
                 (Join-Path $decision.legacy.root 'runtime-deployment.json')) {
-            return
+            $legacyProbe = @(& $helper -Action probe-legacy -PayloadRoot $payloadRoot `
+                -PluginId agent-worktrees -LegacyRoot $InstallDir)
+            $legacyCode = $LASTEXITCODE
+            $probe += $legacyProbe
+            $legacy = ($legacyProbe -join "`n") | ConvertFrom-Json -ErrorAction Stop
+            if ($legacyCode -eq 0 -and $legacy.allowMutation -is [bool] -and
+                $legacy.allowMutation -and
+                [string]$legacy.legacy.root -ceq [string]$decision.legacy.root) {
+                return
+            }
         }
     } catch {
         [Console]::Error.WriteLine(

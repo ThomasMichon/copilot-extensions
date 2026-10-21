@@ -233,6 +233,7 @@ profile_home() {
 }
 
 resolve_runtime() {
+    local AGENT_RT_RESOLVE_TRACE_MODE=ready
     AGENT_RT_PY=""
     if [[ -n "${COPILOT_EXTENSIONS_BOOT_TRACE:-}" ]]; then
         export COPILOT_EXTENSIONS_BOOT_TRACE_PLUGIN="agent-worktrees"
@@ -443,7 +444,7 @@ assert_plugin_runtime_publication() {
         -v "query_path=$(json_path deployment allowPluginPublication)" <<<"$probe" 2>/dev/null || true)"
     path="$(json_get "$probe" "$(json_path deployment path)" 2>/dev/null || true)"
     actual="$(json_get "$probe" "$(json_path actualMode)" 2>/dev/null || true)"
-    if [[ "$ACTUAL_MODE" == legacy ]]; then
+    if [[ "$ACTUAL_MODE" == legacy || "$SIMPLE_POLICY_LEGACY" == 1 ]]; then
         expected_root="$(json_get "$RESOLUTION" "$(json_path legacy root)" 2>/dev/null || true)"
     else
         expected_root="$(json_get "$RESOLUTION" "$(json_path runtimeRoot)" 2>/dev/null || true)"

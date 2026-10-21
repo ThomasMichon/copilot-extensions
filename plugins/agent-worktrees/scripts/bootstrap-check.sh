@@ -48,7 +48,9 @@ INSTALL_DIR="$HOME/.agent-worktrees"
 LIB_DIR="$INSTALL_DIR/lib"
 PKG_DST="$LIB_DIR/agent_worktrees"
 _awresolve="$INSTALL_DIR/bin/resolve-runtime.sh"
-[ -f "$_awresolve" ] && . "$_awresolve"
+if [ -f "$_awresolve" ]; then
+    AGENT_RT_RESOLVE_TRACE_MODE=read-only . "$_awresolve"
+fi
 VENV_PYTHON="${AW_PY:-}"
 MANIFEST="$INSTALL_DIR/deploy-manifest.json"
 
@@ -74,15 +76,24 @@ assert_bootstrap_publication() {
     payload="$(cd -P -- "$ScriptDir/.." && pwd)"
     probe="$(bash "$helper" probe-plugin-publication --payload-root "$payload" \
         --plugin-id agent-worktrees --legacy-root "$INSTALL_DIR")" || code=$?
-    local allowed="" allowed_type="" path="" actual="" root=""
+    local allowed="" allowed_type="" path="" root=""
     allowed="$(LC_ALL=C awk -f "$query" -v mode=get -v query_path=$'deployment\034allowPluginPublication' <<<"$probe" 2>/dev/null || true)"
     allowed_type="$(LC_ALL=C awk -f "$query" -v mode=type -v query_path=$'deployment\034allowPluginPublication' <<<"$probe" 2>/dev/null || true)"
     path="$(LC_ALL=C awk -f "$query" -v mode=get -v query_path=$'deployment\034path' <<<"$probe" 2>/dev/null || true)"
-    actual="$(LC_ALL=C awk -f "$query" -v mode=get -v query_path=actualMode <<<"$probe" 2>/dev/null || true)"
     root="$(LC_ALL=C awk -f "$query" -v mode=get -v query_path=$'legacy\034root' <<<"$probe" 2>/dev/null || true)"
-    if [[ "$code" == 0 && "$allowed_type" == boolean && "$allowed" == true && "$actual" == legacy &&
+    if [[ "$code" == 0 && "$allowed_type" == boolean && "$allowed" == true &&
           "$root" == /* && "$path" == "$root/runtime-deployment.json" ]]; then
-        return 0
+        local legacy="" legacy_code=0 mutation="" mutation_type="" legacy_root=""
+        legacy="$(bash "$helper" probe-legacy --payload-root "$payload" \
+            --plugin-id agent-worktrees --legacy-root "$INSTALL_DIR")" || legacy_code=$?
+        mutation="$(LC_ALL=C awk -f "$query" -v mode=get -v query_path=allowMutation <<<"$legacy" 2>/dev/null || true)"
+        mutation_type="$(LC_ALL=C awk -f "$query" -v mode=type -v query_path=allowMutation <<<"$legacy" 2>/dev/null || true)"
+        legacy_root="$(LC_ALL=C awk -f "$query" -v mode=get -v query_path=$'legacy\034root' <<<"$legacy" 2>/dev/null || true)"
+        if [[ "$legacy_code" == 0 && "$mutation_type" == boolean &&
+              "$mutation" == true && "$legacy_root" == "$root" ]]; then
+            return 0
+        fi
+        probe="$probe $legacy"
     fi
     printf '[agent-worktrees] Runtime publication refused: %s Use explicit installation management to install or repair this runtime.\n' "$probe" >&2
     printf '{}'

@@ -6,6 +6,7 @@ import os
 import shutil
 import subprocess
 import sys
+import venv
 from pathlib import Path
 
 import pytest
@@ -27,7 +28,7 @@ SHELLS = [
 def _native_fixture(fixture: dict, shell: str) -> dict:
     _, environment = _real_installer(fixture, shell, "installed")
     scripts = fixture["payload"] / "scripts"
-    for name in ("bootstrap-check", "invoke-payload-runtime"):
+    for name in ("bootstrap-check", "invoke-payload-runtime", "resolve-runtime"):
         for suffix in ("ps1", "sh"):
             shutil.copyfile(
                 ROOT / f"plugins/agent-worktrees/scripts/{name}.{suffix}",
@@ -145,13 +146,23 @@ def _old_lib_copy(fixture: dict) -> Path:
         "plugin_source": str(source), "commit": "older", "deployed_at": "retained",
     })
     (root / "bin").mkdir()
-    (root / "bin/resolve-runtime.ps1").write_text(
-        "$AwPy = $env:TEST_RUNTIME_PY\n", encoding="utf-8",
-    )
-    (root / "bin/resolve-runtime.sh").write_text(
-        'AW_PY="$TEST_RUNTIME_PY"\n', encoding="utf-8",
-    )
+    for suffix in ("ps1", "sh"):
+        shutil.copyfile(
+            ROOT / f"plugins/agent-worktrees/scripts/resolve-runtime.{suffix}",
+            root / f"bin/resolve-runtime.{suffix}",
+        )
+    _completed_slot(fixture)
     return package
+
+
+def _completed_slot(fixture: dict) -> Path:
+    slot = fixture["legacy"] / "versions/1.0.0"
+    venv.EnvBuilder(with_pip=False).create(slot)
+    _write(slot / ".install-complete.json", {
+        "version": "1.0.0", "completed_at": "2026-01-01T00:00:00Z", "pid": 1,
+    })
+    (fixture["legacy"] / "current-version").write_text("1.0.0", encoding="utf-8")
+    return slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
 
 
 @pytest.mark.parametrize("shell", SHELLS)
@@ -205,13 +216,7 @@ def test_native_healthy_dispatch_does_not_require_publication_permission(
 ) -> None:
     environment = _native_fixture(binding_fixture, shell)
     _policy(binding_fixture)
-    scripts = binding_fixture["payload"] / "scripts"
-    (scripts / "resolve-runtime.ps1").write_text(
-        "$AgentRtPy = $env:TEST_RUNTIME_PY\n", encoding="utf-8",
-    )
-    (scripts / "resolve-runtime.sh").write_text(
-        'AGENT_RT_PY="$TEST_RUNTIME_PY"\n', encoding="utf-8",
-    )
+    _completed_slot(binding_fixture)
     modules = binding_fixture["home"] / "runtime-module"
     modules.mkdir()
     (modules / "agent_worktrees.py").write_text("print('healthy-runtime')\n", encoding="utf-8")
@@ -222,6 +227,11 @@ def test_native_healthy_dispatch_does_not_require_publication_permission(
     assert result.returncode == 0, result
     assert result.stdout.strip() == "healthy-runtime"
     assert "Runtime publication refused" not in result.stderr
+    phases = {
+        json.loads(line)["phase"]
+        for line in (binding_fixture["legacy"] / "logs/activity.jsonl").read_text().splitlines()
+    }
+    assert {"resolver-marker-start", "resolver-marker-result", "resolver-slot-result", "dispatch"} <= phases
     assert not (binding_fixture["legacy"] / ".provision.lock").exists()
     assert not (binding_fixture["legacy"] / "smoke.json").exists()
 
@@ -354,3 +364,81 @@ def test_native_old_deployed_hook_requires_capable_helper_for_present_policy(
         assert _snapshot(binding_fixture["home"]) == before
     else:
         assert (package / "new.py").is_file()
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+@pytest.mark.parametrize("old_copy", [False, True])
+@pytest.mark.parametrize("mode_policy", ["missing", "disabled", "enabled", "invalid", "tombstone"])
+def test_native_bootstrap_missing_provenance_uses_canonical_legacy_admission(
+    binding_fixture: dict, shell: str, old_copy: bool, mode_policy: str, powershell_host,
+) -> None:
+    environment = _native_fixture(binding_fixture, shell)
+    if old_copy:
+        _old_lib_copy(binding_fixture)
+    (binding_fixture["home"] / ".copilot/settings.json").unlink()
+    if mode_policy in {"disabled", "enabled", "invalid"}:
+        _write(binding_fixture["home"] / ".copilot-extensions/installation-mode.json", {
+            "schema": "invalid" if mode_policy == "invalid" else "copilot-extensions.installation-mode",
+            "version": 1, "installationMode": {"enabled": mode_policy == "enabled"},
+        })
+    elif mode_policy == "tombstone":
+        _write(binding_fixture["legacy"] / ".installation-ownership.json", {})
+    host = powershell_host(binding_fixture, environment) if shell == "powershell" else None
+    before = _snapshot(binding_fixture["home"])
+    result = _run(
+        binding_fixture, environment, _command(binding_fixture, shell, "bootstrap-check"), host,
+    )
+    allowed = mode_policy == "missing"
+    assert result.returncode == (0 if allowed else 3), result
+    if allowed:
+        output = (
+            binding_fixture["legacy"] / "lib/agent_worktrees/new.py" if old_copy else
+            binding_fixture["legacy"] / "smoke.json"
+        )
+        assert output.is_file()
+    else:
+        assert "Runtime publication refused" in result.stderr
+        assert _snapshot(binding_fixture["home"]) == before
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+@pytest.mark.parametrize("mode_policy", ["missing", "disabled"])
+def test_native_first_use_missing_provenance_retains_standalone_dispatch(
+    binding_fixture: dict, shell: str, mode_policy: str,
+) -> None:
+    environment = _native_fixture(binding_fixture, shell)
+    (binding_fixture["home"] / ".copilot/settings.json").unlink()
+    if mode_policy == "disabled":
+        _write(binding_fixture["home"] / ".copilot-extensions/installation-mode.json", {
+            "schema": "copilot-extensions.installation-mode", "version": 1,
+            "installationMode": {"enabled": False},
+        })
+    scripts = binding_fixture["payload"] / "scripts"
+    (scripts / "install.ps1").write_text(
+        "param([Parameter(Position=0)][string]$Action)\n"
+        "$root=Join-Path $env:USERPROFILE '.agent-worktrees'\n"
+        "if ($Action -eq 'stamp') {\n"
+        "  [IO.File]::WriteAllText((Join-Path $root 'payload-dir'), $env:AGENT_WORKTREES_PAYLOAD_ROOT)\n"
+        "} else {\n"
+        "  [IO.File]::WriteAllText((Join-Path $PSScriptRoot 'resolve-runtime.ps1'), "
+        "'$AgentRtPy = $env:TEST_RUNTIME_PY')\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    (scripts / "install.sh").write_text(
+        'if [[ "$1" == stamp ]]; then\n'
+        '  printf "%s" "$AGENT_WORKTREES_PAYLOAD_ROOT" > "$HOME/.agent-worktrees/payload-dir"\n'
+        "else\n"
+        "  printf '%s\\n' 'AGENT_RT_PY=\"$TEST_RUNTIME_PY\"' > \"$(dirname \"$0\")/resolve-runtime.sh\"\n"
+        "fi\n",
+        encoding="utf-8",
+    )
+    modules = binding_fixture["home"] / "runtime-module"
+    modules.mkdir()
+    (modules / "agent_worktrees.py").write_text("print('standalone-runtime')\n", encoding="utf-8")
+    environment.update({"TEST_RUNTIME_PY": sys.executable, "PYTHONPATH": str(modules)})
+    result = _run(
+        binding_fixture, environment, _command(binding_fixture, shell, "invoke-payload-runtime"),
+    )
+    assert result.returncode == 0, result
+    assert result.stdout.strip() == "standalone-runtime"
