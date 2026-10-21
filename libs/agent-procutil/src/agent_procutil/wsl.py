@@ -12,7 +12,7 @@ import threading
 import time
 from pathlib import Path
 
-from agent_procutil import no_window_kwargs
+from agent_procutil import _caller_owned, no_window_kwargs
 from agent_procutil.owned_process import run_owned
 
 _MAX_REQUEST = 2 * 1024 * 1024
@@ -112,18 +112,23 @@ def run_windows_owned(
         raise subprocess.TimeoutExpired(argv, timeout)
     request["timeout"] = remaining
     payload = (json.dumps(request, ensure_ascii=True) + "\n").encode("ascii")
-    process = subprocess.Popen(  # noqa: S603 - explicit GUI interpreter, no shell
-        _owner_command(str(python), mapped.stdout.rstrip("\r\n")),
-        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        bufsize=0, **no_window_kwargs(),
-    )
+    with _caller_owned._lifetime_lock:
+        process = subprocess.Popen(  # noqa: S603 - explicit GUI interpreter, no shell
+            _owner_command(str(python), mapped.stdout.rstrip("\r\n")),
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            bufsize=0, **no_window_kwargs(),
+        )
+        writer = process.stdin.fileno()
+        _caller_owned._lifetime_writers.add(writer)
     try:
         try:
             response = _exchange(process, payload, deadline)
         except TimeoutError as error:
             raise subprocess.TimeoutExpired(argv, timeout) from error
     finally:
-        process.stdin.close()
+        with _caller_owned._lifetime_lock:
+            _caller_owned._lifetime_writers.remove(writer)
+            process.stdin.close()
         try:
             process.wait(timeout=3)
         except subprocess.TimeoutExpired as error:

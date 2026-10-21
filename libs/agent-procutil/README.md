@@ -362,7 +362,10 @@ kill-on-close Job. Target creation therefore inherits Windows ownership before
 execution, including the suspended-create/assignment interval of its nested
 ordinary bounded command. The caller keeps a dedicated input pipe open:
 caller exit, hard death or interruption closes it, and the Windows owner exits,
-releasing the self-Job and its descendants. This is a bounded command helper,
+releasing the self-Job and its descendants. Creation, registration and closure
+of its writer share the POSIX caller owner's fork lock and lifetime registry;
+unrelated fork children close inherited writers instead of extending ownership.
+This is a bounded command helper,
 not a persistent service or a POSIX-group claim over Windows processes.
 
 Target stdin, stdout and stderr remain distinct. A framed request carries text
@@ -374,9 +377,12 @@ logged by the interop wrapper. Missing or interrupted completion is explicit
 and never permission to replay an uncertain command.
 
 Portable protocol tests are separate from real WSL/Windows qualification.
-Timeout, blocked-stdin, SIGINT and caller-death cases must inspect exact owned descendants
+Timeout, blocked-stdin, SIGINT and caller-death cases, including an unrelated
+fork child remaining alive, must inspect exact owned descendants
 before an outer fixture closes its own Job. Native Job/stdio success alone is
 not that cross-OS proof.
+The unrelated-fork control requires Linux pidfd observation and keeps the WSL
+launcher alive, so launcher exit cannot mask caller-owned retirement.
 
 The opt-in native suite uses `AGENT_PROCUTIL_WSL_TEST_DISTRO` to select an
 existing WSL distribution and runs each failure case twice while observing

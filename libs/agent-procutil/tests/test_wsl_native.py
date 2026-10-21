@@ -8,7 +8,7 @@ import os
 import subprocess
 import sys
 import time
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import pytest
 
@@ -52,6 +52,34 @@ stage.replace(ready)
 time.sleep(120)
 """
 
+_FORK_STATE = """
+import json,os,pathlib,select,sys
+identity=json.loads(pathlib.Path(sys.argv[1]).read_text())
+try:
+    fd=os.pidfd_open(identity['pid'])
+except ProcessLookupError:
+    print(json.dumps({'alive':False}))
+else:
+    try:
+        observer=select.poll()
+        observer.register(fd,select.POLLIN)
+        try:
+            fields=pathlib.Path('/proc/'+str(identity['pid'])+'/stat').read_text().rpartition(')')[2].split()
+        except FileNotFoundError:
+            events=observer.poll(0)
+            if not events:
+                raise RuntimeError('Unrelated fork child identity is unavailable')
+        else:
+            if int(fields[19])!=identity['birth']:
+                raise RuntimeError('Unrelated fork child identity changed')
+            events=observer.poll(3000 if sys.argv[2]=='wait' else 0)
+        if any(mask & (select.POLLERR|select.POLLNVAL) for _,mask in events):
+            raise RuntimeError('Unrelated fork child observation failed')
+        print(json.dumps({'alive':not events}))
+    finally:
+        os.close(fd)
+"""
+
 
 def _linux_path(path: Path, distro: str) -> str:
     result = subprocess.run(
@@ -59,6 +87,18 @@ def _linux_path(path: Path, distro: str) -> str:
         capture_output=True, text=True, timeout=5, check=True, **no_window_kwargs(),
     )
     return result.stdout.strip()
+
+
+def _fork_is_alive(distro: str, linux_gate: str, *, wait: bool = False) -> bool:
+    ready = str(PurePosixPath(linux_gate).with_name("fork-ready.json"))
+    result = subprocess.run(
+        ["wsl.exe", "-d", distro, "--exec", "/usr/bin/python3", "-c", _FORK_STATE,
+         ready, "wait" if wait else "now"],
+        capture_output=True, text=True, timeout=5, check=True, **no_window_kwargs(),
+    )
+    state = json.loads(result.stdout)
+    assert set(state) == {"alive"} and type(state["alive"]) is bool
+    return state["alive"]
 
 
 def _process_api():
@@ -117,9 +157,10 @@ def _exercise_case(tmp_path, case):
     pythonw = python.with_name("pythonw.exe")
     assert pythonw.is_file()
     ready, gate, config = (tmp_path / name for name in ("ready.json", "interrupt", "request.json"))
+    linux_gate = _linux_path(gate, distro)
     config.write_text(json.dumps({
         "case": case, "source": _linux_path(source, distro),
-        "pythonw": _linux_path(pythonw, distro), "gate": _linux_path(gate, distro),
+        "pythonw": _linux_path(pythonw, distro), "gate": linux_gate,
         "argv": [str(python), "-c", _TARGET, str(ready)],
     }))
     process, outer_job = spawn_sync_in_kill_on_close_job(
@@ -142,12 +183,22 @@ def _exercise_case(tmp_path, case):
         assert all(kernel.WaitForSingleObject(handle, 0) == 258 for kernel, handle in handles)
         if case not in {"timeout", "stdin-stall"}:
             gate.write_text("interrupt")
-        stdout, stderr = process.communicate(timeout=12)
-        if case != "caller-death":
-            assert process.returncode == 0, (stdout, stderr)
-            assert json.loads(stdout)["outcome"] == case
+        if case == "caller-death-with-fork":
+            exited = gate.with_name("caller-exited.json")
+            deadline = time.monotonic() + 12
+            while not exited.exists() and process.poll() is None and time.monotonic() < deadline:
+                time.sleep(.02)
+            assert exited.exists(), "caller did not exit while its WSL launcher remained alive"
+            assert json.loads(exited.read_text())["returncode"] != 0
+            assert process.poll() is None, "WSL launcher exited before the ownership assertion"
+            assert _fork_is_alive(distro, linux_gate), "unrelated fork child exited with the caller"
         else:
-            assert process.returncode != 0
+            stdout, stderr = process.communicate(timeout=12)
+            if case != "caller-death":
+                assert process.returncode == 0, (stdout, stderr)
+                assert json.loads(stdout)["outcome"] == case
+            else:
+                assert process.returncode != 0
         deadline = time.monotonic() + 5
         while (
             any(kernel.WaitForSingleObject(handle, 0) == 258 for kernel, handle in handles)
@@ -156,6 +207,9 @@ def _exercise_case(tmp_path, case):
             time.sleep(.02)
         # This assertion precedes cleanup of the test harness's outer Job.
         assert all(kernel.WaitForSingleObject(handle, 0) == 0 for kernel, handle in handles)
+        if case == "caller-death-with-fork":
+            assert process.poll() is None, "WSL launcher cleanup masked caller-owned retirement"
+            assert _fork_is_alive(distro, linux_gate), "unrelated fork child did not survive the caller"
     finally:
         gate.write_text("interrupt")
         for kernel, handle in handles:
@@ -163,14 +217,22 @@ def _exercise_case(tmp_path, case):
                 kernel.TerminateProcess(handle, 1)
                 kernel.WaitForSingleObject(handle, 3000)
             kernel.CloseHandle(handle)
-        if outer_job is not None:
-            outer_job.terminate_and_wait(3)
-        process.wait(timeout=3)
-        process.stdout.close()
-        process.stderr.close()
+        try:
+            if case == "caller-death-with-fork":
+                gate.with_name("fork-stop").write_text("stop")
+                if gate.with_name("fork-ready.json").exists():
+                    assert not _fork_is_alive(distro, linux_gate, wait=True)
+        finally:
+            if outer_job is not None:
+                outer_job.terminate_and_wait(3)
+            process.wait(timeout=3)
+            process.stdout.close()
+            process.stderr.close()
 
 
-@pytest.mark.parametrize("case", ["timeout", "stdin-stall", "sigint", "caller-death"])
+@pytest.mark.parametrize("case", [
+    "timeout", "stdin-stall", "sigint", "caller-death", "caller-death-with-fork",
+])
 def test_real_windows_tree_is_gone_before_outer_job_cleanup(tmp_path, case):
     from test_spawn_daemon_windows_integration import _configure_win32, _WindowObserver
 

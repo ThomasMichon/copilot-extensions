@@ -268,3 +268,70 @@ def test_exchange_response_bound_is_enforced_while_reading(monkeypatch):
         process.wait(timeout=2)
         process.stdout.close()
         process.stderr.close()
+
+
+@pytest.mark.skipif(os.name == "nt" or not hasattr(os, "fork"), reason="native POSIX fork")
+@pytest.mark.parametrize("failure", [False, True], ids=["completed", "exchange-failure"])
+def test_lifetime_writer_is_fork_safe_through_creation_and_cleanup(tmp_path, monkeypatch, failure):
+    from agent_procutil import _caller_owned
+
+    pythonw = tmp_path / "pythonw.exe"
+    pythonw.touch()
+    monkeypatch.setattr(wsl.platform, "release", lambda: "microsoft-test")
+    monkeypatch.setattr(
+        wsl, "run_owned", lambda *a, **k: subprocess.CompletedProcess(a[0], 0, str(tmp_path), ""),
+    )
+    script = (
+        "import sys;"
+        "request=sys.stdin.buffer.readline();"
+        "print('{\"version\":1,\"returncode\":0,\"stdout\":\"ok\",\"stderr\":\"\"}')"
+        " if request else None"
+    )
+    monkeypatch.setattr(wsl, "_owner_command", lambda *_: [sys.executable, "-I", "-c", script])
+    real_popen, real_exchange = subprocess.Popen, wsl._exchange
+    observed = {}
+
+    def launch(*args, **kwargs):
+        observed["creation_locked"] = _caller_owned._lifetime_lock.locked()
+        process = real_popen(*args, **kwargs)
+        stream = process.stdin
+        writer = stream.fileno()
+        observed["writer"] = writer
+
+        def close():
+            observed["close_locked"] = _caller_owned._lifetime_lock.locked()
+            observed["removed_before_close"] = writer not in _caller_owned._lifetime_writers
+            stream.close()
+
+        process.stdin = SimpleNamespace(fileno=stream.fileno, close=close)
+        return process
+
+    def exchange(process, request, deadline):
+        writer = process.stdin.fileno()
+        child = os.fork()
+        if child == 0:
+            try:
+                os.fstat(writer)
+            except OSError:
+                os._exit(0)
+            os._exit(1)
+        _, status = os.waitpid(child, 0)
+        assert os.waitstatus_to_exitcode(status) == 0, "fork child retained the lifetime writer"
+        assert writer in _caller_owned._lifetime_writers
+        if failure:
+            raise RuntimeError("synthetic exchange failure")
+        return real_exchange(process, request, deadline)
+
+    monkeypatch.setattr(wsl.subprocess, "Popen", launch)
+    monkeypatch.setattr(wsl, "_exchange", exchange)
+    if failure:
+        with pytest.raises(RuntimeError, match="synthetic exchange failure"):
+            wsl.run_windows_owned(["synthetic.exe"], windows_python=str(pythonw), timeout=3)
+    else:
+        result = wsl.run_windows_owned(["synthetic.exe"], windows_python=str(pythonw), timeout=3)
+        assert result.stdout == "ok"
+    assert observed["creation_locked"]
+    assert observed["close_locked"] and observed["removed_before_close"]
+    assert observed["writer"] not in _caller_owned._lifetime_writers
+    with pytest.raises(OSError):
+        os.fstat(observed["writer"])
