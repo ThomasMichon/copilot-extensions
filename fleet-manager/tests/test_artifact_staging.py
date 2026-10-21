@@ -692,6 +692,27 @@ def test_native_cleanup_error_reports_only_the_bounded_os_code(tmp_path, monkeyp
     assert root.is_dir()
 
 
+@pytest.mark.skipif(os.name == "nt", reason="native POSIX quarantine cleanup")
+def test_posix_cleanup_os_failure_retains_code_and_owned_quarantine(tmp_path, monkeypatch):
+    root = tmp_path / "owned-stage"
+    root.mkdir()
+    assert cleanup.os.rename in cleanup.os.supports_dir_fd
+
+    def refused(*args, **kwargs):
+        raise PermissionError(13, "private path and source details")
+
+    monkeypatch.setattr(cleanup.os, "rename", refused)
+    # Preserve the observed native capability while injecting the call failure.
+    monkeypatch.setattr(cleanup.os, "supports_dir_fd", cleanup.os.supports_dir_fd | {refused})
+    with pytest.raises(PlanError) as error:
+        cleanup.remove_owned_stage(root, cleanup.directory_identity(root))
+    message = str(error.value)
+    assert "(OS error 13); cleanup quarantine retained: .fleet-stage-cleanup-" in message
+    assert "private path" not in message
+    assert root.is_dir()
+    assert len(list(tmp_path.glob(".fleet-stage-cleanup-*"))) == 1
+
+
 @pytest.mark.parametrize("operation", ["read", "copy"])
 @pytest.mark.parametrize("interruption", [KeyboardInterrupt, RuntimeError])
 def test_descriptor_is_closed_when_stream_construction_is_interrupted(

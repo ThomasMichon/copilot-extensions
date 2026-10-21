@@ -188,7 +188,7 @@ def _posix_remove(root, expected):
     except (OSError, PlanError) as error:
         message = (
             str(error) if isinstance(error, PlanError)
-            else "artifact stage cleanup could not safely complete"
+            else f"artifact stage cleanup could not safely complete (OS error {error.errno})"
         )
         if retained:
             message += f"; cleanup quarantine retained: {name}"
