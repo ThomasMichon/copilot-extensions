@@ -91,6 +91,11 @@ ordinary Windows workers rather than claiming enforcement or deployed recovery.
 
 ## Bounded owned children
 
+Minimal lifecycle bundles may copy only `agent_procutil/__init__.py` and load
+it directly, with or without registering the module in `sys.modules`.
+The short-lived containment helpers and their typed process-creation errors
+remain self-contained; calling `spawn_daemon` requires the full package.
+
 `agent_procutil.owned_process.run_owned()` executes a finite command with
 captured UTF-8 output, optional `input_text`, and a required positive `timeout`.
 It retains strict Windows Job ownership or an unreaped POSIX session/group

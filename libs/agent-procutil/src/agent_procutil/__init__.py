@@ -60,8 +60,6 @@ import time
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any, BinaryIO
 
-from ._spawn_errors import SyncProcessLaunchError, SyncProcessNotFoundError
-
 if TYPE_CHECKING:
     from .daemon_broker import WindowsDaemonProcess
 
@@ -461,6 +459,20 @@ async def spawn_in_kill_on_close_job(
     return process, job_handle
 
 
+class SyncProcessLaunchError(OSError):
+    """Process creation failed before any child or Job handle was returned."""
+
+    def __init__(self, error: OSError):
+        super().__init__(*error.args)
+        for name in ("errno", "strerror", "filename", "filename2", "winerror"):
+            if hasattr(error, name):
+                setattr(self, name, getattr(error, name))
+
+
+class SyncProcessNotFoundError(SyncProcessLaunchError, FileNotFoundError):
+    """Keep native missing-file handling compatible with the typed boundary."""
+
+
 def spawn_sync_in_kill_on_close_job(
     argv: list[str] | str,
     *,
@@ -850,20 +862,6 @@ def _validated_daemon_log_path(
                 + "); keep the daemon log under its runtime root or home directory"
             )
     return path
-
-
-def _validated_daemon_argv(argv: object) -> list[str]:
-    # A bare string (or path) is itself a Sequence: iterating it would launch
-    # its first character as the executable.
-    if isinstance(argv, (str, bytes, bytearray, os.PathLike)):
-        raise TypeError(
-            "spawn_daemon argv must be a sequence of arguments, not a single "
-            f"{type(argv).__name__}; pass [executable, *args]"
-        )
-    command = [os.fspath(part) for part in argv]  # type: ignore[union-attr]
-    if not command:
-        raise ValueError("spawn_daemon requires a non-empty argv")
-    return command
 
 
 def _validated_extra_creationflags(flags: object) -> int:

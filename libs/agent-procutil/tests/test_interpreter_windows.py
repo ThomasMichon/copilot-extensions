@@ -46,7 +46,13 @@ def test_inner_junction_launch_twice_with_selected_venv(tmp_path, record_propert
     root = tmp_path / "selected"
     venv.EnvBuilder(with_pip=False).create(root)
     alias = tmp_path / "minor"
-    _winapi.CreateJunction(str(base_home), str(alias))
+    # CreateJunction adds its own NT prefix; readlink-derived paths already have one.
+    junction_target = str(base_home)
+    if junction_target.startswith("\\\\?\\UNC\\"):
+        junction_target = "\\\\" + junction_target[8:]
+    elif junction_target.startswith("\\\\?\\"):
+        junction_target = junction_target[4:]
+    _winapi.CreateJunction(junction_target, str(alias))
     try:
         cfg = root / "pyvenv.cfg"
         cfg.write_text("\n".join(
