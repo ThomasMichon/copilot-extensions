@@ -87,7 +87,47 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Admitted fixture-semantic batches
 
+### B-REBASED rewrite and legacy consumers
+
+Baseline: the actual #7523 foundation merge. Twelve rewrite test functions
+and four legacy-rewrite functions now take private completed real post-rebase
+fixtures instead of invoking `publish_and_rebase` as unrelated setup.
+Parameterized cases still select their actual snapshot/refspec scheme;
+literal cases use the matching concrete fixture.
+
+Only fixture arguments and the corresponding setup assignment change.
+AST comparison confirms all 23 rewrite and seven legacy functions,
+decorators, names and remaining bodies are unchanged. In particular, the
+later squash, ordinary-push refusal, explicit confirmation, exact lease,
+hook rejection, fork repoint, process race and record-generation checks
+still exercise the real consumer operations. The three rewrite cases that
+alter identity or destination before publication, or test legacy ownership
+refresh, keep their actual `publish_and_rebase` calls. That helper and the
+shared fixture implementation remain unchanged. The now-unused legacy
+module helper import is removed.
+
+No production batching, transport snapshot adaptation, record-only
+conversion, new skip, test selection or deadline change is included.
+Both complete consumer modules pass on native Windows in separate bounded
+groups: rewrite 40 passed in 157.34 seconds pytest / 170.84 including
+preparation/cleanup; legacy rewrite 21 passed in 55.63 / 59.38 seconds.
+Both use exactly two work-stealing workers, the 30-second default item
+watchdog and unchanged module marks/resource limits under the 240-second
+diagnostic group. There are zero skipped cases. The rewrite run overlapped
+unrelated artifact-extraction I/O; these are functional diagnostics, not
+quiet-host measurements or a whole-suite budget qualification.
+
+Documentation impact is this ledger only; runtime, command, installation
+and configuration contracts do not change. Provisioning clean-room and
+external deployment tests are inapplicable to this test-only conversion.
+The real-Git consumer modules are the direct integration check. Parent
+#5694/#5682 qualification remains open.
+
 ### B-REBASED foundation: private completed setup, no consumer conversions
+
+**Actually merged:** #7523 as
+`f56434e4564fb3680fffc3f52460c4c445df4b92`. Consumer conversions
+are not included in that merge.
 
 Baseline: the actual #7521 adapter merge. Add only
 `_rebased_refspec_pr_seed`, `_rebased_snapshot_pr_seed`,

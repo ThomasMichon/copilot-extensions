@@ -71,10 +71,10 @@ def test_existing_active_pr_can_refresh_ownership_and_rewrite(pr_repo, monkeypat
     assert git("rev-parse", record.pr.branch, cwd=remote) == git("rev-parse", "HEAD", cwd=wt)
 
 
-def test_explicit_rewrite_threads_configured_lock_deadlines(pr_repo, monkeypatch):
+def test_explicit_rewrite_threads_configured_lock_deadlines(rebased_refspec_pr_repo, monkeypatch):
     from agent_worktrees import publication_deadline
 
-    config, wid, wt, _remote, _old = publish_and_rebase(pr_repo, "refspec")
+    config, wid, wt, _remote, _old = rebased_refspec_pr_repo
     repo = replace(config.default_repo, pr=replace(config.default_repo.pr, push_timeout_seconds=600))
     config = replace(config, repos={config.repo_name: repo})
     calls = []
@@ -141,8 +141,8 @@ def publish_and_rebase(pr_repo, scheme):
 
 
 @pytest.mark.parametrize("scheme", ["snapshot", "refspec"])
-def test_explicit_rewrite_public_cli_real_rebase(pr_repo, scheme, monkeypatch):
-    config, wid, wt, remote, old = publish_and_rebase(pr_repo, scheme)
+def test_explicit_rewrite_public_cli_real_rebase(rebased_pr_repo, scheme, monkeypatch):
+    config, wid, wt, remote, old = rebased_pr_repo
     monkeypatch.setattr(cfg, "load_config", lambda *a, **k: config)
     rec = record_for(wid)
     rec.pr.number = 42
@@ -183,8 +183,8 @@ def test_explicit_rewrite_public_cli_real_rebase(pr_repo, scheme, monkeypatch):
 
 @pytest.mark.parametrize("scheme", ["snapshot", "refspec"])
 @pytest.mark.parametrize("during_push", [False, True])
-def test_explicit_rewrite_refuses_moved_remote(pr_repo, scheme, during_push, monkeypatch):
-    config, wid, wt, remote, old = publish_and_rebase(pr_repo, scheme)
+def test_explicit_rewrite_refuses_moved_remote(rebased_pr_repo, scheme, during_push, monkeypatch):
+    config, wid, wt, remote, old = rebased_pr_repo
     pr = record_for(wid).pr
     moved = git("rev-parse", "origin/master", cwd=wt)
     real_push = git_ops.push
@@ -209,8 +209,8 @@ def test_explicit_rewrite_refuses_moved_remote(pr_repo, scheme, during_push, mon
     "shared-head", "default-head", "closed", "untracked", "pushurl",
     "wrong-repo", "wrong-provider-pr", "closed-provider-pr", "merged-provider-pr",
 ])
-def test_explicit_rewrite_ownership_and_destination_guards(pr_repo, defect, monkeypatch):
-    config, wid, wt, remote, old = publish_and_rebase(pr_repo, "refspec")
+def test_explicit_rewrite_ownership_and_destination_guards(rebased_refspec_pr_repo, defect, monkeypatch):
+    config, wid, wt, remote, old = rebased_refspec_pr_repo
     rec = record_for(wid)
     feature = rec.pr.branch
     if defect == "missing-lease":
@@ -254,8 +254,8 @@ def test_explicit_rewrite_ownership_and_destination_guards(pr_repo, defect, monk
     assert git("rev-parse", f"refs/heads/{feature}", cwd=remote) == old
 
 
-def test_explicit_rewrite_preserves_hook_rejection_and_dry_run(pr_repo, capsys):
-    config, wid, wt, remote, old = publish_and_rebase(pr_repo, "snapshot")
+def test_explicit_rewrite_preserves_hook_rejection_and_dry_run(rebased_snapshot_pr_repo, capsys):
+    config, wid, wt, remote, old = rebased_snapshot_pr_repo
     rec = record_for(wid)
     assert finalize.push_changes(wid, config, rewrite_pr=True, dry_run=True)
     assert record_for(wid).pr.head_sha == old
@@ -280,8 +280,8 @@ def test_low_level_rewrite_requires_exact_lease(monkeypatch):
 
 
 @pytest.mark.parametrize("scheme", ["snapshot", "refspec"])
-def test_explicit_rewrite_recorded_fork_and_repoint_refusal(pr_repo, scheme):
-    config, wid, wt, remote, old = publish_and_rebase(pr_repo, scheme)
+def test_explicit_rewrite_recorded_fork_and_repoint_refusal(rebased_pr_repo, scheme):
+    config, wid, wt, remote, old = rebased_pr_repo
     rec = record_for(wid)
     feature = rec.pr.branch
     fork = remote.parent / "fork.git"
@@ -301,8 +301,8 @@ def test_explicit_rewrite_recorded_fork_and_repoint_refusal(pr_repo, scheme):
     assert git("rev-parse", f"refs/heads/{feature}", cwd=remote) == old
 
 
-def test_explicit_rewrite_serializes_set_pr_and_pins_owned_branch(pr_repo, monkeypatch):
-    config, wid, wt, remote, old = publish_and_rebase(pr_repo, "refspec")
+def test_explicit_rewrite_serializes_set_pr_and_pins_owned_branch(rebased_refspec_pr_repo, monkeypatch):
+    config, wid, wt, remote, old = rebased_refspec_pr_repo
     rec = record_for(wid)
     rec.repo = rec.repo.upper()
     rec.pr.repo = rec.pr.repo.upper()
@@ -349,8 +349,8 @@ def test_explicit_rewrite_serializes_set_pr_and_pins_owned_branch(pr_repo, monke
     assert corrected.pr.head_sha == source
 
 
-def test_explicit_rewrite_configured_project_not_ambient(pr_repo, monkeypatch, capfd):
-    config, wid, wt, remote, old = publish_and_rebase(pr_repo, "refspec")
+def test_explicit_rewrite_configured_project_not_ambient(rebased_refspec_pr_repo, monkeypatch, capfd):
+    config, wid, wt, remote, old = rebased_refspec_pr_repo
     ledger = cfg.tracking_dir()
     ambient = ledger.parent / "ambient"
     ambient.mkdir()
@@ -385,8 +385,8 @@ def test_explicit_rewrite_configured_project_not_ambient(pr_repo, monkeypatch, c
     assert observed == [str(wt)]
 
 
-def test_explicit_rewrite_refuses_manual_same_suffix_association_and_stale_save(pr_repo):
-    config, wid, wt, remote, old = publish_and_rebase(pr_repo, "refspec")
+def test_explicit_rewrite_refuses_manual_same_suffix_association_and_stale_save(rebased_refspec_pr_repo):
+    config, wid, wt, remote, old = rebased_refspec_pr_repo
     stale = record_for(wid)
     published = stale.pr.branch
     manual = "manual/name-" + git_ops.worktree_suffix(wid)
@@ -463,8 +463,8 @@ def test_explicit_rewrite_ownership_generation_survives_stale_save(pr_repo, monk
     assert rec.pr.rewrite_owner == f"{wid}:{rec.pr.branch}"
 
 
-def test_explicit_rewrite_rejects_same_record_sibling_head(pr_repo):
-    config, wid, wt, remote, old = publish_and_rebase(pr_repo, "refspec")
+def test_explicit_rewrite_rejects_same_record_sibling_head(rebased_refspec_pr_repo):
+    config, wid, wt, remote, old = rebased_refspec_pr_repo
     rec = record_for(wid)
     feature = rec.pr.branch
     rec.prs.append(replace(rec.pr, pr_id="sibling", rewrite_owner="", opened_at="2000-01-01T00:00:00"))
@@ -473,8 +473,8 @@ def test_explicit_rewrite_rejects_same_record_sibling_head(pr_repo):
     assert git("rev-parse", f"refs/heads/{feature}", cwd=remote) == old
 
 
-def test_explicit_rewrite_selected_moved_path_with_ambient_same_id(pr_repo, monkeypatch):
-    config, wid, wt, remote, old = publish_and_rebase(pr_repo, "refspec")
+def test_explicit_rewrite_selected_moved_path_with_ambient_same_id(rebased_refspec_pr_repo, monkeypatch):
+    config, wid, wt, remote, old = rebased_refspec_pr_repo
     ledger = cfg.tracking_dir()
     relocated = wt.parent.parent / "relocated"
     git("worktree", "move", str(wt), str(relocated), cwd=Path(config.default_repo.anchor))
@@ -517,11 +517,11 @@ def test_explicit_rewrite_rejects_repointed_origin_with_same_slug_and_head(pr_re
     assert git("rev-parse", f"refs/heads/{rec.pr.branch}", cwd=mirror) == old
 
 
-def test_explicit_rewrite_cross_project_process_race_and_lease_generation(pr_repo, monkeypatch):
+def test_explicit_rewrite_cross_project_process_race_and_lease_generation(rebased_refspec_pr_repo, monkeypatch):
     from test_pr_authority import run_writer
     from agent_worktrees import installer
 
-    config, wid, wt, remote, old = publish_and_rebase(pr_repo, "refspec")
+    config, wid, wt, remote, old = rebased_refspec_pr_repo
     rec = record_for(wid)
     ledger = cfg.tracking_dir()
     root = ledger.parent / "runtime"

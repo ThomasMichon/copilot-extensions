@@ -1,0 +1,9 @@
+{
+  "comment": "Reuse private real post-rebase fixtures in rewrite and legacy rewrite setup without changing publication assertions.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
