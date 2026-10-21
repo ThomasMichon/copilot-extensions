@@ -256,6 +256,13 @@ def unregistered_adopters() -> list[str]:
 
 def verify() -> list[str]:
     problems: list[str] = []
+    try:
+        projected = ier.native_executable_config(CANONICAL_DIR)
+        config = CANONICAL_DIR / "installer_dependency_config.py"
+        if projected is not None and config.read_text(encoding="utf-8") != projected:
+            problems.append(f"{config}: canonical native executable projection drift")
+    except (OSError, ValueError, SyntaxError) as error:
+        problems.append(str(error))
     for plugin in unregistered_adopters():
         problems.append(
             f"plugins/{plugin} uses installer-engine but is not listed in "
@@ -304,6 +311,11 @@ def verify() -> list[str]:
 
 def sync() -> list[str]:
     written: list[str] = []
+    projected = ier.native_executable_config(CANONICAL_DIR)
+    config = CANONICAL_DIR / "installer_dependency_config.py"
+    if projected is not None and config.read_text(encoding="utf-8") != projected:
+        config.write_text(projected, encoding="utf-8")
+        written.append(config.relative_to(REPO).as_posix())
     for plugin in ADOPTERS:
         mode, _states, structural_problems = _wrapper_mode(plugin)
         if structural_problems:

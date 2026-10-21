@@ -18,7 +18,6 @@ import stat
 import subprocess
 import sys
 import sysconfig
-import tempfile
 import types
 import zipimport
 from datetime import datetime, timedelta, timezone
@@ -562,6 +561,7 @@ def prepare_uv_install(
     """Preflight only. Installations must execute a retained UV transaction."""
     env = _captured_environment(env)
     _source_inputs(arguments, env, cwd, trusted_source_roots)
+    uv = _select_uv_executable(uv)
     probe_arguments = [
         argument for argument in arguments
         if argument != "--quiet" and not re.fullmatch(r"-q+", argument)
@@ -637,9 +637,15 @@ _configuration_path = Path(__file__).with_name("installer_dependency_config.py")
 _configuration = types.ModuleType(__name__ + "_configuration")
 _configuration.__file__ = str(_configuration_path)
 exec(compile(_configuration_path.read_bytes(), str(_configuration_path), "exec"), _configuration.__dict__)
+RetainedInputCleanupError = _configuration.RetainedInputCleanupError
+_report_cleanup_error = _configuration.report_cleanup_error
+_native_retained_path = _configuration.native_retained_path
+_temporary_inputs = _configuration.temporary_inputs
+tempfile = _configuration.tempfile
 _write_toml = partial(_configuration.write_toml, error_type=DependencyPolicyError)
 _private_retained_root = partial(_configuration.private_retained_root, error_type=DependencyPolicyError)
 _merge_config = _configuration.merge_config
+_select_uv_executable = partial(_configuration.select_uv_executable, error_type=DependencyPolicyError)
 _metadata_needs_caller_layout = _configuration.metadata_needs_caller_layout
 _cutoff_value = partial(_configuration.cutoff_value, error_type=DependencyPolicyError)
 _package_cutoffs = partial(_configuration.package_cutoffs, balanced=_balanced, error_type=DependencyPolicyError)
@@ -655,26 +661,8 @@ def _config_inputs(arguments, environment, base):
     )
 
 
-def _native_retained_path(path):
-    value = os.path.abspath(path)
-    if os.name != "nt" or value.startswith("\\\\?\\"):
-        return value
-    return "\\\\?\\UNC\\" + value[2:] if value.startswith("\\\\") else "\\\\?\\" + value
-
-
 def _copy_retained_file(source, destination):
     return shutil.copy2(_native_retained_path(source), _native_retained_path(destination))
-
-
-@contextmanager
-def _temporary_inputs(parent):
-    prefix = "uv-" if parent is not None else "seasoned-uv-"
-    temporary = tempfile.TemporaryDirectory(prefix=prefix, dir=parent)
-    try:
-        yield temporary.name
-    finally:
-        temporary.name = _native_retained_path(temporary.name)
-        temporary.cleanup()
 
 
 class RetainedUVInstall(NamedTuple):
@@ -698,6 +686,7 @@ def retain_uv_install(
     now = datetime.now(timezone.utc) if now is None else now
     environment = _captured_environment(env)
     base, projects, files, editables = _source_inputs(arguments, environment, cwd, trusted_source_roots)
+    uv = _select_uv_executable(uv)
     resources = []
     for resource in retained_resource_roots:
         if not Path(resource).is_absolute():
@@ -956,16 +945,24 @@ def run_uv_install(
     retained_resource_roots: tuple[Path, ...] = (), **run_options,
 ) -> subprocess.CompletedProcess:
     """Audit and execute the same private source, requirements and configuration."""
-    with retain_uv_install(
-        uv, arguments, env=env, cwd=cwd, now=now,
-        trusted_source_roots=trusted_source_roots,
-        retained_resource_roots=retained_resource_roots,
-    ) as transaction:
-        run_options.setdefault("creationflags", _HEADLESS)
-        return subprocess.run(
-            list(transaction.argv), env=transaction.environment,
-            cwd=transaction.cwd, **run_options,
-        )
+    result = None
+    try:
+        with retain_uv_install(
+            uv, arguments, env=env, cwd=cwd, now=now,
+            trusted_source_roots=trusted_source_roots,
+            retained_resource_roots=retained_resource_roots,
+        ) as transaction:
+            run_options.setdefault("creationflags", _HEADLESS)
+            result = subprocess.run(
+                list(transaction.argv), env=transaction.environment,
+                cwd=transaction.cwd, **run_options,
+            )
+            return result
+    except RetainedInputCleanupError as exc:
+        if result is None or result.returncode == 0:
+            raise
+        _report_cleanup_error(exc)
+        return result
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -985,6 +982,9 @@ def main(argv: list[str] | None = None) -> int:
             args.uv, arguments, trusted_source_roots=roots,
             stdout=sys.stdout, stderr=sys.stderr,
         ).returncode
+    except RetainedInputCleanupError as exc:
+        _report_cleanup_error(exc)
+        return 1
     except (DependencyPolicyError, OSError) as exc:
         print(f"dependency-seasoning: {exc}", file=sys.stderr)
         return 1

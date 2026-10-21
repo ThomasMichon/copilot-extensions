@@ -561,6 +561,7 @@ def prepare_uv_install(
     """Preflight only. Installations must execute a retained UV transaction."""
     env = _captured_environment(env)
     _source_inputs(arguments, env, cwd, trusted_source_roots)
+    uv = _select_uv_executable(uv)
     probe_arguments = [
         argument for argument in arguments
         if argument != "--quiet" and not re.fullmatch(r"-q+", argument)
@@ -644,6 +645,7 @@ tempfile = _configuration.tempfile
 _write_toml = partial(_configuration.write_toml, error_type=DependencyPolicyError)
 _private_retained_root = partial(_configuration.private_retained_root, error_type=DependencyPolicyError)
 _merge_config = _configuration.merge_config
+_select_uv_executable = partial(_configuration.select_uv_executable, error_type=DependencyPolicyError)
 _metadata_needs_caller_layout = _configuration.metadata_needs_caller_layout
 _cutoff_value = partial(_configuration.cutoff_value, error_type=DependencyPolicyError)
 _package_cutoffs = partial(_configuration.package_cutoffs, balanced=_balanced, error_type=DependencyPolicyError)
@@ -684,6 +686,7 @@ def retain_uv_install(
     now = datetime.now(timezone.utc) if now is None else now
     environment = _captured_environment(env)
     base, projects, files, editables = _source_inputs(arguments, environment, cwd, trusted_source_roots)
+    uv = _select_uv_executable(uv)
     resources = []
     for resource in retained_resource_roots:
         if not Path(resource).is_absolute():

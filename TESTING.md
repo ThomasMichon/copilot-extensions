@@ -1324,7 +1324,7 @@ The ordinary attributed-source path remains covered separately.
 Focused policy tests are:
 
 ```bash
-python -m pytest -q tools/test_dependency_age.py tools/test_installer_dependency_policy.py tools/test_seasoned_npm_install.py
+python -m pytest -q tools/test_dependency_age.py tools/test_installer_dependency_policy.py tools/test_dependency_uv_executable.py tools/test_seasoned_npm_install.py
 ```
 
 The editable-retention regression runs the real setuptools backend; the test

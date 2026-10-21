@@ -2727,6 +2727,18 @@ span metadata never excuses a younger executed override. Retained
 comparison accounts for that intentional span-to-absolute conversion, preserving
 the admitted timestamp and every other resolver setting even as probe and
 execution clocks advance.
+On Windows, an installer-selected absolute native UV `.exe` path is resolved without
+traversing links before configuration probing and retained execution. Both
+use the same physical target of that selected command; another UV on PATH is
+not substituted, and no PATH, mitigation, index or seasoning setting is
+changed. This handles an otherwise usable WinGet UV binary whose link is
+rejected by inherited RedirectionGuard. Missing targets refuse explicitly.
+Non-Windows, unqualified-command and non-native-wrapper lookup behavior remain unchanged.
+The existing two-file SDK closure includes a generated projection of
+`agent_procutil._interpreter.physical_executable` in the configuration helper.
+Regenerate it with `tools/sync-installer-engine.py`, then fan runtime helpers
+out with `tools/sync-versioned-runtime.py`; the SDK sync check rejects drift
+from the canonical primitive rather than maintaining a separate resolver.
 `--reinstall` forces actual resolution rather than
 trusting a previously installed, potentially newer package. Skipping dependency
 or isolated-build resolution is not an age-enforcement fallback.
