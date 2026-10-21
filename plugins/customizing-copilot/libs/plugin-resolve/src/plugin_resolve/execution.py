@@ -23,10 +23,16 @@ def windows_batch_command(arguments: list[str], environment: dict[str, str]) -> 
 
 def execution_environment(environment: dict[str, str], cwd: str | Path) -> dict[str, str]:
     base = Path(cwd).resolve()
+    entries = environment.get("PATH", os.defpath).split(os.pathsep)
+    if os.name == "nt":
+        entries = [
+            entry[1:-1] if entry.startswith('"') and entry.endswith('"') else entry
+            for entry in entries
+        ]
     return {
         **environment,
         "PATH": os.pathsep.join(
-            str(base / entry) for entry in environment.get("PATH", os.defpath).split(os.pathsep)
+            str(base / entry) for entry in entries
         ),
     }
 

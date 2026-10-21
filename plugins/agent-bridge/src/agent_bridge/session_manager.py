@@ -24,13 +24,14 @@ from agent_procutil import no_window_flags
 from .events import EventLog
 from .models import SessionStatus
 from .session_host_liveness import _HostLivenessMixin
+from .session_lifecycle_cli import _agent_worktrees_environment, _agent_worktrees_launch_prefix
 from .session_recovery_dormancy import (
     _BACKGROUND_RECOVERY_IDLE_DORMANCY_AFTER,  # noqa: F401 -- re-exported for tests
     _DISCONNECTED_REATTACH_ESCALATE_AFTER,  # noqa: F401 -- re-exported for tests
-    _RecoveryDormancyMixin,
     _background_recovery_backoff_seconds,  # noqa: F401 -- re-exported for tests
+    _RecoveryDormancyMixin,
 )
-from .session_lifecycle_cli import _agent_worktrees_environment, _agent_worktrees_launch_prefix
+from .spawn_target import REQUEST_OVERRIDES_KEY as _REQUEST_OVERRIDES_KEY
 from .transport import SpawnTarget, spawn
 
 if TYPE_CHECKING:
@@ -47,8 +48,6 @@ def __getattr__(name: str) -> type[AcpClient]:
 
 
 log = logging.getLogger("agent-bridge")
-
-_REQUEST_OVERRIDES_KEY = "_agent_bridge_request_overrides"
 
 # The resume recovery ladder (#1468): a resume stall is Copilot CLI's ACP
 # startup race, not a broken session -- so on a failed/stalled resume attempt we
@@ -937,8 +936,8 @@ from .session_monitoring import _SessionMonitoringMixin
 from .session_parity import _SessionParityMixin
 from .session_prompts import _SessionPromptMixin
 from .session_resume import _SessionResumeMixin
-from .session_start import _SessionStartMixin
 from .session_runtime import _SessionRuntimePolicyMixin, session_manager_from_config
+from .session_start import _SessionStartMixin
 
 __all__ = [
     "AcpClient",

@@ -61,6 +61,12 @@ identities, available manifest versions, and known local marketplace roots;
 private Git acquisition homes are deliberately not reported as productive
 native marketplace roots. The directory return contract is unchanged.
 
+Persisted targets retain static argument provenance and the local-preparation
+flag inside the existing request-override metadata, not as new constructor
+fields. The preceding target reader can hydrate and re-save those records
+during rollback; the current reader restores preparation on a later resume.
+Prepared loadouts and one-shot requests remain runtime-only.
+
 The acquisition journal retains this semantic metadata across delivery/recovery,
 not prepared argv or secret environment. Explicit caller worktree, qualified
 owner and session context have separate optional request fields; opaque
@@ -80,6 +86,9 @@ task/seed. Cancellation signals the operation and awaits quiescence;
 this preparation call does not use the legacy owner-command timeout that can
 leave a launch running. The operation's deadline and per-command budgets remain
 bounded, and its private request files are removed only after the owner exits.
+Executable lookup anchors relative PATH entries to the execution checkout.
+Windows quoted PATH entries retain their normal lookup meaning; literal quote
+characters in POSIX directory names remain unchanged.
 
 Live reuse consumes only a receipt bound to that same native session; it never
 reconstructs or changes a retained profile. Changed producer inputs require a

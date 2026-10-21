@@ -44,6 +44,36 @@ def test_missing_optional_command_never_falls_back_to_the_daemon_directory(tmp_p
         execution_executable("copilot", environment, cwd)
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows quoted PATH entries")
+@pytest.mark.parametrize("relative", [False, True])
+def test_quoted_path_retains_execution_directory_and_runs_selected_command(tmp_path, relative):
+    cwd = tmp_path / "checkout"
+    directory = cwd / "space tools"
+    directory.mkdir(parents=True)
+    executable = directory / "selected.cmd"
+    executable.write_text("@echo selected\n")
+    entry = os.path.relpath(directory, cwd) if relative else str(directory)
+    environment = {**os.environ, "PATH": '"' + entry + '"', "PATHEXT": ".CMD"}
+    original = dict(environment)
+    prepared = execution_environment(environment, cwd)
+    assert prepared["PATH"] == str(directory)
+    selected = execution_executable("selected", environment, cwd)
+    assert Path(selected) == executable
+    result = subprocess.run(
+        windows_batch_command([selected], prepared), env=prepared, cwd=cwd,
+        capture_output=True, text=True, timeout=10, creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    assert result.returncode == 0 and result.stdout.strip() == "selected", result.stderr
+    assert environment == original
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX literal quote characters in PATH")
+def test_posix_quoted_directory_name_stays_literal(tmp_path):
+    cwd = tmp_path / "checkout"
+    entry = '"literal"'
+    assert execution_environment({"PATH": entry}, cwd)["PATH"] == str(cwd / entry)
+
+
 @pytest.mark.skipif(os.name != "nt", reason="Windows PATHEXT lookup")
 def test_child_pathext_and_no_default_directory_are_not_taken_from_the_host(tmp_path, monkeypatch):
     cwd, daemon = tmp_path / "checkout", tmp_path / "daemon"

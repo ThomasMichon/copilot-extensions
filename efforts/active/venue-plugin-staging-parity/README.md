@@ -266,6 +266,30 @@ or a reason to create a daemon.
 
 ## Journal
 
+### 2026-10-20 - Preserve rollback hydration and quoted Windows executable lookup
+
+- A newer full review on the same head invalidated the earlier clean verdict
+  before any merge was attempted. Its rollback finding reproduced: two new
+  constructor keys in persisted targets made the preceding strict reader fail.
+  Preparation provenance now lives inside existing extensible request-override
+  metadata. New readers recover it after an old reader hydrates and re-saves
+  the target; ephemeral prepared loadouts and requests remain unpersisted.
+- A frozen, hash-checked copy of the preceding target reader exercises real
+  SQLite session hydration and rollback/forward round trips. Ordinary targets
+  retain the preceding serialized shape, provider classification stays unchanged,
+  and preparation metadata survives without overwriting unrelated overrides.
+  Session/acquisition/snapshot coverage passes 256 cases; local launch,
+  transport and compatibility coverage passes 172.
+- Both executable helpers now honor paired quotes around Windows PATH entries
+  before anchoring relative entries to the real execution checkout. Tests run
+  an actual selected batch command from quoted relative and absolute directories
+  containing spaces, preserve the productive environment, and retain literal
+  quote characters on POSIX. The full contained shared suite passes 284 cases
+  with one explicit platform skip; the shipped vendored helper remains identical.
+- The supported HTTP range and capability floors are unchanged. Current-head
+  native acceptance, review, CI and merge remain required; no previously pinned
+  merge permission transfers to the amended head.
+
 ### 2026-10-20 - Preserve published remote ACP ownership and advance readiness to 44
 
 - A further upstream merge published managed remote ACP ownership at HTTP 43
