@@ -87,7 +87,51 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Admitted fixture-semantic batches
 
+### B-FORK prepared helper and rerun consumers
+
+Baseline: the actual #7539 foundation merge. The existing
+`pr_workflow_setup.PRWorkflowSetup._fork_headed_rerun` helper recognizes the
+private prepared fork record/directory and verifies its feedback file before
+returning. Every unprepared input retains the original real `create_pr`,
+fork migration and feedback-commit path, including already-published inputs.
+This slice does not absorb the independent published-input shortcut from
+the preserved source.
+
+Eleven named fork cases stay at their original `test_pr_ops.py` paths and
+select `fork_pr_repo` instead of the unpublished base. AST comparison
+confirms all 38 existing functions, names, decorators and bodies are
+unchanged after normalizing only the fixture argument and corresponding
+helper input. Later actual rerun publication, remote repoint, push-URL,
+locked identity, ownership and exact-lease refusal assertions remain real.
+No transport stub, P-dependent snapshot adaptation, production function,
+test selection, skip or deadline changes.
+
+Five adapter cases cover unpublished, already-published and prepared-fork
+inputs plus missing/changed prepared feedback. The first two paths call the
+actual publication once and build the original topology. The prepared path
+performs no publication or file mutation; malformed prepared feedback fails
+before any publication and leaves all private files unchanged.
+
+Both complete affected modules pass on native Windows in separate bounded
+groups: fixture/adapter 24 passed, zero skips, 61.86 seconds pytest / 74.39
+including preparation and cleanup; PR consumers 33 passed, zero skips,
+64.21 / 69.50 seconds. Exactly two work-stealing workers, the 30-second
+default item watchdog and unchanged marks/resource limits are retained
+under the 240-second diagnostic group. AST preservation, Ruff F/E9 and
+the 13-plugin install contract pass. These are functional diagnostics,
+not whole-suite budget qualification.
+
+Documentation impact is this ledger only; command, runtime, installation
+and configuration contracts remain unchanged. Provisioning clean-room and
+external deployment are inapplicable to this test-only adapter. Real-Git
+consumer/adapter contracts exercise the changed setup. Parent #5694/#5682
+and full repeated same-head native qualification remain open.
+
 ### B-FORK foundation: private fork-only head, no consumer conversions
+
+**Actually merged:** #7539 as
+`e7583912a79a6a14d5c7025afd4526d7e06d4ec2`. Helper and consumer
+conversions are not included in that merge.
 
 Baseline: the actual #7535 consumer merge. Add only `_fork_pr_seed` and
 `fork_pr_repo`, using the existing private published snapshot and hermetic

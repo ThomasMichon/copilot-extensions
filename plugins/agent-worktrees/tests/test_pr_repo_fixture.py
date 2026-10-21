@@ -512,3 +512,67 @@ def test_fork_seed_copy_preserves_legacy_topology_and_isolates_publication(
     ).returncode != 0
     assert _files(_fork_pr_seed) == seed_files
     assert _files(sibling_path) == sibling_files
+
+
+@pytest.mark.parametrize("fixture_name", ["pr_repo", "published_pr_repo", "fork_pr_repo"])
+def test_fork_rerun_adapter_reuses_only_prepared_fork_state(
+    fixture_name, request, monkeypatch,
+):
+    from agent_worktrees import pr_ops
+    from pr_workflow_setup import PRWorkflowSetup
+
+    repo = request.getfixturevalue(fixture_name)
+    config, wid, worktree, origin = repo
+    prepared = fixture_name == "fork_pr_repo"
+    before = _files(origin.parent)
+    create = pr_ops.create_pr
+    calls = []
+
+    def publish(*args, **kwargs):
+        calls.append((args, kwargs))
+        return create(*args, **kwargs)
+
+    monkeypatch.setattr(pr_ops, "create_pr", publish)
+    result = PRWorkflowSetup()._fork_headed_rerun(repo)
+    assert result[:3] == (config, wid, worktree)
+    fork, branch = result[3:]
+    assert fork == origin.parent / "fork.git"
+    assert len(calls) == (0 if prepared else 1)
+    record = tracking.load_record_by_id(wid)
+    assert record.pr.remote == "fork"
+    assert record.pr.rewrite_owner == record.pr.rewrite_identity == ""
+    assert record.pr.branch == branch
+    assert (worktree / "c.txt").read_text() == "feedback\n"
+    assert git_ops.git("rev-parse", "HEAD^", cwd=worktree).stdout.strip() == record.pr.head_sha
+    assert git_ops.git(
+        "--git-dir", str(fork), "rev-parse", branch,
+    ).stdout.strip() == record.pr.head_sha
+    assert git_ops.git(
+        "--git-dir", str(origin), "show-ref", "--verify",
+        f"refs/heads/{branch}", check=False,
+    ).returncode != 0
+    if prepared:
+        assert _files(origin.parent) == before
+
+
+@pytest.mark.parametrize("defect", ["missing", "changed"])
+def test_fork_rerun_adapter_rejects_incomplete_prepared_feedback(
+    fork_pr_repo, defect, monkeypatch,
+):
+    from agent_worktrees import pr_ops
+    from pr_workflow_setup import PRWorkflowSetup
+
+    _, _, worktree, origin = fork_pr_repo
+    feedback = worktree / "c.txt"
+    if defect == "missing":
+        feedback.unlink()
+    else:
+        feedback.write_text("unrelated feedback\n")
+    before = _files(origin.parent)
+    calls = []
+    monkeypatch.setattr(pr_ops, "create_pr", lambda *a, **k: calls.append((a, k)))
+    error = FileNotFoundError if defect == "missing" else AssertionError
+    with pytest.raises(error):
+        PRWorkflowSetup()._fork_headed_rerun(fork_pr_repo)
+    assert calls == []
+    assert _files(origin.parent) == before
