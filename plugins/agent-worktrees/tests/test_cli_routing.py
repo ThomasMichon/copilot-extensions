@@ -1658,6 +1658,75 @@ def _fake_run(returncode, version="0.1.0-dev21"):
 
 
 @pytest.mark.parametrize("has_project", [False, True])
+@pytest.mark.parametrize(("providers", "selected", "diagnostic"), [
+    ([], "missing", "is not registered"),
+    (["worktree-manager"], "missing", "is not registered"),
+    (["worktree-manager"], "invalid selection!", "is not registered"),
+    (["worktree-manager", "other-manager"], "", "Multiple control-plane providers"),
+])
+def test_provider_selection_failure_is_not_first_run(
+    monkeypatch, tmp_path, capsys, has_project, providers, selected, diagnostic,
+):
+    for provider in providers:
+        _register_provider(tmp_path, provider=provider)
+    monkeypatch.setenv(m._CONTROL_PLANE_PROVIDERS_DIR_ENV, str(_provider_registry_dir(tmp_path)))
+    monkeypatch.setenv(m._CONTROL_PLANE_PROVIDER_ENV, selected)
+    monkeypatch.setattr(m, "_is_noninteractive_invocation", lambda: False)
+    monkeypatch.setattr(m, "_is_headless_project", lambda: False)
+    monkeypatch.setattr(m, "_bundled_picker_available", lambda: False)
+    monkeypatch.setattr(m.cfg, "active_project", lambda: "demo")
+    monkeypatch.setattr(m.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(
+        m.subprocess, "run",
+        lambda *a, **kw: pytest.fail("selection failure must not probe a provider"),
+    )
+    assert _fdc._select_control_plane_provider_manifest() is None
+    health = m._worktree_manager_health()
+    assert health.state == "failed"
+    assert diagnostic in health.diagnostic
+    assert len(health.diagnostic) < 300
+    assert m._usable_worktree_manager() is None
+    assert m.dispatch_bare_invocation(has_project) == 1
+    assert diagnostic in capsys.readouterr().err
+
+
+def test_explicit_provider_selection_probes_only_selected_provider(monkeypatch, tmp_path):
+    _register_provider(tmp_path)
+    command = _register_provider(tmp_path, provider="other-manager")
+    monkeypatch.setenv(m._CONTROL_PLANE_PROVIDERS_DIR_ENV, str(_provider_registry_dir(tmp_path)))
+    monkeypatch.setenv(m._CONTROL_PLANE_PROVIDER_ENV, "other-manager")
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        return _fake_run(0)(argv, **kwargs)
+
+    monkeypatch.setattr(m.subprocess, "run", run)
+    assert _fdc._select_control_plane_provider_manifest().command == command
+    assert m._worktree_manager_health() == _mlc._ManagerHealth("ready", command)
+    assert calls == [[*command, "--version"]]
+
+
+@pytest.mark.parametrize("state", ["absent", "failed"])
+@pytest.mark.parametrize("help_rc", [0, 8])
+def test_no_project_help_is_not_a_successful_provider_fallback(
+    monkeypatch, capsys, state, help_rc,
+):
+    monkeypatch.setattr(m, "_is_noninteractive_invocation", lambda: False)
+    monkeypatch.setattr(m, "_bundled_picker_available", lambda: True)
+    monkeypatch.setattr(m, "_worktree_manager_health", lambda: _mlc._ManagerHealth(state))
+    monkeypatch.setattr(m, "cmd_help_unrouted", lambda: help_rc)
+    monkeypatch.setattr(
+        m, "cmd_manager_install_trigger",
+        lambda *a: pytest.fail("bundled no-project path shows help"),
+    )
+    monkeypatch.setattr(m, "cmd_launch", lambda *a: pytest.fail("help is not a launch"))
+    expected = (help_rc or 1) if state == "failed" else help_rc
+    assert m.dispatch_bare_invocation(False) == expected
+    assert "Launching the bundled picker" not in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("has_project", [False, True])
 @pytest.mark.parametrize("failure", ["exit", "version", "old", "spawn", "timeout"])
 def test_failed_registered_provider_without_fallback_is_failure(
     monkeypatch, tmp_path, capsys, has_project, failure,

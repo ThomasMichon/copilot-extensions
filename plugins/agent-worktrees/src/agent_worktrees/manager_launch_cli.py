@@ -66,16 +66,30 @@ def _core_helper(name: str, local):
 
 
 def _select_control_plane_provider_manifest() -> _ControlPlaneProviderManifest | None:
+    manifest, _ = _control_plane_provider_selection()
+    return manifest
+
+
+def _control_plane_provider_selection() -> tuple[_ControlPlaneProviderManifest | None, str]:
     manifests = _core_helper(
         "_discover_control_plane_provider_manifests",
         _discover_control_plane_provider_manifests,
     )()
     selected = os.environ.get(_CONTROL_PLANE_PROVIDER_ENV, "").strip()
     if selected:
-        return manifests.get(selected)
+        manifest = manifests.get(selected)
+        diagnostic = "" if manifest is not None else (
+            f"Selected control-plane provider {bounded(selected, 120)!r} is not registered."
+        )
+        return manifest, diagnostic
     if len(manifests) == 1:
-        return next(iter(manifests.values()))
-    return None
+        return next(iter(manifests.values())), ""
+    if manifests:
+        return None, (
+            "Multiple control-plane providers are registered; set "
+            f"{_CONTROL_PLANE_PROVIDER_ENV} to select one."
+        )
+    return None, ""
 
 
 def _provider_command_display_name(
@@ -151,9 +165,9 @@ class _ManagerHealth:
 
 def _worktree_manager_health() -> _ManagerHealth:
     """Distinguish first-run absence from a selected provider's failed probe."""
-    manifest = _core_helper(
-        "_select_control_plane_provider_manifest", _select_control_plane_provider_manifest
-    )()
+    manifest, selection_error = _control_plane_provider_selection()
+    if selection_error:
+        return _ManagerHealth("failed", diagnostic=selection_error)
     if manifest is None:
         return _ManagerHealth("absent")
     version, proc = _core_helper(
@@ -331,7 +345,7 @@ def _run_direct_launch_fallback(project: str | None, passthrough: list[str]) -> 
             if not isinstance(ssh_alias, str) or not isinstance(remote_cmd, str):
                 output.err("Remote launch plan is missing ssh handoff details.")
                 return 1
-            proc = subprocess.Popen(["ssh", "-t", ssh_alias, remote_cmd])
+            proc = subprocess.Popen(["ssh", "-t", ssh_alias, remote_cmd])  # headless-guard: allow interactive SSH in caller's console
             return _wait_for_launch_child(proc)
         if action != "exec":
             output.err(f"Unknown launch action: {action}")
@@ -570,6 +584,7 @@ def dispatch_bare_invocation(has_project: bool) -> int:
         if has_project:
             output.warn("Launching the bundled picker.")
             return _core().cmd_launch([])
-        return help_unrouted()
-    rc = manager_install_trigger(project)
+        rc = help_unrouted()
+    else:
+        rc = manager_install_trigger(project)
     return (rc or 1) if health.state == "failed" else rc

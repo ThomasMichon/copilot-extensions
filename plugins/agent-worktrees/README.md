@@ -134,6 +134,9 @@ provider whose health check fails. First-run installation guidance remains a
 successful onboarding result. A failed registered provider reports its bounded,
 credential-redacted startup stderr and returns nonzero when no fallback runs;
 it does not imply a stale launcher or promise an unavailable bundled Picker.
+An unknown explicit provider selection or an ambiguous registry is also a
+failure, not first-run absence. Showing help without launching a fallback
+does not turn a failed provider into a successful launch.
 Headless projects and invocations without an attached terminal retain their
 worktree-list/help behavior.
 
