@@ -276,7 +276,7 @@ if [[ -n "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
         exit 1
     }
     context_publication_allowed() {
-        local publication allowed allowed_type
+        local publication allowed allowed_type publication_root
         publication="$(__aw_context_query probe-plugin-publication "${__aw_status_args[@]:1}")" || {
             printf 'ERROR: Runtime publication refused: %s. Use explicit installation management.\n' \
                 "$publication" >&2
@@ -285,8 +285,10 @@ if [[ -n "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
         allowed="$(__aw_context_value "$publication" $'deployment\034allowPluginPublication')" || return 1
         allowed_type="$(LC_ALL=C awk -f "$__aw_json_query" -v mode=type \
             -v query_path=$'deployment\034allowPluginPublication' <<<"$publication")" || return 1
+        publication_root="$(__aw_context_value "$publication" runtimeRoot)" || return 1
+        publication_root="$(__aw_shell_path "$publication_root")" || return 1
         [[ "$allowed_type" == boolean && "$allowed" == true &&
-           "$(__aw_context_value "$publication" runtimeRoot)" == "$__aw_status_root" ]] || {
+           "$publication_root" == "$__aw_status_root" ]] || {
             printf 'ERROR: Runtime publication probe returned an invalid decision: %s\n' \
                 "$publication" >&2
             return 1

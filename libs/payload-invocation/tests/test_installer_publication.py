@@ -131,6 +131,32 @@ def test_cell_installer_standalone_still_stages(
     assert Path(smoke["ran_from"]) != binding_fixture["payload"] / "scripts"
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows Git Bash")
+@pytest.mark.parametrize("state", ["missing", "standalone"])
+def test_windows_bash_cell_standalone_preserves_staging(
+    binding_fixture: dict, state: str,
+) -> None:
+    git = shutil.which("git")
+    bash = Path(git).resolve().parent.parent / "bin/bash.exe" if git else None
+    if bash is None or not bash.is_file():
+        pytest.skip("Native Windows Git Bash is unavailable")
+    environment = _installer_environment(binding_fixture, "bash")
+    root, arguments = _cell(binding_fixture, environment)
+    _policy(binding_fixture, root, arguments, state)
+    command = [
+        str(bash), "-c",
+        'exec bash "$1" update --install-dir "$(cygpath -u "$2")" '
+        '--runtime-publication-python "$(cygpath -u "$3")"',
+        "--", (binding_fixture["payload"] / "scripts/install.sh").as_posix(),
+        str(root), sys.executable,
+    ]
+    result = _run(binding_fixture, environment, command)
+    assert result.returncode == 0, result.stdout + result.stderr
+    smoke = json.loads((binding_fixture["legacy"] / "smoke.json").read_text(encoding="utf-8-sig"))
+    assert smoke["staged"] is True
+    assert ".install-stage" in smoke["ran_from"]
+
+
 @pytest.fixture
 def backend(binding_fixture: dict, monkeypatch: pytest.MonkeyPatch):
     scripts = ROOT / "plugins/agent-worktrees/scripts"
