@@ -126,6 +126,24 @@ left intact. Use a distinct repair generation or a new released version;
 this health refusal does not itself implement generation repair or complete
 the broader admission/coalescing rollout.
 
+### First-use deployment admission
+
+The stamped global command and payload-local runtime gate use the canonical
+resolver's ready mode before considering provisioning. A healthy selected
+runtime remains callable under managed deployment. Cold commands require the
+selected installation's publication decision before writing boot traces,
+provision status or orchestration locks; context validation alone is not
+deployment permission. Missing or older admission support produces an explicit
+readiness error rather than an alternate installer or completion parser.
+
+Windows stamping captures the private snapshot candidate's canonical source
+before publishing the command and replacing the previous selection. Failed
+command publication leaves that previous snapshot and its selectors intact.
+The global command binds configuration and provisioning to its installed root.
+PowerShell's legacy native argument mode encodes forwarded arguments before
+module execution to preserve embedded quotes; newer native argument passing
+retains direct module invocation.
+
 ## Configuration
 
 **Most repos need no config at all.** agent-codespaces works out of the box on

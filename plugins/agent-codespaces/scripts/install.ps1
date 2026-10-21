@@ -961,6 +961,7 @@ function Deploy-Venv {
 }
 
 function Deploy-SelfProvisioningBinstub {
+    param([string]$SnapshotSourcePath)
     <# Deploy the agent-codespaces CLI binstubs into ~/.local/bin, SELF-PROVISIONING
        (#1393): fast-path the built versioned slot's python; if no slot is built
        yet (a `stamp` deferred the venv), provision on first use by running the
@@ -973,8 +974,29 @@ function Deploy-SelfProvisioningBinstub {
        ! in `ssh --remote-cmd` payloads survive intact. A .cmd forwarding %*
        re-tokenizes the command line and mangles (and can inject) those; the
        .cmd is kept only as a fallback for non-PowerShell callers (cmd.exe or a
-       bare CreateProcess/PATHEXT spawn). Both launch the signed venv python via
-       -m, never the SAC-blocked console-script trampoline .exe. #>
+       bare CreateProcess/PATHEXT spawn). Both launch the module with the signed
+       venv python, never the SAC-blocked console-script trampoline .exe. #>
+    foreach ($resolver in @('resolve-runtime.ps1', 'resolve-runtime.sh')) {
+        if (-not (Test-Path -LiteralPath (Join-Path $PSScriptRoot $resolver) -PathType Leaf)) {
+            throw "Required Codespaces runtime helper is unavailable: $resolver"
+        }
+    }
+    if ($SnapshotSourcePath) {
+        $sourcePayload = if ($env:COPILOT_PLUGIN_STAGED_FROM) {
+            $env:COPILOT_PLUGIN_STAGED_FROM
+        } else { $PluginDir }
+        $sourceProject = if ($env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT) {
+            $env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT
+        } else { (Get-Location).ProviderPath }
+        Publish-LegacySnapshotSource -SnapshotDir $SnapshotSourcePath -HelperDirectory $PSScriptRoot `
+            -PayloadRoot $sourcePayload -PluginId 'agent-codespaces' -RuntimeRoot $InstallDir `
+            -ProjectRoot $sourceProject
+    }
+    foreach ($command in @('agent-codespaces.ps1', 'agent-codespaces.cmd')) {
+        if (Test-Path -LiteralPath (Join-Path $LocalBin $command) -PathType Container) {
+            throw "Binstub destination must be a file: $command"
+        }
+    }
     if (-not (Test-Path $LocalBin)) {
         New-Item -ItemType Directory -Path $LocalBin -Force | Out-Null
     }
@@ -989,55 +1011,56 @@ function Deploy-SelfProvisioningBinstub {
     $ps1Path = Join-Path $LocalBin 'agent-codespaces.ps1'
     $ps1Content = @'
 $env:PYTHONUTF8 = '1'
-$_root = Join-Path $env:USERPROFILE '.agent-codespaces'
-function _resolve_cs_py {
-    $resolver = Join-Path $_root 'bin\resolve-runtime.ps1'
-    if (Test-Path -LiteralPath $resolver) {
-        $env:AGENT_RT_ROOT = $_root
-        $AgentRtPy = $null
-        . $resolver
-        return $AgentRtPy
-    }
-    function _version_key([string]$ver) {
-        if ($ver -match '^(\d+)\.(\d+)\.(\d+)(?:-dev(\d+))?$') {
-            $phase = if ($Matches[4]) { '0' } else { '1' }
-            $dev = if ($Matches[4]) { $Matches[4] } else { '0' }
-            return '0:{0}.{1}.{2}.{3}.{4}' -f $Matches[1].PadLeft(20, '0'), $Matches[2].PadLeft(20, '0'), $Matches[3].PadLeft(20, '0'), $phase, $dev.PadLeft(20, '0')
+$_root = '__RUNTIME_ROOT__'
+$env:AGENT_CODESPACES_HOME = $_root
+$resolver = Join-Path $_root 'bin\resolve-runtime.ps1'
+if (-not (Test-Path -LiteralPath $resolver -PathType Leaf) -or
+    -not (Select-String -LiteralPath $resolver -SimpleMatch '# Trace contract: normal/read-only/ready-v1' -Quiet)) {
+    [Console]::Error.WriteLine('[agent-codespaces] read-only runtime resolver is unavailable. Re-enable/update the plugin, then retry.')
+    exit 126
+}
+function _resolve_cs_py([string]$TraceMode = 'ready') {
+    $env:AGENT_RT_ROOT = $_root
+    $AgentRtPy = $null
+    . $resolver -TraceMode $TraceMode
+    return $AgentRtPy
+}
+function _run_cs_runtime([string]$Python, [string[]]$Arguments) {
+    $previousEap = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        if ($PSVersionTable.PSVersion -lt [version]'7.3' -or
+            (Get-Variable PSNativeCommandArgumentPassing -ValueOnly -ErrorAction SilentlyContinue) -eq 'Legacy') {
+            # Legacy native argument passing retokenizes embedded quotes.
+            $json = ConvertTo-Json -InputObject @($Arguments) -Compress
+            $encoded = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($json))
+            $bootstrap = "import base64,json,runpy,sys;sys.argv=['agent_codespaces']+json.loads(base64.b64decode(sys.argv[1]));runpy.run_module('agent_codespaces',run_name='__main__',alter_sys=True)"
+            & $Python -c $bootstrap $encoded
+        } else {
+            & $Python -m agent_codespaces @Arguments
         }
-        return '1:' + [regex]::Replace($ver.ToLowerInvariant(), '\d+', { param($m) $m.Value.PadLeft(20, '0') })
+    } finally {
+        $ErrorActionPreference = $previousEap
     }
-    function _try_slot([string]$ver) {
-        if (-not $ver) { return $null }
-        $slot = Join-Path $_root ('versions\' + $ver)
-        try {
-            $raw = [IO.File]::ReadAllText((Join-Path $slot '.install-complete.json'))
-            if ($raw -cnotmatch '^\{"version": "[^"\\]+", "completed_at": "[^"\\]+", "pid": (0|[1-9][0-9]*)(, "payload_hash": "[^"\\]+")?\}$') { return $null }
-            $marker = $raw | ConvertFrom-Json -ErrorAction Stop
-            if (-not (($marker -is [pscustomobject]) -and ([string]$marker.version -ceq $ver))) { return $null }
-        } catch { return $null }
-        foreach ($sub in @('Scripts\python.exe', 'bin\python')) {
-            $candidate = Join-Path $slot $sub
-            if (Test-Path -LiteralPath $candidate -PathType Leaf) { return $candidate }
-        }
-        return $null
-    }
-    foreach ($marker in @('current-version', 'last-known-good')) {
-        $ver = ''
-        try { $ver = ([IO.File]::ReadAllText((Join-Path $_root $marker))).Trim() } catch {}
-        $p = _try_slot $ver
-        if ($p) { return $p }
-    }
-    Get-ChildItem (Join-Path $_root 'versions') -Directory -ErrorAction SilentlyContinue |
-        Sort-Object { _version_key $_.Name } | ForEach-Object { _try_slot $_.Name } |
-        Where-Object { $_ } | Select-Object -Last 1
+    exit $LASTEXITCODE
 }
 $_py = _resolve_cs_py
-if ($_py) { & $_py -m agent_codespaces @args; exit $LASTEXITCODE }
+if ($_py) { _run_cs_runtime -Python $_py -Arguments $args }
 if ($env:AGENT_CODESPACES_NO_SELFPROVISION) { [Console]::Error.WriteLine('[agent-codespaces] runtime not provisioned (AGENT_CODESPACES_NO_SELFPROVISION set).'); exit 1 }
 $_snap = ''
 try { $_snap = ([IO.File]::ReadAllText((Join-Path $_root 'payload-dir'))).Trim() } catch {}
 $_inst = if ($_snap) { Join-Path $_snap 'scripts\install.ps1' } else { '' }
 if (-not ($_inst -and (Test-Path -LiteralPath $_inst))) { [Console]::Error.WriteLine('[agent-codespaces] cannot self-provision: snapshot installer not found. Re-enable the plugin, then retry.'); exit 127 }
+$_probe = Join-Path $_snap 'scripts\installation-context\plugin-publication-probe.ps1'
+if (-not (Test-Path -LiteralPath $_probe -PathType Leaf)) {
+    [Console]::Error.WriteLine('[agent-codespaces] Runtime publication refused: snapshot admission helper is unavailable. Re-enable/update the plugin, then retry.')
+    exit 126
+}
+$global:LASTEXITCODE = 0
+& $_probe -PayloadRoot $_snap -PluginId 'agent-codespaces' -LegacyRoot $_root
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+$_py = _resolve_cs_py normal
+if ($_py) { _run_cs_runtime -Python $_py -Arguments $args }
 [Console]::Error.WriteLine('[agent-codespaces] runtime not provisioned -- provisioning on first use (acquires uv + builds a venv; ~30-120s). Do not kill; extend your timeout.')
 [Console]::Error.WriteLine('::agent-provisioning:: plugin=agent-codespaces eta_seconds=120 reason=first-use')
 $_pwsh = Get-Command pwsh -ErrorAction SilentlyContinue
@@ -1049,7 +1072,14 @@ try {
     try { $held = $mutex.WaitOne() } catch [System.Threading.AbandonedMutexException] { $held = $true }
     $_py = _resolve_cs_py
     if (-not $_py) {
-        & $_exe -NoProfile -ExecutionPolicy Bypass -File $_inst provision 2>&1 | ForEach-Object { [Console]::Error.WriteLine($_) }
+        $previousEap = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        try {
+            & $_exe -NoProfile -ExecutionPolicy Bypass -File $_inst provision -InstallDir $_root 2>&1 |
+                ForEach-Object { [Console]::Error.WriteLine($_) }
+        } finally {
+            $ErrorActionPreference = $previousEap
+        }
         $_provisionRc = $LASTEXITCODE
     }
 } finally {
@@ -1061,11 +1091,22 @@ if ($_provisionRc -ne 0) {
     exit $_provisionRc
 }
 $_py = _resolve_cs_py
-if ($_py) { & $_py -m agent_codespaces @args; exit $LASTEXITCODE }
+if ($_py) { _run_cs_runtime -Python $_py -Arguments $args }
 [Console]::Error.WriteLine('[agent-codespaces] provisioning did not yield a runtime. See the log above; retry, or run the snapshot installer manually.')
 exit 1
 '@
-    [System.IO.File]::WriteAllText($ps1Path, $ps1Content, $utf8NoBom)
+    $ps1Content = $ps1Content.Replace('__RUNTIME_ROOT__', $InstallDir.Replace("'", "''"))
+    $temporary = "$ps1Path.$([guid]::NewGuid().ToString('N'))"
+    try {
+        [IO.File]::WriteAllText($temporary, $ps1Content, $utf8NoBom)
+        if ([IO.File]::Exists($ps1Path)) {
+            [IO.File]::Replace($temporary, $ps1Path, [NullString]::Value)
+        } else {
+            [IO.File]::Move($temporary, $ps1Path)
+        }
+    } finally {
+        if ([IO.File]::Exists($temporary)) { [IO.File]::Delete($temporary) }
+    }
 
     $stubPath = Join-Path $LocalBin 'agent-codespaces.cmd'
     $stubContent = @'
@@ -1080,7 +1121,17 @@ if %ERRORLEVEL%==0 (
 )
 exit /b %ERRORLEVEL%
 '@
-    [System.IO.File]::WriteAllText($stubPath, $stubContent, $utf8NoBom)
+    $temporary = "$stubPath.$([guid]::NewGuid().ToString('N'))"
+    try {
+        [IO.File]::WriteAllText($temporary, $stubContent, $utf8NoBom)
+        if ([IO.File]::Exists($stubPath)) {
+            [IO.File]::Replace($temporary, $stubPath, [NullString]::Value)
+        } else {
+            [IO.File]::Move($temporary, $stubPath)
+        }
+    } finally {
+        if ([IO.File]::Exists($temporary)) { [IO.File]::Delete($temporary) }
+    }
     Write-ServiceOk "Binstub: $ps1Path (+ .cmd fallback, self-provisioning)"
 
     # Ensure ~/.local/bin is on User PATH
@@ -1623,6 +1674,7 @@ function Invoke-Stamp {
     Assert-SourceRuntime
     if ($script:SourceRuntimeIdentity) {
         $snapDir = Publish-SourceSnapshot
+        Deploy-SelfProvisioningBinstub
     } else {
         $snapDir = Join-Path (Join-Path $InstallDir 'snapshots') $SrcVersion
         $snapTmp = "$snapDir.tmp-$PID"
@@ -1633,6 +1685,7 @@ function Invoke-Stamp {
             Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $snapTmp $_.Name) -Recurse -Force
         }
         Materialize-SnapshotDependencies -SnapshotDir $snapTmp
+        Deploy-SelfProvisioningBinstub -SnapshotSourcePath $snapTmp
         if (Test-Path $snapDir) { Remove-Item $snapDir -Recurse -Force -ErrorAction SilentlyContinue }
         Move-Item -LiteralPath $snapTmp -Destination $snapDir -Force
     }
@@ -1653,7 +1706,6 @@ function Invoke-Stamp {
         [System.IO.File]::WriteAllText((Join-Path $InstallDir 'stamped-version'), $SrcVersion, $utf8NoBom)
     }
     Write-ServiceOk "Snapshot: $snapDir"
-    Deploy-SelfProvisioningBinstub
     Write-ServiceOk 'Stamped: agent-codespaces binstub on PATH; runtime provisions on first use.'
 }
 

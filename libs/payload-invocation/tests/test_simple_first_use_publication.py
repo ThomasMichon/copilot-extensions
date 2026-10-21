@@ -5,6 +5,7 @@ import os
 import json
 import re
 import runpy
+import shlex
 import shutil
 import subprocess
 import sys
@@ -77,10 +78,15 @@ def test_ssh_restamp_preserves_selected_snapshot_identity(
 
 
 @pytest.mark.portfolio_tier("T3")
-@pytest.mark.parametrize("plugin", ["agent-pull-requests", "agent-vault", "agent-ssh"])
-@pytest.mark.parametrize("state", [
-    "managed", "standalone", "healthy", "old-resolver", "missing-admission",
-    "invalid", "foreign", "future",
+@pytest.mark.parametrize(("plugin", "state"), [
+    (plugin, state)
+    for state in (
+        "managed", "standalone", "healthy", "old-resolver", "missing-admission",
+        "invalid", "foreign", "future", "opt-out",
+    )
+    for plugin in ("agent-pull-requests", "agent-vault", "agent-ssh", "agent-codespaces")
+] + [
+    ("agent-codespaces", "healthy-empty"), ("agent-codespaces", "healthy-single"),
 ])
 def test_shared_actual_stamp_first_use_admission(
     binding_fixture: dict, tmp_path: Path, plugin: str, state: str,
@@ -125,15 +131,22 @@ def test_shared_actual_stamp_first_use_admission(
     elif state == "missing-admission":
         suffix = "ps1" if os.name == "nt" else "sh"
         (snapshot / f"scripts/installation-context/plugin-publication-probe.{suffix}").unlink()
-    elif state == "healthy":
+    elif state.startswith("healthy"):
         python = _completed_slot(binding_fixture)
         site = python.parent.parent / (
             "Lib/site-packages" if os.name == "nt" else
             f"lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages"
         )
         (site / (plugin.replace("-", "_") + ".py")).write_text(
-            'print("healthy selected runtime")\n', encoding="utf-8",
+            'import json, os, sys\nprint("healthy selected runtime")\n'
+            + (f'assert os.environ["AGENT_CODESPACES_HOME"] == {str(root)!r}\n'
+               if plugin == "agent-codespaces" else "")
+            + 'print(json.dumps(sys.argv[1:]))\n', encoding="utf-8",
         )
+        if plugin == "agent-codespaces":
+            environment["AGENT_CODESPACES_HOME"] = str(binding_fixture["home"] / "not-selected")
+    elif state == "opt-out":
+        environment[plugin.upper().replace("-", "_") + "_NO_SELFPROVISION"] = "1"
     for key in (
         "COPILOT_PLUGIN_ROOT", "COPILOT_EXTENSIONS_COMMAND_LIFECYCLE",
         "COPILOT_PLUGIN_INSTALL_STAGED", "COPILOT_PLUGIN_STAGED_FROM",
@@ -141,9 +154,13 @@ def test_shared_actual_stamp_first_use_admission(
     ):
         environment.pop(key, None)
     wrapper = binding_fixture["home"] / ".local/bin" / plugin
+    forwarded = (
+        [] if state == "healthy-empty" else ["version"] if state == "healthy-single" else
+        ["ssh", "--remote-cmd", 'echo "spaces & pipes | semicolons ; bangs !"']
+    )
     command = (
-        [POWERSHELL, "-NoLogo", "-NoProfile", "-File", str(wrapper.with_suffix(".ps1")), "--help"]
-        if os.name == "nt" else [str(wrapper), "--help"]
+        [POWERSHELL, "-NoLogo", "-NoProfile", "-File", str(wrapper.with_suffix(".ps1")), *forwarded]
+        if os.name == "nt" else [str(wrapper), *forwarded]
     )
     before = _snapshot(root)
     result = subprocess.run(
@@ -155,11 +172,13 @@ def test_shared_actual_stamp_first_use_admission(
         assert result.returncode == 37, result.stdout + result.stderr
         assert marker.read_text(encoding="utf-8") == "yes"
         assert (root / "logs/boot-trace.jsonl").is_file()
-        assert (root / ".provision.lock").is_file()
+        if plugin != "agent-codespaces" or os.name != "nt":
+            assert (root / ".provision.lock").is_file()
         return
-    if state == "healthy":
+    if state.startswith("healthy"):
         assert result.returncode == 0, result.stdout + result.stderr
         assert "healthy selected runtime" in result.stdout
+        assert json.loads(result.stdout.splitlines()[-1]) == forwarded, result.stderr
         assert not marker.exists()
         assert (root / "logs/boot-trace.jsonl").is_file()
         assert not (root / ".provision.lock").exists()
@@ -174,12 +193,85 @@ def test_shared_actual_stamp_first_use_admission(
         "invalid": "deployment-policy-invalid",
         "foreign": "deployment-policy-invalid",
         "future": "deployment-policy-version-unsupported",
+        "opt-out": "NO_SELFPROVISION set",
     }.get(state, "deployment-managed")
     assert diagnostic in result.stdout + result.stderr, result.stdout + result.stderr
 
 
 @pytest.mark.portfolio_tier("T3")
-@pytest.mark.parametrize("plugin", ["agent-pull-requests", "agent-vault", "agent-ssh"])
+def test_codespaces_actual_first_use_serializes_one_build(
+    binding_fixture: dict, tmp_path: Path,
+) -> None:
+    released = _release_payload(tmp_path / "release", "agent-codespaces")
+    environment = _adopter(binding_fixture, "agent-codespaces", released)
+    environment.pop("COPILOT_PLUGIN_INSTALL_SMOKE", None)
+    temporary = binding_fixture["home"] / "tmp"
+    temporary.mkdir()
+    environment.update({key: str(temporary) for key in ("TEMP", "TMP", "TMPDIR")})
+    root = binding_fixture["legacy"]
+    environment["AGENT_CODESPACES_HOME"] = str(root)
+    shell = "powershell" if os.name == "nt" else "bash"
+    stamped = _run(
+        binding_fixture, environment, [*_command(binding_fixture, shell, "install"), "stamp"],
+    )
+    assert stamped.returncode == 0, stamped.stdout + stamped.stderr
+    _policy(binding_fixture, root, binding_fixture["arguments"], "standalone")
+    python = _completed_slot(binding_fixture)
+    slot = python.parent.parent
+    site = slot / (
+        "Lib/site-packages" if os.name == "nt" else
+        f"lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages"
+    )
+    (site / "agent_codespaces.py").write_text('print("serialized runtime")\n', encoding="utf-8")
+    marker = slot / ".install-complete.json"
+    pending = marker.with_suffix(".pending")
+    marker.rename(pending)
+    snapshot = Path((root / "payload-dir").read_text(encoding="utf-8-sig").strip())
+    calls = root / "installer-calls"
+    suffix = "ps1" if os.name == "nt" else "sh"
+    installer = snapshot / f"scripts/install.{suffix}"
+    if os.name == "nt":
+        quote = lambda path: "'" + str(path).replace("'", "''") + "'"
+        installer.write_text(
+            f"[IO.File]::AppendAllText({quote(calls)}, \"build`n\")\n"
+            "Start-Sleep -Seconds 1\n"
+            f"[IO.File]::Copy({quote(pending)}, {quote(marker)})\nexit 0\n",
+            encoding="utf-8",
+        )
+    else:
+        installer.write_text(
+            "#!/usr/bin/env bash\n"
+            f"printf 'build\\n' >> {shlex.quote(str(calls))}\nsleep 1\n"
+            f"cp {shlex.quote(str(pending))} {shlex.quote(str(marker))}\n",
+            encoding="utf-8",
+        )
+    for key in (
+        "COPILOT_PLUGIN_ROOT", "COPILOT_EXTENSIONS_COMMAND_LIFECYCLE",
+        "COPILOT_PLUGIN_INSTALL_STAGED", "COPILOT_PLUGIN_STAGED_FROM",
+        "COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT",
+    ):
+        environment.pop(key, None)
+    wrapper = binding_fixture["home"] / ".local/bin/agent-codespaces"
+    command = (
+        [POWERSHELL, "-NoLogo", "-NoProfile", "-File", str(wrapper.with_suffix(".ps1")), "version"]
+        if os.name == "nt" else [str(wrapper), "version"]
+    )
+    processes = [
+        subprocess.Popen(
+            command, env=environment, cwd=snapshot, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, text=True,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        ) for _ in range(2)
+    ]
+    for process in processes:
+        stdout, stderr = process.communicate(timeout=60)
+        assert process.returncode == 0, stdout + stderr
+        assert "serialized runtime" in stdout
+    assert calls.read_text(encoding="utf-8").splitlines() == ["build"]
+
+
+@pytest.mark.portfolio_tier("T3")
+@pytest.mark.parametrize("plugin", ["agent-pull-requests", "agent-vault", "agent-ssh", "agent-codespaces"])
 @pytest.mark.parametrize("failure", ["missing-resolver", "command-directory", "legacy-command-directory"])
 def test_actual_restamp_failure_preserves_previous_selection(
     binding_fixture: dict, tmp_path: Path, plugin: str, failure: str,
@@ -223,12 +315,15 @@ def test_actual_restamp_failure_preserves_previous_selection(
 
 
 @pytest.mark.portfolio_tier("T3")
+@pytest.mark.parametrize(("plugin", "healthy"), [
+    ("agent-vault", False), ("agent-codespaces", False), ("agent-codespaces", True),
+])
 @pytest.mark.parametrize("namespaced", [False, True])
 @pytest.mark.parametrize("managed", [False, True])
-def test_vault_cold_payload_uses_selected_publication_policy(
-    binding_fixture: dict, namespaced: bool, managed: bool,
+def test_payload_uses_selected_publication_policy(
+    binding_fixture: dict, plugin: str, healthy: bool, namespaced: bool, managed: bool,
 ) -> None:
-    environment = _adopter(binding_fixture, "agent-vault")
+    environment = _adopter(binding_fixture, plugin)
     root = binding_fixture["legacy"]
     arguments = binding_fixture["arguments"]
     if namespaced:
@@ -240,7 +335,7 @@ def test_vault_cold_payload_uses_selected_publication_policy(
         )
         primitive.compare_and_swap_activation(
             context=cell["installReceipt"], expected_marketplace_id=cell["marketplaceId"],
-            expected_plugin_id="agent-vault", expected_namespace_generation=cell["namespaceGeneration"],
+            expected_plugin_id=plugin, expected_namespace_generation=cell["namespaceGeneration"],
             expected_install_generation=cell["generation"], expected_activation_generation=0,
             activation_mode="namespaced", activation_state="active", legacy_disposition="absent",
             legacy_probe={"declared": True, "result": "absent", "checkedAt": "2026-01-01T00:00:00Z"},
@@ -255,20 +350,45 @@ def test_vault_cold_payload_uses_selected_publication_policy(
         environment["COPILOT_EXTENSIONS_CONTEXT"] = cell["installReceipt"]
         _write(binding_fixture["legacy"] / "runtime-deployment.json", {"managed": not managed})
     _policy(binding_fixture, root, arguments, "managed" if managed else "standalone")
-    environment.update(
-        AGENT_VAULT_HOME=str(binding_fixture["legacy"]) + os.sep,
-        AGENT_VAULT_PAYLOAD_ROOT=str(binding_fixture["payload"]),
-    )
+    prefix = plugin.upper().replace("-", "_")
+    environment.update({
+        prefix + "_HOME": str(binding_fixture["legacy"]) + os.sep,
+        prefix + "_PAYLOAD_ROOT": str(binding_fixture["payload"]),
+    })
     shell = "powershell" if os.name == "nt" else "bash"
+    if healthy:
+        python = _completed_slot({**binding_fixture, "legacy": root})
+        site = python.parent.parent / (
+            "Lib/site-packages" if os.name == "nt" else
+            f"lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages"
+        )
+        (site / "agent_codespaces.py").write_text(
+            'import json, os, sys\n'
+            f'assert os.environ["AGENT_CODESPACES_HOME"] == {str(root)!r}\n'
+            'print(json.dumps(sys.argv[1:]))\n', encoding="utf-8",
+        )
+        forwarded = ["ssh", "--remote-cmd", 'echo "spaces & pipes | semicolons ; bangs !"']
+        legacy_before = _snapshot(binding_fixture["legacy"])
+        result = _run(
+            binding_fixture, environment,
+            [*_command(binding_fixture, shell, "runtime-gate"), *forwarded],
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert json.loads(result.stdout.splitlines()[-1]) == forwarded
+        assert not (root / ".provision.lock").exists()
+        assert not (root / ".provision-status").exists()
+        if namespaced:
+            assert _snapshot(binding_fixture["legacy"]) == legacy_before
+        return
     installer = binding_fixture["payload"] / "scripts" / (
         "install.ps1" if os.name == "nt" else "install.sh"
     )
     installer.write_text(
         "[Console]::Error.WriteLine('installer diagnostic'); "
-        "[IO.File]::WriteAllText((Join-Path $env:AGENT_VAULT_HOME 'installer-ran'), 'yes'); exit 37\n"
+        f"[IO.File]::WriteAllText((Join-Path $env:{prefix}_HOME 'installer-ran'), 'yes'); exit 37\n"
         if os.name == "nt" else
         '#!/usr/bin/env bash\nprintf "installer diagnostic\\n" >&2\n'
-        'printf yes > "$AGENT_VAULT_HOME/installer-ran"\nexit 37\n',
+        f'printf yes > "${prefix}_HOME/installer-ran"\nexit 37\n',
         encoding="utf-8",
     )
     before = _snapshot(root)
