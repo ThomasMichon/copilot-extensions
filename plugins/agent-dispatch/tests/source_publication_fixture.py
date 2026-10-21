@@ -264,7 +264,7 @@ def stage(tmp_path: Path, *, broken_b: bool = False):
             ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
         )
         for relative in (
-            "source-runtime.sh", "source-runtime.ps1", "versioned_runtime_native.ps1",
+            "source-runtime.sh", "source-runtime.ps1", "base-python.ps1", "versioned_runtime_native.ps1",
             "versioned_runtime.py", "versioned_runtime_leases.py",
             "versioned_runtime_construction.py", "versioned_runtime_source.py",
             "versioned_runtime_publication.py",

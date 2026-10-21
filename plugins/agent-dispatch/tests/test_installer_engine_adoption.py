@@ -371,7 +371,7 @@ def _signed_venv_block() -> str:
     block = start + text.split(start, 1)[1].split(
         "    # The selected MCP extra", 1
     )[0]
-    return block + "}\n"
+    return f". '{PLUGIN / 'scripts' / 'base-python.ps1'}'\n" + block + "}\n"
 
 
 @pytest.mark.parametrize("ext", ["sh", "ps1"])
@@ -442,6 +442,10 @@ $script:RuntimeConstructionReuse=$false
 $pythonCmd='{tmp_path / "forbidden-python.ps1"}'
 function py {{ $global:LASTEXITCODE=0; '{signed}' }}
 function Get-AuthenticodeSignature {{ param($Path) return @{{ Status='Valid' }} }}
+function Invoke-Hidden {{
+    param($FilePath, $ArgList, [ref]$ErrorOutput)
+    & $FilePath @ArgList
+}}
 function Invoke-VersionedSlotClean {{ throw 'reserved slot must not be cleaned after signed bootstrap' }}
 function Remove-Item {{ throw 'reserved slot or receipt must not be raw-deleted' }}
 function Test-DispatchVenv {{

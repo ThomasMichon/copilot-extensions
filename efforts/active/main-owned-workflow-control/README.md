@@ -548,3 +548,4 @@ this contract. New evidence belongs in its date file, not another peer effort.
 - [2026-10-19 - Test burndown contract and measured evidence](journal/2026/10.19-test-burndown.md)
 - [2026-10-20](journal/2026/10.20.md)
 - [2026-10-20 - Independent upstream test repairs](journal/2026/10.20-test-repairs.md)
+- [2026-10-21 - Windows Dispatch base selection](journal/2026/10.21.md)

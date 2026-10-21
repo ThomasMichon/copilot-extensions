@@ -1,3 +1,5 @@
+. (Join-Path $PSScriptRoot 'base-python.ps1')
+
 function Get-SourceRuntimeIdentity {
     param([string]$Payload = $PluginDir, [string]$ExpectedVersion = '')
     $py = Get-BootstrapPython

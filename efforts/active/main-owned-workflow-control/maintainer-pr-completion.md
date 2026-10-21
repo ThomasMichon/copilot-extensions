@@ -74,7 +74,8 @@ agent preferences and project membership. Its isolated registry, CLI and
 retained-reference unregister regressions cover persisted class changes,
 metadata retention and invalid-input rejection.
 
-The remaining source repair adds explicit `unregister --keep-repo-entry unchanged`
+The second #7510 source repair merged in #7552. It adds explicit
+`unregister --keep-repo-entry unchanged`
 retention, preserving repository class, agent preference and metadata while
 removing only full project adoption and an owned project launcher. Existing
 blockers and foreign-launcher ownership checks remain. Registered local
@@ -88,6 +89,16 @@ loading lifecycle configuration; mismatched identity receipts remain rejected.
 Historical launcher disposition and
 installed acceptance remain open; a reviewed source repair does not authorize
 live command transfer or state deletion.
+
+The #7494 Windows construction repair adds an explicit, installation-owned
+signed base-Python preference rather than weakening the required MCP dependency
+closure or changing machine-wide Python discovery. The plugin README owns its
+input, persistence and fail-closed contract. Native PowerShell coverage includes
+publication/failure/supersession boundaries and an opt-in real signed-base/venv
+probe. Qualified release, actual configured-feed dependency installation and
+running coordinator readiness remain separate acceptance gates. The shared
+dependency-cleanup error-classification defect remains tracked under #7494;
+this slice does not change the shared dependency policy.
 
 The #7441 per-review-layer authority fix is qualified by promotion #7448 and
 present in the selected, importable Worktrees 1.24.106-dev1 runtime. That is

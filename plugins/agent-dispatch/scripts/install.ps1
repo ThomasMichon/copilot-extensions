@@ -1657,6 +1657,7 @@ function Test-DispatchVenv {
 
 function Install-Runtime {
     Assert-SourceRuntime
+    $selectedBasePython = Resolve-DispatchBasePython
     if (-not (Test-Path $PkgSrcDir)) {
         Write-Fail "Package source not found at $PkgSrcDir"
         exit 1
@@ -1699,13 +1700,15 @@ function Install-Runtime {
     }
 
     # Find a Python interpreter (skip Windows Store aliases that aren't real)
-    $pythonCmd = $null
-    foreach ($candidate in @('python', 'python3', 'py')) {
-        $found = Get-Command $candidate -ErrorAction SilentlyContinue | Select-Object -First 1
-        if ($found) {
-            $probe = Invoke-NativeCapture { & $found.Source --version }
-            if ($probe.ExitCode -eq 0 -and $probe.Output -match 'Python') { $pythonCmd = $found.Source }
-            if ($pythonCmd) { break }
+    $pythonCmd = $selectedBasePython
+    if (-not $pythonCmd) {
+        foreach ($candidate in @('python', 'python3', 'py')) {
+            $found = Get-Command $candidate -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($found) {
+                $probe = Invoke-NativeCapture { & $found.Source --version }
+                if ($probe.ExitCode -eq 0 -and $probe.Output -match 'Python') { $pythonCmd = $found.Source }
+                if ($pythonCmd) { break }
+            }
         }
     }
     if (-not $pythonCmd) {
@@ -1726,13 +1729,16 @@ function Install-Runtime {
     Write-Ok "Directories: $InstallDir"
 
     [void](Invoke-VersionedSlotClean)
+    if ($selectedBasePython -and (Test-Path -LiteralPath $VenvPython -PathType Leaf)) {
+        Assert-DispatchCandidateBase -Python $VenvPython -BasePython $selectedBasePython
+    }
     if (-not $script:RuntimeConstructionReuse) {
     # -- venv (SAC-trusted signed base python preferred; then uv; then venv) --
     if (-not (Test-DispatchVenv -Dir $VenvDir -Python $VenvPython)) {
         $prevEAP = $ErrorActionPreference
         $ErrorActionPreference = 'Continue'
-        $signedBase = $null
-        if ($env:OS -eq 'Windows_NT' -and (Get-Command py -ErrorAction SilentlyContinue)) {
+        $signedBase = $selectedBasePython
+        if (-not $signedBase -and $env:OS -eq 'Windows_NT' -and (Get-Command py -ErrorAction SilentlyContinue)) {
             foreach ($v in '3.13', '3.12', '3.11') {
                 $cand = (& py "-$v" -c "import sys;print(sys.executable)" 2>$null | Out-String).Trim()
                 if ($LASTEXITCODE -eq 0 -and $cand -and (Test-Path $cand)) {
@@ -1741,7 +1747,9 @@ function Install-Runtime {
             }
         }
         if ($signedBase) {
-            $signedResult = Invoke-NativeCapture { & $signedBase -m venv --copies $VenvDir }
+            $signedError = ''
+            $signedOutput = Invoke-Hidden -FilePath $signedBase -ArgList @('-I', '-B', '-m', 'venv', '--copies', $VenvDir) -ErrorOutput ([ref]$signedError)
+            $signedResult = @{ ExitCode = $LASTEXITCODE; Output = "$signedOutput$signedError" }
             if (-not (Test-DispatchVenv -Dir $VenvDir -Python $VenvPython)) {
                 $ErrorActionPreference = $prevEAP
                 Write-Fail "Signed Python venv failed validation (exit $($signedResult.ExitCode)); construction aborted"
@@ -1773,6 +1781,7 @@ function Install-Runtime {
     } else {
         Write-Skip 'Venv already exists'
     }
+    Assert-DispatchCandidateBase -Python $VenvPython -BasePython $selectedBasePython
 
     # The selected MCP extra is part of this candidate's required closure.
     $prevEAP = $ErrorActionPreference
@@ -2080,6 +2089,7 @@ function Install-Runtime {
             # The Picker materializes templates only from its verified active
             # payload roots; this installer does not publish shared pivot data.
             Register-PickerPivot
+            Publish-DispatchBasePython -Python $selectedBasePython
         } finally {
             [void]$publishMutex.ReleaseMutex()
             $publishMutex.Dispose()

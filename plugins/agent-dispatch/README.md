@@ -248,10 +248,29 @@ Both installers source the canonical installer engine during development;
 release tooling materializes byte-identical payload-local copies. The engine
 owns pinned, checksum-verified uv acquisition, transient venv/package retries
 and deploy-manifest writing. Dispatch retains dependency order, build-artifact
-scrubbing, optional `[mcp]` fallback, launchers, and coordinator/supervisor
+scrubbing, required `[mcp]` dependencies, launchers, and coordinator/supervisor
 lifecycle. Windows prefers signed Python with `--copies` and validates the
 result independently of its exit code before accepting it; Python venv/pip
 remains the fallback when uv is unavailable.
+
+On Windows, set `AGENT_DISPATCH_BASE_PYTHON` to an absolute base `python.exe`
+path in the **updater process** to explicitly choose a Dispatch-only interpreter.
+The installer requires a valid Python Software Foundation Authenticode signature
+and probes the executable in isolation for supported 64-bit CPython 3.10+.
+It uses that base before PATH or launcher discovery, without changing the global
+Python default, PATH, or other plugins' interpreter selection.
+
+After a qualified candidate publishes, Dispatch atomically stores the choice in
+`base-python.json` under its runtime root. Later updates use that preference
+without needing the environment input again; an explicit process input takes
+precedence. Missing, invalid or untrusted selected interpreters and malformed or
+reparse-point preference files fail closed instead of reverting to another
+interpreter. A completed candidate using a different base is rejected without
+rebuilding it in place. Failed or superseded builds do not save a new preference.
+With neither an explicit choice nor a stored preference, existing discovery and
+fallback behavior is unchanged. Dependency seasoning, configured resolver feeds,
+required MCP installation and import-health gates apply to every selected base.
+Saving a preference is not proof of a successful coordinator cutover.
 
 The installer also manages optional, label-gated **embody supervisor** services.
 The primary supervisor reads `~/.agent-dispatch/supervisor.env` and installs as
