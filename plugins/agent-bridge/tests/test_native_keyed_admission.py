@@ -53,9 +53,9 @@ def test_real_parser_mixed_keyed_options_refuse_before_input_or_client(
     missing = tmp_path / "nonexistent-invocation.json"
     assert not missing.exists()
     args = core.build_parser().parse_args([
-        "--json", "send", "bridge-a", "--native-invocation-file",
+        "--json", "send", "bridge-a", *options, "--native-invocation-file",
         "-" if source == "stdin" else str(missing),
-        "--expected-native-session-id", "native-a", *options,
+        "--expected-native-session-id", "native-a",
     ])
     client = MagicMock()
     get_client = MagicMock(return_value=client)
