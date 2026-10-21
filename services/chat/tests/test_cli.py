@@ -139,7 +139,7 @@ def test_offline_status_and_capability_never_execute_provider_or_network(tmp_pat
     assert not marker.exists()
 
 def test_actual_installed_cli_death_releases_reader_lock_before_outer_cleanup(
-    rpc_endpoint, tmp_path, installed_chat,
+    rpc_endpoint, tmp_path, installed_chat, fixed_rpc_provider, caller_observer,
 ):
     from agent_procutil import no_window_kwargs, spawn_sync_in_kill_on_close_job
 
@@ -150,6 +150,33 @@ def test_actual_installed_cli_death_releases_reader_lock_before_outer_cleanup(
     command = [str(installed_chat.console), "--config", str(path)]
     run = installed_chat.run
     assert json.loads(run([*command, "join", "room"], cwd=tmp_path))["membership"]["active"]
+    fixture = tmp_path / "process-fixture.py"
+    fixture.write_bytes(Path(caller_observer.fixture.__file__).read_bytes())
+    provider = tmp_path / "observed-provider.py"
+    provider.write_text("""
+import json,runpy,subprocess,sys
+from pathlib import Path
+import agent_chat_service,agent_procutil
+fixture,original,endpoint,directory=sys.argv[1:]
+support=runpy.run_path(fixture)
+root=Path(directory)
+subprocess.Popen(
+    [sys.executable,"-I",fixture,"leaf",directory,"kill"],
+    stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,
+    **agent_procutil.no_window_kwargs(),
+)
+support["_write"](root,"provider",{
+    "self":support["identity"](),"package":agent_chat_service.__file__,"prefix":sys.prefix,
+})
+sys.argv=[original,endpoint]
+runpy.run_path(original,run_name="__main__")
+""", encoding="utf-8")
+    del config["token_command"]
+    config["request_command"] = [
+        str(installed_chat.interpreter), "-I", str(provider), str(fixture),
+        fixed_rpc_provider[2], rpc_endpoint.endpoint, str(tmp_path),
+    ]
+    path.write_text(json.dumps(config), encoding="utf-8")
     event = rpc_endpoint.store.dispatch({
         "op": "post", "channel": "room", "codename": config["actor"]["codename"],
         "text": "retained", "request_id": "retained",
@@ -163,13 +190,51 @@ def test_actual_installed_cli_death_releases_reader_lock_before_outer_cleanup(
         stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         **no_window_kwargs(),
     )
+    pins = {}
     try:
+        ready_deadline = time.monotonic() + 5
         assert rpc_endpoint.state.read_entered.wait(5), (
             "Installed read did not reach the fixture before its existing synchronization bound; "
             f"console_returncode={process.poll()}."
         )
+        def ready():
+            records = [
+                caller_observer._read(tmp_path / f"{role}.json") for role in ("provider", "leaf")
+            ]
+            return records if all(records) else None
+
+        provider_record, leaf_record = caller_observer._wait(
+            ready,
+            max(0, ready_deadline - time.monotonic()), "installed provider/leaf not ready",
+        )
+        assert leaf_record["parent"] == caller_observer.fixture.identity(
+            leaf_record["parent"]["pid"],
+        )
+        assert Path(provider_record["package"]).resolve().is_relative_to(
+            installed_chat.target.resolve(),
+        )
+        assert Path(provider_record["prefix"]).resolve() == installed_chat.target.resolve()
+        chain = caller_observer.psutil.Process(leaf_record["self"]["pid"])
+        identities = [leaf_record["self"], provider_record["self"]]
+        for parent in chain.parents():
+            identities.append(caller_observer.fixture.identity(parent.pid))
+            if parent.pid == process.pid:
+                break
+        else:
+            raise AssertionError("installed provider is not the actual console's descendant")
+        assert provider_record["self"] in identities, (
+            "leaf ancestry does not contain the birth-identified installed provider"
+        )
+        for identity in identities:
+            if identity["pid"] not in pins:
+                pins[identity["pid"]] = caller_observer.PinnedProcess(identity)
+        assert not any(pin.gone() for pin in pins.values())
         process.kill()
         process.wait(timeout=5)
+        caller_observer._wait(
+            lambda: all(pin.gone() for pin in pins.values()), 3,
+            "installed CLI/provider/descendant survived before observer cleanup",
+        )
         assert json.loads(run([*command, "status"], cwd=tmp_path))["pending_posts"] == []
         assert time.monotonic() < rpc_endpoint.state.read_hold_deadline, (
             "Caller death and lock reacquisition were not proved before the hold watchdog expired."
@@ -190,6 +255,11 @@ def test_actual_installed_cli_death_releases_reader_lock_before_outer_cleanup(
             process.wait(timeout=5)
         if job is not None:
             job.close()
+        for pin in pins.values():
+            try:
+                pin.kill()
+            finally:
+                pin.close()
         process.stdout.close()
         process.stderr.close()
 

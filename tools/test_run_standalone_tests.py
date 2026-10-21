@@ -14,8 +14,6 @@ from pathlib import Path
 
 import pytest
 
-from _promotion_workflow_test_support import source_workflow
-
 SCRIPT = Path(__file__).with_name("run-standalone-tests.py")
 SPEC = importlib.util.spec_from_file_location("run_standalone_tests", SCRIPT)
 assert SPEC is not None and SPEC.loader is not None
@@ -315,6 +313,7 @@ def test_service_alias_uses_canonical_preparation_lease_and_tests(
     tmp_path, monkeypatch, legacy, canonical,
 ):
     monkeypatch.setattr(runner, "REPO", tmp_path)
+    monkeypatch.setenv("AGENT_CHAT_TEST_SUITE", "foreign-inherited-selection")
     root = tmp_path / canonical
     (root / "tests").mkdir(parents=True)
     python = runner.default_python(canonical)
@@ -345,6 +344,10 @@ def test_service_alias_uses_canonical_preparation_lease_and_tests(
         assert kwargs["env"]["COPILOT_EXTENSIONS_TEST_CONTAINED"] == "1"
         assert all(Path(path).is_relative_to(root / "tests") for path in command[5:-2])
         assert command[5] == str(root / "tests")
+        assert kwargs["limits"].wall_seconds == (120 if canonical == "services/chat" else 600)
+        assert kwargs["env"].get("AGENT_CHAT_TEST_SUITE") == (
+            "acceptance" if canonical == "services/chat" else None
+        )
         events.append(("run",))
         return 0
 
@@ -781,49 +784,6 @@ with owned_python(['-c', 'import time; time.sleep(120)'],
     assert identity["group"] == identity["owner_group"]
     state = Path(f"/proc/{identity['pid']}/stat")
     assert not state.exists() or state.read_text().split(") ", 1)[1].startswith("Z ")
-
-
-def test_ci_path_gates_smoke_and_promotion_keeps_exhaustive():
-    root = SCRIPT.parent.parent
-    _assert_ci_path_gates_smoke_and_promotion_keeps_exhaustive(
-        source_workflow(root, "ci.yml")["jobs"],
-        source_workflow(root, "validate-and-promote.yml")["jobs"],
-    )
-
-
-def _assert_ci_path_gates_smoke_and_promotion_keeps_exhaustive(ci, promotion):
-    import shlex
-    from packaging.requirements import Requirement
-
-    discovery = next(step["run"] for step in ci["discover"]["steps"] if step.get("id") == "set")
-    detector = next(
-        step["run"] for step in ci["checks"]["steps"] if step.get("id") == "version-bump-engine"
-    )
-    assert r"standalone_consumers\.py" in detector
-    for path in ("services/index/", "plugins/agent-index/", "libs/", "tools/"):
-        assert path in discovery
-    for name in ("test-runner-linux", "test-runner-windows"):
-        command = next(
-            step["run"] for step in ci[name]["steps"]
-            if step.get("name") == "Test runner admission and isolation"
-        )
-        install = shlex.split(command.split("&&", 1)[0])
-        assert "tools/seasoned_uv.py" in install and "--system" in install
-        requirements = {
-            requirement.name: requirement
-            for requirement in map(Requirement, install[install.index("--system") + 1:])
-        }
-        assert {"pytest", "pytest-timeout", "pyyaml", "setuptools", "wheel"} <= requirements.keys()
-        assert "83.0.0" in requirements["setuptools"].specifier
-        assert "82.9.0" not in requirements["setuptools"].specifier
-    for name in ("agent-index-service-linux", "agent-index-service-windows"):
-        assert ci[name]["needs"] == "discover"
-        assert "needs.discover.outputs.standalone_service == 'true'" in ci[name]["if"]
-        command = next(step["run"] for step in ci[name]["steps"] if "run" in step)
-        assert 'MODE="--smoke"' in command
-        assert "workflow_dispatch" in command
-        full = next(step["run"] for step in promotion[name]["steps"] if "run-standalone-tests" in step.get("run", ""))
-        assert "--smoke" not in full
 
 
 def test_sandbox_cleanup_retries_only_transient_windows_lock(monkeypatch):

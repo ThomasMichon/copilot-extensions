@@ -1,4 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import nullcontext
 import http.server
 import json
 import os
@@ -14,6 +15,61 @@ from types import SimpleNamespace
 import pytest
 
 from agent_chat_service import ChatError, ChatStore, json_bytes, strict_json
+
+
+@pytest.hookimpl(wrapper=True, tryfirst=True)
+def pytest_collection_modifyitems(config, items):
+    from qualification import membership, membership_digest
+
+    profile = os.environ.get("AGENT_CHAT_TEST_SUITE")
+    original = [item.nodeid.removeprefix("tests/") for item in items]
+    result = yield
+    if not profile:
+        return result
+    if profile not in {"acceptance", "full"}:
+        raise pytest.UsageError("unknown Chat qualification lane")
+    current = [item.nodeid.removeprefix("tests/") for item in items]
+    if config.option.keyword or config.option.markexpr or current != original:
+        raise pytest.UsageError("Chat qualification requires unfiltered collection")
+    if config.option.collectonly or config.option.setuponly or config.option.setupplan:
+        raise pytest.UsageError("Chat qualification requires actual test execution")
+    try:
+        mapping = membership(original)
+    except ValueError as error:
+        raise pytest.UsageError(str(error)) from error
+    selected, deferred = [], []
+    for item, node in zip(items, original):
+        (selected if profile == "full" or mapping[node] == "acceptance" else deferred).append(item)
+    if deferred:
+        items[:] = selected
+        config.hook.pytest_deselected(items=deferred)
+    config._chat_membership = {
+        "schema": "agent-chat.test-membership", "version": 1, "profile": profile,
+        "collected": len(mapping), "selected": len(selected),
+        "membership_sha256": membership_digest(mapping), "nodes": mapping,
+    }
+    return result
+
+
+def pytest_terminal_summary(terminalreporter):
+    report = getattr(terminalreporter.config, "_chat_membership", None)
+    if report is not None:
+        path = terminalreporter.config._tmp_path_factory.getbasetemp() / "chat-membership.json"
+        path.write_text(json.dumps(report, sort_keys=True), encoding="utf-8")
+        terminalreporter.write_line(
+            f"Chat {report['profile']}: {report['selected']}/{report['collected']} nodes; "
+            f"membership_sha256={report['membership_sha256']}; map={path}"
+        )
+
+
+@pytest.fixture
+def caller_observer(monkeypatch):
+    support = Path(__file__).resolve().parents[3] / "libs" / "agent-procutil" / "tests"
+    monkeypatch.syspath_prepend(str(support))
+    import test_caller_owned_native as observer
+
+    with nullcontext() if os.name == "nt" else observer._linux_observer():
+        yield observer
 
 
 def run_artifact(argv, *, cwd=None):

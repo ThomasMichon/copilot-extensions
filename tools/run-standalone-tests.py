@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import math
 import os
 import shutil
@@ -230,9 +231,26 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--prepare", action="store_true", help="provision declared test dependencies")
     parser.add_argument("--smoke", action="store_true", help="run controller contracts without real deployment cycles")
+    parser.add_argument(
+        "--chat-suite", choices=("acceptance", "full"),
+        help="Chat qualification lane (default: acceptance; full is also required)",
+    )
+    parser.add_argument(
+        "--chat-membership-report", type=Path,
+        help="retain the Chat parameter-node map at a new file outside the disposable sandbox",
+    )
     parser.add_argument("--admission-wait", type=float, default=0.0)
-    parser.add_argument("--timeout", type=float, default=600.0)
+    parser.add_argument("--timeout", type=float)
     args = parser.parse_args(argv)
+    if (args.chat_suite or args.chat_membership_report) and args.component != "services/chat":
+        parser.error("Chat qualification options are only defined for services/chat")
+    if args.chat_membership_report and (
+        args.chat_membership_report.exists() or not args.chat_membership_report.parent.is_dir()
+    ):
+        parser.error("--chat-membership-report requires a new file in an existing directory")
+    chat_suite = (args.chat_suite or "acceptance") if args.component == "services/chat" else None
+    if args.timeout is None:
+        args.timeout = 120.0 if chat_suite == "acceptance" else 600.0
     if not math.isfinite(args.timeout) or args.timeout <= 0:
         parser.error("--timeout must be finite and positive")
     if not math.isfinite(args.admission_wait) or args.admission_wait < 0:
@@ -313,6 +331,9 @@ def main(argv: list[str] | None = None) -> int:
         try:
             sandbox = Path(temporary.name)
             env = isolated_environment(os.environ, sandbox)
+            env.pop("AGENT_CHAT_TEST_SUITE", None)
+            if chat_suite:
+                env["AGENT_CHAT_TEST_SUITE"] = chat_suite
             tests = (
                 [
                     root / "tests" / "test_cli.py", root / "tests" / "test_config.py",
@@ -328,7 +349,7 @@ def main(argv: list[str] | None = None) -> int:
                 ]
                 if args.smoke else [root / "tests"]
             )
-            return run_contained(
+            outcome = run_contained(
                 [str(python), "-I", "-m", "pytest", "-q", *map(str, tests),
                  "--basetemp", str(sandbox / "pytest")],
                 cwd=root,
@@ -336,6 +357,12 @@ def main(argv: list[str] | None = None) -> int:
                 sandbox=sandbox,
                 limits=limits,
             )
+            if args.chat_membership_report:
+                report = json.loads((sandbox / "pytest" / "chat-membership.json").read_text("utf-8"))
+                report["exit_code"] = outcome
+                with args.chat_membership_report.open("x", encoding="utf-8") as output:
+                    json.dump(report, output, sort_keys=True)
+            return outcome
         except UnreapedProcessError:
             temporary.retain()
             raise

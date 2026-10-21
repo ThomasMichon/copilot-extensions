@@ -1,0 +1,117 @@
+"""Standalone qualification lanes and their separation from source CI."""
+
+import json
+
+import pytest
+
+from _promotion_workflow_test_support import source_workflow
+from test_run_standalone_tests import SCRIPT, runner
+
+
+@pytest.mark.parametrize("profile,timeout,explicit", [
+    ("acceptance", 120, False), ("full", 600, False),
+    ("acceptance", 45, True), ("full", 45, True),
+])
+@pytest.mark.parametrize("outcome", [0, 1])
+def test_chat_qualification_lane_defaults_preserve_full_collection(
+    tmp_path, monkeypatch, profile, timeout, explicit, outcome,
+):
+    monkeypatch.setattr(runner, "REPO", tmp_path)
+    root = tmp_path / "services" / "chat"
+    (root / "tests").mkdir(parents=True)
+    python = runner.default_python("services/chat")
+    python.parent.mkdir(parents=True)
+    python.touch()
+    monkeypatch.setattr(runner, "acquire", lambda *_: type("Lease", (), {"release": lambda _: None})())
+
+    def run(command, **kwargs):
+        assert command[5] == str(root / "tests")
+        assert kwargs["env"]["AGENT_CHAT_TEST_SUITE"] == profile
+        assert kwargs["limits"].wall_seconds == timeout
+        report = kwargs["sandbox"] / "pytest" / "chat-membership.json"
+        report.parent.mkdir()
+        report.write_text('{"nodes":{"fixture":"acceptance"}}', encoding="utf-8")
+        return outcome
+
+    monkeypatch.setattr(runner, "run_contained", run)
+    report = tmp_path / "report.json"
+    args = ["services/chat", "--chat-suite", profile, "--chat-membership-report", str(report)]
+    if explicit:
+        args.extend(("--timeout", str(timeout)))
+    assert runner.main(args) == outcome
+    assert json.loads(report.read_text("utf-8")) == {
+        "nodes": {"fixture": "acceptance"}, "exit_code": outcome,
+    }
+    with pytest.raises(SystemExit) as error:
+        runner.main(args)
+    assert error.value.code == 2
+    assert json.loads(report.read_text("utf-8"))["exit_code"] == outcome
+
+
+def test_chat_lane_refuses_other_consumers_before_admission(monkeypatch):
+    monkeypatch.setattr(runner, "acquire", lambda *_: pytest.fail("unexpected admission"))
+    with pytest.raises(SystemExit) as error:
+        runner.main(["fleet-manager", "--chat-suite", "full"])
+    assert error.value.code == 2
+
+
+def test_ci_path_gates_smoke_and_promotion_keeps_exhaustive():
+    root = SCRIPT.parent.parent
+    ci = source_workflow(root, "ci.yml")["jobs"]
+    promotion = source_workflow(root, "validate-and-promote.yml")["jobs"]
+    if "unit-plan" in ci:
+        assert set(ci) == {"checks", "unit-plan", "unit-tests", "pr-gate"}
+        assert set(ci["pr-gate"]["needs"]) == {"checks", "unit-plan", "unit-tests"}
+        for jobs, owner in ((ci, "unit-tests"), (promotion, "source-units")):
+            commands = [
+                step["run"] for job in jobs.values() for step in job.get("steps", [])
+                if "run" in step
+            ]
+            assert not any("run-standalone-tests.py" in command for command in commands)
+            assert not any("run-plugin-tests.py" in command for command in commands)
+            packets = [
+                step["run"] for step in jobs[owner]["steps"]
+                if "tools/run-promotion-unit-tests.py" in step.get("run", "")
+            ]
+            assert len(packets) == 1
+            assert "--source-sha" in packets[0] and "--output-dir" in packets[0]
+        return
+    _assert_ci_path_gates_smoke_and_promotion_keeps_exhaustive(ci, promotion)
+
+
+def _assert_ci_path_gates_smoke_and_promotion_keeps_exhaustive(ci, promotion):
+    import shlex
+    from packaging.requirements import Requirement
+
+    discovery = next(step["run"] for step in ci["discover"]["steps"] if step.get("id") == "set")
+    detector = next(
+        step["run"] for step in ci["checks"]["steps"] if step.get("id") == "version-bump-engine"
+    )
+    assert r"standalone_consumers\.py" in detector
+    for path in ("services/index/", "plugins/agent-index/", "libs/", "tools/"):
+        assert path in discovery
+    for name in ("test-runner-linux", "test-runner-windows"):
+        command = next(
+            step["run"] for step in ci[name]["steps"]
+            if step.get("name") == "Test runner admission and isolation"
+        )
+        install = shlex.split(command.split("&&", 1)[0])
+        assert "tools/seasoned_uv.py" in install and "--system" in install
+        requirements = {
+            requirement.name: requirement
+            for requirement in map(Requirement, install[install.index("--system") + 1:])
+        }
+        assert {"pytest", "pytest-timeout", "pyyaml", "setuptools", "wheel"} <= requirements.keys()
+        assert "83.0.0" in requirements["setuptools"].specifier
+        assert "82.9.0" not in requirements["setuptools"].specifier
+    for name in ("agent-index-service-linux", "agent-index-service-windows"):
+        assert ci[name]["needs"] == "discover"
+        assert "needs.discover.outputs.standalone_service == 'true'" in ci[name]["if"]
+        command = next(step["run"] for step in ci[name]["steps"] if "run" in step)
+        assert 'MODE="--smoke"' in command
+        assert "workflow_dispatch" in command
+        full = next(
+            step["run"] for step in promotion[name]["steps"]
+            if "run-standalone-tests" in step.get("run", "")
+        )
+        assert "--smoke" not in full

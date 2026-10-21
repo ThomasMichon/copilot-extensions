@@ -1179,17 +1179,51 @@ against the client API rather than repeating those same full-stack operations
 for every parser variant. Preserve the real installed join before the
 console-death fault; cold startup is not part of its five-second read barrier.
 
-For a complete timing/value evaluation of the expanded matrix, use the
-standalone runner's existing allowance:
-`python tools/run-standalone-tests.py services/chat --prepare --timeout 600`.
+Chat qualification requires **both lanes on the same immutable candidate**:
+
+```text
+python tools/run-standalone-tests.py services/chat --prepare --chat-suite acceptance --timeout 120
+python tools/run-standalone-tests.py services/chat --chat-suite full --timeout 600
+```
+
+Chat defaults to the acceptance lane and its 120-second allowance; `full`
+defaults to 600 seconds. Other consumers keep their existing 600-second
+defaults. Neither lane substitutes for the other. The acceptance packet runs
+the real source-removed installed client, native caller/provider/descendant
+death, protocol, authentication, durable data/progress, deadlines and raw
+capture contracts. The complete lane additionally runs all host and
+source-removed service lifecycle cases, with no test removed or marked skipped
+by this partition. Existing platform-specific skips still require positive
+qualification on their owning platform.
+
+`services/chat/tests/qualification.py` lists every test family and its lane.
+Every collected parameter node must map to exactly one family with its retained
+parameter count; new, missing or duplicate families/nodes and lost parameter
+cases fail qualification instead of silently disappearing.
+Each lane reports the same complete membership digest, collected/selected
+counts and a parameter-level JSON map within its contained sandbox. Supply
+`--chat-membership-report <new-file>` to retain that map, including the actual
+runner exit code, after sandbox cleanup. Its parent directory must already
+exist and an existing report is never overwritten. The
+acceptance collection explicitly deselects full-only families, while `full`
+executes their union. Direct pytest/partial diagnostics without the runner's
+explicit qualification environment remain unqualified and unpartitioned.
+Filters and collection/setup-only modes are rejected for either lane.
+
+The native caller-death case reuses the process utility's test-only birth-pinned
+Windows handle/Linux pidfd observer. It observes the actual installed provider,
+its sleeping descendant and the console ancestry alive, then requires them all
+to exit before outer observer cleanup and before the existing held-read
+watchdog. The test dependency does not enter the core/client runtime wheels.
+
 The [per-test assessment](efforts/active/agent-chat-graduation/test-portfolio.csv)
 and [measured comparison](efforts/active/agent-chat-graduation/README.md#journal)
 separate the full222-case snapshot from explicit42/221-case candidates measured
 under120s. Later230/236-case measurements and a65-pass/one-skip changed-path
 packet are recorded separately in that journal; none is a current full120s
-acceptance claim. Neither subset is full-matrix acceptance, and the evaluation does not
-change required CI, per-operation bounds, containment or the unfiltered source
-selection. Use pytest's built-in JUnit call-duration reporting plus
+acceptance claim. Those historical results do not retroactively pass either
+new lane. The split does not change required CI, per-operation bounds or
+containment. Use pytest's built-in JUnit call-duration reporting plus
 `--durations=0 --durations-min=0` to retain every case and fixture cost; quote
 Windows output paths inside `PYTEST_ADDOPTS` so its argument parser preserves
 backslashes. Shared artifact setup must not be charged solely to its first user.

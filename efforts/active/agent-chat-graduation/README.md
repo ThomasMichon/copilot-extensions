@@ -271,6 +271,10 @@ requirements.
 - [ ] **Portfolio:** keep fast portable contracts in required change-scoped CI;
   isolate real process/native/fresh-environment matrices in their existing
   appropriate lanes. Record why a genuinely unavailable venue was not exercised.
+  Client qualification requires the explicit120s acceptance packet and complete
+  600s suite on the same immutable candidate. Their mechanically checked
+  family/parameter membership must retain every existing assertion and case;
+  a selected packet alone is not complete qualification.
 - [ ] **Publication:** public-only references and synthetic examples,
   documentation-impact review, required CI/review and unchanged open parent
   tracker until its actual completion gate is met.
@@ -345,6 +349,49 @@ shared-multiplex contracts above.
 - Retained the portable/adopter boundary, standard installation and Worktree
   Manager baseline, and existing Gateway/SSH, Vault and lifecycle owners.
   No runtime API, new process, deployment or permission grant is supplied.
+
+### 2026-10-20 - Explicit acceptance and complete-suite qualification
+
+- The qualification-contract decision selected a120s real acceptance packet
+  plus the mandatory complete600s suite, retaining all coverage. This changes
+  future qualification, not the failed published295/120s result or required CI.
+  No production deadline or process/fixture synchronization bound changed.
+- Added a checked family/parameter-count map. New, missing or duplicate nodes,
+  unassigned families and lost parameter cases refuse qualification. Comparing
+  both actual maps to the prior full packet proves all236 original exact
+  parameter nodes remain, with five new membership guards. Acceptance selects
+  208 of241 nodes; the full lane executes all241. Collection/setup-only
+  execution refuses rather than returning a success-shaped qualification.
+  Host-only lifecycle families
+  are deferred from acceptance, not deleted, skipped by policy or omitted from
+  the complete lane. Optional exclusive report output preserves the map and
+  actual exit code after normal sandbox cleanup.
+- The installed-console death case now observes its installed Chat provider,
+  sleeping descendant and console ancestry through the canonical utility's
+  test-only birth-pinned Windows handle/Linux pidfd observer. All are alive
+  before the fault and must be gone before external cleanup. Windows venv
+  launcher ancestry is retained rather than mistaken for the provider itself.
+  Real join, held read, reader-lock recovery and unread-body recovery remain.
+  The additional process-observer dependency is development-only.
+- Final Windows normal-run results: acceptance207 passed, one explicit native
+  POSIX skip and33 full-only deselections in71.37s/120; complete240 passed and
+  the same one POSIX skip in137.12s/600. Both collected241 nodes with membership
+  digest `074d0284d500d105ffecd67dfc9ae6146f7af50d413edbbdbd0b93c5f81fd5cc`.
+  Positive native Linux execution remains required; Windows skip evidence
+  does not satisfy it.
+- Shared runner contracts passed82 with one native POSIX skip. Their existing
+  obsolete discovery-job assertion was updated for the actual unit-only
+  source CI, retaining the historical smoke/full helper separately. New lane
+  tests and that CI contract were extracted to keep the old module shrinking.
+  No workflow, other consumer's defaults, preparation lease, containment or
+  source-unit-only CI behavior changed. F/E9 checks pass.
+- Validation tiers: changed pure contracts and the real installed/native
+  Windows lane passed; fresh offline role installs and source removal exercise
+  the clean first-touch boundary. Independent native Linux qualification is
+  assigned to the existing qualification contributor on the next immutable
+  source pin; no substitute worker, deployment or external venue is implied.
+  Current-head review and required CI remain merge gates. The full graduation
+  effort, standard setup/lifecycle, assignment/multiplexing and adoption stay open.
 
 ### 2026-10-20 - Literal platform result and measured portfolio follow-through
 
