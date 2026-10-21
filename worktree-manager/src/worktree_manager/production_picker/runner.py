@@ -119,6 +119,7 @@ def capture(
     return picker_capture.capture(
         source,
         live=live,
+        setup_timeout=engine_client._DEFAULT_TIMEOUT,
         pivot=pivot,
         wait_pivot=wait_pivot,
     )

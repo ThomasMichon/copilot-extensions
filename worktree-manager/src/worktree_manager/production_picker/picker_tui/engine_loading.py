@@ -557,6 +557,9 @@ class PickerScreenLoadingMixin:
         # exercise ``on_unmount`` on a bare object with no real ``__init__``.
         with getattr(self, "_bg_cancel_lock", None) or contextlib.nullcontext():
             self._bg_cancel.set()
+        completion = getattr(self, "_setup_completion_event", None)
+        if completion is not None:
+            completion.set()
         disposer = getattr(self, "_dispose_pending_setup_payloads", None)
         if callable(disposer):
             disposer()

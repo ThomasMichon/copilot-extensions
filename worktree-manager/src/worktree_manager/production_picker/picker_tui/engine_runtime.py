@@ -501,9 +501,22 @@ class PickerScreenRuntimeMixin:
                 lock = self._setup_epoch_lock = threading.Lock()
             return lock
 
+    def _ensure_setup_completion_event(self) -> threading.Event:
+        event = getattr(self, "_setup_completion_event", None)
+        if event is None:
+            with _SETUP_EPOCH_LOCK_INIT_LOCK:
+                event = getattr(self, "_setup_completion_event", None)
+                if event is None:
+                    event = self._setup_completion_event = threading.Event()
+        return event
+
     def _next_setup_epoch(self) -> int:
         with self._ensure_setup_epoch_lock():
+            previous = self._ensure_setup_completion_event()
+            self._setup_completion_event = threading.Event()
             self._setup_epoch += 1
+            # Wake observers of the superseded epoch to follow the new event.
+            previous.set()
             return self._setup_epoch
 
     def _dispose_setup_payload(self, payload: _SetupPayload | None) -> None:
@@ -759,9 +772,10 @@ class PickerScreenRuntimeMixin:
         self._reconcile_wt_sel()
 
     def _apply_setup_failure(self, epoch: int, err: Exception) -> None:
-        self._setup_failed_epoch = epoch
         self._busy_label = "Load failed"
         self.debug = f"setup-failed: {err}"
+        self._setup_failed_epoch = epoch
+        self._ensure_setup_completion_event().set()
 
     def _publish_setup_failure_if_current(
         self, epoch: int, cancel: threading.Event, err: Exception
@@ -840,6 +854,7 @@ class PickerScreenRuntimeMixin:
                     self.refresh()
                     return
                 self._setup_applied_epoch = epoch
+                self._ensure_setup_completion_event().set()
                 self.refresh()
 
             if app is None:
@@ -943,13 +958,15 @@ class PickerScreenRuntimeMixin:
         epoch = self._next_setup_epoch()
         try:
             payload = self._collect_setup_payload()
-        except Exception:
-            self._setup_failed_epoch = epoch
+        except Exception as exc:
+            self._apply_setup_failure(epoch, exc)
             raise
         try:
             self._invalidate_setup_reload_caches()
             self._apply_setup_payload(payload)
-        except Exception:
+        except Exception as exc:
             self._dispose_setup_payload(payload)
+            self._apply_setup_failure(epoch, exc)
             raise
         self._setup_applied_epoch = epoch
+        self._ensure_setup_completion_event().set()

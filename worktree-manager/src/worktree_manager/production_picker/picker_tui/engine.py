@@ -264,6 +264,7 @@ class PickerScreen(
         self._setup_epoch = 0
         self._setup_applied_epoch = 0
         self._setup_failed_epoch = 0
+        self._setup_completion_event = threading.Event()
         self._pending_setup_payloads: dict[int, object] = {}
         self._setup_payloads_lock = threading.Lock()
         # worktree-claims-transitive-finalization Phase 4 item 2: the local

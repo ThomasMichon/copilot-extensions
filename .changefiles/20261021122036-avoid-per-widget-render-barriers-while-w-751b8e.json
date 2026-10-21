@@ -1,0 +1,9 @@
+{
+  "comment": "Wait for Picker setup completion without per-widget render barriers, surface setup failures and cancellation, and bound production capture by the engine operation budget.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

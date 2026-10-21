@@ -973,6 +973,15 @@ pivot registry a real contributed pivot uses). The older minimal `picker_app`
 remains only as the still-live `LaunchRequest`/launch-compose machinery
 shared with other commands.
 
+Non-live screenshots wait for the current setup epoch to apply before reading
+the compositor. Setup completion, diagnosed failure and teardown wake the
+capture without repeated per-widget render barriers. Production captures use
+the engine's 120-second operation budget for the whole setup wait, including
+plugin verification and source loading; this is not a first-paint speed target.
+The low-level fixture capture helper retains its five-second default.
+Setup failure, teardown or deadline expiry returns an error, not a successful
+capture of an unloaded screen. Interactive startup remains asynchronous.
+
 During the migration, the copied presentation modules reach their existing
 engine/data operations through a private compatibility boundary to the active
 agent-worktrees runtime. That boundary is intentionally temporary: it preserves
