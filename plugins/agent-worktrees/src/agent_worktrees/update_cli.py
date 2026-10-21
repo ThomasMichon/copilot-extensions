@@ -110,6 +110,11 @@ def add_parsers(sub) -> None:
         "reconcile-plugins", help="Reconcile repo enabledPlugins payloads + gated runtimes (JSON)"
     )
     sp.add_argument(
+        "--check-update",
+        action="store_true",
+        help="Revalidate one native runtime action from JSON stdin without executing it.",
+    )
+    sp.add_argument(
         "--machine", default=None, help="Machine name (auto-detected from hostname if omitted)"
     )
     sp.add_argument(
@@ -776,6 +781,30 @@ def _append_update_if_stale(
 def cmd_reconcile_plugins(args: argparse.Namespace) -> int:
     """Reconcile repo-configured copilot-extensions plugins (JSON action plan)."""
     from . import reconcile
+
+    if getattr(args, "check_update", False):
+        from .reconcile_deployment import execution_diagnostic
+
+        try:
+            update = json.load(sys.stdin)
+            if (
+                not isinstance(update, dict)
+                or update.get("phase") != "runtime"
+                or not isinstance(update.get("service"), str)
+                or not update["service"]
+                or not isinstance(update.get("environment", {}), dict)
+            ):
+                raise ValueError("Expected one runtime action with service and environment metadata.")
+            diagnostic = execution_diagnostic(update)
+        except (OSError, ValueError) as error:
+            diagnostic = {
+                "reason": "execution-admission-invalid", "message": str(error),
+            }
+        print(json.dumps({
+            "allowed": diagnostic is None,
+            "diagnostics": [diagnostic] if diagnostic else [],
+        }))
+        return 3 if diagnostic else 0
 
     status_arg = getattr(args, "status", None)
 

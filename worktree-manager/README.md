@@ -95,6 +95,15 @@ exit code from the command, not its output consumer, and decodes staged metadata
 with NUL-delimited fields so an empty optional value cannot shift the installer
 path or runtime root.
 
+Before executing a runtime action, the native wrappers ask the engine's
+read-only [`reconcile-plugins --check-update`](../plugins/agent-worktrees/docs/cli-reference.md#repo-adopted-plugin-reconciliation-reconcile-plugins)
+seam to revalidate the cached installation and publication permission.
+The staged marketplace installer is checked before either synchronous execution
+or detached spawn. A refusal retains its diagnostic; an older engine without
+the capability or a malformed decision warns and skips runtime publication.
+Independent bootstrap and non-publication actions still run. This does not
+replace installer-side ownership checks or grant explicit management authority.
+
 The native maintenance sinks share one physical-line envelope with the
 Python updater: `[HH:mm:ss.fffZ] scope state message [elapsed Ns]` or a
 completed action's `[duration Ns]`. Canonical nested envelopes are retained,

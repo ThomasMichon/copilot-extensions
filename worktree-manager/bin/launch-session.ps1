@@ -546,7 +546,7 @@ function Push-UpdateEnvironment {
     if ($Update -and $Update.PSObject.Properties['unset_environment']) {
         foreach ($key in @($Update.unset_environment | Where-Object { $_ })) {
             $saved[$key] = [Environment]::GetEnvironmentVariable($key, 'Process')
-            [Environment]::SetEnvironmentVariable($key, $null, 'Process')
+            Remove-Item -LiteralPath "Env:$key" -ErrorAction SilentlyContinue
         }
     }
     if ($Update -and $Update.PSObject.Properties['environment'] -and $Update.environment) {
@@ -567,9 +567,44 @@ function Push-UpdateEnvironment {
 function Pop-UpdateEnvironment {
     param([hashtable]$Saved)
     foreach ($entry in $Saved.GetEnumerator()) {
+        if ($null -eq $entry.Value) {
+            Remove-Item -LiteralPath "Env:$($entry.Key)" -ErrorAction SilentlyContinue
+            continue
+        }
         [Environment]::SetEnvironmentVariable(
             $entry.Key, $entry.Value, 'Process'
         )
+    }
+}
+
+function Test-UpdateAdmission {
+    param([object]$Update)
+    if ($Update -and -not $Update.phase -and $Update.service -eq 'agent-worktrees') {
+        $Update | Add-Member -NotePropertyName phase -NotePropertyValue runtime -Force
+    }
+    if (-not $Update -or $Update.phase -ne 'runtime') { return $true }
+    $savedErrorPreference = $ErrorActionPreference
+    $savedNativePreference = $PSNativeCommandUseErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $PSNativeCommandUseErrorActionPreference = $false
+        $reply = ($Update | ConvertTo-Json -Depth 20 -Compress) |
+            & $VenvPython -m agent_worktrees reconcile-plugins --check-update 2>&1
+        $code = $LASTEXITCODE
+        $decision = ($reply -join "`n") | ConvertFrom-Json -ErrorAction Stop
+        foreach ($diagnostic in @($decision.diagnostics)) {
+            Write-SetupLog "Runtime execution: [$($diagnostic.reason)] $($diagnostic.message)" 'WARN'
+        }
+        if ($decision.allowed -isnot [bool]) { throw 'Missing boolean execution admission.' }
+        if ($code -eq 0 -and $decision.allowed) { return $true }
+        if ($code -eq 3 -and -not $decision.allowed -and @($decision.diagnostics).Count -gt 0) { return $false }
+        throw "Unexpected execution admission response (exit $code)."
+    } catch {
+        Write-SetupLog "Runtime execution admission unavailable; skipping runtime action. Update the engine explicitly before retrying: $_" 'WARN'
+        return $false
+    } finally {
+        $ErrorActionPreference = $savedErrorPreference
+        $PSNativeCommandUseErrorActionPreference = $savedNativePreference
     }
 }
 
@@ -578,8 +613,9 @@ function Invoke-SetupAction {
         [string[]]$CommandArgv, [object]$Update,
         [string]$Scope, [string]$Label
     )
+    if (-not (Test-UpdateAdmission $Update)) { return }
     $exe = $CommandArgv[0]
-    $rest = if ($CommandArgv.Count -gt 1) { $CommandArgv[1..($CommandArgv.Count - 1)] } else { @() }
+    $rest = @($CommandArgv | Select-Object -Skip 1)
     $actionTimer = [Diagnostics.Stopwatch]::StartNew()
     $actionExitCode = $null
     $actionSpawnError = $null
@@ -660,7 +696,14 @@ function Invoke-UpdateApply {
 
         # (1) Marketplace installer, iff the download changed the payload.
         #     NO re-exec: a launcher-script change applies on the next launch.
-        if ($status -and $status.plugin_changed) {
+        $stageUpdate = if ($status) {
+            [PSCustomObject]@{
+                phase = 'runtime'; service = 'agent-worktrees'
+                payload_root = $status.plugin_dir; runtime_root = $status.runtime_root
+                environment = if ($status.environment) { $status.environment } else { [PSCustomObject]@{} }
+            }
+        } else { $null }
+        if ($status -and $status.plugin_changed -and (Test-UpdateAdmission $stageUpdate)) {
             $pdir = $status.plugin_dir
             $pluginInstaller = if ($pdir) { Join-Path $pdir 'scripts\install.ps1' } else { $null }
             if ($pluginInstaller -and (Test-Path $pluginInstaller)) {

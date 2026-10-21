@@ -182,6 +182,37 @@ setup_status() {
     [[ "$_SHOW_LAUNCH_STATUS" == "1" ]] && printf '  %s\n' "$msg" >&2 || true
 }
 
+check_update_admission() {
+    local update="$1" reply code messages allowed=0
+    [[ -n "$update" ]] || return 0
+    if reply=$("$PYTHON" -m agent_worktrees reconcile-plugins --check-update <<< "$update" 2>&1); then
+        code=0
+    else
+        code=$?
+    fi
+    if messages=$("$PYTHON" -c '
+import json, sys
+try:
+    decision = json.load(sys.stdin)
+    code = int(sys.argv[1])
+    if code == 0 and decision.get("allowed") is True:
+        raise SystemExit(0)
+    if code != 3 or decision.get("allowed") is not False or not decision.get("diagnostics"):
+        raise ValueError("unexpected admission response")
+    for diagnostic in decision["diagnostics"]:
+        print("Runtime execution: [{}] {}".format(diagnostic.get("reason"), diagnostic.get("message")))
+except (ValueError, KeyError, TypeError, AttributeError):
+    print("Runtime execution admission unavailable; skipping runtime action. Update the engine explicitly before retrying.")
+raise SystemExit(1)
+' "$code" <<< "$reply"); then
+        allowed=1
+    fi
+    while IFS= read -r message; do
+        [[ -n "$message" ]] && setup_log WARN "$message"
+    done <<< "$messages"
+    [[ "$allowed" == 1 ]]
+}
+
 # Write header
 {
     echo "# Worktree Manager — session launch log"
@@ -549,6 +580,18 @@ for value in [
         # (1) Marketplace installer, iff the download changed the payload.
         #     NO re-exec: a launcher-script change applies on the next launch.
         if [[ "$plugin_changed" == "True" ]]; then
+            local _stage_update
+            if ! _stage_update=$("$PYTHON" -c '
+import json, sys
+status = json.load(open(sys.argv[1], encoding="utf-8"))
+print(json.dumps(dict(
+    phase="runtime", service="agent-worktrees", payload_root=status.get("plugin_dir"),
+    runtime_root=status.get("runtime_root"), environment=status.get("environment", {}),
+)))
+' "$status_file") || ! check_update_admission "$_stage_update"; then
+                setup_log WARN 'Staged runtime execution refused; continuing with the existing runtime'
+                plugin_changed="False"
+            fi
             local _stage_env_text=""
             local _stage_env=()
             if ! _stage_env_text=$("$PYTHON" -c "
@@ -662,6 +705,13 @@ for a in json.load(sys.stdin)['updates'][$i].get('argv', []):
     print(a)
 " <<< "$PRE_JSON" 2>/dev/null)
                 if [[ ${#UPDATE_ARGV[@]} -gt 0 ]]; then
+                    _UPDATE_JSON=$("$PYTHON" -c "
+import sys, json
+update = json.load(sys.stdin)['updates'][$i]
+if not update.get('phase') and update.get('service') == 'agent-worktrees': update['phase'] = 'runtime'
+if update.get('phase') == 'runtime': print(json.dumps(update))
+" <<< "$PRE_JSON") || { setup_log WARN "Invalid action for $SVC_NAME; skipping"; continue; }
+                    check_update_admission "$_UPDATE_JSON" || continue
                     _UPDATE_ENV=()
                     _UPDATE_ENV_TEXT=$("$PYTHON" -c "
 import sys, json
@@ -762,6 +812,13 @@ for a in json.load(sys.stdin)['updates'][$_ri].get('argv', []):
     print(a)
 " <<< "$REC_JSON" 2>/dev/null)
                 [[ ${#_RARGV[@]} -gt 0 ]] || continue
+                _RUPDATE=$("$PYTHON" -c "
+import sys, json
+update = json.load(sys.stdin)['updates'][$_ri]
+if not update.get('phase') and update.get('service') == 'agent-worktrees': update['phase'] = 'runtime'
+if update.get('phase') == 'runtime': print(json.dumps(update))
+" <<< "$REC_JSON") || { setup_log WARN "Invalid action for $_RSVC; skipping"; continue; }
+                check_update_admission "$_RUPDATE" || continue
                 if [[ "${_RARGV[0]}" == "copilot" ]] && ! command -v copilot &>/dev/null; then
                     setup_log WARN "Plugin reconcile: skipping $_RSVC (copilot not on PATH)"
                     continue

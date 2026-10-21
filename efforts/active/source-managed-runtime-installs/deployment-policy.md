@@ -147,8 +147,13 @@ mode. Only the runtime-application request is suppressed, with the canonical
 reason and recovery diagnostic retained in its status. Payload changes and
 venv-version drift are checked independently; drift repair cannot override a
 deployment refusal. These checks prepare new plans, not authorize execution of
-old ones. Native launcher consumers must still revalidate cached actions at
-execution; this producer slice does not close that boundary.
+old ones. The native consumers now call the existing reconciler's read-only
+execution-admission seam before each runtime action and before synchronous
+or detached staged-installer spawn. The engine repeats canonical installation
+and policy admission; the shell neither parses deployment policy nor grants
+management permission. Missing engine capability and malformed decisions
+remain explicit skip/readiness outcomes, distinct from an older standalone
+payload that has no deployment policy.
 
 ## Source-qualified lifecycle admission
 

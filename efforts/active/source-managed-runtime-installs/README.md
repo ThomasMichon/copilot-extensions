@@ -134,7 +134,8 @@ publication and command-ownership boundaries; it does not disable whole hooks.
 - [x] Authenticate Worktrees' explicit managed-cell installation through the existing
   genesis/install custody across native staging, candidate handover and callbacks.
 - [x] Gate Worktrees' pre-launch and staged runtime-update planning without suppressing marketplace refreshes, healthy reuse or unrelated repository bootstrap actions.
-- [ ] Revalidate cached launcher plans immediately before native execution, including older standalone compatibility and policy changes after planning.
+- [x] Revalidate cached launcher plans immediately before native execution, including older standalone compatibility and policy changes after planning.
+- [ ] Complete the remaining adopter hook/extension publication map and qualify their retained non-deployment behavior and explicit readiness outcomes.
 - [ ] Keep adapters thin and enforce drift-compatible service interaction without implicit runtime replacement.
 
 ### Phase 4 - Integrate Manager-owned runtime source selection
@@ -553,3 +554,16 @@ onto one branch.
 - This producer boundary is a separate coherent slice from execution admission. A previously prepared launcher plan still needs policy/root/context revalidation immediately before native execution; that remains the next explicit Plan item, not a claimed completion of Phase 3.
 - Review exposed the shared verifier's ready-only status check: a validated namespaced cell awaiting explicit deactivation legitimately permits standalone publication with a present matching policy. New real-helper regressions first reproduced all three producer failures: pre-launch, payload-change staging and drift-only staging.
 - The shared verifier now admits `deactivation-required` only with a namespaced context, preserving every existing identity, root, receipt and deployment-policy check. The producer matrix covers both legacy and deactivation-required scope; a forged legacy deactivation status still refuses. The final four-module selection passes 147 Windows cases and 141 with six Windows-only skips on Linux under the unchanged bounded limits.
+
+### 2026-10-21 - Launcher producer admission merged; native execution next
+- PR #7564 merged as `fdb4fd45633a2f7a725114803e67aa4bc864879c` after corrected-head Copilot approval and successful required checks. The carried-forward deactivation finding names the already-tested correction; its exact-commit reply and resolved thread retain that evidence. Canonical completion reconciled the worktree to merged development source.
+- Re-read both Plan and Validation Plan. Only the producer-side launcher planning item closes. Next reuse the existing execution decision at native stage, pre-launch and reconciliation execution boundaries, proving a policy change after planning cannot invoke the installer while unrelated actions and compatible standalone behavior continue.
+- Both the wider publication/hook/skew boundary and independent source/maintenance/native-adoption gates remain open. No host deployment, policy, source binding, startup entry or cadence changed.
+
+### 2026-10-21 - Native cached-plan execution admission
+- Added a read-only check on the existing reconciler CLI, reusing its canonical execution decision before repository discovery. Native wrappers invoke it before bootstrap/reconciliation runtime actions and before synchronous or detached staged-installer spawn; they do not implement a deployment-policy parser or another updater.
+- Real-helper regressions cover a policy introduced after planning, changed payload/root/context, malformed input and old standalone helper compatibility. A present policy without capable helper support refuses; an engine missing the new execution check is a distinct explicit readiness warning, not silent permission.
+- Native Windows PowerShell 7/5.1 and Linux Bash fixtures retain independent repository actions, progress/exit reporting, environment restoration, fresh replanning and quiet stdout. They cover managed policy, missing engine capability, malformed decisions, legacy unphased Worktrees actions and both staged execution modes without starting a refused installer.
+- The retained-action fixture exposed two coupled PowerShell issues: a null environment assignment can leave an empty variable on newer .NET, and a single remaining argument could be scalar-unrolled before native invocation. Actual removal and an explicit remaining-argument array preserve absence and the complete argv on both PowerShell hosts.
+- The final four-module engine selection passes 163 Windows cases and 157 Linux cases with six platform skips. Native launcher coverage passes 82 Windows cases with 42 platform skips and 50 Linux cases with 74 skips, under unchanged runner bounds. These results qualify this consumer boundary, not the remaining adopter hooks or a fresh host deployment.
+- Next complete the remaining adopter hook/extension publication map and skew/readiness evidence before integrating independent Manager/service source selections. Source-backed maintenance and native adoption remain open; no installed policy, source binding, startup entry or cadence changed.

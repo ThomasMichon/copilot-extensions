@@ -190,7 +190,8 @@ def test_streamed_error_retains_version_skew_detail(monkeypatch, capsys):
 @pytest.mark.parametrize("shell", ["pwsh", "powershell", "bash"])
 @pytest.mark.parametrize("current", [False, True])
 @pytest.mark.parametrize("boundary", ["reconcile", "bootstrap"])
-def test_native_maintenance_reports_outcomes_and_replans(tmp_path, shell, current, boundary):
+@pytest.mark.parametrize("admission", ["allowed", "managed", "old-engine", "malformed"])
+def test_native_maintenance_reports_outcomes_and_replans(tmp_path, shell, current, boundary, admission):
     if shell != "bash" and os.name != "nt":
         pytest.skip("Windows launcher contract")
     if shell != "bash" and not shutil.which(shell):
@@ -222,18 +223,39 @@ def test_native_maintenance_reports_outcomes_and_replans(tmp_path, shell, curren
     package.mkdir()
     (package / "__init__.py").write_text("")
     state = tmp_path / "passes"
+    policy = tmp_path / "policy-after-planning"
+    independent = tmp_path / "independent-action"
+    independent_script = tmp_path / "independent.py"
+    independent_script.write_text(
+        f"from pathlib import Path\nPath({str(independent)!r}).write_text('retained')\n",
+    )
     (package / "__main__.py").write_text(
         "import json,os,sys\nfrom pathlib import Path\n"
         f"state=Path({str(state)!r})\n"
+        "if '--check-update' in sys.argv:\n"
+        "    update=json.load(sys.stdin)\n"
+        "    assert update['phase']=='runtime'\n"
+        f"    admission=Path({str(policy)!r}).read_text()\n"
+        "    if admission=='old-engine':\n"
+        "        print('unrecognized arguments: --check-update',file=sys.stderr); sys.exit(2)\n"
+        "    if admission=='malformed':\n"
+        "        print('{\"allowed\":\"true\",\"diagnostics\":[]}'); sys.exit(0)\n"
+        "    denied=admission=='managed'\n"
+        "    print(json.dumps(dict(allowed=not denied,diagnostics=[dict("
+        "service=update['service'],reason='deployment-managed',message='policy changed after planning')] if denied else [])))\n"
+        "    sys.exit(3 if denied else 0)\n"
         "n=int(state.read_text())+1 if state.exists() else 1\n"
         "state.write_text(str(n))\n"
+        f"Path({str(policy)!r}).write_text({admission!r})\n"
         "assert os.environ['MAINTENANCE_FIXTURE'] == 'parent'\n"
         "assert os.environ['MAINTENANCE_UNSET'] == 'parent'\n"
         f"argv=[sys.executable,{str(child)!r},{str(gate)!r}]\n"
-        "updates=[dict(service=label,argv=args,environment={'MAINTENANCE_FIXTURE':'child'},"
+        "updates=[dict(service=label,phase='runtime',argv=args,environment={'MAINTENANCE_FIXTURE':'child'},"
         "unset_environment=['MAINTENANCE_UNSET']) for label,args in "
         f"[('failed',argv+['7',{literal!r}]),"
         f"('spawn-error',[{str(tmp_path / 'missing-executable')!r}]),('success',argv+['0',{literal!r}])]]\n"
+        "updates[2]['service']='agent-worktrees'; updates[2].pop('phase')\n"
+        f"updates.append(dict(service='repository-bootstrap',argv=[sys.executable,{str(independent_script)!r}]))\n"
         f"print(json.dumps(dict(action={('self-update' if boundary == 'bootstrap' else 'reconcile')!r} "
         f"if n==1 and not {current!r} else 'continue',updates=updates)))\n"
     )
@@ -346,19 +368,32 @@ def test_native_maintenance_reports_outcomes_and_replans(tmp_path, shell, curren
         assert ("launch/bootstrap/" if boundary == "bootstrap" else "reconcile/pass-") not in report
         return
     assert state.read_text() == "2", "success/failure must not replace fresh replanning"
-    assert gate.exists(), "child progress was not streamed"
+    assert independent.exists(), report
+    assert independent.read_text() == "retained"
+    if admission != "allowed":
+        assert not gate.exists(), "refused runtime action was executed"
+        assert (
+            "policy changed after planning" if admission == "managed"
+            else "execution admission unavailable"
+        ) in report
+        return
+    assert gate.exists(), report
     assert "action-diagnostic" in report
     assert report.splitlines().count(canonical) == 2
     assert report.count("native-last-line [elapsed ") == 2
     assert re.search(r"failed.*exit 7.*continuing.*duration [0-9.]+s", report)
-    assert re.search(r"success.*exit 0.*duration [0-9.]+s", report)
+    assert re.search(r"agent-worktrees.*exit 0.*duration [0-9.]+s", report)
     assert re.search(r"spawn-error.*(exit 127|spawn failed).*continuing.*duration [0-9.]+s", report)
     assert "starting" in result.stderr
 
 
 @pytest.mark.parametrize("shell", ["pwsh", "powershell", "bash"])
 @pytest.mark.parametrize("exit_code", [0, 7])
-def test_blocking_marketplace_installer_keeps_native_frames_and_exit(tmp_path, shell, exit_code):
+@pytest.mark.parametrize("admission", ["allowed", "managed", "old-engine", "malformed"])
+@pytest.mark.parametrize("blocking", [True, False])
+def test_blocking_marketplace_installer_keeps_native_frames_and_exit(tmp_path, shell, exit_code, admission, blocking):
+    if not blocking and admission == "allowed":
+        pytest.skip("Streaming fixture is synchronous; refused detached execution is covered")
     if shell == "bash" and os.name != "posix":
         pytest.skip("POSIX shell contract")
     if shell != "bash" and (os.name != "nt" or not shutil.which(shell)):
@@ -368,7 +403,23 @@ def test_blocking_marketplace_installer_keeps_native_frames_and_exit(tmp_path, s
     package = tmp_path / "agent_worktrees"
     package.mkdir()
     (package / "__init__.py").write_text("")
-    (package / "__main__.py").write_text("print('{\"action\":\"continue\"}')\n")
+    marker = tmp_path / "executed"
+    (package / "__main__.py").write_text(
+        "import json,sys\n"
+        "if '--check-update' in sys.argv:\n"
+        "    update=json.load(sys.stdin)\n"
+        "    assert update['phase']=='runtime' and update['service']=='agent-worktrees'\n"
+        f"    admission={admission!r}\n"
+        "    if admission=='old-engine':\n"
+        "        print('unrecognized arguments: --check-update',file=sys.stderr); sys.exit(2)\n"
+        "    if admission=='malformed':\n"
+        "        print('{\"allowed\":\"true\",\"diagnostics\":[]}'); sys.exit(0)\n"
+        "    denied=admission=='managed'\n"
+        "    print(json.dumps(dict(allowed=not denied,diagnostics=[dict("
+        "reason='deployment-managed',message='policy changed after staging')] if denied else [])))\n"
+        "    sys.exit(3 if denied else 0)\n"
+        "print('{\"action\":\"continue\"}')\n",
+    )
     plugin = tmp_path / "installed plugin"
     scripts = plugin / "scripts"
     scripts.mkdir(parents=True)
@@ -383,9 +434,12 @@ def test_blocking_marketplace_installer_keeps_native_frames_and_exit(tmp_path, s
     )))
     env = dict(
         os.environ, HOME=str(stage.parent.parent), USERPROFILE=str(stage.parent.parent),
-        PYTHONPATH=str(tmp_path), WORKTREE_BLOCKING_INSTALL="1",
+        PYTHONPATH=str(tmp_path),
         MAINTENANCE_FIXTURE="parent", MAINTENANCE_UNSET="parent",
     )
+    env.pop("WORKTREE_BLOCKING_INSTALL", None)
+    if blocking:
+        env["WORKTREE_BLOCKING_INSTALL"] = "1"
     log = tmp_path / "setup.log"
     if shell != "bash":
         source = (root / "bin/launch-session.ps1").read_text(encoding="utf-8")
@@ -396,6 +450,7 @@ def test_blocking_marketplace_installer_keeps_native_frames_and_exit(tmp_path, s
 
         (scripts / "install.ps1").write_text(
             "param($Action,$InstallDir,$ProjectName)\n"
+            f"[IO.File]::WriteAllText('{marker}','executed')\n"
             f"if($Action -ne 'update' -or $InstallDir -ne '{runtime_root}'){{throw 'arguments changed'}}\n"
             "if($env:MAINTENANCE_FIXTURE -ne 'child' -or $env:MAINTENANCE_UNSET){throw 'environment changed'}\n"
             "Write-Host 'installer-detail'\n"
@@ -413,7 +468,9 @@ def test_blocking_marketplace_installer_keeps_native_frames_and_exit(tmp_path, s
             function("Format-SetupLine"), function("Write-SetupLog"),
             function("Write-SetupStatus"), function("Write-PlanDiagnostics"),
             function("Push-UpdateEnvironment"), function("Pop-UpdateEnvironment"),
+            function("Test-UpdateAdmission"),
             function("Invoke-SetupAction"), function("Invoke-UpdateApply"),
+            f"function Start-Process {{ [IO.File]::WriteAllText('{marker}','spawned'); throw 'unexpected detached spawn' }}",
             "Invoke-UpdateApply",
             "if($env:MAINTENANCE_FIXTURE -ne 'parent' -or $env:MAINTENANCE_UNSET -ne 'parent'){throw 'environment leaked'}",
             "if($ErrorActionPreference -ne 'Stop' -or -not $PSNativeCommandUseErrorActionPreference){throw 'preference leaked'}",
@@ -428,6 +485,7 @@ def test_blocking_marketplace_installer_keeps_native_frames_and_exit(tmp_path, s
         functions = source[source.index("setup_log() {"):source.index("\n# Write header")]
         (scripts / "install.sh").write_text(
             "#!/bin/bash\nset -euo pipefail\n"
+            f"printf executed > {shlex.quote(str(marker))}\n"
             f"[[ \"$1\" == update && \"$2\" == --install-dir && \"$3\" == {shlex.quote(str(runtime_root))} ]]\n"
             "[[ \"$MAINTENANCE_FIXTURE\" == child && -z \"${MAINTENANCE_UNSET+x}\" ]]\n"
             "printf '%s\\n' installer-detail\n"
@@ -443,6 +501,7 @@ def test_blocking_marketplace_installer_keeps_native_frames_and_exit(tmp_path, s
             "set -euo pipefail; _NO_UPDATE=0; _UPDATE_APPLIED=''; _STAGE_PID=''; LAUNCH_PROJECT=''",
             f"PYTHON={shlex.quote(python)}",
             functions, apply,
+            f"setsid() {{ printf spawned > {shlex.quote(str(marker))}; }}",
             f"_SETUP_LOG_DIR={shlex.quote(str(tmp_path))}; SETUP_LOG={shlex.quote(str(log))}",
             "invoke_update_apply 0",
             '[[ "$MAINTENANCE_FIXTURE" == parent && "$MAINTENANCE_UNSET" == parent ]]',
@@ -457,6 +516,14 @@ def test_blocking_marketplace_installer_keeps_native_frames_and_exit(tmp_path, s
     assert result.returncode == 0, result.stdout + result.stderr
     assert result.stdout == ""
     report = log.read_text()
+    if admission != "allowed":
+        assert not marker.exists(), report
+        assert (
+            "policy changed after staging" if admission == "managed"
+            else "execution admission unavailable"
+        ) in report
+        assert "Checking bootstrap services" in report
+        return
     assert "installer-detail [elapsed " in report
     assert "installer-diagnostic [elapsed " in report
     assert "installer-last-line [elapsed " in report

@@ -1192,8 +1192,20 @@ helper cannot silently ignore it.
 deployment permission before either its default or custom execution adapter.
 This catches a policy added after planning. Healthy runtimes need no
 publication permission to remain selected. Uninstall is a separate action,
-not runtime publication. These checks cover the reconciler, not independent
-bootstrap, first-use or direct native installer entry points.
+not runtime publication.
+
+Native launch wrappers use `reconcile-plugins --check-update` with one runtime
+action on JSON stdin immediately before execution. It returns
+`{"allowed": true, "diagnostics": []}` with exit 0, or `allowed: false`
+and recovery diagnostics with exit 3. It never discovers a repository,
+replans or executes the action. Cached payload/root/context changes are refused
+through the same execution admission used by `--apply`.
+An older standalone payload without policy needs no new policy helper.
+An older engine without this check is different: wrappers skip runtime
+publication with an explicit readiness warning rather than treating absent
+capability as permission. Independent bootstrap/payload/uninstall actions
+continue under their existing contracts. Direct native installer admission
+remains that installer's responsibility.
 
 ### Teardown sweep (`uninstall-plugins`)
 

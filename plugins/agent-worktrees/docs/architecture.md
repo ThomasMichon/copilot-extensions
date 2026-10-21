@@ -1309,8 +1309,13 @@ sibling plugins or modules.
 The `pre-launch` planner applies the same decision before emitting Worktrees'
 own stale-runtime action, without suppressing unrelated configured repository
 bootstrap actions. Healthy unchanged runtimes need no publication permission.
-Planning admission does not authorize executing a cached action after the
-policy changes; launcher-side execution revalidation remains a separate boundary.
+The native launcher repeats execution admission through
+`reconcile-plugins --check-update` before a runtime action or a staged
+installer spawn, including the detached path. It uses the same canonical
+payload/root/context and deployment-policy check as in-process reconciliation,
+not a shell-owned policy parser. Missing engine capability or an invalid
+response skips that runtime action with an explicit readiness warning; it
+does not abort launch, suppress unrelated actions or imply runtime readiness.
 
 Skip with `--no-update` or `WORKTREE_NO_UPDATE=1`. The Picker reports
 **Updates paused** for that launch and suppresses the refresh action, regardless
