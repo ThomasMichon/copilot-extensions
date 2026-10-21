@@ -586,7 +586,8 @@ for value in [
 import json, sys
 status = json.load(sys.stdin)
 print(json.dumps(dict(
-    phase="runtime", service="agent-worktrees", payload_root=status.get("plugin_dir"),
+    phase="runtime", service="agent-worktrees", trigger="stage-update",
+    payload_root=status.get("plugin_dir"),
     runtime_root=status.get("runtime_root"), environment=status.get("environment", {}),
 )))
 ' <<< "$stage_snapshot") || ! check_update_admission "$_stage_update"; then

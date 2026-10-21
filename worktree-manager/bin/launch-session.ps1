@@ -704,7 +704,7 @@ function Invoke-UpdateApply {
         #     NO re-exec: a launcher-script change applies on the next launch.
         $stageUpdate = if ($status) {
             [PSCustomObject]@{
-                phase = 'runtime'; service = 'agent-worktrees'
+                phase = 'runtime'; service = 'agent-worktrees'; trigger = 'stage-update'
                 payload_root = $status.plugin_dir; runtime_root = $status.runtime_root
                 environment = if ($status.environment) { $status.environment } else { [PSCustomObject]@{} }
             }

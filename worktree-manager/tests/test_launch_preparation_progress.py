@@ -416,6 +416,7 @@ def test_blocking_marketplace_installer_keeps_native_frames_and_exit(tmp_path, s
         "if '--check-update' in sys.argv:\n"
         "    update=json.load(sys.stdin)\n"
         "    assert update['phase']=='runtime' and update['service']=='agent-worktrees'\n"
+        "    assert update.get('trigger')=='stage-update'\n"
         f"    assert update['runtime_root']=={str(runtime_root)!r}, 'runtime identity was recoded'\n"
         f"    admission={admission!r}\n"
         "    if admission=='old-engine':\n"

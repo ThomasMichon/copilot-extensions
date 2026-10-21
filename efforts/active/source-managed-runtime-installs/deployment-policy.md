@@ -154,6 +154,10 @@ and policy admission; the shell neither parses deployment policy nor grants
 management permission. Missing engine capability and malformed decisions
 remain explicit skip/readiness outcomes, distinct from an older standalone
 payload that has no deployment policy.
+Staged Worktrees self-update repeats its own canonical marketplace-or-direct
+payload discovery before comparing the cached installation. Ordinary
+marketplace reconciliation does not gain a direct-payload fallback; a trigger
+marker cannot borrow another plugin's installation or skip policy admission.
 
 ## Source-qualified lifecycle admission
 

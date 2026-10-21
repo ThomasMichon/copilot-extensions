@@ -799,7 +799,9 @@ def cmd_reconcile_plugins(args: argparse.Namespace) -> int:
                 )
             ):
                 raise ValueError("Expected one runtime action with service and environment metadata.")
-            diagnostic = execution_diagnostic(update)
+            diagnostic = execution_diagnostic(
+                update, staged=update.get("trigger") == "stage-update",
+            )
         except (OSError, ValueError) as error:
             diagnostic = {
                 "reason": "execution-admission-invalid", "message": str(error),

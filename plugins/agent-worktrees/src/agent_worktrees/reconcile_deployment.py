@@ -92,15 +92,24 @@ def publication_diagnostic(
         return denied("deployment-policy-unavailable", str(error))
 
 
-def execution_diagnostic(update: dict[str, Any]) -> dict[str, Any] | None:
-    """Revalidate runtime steps immediately before either execution adapter."""
+def execution_diagnostic(
+    update: dict[str, Any], *, staged: bool = False,
+) -> dict[str, Any] | None:
+    """Revalidate runtime steps, retaining the stager's own Worktrees discovery."""
     from . import reconcile
 
     if update.get("phase") != "runtime":
         return None
     plugin = str(update.get("service", ""))
     try:
-        payload = reconcile.core_installed_payload_dir(plugin)
+        if staged:
+            if plugin != reconcile.SELF_PLUGIN:
+                raise ValueError("Staged payload discovery is only supported for agent-worktrees.")
+            from .update_stage import discover_plugin_dir
+
+            payload, _layout = discover_plugin_dir()
+        else:
+            payload = reconcile.core_installed_payload_dir(plugin)
         if payload is None:
             raise ValueError("The owning plugin payload is no longer installed.")
         environment, root = reconcile.runtime_installer_environment(plugin, payload)
