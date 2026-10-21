@@ -8,6 +8,7 @@ import json
 import time
 import uuid
 from dataclasses import replace
+from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
 from .caller_session import normalize_caller_session_id
@@ -84,6 +85,7 @@ class _SessionStartMixin:
         replace_session_id: str | None = None,
         retain_container_lock_on_failure: bool = False,
         creation_session_id: str | None = None,
+        creation_before_launch: Callable[[], Awaitable[None]] | None = None,
     ) -> Session:
         """Create and start a new agent session.
 
@@ -183,6 +185,23 @@ class _SessionStartMixin:
         session_id = creation_session_id or str(uuid.uuid4())[:12]
         if session_id in self._sessions:
             raise ValueError("creation session already exists; reconcile its original start")
+        prepared_local_launch = None
+        if creation_before_launch is not None:
+            from .local_launch_preparation import prepare
+            from .venue_plugins import with_controller_origin
+
+            if not creation_session_id or target.type != "local" or not target.explicit_cwd:
+                raise ValueError("creation preflight requires a keyed exact local target")
+            target = with_controller_origin(
+                target, controller_origin,
+                caller_session_id=normalize_caller_session_id(caller_session_id),
+            )
+            prepared_local_launch = await prepare(target, session_id)
+            if self._draining:
+                raise DaemonDrainingError("session")
+            await creation_before_launch()
+            if self._draining:
+                raise DaemonDrainingError("session")
         name = _generate_name()
         now = time.time()
 
@@ -361,6 +380,7 @@ class _SessionStartMixin:
                     mcp_servers=mcp_servers,
                     model=model,
                     effort=effort,
+                    **({"prepared_local_launch": prepared_local_launch} if prepared_local_launch is not None else {}),
                 )
             elif container_target is not None:
                 from .venue_plugins import prepare_venue_plugins, resolve_controller_cwd

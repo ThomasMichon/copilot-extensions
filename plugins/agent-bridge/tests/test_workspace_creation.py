@@ -28,6 +28,12 @@ pytestmark = pytest.mark.contract("agent_bridge.workspace_creation")
 
 @pytest.fixture
 def creation_rig(rig, monkeypatch, tmp_path):
+    from agent_bridge import local_launch_preparation
+
+    async def resolve(target, **_kwargs):
+        return ["copilot", "--acp", "--stdio"], target.cwd, {}
+
+    monkeypatch.setattr(local_launch_preparation, "resolve_local_launch", resolve)
     row = {
         "id": "worktree-a", "repo": "test-project", "path": str(tmp_path),
         "creation_nonce": "original-allocation", "session_count": 0, "status": "active",
