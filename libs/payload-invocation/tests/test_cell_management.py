@@ -191,7 +191,11 @@ def test_backend_borrows_outer_management_without_reacquiring(
         with governance.held(timeout=.1):
             assert len(governance.publication_locks) == 2
             assert all(lock._owner()["pid"] == os.getpid() for lock in governance.publication_locks)
-            governance.recheck()
+            locks = governance.publication_locks
+            with governance.held(timeout=.1):
+                assert governance.publication_locks == locks
+                governance.recheck()
+            assert governance.publication_locks == locks
         assert _snapshot(binding_fixture["home"]) == before
         primitive.borrow_runtime_publication(**{
             **arguments, "environment": {**arguments["environment"], **patch},

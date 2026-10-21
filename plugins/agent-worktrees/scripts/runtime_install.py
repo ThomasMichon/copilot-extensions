@@ -136,6 +136,12 @@ class Governance:
 
     @contextmanager
     def held(self, *, timeout: float = 180):
+        if self.publication_locks:
+            for lock in self.publication_locks:
+                lock.assert_owned()
+            self.recheck()
+            yield
+            return
         deadline = time.monotonic() + timeout
         with ExitStack() as stack:
             locks = []
@@ -726,8 +732,9 @@ def settle_candidate(
     frontend: dict | None = None, publication_source_root: Path | None = None,
     child_timeout: float = 180,
     base_python: Path | None = None,
+    governance: Governance | None = None,
 ) -> dict:
-    governance = Governance(root, payload)
+    governance = governance if governance is not None else Governance(root, payload)
     if governance.signature() != expected_governance:
         raise InstallationRefused("Installation governance changed before candidate handover")
     root = governance.root
@@ -753,12 +760,12 @@ def settle_candidate(
         manifest = deployment.manifest_bytes(identity, candidate_slot, payload_hash)
 
         monitor_scope = cfg.install_dir().resolve() == root
-        guard = cutover_guard
-        if guard is None:
-            guard = cutover._acquire_cutover_lock(root / "status-monitor-routing")
-            custody.callback(guard.release)
-        print(f"Runtime {version}: cutover authority acquired", flush=True)
-        with governance.held(timeout=wait_timeout):
+        with governance.held(timeout=wait_timeout), ExitStack() as cutover_custody:
+            guard = cutover_guard
+            if guard is None:
+                guard = cutover._acquire_cutover_lock(root / "status-monitor-routing")
+                cutover_custody.callback(guard.release)
+            print(f"Runtime {version}: cutover authority acquired", flush=True)
             selected = _selected(root)
             if selected is not None and selected != previous:
                 custody.enter_context(runtime.retention_lease(root, selected, timeout=wait_timeout))

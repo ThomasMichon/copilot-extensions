@@ -102,6 +102,11 @@ caller's existing `-BootstrapPython` or `--runtime-publication-python`. Ordinary
 standalone native installation gains no interpreter prerequisite. The backend
 borrows the same locks through construction, retained candidate handover and
 native helper callbacks; it never reacquires an outer manager's locks.
+Publication adapters acquire namespace custody before any service cutover lock,
+including ordinary standalone callers addressing the same cell. Nested
+settlement retains that custody until cutover authority has been released;
+a standalone waiter must not hold cutover while waiting for a manager's
+namespace owners.
 Manager/source-selection integration remains separate from this custody API.
 
 The bounded `payload-invocation` portfolio contains T2 borrower/native-admission
@@ -110,6 +115,7 @@ root:
 
 ```text
 python tools/run-plugin-tests.py payload-invocation --test-file tests/test_cell_management.py
+python tools/run-plugin-tests.py payload-invocation --test-file tests/test_cell_publication_overlap.py
 python tools/run-plugin-tests.py payload-invocation --allow-explicit-tiers --test-file tests/test_cell_management_install.py -k pwsh
 ```
 

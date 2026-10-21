@@ -269,7 +269,7 @@ def test_one_owner_retains_candidate_and_rollback_until_actual_cutover(
         assert result["runtime_version"] == "2.0.0"
         assert driver.runtime.current_version(root) == "2.0.0"
     assert previous.is_dir()
-    assert authority == ["enter", "leave", "enter", "leave", "cutover-released"]
+    assert authority == ["enter", "leave", "enter", "cutover-released", "leave"]
     for version in ("1.0.0", "2.0.0"):
         with driver.runtime._kernel_lease(root, version, kind="retention", shared=False, timeout=0):
             pass
@@ -380,7 +380,7 @@ def test_publication_failure_retains_custody_through_observed_outcome(
             expected_governance={}, previous="1.0.0",
         )
     assert raised.value is failure
-    assert events[-2:] == ["governance-released", "cutover-released"]
+    assert events[-2:] == ["cutover-released", "governance-released"]
     if committed:
         assert events.count("outcome-observed") == 1
         assert "restore" not in events

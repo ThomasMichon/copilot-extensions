@@ -143,14 +143,19 @@ def _pid_alive(pid: int) -> bool:
         from .diagnostic_exit import pid_alive_windows
 
         return pid_alive_windows(pid)
-    if hasattr(os, "pidfd_open"):
+    pidfd_open = getattr(os, "pidfd_open", None)
+    if not callable(pidfd_open) and platform.system() == "Linux":
+        from .singleton_linux import _open_pidfd
+
+        pidfd_open = _open_pidfd
+    if callable(pidfd_open):
         from .diagnostic_exit import wait_posix
 
         try:
-            descriptor = os.pidfd_open(pid)
+            descriptor = pidfd_open(pid)
         except ProcessLookupError:
             return False
-        except OSError:
+        except (OSError, NotImplementedError):
             pass
         else:
             try:

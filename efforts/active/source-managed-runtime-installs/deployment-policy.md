@@ -13,7 +13,7 @@ Installation-mode governance owns legacy versus namespaced selection,
 activation and transfer. Command binding owns source-qualified installation
 identity. Canonical runtime construction/publication owns immutable candidates,
 redirects and rollback. Manager orchestrates an explicitly selected install;
-Agent Machines owns scheduled invocation.
+the [maintenance slice](maintenance.md) owns recurring invocation.
 
 Managed deployment is an additional authority decision at those existing
 publication boundaries, not another installation mode, source of actual-root
@@ -173,6 +173,10 @@ Worktrees' native staging, backend construction, retained candidate handover
 and native callbacks authenticate and borrow the same live genesis/install
 owners. A context receipt or staging environment flag alone remains
 insufficient; namespaced installs are not coerced into legacy command binding.
+Standalone and managed flows acquire namespace custody before service cutover.
+Explicit modes retain the same governance owner through nested settlement and
+release cutover before releasing the namespace, avoiding an overlap cycle with
+an outer management owner.
 Manager source selection and other caller/launcher gates remain open.
 
 ## Native bootstrap and early first-use admission

@@ -117,7 +117,7 @@ def test_dev_owner_refuses_inputs_outside_claiming_worktree(modes, tmp_path):
 
 @pytest.mark.parametrize("construction_failure", [False, True])
 @pytest.mark.parametrize("package_version", ["1.0.0-dev7", "1.0.0+local"])
-def test_repair_guard_precedes_allocation_governance_and_real_construction(
+def test_repair_namespace_then_cutover_precede_allocation_and_real_construction(
     modes,
     tmp_path,
     monkeypatch,
@@ -147,23 +147,28 @@ def test_repair_guard_precedes_allocation_governance_and_real_construction(
     class Governance:
         def __init__(self, requested, payload):
             self.root, self.payload = requested, payload
+            self.active = False
 
         def signature(self):
             return {"generation": 1}
 
         @contextmanager
         def held(self, *, timeout=180):
-            assert events[0] == "acquire-cutover"
+            if self.active:
+                yield
+                return
+            self.active = True
             events.append("enter-governance")
             try:
                 yield
             finally:
                 events.append("leave-governance")
+                self.active = False
 
     @contextmanager
     def candidate(requested, version, **kwargs):
         assert requested == root
-        assert events == ["acquire-cutover", "enter-governance"]
+        assert events == ["enter-governance", "acquire-cutover"]
         assert version.startswith(package_version)
         assert version != "broken" and "repair." in version
         assert kwargs["construction_data"] == provenance
@@ -186,12 +191,12 @@ def test_repair_guard_precedes_allocation_governance_and_real_construction(
 
     def settle(requested, version, **kwargs):
         assert events == [
-            "acquire-cutover",
             "enter-governance",
+            "acquire-cutover",
             "construct",
-            "leave-governance",
         ]
         assert kwargs["cutover_guard"] is guard
+        assert kwargs["governance"].active
         assert kwargs["lifecycle_slot"] == Path(sys.prefix).resolve()
         assert kwargs["package_version"] == package_version
         assert kwargs["previous"] == "broken"
@@ -226,17 +231,19 @@ def test_repair_guard_precedes_allocation_governance_and_real_construction(
         with pytest.raises(OSError, match="construction storage failure"):
             modes.run_owned(root, plugin, **arguments)
         assert events == [
-            "acquire-cutover",
             "enter-governance",
+            "acquire-cutover",
             "construct",
-            "leave-governance",
             "release-cutover",
+            "leave-governance",
         ]
     else:
         result = modes.run_owned(root, plugin, **arguments)
         assert result["package_version"] == package_version
         assert result["runtime_version"] != package_version
-        assert events[-3:] == ["settle", "release-candidate", "release-cutover"]
+        assert events[-4:] == [
+            "settle", "release-candidate", "release-cutover", "leave-governance",
+        ]
     assert (previous / ".install-complete.json").read_text() == "broken evidence"
     with lifecycle.runtime._kernel_lease(
         root, "broken", kind="retention", shared=False, timeout=0
@@ -372,18 +379,23 @@ def test_dev_release_keeps_original_claim_until_restoration_settles(
     class Governance:
         def __init__(self, requested, payload):
             self.root, self.payload = requested, payload
+            self.active = False
 
         def signature(self):
             return {}
 
         @contextmanager
         def held(self, *, timeout=180):
-            assert "enter-governance" not in events[-1:]
+            if self.active:
+                yield
+                return
+            self.active = True
             events.append("enter-governance")
             try:
                 yield
             finally:
                 events.append("leave-governance")
+                self.active = False
 
     guard = SimpleNamespace(release=lambda: events.append("release-cutover"))
 
@@ -392,7 +404,8 @@ def test_dev_release_keeps_original_claim_until_restoration_settles(
         assert kwargs["cutover_guard"] is guard
         assert kwargs["payload_hash"] == "original-content"
         assert kwargs["package_version"] == "1.0.0"
-        assert events == ["enter-governance", "leave-governance"]
+        assert events == ["enter-governance"]
+        assert kwargs["governance"].active
         assert lifecycle.runtime.read_dev_claim(root)["previous_version"] == "original"
         for retained in ("original", "dev"):
             with pytest.raises(lifecycle.runtime.RetentionTimeout):
@@ -436,7 +449,7 @@ def test_dev_release_keeps_original_claim_until_restoration_settles(
         assert modes.run_owned(root, plugin, **arguments)["reused"] is True
         assert lifecycle.runtime.read_dev_claim(root) is None
         assert lifecycle.runtime.current_version(root) == "original"
-    assert events[-1] == "release-cutover"
+    assert events[-2:] == ["release-cutover", "leave-governance"]
 
 
 @pytest.mark.timeout(650)
