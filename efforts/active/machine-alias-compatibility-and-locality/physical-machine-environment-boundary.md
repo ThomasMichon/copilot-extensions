@@ -308,9 +308,9 @@ Do not rewrite old receipts or backfill identity merely by replaying them.
 - [x] Implement shared-selection derivation and actual create/system/bridge/
   paired producers behind the internal legacy-default mode, with negative
   pre-effect cases and unchanged legacy output controls in #7572.
-- [ ] Wire complete launch admission, creation-key replay and retained tail
+- [x] Wire complete launch admission, creation-key replay and retained tail
   repair; exercise both old receipts and new tuple receipts without allocating
-  a replacement on retry or refusal.
+  a replacement on retry or refusal in #7582.
 - [ ] Wire new anchor and external-adoption records through the same opt-in
   boundary; prove existing records are returned byte-for-byte unchanged.
 - [ ] Prove source one-term equivalence through actual creation/lookup/resume

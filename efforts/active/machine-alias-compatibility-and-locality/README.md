@@ -384,6 +384,42 @@ unrelated service changes or a second machine registry.
 
 ## Journal
 
+### 2026-10-21 - New anchor and external-adoption source slice
+- Added the reviewed internal legacy-default mode to the actual anchor and
+  external linked-worktree producers. A lazy identity factory runs only after
+  winning the existing record lock; new tuples use the receiving namespace and
+  current execution map. Anchor creation now also uses atomic if-absent
+  semantics instead of an existence check followed by an overwriting writer.
+- Existing records and competing winners retain their original representation,
+  creation nonce, sessions, head, title, disposition flags and controller/claim
+  references. External adoption retains Git's actual linked checkout, branch
+  and anchor authority, including historical repeated prefixes.
+- Actual producer-to-tracking-to-JSON/controller fixtures cover Windows, WSL
+  and Linux metadata, with legacy controls, registry/platform/namespace
+  refusals and competing creation. The affected bounded source portfolio
+  passed 794 tests with one conditional skip. This is Linux-contained Git
+  execution, not native Windows or installed-consumer acceptance.
+- Review/publication remains next for this slice. The containing effort stays
+  Active; actual one-term creation/lookup/resume equivalence, release,
+  installed acceptance and separately reviewed default activation remain open.
+  No live record migration, registry edit or runtime rollout occurred.
+
+### 2026-10-21 - Retained allocation source merged; new-record admission next
+- #7582 merged as `6cf24adbae071dc3f06146de274d4e8a82298375`
+  after current-head approval of
+  `cffa802c449d9dfe1b7d249bea722d63d5860a50` and passing required CI.
+  The review's partial-tuple downgrade finding was reproduced and fixed at
+  all three receipt-owner boundaries without changing the shared codec.
+- The complete admission/replay/repair source sub-item is now complete:
+  533 affected tests passed with four conditional skips, and the final
+  exact-source unit packet passed all 322 tests with its existing guards.
+  Managed completion reconciled both landed commits and retained a backup.
+- Continue with new anchor and external linked-worktree admission behind the
+  same legacy-default opt-in. Prove that existing/competing if-absent records
+  remain unchanged, then complete actual creation/lookup/resume one-term
+  equivalence. No ordinary-default activation, real-record migration,
+  installed acceptance or containing effort completion is claimed.
+
 ### 2026-10-21 - Complete admission and retained replay source
 - Implemented the next reviewed gated-producer slice: a frozen complete
   allocation derived by the existing locked launch writer, consumed unchanged
@@ -401,9 +437,10 @@ unrelated service changes or a second machine registry.
   Git pair repair, with Windows/WSL/Linux metadata fixtures and both suffix
   lengths: 533 affected tests passed with four conditional skips. This is not
   native Windows or installed-consumer acceptance.
-  Review/publication remains pending; ordinary defaults, anchor/external opt-in,
-  one-term equivalence, release qualification and installed acceptance remain
-  open. No live records, runtime or registry was migrated.
+  Review/publication was pending at this source checkpoint; ordinary defaults,
+  anchor/external opt-in, one-term equivalence, release qualification and
+  installed acceptance remain open. No live records, runtime or registry was
+  migrated.
 
 ### 2026-10-21 - First producer source merged; admitted allocation next
 - #7572 merged as `d8d9c19edc16026ab0ea03d9bde8e215cea807b4`

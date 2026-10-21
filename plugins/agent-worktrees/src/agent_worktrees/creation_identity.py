@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Literal
 
 from machine_transport.registry import resolve_machine_selection
@@ -48,3 +49,27 @@ def require_same_machine_identity(
 ) -> None:
     if identity is not None and new_machine_identity(config, "tuple-v1") != identity:
         raise execution_spaces.ExecutionSpaceError("creation machine identity changed before allocation")
+
+
+def new_tracking_identity(
+    mode: IdentityMode, *, repo: str, machine: str, platform_name: str,
+    tracking_path: Path, anchor_path: str | None = None, config: cfg.Config | None = None,
+) -> WorktreeMachineIdentity | None:
+    """Derive a new ledger identity only inside the winning if-absent boundary."""
+    validate_mode(mode)
+    if mode == "legacy":
+        return None
+    if config is None:
+        config = cfg.load_config()
+    if (
+        repo != config.repo_name or machine != config.machine or platform_name != config.platform
+        or tracking_path.resolve() != cfg.tracking_dir(config.repo_name).resolve()
+        or (
+            anchor_path is not None
+            and Path(anchor_path).resolve() != Path(config.default_repo.anchor).resolve()
+        )
+    ):
+        raise execution_spaces.ExecutionSpaceError(
+            "new tracking identity conflicts with the receiving project namespace",
+        )
+    return new_machine_identity(config, mode)

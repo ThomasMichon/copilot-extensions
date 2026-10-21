@@ -11,6 +11,7 @@ import yaml
 
 from . import config as cfg
 from . import obligations
+from .creation_identity import IdentityMode, new_tracking_identity, validate_mode
 
 if TYPE_CHECKING:
     from . import tracking
@@ -441,12 +442,12 @@ def load_or_create_anchor_record(
     machine: str,
     platform_name: str,
     tracking_path: Path,
+    *,
+    identity_mode: IdentityMode = "legacy",
 ) -> tracking.WorktreeRecord:
+    validate_mode(identity_mode)
     tracking = _tracking()
-    path = tracking_path / f"{ANCHOR_ID}.yaml"
-    if path.exists():
-        return tracking.load_record(path)
-    return tracking.create_new_record(
+    record, _created = tracking.create_new_record_if_absent(
         ANCHOR_ID,
         ANCHOR_ID,
         anchor_path,
@@ -455,7 +456,12 @@ def load_or_create_anchor_record(
         platform_name,
         tracking_path,
         pair_kind="anchor",
+        machine_identity_factory=lambda: new_tracking_identity(
+            identity_mode, repo=repo, machine=machine, platform_name=platform_name,
+            tracking_path=tracking_path, anchor_path=anchor_path,
+        ),
     )
+    return record
 
 
 def claim_handoff_reservation(

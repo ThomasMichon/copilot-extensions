@@ -130,10 +130,21 @@ tuple and exact pair stub, not a fresh allocation. A proven compatible legacy
 registry alias keeps its original record and reciprocal-reference spelling.
 Replacement of the retained nonce or owner during repair refuses.
 
+`load_or_create_anchor_record` and `_adopt_linked_worktree` expose the same
+internal opt-in for genuinely new records. The existing if-absent record lock
+selects the winner before deriving a tuple. Derivation checks the receiving
+project, tracking namespace and execution configuration; anchor admission also
+checks the configured anchor, and external adoption keeps Git's actual anchor,
+linked-checkout path, ID and branch as authority. It does not rename an externally
+created checkout to match prospective naming. Opt-in derivation errors propagate
+instead of falling back to a legacy write. Existing records, including a
+competing creation winner, return with their original identity and bytes and
+without requesting a new tuple from the registry.
+
 The timestamp/suffix-only `allocation` input still cannot admit a new tuple;
 the complete admitted value is required. These source APIs are not CLI flags,
 settings or rollout switches. Ordinary create, anchor admission and externally
-adopted checkout producers still emit legacy records. Remaining producer
-integration, one-term equivalence and installed-reader acceptance stay gated
+adopted checkout producers still emit legacy records. One-term equivalence
+and installed-reader acceptance stay gated
 before ordinary-default activation. No historical ID, path, stored reference
 or session is rewritten.
