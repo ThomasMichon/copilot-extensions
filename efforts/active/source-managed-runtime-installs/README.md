@@ -127,8 +127,9 @@ publication and command-ownership boundaries; it does not disable whole hooks.
 - [x] Gate each plugin's reconciliation plan and in-process execution without suppressing marketplace refresh or independent targets.
 - [x] Qualify shared legacy lifecycle publication admission and explicit management purpose on the existing source-qualified lease.
 - [ ] Cover session bootstrap and indirect first-use publication without disabling other hook or extension behavior.
-- [ ] Qualify Logger's direct native installer admission before staging, preserving standalone stamping and canonical management custody.
-- [ ] Gate the common CodeSpaces/Logger/Pull Requests/Vault bootstrap family's first dispatch and pre-dispatch trace/status/lock/reaping writes, retaining independent hook behavior and healthy dispatch.
+- [x] Qualify Logger's direct native installer admission before staging, preserving standalone stamping and canonical management custody.
+- [ ] Gate the common CodeSpaces/Logger/Pull Requests/Vault bootstrap family's first stamping and drift reconciliation before lock/reaping/dispatch, retaining independent hook behavior and healthy dispatch.
+- [ ] Gate generated first-use wrappers before boot trace, provision status and orchestration-lock writes, preserving admitted provisioning and healthy runtime invocation.
 - [x] Qualify Worktrees' native bootstrap and payload-local early first-use
   publication gates, retaining standalone reconciliation and healthy dispatch.
 - [x] Qualify Worktrees' cell-installer pre-staging and retained-backend
@@ -608,3 +609,15 @@ onto one branch.
 - Retained source reselection passes thirteen cases on each platform using the actual canonical source-capture helper. Its fixtures now declare a real directory marketplace and distinguish published helpers from narrowly verified private recovery stages. Existing source-install/source-identity coverage passes 26/50 Windows cases, with four/three platform skips. Lifecycle command/stdio contracts pass 49/15 Windows cases and 48/11 Linux cases, with explicit platform skips. Deployment/adapters/vendoring/packaging passes 83 Windows cases with 29 skips; the Linux package-failure module passes 85 cases. Canonical vendor equality, all thirteen install contracts, bootstrap synchronization, module-size and changefile guards pass.
 - A broader native snapshot matrix is not green: outdated extracted-installer fixtures, POSIX-only filename/replacement assumptions and a real installed cell-slot self-stage refusal are tracked in #7612. That separate qualification dependency remains an explicit open Plan item; focused direct-installer results do not close it.
 - The first-use wrappers' existing boot trace, provision status and orchestration-lock writes are explicitly outside this direct-installer slice. Their own earlier admission gate is now a named open Plan item, not concealed by the snapshot publication assertions. No installed policy, source binding, service role, startup entry or maintenance cadence changed.
+
+### 2026-10-21 - Logger direct-installer boundary merged
+- PR #7598 merged as `286c020d8a5eb74cf69f67816534905435d47be1` after exact-head Copilot review reported no open findings and required checks passed. The accepted comment-shaped verdict satisfies the owner-authored review policy; author-generated inline reply reviews were not treated as independent verdicts.
+- Re-read the Plan and Validation Plan after the actual merge. Only Logger's direct-installer admission item closes. Common bootstrap trace/status/lock/reaping admission is the next implementation slice; #7612 remains a separate native snapshot/cell-slot qualification dependency.
+- Manager/service/plugin-content source separation, source-backed maintenance and installed native adoption remain open. This merge changes no local installation or maintenance enrollment.
+
+### 2026-10-21 - Common bootstrap publication admission
+- Added thin native adapters composing the existing canonical publication and legacy-entrypoint probes, rather than duplicating deployment-policy parsing. The four-member shared bootstrap family calls them before first stamping and before drift-reconcile reaping, lock writes or background dispatch. Healthy current runtimes remain a read-only no-op.
+- Isolated process fixtures cover managed, malformed, foreign and future-version deployment policy; absent and explicit standalone behavior; helperless compatibility; failed or missing adapters; and unchanged standalone reconcile dispatch. Stale-process and background-launch paths use recording doubles, never host process termination.
+- The actual separate hook expressions still invoke guidance and provider registration after bootstrap refusal. The Pull Requests admission wrapper remains intact. Tests capture its real child-process stderr rather than assuming an in-process console writer captures inherited handles.
+- Split common bootstrap admission from generated first-use wrapper trace/status/lock admission so the latter cannot be silently marked complete by this bounded change. Both Plan items remain open pending their own reviewed implementation; #7612 remains the separate native snapshot/cell-slot qualification dependency.
+- This closes a bounded part of the source-managed-runtime vision through the existing shared installation owner. It changes neither marketplace delivery nor local runtime sources, installed policy, service roles, startup configuration or maintenance cadence.

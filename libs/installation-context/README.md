@@ -21,6 +21,16 @@ cells. Mutation remains explicit and non-automatic:
   conservative legacy-footprint evidence from `payload-invocation.json` and
   gate installer/bootstrap mutation through the read-only `probe-legacy`
   decision.
+- `plugin-publication-probe.sh` and `plugin-publication-probe.ps1` compose the
+  existing read-only `probe-plugin-publication` and `probe-legacy` decisions.
+  Both publication and installation-mode admission must allow mutation of the
+  same legacy root. They emit no success output, diagnose refusal on stderr
+  and exit 3 without publishing, provisioning or installing an interpreter.
+  The common CodeSpaces/Logger/Pull Requests/Vault bootstrap calls this adapter
+  before first stamping or drift-reconcile reaping, locking and dispatch.
+  Healthy current runtimes remain a read-only no-op; independent session hooks
+  retain their separate invocation. An older helperless bootstrap retains
+  standalone behavior only when its deployment policy is absent.
 
 All three normalize marketplace source descriptors, derive source fingerprints
 and marketplace ids, resolve payload provenance, compute the approved durable

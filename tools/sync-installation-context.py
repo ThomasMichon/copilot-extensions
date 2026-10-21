@@ -49,6 +49,8 @@ FILES = (
     "installation_context.py",
     "installation-context.sh",
     "installation-context.ps1",
+    "plugin-publication-probe.ps1",
+    "plugin-publication-probe.sh",
     "guest-environment.ps1",
     "guest-environment.sh",
     "json-query.awk",
