@@ -175,3 +175,46 @@ Canonical contract: [README.md](README.md).
 - Batch nine is researched in disjoint scopes and batch ten is being supplied.
   No product implementation, tests, deployment or live claim/lease/service
   mutation has been performed by this campaign.
+
+## 2026-10-21 - Two hundred issues reconciled
+
+- Checkpoint #7570 received current-head approval with no findings and green
+  required checks, merged, and was followed by managed pull-forward and a reread
+  of the continuing Plan and Validation Plan.
+- Full enumeration at 10:07:33 UTC found **1,336 open issues**: 1,335 original
+  cohort members and #7556 inflow. **200 distinct original issues are reviewed;
+  122 were closed by this campaign**. The unrelated #5610 closure and
+  coordination inflow still cancel in the net accounting. No campaign closure
+  was observed reopened; the guidance checkpoint remains at most 729.
+- Additional completed scopes: #1606's inactive retired-inventory diagnostics;
+  #1622's live local-marketplace root selection; #1680's stable-read Windows
+  metadata fix; #1759's bounded shared roster; #1777's persistent SSH carrier
+  foundation; #1823's declarative issue-loop primitive; #1831's aggregate
+  resolution specification; and #1875's capable native-Bash admission.
+  Historical carrier proof is credited as historical, not a new installed run.
+- Consolidated #1615/#1616/#1617/#1618/#1619 into #1612 with all calibration,
+  structured-design, authoring, advisory-review and migration acceptance still
+  unfinished in distinct existing lanes. Reconciled the old separate-#1619
+  wording; no experiment winner, native composition or archival-sketch execution
+  was invented to close phase wrappers.
+- Other transfers: #1610 to #6812; #1632/#1645/#1663 to #2594; #1646 to
+  #5543; #1647 to #63; #1649/#1697/#1829/#1874 to #1303; #1786 to #3000;
+  #1834/#1835 to #1817; #1846 to #1733; and #1885 to #1460. Successor
+  checklists were appended and read back before source closures, preserving
+  full failure tails, exact platform cases and current authority boundaries.
+- #1645's sparse symptom and #1663's fuller fallback contract now share the
+  same open successor without dropping prompt-preservation or exact-path
+  recovery after total storage failure. Paired cleanup retains unknown-state,
+  branch-ref and current BOTH-policy gates; no rejected unmerged implementation
+  is counted as delivered evidence.
+- Reviewer validation remains distinct from consumer forge/landing policy.
+  Logger compilation/specification is not effecting authorization or adoption.
+  Live provider refresh remains a capability-gated provider-owned protocol, not
+  permission to replace a healthy Session Host after a manifest change.
+- Retained: #1611, #1612, #1666, #1733, #1734, #1735, #1742, #1803, #1817,
+  #1838, #1843 and #1859. These include explicit discovery/proxy claims,
+  incomplete claim/scope records, assigned Index custody and distinct IPC/feed
+  defects; none was retired by age or by a related partial merge.
+- Batch eleven is researched in disjoint scopes, with batch twelve being
+  supplied. The campaign remains Active and continues oldest-first without
+  implementation, test execution, deployment or live claim/lease/service action.
