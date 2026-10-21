@@ -63,6 +63,7 @@ class Governance:
                 raise InstallationRefused(
                     f"Legacy runtime mutation refused: {state.get('probeReason')}"
                 )
+            self._publication(arguments)
             return state, None
         receipt = self.helper.validate_context_receipt(
             self.context, self.durable_home,
@@ -78,7 +79,30 @@ class Governance:
             or state.get("installGeneration") != receipt["generation"]
         ):
             raise InstallationRefused("Installation context does not authorize this runtime root")
+        self._publication({**arguments, "context": self.context})
         return state, receipt
+
+    def _publication(self, arguments: dict) -> None:
+        decision = self.helper.resolve_runtime_deployment(**arguments)
+        actual_root = decision["runtimeRoot"] or decision["legacy"]["root"]
+        if Path(actual_root).resolve() != self.root:
+            raise InstallationRefused("Runtime deployment policy names another root")
+        policy = decision["deployment"]
+        if policy["allowPluginPublication"] is True:
+            return
+        if not self.context and policy["state"] == "valid" and policy["managed"] is True:
+            import command_binding as binding
+
+            lease = binding._load_lifecycle().borrowed_lease(
+                binding._rules(), self.helper, payload_root=self.payload,
+                plugin_id="agent-worktrees", legacy_root=self.root,
+            )
+            if lease is not None and lease.purpose["origin"] == "management":
+                return
+        raise InstallationRefused(
+            f"Runtime publication refused: {policy['reason']}. "
+            f"{policy['diagnostic'] or ''} {policy['recovery'] or ''}".strip()
+        )
 
     def recheck(self) -> None:
         state, receipt = self.read()

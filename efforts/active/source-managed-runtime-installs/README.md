@@ -116,6 +116,10 @@ publication and command-ownership boundaries; it does not disable whole hooks.
 - [ ] Cover session bootstrap and indirect first-use publication without disabling other hook or extension behavior.
 - [x] Qualify Worktrees' native bootstrap and payload-local early first-use
   publication gates, retaining standalone reconciliation and healthy dispatch.
+- [x] Qualify Worktrees' cell-installer pre-staging and retained-backend
+  publication gates using existing governance and lock custody.
+- [ ] Authenticate explicit managed-cell installation through the existing
+  genesis/install custody across native staging, candidate handover and callbacks.
 - [ ] Keep adapters thin and enforce drift-compatible service interaction without implicit runtime replacement.
 
 ### Phase 4 - Integrate Manager-owned runtime source selection
@@ -457,3 +461,15 @@ onto one branch.
 - Review exposed null-mode standalone fallback rejection and production resolver traces written before deployment admission. Bootstrap now composes canonical legacy mutation admission, first use uses the admitted fallback's legacy root, and preliminary resolvers defer durable traces until a healthy selected runtime. The inventory regressions now use the production resolvers, not silent stubs; healthy dispatch also asserts the original marker/slot trace phases.
 - Added missing-provenance first-stamp/lib-copy/first-use coverage with mode-policy and tombstone negatives. Preserved the existing same-process and provision-lock-release regression while updating its helper call counts for the additional policy probes.
 - The corrected inventory/fallback matrix passes all 68 Linux cases in two bounded selections and 34 applicable cases with 34 platform skips on each Windows PowerShell host. Existing Windows dispatch/trace contracts pass thirteen cases; the Linux Worktrees caller selection passes seven with six Windows-only skips. Its cancellation and post-provision fixtures now answer publication probes separately without weakening their original assertions.
+
+### 2026-10-20 - Native bootstrap and early first use merged
+- PR #7463 merged as `125b63bf50f58be36e5f913db29c505b6cb9f56a` after exact-head Copilot approval and successful required checks. The carried-forward probe-count finding already matched the reviewed commit; its thread now cites that exact correction and is resolved without a redundant code edit.
+- Re-read the Plan and Validation Plan. Only the Worktrees native bootstrap/early-first-use item closes. The broader hook/publication boundary, installation-cell installer admission, launcher execution and declared skew remain open, followed by independent Manager/service source selection, maintenance and native adoption.
+- Next reuse the existing installation-cell governance and live publication custody for native admission before staging and Python-owned mutation. Do not coerce namespaced receipts into legacy command binding or introduce a parallel lock/updater.
+
+### 2026-10-20 - Cell installer and retained-backend admission
+- Added canonical deployment probes after context/root/generation validation and before native self-staging, with another check before runtime-input writes. PowerShell validation runs in the existing host, avoiding an incidental profile write before admission.
+- The Python lifecycle checks deployment policy at entry and every governance recheck, including the existing genesis/install lock boundary, candidate handover and helper callbacks. Direct backend entry cannot bypass managed policy. An existing live legacy management/publication lease remains usable; namespaced context flags do not grant management authority.
+- Retained lifecycle closure now includes command-binding and lifecycle companions needed to authenticate a legacy management borrower without source imports. Separate-process coverage uses that copied closure.
+- Native refusal fixtures preserve complete home inventories; positive fixtures retain standalone staging. Backend cases cover ordinary construction, explicit modes, settlement, live/stale management custody and policy changes under the actual namespace locks. Native Windows PowerShell 7 and 5.1 pass 55 cases each with 22 platform skips; all 77 Linux cases pass in three bounded batches. Existing retained lifecycle coverage passes thirty cases; stationary final-source repair on all three native Windows entrypoints plus candidate closure preparation passes four focused cases.
+- Explicit managed-cell installation remains a separate unchecked item. Manager source selection, other caller/launcher gates, skew, maintenance and native adoption remain open; no host rollout or policy change has occurred.

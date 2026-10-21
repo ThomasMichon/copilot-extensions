@@ -92,6 +92,15 @@ trace phases. This protects these native entrypoints, not every installer or lau
 publication path. The [canonical deployment policy contract](../../libs/installation-context/README.md)
 owns the policy schema and decision semantics.
 
+Cell installers also check before self-staging and runtime-input writes. The
+Python lifecycle repeats admission at entry, under the existing genesis/install
+locks, on candidate handover and in helper callbacks, including when invoked
+directly from a retained runtime. Legacy management requires an authenticated
+live lifecycle lease with management/publication purpose. Explicit managed-cell
+installation is not yet supported; a context or staging environment flag does
+not authorize it. Ordinary standalone cells retain their existing installer
+path. Other plugins and launcher-executed plans still need caller integration.
+
 Project launchers are attributable global entry points with ownership receipts
 under `~/.agent-worktrees/binstub-receipts/`. Legacy launchers delegate to the
 installed user-side `agent-worktrees` command in their resolved local-bin

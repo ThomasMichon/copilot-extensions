@@ -153,6 +153,27 @@ policy remains blocking, and teardown cannot become publication.
 This slice does not wire Manager source selection or installation-cell installer
 admission. Their actual mutation gates remain required.
 
+## Cell installer and retained-backend admission
+
+Worktrees' native cell installers now consult the canonical deployment decision
+after validating the context/root/generations and before self-staging. They
+repeat admission before runtime-input writes. Status remains a non-publication
+operation rather than requiring a deployment permit.
+
+The Python lifecycle makes the same decision at entry and each governance
+recheck, including the existing genesis/install lock boundary, candidate
+handover and helper callback validation. A direct retained-backend invocation
+does not bypass policy. Retained bootstraps include the canonical command-binding
+and lifecycle companions so legacy management can authenticate its existing live
+publication-purpose lease without importing source code.
+
+This is plugin-publication admission, not explicit managed-cell installation.
+That separate integration still needs authenticated durable management purpose
+on the existing namespace custody throughout staging, candidate handover and
+callbacks. A context receipt or staging environment flag alone remains
+insufficient; namespaced installs are not coerced into legacy command binding.
+Manager source selection and other caller/launcher gates remain open.
+
 ## Native bootstrap and early first-use admission
 
 Worktrees' native bootstrap now probes its own invoked payload's canonical

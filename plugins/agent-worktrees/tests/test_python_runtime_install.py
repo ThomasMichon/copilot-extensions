@@ -754,6 +754,7 @@ def test_preparation_stamps_installed_metadata_and_preserves_native_scripts(tmp_
     }
     frozen_scripts = Path(provenance["frozen_plugin"]) / "scripts"
     frozen_scripts.mkdir(parents=True)
+    assert {"command_binding.py", "command_lifecycle.py"} <= set(installer._LIFECYCLE_FILES)
     for name in installer._LIFECYCLE_FILES:
         (frozen_scripts / name).write_text("frozen lifecycle", encoding="utf-8")
     (frozen_scripts / "installation-context").mkdir()

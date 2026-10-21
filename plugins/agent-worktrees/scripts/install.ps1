@@ -318,7 +318,7 @@ if ($ContextualInstall) {
         $contextDurableHome = Split-Path -Parent $contextDurableHome
     }
     $hostExe = (Get-Process -Id $PID).Path
-    $validatedJson = & $hostExe -NoProfile -ExecutionPolicy Bypass -File $contextHelper validate `
+    $validatedJson = & $contextHelper validate `
         -Context $contextPath `
         -DurableHome $contextDurableHome `
         -ExpectedPluginId 'agent-worktrees' `
@@ -338,16 +338,15 @@ if ($ContextualInstall) {
         Write-Error '-InstallDir does not match validated installation context.'
         exit 1
     }
-    $contextStatusArgs = @(
-        '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $contextHelper,
-        'status',
-        '-PayloadRoot', $contextPayload,
-        '-PluginId', 'agent-worktrees',
-        '-LegacyRoot', (Join-Path $env:USERPROFILE '.agent-worktrees'),
-        '-Context', $contextPath,
-        '-DurableHome', $contextDurableHome
-    )
-    $contextStatusJson = @(& $hostExe @contextStatusArgs)
+    $contextStatusArgs = @{
+        Action = 'status'
+        PayloadRoot = $contextPayload
+        PluginId = 'agent-worktrees'
+        LegacyRoot = (Join-Path $env:USERPROFILE '.agent-worktrees')
+        Context = $contextPath
+        DurableHome = $contextDurableHome
+    }
+    $contextStatusJson = @(& $contextHelper @contextStatusArgs)
     if ($LASTEXITCODE -ne 0) {
         Write-Error 'Installation governance could not be resolved.'
         exit 1
@@ -381,16 +380,35 @@ if ($ContextualInstall) {
         exit 1
     }
 
+    function Assert-ContextPublication {
+        $publicationArgs = $contextStatusArgs.Clone()
+        $publicationArgs.Action = 'probe-plugin-publication'
+        $publicationJson = @(& $contextHelper @publicationArgs)
+        $publicationExit = $LASTEXITCODE
+        try {
+            $publication = ($publicationJson -join "`n") | ConvertFrom-Json -ErrorAction Stop
+        } catch {
+            throw 'Runtime publication probe returned an invalid decision.'
+        }
+        if ($publicationExit -ne 0 -or
+            $publication.deployment.allowPluginPublication -isnot [bool] -or
+            -not $publication.deployment.allowPluginPublication -or
+            [string]$publication.runtimeRoot -cne $InstallDir) {
+            throw ("Runtime publication refused: " + ($publicationJson -join ' ') +
+                ' Use explicit installation management to install or repair this runtime.')
+        }
+    }
+    if ($Action -ne 'status') { Assert-ContextPublication }
+
     function Test-ContextGovernanceUnchanged {
-        $currentJson = @(& $hostExe @contextStatusArgs)
+        $currentJson = @(& $contextHelper @contextStatusArgs)
         if ($LASTEXITCODE -ne 0) { return $false }
         try {
             $current = ($currentJson -join "`n") | ConvertFrom-Json
         } catch {
             return $false
         }
-        $currentValidationJson = & $hostExe -NoProfile -ExecutionPolicy Bypass `
-            -File $contextHelper validate `
+        $currentValidationJson = & $contextHelper validate `
             -Context $contextPath `
             -DurableHome $contextDurableHome `
             -ExpectedPluginId 'agent-worktrees' `
@@ -2753,6 +2771,7 @@ function Deploy-PythonRuntime {
     $originPayload = if ($env:COPILOT_PLUGIN_STAGED_FROM) {
         $env:COPILOT_PLUGIN_STAGED_FROM
     } else { $PluginDir.ToString() }
+    if ($ContextualInstall) { Assert-ContextPublication }
     $resultDir = Join-Path $InstallDir '.installer-inputs'
     Ensure-InstallDir $resultDir
     $resultPath = Join-Path $resultDir ("result-$PID-" + [Guid]::NewGuid().ToString('N') + '.json')

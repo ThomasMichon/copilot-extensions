@@ -275,6 +275,26 @@ if [[ -n "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
             "ERROR: installation receipt generation does not match governance" >&2
         exit 1
     }
+    context_publication_allowed() {
+        local publication allowed allowed_type
+        publication="$(__aw_context_query probe-plugin-publication "${__aw_status_args[@]:1}")" || {
+            printf 'ERROR: Runtime publication refused: %s. Use explicit installation management.\n' \
+                "$publication" >&2
+            return 1
+        }
+        allowed="$(__aw_context_value "$publication" $'deployment\034allowPluginPublication')" || return 1
+        allowed_type="$(LC_ALL=C awk -f "$__aw_json_query" -v mode=type \
+            -v query_path=$'deployment\034allowPluginPublication' <<<"$publication")" || return 1
+        [[ "$allowed_type" == boolean && "$allowed" == true &&
+           "$(__aw_context_value "$publication" runtimeRoot)" == "$__aw_status_root" ]] || {
+            printf 'ERROR: Runtime publication probe returned an invalid decision: %s\n' \
+                "$publication" >&2
+            return 1
+        }
+    }
+    if [[ "$__aw_action" != status ]]; then
+        context_publication_allowed || exit $?
+    fi
     context_governance_unchanged() {
         local current current_status current_reason current_mode current_root
         local current_context current_activation current_namespace current_install
@@ -1120,6 +1140,7 @@ _deploy_python_runtime() {
             if [[ "$uv_path" != *.exe && -f "$uv_path.exe" ]]; then uv_path="$uv_path.exe"; fi ;;
     esac
     origin_payload="${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}"
+    if $CONTEXTUAL_INSTALL; then context_publication_allowed || return $?; fi
     result_dir="$INSTALL_DIR/.installer-inputs"
     mkdir -p "$result_dir"
     result_path="$(mktemp "$result_dir/result-$$-XXXXXX")" || return 1
