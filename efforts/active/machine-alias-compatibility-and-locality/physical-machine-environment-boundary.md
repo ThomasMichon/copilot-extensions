@@ -228,6 +228,111 @@ slice does not enable ordinary tuple producers or authorize rollout.
   timeout was not counted as proof.
   Source proof does not satisfy qualified delivery or installed acceptance.
 
+## Gated producer implementation
+
+This **agent-recommended source realization** implements the operator-selected
+`gated-producer-implementation`. Review this amendment before adding its API or
+changing a producer. It closes the existing agent-fabric
+`host-qualified-guest-identity` and Worktrees durable-identity intent; it does
+not extend the vision. It retains the architecture patterns' single registry,
+independent installation, separate execution workspace and explicit repair
+boundaries.
+
+### Source interfaces and ownership
+
+Use a small internal typed `identity_mode` selection with only `legacy` and
+`tuple-v1`; omitted means `legacy`. There is no new command-line flag,
+environment override, persistent setting or ordinary default change in this
+source slice. Exercise the opt-in through the actual producer APIs in isolated
+fixtures. A later reviewed activation change owns ordinary call-site selection.
+
+For a genuinely new tuple allocation, derive `WorktreeMachineIdentity` from
+`execution_spaces.registry_for_config`, the existing shared
+`resolve_machine_selection`, and the actual execution platform, after the
+existing current-space fence. Require a declared, unambiguous local execution
+selection with consistent physical machine, environment and execution key.
+Missing registry evidence or conflicting platform refuses before allocation;
+do not synthesize authority by trimming a suffix, observing hostname alone, or
+accepting a caller-constructed tuple. `Config.machine` remains the execution
+identifier and its existing scoped-key requirements remain intact.
+
+| Authoritative boundary | Implementation obligation |
+|---|---|
+| `_create_worktree_core` | Resolve a fresh tuple only for a new opt-in allocation; use `prospective_session_worktree_id`, and pass physical machine plus the typed identity to tracking |
+| Paired knowledge creation | Share the admitted harness tuple and exact harness ID; keep qualified forward/back references execution-qualified, including an anchor companion |
+| `launch_request.execute` / admission | Persist and consume the admitted complete allocation, not a timestamp/suffix that is reformatted using current naming defaults |
+| `creation_requests.create` | Replay a completed receipt before selecting a new producer representation; retain original allocation and validate current receiving-space authority |
+| `creation_tail_repair` | Use the retained record and original pair identity; never derive a new tuple or rename an admitted allocation during repair |
+| Anchor and external linked-worktree adoption | Stamp the tuple only on a new opt-in record; load an existing record unchanged under existing locked/if-absent semantics |
+| Tracking and projections | Reuse the shared codec and immutable identity fence; retain current JSON and execution-reference adapters, sessions and controller semantics |
+
+Keep the public compatibility imports and existing low-level
+`machine_identity` tracking parameter. The internal mode selects derivation,
+not permission to overwrite an existing record. Unknown modes refuse explicitly.
+Do not centralize tuple derivation inside every tracking save: loading/saving a
+legacy record is not adoption or a format upgrade.
+
+### Admission, replay and repair
+
+The existing SQLite creation journal and daemon-owned launch admission remain
+the owning stores; do not add a reservation registry. Keep legacy allocation
+facts byte-compatible. Representation mode is not a new logical creation
+request: retrying the same creation key under a different producer default must
+return its original supported representation, not conflict solely on that mode
+or allocate again.
+
+Introduce an immutable internal admitted-allocation value where the current
+timestamp/suffix pair loses information. Carry the exact ID, branch, checkout
+and original owner representation from the validated reservation or retained
+record; a raw arbitrary ID supplied by a caller is not admission. Capture
+additive identity evidence in new receipts through their existing locked
+writers, with strict validation and backward-compatible legacy receipt reads.
+Validate current project, execution-space authority, allocation namespace and
+existing nonce checks before reuse. Changed registry spelling may resolve
+through the shared compatibility rules or produce an explicit demonstrated
+conflict, never a newly formatted replacement.
+
+An already-started or interrupted journal entry retains its existing
+pending/inspect refusal. This is not an automatic restart or a second carve.
+Completed creation-key replay returns the stored original result; explicit
+tail repair operates on the retained record and seed. Preserve original
+relationship bytes, creation nonce, pair stub, sessions, head, title, flags,
+claims and paths. A missing or mismatched allocation, foreign execution space,
+changed owner, nonce, project or pair must refuse without new allocation.
+Do not rewrite old receipts or backfill identity merely by replaying them.
+
+### Ordered source slices and acceptance
+
+- [ ] Land this source-interface/replay amendment through ordinary plan review.
+- [ ] Implement shared-selection derivation and actual create/system/bridge/
+  paired producers behind the internal legacy-default mode, with negative
+  pre-effect cases and unchanged legacy output controls.
+- [ ] Wire complete launch admission, creation-key replay and retained tail
+  repair; exercise both old receipts and new tuple receipts without allocating
+  a replacement on retry or refusal.
+- [ ] Wire new anchor and external-adoption records through the same opt-in
+  boundary; prove existing records are returned byte-for-byte unchanged.
+- [ ] Prove source one-term equivalence through actual creation/lookup/resume
+  entry points: declared shorthand, physical plus explicit environment, custom
+  execution key and configured aliases agree where permitted. Retain exact-key
+  precedence, ambiguity, conflicting-environment and foreign-space refusals.
+- [ ] Cover actual producer-to-tracking-to-JSON and pair/controller/reference
+  flows for Windows, WSL and Linux. Include a physical name ending in a
+  platform-like suffix, repeated historical prefixes, both suffix lengths,
+  changed current registry spelling, removed checkout, pending reservation,
+  changed nonce and competing if-absent creation.
+- [ ] Run bounded source validation and required CI, review the final source
+  diff, and release through normal unit-only promotion. Pure decisions are unit
+  candidates only when the actual effect/coverage closure admits them; real
+  SQLite/filesystem/Git, cross-process and installed/native cases stay in
+  existing bounded development/periodic lanes, not promotion prerequisites.
+- [ ] Verify released, installed reader acceptance in every relevant consumer
+  before proposing ordinary producer-default activation. Source fixtures,
+  merged adapters and artifact publication are not installed acceptance.
+- [ ] Review any ordinary-default activation separately, only after retained
+  replay, one-term equivalence and installed-reader gates pass. Actual rollout
+  remains separately authorized; no historical-record migration is implied.
+
 ## Validation Plan
 
 - [ ] The same configured physical machine is reported in Windows and WSL;

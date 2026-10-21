@@ -39,6 +39,7 @@ clarification without rewriting historical identifiers.
 | Runtime readiness owner | Empty-mux current-roster and liveness prerequisite | Managed source `grimy-cylinder` |
 | Guest installation identity repair | Bounded #6945 proposal, shared identity repair and entry-path acceptance | Managed source `tinkling-toolbox` |
 | Canonical native label history | Bounded #7057 convergence on the canonical native repair; owns source PRs, not live application | Managed source `chugging-ratchet` |
+| Gated producer contributor | Phase 3d source producers, retained replay and equivalence; no default activation or live migration | Managed source `chugging-wrench` |
 
 ## Coordination
 
@@ -62,6 +63,10 @@ clarification without rewriting historical identifiers.
   validation. Existing campaign, release and installation owners remain intact.
   The coordinator owns any separately authorized local application; source
   implementation must not touch real records, topology, runtimes or services.
+- **Current source transition:** After completing the first regression-admission
+  cohort under the release effort's Phase 9b, `chugging-wrench` resumes the
+  declared gated producer contribution in Phase 3d. Release, installed rollout,
+  original compatibility repair and other participants retain their obligations.
 
 ## Context
 
@@ -304,6 +309,8 @@ _(Agent-recommended realization of the operator's explicit model clarification.)
       consumers in #7414, keeping ordinary creation producers legacy.
 - [x] Review and execute the [shared raw-JSON codec integration](physical-machine-environment-boundary.md#shared-raw-json-codec-integration)
       before enabling producers; retain independent plugin installation.
+- [ ] Review and execute the [gated producer source plan](physical-machine-environment-boundary.md#gated-producer-implementation),
+      preserving retained allocations before any ordinary-default activation.
 - [ ] Make runtime admission, structured machine guidance and prospective
       worktree naming/metadata consume the correct dimension. Keep native and
       guest execution authority distinct and use the same policy in update and
@@ -376,6 +383,23 @@ operator's all-alias/all-worktree acceptance requirement, not authorization for
 unrelated service changes or a second machine registry.
 
 ## Journal
+
+### 2026-10-21 - Gated producer source realization proposed
+- The first release-regression cohort is complete under the release effort;
+  the declared contributor now resumes this effort's Phase 3d source work.
+  This records a slice transition, not completion of either containing effort.
+- The existing contract now names the internal legacy-default opt-in, shared-map
+  derivation, complete admitted allocation, original-representation replay,
+  paired/anchor/external-adoption writers and corresponding source obligations.
+  The amendment must pass review before its new API or producer changes begin.
+- Source inspection found two distinct admission paths: the creation-key
+  SQLite journal and daemon-owned launch request receipts. Both must preserve
+  an admitted identity; timestamp/suffix reconstruction under current naming
+  rules is not an acceptable replay strategy. Pending/interrupted allocations
+  remain inspect-only rather than authorizing another carve.
+- Ordinary defaults, rollout and migration remain unauthorized. Installed
+  reader acceptance, retained replay and one-term equivalence still gate any
+  later activation proposal; the containing Plan and Validation Plan stay open.
 
 ### 2026-10-20 - Shared reader integration merged; producer gates remain
 - #7519 merged as `fb8351eb15fbccceca9b097897615c649c65d7af`
