@@ -24,6 +24,8 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+from worktree_identity import parse_machine_identity
+
 from . import agent_plugin_runtime
 
 #: The engine binstub name (the self-provisioning agent-worktrees tool CLI).
@@ -445,6 +447,8 @@ class Worktree:
     Only the fields the Manager renders are lifted into typed attributes; the
     raw dict is kept on ``raw`` so a newer contract field is reachable without a
     code change here (additive-only evolution).
+    ``machine`` is the execution owner of an explicit tuple; its physical host
+    and environment remain unchanged on ``raw``.
     """
 
     id: str
@@ -504,10 +508,13 @@ def _bool_field(value: object, *, name: str) -> bool:
 
 def worktree_from_dict(d: dict) -> Worktree:
     """Build the Manager's cross-cutting worktree model from a contract row."""
+    identity = parse_machine_identity(d)
     return Worktree(
         id=str(d.get("id") or ""),
         repo=str(d.get("repo", "") or ""),
-        machine=str(d.get("machine", "") or ""),
+        machine=(
+            identity.execution_machine if identity is not None else str(d.get("machine", "") or "")
+        ),
         branch=str(d.get("branch", "") or ""),
         title=(d.get("title") if d.get("title") not in (None, "null") else None),
         state=d.get("state"),

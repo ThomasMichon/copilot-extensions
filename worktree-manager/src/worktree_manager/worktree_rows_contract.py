@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import math
 
+from worktree_identity import parse_machine_identity
+
 _HISTORICAL_FIELDS = frozenset(
     {
         "resources",
@@ -110,6 +112,7 @@ def parse_current_rows(obj: dict, *, complete: bool = True) -> list[dict]:
             raise ValueError("engine returned invalid or duplicate current-roster rows")
         identities.add(row["id"])
         _bounded(row)
+        parse_machine_identity(row)
         if len(json.dumps(row, ensure_ascii=False, separators=(",", ":")).encode("utf-8")) > 65536:
             raise ValueError("current-roster row exceeds its byte bound")
         result.append(

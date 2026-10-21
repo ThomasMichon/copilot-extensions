@@ -6,10 +6,13 @@ import json
 import subprocess
 import threading
 
+from worktree_identity import WorktreeMachineIdentityError
+
 from .engine_dialogs import SubMenuScreen, WtDetailsScreen
 from .controller_workspaces import target_row
 from .engine_live_screens import MsgViewScreen
 from .resume_prompt_actions import open_resume_prompt
+from .worktree_action_context import build_worktree_action_context
 
 class PickerScreenWorktreeActionsMixin:
     @staticmethod
@@ -485,20 +488,7 @@ class PickerScreenWorktreeActionsMixin:
     def _wt_action_ctx(self, rec: dict) -> dict:
         """Placeholder context for a contributed worktree action's argv template:
         the worktree's id/machine/env/repo plus its (scalar) raw fields."""
-        raw = rec.get("raw") or {}
-        ctx = {k: v for k, v in raw.items()
-               if isinstance(v, (str, int, float, bool))}
-        ctx.update({
-            "worktree": raw.get("id") or rec.get("id4"),
-            "id": raw.get("id") or rec.get("id4"),
-            "id4": rec.get("id4"),
-            "machine": str(rec.get("machine") or raw.get("machine") or ""),
-            "env": str(rec.get("env") or ""),
-            "repo": getattr(self.src, "REPO", "") or "",
-            "title": rec.get("title", ""),
-            "state": rec.get("state", ""),
-        })
-        return ctx
+        return build_worktree_action_context(rec, repo=getattr(self.src, "REPO", "") or "")
     def _run_wt_action(self, action, rec: dict) -> None:
         """Run a contributed worktree action (subprocess), report the outcome,
         and rescan (the action may have changed worktree/session state). The
@@ -506,7 +496,12 @@ class PickerScreenWorktreeActionsMixin:
         from . import tasks
 
         label, source = action.label, action.source
-        ctx = self._wt_action_ctx(rec)
+        try:
+            ctx = self._wt_action_ctx(rec)
+        except WorktreeMachineIdentityError as exc:
+            self.debug = f"{label} ({source}) failed: {exc}"
+            self.app.notify(self.debug, severity="error")
+            return
 
         def _work():
             return tasks.run_worktree_action(action, ctx)

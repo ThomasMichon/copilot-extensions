@@ -75,9 +75,11 @@ dependencies = [
     # update exit-code table (module ``update_telemetry``). Used by
     # ``worktree-manager update``, which owns the run the engine joins.
     "agent-update-telemetry",
+    "agent-worktree-identity",
 ]
 
 [tool.uv.sources]
+agent-worktree-identity = { path = "../libs/worktree-identity", editable = true }
 # Always resolve the vendored lib from the local path, never an index.
 # Copilot CLI + Claude plugin resolution -- marketplaces, plugins, repo settings
 # (module ``plugin_resolve``). Vendored per the harness's shared-lib convention

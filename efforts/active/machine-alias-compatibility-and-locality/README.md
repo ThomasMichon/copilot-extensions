@@ -365,6 +365,46 @@ unrelated service changes or a second machine registry.
 
 ## Journal
 
+### 2026-10-20 - Manager row and action adapter source slice
+- Manager's current-roster admission and typed model use the same pure codec.
+  Explicit tuple models expose the execution owner, while raw physical and
+  environment fields remain unchanged. Picker normalization retains the
+  declared logical source and adds separate validated tuple metadata; it does
+  not derive a different transport or authority from a record.
+- Contributed action context uses the execution owner for a raw fallback and
+  exposes `physical_machine` separately. Malformed tuples fail visibly before
+  background/template execution. Extracting that pure context builder keeps
+  the existing 996-line action module below its ceiling without unrelated
+  restructuring. Legacy parsing and output behavior remains unchanged.
+- The baseline established 41 product regression failures with four passing
+  legacy controls; one incorrectly named remote test fixture was corrected and
+  excluded from baseline evidence. The complete affected model/current-feed/
+  source/action portfolio passed 393 tests with one conditional skip.
+- Nine canonical package graph/materialization/import checks passed across all
+  four consumers. The Manager's actual selected trusted payload materializer
+  embeds byte-identical codec source and rewrites its local path; an isolated
+  import succeeds without sibling runtimes. No bootstrap, installed-runtime,
+  self-install or process-owner implementation was edited.
+- The #7420 owner was notified of this disjoint slice. Current-head review and
+  required Source CI remain pending; ordinary producers and rollout remain
+  paused, and producer/replay/equivalence plus installed acceptance stay open.
+
+### 2026-10-20 - Bridge adapter merged; Manager raw rows next
+- #7502 merged as `fabfb2491f89b55092aac743b6a378c4af65464f`
+  after exact-head approval of
+  `f4f3861be6ed03f1c7dd6bc37b282a97a39897a5`, no open findings
+  and passing required Source CI. The supported publication path verified
+  the owned rebase and the managed completion path preserved its backup.
+- The first approved candidate conflicted with #7185 at additive imports.
+  Resolution retained both imports and all upstream repository-binding and
+  local-preparation behavior. The expanded contained portfolio passed 181
+  tests with one conditional skip; seven package checks passed. The real
+  PowerShell materializer and its exercised fixture bytes were unchanged.
+- Manager's raw-row admission, typed model and Picker action boundary are
+  next. The independent #7420 runtime-construction owner retains bootstrap,
+  installed-launcher, self-install and process-management work. No tuple
+  producer, task/session store, transport registry or installed runtime changes.
+
 ### 2026-10-20 - Bridge venue-owner adapter source slice
 - The venue controller's raw Worktrees row is decoded through the same pure
   codec before comparing its execution owner to `caller_owner_ref`. Physical

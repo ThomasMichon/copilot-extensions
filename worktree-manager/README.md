@@ -166,6 +166,22 @@ rows until the replacement generation completes. Unsupported authority is an
 actionable engine-upgrade error. Explicit `AGENT_WORKTREES_PICKER_STREAM=0`
 selects current one-shot reads, not a direct computation fallback.
 
+Explicit version-1 machine tuples are validated by the shared dependency-free
+identity codec before current rows or stream publications are admitted.
+`engine_client.Worktree.machine` is their execution owner; the original physical
+host and environment remain unchanged in `raw`. Picker rows additionally expose
+the validated tuple as `machine_identity`, while their `machine`, `env` and
+`source_id` keep the already-selected logical source. Tuple metadata never
+retargets a configured transport or grants native/guest authority.
+
+Contributed action context keeps an explicitly selected source owner; if it
+needs a raw-row fallback, it uses the tuple's execution owner, not its physical
+host. `{physical_machine}` exposes that original host for versioned rows.
+Malformed explicit tuples fail visibly before background/template effects;
+unversioned rows keep historical parsing and output behavior. The codec is an
+ordinary first-party dependency embedded by the existing payload materializer,
+not an import of an installed Worktrees runtime.
+
 The CLAIMS preview retains the engine's ranking and links, with a leading
 omitted-count or unresolved-descendant warning when the bounded publication
 is partial. Older publications without sufficient evidence show **coverage
