@@ -436,3 +436,79 @@ def test_rebased_pr_copy_preserves_old_head_scheme_and_private_state(
     ).stdout.strip() == record.pr.head_sha
     assert _files(seed) == seed_files
     assert _files(sibling_path) == sibling_files
+
+
+@pytest.mark.parametrize("iteration", range(2))
+def test_fork_seed_copy_preserves_legacy_topology_and_isolates_publication(
+    fork_pr_repo, _fork_pr_seed, iteration, tmp_path, monkeypatch,
+):
+    from agent_worktrees import config as cfg
+
+    config, wid, worktree, origin = fork_pr_repo
+    fork = origin.parent / "fork.git"
+    assert config.default_repo.pr.head_scheme == "snapshot"
+    assert cfg.load_config() is config
+    record = tracking.load_record_by_id(wid)
+    assert record is not None and record.pr is not None
+    assert record.title == "Add feature" and record.pr.state == "open"
+    assert record.worktree_path == str(worktree)
+    assert record.pr.repo == git_ops.slug_from_url(str(origin))
+    assert record.pr.remote == "fork"
+    assert record.pr.rewrite_owner == record.pr.rewrite_identity == ""
+    assert git_ops.git("remote", "get-url", "fork", cwd=worktree).stdout.strip() == str(fork)
+    assert git_ops.git("remote", "get-url", "origin", cwd=worktree).stdout.strip() == str(origin)
+    branch = record.pr.branch
+    old = record.pr.head_sha
+    head = git_ops.git("rev-parse", "HEAD", cwd=worktree).stdout.strip()
+    assert head != old
+    assert git_ops.git("rev-parse", "HEAD^", cwd=worktree).stdout.strip() == old
+    assert git_ops.git("log", "-1", "--format=%s", cwd=worktree).stdout.strip() == "address feedback"
+    for filename, text in (("a.txt", "one\n"), ("b.txt", "two\n"), ("c.txt", "feedback\n")):
+        assert (worktree / filename).read_text() == text
+    assert git_ops.git(
+        "--git-dir", str(origin), "show-ref", "--verify",
+        f"refs/heads/{branch}", check=False,
+    ).returncode != 0
+    assert git_ops.git(
+        "--git-dir", str(fork), "show-ref", "--verify", "refs/heads/master", check=False,
+    ).returncode != 0
+    assert git_ops.git(
+        "--git-dir", str(fork), "rev-parse", branch,
+    ).stdout.strip() == old
+    assert git_ops.git("rev-parse", branch, cwd=worktree).stdout.strip() == old
+    seed_files = _files(_fork_pr_seed)
+    sibling_path = tmp_path / "sibling"
+    with monkeypatch.context() as patch:
+        _, _, sibling, sibling_origin = _copy_pr_repo(_fork_pr_seed, sibling_path, patch)
+        assert git_ops.git("rev-parse", "HEAD", cwd=sibling).stdout.strip() == head
+        sibling_record = tracking.load_record_by_id(wid)
+        assert sibling_record.pr.head_sha == old
+        assert sibling_record.pr.remote == "fork"
+        assert git_ops.git("remote", "get-url", "fork", cwd=sibling).stdout.strip() == str(
+            sibling_origin.parent / "fork.git"
+        )
+    assert cfg.load_config() is config
+    sibling_files = _files(sibling_path)
+    for source in (_fork_pr_seed / "fork.git").rglob("*"):
+        if source.is_file():
+            relative = source.relative_to(_fork_pr_seed)
+            assert not source.samefile(origin.parent / relative)
+            assert not (origin.parent / relative).samefile(sibling_path / relative)
+    (fork / "hooks" / "copy-only").write_text("private hook\n")
+    git_ops.git("--git-dir", str(fork), "config", "fixture.private", str(iteration))
+    (worktree / "fork-only.txt").write_text(f"independent fork update {iteration}\n")
+    git_ops.git("add", "fork-only.txt", cwd=worktree)
+    git_ops.git("commit", "-m", "independent fork update", cwd=worktree)
+    git_ops.git("push", "fork", f"HEAD:refs/heads/{branch}", cwd=worktree)
+    record.pr.head_sha = git_ops.git("rev-parse", "HEAD", cwd=worktree).stdout.strip()
+    tracking.save_record(record)
+    assert tracking.load_record_by_id(wid).pr.head_sha == record.pr.head_sha != head
+    assert git_ops.git(
+        "--git-dir", str(fork), "rev-parse", branch,
+    ).stdout.strip() == record.pr.head_sha
+    assert git_ops.git(
+        "--git-dir", str(origin), "show-ref", "--verify",
+        f"refs/heads/{branch}", check=False,
+    ).returncode != 0
+    assert _files(_fork_pr_seed) == seed_files
+    assert _files(sibling_path) == sibling_files

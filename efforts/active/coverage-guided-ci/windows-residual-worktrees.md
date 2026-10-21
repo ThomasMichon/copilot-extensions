@@ -87,7 +87,44 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Admitted fixture-semantic batches
 
+### B-FORK foundation: private fork-only head, no consumer conversions
+
+Baseline: the actual #7535 consumer merge. Add only `_fork_pr_seed` and
+`fork_pr_repo`, using the existing private published snapshot and hermetic
+HOME/Git/identity context under run-local seed locking. The prepared topology
+keeps the old publication only in the copied fork, not origin; the fork has
+no default-branch head. The private worktree contains one unpublished
+feedback commit on top of the old snapshot. The persisted legacy record
+selects `fork` and has no rewrite ownership/identity.
+
+Two repeated-copy regression cases assert the exact old head, feedback
+parent/message/content, snapshot scheme, config/load binding, relocated
+record and origin/fork URLs, missing origin publication and missing fork
+default head. A second private sibling has the same initial history and
+independent physical fork files. Changing the first copy's fork config,
+hook, source commit, published head and record leaves every seed and sibling
+byte unchanged. Existing fixture/test functions and decorators are unchanged;
+no helper adapter, fork consumer or transport stub changes are included.
+
+Both complete fixture-copy and seed-cache modules pass on native Windows:
+48 passed, zero skips, 62.20 seconds pytest / 75.28 including preparation
+and cleanup, exactly two work-stealing workers, 30-second default item
+watchdog and unchanged resource limits under the 240-second diagnostic
+group. Ruff F/E9, unchanged-existing-body AST comparison and the 13-plugin
+install contract pass. This is not a whole-suite budget qualification.
+
+Documentation impact is this ledger only. Runtime, command, installation
+and configuration contracts do not change. Provisioning clean-room and
+external deployment are inapplicable to this test-only foundation; real-Git
+fixture-copy contracts exercise first construction and private copies.
+No Linux/container or parent whole-suite qualification is claimed.
+Consumer conversions and original #5694/#5682 remain open.
+
 ### B-REBASED rewrite and legacy consumers
+
+**Actually merged:** #7535 as
+`810bbc09c81e23516c94371f3155000dfcac5742`. B-FORK foundation
+and consumer conversions are not included in that merge.
 
 Baseline: the actual #7523 foundation merge. Twelve rewrite test functions
 and four legacy-rewrite functions now take private completed real post-rebase

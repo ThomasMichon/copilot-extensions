@@ -830,6 +830,35 @@ def rebased_pr_repo(scheme, request):
     return request.getfixturevalue(f"rebased_{scheme}_pr_repo")
 
 
+@pytest.fixture(scope="session")
+def _fork_pr_seed(tmp_path_factory, _published_pr_seed):
+    with _seed_directory(tmp_path_factory, "fork") as (seed, build):
+        if build:
+            with _published_seed_environment(tmp_path_factory) as patch:
+                config, wid, worktree, remote = _copy_pr_repo(_published_pr_seed, seed, patch)
+                record = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+                fork = seed / "fork.git"
+                shutil.copytree(remote, fork, copy_function=shutil.copyfile)
+                _pr_git("--git-dir", str(fork), "update-ref", "-d", "refs/heads/master", cwd=fork)
+                _pr_git("remote", "add", "fork", str(fork), cwd=worktree)
+                _pr_git("--git-dir", str(remote), "update-ref", "-d",
+                        f"refs/heads/{record.pr.branch}", cwd=remote)
+                record.pr.remote = "fork"
+                record.pr.rewrite_owner = record.pr.rewrite_identity = ""
+                record.pr.pr_revision += 1
+                tracking.save_record(record)
+                (worktree / "c.txt").write_text("feedback\n")
+                _pr_git("add", "c.txt", cwd=worktree)
+                _pr_git("commit", "-m", "address feedback", cwd=worktree)
+        return seed
+
+
+@pytest.fixture
+def fork_pr_repo(tmp_path: Path, monkeypatch, _fork_pr_seed):
+    """Private fork-only published head with independent feedback history."""
+    return _copy_pr_repo(_fork_pr_seed, tmp_path, monkeypatch)
+
+
 class _SubprocessRunInstaller:
     """``installer_run`` process stand-in that delegates to ``subprocess.run``.
 
