@@ -218,3 +218,45 @@ Canonical contract: [README.md](README.md).
 - Batch eleven is researched in disjoint scopes, with batch twelve being
   supplied. The campaign remains Active and continues oldest-first without
   implementation, test execution, deployment or live claim/lease/service action.
+
+## 2026-10-21 - Batches eleven and twelve, 240 original issues reviewed
+
+- The full paginated census at 10:27 UTC records **1,313 open issues**:
+  1,312 original-cohort issues and #7556 inflow. **240 distinct original issues
+  are reviewed; 145 were closed by this campaign**. The unrelated #5610 closure
+  and coordination inflow still cancel in net accounting. No campaign closure
+  was observed reopened. The fixed guidance checkpoint remains at most 729.
+- Completed scopes: #1945's canonical-owner cold resume without live Bridge
+  registration; #1985's registered-agent execution-project selection; #2043's
+  owner-qualified orphan reservation recovery; #2057's same-lineage cold-steer
+  resumption; #2149's functional Bash admission; and #2151's unchanged-task
+  no-op and explicit stale-ACL warning. These closures credit actual merged
+  implementations and retained source contracts, not fresh native runs.
+- Transfers preserve separate acceptance lanes: #1906/#1957/#2159 to #1303;
+  #1919 to #3761; #1959 to #2173; #2041/#2055/#2132 to #2464;
+  #2042/#2094 to #954; #2053 to #2062; #2060 to #1735; #2070 to #6389;
+  #2087 to #2423; #2112 to #2110; #2140 to #2118; and #2155 to #2594.
+  All checklists were appended and read back before closing source trackers.
+- The complete previously transferred #1584 Herdr checklist was carried
+  directly to #2594 before #2155 closed. Its original disposition now points
+  directly to that open canonical successor; no ordinary-checkout storage,
+  explicit seeded launch, predecessor preservation or identity-checked
+  consume-driven retirement requirement was lost through the intermediate.
+- Persistent environment containment detects drift but does not implement
+  rollback. #1303 retains an explicit ownership-safe recovery decision rather
+  than inventing a restore pass or authorizing blind host-state restoration.
+  The complete five-case Windows Logger tail and precise Index update and
+  managed-runtime materialization cases remain open in their successors.
+- #2110 now preserves independent aggregate CPU <=5% of one logical core and
+  production-path event-to-reconciliation p95 <=2 seconds acceptance. Stable
+  carrier identity, cadence repair and synthetic wake tests do not establish
+  either performance result. #2173 retains startup-latency outcomes through
+  current file delivery, not restoration of the retired custom aggregator.
+- Retained original tokens: #1886, #1915, #1918, #1920/#1921/#1922, #1941,
+  #1943, #1946, #1986, #2014, #2062, #2095, #2106, #2110, #2118 and #2137.
+  Assigned per-attempt cleanup and opt-in configuration custody, the explicit
+  nonexpiring #912 chain claim, phased launch ownership and independent model
+  trial/account/native-adoption gates remain unchanged.
+- Batch thirteen is being adjudicated while disjoint batch-fourteen research
+  is supplied. The campaign remains Active; no product implementation, tests,
+  deployment, process termination or live reservation cleanup was performed.
