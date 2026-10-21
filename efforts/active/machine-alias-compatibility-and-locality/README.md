@@ -395,13 +395,16 @@ unrelated service changes or a second machine registry.
   Companion refs and dispatch creation metadata remain execution-qualified.
 - The isolated baseline reproduced 19 missing-API failures with one passing
   legacy control. The expanded affected creation, pair, tracking-identity and
-  creation-key/naming portfolio passed 155 tests with three conditional skips.
+  creation-key/naming portfolio passed 239 tests with three conditional skips.
   Existing allocation facts and ordinary producer defaults remain unchanged.
 - Review found that a declared physical name containing a path separator could
   become a nested allocation ID. The prospective naming boundary now rejects
   both separators before reservation or carving. Eight actual producer cases
   reproduced the defect before correction; keyed refusals retain no allocation
   and remain retryable instead of leaving the creation journal pending.
+  A subsequent drive-qualified-name finding extended the same pre-allocation
+  boundary to portable path/Git-reference components, with controls for invalid
+  characters, traversal, reserved device names and valid Unicode/dotted names.
 - Completed creation-key results now pass the existing receiving-record
   authority fence before return, including when a caller selects the other
   supported representation. Native and guest callers cannot replay each

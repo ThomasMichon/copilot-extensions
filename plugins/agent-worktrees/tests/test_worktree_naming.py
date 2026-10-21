@@ -69,8 +69,21 @@ def test_creation_repair_preserves_a_versioned_physical_name_suffix() -> None:
         _allocation(record)
 
 
-@pytest.mark.parametrize("physical", ["rack/desk", r"rack\desk"])
+@pytest.mark.parametrize("physical", [
+    "rack/desk", r"rack\desk", "D:desk", "rack..desk", ".desk", "rack@{desk}",
+    "rack desk", "rack\tpeer", "rack~desk", "rack^desk", "rack?desk", "rack*desk",
+    "rack[desk", 'rack"desk', "rack<desk", "rack>desk", "rack|desk",
+    "CON.desk", "COM1.desk", "lpt9.desk", "COM¹.desk",
+])
 def test_prospective_name_refuses_non_component_physical_identity(physical: str) -> None:
     identity = WorktreeMachineIdentity(physical, "wsl", "guest-space")
     with pytest.raises(ValueError, match="physical machine.*path"):
         prospective_session_worktree_id(identity, "20261021-010203", "abcd")
+
+
+@pytest.mark.parametrize("physical", ["CON", "COM1", "CONSOLE", "work.station", "dèsktop"])
+def test_prospective_name_preserves_valid_component_names(physical: str) -> None:
+    identity = WorktreeMachineIdentity(physical, "wsl", "guest-space")
+    assert prospective_session_worktree_id(identity, "20261021-010203", "abcd") == (
+        f"{physical}-wsl-20261021-010203-abcd"
+    )

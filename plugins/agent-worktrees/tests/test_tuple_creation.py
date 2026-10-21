@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import replace
+import json
 from pathlib import Path
 import sqlite3
 from types import SimpleNamespace
@@ -23,7 +24,7 @@ def _setup(
     config = replace(_create_config(tmp_path), machine=execution, platform=platform)
     anchor = Path(config.default_repo.anchor)
     (anchor / "machines.yaml").write_text(
-        f"machines:\n  {execution}:\n    physical_host: {physical}\n"
+        f"machines:\n  {execution}:\n    physical_host: {json.dumps(physical)}\n"
         f"    execution_platform: {platform}\n",
     )
     monkeypatch.setattr(cfg, "detect_platform", lambda: platform)
@@ -199,10 +200,14 @@ def test_completed_key_cannot_replay_into_sibling_execution_space(
     assert path.read_bytes() == before
 
 
-@pytest.mark.parametrize("physical", ["rack/desk", r"rack\desk"])
+@pytest.mark.parametrize("physical", [
+    "rack/desk", r"rack\desk", "D:desk", "rack..desk", ".desk", "rack@{desk}",
+    "rack desk", "rack~desk", "rack^desk", "rack?desk", "rack*desk", "rack[desk",
+    'rack"desk', "rack<desk", "rack>desk", "rack|desk", "CON.desk",
+])
 @pytest.mark.parametrize("kind", ["session", "bridge"])
 @pytest.mark.parametrize("keyed", [False, True])
-def test_physical_path_separator_refuses_before_reservation_or_carve(
+def test_invalid_physical_component_refuses_before_reservation_or_carve(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, physical: str, kind: str, keyed: bool,
 ) -> None:
     from agent_worktrees import creation_requests
