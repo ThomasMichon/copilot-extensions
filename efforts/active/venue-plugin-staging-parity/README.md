@@ -153,22 +153,22 @@ payload paths when those directories are supplied.
 
 ### Phase 2 - Static local, remote SSH and privileged relay
 
-- [ ] Preserve declared source kind through shared preparation in every
+- [x] Preserve declared source kind through shared preparation in every
   integrated venue: retain Git origin/revision/location declarations, retain
   local references or reflected local copies, and rebind target-owned absolute
   local references relative to the actual execution checkout.
-- [ ] Gate task delivery on the complete effective plugin set, allowing native
+- [x] Gate task delivery on the complete effective plugin set, allowing native
   repository-scoped Git startup acquisition without treating process creation,
   a connection or a session acknowledgment as plugin readiness.
 - [x] Publish worked examples mapping controller selection and execution
   location to target-local settings and the complete automatic ACP directory
   set; cover source preservation, target ownership, mixed origins, installed
   fallback and explicit target-local choices.
-- [ ] Apply target-local registration before static-registry local-loopback ACP
+- [x] Apply target-local registration before static-registry local-loopback ACP
   launches, retaining existing own/related selection, native
   operator precedence and account/platform locality checks. Resolve local
   filesystem references without assuming a remote provider owns this path.
-- [ ] Apply the same registration barrier through the existing local
+- [x] Apply the same registration barrier through the existing local
   acquisition owner in CLI and ACP modes; settings-only consumer discovery is
   not proof that this adapter prepares its target.
 - [ ] Apply the same contract to genuine remote static-registry SSH targets:
@@ -176,7 +176,7 @@ payload paths when those directories are supplied.
 - [ ] Resolve the privileged launch's real identity/filesystem context and
   prepare through its supported channel; do not assume it shares the
   unprivileged account's home.
-- [ ] Preserve loopback account/platform locality checks and existing binding
+- [x] Preserve loopback account/platform locality checks and existing binding
   behavior. Land tested slices independently.
 
 ### Phase 3 - Release and acceptance
@@ -220,14 +220,14 @@ payload paths when those directories are supplied.
   modes, with effective paths/settings and launch version recorded.
 - [ ] Static local, SSH, and privileged lanes have equivalent acceptance
   evidence or explicit tracked transfers.
-- [ ] Source-preservation examples agree with executable cases: local
+- [x] Source-preservation examples agree with executable cases: local
   same-world references retain the original path, remote local sources use
   reflected paths, Git declarations remain Git declarations after installation,
   and target-owned absolute paths become target-relative marketplace paths.
-- [ ] Git preparation and activation leave user-global preferences unchanged;
+- [x] Git preparation and activation leave user-global preferences unchanged;
   an unrelated repository using the same execution profile does not load the
   target repository's selected plugins.
-- [ ] Native startup acquisition completes before task delivery; a failed or
+- [x] Native startup acquisition completes before task delivery; a failed or
   incomplete selection prevents ready status and task submission, including
   cancellation, retry and modes with no skill contribution to observe.
 - [x] Existing own-plugin, related-plugin, Session Host resume, and native
@@ -265,6 +265,26 @@ on malformed configuration. These are reliability details, not new authority
 or a reason to create a daemon.
 
 ## Journal
+
+### 2026-10-21 - Merge the source-preserving local and startup-readiness slice
+
+- #7185 merged into `dev` as
+  `edf04012ec694f8bac76b130b52d2b65c62b1c61`. The final full review reported no
+  open issues and confirmed the rollback finding resolved; all required CI
+  passed and all 16 review threads were resolved before merge.
+- Closed the implemented source-preservation, static-local ACP, local CLI/ACP
+  acquisition, owned startup-admission and locality-preservation Plan items.
+  Closed their source-example, repository-isolation and startup-failure/retry
+  validation items using the previously recorded contained and native evidence.
+  This does not close the combined static-local/SSH/privileged acceptance item:
+  local evidence exists, but the other lanes remain pending.
+- The effort remains **Active**. Genuine remote static-registry SSH, privileged
+  and wrapped/command/sub-daemon contexts, receiver-local integration, live
+  trusted-container and ambiguous external-lifecycle acceptance remain open.
+  Publication to `main` and authorized running-version rollout remain gated
+  by #6237; no release promotion, shared update or deployment was performed.
+- The canonical tracking remains #5286, #5072 and parent #954. Source merge
+  closes this implementation slice, not those broader issues or the effort.
 
 ### 2026-10-20 - Preserve rollback hydration and quoted Windows executable lookup
 
