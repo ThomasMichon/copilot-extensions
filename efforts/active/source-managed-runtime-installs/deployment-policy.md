@@ -173,6 +173,8 @@ Worktrees' native staging, backend construction, retained candidate handover
 and native callbacks authenticate and borrow the same live genesis/install
 owners. A context receipt or staging environment flag alone remains
 insufficient; namespaced installs are not coerced into legacy command binding.
+Management purpose pins the original native process birth as well as its PID;
+an exited, unreaped or reused process cannot retain publication authority.
 Standalone and managed flows acquire namespace custody before service cutover.
 Explicit modes retain the same governance owner through nested settlement and
 release cutover before releasing the namespace, avoiding an overlap cycle with

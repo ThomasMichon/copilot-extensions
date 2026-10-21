@@ -8,6 +8,61 @@ from collections.abc import Iterator
 RUNTIME_PUBLICATION_ENV = "COPILOT_EXTENSIONS_RUNTIME_PUBLICATION"
 
 
+def _runtime_publication_process_identity(pid: int) -> str | None:
+    """Prove a live native birth, not conservative PID existence."""
+    if type(pid) is not int or pid < 1:
+        return None
+    if sys.platform == "linux":
+        try:
+            record = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8")
+            boot = Path("/proc/sys/kernel/random/boot_id").read_text(encoding="ascii").strip()
+        except (OSError, UnicodeError):
+            return None
+        closing = record.rfind(")")
+        fields = record[closing + 1:].split()
+        if (
+            closing < 0 or len(fields) < 20
+            or fields[0] not in {"R", "S", "D", "T", "t", "W", "K", "P", "I"}
+            or not fields[19].isdigit() or int(fields[19]) < 1
+            or re.fullmatch(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}", boot) is None
+        ):
+            return None
+        return f"linux:{boot}:{fields[19]}"
+    if os.name != "nt" or pid > 0xFFFFFFFF:
+        return None
+    import ctypes
+    from ctypes import wintypes
+
+    try:
+        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+        kernel.OpenProcess.restype = wintypes.HANDLE
+        kernel.WaitForSingleObject.argtypes = (wintypes.HANDLE, wintypes.DWORD)
+        kernel.WaitForSingleObject.restype = wintypes.DWORD
+        kernel.GetProcessTimes.argtypes = (wintypes.HANDLE, *([ctypes.POINTER(wintypes.FILETIME)] * 4))
+        kernel.GetProcessTimes.restype = wintypes.BOOL
+        kernel.CloseHandle.argtypes = (wintypes.HANDLE,)
+        kernel.CloseHandle.restype = wintypes.BOOL
+        handle = kernel.OpenProcess(0x00100000 | 0x1000, False, pid)
+        if not handle:
+            return None
+        try:
+            if kernel.WaitForSingleObject(handle, 0) != 258:
+                return None
+            creation, exit_time, kernel_time, user_time = (wintypes.FILETIME() for _ in range(4))
+            if not kernel.GetProcessTimes(
+                handle, ctypes.byref(creation), ctypes.byref(exit_time),
+                ctypes.byref(kernel_time), ctypes.byref(user_time),
+            ):
+                return None
+            birth = (creation.dwHighDateTime << 32) | creation.dwLowDateTime
+            return f"windows:{birth}" if birth else None
+        finally:
+            kernel.CloseHandle(handle)
+    except (OSError, ctypes.ArgumentError):
+        return None
+
+
 def _runtime_publication_identity(
     arguments: Mapping[str, Any],
 ) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -92,10 +147,12 @@ def borrow_runtime_publication(**arguments: Any) -> tuple[_DirectoryLock, _Direc
         lock.token, lock.acquired = token, True
         lock.assert_owned()
         owner = lock._owner()
+        process_identity = _runtime_publication_process_identity(owner["pid"])
         if (
-            json.dumps(owner.get("runtimePublication"), sort_keys=True)
-            != json.dumps(purpose, sort_keys=True) or owner["host"] != lock.host
-            or not _pid_is_live(owner["pid"])
+            process_identity is None
+            or json.dumps(owner.get("runtimePublication"), sort_keys=True)
+            != json.dumps({**purpose, "processIdentity": process_identity}, sort_keys=True)
+            or owner["host"] != lock.host
         ):
             _fail("Runtime publication management owner is stale, foreign or has another purpose.")
         owners.append(owner)
@@ -104,7 +161,11 @@ def borrow_runtime_publication(**arguments: Any) -> tuple[_DirectoryLock, _Direc
     if _runtime_publication_identity(arguments)[0] != identity:
         _fail("Runtime publication installation changed while borrowing custody.")
     for lock, owner in zip(locks, owners):
-        if dict(lock._owner()) != dict(owner):
+        if (
+            dict(lock._owner()) != dict(owner)
+            or _runtime_publication_process_identity(owner["pid"])
+            != owner["runtimePublication"]["processIdentity"]
+        ):
             _fail("Runtime publication management owner changed while borrowing custody.")
     return locks
 
@@ -115,6 +176,9 @@ def runtime_publication_lease(
 ) -> Iterator[dict[str, str]]:
     """Hold existing namespace locks for explicit, caller-owned runtime installation."""
     identity, receipt = _runtime_publication_identity(arguments)
+    process_identity = _runtime_publication_process_identity(os.getpid())
+    if process_identity is None:
+        _fail("Runtime publication management process identity is unavailable.")
     deadline = time.monotonic() + timeout_seconds
     with ExitStack() as stack:
         locks = _runtime_publication_locks(receipt, arguments.get("durable_home"))
@@ -123,7 +187,10 @@ def runtime_publication_lease(
             stack.enter_context(lock)
         if _runtime_publication_identity(arguments)[0] != identity:
             _fail("Runtime publication installation changed before management admission.")
-        purpose = {"version": 1, "origin": "management", "operation": "publish", **identity}
+        purpose = {
+            "version": 1, "origin": "management", "operation": "publish",
+            **identity, "processIdentity": process_identity,
+        }
         for lock in locks:
             lock.assert_owned()
             _atomic_write_json(

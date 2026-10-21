@@ -92,8 +92,14 @@ acquiring or releasing them. Its returned lock handles are borrowed inspection
 handles, never caller-owned locks to release. Durable management/publication
 purpose binds the source, installation, context and receipt/activation
 generations; both owners must have the exact tokens, same live local PID and
-current valid governance. A ticket alone, a stale owner, another purpose or an
-invalid deployment policy cannot authorize publication.
+native process birth, and current valid governance. Linux custody uses the
+kernel's boot/start identity and nonterminal process state; Windows uses a live
+query/synchronization handle and its creation time. An exited but unreaped
+process is not a live management owner. Unavailable native identity refuses
+management admission before lock writes or refuses borrowing; the conservative
+PID-existence probe used elsewhere is not publication authority.
+A ticket alone, a stale or reused PID, another purpose or an invalid deployment
+policy cannot authorize publication.
 
 The Python-only `probe-management-publication` CLI action exposes the same
 read-only borrower check with the usual mode-resolution arguments. Worktrees'
