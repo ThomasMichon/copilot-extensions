@@ -9,6 +9,7 @@ import json
 import shutil
 from pathlib import Path
 import socket
+import subprocess
 import sys
 import threading
 import time
@@ -97,6 +98,82 @@ def test_actual_signed_selected_bytes_retained_without_runtime_activation(
         frozen.reverify(trusted, clock=lambda: 152)
     with pytest.raises(PlanError, match="retention has ended"):
         frozen.read_artifact(selected[0], trusted, clock=lambda: 152)
+
+
+@pytest.mark.parametrize("count", [1, 16, 256])
+def test_batch_snapshot_consumption_scans_the_closure_a_constant_number_of_times(
+    tmp_path, primitive, monkeypatch, count,
+):
+    from test_client_admission import independently_sign
+
+    fixture = artifact_fixture(tmp_path)
+    prototype = fixture["manifest"]["components"]["cli"]
+    names = [f"client-{index}" for index in range(count)]
+    fixture["manifest"]["components"] = {
+        name: copy.deepcopy(prototype) for name in names
+    }
+    fixture["manifest"]["roles"] = {role: list(names) for role in ("client", "gateway", "node")}
+    content = b"independently authenticated batch snapshot\n"
+    sources = {}
+    for name in names:
+        path = tmp_path / name
+        path.write_bytes(content)
+        fixture["manifest"]["components"][name]["artifact_sha256"] = hashlib.sha256(content).hexdigest()
+        sources[name] = str(path)
+    fixture["sources"]["components"] = sources
+    payload = {
+        **fixture["proof"]["payload"],
+        "release_digest": hashlib.sha256(canonical(fixture["manifest"])).hexdigest(),
+    }
+    signed = independently_sign([payload], tmp_path)
+    fixture["proof"] = {**fixture["proof"], **signed["proofs"][0]}
+    fixture["policy"]["keys"][0]["public_key"] = signed["public_key"]
+    parent = tmp_path / "stage"
+    parent.mkdir()
+    context, trusted = stage(fixture, parent)
+    with context as frozen:
+        original = staging.verify_role_artifacts
+        calls = []
+
+        def counted(*args, **kwargs):
+            calls.append(True)
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(staging, "verify_role_artifacts", counted)
+        snapshots = frozen.read_artifacts(trusted, clock=lambda: 151)
+        assert snapshots == dict.fromkeys(names, content)
+        assert len(calls) == 2
+
+
+@pytest.mark.parametrize("change", ["snapshot", "revoke", "expired", "closed"])
+def test_batch_snapshot_consumption_rechecks_integrity_and_current_authority(
+    tmp_path, primitive, monkeypatch, change,
+):
+    fixture = artifact_fixture(tmp_path)
+    parent = tmp_path / "stage"
+    parent.mkdir()
+    context, trusted = stage(fixture, parent)
+    with context as frozen:
+        original = staging._bytes
+        read_started = False
+
+        def changed(path, limit):
+            nonlocal read_started
+            content = original(path, limit)
+            if path.name != "release.json":
+                read_started = True
+                if change == "snapshot":
+                    return b"changed snapshot"
+                if change == "revoke":
+                    trusted["keys"][0]["revoked"] = True
+                if change == "closed":
+                    frozen._close()
+            return content
+
+        monkeypatch.setattr(staging, "_bytes", changed)
+        clock = lambda: 200 if change == "expired" and read_started else 151
+        with pytest.raises(PlanError):
+            frozen.read_artifacts(trusted, clock=clock)
 
 
 def test_original_mutation_cannot_replace_frozen_selected_bytes(tmp_path, primitive):
@@ -716,7 +793,7 @@ def test_fresh_installed_console_admission_and_durable_reopen_without_hosting(tm
     assert uv
     target = tmp_path / "installed-client"
     installed = run([uv, "pip", "install", "--target", str(target), "--no-deps",
-                     "--no-index", "--offline", str(artifact)])
+                     "--no-index", "--offline", "--python", sys.executable, str(artifact)])
     assert installed.returncode == 0, installed.stderr
     fixture = artifact_fixture(tmp_path)
     now = int(time.time())
@@ -769,6 +846,34 @@ raise SystemExit(entry.load()())
 
     initialized = client("initialize")
     assert initialized.returncode == 0, initialized.stderr
+    hot = subprocess.Popen(
+        [sys.executable, "-I", "-c",
+         "import sqlite3,sys,time; "
+         "c=sqlite3.connect(sys.argv[1]); "
+         "c.execute('PRAGMA cache_size=1'); c.execute('PRAGMA cache_spill=ON'); "
+         "c.execute('PRAGMA synchronous=FULL'); c.execute('BEGIN IMMEDIATE'); "
+         "c.execute('UPDATE installation SET identity=?', ('x'*1000000,)); "
+         "print('HOT_JOURNAL',flush=True); time.sleep(30)",
+         str(root / "client-admission.sqlite3")],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+    )
+    try:
+        assert hot.stdout.readline().strip() == "HOT_JOURNAL"
+        hot.kill()
+        assert hot.wait(timeout=10) != 0
+    finally:
+        if hot.poll() is None:
+            hot.kill()
+        hot.wait(timeout=10)
+        hot.stdout.close()
+        hot.stderr.close()
+    journal = root / "client-admission.sqlite3-journal"
+    assert journal.read_bytes()[:8] != b"\0" * 8
+    before = (root / "client-admission.sqlite3").read_bytes(), journal.read_bytes()
+    readonly = client("inspect")
+    assert readonly.returncode == 1 and "without mutation" in readonly.stderr
+    assert before == ((root / "client-admission.sqlite3").read_bytes(), journal.read_bytes())
     sentinel = root / "preserved-user-config"
     sentinel.write_bytes(b"previous client configuration")
     arguments = [part for name in ("selection", "release", "proof", "policy", "sources")

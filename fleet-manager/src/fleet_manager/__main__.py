@@ -86,6 +86,7 @@ def main(argv=None):
             from .artifact_staging import _bytes, stage_authenticated_artifacts
             from .client_admission import (
                 admit_client_release, initialize_client_admission, inspect_client_admission,
+                recover_client_admission,
             )
 
             def local(path):
@@ -97,7 +98,7 @@ def main(argv=None):
             elif args.state_command == "inspect":
                 result = inspect_client_admission(args.root, identity)
             else:
-                inspect_client_admission(args.root, identity)
+                recover_client_admission(args.root, identity)
                 if (
                     args.staging_parent.absolute().is_relative_to(args.root.absolute())
                     or args.root.absolute().is_relative_to(args.staging_parent.absolute())

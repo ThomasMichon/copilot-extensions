@@ -17,6 +17,7 @@ import pytest
 
 import fleet_manager.client_admission as admission
 from fleet_manager.planning import PlanError, canonical
+from fleet_manager.release_selection import ReleaseSelection
 from test_artifact_staging import primitive as primitive, stage
 from test_client_distribution import FLAGS, run
 from test_release_auth import artifact_fixture
@@ -40,8 +41,8 @@ def root_at(tmp_path):
 
 def selection(fixture):
     return {
-        "schema": "fleet-manager.client-release-selection", "version": 1,
-        "id": "selected-client", "revision": "r1", "owner": "test-adopter",
+        "schema": "fleet-manager.release-selection", "version": 1,
+        "decision": "selected-client", "revision": 1, "owner": "test-adopter",
         "authority": "test-authority", "installation": "test-installation", "role": "client",
         "release_digest": hashlib.sha256(canonical(fixture["manifest"])).hexdigest(),
         "sequence": fixture["proof"]["payload"]["sequence"],
@@ -135,7 +136,9 @@ def test_actual_signed_immutable_admission_and_fresh_idempotent_retry(tmp_path, 
     assert database_bytes(root) == before
     persisted = admission.inspect_client_admission(root, identity())["admitted"]
     assert persisted["sequence"] == 10 and persisted["selection"] == selection(fixture)
-    assert persisted["selection_digest"] == hashlib.sha256(canonical(selection(fixture))).hexdigest()
+    assert persisted["selection_digest"] == ReleaseSelection.from_dict(
+        selection(fixture),
+    ).selection_digest
     assert not result["active"] and not result["constructed"]
 
 
@@ -173,7 +176,7 @@ def test_saved_report_closed_stage_or_changed_selection_is_not_retry_authority(t
             root, identity(), selection(fixture), staged, trusted, clock=lambda: 150,
         )
         before = database_bytes(root)
-        changed = {**selection(fixture), "revision": "r2"}
+        changed = {**selection(fixture), "revision": 2}
         with pytest.raises(PlanError, match="content conflicts"):
             admission.admit_client_release(root, identity(), changed, staged, trusted, clock=lambda: 150)
         with pytest.raises(PlanError, match="live retained"):
@@ -344,6 +347,12 @@ def test_cli_initialize_inspect_and_missing_state_do_not_host(tmp_path, primitiv
     identity_file.write_bytes(canonical(identity()))
     base = ["--root", str(root), "--identity", str(identity_file)]
     assert main(["client-state", "inspect", *base]) == 1
+    assert not list(root.iterdir())
+    absent_inputs = [
+        part for name in ("selection", "release", "proof", "policy", "sources", "staging-parent")
+        for part in ("--" + name, str(tmp_path / "not-created"))
+    ]
+    assert main(["client-state", "admit", *base, *absent_inputs]) == 1
     assert not list(root.iterdir())
     assert main(["client-state", "initialize", *base]) == 0
     assert main(["client-state", "inspect", *base]) == 0

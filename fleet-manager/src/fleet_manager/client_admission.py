@@ -10,7 +10,7 @@ import time
 
 from . import artifact_staging
 from .planning import PlanError, canonical, decode, identifier, integer, record
-from .release import _hash
+from .release_selection import ReleaseSelection
 from .staging_cleanup import _windows_handle
 
 DATABASE = "client-admission.sqlite3"
@@ -39,25 +39,14 @@ def _identity(value):
 
 
 def _selection(value, identity):
-    value = decode(canonical(value))
-    record(value, "fleet-manager.client-release-selection",
-           {"id", "revision", "owner", "authority", "installation", "role",
-            "release_digest", "sequence", "components"})
-    for name in ("id", "revision", "owner", "authority", "installation"):
-        identifier(value[name], f"selection {name}")
+    selected = ReleaseSelection.from_dict(value)
+    value = selected.to_dict()
     if (value["authority"], value["installation"], value["role"], value["owner"]) != (
         identity["authority"], identity["installation"], "client", identity["selection_owner"],
     ):
         raise PlanError("selected release owner or installation scope mismatch")
-    _hash(value["release_digest"], "selected manifest digest")
-    integer(value["sequence"], "selected sequence", minimum=1)
-    names = value["components"]
-    if not isinstance(names, list) or not 1 <= len(names) <= 256:
-        raise PlanError("selected client closure must be a nonempty bounded list")
-    for name in names:
-        identifier(name, "selected component")
-    if names != sorted(set(names)):
-        raise PlanError("selected client closure must be sorted and unique")
+    if len(value["components"]) > 256:
+        raise PlanError("selected client closure exceeds its component bound")
     return value
 
 
@@ -274,7 +263,7 @@ def _read_state(connection, identity):
     if (
         receipt["sequence"] != rows[0][1] or receipt["sequence"] != selection["sequence"]
         or receipt["release_digest"] != selection["release_digest"]
-        or receipt["selection_digest"] != hashlib.sha256(canonical(selection)).hexdigest()
+        or receipt["selection_digest"] != ReleaseSelection.from_dict(selection).selection_digest
         or canonical(receipt).decode("utf-8") != rows[0][2]
     ):
         raise PlanError("client admission receipt identity mismatch")
@@ -361,6 +350,23 @@ def inspect_client_admission(root, identity):
         raise PlanError("client admission state could not be inspected without mutation") from None
 
 
+def recover_client_admission(root, identity):
+    """Validate existing state under ownership, allowing SQLite rollback recovery."""
+    identity = _identity(identity)
+    try:
+        with _root(root) as (path, _, unchanged):
+            _ordinary_file(path / DATABASE)
+            _lease_shape(path)
+            unchanged()
+        with _owned(root) as (path, database_root, unchanged):
+            with _connection(path, database_root=database_root, readonly=False) as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                _read_state(connection, identity)
+                unchanged()
+    except (OSError, sqlite3.Error):
+        raise PlanError("client admission state could not be recovered under ownership") from None
+
+
 def admit_client_release(root, identity, selection, staged, policy, *, clock=lambda: int(time.time())):
     """Persist a supplied selected release after fresh live-stage authentication, never execute it."""
     identity = _identity(identity)
@@ -383,10 +389,9 @@ def admit_client_release(root, identity, selection, staged, policy, *, clock=lam
                     or sorted(staged.artifacts) != selection["components"]
                 ):
                     raise PlanError("authenticated release was not selected for this installation")
-                for component in selection["components"]:
-                    staged.read_artifact(component, policy, clock=clock)
+                staged.read_artifacts(policy, clock=clock)
                 evidence = staged.reverify(policy, clock=clock)
-                decision_digest = hashlib.sha256(canonical(selection)).hexdigest()
+                decision_digest = ReleaseSelection.from_dict(selection).selection_digest
                 if previous:
                     if selection["sequence"] < previous["sequence"]:
                         raise PlanError("selected release is below durable admitted sequence")

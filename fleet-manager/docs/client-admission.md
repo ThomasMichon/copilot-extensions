@@ -29,8 +29,9 @@ corrupt/unsupported existing state. It never repairs permissions or resets an
 admitted sequence. Inspection does not create missing state, acquire a
 construction lease, stage artifacts or obtain credentials.
 
-The selected-release input has schema `fleet-manager.client-release-selection`,
-version `1`. It binds `id`, `revision`, `owner`, `authority`, `installation` and
+The selected-release input reuses `ReleaseSelection` with schema
+`fleet-manager.release-selection`, version `1`. It binds `decision`, positive
+integer `revision`, `owner`, `authority`, `installation` and
 `role` to the exact manifest's `release_digest`, positive `sequence` and sorted,
 unique `components` client closure. Signing validity or a higher sequence does
 not supply a missing selection decision. The sources and authentication inputs
@@ -60,6 +61,9 @@ manifest or selection content at the same sequence refuses. An identical retry
 is idempotent only after fresh verification; revoked or expired authorization
 still refuses. A reported uncertain commit must be reconciled by a fresh owned
 retry/reread, never by reducing the floor or inventing a completed receipt.
+Explicit admission preflight can recover a hot SQLite rollback journal under
+the construction lease before staging inputs. Ordinary inspection remains
+read-only and does not recover or rewrite state.
 
 Roots and state/ownership files must be ordinary and private; files must also
 be singly linked.
