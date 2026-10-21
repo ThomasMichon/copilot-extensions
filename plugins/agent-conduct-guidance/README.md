@@ -16,6 +16,7 @@ look for "is there ambient guidance for X."
 
 | Module | Instruction projection | Skill | What it covers |
 |--------|------------------------|-------|-----------------|
+| Multi-agent rules of engagement | [`multi-agent-rules-of-engagement`](instructions/multi-agent-rules-of-engagement.instructions.md) | [`using-multi-agent-rules-of-engagement`](skills/using-multi-agent-rules-of-engagement/SKILL.md) | In-scope same-operator peer authority without redundant approval, scope attenuation, real custody and gates, collective decisions/handoff, authoritative countermand, external ingress and minimal provenance |
 | Process-spawn hygiene | [`process-hygiene-fallback`](instructions/process-hygiene-fallback.instructions.md) | [`spawning-headless-processes`](skills/spawning-headless-processes/SKILL.md) | Spawn every ad hoc CMD/PowerShell/Python/Node/etc. child process headlessly — especially on Windows, where a naive spawn allocates a visible, focus-stealing console window per invocation |
 | Coordinator-first delegation | [`delegation-fallback`](instructions/delegation-fallback.instructions.md) | [`delegating-work`](skills/delegating-work/SKILL.md) | Route broad separable research, comparisons, evaluations, domain-tool calls, and disjoint bulk edits into bounded sub-agent contexts while the coordinator retains synthesis, integration, cohesive implementation, and completion |
 | Scratch-space hygiene | [`scratch-space-fallback`](instructions/scratch-space-fallback.instructions.md) | [`using-scratch-space`](skills/using-scratch-space/SKILL.md) | Resolve a portable scratch root and a timestamped per-task subfolder before writing an ad hoc working file (a draft PR body, a log, a one-off dump) outside a repository, instead of littering a drive root with undated loose files |
@@ -37,6 +38,7 @@ skill, documented in the table above and in **What's in this plugin** below.
 | Entry point | When it applies | What it does |
 |-------------|-----------------|--------------|
 | checked-in instruction projections | Every adopting repository | Loads each module's bounded owner-marked reminder without a startup output hook |
+| [`using-multi-agent-rules-of-engagement`](skills/using-multi-agent-rules-of-engagement/SKILL.md) skill | peer work directives, repeated-approval questions, conflicting directives, leadership handoff or external-domain instructions | Resolves the existing domain/scope/custody evidence and applies bounded authority rules without adding an authorization service |
 | [`spawning-headless-processes`](skills/spawning-headless-processes/SKILL.md) skill | "run this in the background", authoring a script/service that shells out, "why does a window keep flashing", any CMD/PowerShell/Python/Node child-process spawn | Selects the correct windowless/headless mechanism for the target language and OS before the spawn happens |
 | [`delegating-work`](skills/delegating-work/SKILL.md) skill | "delegate this research", "use agents to compare", "parallelize the investigation", "split these bulk edits" | Chooses direct versus delegated work, defines bounded contracts, and preserves coordinator ownership |
 | [`using-scratch-space`](skills/using-scratch-space/SKILL.md) skill | writing a draft PR/issue body, a captured log, a one-off JSON dump, or any other ad hoc file outside a repository checkout | Resolves a portable scratch root (never hardcoded) and a timestamped per-task subfolder convention |
@@ -158,6 +160,11 @@ the budget owner, not reconstructed from billing fields in this plugin.
 **Provides**
 
 - a concise ambient reminder per module, each independently scoped;
+- (rules-of-engagement module) the task-time procedure and explicit decision
+  examples for same-operator delegated work, scope/custody/review boundaries,
+  collective decisions, countermand and external ingress. It implements the
+  reviewed [Agent Chat scoped-authority intent](../../visions/plugins/agent-chat/README.md#scoped-peer-authority-and-countermand)
+  as generic guidance, not a new Chat dependency or runtime API;
 - (process-hygiene module) a per-language (PowerShell, Python, Node.js,
   CMD/batch), per-OS route table for the correct windowless/headless
   mechanism, guidance to prefer an existing local API/service over spawning a
@@ -180,6 +187,10 @@ the budget owner, not reconstructed from billing fields in this plugin.
 
 **Does NOT provide**
 
+- an operator-domain verifier, grant/revocation API, automatic deployment,
+  leadership election or transcript collector. Existing explicit authenticated
+  scope remains actionable; a new adapter's missing callable provenance seam
+  stays with its host/client owner instead of becoming a universal approval hold;
 - a process-spawn library, runtime, or vendored helper module — it is
   guidance, not code;
 - copilot-extensions' own internal enforcement (`tools/check-headless-launch.py`,
@@ -222,6 +233,8 @@ agent, MCP, bridge, or dispatch plugins separately when a task needs them.
 
 | Path | Purpose |
 |------|---------|
+| [`skills/using-multi-agent-rules-of-engagement/SKILL.md`](skills/using-multi-agent-rules-of-engagement/SKILL.md) | Bounded peer-authority, conflict, handoff and external-ingress procedure with policy decision examples |
+| [`instructions/multi-agent-rules-of-engagement.instructions.md`](instructions/multi-agent-rules-of-engagement.instructions.md) | Static ambient authority/custody boundaries between task-time skill invocations |
 | [`skills/spawning-headless-processes/SKILL.md`](skills/spawning-headless-processes/SKILL.md) | Per-language/per-OS headless-spawn route table and verification checklist (process-hygiene module) |
 | [`skills/delegating-work/SKILL.md`](skills/delegating-work/SKILL.md) | Detailed direct-versus-delegated routing procedure (delegation module) |
 | [`skills/using-scratch-space/SKILL.md`](skills/using-scratch-space/SKILL.md) | Scratch-root resolution order and timestamped per-task subfolder convention (scratch-space module) |
@@ -233,7 +246,7 @@ agent, MCP, bridge, or dispatch plugins separately when a task needs them.
 | [`scripts/resolve-model-routing.py`](scripts/resolve-model-routing.py) | Strict inert repository/operator registry resolver (delegation module) |
 | [`schemas/model-routing.schema.json`](schemas/model-routing.schema.json) | Versioned purpose-to-model configuration contract |
 | [`examples/model-routing.json`](examples/model-routing.json) | Synthetic configuration example |
-| [`tests/`](tests/) | Contract tests for both modules' projections, the reserved policy producers, and the model-routing resolver |
+| [`tests/`](tests/) | Declarative policy, projection/discovery, reserved policy-producer and model-routing contracts; these do not certify model behavior or runtime authorization |
 
 Each module's skill file is the source of truth for that module's task-time
 behavior.
