@@ -290,7 +290,7 @@ _(Agent-recommended realization of the operator's explicit model clarification.)
       semantics.
 - [x] Prepare Worktrees' versioned tracking, reference and observational
       consumers in #7414, keeping ordinary creation producers legacy.
-- [ ] Review and execute the [shared raw-JSON codec integration](physical-machine-environment-boundary.md#shared-raw-json-codec-integration)
+- [x] Review and execute the [shared raw-JSON codec integration](physical-machine-environment-boundary.md#shared-raw-json-codec-integration)
       before enabling producers; retain independent plugin installation.
 - [ ] Make runtime admission, structured machine guidance and prospective
       worktree naming/metadata consume the correct dimension. Keep native and
@@ -364,6 +364,29 @@ operator's all-alias/all-worktree acceptance requirement, not authorization for
 unrelated service changes or a second machine registry.
 
 ## Journal
+
+### 2026-10-20 - Shared reader integration merged; producer gates remain
+- #7519 merged as `fb8351eb15fbccceca9b097897615c649c65d7af`
+  after exact-head approval of
+  `ed6649bec9799ff8854c78ba0e7e02bd1547d832`, no open findings
+  and passing required Source CI. The managed completion path retained its
+  backup and reconciled the landed range onto current development history.
+- The shared-reader sub-plan is complete in reviewed source: extraction
+  #7481, Dispatch #7484, Bridge #7502 and Manager #7519. Only that Phase 3d
+  checklist item is closed; the containing effort remains Active.
+- The local live age audit remained unavailable. Independent exact-head CI
+  run `39549062922`, job `119053827150`, actually executed **Seasoned
+  dependency declarations** successfully: 320 declarations, zero violations,
+  minimum seven days. That nonempty result closes the source declaration
+  proof; it does not claim the timed-out local query passed or substitute for
+  configured-feed artifact checks during installation.
+- Ordinary create, anchor and external-adoption producers remain legacy, and
+  rollout remains paused. The next stretch is prospective creation, retained
+  allocation replay and one-term equivalence qualification under the reviewed
+  contract, before any producer-default switch or installed acceptance.
+- The #7420 owner received the merged Manager pure-dependency contract. Its
+  construction/release handback, the separate Windows reporting convergence,
+  qualified delivery and native Windows/WSL acceptance remain open.
 
 ### 2026-10-20 - Manager row and action adapter source slice
 - Manager's current-roster admission and typed model use the same pure codec.

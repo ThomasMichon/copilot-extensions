@@ -166,9 +166,10 @@ The sequence below is **agent-recommended** and requires this proposal's review.
 
 ## Shared raw-JSON codec integration
 
-The operator selected a shared dependency-free codec for the next consumer
-boundary. The package name and sequence below are **agent-recommended
-implementation details**, proposed for review before execution.
+The operator selected a shared dependency-free codec for this consumer
+boundary. The **agent-recommended package name and sequence** were reviewed in
+#7440 and implemented in #7481, #7484, #7502 and #7519. This completed reader
+slice does not enable ordinary tuple producers or authorize rollout.
 
 ### Bounded implementation
 
@@ -185,19 +186,20 @@ implementation details**, proposed for review before execution.
   dependency, materialization and artifact-attribution mechanisms. Never
   require an installed sibling plugin or copy the decoder into each consumer.
   Preserve package sources, dependency seasoning and standalone installation.
-- [ ] Adapt Dispatch's raw Worktrees row filtering and focus presentation,
+- [x] Adapt Dispatch's raw Worktrees row filtering and focus presentation,
   Bridge's venue-plugin owner checks, and Manager's raw-row source/action
   routing. Use the shared execution owner at one-term boundaries, retain
   physical/environment metadata separately, and refuse malformed explicit
   tuples before any ownership or routing effect.
   Dispatch's reader/focus boundary landed in #7484 and Bridge's controller
-  boundary in #7502; Manager remains open.
-- [ ] Keep task queues, sessions, relationships, transport profiles and
+  boundary in #7502; Manager's row/action boundary landed in #7519.
+- [x] Keep task queues, sessions, relationships, transport profiles and
   historical rows untouched. This is tuple-wire adaptation, not a takeover of
   existing transport, task lifecycle, installer or Manager runtime work.
-- [ ] Land the extraction and adapters in reviewable source slices, then
-  continue the existing prospective-producer and retained-replay gates.
-  Ordinary create, anchor and external-adoption producers remain legacy here.
+- [x] Land the extraction and adapters in reviewable source slices.
+  The next Phase 3d stretch continues the existing prospective-producer and
+  retained-replay gates. Ordinary create, anchor and external-adoption
+  producers remain legacy here.
 
 ### Required validation
 
@@ -209,16 +211,21 @@ implementation details**, proposed for review before execution.
   versions, missing dimensions, conflicting platform/environment and invalid
   owner fields. A physical name shared by native and guest records cannot
   substitute for the execution owner.
-- [ ] Test each actual consumer's raw JSON boundary with legacy, valid tuple
+- [x] Test each actual consumer's raw JSON boundary with legacy, valid tuple
   and malformed tuple rows. Preserve full metadata without putting physical
   identity into one-term owner fields; filtering must not hide uncertainty.
   Dispatch's raw reader and actual focus CLI have this coverage in #7484.
   Bridge's controller and provider/transport refusal boundary is covered in #7502.
+  Manager's model, current publications and Picker action boundary are covered
+  in #7519, retaining selected source identity independently of tuple metadata.
 - [x] Verify real first-party package construction, materialization and
   installed import boundaries through existing bounded tools, without adding
   networked or native integration work to the unit-only promotion packet.
-- [ ] Pass affected bounded suites, dependency/install-contract and module
+- [x] Pass affected bounded suites, dependency/install-contract and module
   guards, documentation review, current-head review and required Source CI.
+  Exact-head Source CI for #7519 ran the complete live declaration audit:
+  320 declarations, zero violations, minimum seven days. The separate local
+  timeout was not counted as proof.
   Source proof does not satisfy qualified delivery or installed acceptance.
 
 ## Validation Plan
