@@ -64,6 +64,12 @@ def test_explicit_reconcile_repo_does_not_require_cwd_project(selector, operatio
     assert argv == before
 
 
+def test_native_execution_check_is_project_independent():
+    argv = ["reconcile-plugins", "--check-update"]
+    assert routing._is_no_project_invocation(argv) is True
+    assert argv == ["reconcile-plugins", "--check-update"]
+
+
 @pytest.mark.parametrize(
     "argv,allowed",
     [
