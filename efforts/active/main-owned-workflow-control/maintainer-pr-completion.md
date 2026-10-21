@@ -50,6 +50,30 @@ These directions authorize the completion slice, not reassignment of other
 participants' release or control responsibilities. The mechanisms and tests
 below are **agent-recommended** ways to implement those requirements.
 
+October 20 deployment acceptance direction, verbatim:
+
+> Just deploy whenever necessary
+
+> All that needs filing and fixing
+
+This authorizes the normal deployment and repair work needed for this slice,
+not ownership transfers, policy exceptions, credential expansion or controller
+activation. The installed-update failures are tracked separately: #6925/#6928
+retain phase-aware watchdog ownership, #7305 with #7420/#7446 retain Manager
+construction and recovery, #6820 retains historical-command reconciliation,
+and #7494/#7495 track the new native dependency and staged-refresh regressions.
+The maintenance-axis gap is tracked by #7510; #7511 owns the narrow repeated
+validator-code import repair exposed by native profile validation.
+Repository editing class, agent exposure and Manager project membership are
+independent; a related worktree-class repository is not automatically a full
+Manager project. Concrete downstream classifications remain downstream.
+
+The #7441 per-review-layer authority fix is qualified by promotion #7448 and
+present in the selected, importable Worktrees 1.24.106-dev1 runtime. That is
+caller delivery evidence, not whole-update acceptance: Bridge cutover, Dispatch
+construction, command ownership and the first real Manager/profile invocation
+remain open. The CODEOWNER split stays rolled back and the controller stays off.
+
 ## Evidence and the delta
 
 Evidence was read against Dev `37ecc15c8c`; refresh before implementation:

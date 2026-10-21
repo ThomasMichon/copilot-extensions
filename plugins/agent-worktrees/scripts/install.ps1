@@ -3740,12 +3740,8 @@ function Deploy-CopilotPlugin {
         $copilotPrefix = @($copilotCommand[1..($copilotCommand.Count - 1)])
     }
 
-    # Detect if we are running from the installed plugin directory.
-    # When cmd_update invokes us, it sets cwd to the plugin dir and
-    # has already done the plugin update -- re-running it would EBUSY
-    # on Windows because copilot CLI tries to rmdir our own cwd.
-    $installedPluginsDir = Join-Path $env:USERPROFILE '.copilot\installed-plugins'
-    $runningFromInstalled = $PluginDir.Path -like "$installedPluginsDir*"
+    # Self-staging changes PluginDir, not the original payload's source kind.
+    $runningFromInstalled = (Get-SourceKind -PluginPath $PluginDir.Path) -eq 'marketplace'
 
     # 1. Register marketplace if not present
     $marketplaces = (& $copilotExecutable @copilotPrefix plugin marketplace list 2>$null) -join "`n"

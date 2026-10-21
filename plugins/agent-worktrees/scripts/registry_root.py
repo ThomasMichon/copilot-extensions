@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 import os
@@ -60,6 +61,7 @@ def _payload_root(
 
 
 def _load_context_helper(payload_root: Path) -> ModuleType:
+    """Reuse content-verified code, never a previous context-validation result."""
     helper = (
         Path(__file__).resolve().parent
         / "installation-context"
@@ -70,6 +72,25 @@ def _load_context_helper(payload_root: Path) -> ModuleType:
             "the owning payload has no installation-context validator"
         )
     module_name = "_agent_worktrees_registry_installation_context"
+    try:
+        sources = {
+            path.name: path.read_bytes()
+            for path in (helper, *sorted(helper.parent.glob("_installation_context_*.py")))
+        }
+    except OSError as error:
+        raise RegistryRootError(
+            "the installation-context validator cannot be read"
+        ) from error
+    fingerprint = tuple(
+        (name, hashlib.sha256(content).digest()) for name, content in sources.items()
+    )
+    cached = sys.modules.get(module_name)
+    if (
+        cached is not None
+        and getattr(cached, "__file__", None) == str(helper)
+        and getattr(cached, "_registry_code_fingerprint", None) == fingerprint
+    ):
+        return cached
     spec = importlib.util.spec_from_file_location(module_name, helper)
     if spec is None or spec.loader is None:
         raise RegistryRootError(
@@ -78,12 +99,13 @@ def _load_context_helper(payload_root: Path) -> ModuleType:
     module = importlib.util.module_from_spec(spec)
     sys.modules[module_name] = module
     try:
-        spec.loader.exec_module(module)
+        exec(compile(sources[helper.name], str(helper), "exec"), module.__dict__)
     except Exception as error:
         sys.modules.pop(module_name, None)
         raise RegistryRootError(
             "the installation-context validator cannot be loaded"
         ) from error
+    module._registry_code_fingerprint = fingerprint
     return module
 
 

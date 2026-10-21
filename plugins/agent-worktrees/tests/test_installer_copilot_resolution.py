@@ -267,3 +267,78 @@ try {
         )
         assert batch_result.returncode == 0, batch_result.stderr
         assert json.loads(batch_result.stdout) == forwarded
+
+
+@pytest.mark.portfolio_tier("T3")
+@pytest.mark.effect("process")
+@pytest.mark.effect("filesystem")
+@pytest.mark.parametrize(
+    ("payload", "origin", "expected_updates"),
+    [
+        ("stage/agent-worktrees", ".copilot/installed-plugins/example/agent-worktrees", 0),
+        (".copilot/installed-plugins/example/agent-worktrees", "", 0),
+        ("stage/agent-worktrees", "source/agent-worktrees", 1),
+        (".copilot/installed-plugins-backup/agent-worktrees", "", 1),
+    ],
+)
+def test_powershell_payload_refresh_uses_original_source(
+    tmp_path: Path,
+    native_powershell: str,
+    payload: str,
+    origin: str,
+    expected_updates: int,
+) -> None:
+    script = r"""
+$ErrorActionPreference = 'Stop'
+$tokens = $null
+$errors = $null
+$source = Get-Content -LiteralPath $env:INSTALLER -Raw
+$ast = [System.Management.Automation.Language.Parser]::ParseInput(
+    $source, [ref]$tokens, [ref]$errors
+)
+if ($errors.Count) { throw "Invalid installer: $errors" }
+foreach ($name in @('Get-SourceKind', 'Deploy-CopilotPlugin')) {
+    $functionAst = $ast.Find({
+        param($node)
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+            $node.Name -eq $name
+    }, $true)
+    if (-not $functionAst) { throw "Missing installer function: $name" }
+    Invoke-Expression $functionAst.Extent.Text
+}
+
+function Resolve-CopilotCommand { 'Invoke-FixtureCopilot' }
+function Write-ServiceOk { param($Message) }
+function Write-ServiceChanged { param($Message) }
+function Write-ServiceWarn { param($Message); throw $Message }
+function Write-ServiceErr { param($Message); throw $Message }
+function Invoke-FixtureCopilot {
+    $global:LASTEXITCODE = 0
+    switch ($args -join '|') {
+        'plugin|marketplace|list' { 'copilot-extensions' }
+        'plugin|list' { 'agent-worktrees@copilot-extensions' }
+        'plugin|update|agent-worktrees@copilot-extensions' { $script:Updates++ }
+        default { throw "Unexpected Copilot invocation: $args" }
+    }
+}
+$script:Updates = 0
+$PluginDir = [pscustomobject]@{Path = $env:PAYLOAD}
+Deploy-CopilotPlugin
+[pscustomobject]@{Updates = $script:Updates} | ConvertTo-Json -Compress
+"""
+    result = run_headless(
+        [native_powershell, "-NoProfile", "-NonInteractive", "-Command", script],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        env={
+            **os.environ,
+            "USERPROFILE": str(tmp_path),
+            "INSTALLER": str(INSTALL_PS1),
+            "PAYLOAD": str(tmp_path / payload),
+            "COPILOT_PLUGIN_STAGED_FROM": str(tmp_path / origin) if origin else "",
+        },
+        timeout=60,
+    )
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)["Updates"] == expected_updates

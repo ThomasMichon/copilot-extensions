@@ -189,6 +189,57 @@ def test_incomplete_installed_registry_bootstrap_cannot_fall_back_to_payload(mon
         registry_paths._helper()
 
 
+def test_registry_validator_reuses_code_but_revalidates_context(monkeypatch, tmp_path):
+    payload = _payload(tmp_path, "payload")
+    context, plugin_root = _stamp(
+        tmp_path / "durable", payload,
+        marketplace="cached", repository="Example-Org/Cached-Validator",
+    )
+    _select(monkeypatch, context, payload)
+    monkeypatch.setattr(registry_paths.sys, "prefix", str(tmp_path / "uninstalled"))
+
+    assert config.install_dir() == plugin_root
+    first = sys.modules["_agent_worktrees_registry_installation_context"]
+    assert registry_paths.installation_context()["pluginRoot"] == str(plugin_root)
+    assert sys.modules["_agent_worktrees_registry_installation_context"] is first
+
+    context.write_text("{}\n", encoding="utf-8")
+    with pytest.raises(ValueError):
+        config.install_dir()
+
+
+@pytest.mark.parametrize("changed_file", [
+    "installation_context.py", "_installation_context_base.py",
+])
+def test_registry_validator_reloads_changed_code_with_same_stat(
+    monkeypatch, tmp_path, changed_file,
+):
+    payload = _payload(tmp_path, "payload")
+    context, plugin_root = _stamp(
+        tmp_path / "durable", payload,
+        marketplace="changed", repository="Example-Org/Changed-Validator",
+    )
+    _select(monkeypatch, context, payload)
+    monkeypatch.setattr(registry_paths.sys, "prefix", str(tmp_path / "uninstalled"))
+    source = payload / "scripts" / "installation-context" / changed_file
+    source.write_text(source.read_text(encoding="utf-8") + "\nCACHE_PROBE = 'before'\n",
+                      encoding="utf-8")
+    assert config.install_dir() == plugin_root
+    first = sys.modules["_agent_worktrees_registry_installation_context"]
+    assert first.CACHE_PROBE == "before"
+    original_stat = source.stat()
+    source.write_text(source.read_text(encoding="utf-8").replace(
+        "CACHE_PROBE = 'before'", "CACHE_PROBE = 'after!'",
+    ), encoding="utf-8")
+    os.utime(source, ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns))
+    assert source.stat().st_size == original_stat.st_size
+
+    assert config.install_dir() == plugin_root
+    second = sys.modules["_agent_worktrees_registry_installation_context"]
+    assert second is not first
+    assert second.CACHE_PROBE == "after!"
+
+
 def test_binstub_arbitration_is_shared_across_validated_cells(monkeypatch, tmp_path):
     isolated_home = tmp_path / "sandbox"
     monkeypatch.setenv("AGENT_HOME", str(isolated_home))
