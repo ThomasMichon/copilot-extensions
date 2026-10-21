@@ -23,8 +23,6 @@ this band makes the call, exactly as the handoff-cutover slice's own
 
 from __future__ import annotations
 
-import re
-
 import argparse
 from collections.abc import Callable
 import os
@@ -49,8 +47,8 @@ from . import (
 )
 from . import config as cfg
 from .launch_progress import step
+from .creation_allocation import AdmittedAllocation, creation_parameters
 from .creation_identity import IdentityMode, new_machine_identity, require_same_machine_identity, validate_mode
-from .worktree_naming import prospective_session_worktree_id, session_worktree_id
 from .worktree_machine_identity import WorktreeMachineIdentity
 
 
@@ -155,6 +153,7 @@ def _carve_paired_knowledge(
     plat: str,
     plat_short: str,
     machine_identity: WorktreeMachineIdentity | None = None,
+    legacy_machine: str | None = None,
 ) -> dict | None:
     """Carve/stamp the citadel knowledge-repo PAIR for a stateless harness (#957).
 
@@ -192,7 +191,9 @@ def _carve_paired_knowledge(
     knowledge_name = res.repo
     knowledge_anchor = res.path
     pair_id = f"{timestamp}-{suffix}"
-    execution_machine = machine_identity.execution_machine if machine_identity is not None else config.machine
+    execution_machine = (
+        machine_identity.execution_machine if machine_identity is not None else legacy_machine or config.machine
+    )
     harness_ref = tracking.format_claim_ref(execution_machine, config.repo_name or "?", harness_id)
     entry = repos_mod.find_repo(knowledge_name)
     is_worktree_class = bool(entry) and repos_mod.normalize_class(entry.repo_class) in (
@@ -341,7 +342,7 @@ def _carve_paired_knowledge(
             branch=knowledge_branch,
             worktree_path=knowledge_wt_path,
             repo=knowledge_name,
-            machine=machine_identity.machine if machine_identity is not None else config.machine,
+            machine=machine_identity.machine if machine_identity is not None else execution_machine,
             platform_name=plat,
             machine_identity=machine_identity,
             tracking_path=knowledge_tracking_path,
@@ -556,6 +557,7 @@ def _create_worktree_core(
     pending_seed: str | None = None,
     pending_seed_id: str | None = None,
     allocation: tuple[str, str] | None = None,
+    admitted_allocation: AdmittedAllocation | None = None,
     creation_key: str | None = None,
     creation_intent: Callable[[dict], None] | None = None,
     identity_mode: IdentityMode = "legacy",
@@ -604,16 +606,23 @@ def _create_worktree_core(
             "no_pair": no_pair, "pending_seed": pending_seed,
             "defer_projections": defer_projections,
             "pending_seed_id": pending_seed_id, "allocation": allocation,
-            "identity_mode": identity_mode,
+            "identity_mode": identity_mode, "admitted_allocation": admitted_allocation,
         }
         return creation_requests.create(
             config, creation_key, creation_requests.allocation_facts(config, **options),
             lambda reserve: _create_worktree_core(config, **options, creation_intent=reserve),
             validate_record=lambda record: require_record_mutation(record, config),
         )
-    if allocation is not None and identity_mode != "legacy":
+    if admitted_allocation is not None:
+        if allocation is not None or kind != "session":
+            raise ValueError("Complete admitted allocation requires a session and no partial allocation")
+        admitted_allocation.require_current(config)
+    elif allocation is not None and identity_mode != "legacy":
         raise ValueError("tuple creation requires complete admitted allocation identity, not timestamp/suffix")
-    machine_identity = new_machine_identity(config, identity_mode)
+    machine_identity = (
+        admitted_allocation.machine_identity if admitted_allocation is not None
+        else new_machine_identity(config, identity_mode)
+    )
     # Stage D: local-shadow deferred names via _self_override (keeps create/worktree_ops_cli cluster-free).
     from . import claims_cli as _claims_cli
     from . import resolve_launch_cli as _resolve_launch_cli
@@ -640,30 +649,19 @@ def _create_worktree_core(
     plat = cfg.detect_platform()
     plat_short = "win" if plat == "windows" else plat
 
-    if allocation is None:
+    if admitted_allocation is not None:
+        timestamp, suffix = admitted_allocation.timestamp, admitted_allocation.suffix
+    elif allocation is None:
         timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
         suffix = secrets.token_hex(2)
     else:
         timestamp, suffix = allocation
-        if (
-            kind != "session"
-            or re.fullmatch(r"\d{8}-\d{6}", timestamp) is None
-            or re.fullmatch(r"[0-9a-f]{4}|[0-9a-f]{32}", suffix) is None
-        ):
-            raise ValueError("Invalid admitted worktree allocation")
-    if kind == "system":
-        # Recognizable id for daemon worktrees: sys-<name>-<ts>-<suffix>.
-        slug = _slugify(name or owner or "daemon")
-        worktree_id = f"sys-{slug}-{timestamp}-{suffix}"
-    elif machine_identity is not None:
-        worktree_id = prospective_session_worktree_id(machine_identity, timestamp, suffix)
-    else:
-        worktree_id = session_worktree_id(
-            config.machine, plat, timestamp, suffix,
-            legacy=allocation is not None and len(suffix) == 32,
-        )
-    branch = f"worktree/{worktree_id}"
-    worktree_path = str(Path(repo.worktree_root) / worktree_id)
+    worktree_id, branch, worktree_path = creation_parameters(
+        config, kind=kind, machine_identity=machine_identity, timestamp=timestamp, suffix=suffix,
+        partial=allocation is not None,
+        system_slug=_slugify(name or owner or "daemon") if kind == "system" else "",
+        admitted=admitted_allocation,
+    )
     if owner_ref:
         parsed_owner = tracking.parse_claim_ref(owner_ref)
         if parsed_owner is None or not parsed_owner.is_qualified:
@@ -809,7 +807,9 @@ def _create_worktree_core(
             codename_source=fresh_codename_source,
             source_attribution_configured=fresh_sac,
         )
-        if machine_identity is not None:
+        if admitted_allocation is not None:
+            admitted_allocation.require_current(fresh_config)
+        elif machine_identity is not None:
             require_same_machine_identity(fresh_config, machine_identity)
         new_codename = codename_tracking.assign_new_codename(
             tracking_path, codename_tracking.wordlist_for_repo(fresh_wordlist_config)

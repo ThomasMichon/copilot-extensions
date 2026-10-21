@@ -305,9 +305,9 @@ Do not rewrite old receipts or backfill identity merely by replaying them.
 
 - [x] Land this source-interface/replay amendment through ordinary plan review
   in #7568.
-- [ ] Implement shared-selection derivation and actual create/system/bridge/
+- [x] Implement shared-selection derivation and actual create/system/bridge/
   paired producers behind the internal legacy-default mode, with negative
-  pre-effect cases and unchanged legacy output controls.
+  pre-effect cases and unchanged legacy output controls in #7572.
 - [ ] Wire complete launch admission, creation-key replay and retained tail
   repair; exercise both old receipts and new tuple receipts without allocating
   a replacement on retry or refusal.

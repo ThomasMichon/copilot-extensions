@@ -18,17 +18,24 @@ from agent_worktrees import config as cfg, creation_tail_repair as repair
 from agent_worktrees import git_ops, installer, launch_seed_state, local_cache_refresh
 from agent_worktrees import launch_admission, maintenance_cli, permissions, repos, sessions, state_root
 from agent_worktrees import status_monitor_runtime, tracking, worktree_creation
+from agent_worktrees.worktree_machine_identity import WorktreeMachineIdentity
 
 
-def _creation_fixture(tmp_path, monkeypatch, *, native_git=False):
+def _creation_fixture(tmp_path, monkeypatch, *, native_git=False, tuple_identity=False, suffix="abcd"):
     native_load_config = cfg.load_config
     platform = cfg.detect_platform()
-    machine = "host-wsl" if platform == "wsl" else "host"
+    machine = "custom-space" if tuple_identity else "host-wsl" if platform == "wsl" else "host"
+    physical = "host-wsl" if tuple_identity else machine
+    identity_fields = WorktreeMachineIdentity(physical, platform, machine) if tuple_identity else None
     short = "win" if platform == "windows" else platform
-    identity = f"{machine}-{short}-20261013-100000-abcd"
+    identity = f"{physical}-{short}-20261013-100000-{suffix}"
     anchors = {name: tmp_path / name for name in ("harness", "knowledge")}
     for anchor in anchors.values():
         anchor.mkdir()
+        if tuple_identity:
+            (anchor / "machines.yaml").write_text(
+                f"machines:\n  {machine}: {{physical_host: {physical}, execution_platform: {platform}}}\n",
+            )
         if native_git:
             git_ops.git("init", "-b", "main", cwd=anchor)
             git_ops.git(
@@ -98,8 +105,8 @@ def _creation_fixture(tmp_path, monkeypatch, *, native_git=False):
         checkout.mkdir(parents=True)
         monkeypatch.setattr(repair, "_same_repository", lambda *args, **kw: None)
     record = tracking.create_new_record(
-        identity, f"worktree/{identity}", str(checkout), "harness", machine, platform,
-        projects["harness"] / "worktrees",
+        identity, f"worktree/{identity}", str(checkout), "harness", physical, platform,
+        projects["harness"] / "worktrees", machine_identity=identity_fields,
     )
     seed = launch_seed_state.stage(record.yaml_path, kind="new", text="retained\nprivate intent")
     return SimpleNamespace(

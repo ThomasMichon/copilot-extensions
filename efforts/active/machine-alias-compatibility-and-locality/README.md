@@ -384,6 +384,41 @@ unrelated service changes or a second machine registry.
 
 ## Journal
 
+### 2026-10-21 - Complete admission and retained replay source
+- Implemented the next reviewed gated-producer slice: a frozen complete
+  allocation derived by the existing locked launch writer, consumed unchanged
+  by the actual creation core and revalidated under its allocation lock.
+  Supported mode changes replay the admitted representation; old receipt
+  formats remain readable without identity backfill.
+- New launch and creation-key receipts retain original nonce, owner and pair
+  evidence. Missing, replaced, retired or conflicting allocations refuse
+  without a replacement carve. All launch writer verbs negotiate protocol 6
+  so an older handler cannot silently ignore the evidence.
+- Explicit tail repair retains the original typed identity, exact historical
+  pair stub and compatible legacy-owner spelling. It rejects nonce/owner
+  replacement during repair and preserves existing record and seed state.
+- Bounded source coverage includes actual daemon admission/replay and actual
+  Git pair repair, with Windows/WSL/Linux metadata fixtures and both suffix
+  lengths: 515 affected tests passed with four conditional skips. This is not
+  native Windows or installed-consumer acceptance.
+  Review/publication remains pending; ordinary defaults, anchor/external opt-in,
+  one-term equivalence, release qualification and installed acceptance remain
+  open. No live records, runtime or registry was migrated.
+
+### 2026-10-21 - First producer source merged; admitted allocation next
+- #7572 merged as `d8d9c19edc16026ab0ea03d9bde8e215cea807b4`
+  after current-head approval of
+  `25913e6d5c8c7833fd073a37f309f9ecbb2a7610`, both naming findings
+  resolved and passing required Source CI. Managed completion reconciled all
+  three landed source commits and retained its pre-completion backup.
+- Only the sub-plan's first producer implementation item is now complete.
+  Ordinary producer defaults remain legacy. Release and installed acceptance
+  have not been claimed; the containing effort remains Active.
+- Continue the reviewed complete-admission/replay slice in the same source:
+  preserve exact admitted IDs, paths, branches, original owner representation
+  and relationships across launch receipts and creation keys, then complete
+  retained repair, anchor/external adoption and one-term equivalence.
+
 ### 2026-10-21 - First gated producer source slice
 - The source-interface/replay amendment landed as #7568 after current-head
   approval and passing required CI. The declared contributor now owns this

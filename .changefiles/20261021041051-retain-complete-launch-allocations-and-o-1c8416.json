@@ -1,0 +1,9 @@
+{
+  "comment": "Retain complete launch allocations and original creation ownership across gated tuple replay and repair",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

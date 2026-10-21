@@ -109,10 +109,29 @@ authoritative creation path validates the retained record against the receiving
 execution space before returning it; a sibling environment cannot reuse the key
 to obtain an allocation owned by the other environment.
 
-The timestamp/suffix-only `allocation` input is not sufficient to admit a new
-tuple: that combination explicitly refuses until complete retained admission is
-integrated. This source API is not a new CLI flag, setting or rollout switch.
-Ordinary create, anchor admission and externally adopted checkout producers
-still emit legacy records. Complete admission/replay, one-term equivalence and
-installed-reader acceptance remain gates before ordinary-default activation.
-No historical ID, path, stored reference or session is rewritten.
+`launch_request.execute` exposes the same internal legacy-default opt-in.
+Its existing locked admission writer derives and retains a complete allocation:
+the exact ID, branch, checkout, project namespace and original owner
+representation. The core consumes that value rather than reformatting a
+timestamp/suffix using current defaults, and revalidates it under the allocation
+lock. New launch receipts also retain the record's creation nonce and original
+owner/pair evidence. Retry and status refuse a replaced, retired, missing or
+conflicting allocation; an already-started creation never automatically carves
+again. Writer protocol version 6 prevents older handlers from consuming this
+new evidence. Old receipt formats remain readable and are not backfilled.
+
+New creation-key receipts retain the same original owner/pair evidence alongside
+their existing nonce. Completed replay preserves the original result and refuses
+changed relationships; legacy receipts retain their prior nonce and identity
+checks without being rewritten. Explicit creation-tail repair uses the retained
+tuple and exact pair stub, not a fresh allocation. A proven compatible legacy
+registry alias keeps its original record and reciprocal-reference spelling.
+Replacement of the retained nonce or owner during repair refuses.
+
+The timestamp/suffix-only `allocation` input still cannot admit a new tuple;
+the complete admitted value is required. These source APIs are not CLI flags,
+settings or rollout switches. Ordinary create, anchor admission and externally
+adopted checkout producers still emit legacy records. Remaining producer
+integration, one-term equivalence and installed-reader acceptance stay gated
+before ordinary-default activation. No historical ID, path, stored reference
+or session is rewritten.

@@ -10,7 +10,7 @@ from pathlib import Path
 import sqlite3
 import stat
 
-from . import config as cfg, tracking
+from . import config as cfg, creation_allocation, tracking
 
 SCHEMA_VERSION = 1
 
@@ -64,7 +64,10 @@ def allocation_facts(config: cfg.Config, **options) -> dict:
         "no_pair": options["no_pair"] or bool(os.environ.get("AGENT_WORKTREES_NO_PAIR")),
         "seed_sha256": hashlib.sha256((options["pending_seed"] or "").encode()).hexdigest(),
         "pending_seed_id": options.get("pending_seed_id"),
-        "allocation": options.get("allocation"),
+        "allocation": (
+            options["admitted_allocation"].to_fields() if options.get("admitted_allocation") is not None
+            else options.get("allocation")
+        ),
         # Attempt provenance is evidence about the original allocation, not a
         # logical revision authorizing another one.
         "dispatch_task_id": (options["dispatch_attempt"] or {}).get("task_id"),
@@ -117,6 +120,10 @@ def _owner_record(worktree: dict, records: Path, project: str) -> tracking.Workt
         raise CreationRequestFailure("conflict", "The original allocation's owner identity changed", worktree)
     if not record.creation_nonce:
         raise CreationRequestFailure("pending", "The allocation has no authoritative creation nonce", worktree)
+    try:
+        creation_allocation.require_result_identity(record, worktree)
+    except ValueError as exc:
+        raise CreationRequestFailure("conflict", str(exc), worktree) from exc
     return record
 
 
@@ -148,6 +155,11 @@ def _replay(
     record = _owner_record(worktree, records, project)
     if record.creation_nonce != receipt.get("creation_nonce"):
         raise CreationRequestFailure("conflict", "The original allocation was replaced", worktree)
+    if "record_identity" in receipt:
+        try:
+            creation_allocation.require_record_evidence(record, receipt["record_identity"])
+        except ValueError as exc:
+            raise CreationRequestFailure("conflict", str(exc), worktree) from exc
     if validate_record is not None:
         validate_record(record)
     return {
@@ -244,6 +256,7 @@ def create(
                 "WHERE key_digest=? AND status='pending'",
                 (json.dumps({
                     "worktree": worktree, "creation_nonce": record.creation_nonce,
+                    "record_identity": creation_allocation.record_evidence(record),
                 }, sort_keys=True), digest),
             ).rowcount
             if changed != 1:
