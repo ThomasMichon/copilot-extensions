@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import json
 import os
+import runpy
+import shlex
 import shutil
 import subprocess
 import sys
@@ -38,16 +40,19 @@ def _command(fixture: dict, shell: str, name: str) -> list[str]:
     return [POWERSHELL, "-NoLogo", "-NoProfile", "-File", script]
 
 
-def _adopter(fixture: dict, plugin: str) -> dict[str, str]:
+def _adopter(fixture: dict, plugin: str, source: Path | None = None) -> dict[str, str]:
     payload = fixture["payload"].with_name(plugin)
     payload.mkdir()
     root = fixture["home"] / f".{plugin}"
     root.mkdir()
     fixture.update(payload=payload, legacy=root)
     fixture["arguments"].update(payload_root=payload, plugin_id=plugin, legacy_root=root)
-    source = ROOT / "plugins" / plugin
-    shutil.copytree(source / "scripts", payload / "scripts")
-    shutil.copyfile(source / "plugin.json", payload / "plugin.json")
+    if source is None:
+        source = ROOT / "plugins" / plugin
+        shutil.copytree(source / "scripts", payload / "scripts")
+        shutil.copyfile(source / "plugin.json", payload / "plugin.json")
+    else:
+        shutil.copytree(source, payload, dirs_exist_ok=True)
     environment = _catalog_environment(fixture)
     environment.update(
         COPILOT_PLUGIN_INSTALL_SMOKE="1",
@@ -73,6 +78,67 @@ def _adopter(fixture: dict, plugin: str) -> dict[str, str]:
         )
         getent.chmod(0o755)
     return environment
+
+
+@pytest.mark.portfolio_tier("T3")
+@pytest.mark.timeout(240)
+@pytest.mark.filterwarnings("ignore:Unknown pytest.mark.guard:pytest.PytestUnknownMarkWarning")
+@pytest.mark.parametrize("state", ["standalone", "managed"])
+@pytest.mark.parametrize("stamp_python", [False, True])
+def test_logger_actual_stamp_first_use_revalidates_snapshot_owner(
+    binding_fixture: dict, state: str, stamp_python: bool, tmp_path: Path,
+) -> None:
+    helpers = runpy.run_path(str(ROOT / "plugins/agent-logger/tests/test_install_binstub.py"))
+    released = helpers["_stage_release_payload"](tmp_path / "publisher")
+    environment = _adopter(binding_fixture, "agent-logger", released)
+    environment.pop("COPILOT_PLUGIN_INSTALL_SMOKE", None)
+    temporary = binding_fixture["home"] / "tmp"
+    temporary.mkdir()
+    environment.update({key: str(temporary) for key in ("TEMP", "TMP", "TMPDIR")})
+    calls = helpers["_offline_uv"](tmp_path, environment)
+    provision_path = environment["PATH"]
+    if not stamp_python:
+        _without_python(binding_fixture, environment)
+    root = binding_fixture["legacy"]
+    _policy(binding_fixture, root, binding_fixture["arguments"], "standalone")
+    shell = "powershell" if os.name == "nt" else "bash"
+    stamped = _run(
+        binding_fixture, environment, [*_command(binding_fixture, shell, "install"), "stamp"],
+    )
+    assert stamped.returncode == 0, stamped.stdout + stamped.stderr
+    environment["PATH"] = provision_path
+    assert not calls.exists()
+    snapshot = Path((root / "payload-dir").read_text(encoding="utf-8").strip())
+    _policy(binding_fixture, root, binding_fixture["arguments"], state)
+    binding_fixture["payload"].rename(binding_fixture["payload"].with_name("publisher-unavailable"))
+    for key in (
+        "COPILOT_PLUGIN_ROOT", "COPILOT_EXTENSIONS_COMMAND_LIFECYCLE",
+        "COPILOT_PLUGIN_INSTALL_STAGED", "COPILOT_PLUGIN_STAGED_FROM",
+        "COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT",
+    ):
+        environment.pop(key, None)
+    # Wrapper trace/status/locking admission is a separate bootstrap slice.
+    trace_paths = {".", "logs", "logs/boot-trace.jsonl", ".provision.lock", ".provision-status"}
+    before = {key: value for key, value in _snapshot(root).items() if key not in trace_paths}
+    wrapper = binding_fixture["home"] / ".local/bin/agent-logger"
+    command = (
+        [POWERSHELL, "-NoLogo", "-NoProfile", "-File", str(wrapper.with_suffix(".ps1")), "version"]
+        if os.name == "nt" else [str(wrapper), "version"]
+    )
+    result = subprocess.run(
+        command, env=environment, cwd=snapshot, capture_output=True, text=True,
+        timeout=180, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    if state == "managed":
+        assert result.returncode != 0
+        assert "deployment-managed" in result.stdout + result.stderr
+        assert {key: value for key, value in _snapshot(root).items() if key not in trace_paths} == before
+        assert not calls.exists()
+    else:
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "agent-logger " in result.stdout
+        helpers["_assert_complete_runtime"](binding_fixture["home"])
+        assert calls.exists()
 
 
 def _without_python(fixture: dict, environment: dict[str, str]) -> None:
@@ -290,6 +356,93 @@ def test_relocated_admission_retains_launch_project(
     assert result.returncode == 0, result.stdout + result.stderr
     smoke = json.loads((binding_fixture["legacy"] / "smoke.json").read_text(encoding="utf-8-sig"))
     assert smoke["staged"] is True
+
+
+@pytest.mark.skipif(os.name != "nt", reason="PowerShell filesystem provider location")
+@pytest.mark.parametrize("relative_root", [False, True])
+@pytest.mark.parametrize("python_available", [False, True])
+def test_interactive_location_retains_project_and_install_root(
+    binding_fixture: dict, relative_root: bool, python_available: bool, monkeypatch,
+) -> None:
+    environment = _adopter(binding_fixture, "agent-logger")
+    if not python_available:
+        _without_python(binding_fixture, environment)
+    _write(binding_fixture["home"] / ".copilot/settings.json", {})
+    project = binding_fixture["home"] / "launch-project"
+    _write(project / ".github/copilot/settings.json", {
+        "extraKnownMarketplaces": {
+            "example": {"source": {"source": "github", "repo": "Project/Plugins"}},
+        },
+    })
+    root = project / "runtime" if relative_root else binding_fixture["legacy"]
+    arguments = {**binding_fixture["arguments"], "project_root": project, "legacy_root": root}
+    _policy(binding_fixture, root, arguments, "standalone")
+    installer = binding_fixture["payload"] / "scripts/install.ps1"
+    text = installer.read_text(encoding="utf-8")
+    anchor = "            ran_from     = $PSScriptRoot"
+    assert text.count(anchor) == 1
+    installer.write_text(text.replace(
+        anchor, "            install_dir  = $InstallDir\n" + anchor,
+    ), encoding="utf-8")
+    monkeypatch.syspath_prepend(str(ROOT / "tools"))
+    from installer_engine_ref import human_output_json
+    installer.with_suffix(".human-output.json").write_text(
+        human_output_json(installer), encoding="utf-8",
+    )
+
+    def quote(value: object) -> str:
+        return "'" + str(value).replace("'", "''") + "'"
+    command = (
+        f"[IO.Directory]::SetCurrentDirectory({quote(binding_fixture['home'])}); "
+        f"Set-Location -LiteralPath {quote(project)}; "
+        "if ([IO.Directory]::GetCurrentDirectory() -eq (Get-Location).Path) "
+        "{ throw 'fixture requires distinct native and provider locations' }; "
+        f"& {quote(installer)} stamp"
+        + (" -InstallDir './runtime'" if relative_root else "")
+        + "; exit $LASTEXITCODE"
+    )
+    result = subprocess.run(
+        [POWERSHELL, "-NoLogo", "-NoProfile", "-Command", command],
+        env=environment, cwd=binding_fixture["home"], capture_output=True,
+        text=True, timeout=30, creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    smoke = json.loads((binding_fixture["legacy"] / "smoke.json").read_text(encoding="utf-8-sig"))
+    assert smoke["staged"] is True
+    assert smoke["install_dir"] == (str(root) if relative_root else "")
+    assert not (binding_fixture["home"] / "runtime").exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX relative PATH entries")
+@pytest.mark.parametrize("selected", ["python", "bash"])
+def test_relocated_admission_retains_relative_path_interpreter(binding_fixture: dict, selected: str) -> None:
+    environment = _adopter(binding_fixture, "agent-logger")
+    project = binding_fixture["home"] / "launch-project"
+    binaries = project / "bin"
+    binaries.mkdir(parents=True)
+    marker = binding_fixture["home"] / "selected-bash"
+    if selected == "python":
+        (binaries / "python3").symlink_to(binding_fixture["home"] / "test-bin/python3")
+    else:
+        bash = shutil.which("bash")
+        assert bash is not None
+        wrapper = binaries / "bash"
+        wrapper.write_text(
+            f"#!/bin/sh\nprintf 'selected\\n' >> {shlex.quote(str(marker))}\n"
+            f"exec {shlex.quote(bash)} \"$@\"\n", encoding="utf-8",
+        )
+        wrapper.chmod(0o755)
+    environment["PATH"] = "bin" + os.pathsep + environment["PATH"]
+    _policy(binding_fixture, binding_fixture["legacy"], binding_fixture["arguments"], "standalone")
+    result = subprocess.run(
+        [*_command(binding_fixture, "bash", "install"), "stamp"],
+        env=environment, cwd=project, capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    smoke = json.loads((binding_fixture["legacy"] / "smoke.json").read_text(encoding="utf-8"))
+    assert smoke["staged"] is True
+    if selected == "bash":
+        assert len(marker.read_text(encoding="utf-8").splitlines()) >= 2
 
 
 @pytest.mark.portfolio_tier("T3")

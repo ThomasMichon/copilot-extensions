@@ -65,6 +65,8 @@ case "$ACTION" in
         while IFS= read -r __publication_candidate; do
             [[ -f "$__publication_candidate" && -x "$__publication_candidate" ]] || continue
             case "$__publication_candidate" in */Microsoft/WindowsApps/*) continue ;; esac
+            __publication_candidate="$(cd -P -- "$(dirname -- "$__publication_candidate")" &&
+                printf '%s/%s\n' "$PWD" "$(basename -- "$__publication_candidate")")" || exit 1
             "$__publication_candidate" -I -B -c 'import sys; assert sys.version_info >= (3,10)' \
                 >/dev/null 2>&1 || continue
             __publication_python="$__publication_candidate"
@@ -83,11 +85,14 @@ case "$ACTION" in
             else
                 unset COPILOT_PLUGIN_STAGED_FROM
                 [[ "$ACTION" != stamp ]] || __publication_binding+=(--deferred-runtime)
+                __publication_bash="$(type -P bash)" || exit 1
+                __publication_bash="$(cd -P -- "$(dirname -- "$__publication_bash")" &&
+                    printf '%s/%s\n' "$PWD" "$(basename -- "$__publication_bash")")" || exit 1
                 cd "$HOME" || exit 1
                 # MSYS may retain a native-exec parent; close its script descriptor first.
-                exec bash -c 'exec "$@"' bash \
+                exec "$__publication_bash" -c 'exec "$@"' bash \
                     "$__publication_python" "${__publication_binding[@]}" --run-lifecycle -- \
-                    "$(type -P bash)" "$SCRIPT_DIR/install.sh" "$@"
+                    "$__publication_bash" "$SCRIPT_DIR/install.sh" "$@"
             fi
         elif [[ -n "${COPILOT_EXTENSIONS_COMMAND_LIFECYCLE:-}" ]]; then
             printf '%s\n' 'Runtime publication refused: lifecycle custody requires an existing Python 3.10+ executable.' >&2
@@ -134,6 +139,7 @@ case "$ACTION" in
                 fi
             done
             set -- "${__publication_args[@]}"
+            __publication_payload="$__publication_native_payload"
         fi
         ;;
 esac
@@ -1007,6 +1013,51 @@ _materialize_snapshot_libs() {
     done
 }
 
+_publish_snapshot_source() {
+    [[ -z "${COPILOT_EXTENSIONS_CONTEXT:-}" ]] || return 0
+    local snapshot="$1" resolution receipt previous_fingerprint fingerprint previous_plugin temporary schema version version_type
+    local helper="$SCRIPT_DIR/installation-context/installation-context.sh"
+    local query="$SCRIPT_DIR/installation-context/json-query.awk"
+    if ! resolution="$(bash "$helper" resolve --payload-root "$__publication_payload" \
+        --plugin-id agent-logger --project-root "$__publication_project")"; then
+        if [[ -e "$INSTALL_DIR/runtime-deployment.json" || -L "$INSTALL_DIR/runtime-deployment.json" ]]; then
+            _fail 'Cannot preserve canonical snapshot source under an explicit deployment policy.'
+            return 1
+        fi
+        printf '%s\n' 'WARNING: snapshot has no canonical source evidence; explicit deployment ownership will require repair.' >&2
+        return 0
+    fi
+    receipt="$snapshot/snapshot-provenance.json"
+    fingerprint="$(LC_ALL=C awk -f "$query" -v mode=get -v query_path=sourceFingerprint <<<"$resolution")" || return 1
+    if [[ -e "$receipt" || -L "$receipt" ]]; then
+        [[ -f "$receipt" && ! -L "$receipt" ]] || {
+            _fail 'Snapshot source must be an ordinary file.'
+            return 1
+        }
+        schema="$(LC_ALL=C awk -f "$query" -v mode=get -v query_path=schema "$receipt")" || return 1
+        version="$(LC_ALL=C awk -f "$query" -v mode=get -v query_path=version "$receipt")" || return 1
+        version_type="$(LC_ALL=C awk -f "$query" -v mode=type -v query_path=version "$receipt")" || return 1
+        previous_fingerprint="$(LC_ALL=C awk -f "$query" -v mode=get \
+            -v query_path=$'resolution\034sourceFingerprint' "$receipt")" || return 1
+        previous_plugin="$(LC_ALL=C awk -f "$query" -v mode=get \
+            -v query_path=$'resolution\034pluginId' "$receipt")" || return 1
+        if [[ "$schema" != copilot-extensions.legacy-snapshot-source || "$version_type" != number ||
+              "$version" != 1 || "$previous_fingerprint" != "$fingerprint" || "$previous_plugin" != agent-logger ]]; then
+            _fail 'Existing snapshot source belongs to another owner or is invalid.'
+            return 1
+        fi
+        return 0
+    fi
+    temporary="$(mktemp "$snapshot/.source-provenance.XXXXXX")" || return 1
+    if ! printf '{"schema":"copilot-extensions.legacy-snapshot-source","version":1,"resolution":%s}\n' \
+        "$resolution" > "$temporary" || ! ln -- "$temporary" "$receipt"; then
+        rm -f -- "$temporary"
+        _fail 'Cannot atomically publish canonical snapshot source.'
+        return 1
+    fi
+    rm -f -- "$temporary" || return 1
+}
+
 publish_payload_snapshot() {
     _assert_source_runtime || return 1
     mkdir -p "${INSTALL_DIR}/snapshots" || {
@@ -1015,6 +1066,7 @@ publish_payload_snapshot() {
     local snapshot_dir="${INSTALL_DIR}/snapshots/${SRC_VERSION}"
     if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
         snapshot_dir="$(_publish_source_snapshot)" || return 1
+        _publish_snapshot_source "$snapshot_dir" || return 1
         local py
         py="$(_bootstrap_python)" || return 1
         _prepare_source_manifest_context || return 1
@@ -1039,6 +1091,7 @@ publish_payload_snapshot() {
                 "$snapshot_dir" >&2
             return 1
         fi
+        _publish_snapshot_source "$snapshot_dir" || return 1
     else
         local snapshot_tmp="${snapshot_dir}.tmp.$$"
         rm -rf "$snapshot_tmp" || {
@@ -1067,6 +1120,7 @@ publish_payload_snapshot() {
             }
         _materialize_snapshot_libs "$snapshot_tmp" || return 1
         _materialize_snapshot_engine "$snapshot_tmp" || return 1
+        _publish_snapshot_source "$snapshot_tmp" || return 1
         mv "$snapshot_tmp" "$snapshot_dir" || {
             _fail "Snapshot publication failed: $snapshot_dir"; return 1;
         }

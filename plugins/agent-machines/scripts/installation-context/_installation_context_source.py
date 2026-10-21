@@ -642,6 +642,68 @@ def _resolve_directory_evidence(
     return None
 
 
+def _resolve_legacy_snapshot_evidence(
+    payload: Path, requested_plugin_id: str | None,
+) -> dict[str, Any] | None:
+    receipt_path = payload / SNAPSHOT_PROVENANCE_FILE
+    if not os.path.lexists(receipt_path):
+        return None
+    receipt = read_json(receipt_path)
+    if not isinstance(receipt, Mapping) or _property(receipt, "schema") != (
+        "copilot-extensions.legacy-snapshot-source"
+    ):
+        return None
+    if type(_property(receipt, "version")) is not int or receipt["version"] != 1:
+        _fail("Legacy snapshot source has an unsupported version.")
+    snapshots = payload.parent
+    root = snapshots.parent
+    if snapshots.name != "snapshots" or _is_link_or_junction(receipt_path):
+        _fail("Legacy snapshot source must be an ordinary snapshot-local file.")
+    selected = _read_regular_file_bytes(
+        root / "payload-dir", label="Legacy snapshot redirect", require_stable_identity=True,
+    ).decode("utf-8").strip()
+    stamped = _read_runtime_marker(root / "stamped-version", "Legacy snapshot version")
+    if (
+        not _path_is_fully_qualified(selected)
+        or not paths_equal(selected, payload)
+        or stamped != payload.name
+    ):
+        _fail("Legacy snapshot source does not describe the selected snapshot.")
+    resolution = _property(receipt, "resolution")
+    if (
+        not isinstance(resolution, Mapping)
+        or _property(resolution, "action") != "resolve"
+        or _property(resolution, "operative") is not False
+        or _property(resolution, "rebindRequired") is not False
+    ):
+        _fail("Legacy snapshot source requires a canonical read-only resolution.")
+    plugin = _string_property(resolution, "pluginId")
+    _assert_plugin_id(plugin)
+    if requested_plugin_id and plugin != requested_plugin_id:
+        _fail("Legacy snapshot source identifies another plugin.")
+    manifest = read_json(payload / "plugin.json")
+    if not isinstance(manifest, Mapping) or _property(manifest, "name") != plugin:
+        _fail("Legacy snapshot source does not match its payload plugin.")
+    captured_source = _property(resolution, "source")
+    if not isinstance(captured_source, Mapping):
+        _fail("Legacy snapshot source identity is missing.")
+    normalized = normalize_source(captured_source, from_receipt=True)
+    marketplace = _string_property(resolution, "marketplaceId")
+    _validate_marketplace_id(marketplace)
+    readable = marketplace.rsplit("--", 1)[0]
+    identity = source_identity(normalized, readable)
+    if (
+        identity["marketplaceId"] != marketplace
+        or identity["fingerprint"] != _string_property(resolution, "sourceFingerprint")
+        or identity["record"] != _string_property(captured_source, "record")
+    ):
+        _fail("Legacy snapshot source identity does not match its canonical fingerprint.")
+    return {
+        "source": normalized, "pluginId": plugin,
+        "readableName": readable, "locator": None,
+    }
+
+
 def resolve_payload_source(
     *,
     payload_root: str | os.PathLike[str] | None = None,
@@ -691,6 +753,8 @@ def resolve_payload_source(
         }
     else:
         evidence = _resolve_installed_evidence(payload, copilot, project)
+        if evidence is None:
+            evidence = _resolve_legacy_snapshot_evidence(payload, plugin_id)
         if evidence is None:
             evidence = _resolve_directory_evidence(payload, plugin_id)
         if evidence is None:

@@ -199,6 +199,12 @@ printf() {{
 . "$SCRIPT_DIR/source-runtime.sh"
 {body}
 # Build/acquisition is fixed here; the conditional callers and publication bodies are real.
+_publish_snapshot_source() {{
+    if [[ "$_failure" == source-provenance ]]; then
+        _injected; _fail 'snapshot source unavailable'; return 73
+    fi
+    [[ -d "$1" ]]
+}}
 _ensure_uv_index() {{ :; }}
 ensure_uv() {{ printf '%s\\n' fixture-provider; }}
 _versioned_slot_clean() {{ _RUNTIME_CONSTRUCTION_REUSE=0; }}
@@ -232,6 +238,7 @@ if {operation}; then exit 0; else exit 19; fi
     "stage-mkdir", "lib-remove", "prune", "rewrite-read",
     "rewrite-write", "rewrite-rename", "snapshot-rename", "libraries-mkdir",
     "scripts-mkdir", "engine-source-missing", "rewrite-prepare", "rewrite-prepare-link",
+    "source-provenance",
 ])
 def test_conditional_package_snapshot_failure_preserves_previous_publication(tmp_path, failure):
     state = _case(tmp_path)

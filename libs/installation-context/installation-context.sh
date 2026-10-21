@@ -1492,6 +1492,58 @@ resolve_installed_evidence() {
     return 0
 }
 
+resolve_legacy_snapshot_evidence() {
+    local payload="$1" requested_plugin_id="$2" receipt schema version snapshots root selected stamped
+    local action operative rebind plugin manifest_plugin marketplace fingerprint record source_prefix
+    EVIDENCE_FOUND=false
+    receipt="$payload/snapshot-provenance.json"
+    [[ -e "$receipt" || -L "$receipt" ]] || return 0
+    json_optional_string_into schema "$receipt" schema
+    [[ "$schema" == copilot-extensions.legacy-snapshot-source ]] || return 0
+    assert_json_type "$receipt" version number 'legacy snapshot source version'
+    version="$(json_optional_path "$receipt" version)"
+    [[ "$version" == 1 ]] || fail 'Legacy snapshot source has an unsupported version.'
+    snapshots="$(dirname -- "$payload")"
+    root="$(dirname -- "$snapshots")"
+    [[ "${snapshots##*/}" == snapshots && -f "$receipt" && ! -L "$receipt" ]] ||
+        fail 'Legacy snapshot source must be an ordinary snapshot-local file.'
+    [[ -f "$root/payload-dir" && ! -L "$root/payload-dir" ]] ||
+        fail 'Legacy snapshot redirect must be an ordinary file.'
+    selected="$(cat -- "$root/payload-dir")" || fail 'Cannot read legacy snapshot redirect.'
+    read_runtime_marker_into stamped "$root/stamped-version" 'Legacy snapshot version'
+    is_absolute "$selected" && paths_equal "$selected" "$payload" &&
+        [[ "$stamped" == "${payload##*/}" ]] ||
+        fail 'Legacy snapshot source does not describe the selected snapshot.'
+    json_optional_string_into action "$receipt" "$(path_join resolution action)"
+    assert_json_type "$receipt" "$(path_join resolution operative)" boolean 'resolution operative'
+    assert_json_type "$receipt" "$(path_join resolution rebindRequired)" boolean 'resolution rebindRequired'
+    operative="$(json_optional_path "$receipt" "$(path_join resolution operative)")"
+    rebind="$(json_optional_path "$receipt" "$(path_join resolution rebindRequired)")"
+    [[ "$action" == resolve && "$operative" == false && "$rebind" == false ]] ||
+        fail 'Legacy snapshot source requires a canonical read-only resolution.'
+    json_optional_string_into plugin "$receipt" "$(path_join resolution pluginId)"
+    assert_plugin_id "$plugin"
+    [[ -z "$requested_plugin_id" || "$plugin" == "$requested_plugin_id" ]] ||
+        fail 'Legacy snapshot source identifies another plugin.'
+    json_optional_string_into manifest_plugin "$payload/plugin.json" name
+    [[ "$manifest_plugin" == "$plugin" ]] ||
+        fail 'Legacy snapshot source does not match its payload plugin.'
+    source_prefix="$(path_join resolution source)"
+    normalize_source "$receipt" "$source_prefix" "" true
+    json_optional_string_into marketplace "$receipt" "$(path_join resolution marketplaceId)"
+    assert_marketplace_id "$marketplace"
+    EVIDENCE_READABLE_NAME="${marketplace%--*}"
+    derive_identity "$EVIDENCE_READABLE_NAME"
+    json_optional_string_into fingerprint "$receipt" "$(path_join resolution sourceFingerprint)"
+    json_optional_string_into record "$receipt" "$(path_join "$source_prefix" record)"
+    [[ "$MARKETPLACE_ID" == "$marketplace" && "$SOURCE_FINGERPRINT" == "$fingerprint" &&
+       "$SOURCE_RECORD" == "$record" ]] ||
+        fail 'Legacy snapshot source identity does not match its canonical fingerprint.'
+    EVIDENCE_PLUGIN_ID="$plugin"
+    LOCATOR_KIND=""
+    EVIDENCE_FOUND=true
+}
+
 resolve_directory_evidence() {
     local payload="$1" requested_plugin_id="$2" cursor manifest relative plugin_root source_base
     local count name source_path candidate matches matched_name manifest_name
@@ -1502,6 +1554,8 @@ resolve_directory_evidence() {
         ".claude-plugin/marketplace.json"
     )
     EVIDENCE_FOUND=false
+    resolve_legacy_snapshot_evidence "$payload" "$requested_plugin_id"
+    [[ "$EVIDENCE_FOUND" == false ]] || return 0
     cursor="$payload"
     while :; do
         for relative in "${manifests[@]}"; do

@@ -83,6 +83,10 @@ handles while retaining the launch project's read context. Windows Bash retains
 its existing requirement to launch outside the payload (for example from HOME);
 the unsafe payload-CWD form refuses before staging, rather than pinning an
 outer shell throughout installation.
+PowerShell captures its filesystem provider location before rerooting, including
+interactive `Set-Location` and relative install roots. Bash retains the exact
+selected Python and Bash executables as absolute paths before leaving the launch
+directory; a relative `PATH` entry cannot silently select another interpreter.
 
 Both native installers accept a canonically prepared `runtime-source.json`
 payload. They pin its full identity before the installation lock and revalidate
@@ -93,6 +97,10 @@ ordinary package-only installs retain their existing version identity.
 Deferred stamps retain the complete verified payload and vendor closure in an
 immutable source snapshot, so first-use provisioning and the `session-sync`
 command family remain usable after the publisher checkout is unavailable.
+Legacy snapshots retain
+[canonical frozen source evidence](../../libs/installation-context/README.md)
+for fresh-process policy admission, including stamps made without Python.
+The live deployment policy is never cached as permission in that evidence.
 Identical inputs reuse snapshots and completion evidence. Recovery requires an
 exact current or last-known-good selector rather than ordering source hashes.
 `agent-logger version` reports the selected source generation without changing

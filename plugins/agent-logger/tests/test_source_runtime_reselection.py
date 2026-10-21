@@ -130,6 +130,11 @@ def _reclaim_case_runtimes(tmp_path, record_property):
 
 def _case(tmp_path, plugin, *, incomplete_first=False):
     payload, fixtures = _small_stage(tmp_path, plugin)
+    marketplace = tmp_path / ".github" / "plugin" / "marketplace.json"
+    marketplace.parent.mkdir(parents=True)
+    marketplace.write_text(json.dumps({
+        "name": "fixture", "plugins": [{"name": plugin, "source": "./payload"}],
+    }), encoding="utf-8")
     package = plugin.replace("-", "_")
     checkout = payload / "src" / package
     checkout.mkdir(parents=True)
@@ -214,7 +219,7 @@ def _reuse(state, identity, *, fail_helper_copy=False, build_candidate=False, st
         names += (
             [
                 "Install-Package", "Invoke-VersionedMarkComplete", "Write-LoggerDeployManifest",
-                "Publish-PayloadSnapshot", "Test-SnapshotRequiresMaterializedEngine",
+                "Publish-PayloadSnapshot", "Publish-SnapshotSource", "Test-SnapshotRequiresMaterializedEngine",
                 "Materialize-SnapshotLibs", "Materialize-SnapshotInstallerEngine",
                 "Resolve-SnapshotInstallerEngineSource",
                 "Deploy-ResolverHelpers", "Test-LoggerRuntimeHealthy",
@@ -237,6 +242,8 @@ def _reuse(state, identity, *, fail_helper_copy=False, build_candidate=False, st
 $ErrorActionPreference = 'Stop'
 $ScriptDir = {_ps(state.payload / 'scripts')}
 $PluginDir = {_ps(state.payload)}
+$publicationSource = $PluginDir
+$publicationProject = {_ps(state.work)}
 $InstallDir = {_ps(state.root)}
 $LocalBin = {_ps(state.home / '.local' / 'bin')}
 $PkgSrcDir = Join-Path $PluginDir 'src\\agent_vault'
@@ -306,6 +313,7 @@ try {{
         names += (
             [
                 "install_package", "_versioned_mark_complete", "publish_payload_snapshot",
+                "_publish_snapshot_source",
                 "_snapshot_requires_materialized_engine", "_materialize_snapshot_libs",
                 "_materialize_snapshot_engine", "_resolve_snapshot_engine_source",
                 "_rewrite_snapshot_engine_ref",
@@ -327,6 +335,8 @@ try {{
         body = f"""
 set -euo pipefail
 PLUGIN_DIR={shlex.quote(str(state.payload))}
+__publication_payload="$PLUGIN_DIR"
+__publication_project={shlex.quote(str(state.work))}
 SCRIPT_DIR="$PLUGIN_DIR/scripts"
 INSTALL_DIR={shlex.quote(str(state.root))}
 LOCAL_BIN={shlex.quote(str(state.home / '.local' / 'bin'))}
@@ -461,8 +471,19 @@ def test_broken_retained_cli_with_healthy_initializer_is_not_selected_and_can_re
 def _protected_publication(state):
     names = ("current-version", "last-known-good", "deploy-manifest.json", "payload-dir", "stamped-version")
     paths = [state.root / name for name in names]
-    paths += [path for directory in (state.root / "bin", state.home / ".local" / "bin")
-              for path in directory.rglob("*") if path.is_file()]
+    for directory in (state.root / "bin", state.home / ".local" / "bin"):
+        for path in directory.rglob("*"):
+            if not path.is_file():
+                continue
+            if path.parent.parent == directory and path.parent.name.startswith(
+                f".{path.name}.publication-stage."
+            ):
+                # Failed native copies may retain private recovery staging, not a published helper.
+                assert not path.is_symlink() and not path.parent.is_symlink()
+                assert list(path.parent.iterdir()) == [path]
+                assert path.read_bytes() == (directory / path.name).read_bytes()
+                continue
+            paths.append(path)
     return {str(path): (path.stat().st_mtime_ns, path.read_bytes()) for path in paths}
 
 

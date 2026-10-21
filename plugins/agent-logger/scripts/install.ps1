@@ -57,12 +57,14 @@ if ($Action -in @('install', 'update', 'stamp', 'provision')) {
         ($env:COPILOT_PLUGIN_INSTALL_STAGED -and
             (($PSScriptRoot -replace '\\', '/') -match '/\.install-stage/'))
     )) {
-        [IO.Path]::GetFullPath($env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT)
+        $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath(
+            $env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT)
     } elseif ($env:COPILOT_PROJECT_DIR) {
-        [IO.Path]::GetFullPath($env:COPILOT_PROJECT_DIR)
-    } else { [IO.Directory]::GetCurrentDirectory() }
+        $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath(
+            $env:COPILOT_PROJECT_DIR)
+    } else { $ExecutionContext.SessionState.Path.CurrentFileSystemLocation.ProviderPath }
     $env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT = $publicationProject
-    $publicationRoot = [IO.Path]::GetFullPath($(if ($InstallDir) {
+    $publicationRoot = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($(if ($InstallDir) {
         $InstallDir
     } else { Join-Path $env:USERPROFILE '.agent-logger' }))
     if ($InstallDir) {
@@ -183,6 +185,7 @@ if ($Action -in @('install', 'update', 'stamp', 'provision')) {
             $InstallDir = $publicationActualRoot
             $PSBoundParameters['InstallDir'] = $InstallDir
         }
+        $publicationSource = $nativePublicationPayload
     }
 }
 
@@ -921,6 +924,50 @@ function Test-SnapshotRequiresMaterializedEngine {
     return $false
 }
 
+function Publish-SnapshotSource {
+    param([string]$SnapshotDir)
+    if ($env:COPILOT_EXTENSIONS_CONTEXT) { return }
+    $helper = Join-Path $ScriptDir 'installation-context\installation-context.ps1'
+    $resolved = @(& $helper -Action resolve -PayloadRoot $publicationSource `
+        -PluginId agent-logger -ProjectRoot $publicationProject)
+    if ($LASTEXITCODE -ne 0) {
+        if (Test-Path -LiteralPath (Join-Path $InstallDir 'runtime-deployment.json')) {
+            throw 'Cannot preserve canonical snapshot source under an explicit deployment policy.'
+        }
+        Write-Warning 'Snapshot has no canonical source evidence; explicit deployment ownership will require repair.'
+        return
+    }
+    $resolution = ($resolved -join "`n") | ConvertFrom-Json -ErrorAction Stop
+    $receipt = Join-Path $SnapshotDir 'snapshot-provenance.json'
+    if (Test-Path -LiteralPath $receipt) {
+        $entry = Get-Item -LiteralPath $receipt -Force
+        if ($entry.PSIsContainer -or ($entry.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+            throw 'Snapshot source must be an ordinary file.'
+        }
+        $previous = Get-Content -LiteralPath $receipt -Raw | ConvertFrom-Json -ErrorAction Stop
+        if ($previous.schema -cne 'copilot-extensions.legacy-snapshot-source' -or
+            ($previous.version -isnot [int] -and $previous.version -isnot [long]) -or
+            $previous.version -ne 1 -or
+            $previous.resolution.sourceFingerprint -cne $resolution.sourceFingerprint -or
+            $previous.resolution.pluginId -cne $resolution.pluginId) {
+            throw 'Existing snapshot source belongs to another owner or is invalid.'
+        }
+        return
+    }
+    $document = [ordered]@{
+        schema = 'copilot-extensions.legacy-snapshot-source'
+        version = 1
+        resolution = $resolution
+    } | ConvertTo-Json -Depth 30
+    $temporary = Join-Path $SnapshotDir ('.source-provenance-' + [guid]::NewGuid().ToString('N'))
+    try {
+        [IO.File]::WriteAllText($temporary, $document, [Text.UTF8Encoding]::new($false))
+        [IO.File]::Move($temporary, $receipt)
+    } finally {
+        if ([IO.File]::Exists($temporary)) { [IO.File]::Delete($temporary) }
+    }
+}
+
 function Publish-PayloadSnapshot {
     <# Publish one immutable payload snapshot and atomically point payload-dir
        and stamped-version at it. Existing complete same-version snapshots are
@@ -934,6 +981,7 @@ function Publish-PayloadSnapshot {
     $snapDir = Join-Path (Join-Path $InstallDir 'snapshots') $SrcVersion
     if ($script:SourceRuntimeIdentity) {
         $snapDir = Publish-SourceSnapshot
+        Publish-SnapshotSource -SnapshotDir $snapDir
         $py = Get-BootstrapPython
         if (-not $py) { throw 'Source redirect publication requires a bootstrap Python interpreter' }
         Prepare-SourceManifestContext
@@ -961,6 +1009,7 @@ function Publish-PayloadSnapshot {
         if (-not $complete) {
             throw "Existing agent-logger snapshot is incomplete; refusing replacement: $snapDir"
         }
+        Publish-SnapshotSource -SnapshotDir $snapDir
     } else {
         $snapTmp = "$snapDir.tmp-$PID"
         if (Test-Path $snapTmp) {
@@ -979,6 +1028,7 @@ function Publish-PayloadSnapshot {
             }
         Materialize-SnapshotLibs -SnapshotDir $snapTmp
         Materialize-SnapshotInstallerEngine -SnapshotDir $snapTmp
+        Publish-SnapshotSource -SnapshotDir $snapTmp
         Move-Item -LiteralPath $snapTmp -Destination $snapDir
     }
 
