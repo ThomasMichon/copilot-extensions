@@ -274,6 +274,15 @@ authorizes critical main-path acceptance or a bounded administrative change.
   Natural source/push CI and the closed, unmerged narrative validation #7663
   prove the actual conditional outcomes and retained push diagnostic.
   This does not close the whole-flow measurement and release-cycle items.
+- [x] Land bounded same-release upload batching and four-way independent raw
+  readback in the source helpers (#7679), preserving qualification, signer,
+  metadata, source/tag identity and receipt gates. Existing-control selection
+  and comparable natural publication timing remain open under Phase 6;
+  source merge alone does not activate a new trusted helper pin.
+- [ ] Land and observe the bounded tracking-write guard traversal reuse,
+  preserving all sibling files, failure handling, alias fixed points and
+  diagnostic ordering. Keep local paired timing separate from hosted timing
+  and the broader whole-flow acceptance gates.
 - [ ] Remove redundant release-shaped PR and main-push validation only where
   existing trusted gates and exact-SHA release evidence cover the removed work;
   first prove no generated-output coverage or required context is lost.

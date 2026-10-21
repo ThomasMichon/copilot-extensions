@@ -91,6 +91,17 @@ Real front-door, missing-socket, installed-hook, SDK-forwarding and JavaScript
 delivery counterparts retain their existing periodic ownership. No Python
 classifier assertion is treated as proof of a native or shell boundary.
 
+## Tracking-write source guard
+
+The source tracking-write guard still parses every sibling-plugin Python file,
+including unchanged files, and fails closed on read, encoding and syntax errors.
+It reuses one per-file breadth-first AST enumeration and assignment list across
+its existing alias fixed-point passes. This is traversal reuse, not a changed-path
+filter or a persistent cache; the denylist, reflection checks and diagnostic
+ordering remain unchanged. The focused regression entrypoint is
+`python -m pytest -q tools/test_check_no_sibling_tracking_writes.py`, run through
+the bounded test supervisor.
+
 ## Copilot Code Review setup staging
 
 The dedicated `copilot-code-review.yml` setup stays on literal `ubuntu-latest`
