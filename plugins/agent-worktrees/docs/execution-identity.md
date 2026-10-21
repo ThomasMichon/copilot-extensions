@@ -139,7 +139,9 @@ linked-checkout path, ID and branch as authority. It does not rename an external
 created checkout to match prospective naming. Opt-in derivation errors propagate
 instead of falling back to a legacy write. Existing records, including a
 competing creation winner, return with their original identity and bytes and
-without requesting a new tuple from the registry.
+without requesting a new tuple from the registry. Newly created records retain
+their supplied tracking destination for subsequent path-implicit saves,
+including legacy anchor callers using a nondefault tracking directory.
 
 The timestamp/suffix-only `allocation` input still cannot admit a new tuple;
 the complete admitted value is required. These source APIs are not CLI flags,

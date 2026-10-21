@@ -20,6 +20,8 @@ import re
 import subprocess
 from pathlib import Path
 
+from agent_procutil import no_window_kwargs
+
 from . import config as cfg
 from . import git_ops, output, tracking
 from .creation_identity import IdentityMode, new_tracking_identity, validate_mode
@@ -379,6 +381,7 @@ def _find_repo_dir() -> Path | None:
             capture_output=True,
             text=True,
             timeout=5,
+            **no_window_kwargs(),
         )
         if r.returncode == 0:
             return git_ops.resolve_to_anchor(Path(r.stdout.strip()))

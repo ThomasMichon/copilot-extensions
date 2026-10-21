@@ -397,8 +397,13 @@ unrelated service changes or a second machine registry.
 - Actual producer-to-tracking-to-JSON/controller fixtures cover Windows, WSL
   and Linux metadata, with legacy controls, registry/platform/namespace
   refusals and competing creation. The affected bounded source portfolio
-  passed 794 tests with one conditional skip. This is Linux-contained Git
+  passed 823 tests with one conditional skip. This is Linux-contained Git
   execution, not native Windows or installed-consumer acceptance.
+- Review found that the if-absent factory did not stamp its returned record's
+  supplied tracking destination. Three new cases reproduced the class across
+  anchor and legacy/tuple factory returns; the factory now retains that path
+  for implicit saves. A fourth regression reproduced CI's unsuppressed Git
+  discovery probe, which now uses the existing shared headless helper.
 - Review/publication remains next for this slice. The containing effort stays
   Active; actual one-term creation/lookup/resume equivalence, release,
   installed acceptance and separately reviewed default activation remain open.

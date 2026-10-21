@@ -703,5 +703,6 @@ def create_new_record_if_absent(
             creation_nonce=secrets.token_hex(8),
         )
         tracking._save_record_unlocked(record, path)
+    record._loaded_from = path
     tracking._flush_session_projections(record)
     return record, True

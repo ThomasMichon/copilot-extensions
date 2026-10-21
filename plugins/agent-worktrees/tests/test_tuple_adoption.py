@@ -246,3 +246,59 @@ def test_unknown_adoption_mode_refuses_explicitly(
     with pytest.raises(ValueError, match="Unsupported creation identity mode"):
         _produce(adoption_config, kind, mode="unsupported")
     assert not list(cfg.tracking_dir().glob("*.yaml"))
+
+
+@pytest.mark.parametrize("producer", ["anchor", "if-absent", "if-absent-tuple"])
+def test_new_adoption_record_retains_supplied_destination_for_later_save(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, producer: str,
+) -> None:
+    default_project = tmp_path / "default-project"
+    supplied = tmp_path / "supplied-tracking"
+    monkeypatch.setattr(cfg, "project_dir", lambda *_a: default_project)
+    if producer == "anchor":
+        record = tracking.load_or_create_anchor_record(
+            str(tmp_path / "anchor"), "project", "custom-space", "wsl", supplied,
+        )
+    else:
+        identity = (
+            WorktreeMachineIdentity("desk", "wsl", "custom-space")
+            if producer == "if-absent-tuple" else None
+        )
+        record, created = tracking.create_new_record_if_absent(
+            "external", "retained", str(tmp_path / "external"), "project",
+            identity.machine if identity is not None else "custom-space", "wsl", supplied,
+            machine_identity=identity,
+        )
+        assert created
+    expected = supplied / f"{record.worktree_id}.yaml"
+    assert record.yaml_path == expected
+    record.title = "updated at supplied destination"
+    tracking.save_record(record)
+    assert tracking._load_record_uncached(expected).title == record.title
+    assert not (default_project / "worktrees" / expected.name).exists()
+
+
+def test_repo_discovery_git_probe_uses_shared_headless_kwargs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install = tmp_path / "install"
+    package = install / "agent_worktrees"
+    package.mkdir(parents=True)
+    anchor = tmp_path / "anchor"
+    (anchor / ".git").mkdir(parents=True)
+    monkeypatch.setattr(worktree_identity, "__file__", str(package / "worktree_identity.py"))
+    monkeypatch.setattr(cfg, "install_dir", lambda: install)
+    monkeypatch.setattr(
+        worktree_identity, "no_window_kwargs", lambda: {"creationflags": 123}, raising=False,
+    )
+    monkeypatch.chdir(tmp_path)
+    calls = []
+
+    def probe(command, **kwargs):
+        calls.append((command, kwargs))
+        return worktree_identity.subprocess.CompletedProcess(command, 0, str(anchor), "")
+
+    monkeypatch.setattr(worktree_identity.subprocess, "run", probe)
+    assert worktree_identity._find_repo_dir() == anchor
+    assert len(calls) == 1
+    assert calls[0][1]["creationflags"] == 123
