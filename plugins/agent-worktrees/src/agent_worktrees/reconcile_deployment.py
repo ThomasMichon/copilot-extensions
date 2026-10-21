@@ -54,7 +54,9 @@ def publication_diagnostic(
             or result.get("version") != 1
             or result.get("marketplaceId") != reconcile.CORE_MARKETPLACE_ID
             or result.get("pluginId") != plugin
-            or result.get("status") != "ready"
+            or result.get("status") not in (
+                ("ready", "deactivation-required") if context is not None else ("ready",)
+            )
             or result.get("actualMode") != ("namespaced" if context else "legacy")
             or not _matching_path(result.get("runtimeRoot"), root)
             or not _matching_path(result.get("context"), context)

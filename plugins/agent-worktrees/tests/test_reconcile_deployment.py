@@ -54,6 +54,7 @@ def deployment(
     env.deploy_runtime(plugin, "1.0.0")
     env.root = env.home / f".{plugin}"
     env.context = None
+    env.plugin = plugin
 
     def policy(state: str) -> None:
         helper = reconcile._installation_context_helper(plugin, env.payload)
@@ -203,22 +204,38 @@ def test_environment_hint_is_not_publication_authority(
     assert diagnostic is not None and diagnostic["reason"] == "deployment-managed"
 
 
-@pytest.mark.parametrize("state", ["standalone", "managed", "invalid"])
-def test_namespaced_policy_uses_actual_root_not_legacy(
-    deployment: Any, state: str,
+def test_deactivation_status_does_not_authorize_a_legacy_owner(
+    deployment: Any, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    helper = reconcile._installation_context_helper("agent-index", deployment.payload)
+    deployment.policy("standalone")
+    original = reconcile._run_installation_mode_helper
+
+    def wrong_status(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        result = original(*args, **kwargs)
+        return {**result, "status": "deactivation-required"}
+
+    monkeypatch.setattr(reconcile, "_run_installation_mode_helper", wrong_status)
+    diagnostic = reconcile_deployment.publication_diagnostic(
+        "agent-index", deployment.payload, deployment.root, context=None,
+    )
+    assert diagnostic is not None
+    assert diagnostic["reason"] == "deployment-policy-unavailable"
+
+
+def _select_namespaced(deployment: Any, *, enabled: bool) -> None:
+    plugin = deployment.plugin
+    helper = reconcile._installation_context_helper(plugin, deployment.payload)
     current = reconcile._run_installation_mode_helper(
-        "agent-index", deployment.payload, helper, deployment.root, context=None,
+        plugin, deployment.payload, helper, deployment.root, context=None,
     )
     context, root = deployment.select_context(
-        "agent-index", deployment.payload, "2.0.0", "1.0.0",
+        plugin, deployment.payload, "2.0.0", "1.0.0",
     )
     receipt = json.loads(context.read_text(encoding="utf-8"))
     namespace = json.loads(Path(receipt["namespaceReceipt"]).read_text(encoding="utf-8"))
     (root / "installation-activation.json").write_text(json.dumps({
         "schema": "copilot-extensions.installation-activation", "version": 1,
-        "marketplaceId": reconcile.CORE_MARKETPLACE_ID, "pluginId": "agent-index",
+        "marketplaceId": reconcile.CORE_MARKETPLACE_ID, "pluginId": plugin,
         "mode": "namespaced", "state": "active",
         "environment": current["environment"], "context": str(context),
         "namespaceGeneration": namespace["generation"],
@@ -232,13 +249,21 @@ def test_namespaced_policy_uses_actual_root_not_legacy(
     (deployment.home / ".copilot-extensions" / "installation-mode.json").write_text(
         json.dumps({
             "schema": "copilot-extensions.installation-mode", "version": 1,
-            "installationMode": {"enabled": True},
+            "installationMode": {"enabled": enabled},
         }), encoding="utf-8",
     )
     # The legacy policy is deliberately invalid. Only the active cell owns
     # this runtime decision; probing the conventional root would refuse it.
     deployment.policy("invalid")
     deployment.root, deployment.context = root, context
+
+
+@pytest.mark.parametrize("state", ["standalone", "managed", "invalid"])
+def test_namespaced_policy_uses_actual_root_not_legacy(
+    deployment: Any, state: str,
+) -> None:
+    _select_namespaced(deployment, enabled=True)
+    root, context = deployment.root, deployment.context
     deployment.policy(state)
     before = _snapshot(deployment.home)
     plan = reconcile.build_plan(deployment.repo, machine="test", cache={}, save=False)
@@ -324,6 +349,7 @@ def test_aliased_home_retains_installation_policy_scope(
 
 @pytest.mark.parametrize("deployment", ["agent-worktrees"], indirect=True)
 @pytest.mark.parametrize("current", [False, True])
+@pytest.mark.parametrize("deactivation_required", [False, True])
 @pytest.mark.parametrize(
     ("state", "reason"),
     [
@@ -336,10 +362,12 @@ def test_aliased_home_retains_installation_policy_scope(
 )
 def test_prelaunch_retains_custom_bootstrap_but_gates_runtime(
     deployment: Any, monkeypatch: pytest.MonkeyPatch,
-    state: str, reason: str | None, current: bool,
+    state: str, reason: str | None, current: bool, deactivation_required: bool,
 ) -> None:
     from types import SimpleNamespace
 
+    if deactivation_required:
+        _select_namespaced(deployment, enabled=False)
     if state != "missing":
         deployment.policy(state)
     (deployment.payload / "scripts" / "install.ps1").write_text("# installer\n", encoding="utf-8")
@@ -382,9 +410,13 @@ def test_prelaunch_retains_custom_bootstrap_but_gates_runtime(
 @pytest.mark.parametrize("deployment", ["agent-worktrees"], indirect=True)
 @pytest.mark.parametrize("state", ["missing", "standalone", "managed", "invalid", "probe-error"])
 @pytest.mark.parametrize("trigger", ["drift", "payload", "current"])
+@pytest.mark.parametrize("deactivation_required", [False, True])
 def test_stage_refreshes_payload_without_republishing_managed_runtime(
     deployment: Any, monkeypatch: pytest.MonkeyPatch, state: str, trigger: str,
+    deactivation_required: bool,
 ) -> None:
+    if deactivation_required:
+        _select_namespaced(deployment, enabled=False)
     if state == "probe-error":
         def failed_probe(*args: Any, **kwargs: Any) -> None:
             raise RuntimeError("publication probe failed")
@@ -392,7 +424,10 @@ def test_stage_refreshes_payload_without_republishing_managed_runtime(
     elif state != "missing":
         deployment.policy(state)
     if trigger != "drift":
-        deployment.deploy_runtime("agent-worktrees", "2.0.0")
+        (deployment.root / "deploy-manifest.json").write_text(
+            json.dumps({"schema_version": 3, "source": {"version": "2.0.0"}}),
+            encoding="utf-8",
+        )
     monkeypatch.setattr(
         update_stage, "discover_plugin_dir", lambda home: (deployment.payload, "marketplace"),
     )
