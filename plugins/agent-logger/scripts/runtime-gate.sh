@@ -230,6 +230,11 @@ if { [[ "$RESOLUTION_STATUS" = ready &&
         printf '[agent-logger] requested installation context is not active.\n' >&2
         exit 126
     fi
+    RUNTIME_ROOT="$(json_get "$RESOLUTION" "$(json_path legacy root)" 2>/dev/null || true)"
+    if [[ "$RUNTIME_ROOT" != /* ]]; then
+        printf '[agent-logger] installation context is missing the canonical legacy root.\n' >&2
+        exit 126
+    fi
 elif { [[ "$RESOLUTION_STATUS" = ready &&
           "$RESOLUTION_REASON" = namespaced-active ]]; } ||
      [[ "$RESOLUTION_STATUS" = deactivation-required ]]; then

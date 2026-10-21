@@ -191,6 +191,11 @@ if (
         )
         exit 126
     }
+    $runtimeRoot = [string]$resolution.legacy.root
+    if (-not $runtimeRoot -or -not [IO.Path]::IsPathRooted($runtimeRoot)) {
+        [Console]::Error.WriteLine('[agent-logger] installation context is missing the canonical legacy root.')
+        exit 126
+    }
 }
 elseif (
     (

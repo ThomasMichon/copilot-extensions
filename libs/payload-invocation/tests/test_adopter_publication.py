@@ -88,6 +88,10 @@ def _adopter(fixture: dict, plugin: str, source: Path | None = None) -> dict[str
     for entry in ("global", "payload", "auxiliary")
     for state in ("standalone", "managed")
     for python in (False, True)
+] + [
+    (entry, state, False)
+    for entry in ("payload-trailing", "auxiliary-trailing")
+    for state in ("standalone", "managed")
 ] + [("legacy-resolver", "managed", False), ("missing-admission", "managed", False)])
 def test_logger_actual_stamp_first_use_revalidates_snapshot_owner(
     binding_fixture: dict, state: str, stamp_python: bool, entry: str, tmp_path: Path,
@@ -130,13 +134,16 @@ def test_logger_actual_stamp_first_use_revalidates_snapshot_owner(
     elif entry == "missing-admission":
         suffix = "ps1" if os.name == "nt" else "sh"
         (snapshot / f"scripts/installation-context/plugin-publication-probe.{suffix}").unlink()
+    entrypoint = entry.removesuffix("-trailing")
+    if entry != entrypoint:
+        environment["AGENT_LOGGER_HOME"] = str(root) + os.sep
     before = _snapshot(root)
     wrapper = (
-        snapshot / "bin/agent-logger" if entry == "payload" else
+        snapshot / "bin/agent-logger" if entrypoint == "payload" else
         binding_fixture["home"] / ".local/bin" /
-        ("read-session-digest" if entry == "auxiliary" else "agent-logger")
+        ("read-session-digest" if entrypoint == "auxiliary" else "agent-logger")
     )
-    arguments = ["--help"] if entry == "auxiliary" else ["version"]
+    arguments = ["--help"] if entrypoint == "auxiliary" else ["version"]
     command = (
         [POWERSHELL, "-NoLogo", "-NoProfile", "-File", str(wrapper.with_suffix(".ps1")), *arguments]
         if os.name == "nt" else [str(wrapper), *arguments]
@@ -157,7 +164,7 @@ def test_logger_actual_stamp_first_use_revalidates_snapshot_owner(
         assert not calls.exists()
     else:
         assert result.returncode == 0, result.stdout + result.stderr
-        assert ("usage:" if entry == "auxiliary" else "agent-logger ") in result.stdout.lower()
+        assert ("usage:" if entrypoint == "auxiliary" else "agent-logger ") in result.stdout.lower()
         helpers["_assert_complete_runtime"](binding_fixture["home"])
         assert calls.exists()
         installed_calls = calls.read_bytes()
