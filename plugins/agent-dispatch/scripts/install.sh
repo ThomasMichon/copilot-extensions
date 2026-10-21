@@ -2352,7 +2352,7 @@ do_update() {
     # legitimately, briefly mid-cutover. The EXIT trap covers every path
     # below uniformly, including an unhandled error under `set -euo pipefail`.
     _write_update_marker
-    trap _clear_update_marker EXIT
+    trap '_lifecycle_finish "$?"; _clear_update_marker' EXIT
     _downgrade_guard
     _ensure_runtime || return 1
     if _activation_superseded_now; then
@@ -2484,7 +2484,7 @@ do_start() {
     # unlike agent-bridge's do_start, this one has no "already healthy,
     # nothing to do" early return, so the marker covers the whole function.
     _write_update_marker
-    trap _clear_update_marker EXIT
+    trap '_lifecycle_finish "$?"; _clear_update_marker' EXIT
 
     if command -v systemctl >/dev/null 2>&1 && [[ -f "$UNIT_DIR/$SYSTEMD_UNIT" ]]; then
         systemctl --user start "$SYSTEMD_UNIT"
@@ -2621,9 +2621,45 @@ do_uninstall() {
     [[ "$DRY_RUN" -eq 1 ]] && echo "agent-dispatch uninstall dry run complete -- nothing was changed"
 }
 
+_lifecycle_emit() {
+    local py recorder="$PLUGIN_DIR/libs/zdd/src/zdd/lifecycle.py"
+    if [[ ! -f "$recorder" ]]; then
+        recorder="$PLUGIN_DIR/../../libs/zdd/src/zdd/lifecycle.py"
+    fi
+    if ! py="$(command -v python3 || command -v python)" || [[ ! -f "$recorder" ]]; then
+        _warn "Lifecycle record unavailable: bootstrap Python or payload recorder is missing"
+        return 0
+    fi
+    if ! "$py" -I "$recorder" record \
+        --config-dir "${AGENT_DISPATCH_ROUTING_DIR:-$INSTALL_DIR}" \
+        --service agent-dispatch --action "$_LIFECYCLE_ACTION" --outcome "$1" \
+        --pid "$$" --version "${SRC_VERSION:-}"; then
+        _warn "Lifecycle recorder failed; installer outcome is unchanged"
+    fi
+    return 0
+}
+
+_lifecycle_finish() {
+    local rc="$1"
+    if [[ -n "${_LIFECYCLE_ACTION:-}" ]]; then
+        if [[ "$rc" == 0 ]]; then _lifecycle_emit ok; else _lifecycle_emit fail; fi
+        _LIFECYCLE_ACTION=""
+    fi
+    return 0
+}
+
 source "$SCRIPT_DIR/source-runtime.sh"
 PACKAGE_VERSION="$SRC_VERSION"
 SOURCE_RUNTIME_IDENTITY=""
+_LIFECYCLE_ACTION=""
+case "$ACTION" in
+    install|provision) _LIFECYCLE_ACTION=install ;;
+    update|start|stop) _LIFECYCLE_ACTION="$ACTION" ;;
+esac
+if [[ -n "$_LIFECYCLE_ACTION" ]]; then
+    trap '_lifecycle_finish "$?"' EXIT
+    _lifecycle_emit begin
+fi
 case "$ACTION" in
     install|update|provision|stamp)
         _initialize_source_runtime || exit 1

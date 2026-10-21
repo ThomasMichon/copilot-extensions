@@ -1725,7 +1725,7 @@ _require_install_lock() {
         _fail "Could not acquire the install transaction lock ($INSTALL_DIR/.install.lock) -- refusing to proceed unlocked"
         exit 1
     fi
-    trap _exit_install_lock EXIT
+    trap '_lifecycle_finish "$?"; _exit_install_lock' EXIT
 }
 
 _install_slot_build() {
@@ -2098,7 +2098,7 @@ do_start() {
     # should only ever see this during an actual start attempt, never while
     # an already-healthy daemon or a forward route is correctly left alone.
     _write_update_marker
-    trap '_clear_update_marker; _exit_install_lock' EXIT
+    trap '_lifecycle_finish "$?"; _clear_update_marker; _exit_install_lock' EXIT
 
     _step "Starting agent-bridge..."
 
@@ -2539,7 +2539,7 @@ _reconcile_serving_runtime() {
         _fail "Serving runtime reconcile failed (probe exit $rc); completed slot left unchanged."
         return 1
     fi
-    trap '_clear_update_marker; _exit_install_lock' EXIT
+    trap '_lifecycle_finish "$?"; _clear_update_marker; _exit_install_lock' EXIT
     _write_update_marker
     rc=0
     "$VENV_DIR/bin/python" -m agent_bridge deploy --reconcile-serving --health-timeout 180 || rc=$?
@@ -2548,6 +2548,32 @@ _reconcile_serving_runtime() {
         _fail "Serving runtime reconcile failed; completed slot left unchanged. Resolve the reported ownership/health/cutover failure before retrying."
         return 1
     fi
+}
+
+_lifecycle_emit() {
+    local py recorder="$PLUGIN_DIR/libs/zdd/src/zdd/lifecycle.py"
+    if [[ ! -f "$recorder" ]]; then
+        recorder="$PLUGIN_DIR/../../libs/zdd/src/zdd/lifecycle.py"
+    fi
+    if ! py="$(command -v python3 || command -v python)" || [[ ! -f "$recorder" ]]; then
+        _warn "Lifecycle record unavailable: bootstrap Python or payload recorder is missing"
+        return 0
+    fi
+    if ! "$py" -I "$recorder" record --config-dir "$INSTALL_DIR" \
+        --service agent-bridge --action "$_LIFECYCLE_ACTION" --outcome "$1" \
+        --pid "$$" --version "${SRC_VERSION:-}"; then
+        _warn "Lifecycle recorder failed; installer outcome is unchanged"
+    fi
+    return 0
+}
+
+_lifecycle_finish() {
+    local rc="$1"
+    if [[ -n "${_LIFECYCLE_ACTION:-}" ]]; then
+        if [[ "$rc" == 0 ]]; then _lifecycle_emit ok; else _lifecycle_emit fail; fi
+        _LIFECYCLE_ACTION=""
+    fi
+    return 0
 }
 
 do_update() {
@@ -2594,7 +2620,7 @@ do_update() {
     # error under `set -euo pipefail`.
     if [[ "$active_forward" != true ]]; then
         _write_update_marker
-        trap '_clear_update_marker; _exit_install_lock' EXIT
+        trap '_lifecycle_finish "$?"; _clear_update_marker; _exit_install_lock' EXIT
     fi
 
     local predecessor_signature=""
@@ -2758,6 +2784,15 @@ do_update() {
 
 # -- Dispatch ----------------------------------------------------------------
 
+_LIFECYCLE_ACTION=""
+case "$ACTION" in
+    install|provision) _LIFECYCLE_ACTION=install ;;
+    update|start|stop) _LIFECYCLE_ACTION="$ACTION" ;;
+esac
+if [[ -n "$_LIFECYCLE_ACTION" ]]; then
+    trap '_lifecycle_finish "$?"' EXIT
+    _lifecycle_emit begin
+fi
 _initialize_source_runtime || exit 1
 
 case "$ACTION" in

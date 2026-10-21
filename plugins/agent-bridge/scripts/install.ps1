@@ -3500,6 +3500,45 @@ function Invoke-Update {
 
 # -- Dispatch ----------------------------------------------------------------
 
+function Write-InstallerLifecycle {
+    param([string]$Outcome)
+
+    $savedExit = Get-Variable LASTEXITCODE -Scope Global -ValueOnly -ErrorAction SilentlyContinue
+    try {
+        $python = $null
+        foreach ($name in @('python3', 'python')) {
+            $candidate = Get-Command $name -CommandType Application -ErrorAction SilentlyContinue |
+                Where-Object { $_.Source -notmatch 'WindowsApps' } | Select-Object -First 1
+            if ($candidate) { $python = $candidate.Source; break }
+        }
+        $recorder = Join-Path $PluginDir 'libs/zdd/src/zdd/lifecycle.py'
+        if (-not (Test-Path -LiteralPath $recorder -PathType Leaf)) {
+            $recorder = Join-Path $PluginDir '../../libs/zdd/src/zdd/lifecycle.py'
+        }
+        if (-not $python -or -not (Test-Path -LiteralPath $recorder -PathType Leaf)) {
+            [Console]::Error.WriteLine('[WARN] Lifecycle record unavailable: bootstrap Python or payload recorder is missing')
+            return
+        }
+        $diagnostic = ''
+        $arguments = @('-I', $recorder, 'record', '--config-dir', $InstallDir,
+            '--service', 'agent-bridge', '--action', $script:InstallerLifecycleAction,
+            '--outcome', $Outcome, '--pid', "$PID", '--version', "$SrcVersion")
+        $null = Invoke-Hidden -FilePath $python -ArgList $arguments -ErrorOutput ([ref]$diagnostic)
+        if ($diagnostic) { [Console]::Error.Write($diagnostic) }
+        if ($LASTEXITCODE -ne 0) {
+            [Console]::Error.WriteLine('[WARN] Lifecycle recorder failed; installer outcome is unchanged')
+        }
+    } catch {
+        [Console]::Error.WriteLine("[WARN] Lifecycle recorder unavailable: $($_.Exception.Message)")
+    } finally {
+        $global:LASTEXITCODE = $savedExit
+    }
+}
+
+$script:InstallerLifecycleAction = if ($Action -in @('install', 'provision')) { 'install' }
+    elseif ($Action -in @('update', 'start', 'stop')) { $Action } else { '' }
+$script:InstallerLifecycleOutcome = 'fail'
+if ($script:InstallerLifecycleAction) { Write-InstallerLifecycle begin }
 try {
     Initialize-SourceRuntime
     switch ($Action) {
@@ -3512,14 +3551,23 @@ try {
         'stamp'     { Invoke-Stamp }
         'provision' { Invoke-Provision }
     }
+    $script:InstallerLifecycleOutcome = 'ok'
 } finally {
     try {
-        if (Test-Path -LiteralPath 'Function:\Stop-RuntimeConstruction') {
-            Stop-RuntimeConstruction
+        try {
+            if (Test-Path -LiteralPath 'Function:\Stop-RuntimeConstruction') {
+                Stop-RuntimeConstruction
+            }
+        } finally {
+            # Release the install lock even when construction cleanup fails.
+            Exit-InstallLock
         }
+    } catch {
+        $script:InstallerLifecycleOutcome = 'fail'
+        throw
     } finally {
-    # Release the install lock on any exit path (the OS also drops it on process
-    # death, so an `exit`/crash never strands it).
-    Exit-InstallLock
+        if ($script:InstallerLifecycleAction) {
+            Write-InstallerLifecycle $script:InstallerLifecycleOutcome
+        }
     }
 }

@@ -138,6 +138,19 @@ def test_cli_record_and_show(tmp_path: Path, capsys):
 
 # -- cutover instrumentation -------------------------------------------------
 
+def test_cli_dropped_record_warns_without_changing_exit_status(tmp_path: Path, capsys):
+    blocker = tmp_path / "not-a-directory"
+    blocker.write_text("preserve", encoding="utf-8")
+    rc = lifecycle.main([
+        "record", "--config-dir", str(blocker / "child"),
+        "--service", "example-service", "--action", "update", "--outcome", "fail",
+    ])
+    assert rc == 0
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "[WARN] lifecycle: could not append update/fail" in captured.err
+    assert blocker.read_text(encoding="utf-8") == "preserve"
+
 
 class _Handle:
     def __init__(self, pid: int = 4321) -> None:

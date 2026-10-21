@@ -4267,11 +4267,52 @@ $ScriptDir = $PSScriptRoot
 . (Join-Path $PSScriptRoot 'source-runtime.ps1')
 $PackageVersion = $SrcVersion
 $script:SourceRuntimeIdentity = $null
+
+function Write-InstallerLifecycle {
+    param([string]$Outcome)
+
+    $savedExit = Get-Variable LASTEXITCODE -Scope Global -ValueOnly -ErrorAction SilentlyContinue
+    try {
+        $python = $null
+        foreach ($name in @('python3', 'python')) {
+            $candidate = Get-Command $name -CommandType Application -ErrorAction SilentlyContinue |
+                Where-Object { $_.Source -notmatch 'WindowsApps' } | Select-Object -First 1
+            if ($candidate) { $python = $candidate.Source; break }
+        }
+        $recorder = Join-Path $PluginDir 'libs/zdd/src/zdd/lifecycle.py'
+        if (-not (Test-Path -LiteralPath $recorder -PathType Leaf)) {
+            $recorder = Join-Path $PluginDir '../../libs/zdd/src/zdd/lifecycle.py'
+        }
+        if (-not $python -or -not (Test-Path -LiteralPath $recorder -PathType Leaf)) {
+            [Console]::Error.WriteLine('[WARN] Lifecycle record unavailable: bootstrap Python or payload recorder is missing')
+            return
+        }
+        $routingDir = if ($env:AGENT_DISPATCH_ROUTING_DIR) { $env:AGENT_DISPATCH_ROUTING_DIR } else { $InstallDir }
+        $diagnostic = ''
+        $arguments = @('-I', $recorder, 'record', '--config-dir', $routingDir,
+            '--service', 'agent-dispatch', '--action', $script:InstallerLifecycleAction,
+            '--outcome', $Outcome, '--pid', "$PID", '--version', "$SrcVersion")
+        $null = Invoke-Hidden -FilePath $python -ArgList $arguments -ErrorOutput ([ref]$diagnostic)
+        if ($diagnostic) { [Console]::Error.Write($diagnostic) }
+        if ($LASTEXITCODE -ne 0) {
+            [Console]::Error.WriteLine('[WARN] Lifecycle recorder failed; installer outcome is unchanged')
+        }
+    } catch {
+        [Console]::Error.WriteLine("[WARN] Lifecycle recorder unavailable: $($_.Exception.Message)")
+    } finally {
+        $global:LASTEXITCODE = $savedExit
+    }
+}
+
+$script:InstallerLifecycleAction = if ($Action -in @('install', 'provision')) { 'install' }
+    elseif ($Action -in @('update', 'start', 'stop')) { $Action } else { '' }
+$script:InstallerLifecycleOutcome = 'fail'
+if ($script:InstallerLifecycleAction) { Write-InstallerLifecycle begin }
+try {
 if ($Action -in @('install', 'update', 'provision', 'stamp')) {
     Initialize-SourceRuntime
     Assert-SourceRuntime
 }
-try {
 switch ($Action) {
     'install'   { Invoke-Install }
     'update'    { Invoke-Update }
@@ -4282,10 +4323,20 @@ switch ($Action) {
     'stamp'     { Invoke-Stamp }
     'provision' { Invoke-Install }
 }
+$script:InstallerLifecycleOutcome = 'ok'
 exit 0
 
 } finally {
-    if (Test-Path -LiteralPath 'Function:\Stop-RuntimeConstruction') {
-        Stop-RuntimeConstruction
+    try {
+        if (Test-Path -LiteralPath 'Function:\Stop-RuntimeConstruction') {
+            Stop-RuntimeConstruction
+        }
+    } catch {
+        $script:InstallerLifecycleOutcome = 'fail'
+        throw
+    } finally {
+        if ($script:InstallerLifecycleAction) {
+            Write-InstallerLifecycle $script:InstallerLifecycleOutcome
+        }
     }
 }
