@@ -377,3 +377,62 @@ assert not (root / 'hook-ran').exists()
     assert result.returncode == 0, result.stdout + result.stderr
     assert _files(home) == original
     assert not marker.exists()
+
+
+@pytest.mark.parametrize("scheme", ["snapshot", "refspec"])
+@pytest.mark.parametrize("iteration", range(2))
+def test_rebased_pr_copy_preserves_old_head_scheme_and_private_state(
+    rebased_pr_repo, scheme, iteration, request, tmp_path, monkeypatch,
+):
+    from agent_worktrees import config as cfg
+    from conftest import _copy_rebased_pr_repo
+
+    config, wid, worktree, remote, old = rebased_pr_repo
+    seed = request.getfixturevalue(f"_rebased_{scheme}_pr_seed")
+    assert config.default_repo.pr.head_scheme == scheme
+    assert cfg.load_config() is config
+    record = tracking.load_record_by_id(wid)
+    assert record is not None and record.pr is not None
+    assert record.worktree_path == str(worktree)
+    assert record.title == "Add feature"
+    assert record.pr.state == "open" and record.pr.head_sha == old
+    assert record.pr.repo == git_ops.slug_from_url(str(remote))
+    assert record.pr.rewrite_identity == pr_publish.push_identity("origin", cwd=str(worktree))
+    head = git_ops.git("rev-parse", "HEAD", cwd=worktree).stdout.strip()
+    base = git_ops.git("rev-parse", "origin/master", cwd=worktree).stdout.strip()
+    assert head != old and record.pr.base_sha != base
+    assert not git_ops.is_commit_ancestor(old, head, cwd=str(worktree))
+    assert git_ops.git("rev-parse", "HEAD^", cwd=worktree).stdout.strip() == base
+    assert git_ops.git(
+        "--git-dir", str(remote), "rev-parse", record.pr.branch,
+    ).stdout.strip() == old
+    for filename, text in (
+        ("a.txt", "one\n"), ("b.txt", "two\n"), ("upstream.txt", "advance\n"),
+    ):
+        assert (worktree / filename).read_text() == text
+    local_head = git_ops.git(
+        "show-ref", "--verify", f"refs/heads/{record.pr.branch}", cwd=worktree, check=False,
+    )
+    assert (local_head.returncode == 0) is (scheme == "snapshot")
+    if scheme == "snapshot":
+        assert local_head.stdout.split()[0] == old
+    seed_files = _files(seed)
+    sibling_path = tmp_path / "sibling"
+    with monkeypatch.context() as patch:
+        sibling = _copy_rebased_pr_repo(seed, sibling_path, patch, scheme)
+        assert sibling[-1] == old
+        assert tracking.load_record_by_id(wid).pr.head_sha == old
+    assert cfg.load_config() is config
+    sibling_files = _files(sibling_path)
+    (worktree / "copy-only.txt").write_text(f"private rebased copy {iteration}\n")
+    git_ops.git("add", "copy-only.txt", cwd=worktree)
+    git_ops.git("commit", "-m", "private feedback", cwd=worktree)
+    git_ops.git("push", "origin", "HEAD:refs/heads/copy-only", cwd=worktree)
+    record.pr.head_sha = git_ops.git("rev-parse", "HEAD", cwd=worktree).stdout.strip()
+    tracking.save_record(record)
+    assert tracking.load_record_by_id(wid).pr.head_sha == record.pr.head_sha != old
+    assert git_ops.git(
+        "--git-dir", str(remote), "rev-parse", "copy-only",
+    ).stdout.strip() == record.pr.head_sha
+    assert _files(seed) == seed_files
+    assert _files(sibling_path) == sibling_files

@@ -780,6 +780,56 @@ def published_refspec_pr_repo(tmp_path: Path, monkeypatch, _published_refspec_pr
     return config, wid, worktree, remote
 
 
+@pytest.fixture(scope="session")
+def _rebased_refspec_pr_seed(tmp_path_factory, _pr_repo_seed):
+    from test_pr_rewrite import publish_and_rebase
+
+    with _seed_directory(tmp_path_factory, "rebased-refspec") as (seed, build):
+        if build:
+            with _published_seed_environment(tmp_path_factory) as patch:
+                publish_and_rebase(_copy_pr_repo(_pr_repo_seed, seed, patch), "refspec")
+        return seed
+
+
+def _copy_rebased_pr_repo(seed, tmp_path, monkeypatch, scheme):
+    config, wid, worktree, remote = _copy_pr_repo(seed, tmp_path, monkeypatch)
+    config = replace(config, repos={
+        config.repo_name: replace(config.default_repo, pr=replace(
+            config.default_repo.pr, head_scheme=scheme,
+        )),
+    })
+    monkeypatch.setattr(cfg, "load_config", lambda *a, **k: config)
+    record = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+    return config, wid, worktree, remote, record.pr.head_sha
+
+
+@pytest.fixture
+def rebased_refspec_pr_repo(tmp_path, monkeypatch, _rebased_refspec_pr_seed):
+    """Independent real post-rebase state for rewrite, not rebase, contracts."""
+    return _copy_rebased_pr_repo(_rebased_refspec_pr_seed, tmp_path, monkeypatch, "refspec")
+
+
+@pytest.fixture(scope="session")
+def _rebased_snapshot_pr_seed(tmp_path_factory, _pr_repo_seed):
+    from test_pr_rewrite import publish_and_rebase
+
+    with _seed_directory(tmp_path_factory, "rebased-snapshot") as (seed, build):
+        if build:
+            with _published_seed_environment(tmp_path_factory) as patch:
+                publish_and_rebase(_copy_pr_repo(_pr_repo_seed, seed, patch), "snapshot")
+        return seed
+
+
+@pytest.fixture
+def rebased_snapshot_pr_repo(tmp_path, monkeypatch, _rebased_snapshot_pr_seed):
+    return _copy_rebased_pr_repo(_rebased_snapshot_pr_seed, tmp_path, monkeypatch, "snapshot")
+
+
+@pytest.fixture
+def rebased_pr_repo(scheme, request):
+    return request.getfixturevalue(f"rebased_{scheme}_pr_repo")
+
+
 class _SubprocessRunInstaller:
     """``installer_run`` process stand-in that delegates to ``subprocess.run``.
 

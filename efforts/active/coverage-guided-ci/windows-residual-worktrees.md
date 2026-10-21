@@ -87,7 +87,45 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Admitted fixture-semantic batches
 
+### B-REBASED foundation: private completed setup, no consumer conversions
+
+Baseline: the actual #7521 adapter merge. Add only
+`_rebased_refspec_pr_seed`, `_rebased_snapshot_pr_seed`,
+`_copy_rebased_pr_repo`, both concrete fixtures and `rebased_pr_repo`.
+Both seeds invoke the existing unchanged
+`test_pr_rewrite.publish_and_rebase` against a copied unpublished base.
+That helper performs the actual first publication, advances the bare remote
+and rebases the source while retaining the old published head. Session setup
+uses the already-proven hermetic HOME/Git/identity context and run-local
+seed lock, not ambient host configuration.
+
+Four new cases (two schemes, two independent copies each) verify the old
+record/remote publication head, different rebased source head, exact new
+upstream parent and source/upstream content. They check copied config/load
+bindings and destination identity, and preserve the old snapshot-only local
+PR-head ref. Each makes a second sibling copy, then commits/pushes a new
+private ref and updates only its own record; all seed and sibling bytes
+must remain unchanged. Existing fixture tests and setup helper bodies are
+unchanged. No rewrite/rebase consumer, test selection, skip, item mark,
+deadline or production function changes.
+
+Both complete fixture-copy and seed-cache contract modules pass on native
+Windows: 46 passed, zero skips, 51.45 seconds pytest / 55.64 including
+preparation/cleanup, exactly two work-stealing workers, 30-second default
+item timeout and unchanged process/memory/temp limits under the 240-second
+diagnostic group. This does not qualify the parent suite budget.
+Documentation impact is this ledger only; runtime/command/install/config
+contracts do not change. Provisioning clean-room and external deployment
+are inapplicable to these test-only fixtures; the real-Git fixture contracts
+exercise first construction and independent copies directly. No Linux or
+container result is claimed. Consumer conversions remain a separate wave,
+and parent #5694/#5682 remains open.
+
 ### B-PUBLISHED rebase setup adapter
+
+**Actually merged:** #7521 as
+`99d85042c87ff43d93aa94807f3d9dca528c9ae3`. B-REBASED foundation and
+consumer conversions are not included in that merge.
 
 Baseline: the actual #7509 finalization-consumer merge. This slice adds
 only the module-private published-state adapter in `test_pr_rebase.py`.
