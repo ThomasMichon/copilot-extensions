@@ -384,6 +384,29 @@ unrelated service changes or a second machine registry.
 
 ## Journal
 
+### 2026-10-21 - First gated producer source slice
+- The source-interface/replay amendment landed as #7568 after current-head
+  approval and passing required CI. The declared contributor now owns this
+  Phase 3d source slice through the canonical worktree effort binding.
+- The internal legacy-default mode derives new tuples through the shared
+  registry and actual execution platform, and revalidates before allocation.
+  Actual session, bridge and system creation writes typed tracking/JSON;
+  session/bridge naming uses the physical tuple and paired records retain it.
+  Companion refs and dispatch creation metadata remain execution-qualified.
+- The isolated baseline reproduced 19 missing-API failures with one passing
+  legacy control. The expanded affected creation, pair, tracking-identity and
+  creation-key portfolio passed 128 tests with three conditional skips.
+  Existing allocation facts and ordinary producer defaults remain unchanged.
+- Completed creation-key results now pass the existing receiving-record
+  authority fence before return, including when a caller selects the other
+  supported representation. Native and guest callers cannot replay each
+  other's records merely because their physical host matches.
+- This is not the full producer gate. Complete launch admission, original-owner
+  receipt evidence, retained repair, anchor/external-adoption opt-in and one-term
+  entry-point equivalence remain next. Tuple mode explicitly refuses the
+  incomplete timestamp/suffix-only allocation input rather than guessing.
+  Source review, release and installed acceptance remain outstanding.
+
 ### 2026-10-21 - Gated producer source realization proposed
 - The first release-regression cohort is complete under the release effort;
   the declared contributor now resumes this effort's Phase 3d source work.

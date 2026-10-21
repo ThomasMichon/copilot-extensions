@@ -16,6 +16,7 @@ from agent_worktrees import local_cache_refresh as lcr
 from agent_worktrees import repos as repos_mod
 from agent_worktrees import state_root as sr
 from agent_worktrees import tracking as tk
+from agent_worktrees.worktree_machine_identity import WorktreeMachineIdentity
 
 
 def _state_root(*, path, repo, requires_external=True, bound=True):
@@ -93,13 +94,14 @@ class TestCarvePairedKnowledge:
         )
         assert out is None
 
+    @pytest.mark.parametrize("tuple_first", [False, True])
     @pytest.mark.parametrize("machine,platform,prefix", [
         ("test", "windows", "test-win"),
         ("test-wsl", "wsl", "test-wsl"),
         ("test-wsl", "wsl", "test-wsl-wsl"),
     ])
     def test_worktree_class_carves_and_cross_stamps(
-        self, monkeypatch, tmp_path, machine, platform, prefix,
+        self, monkeypatch, tmp_path, machine, platform, prefix, tuple_first,
     ):
         _common_patches(monkeypatch, tmp_path)
         k_anchor = tmp_path / "knowledge"
@@ -146,10 +148,12 @@ class TestCarvePairedKnowledge:
         monkeypatch.setattr(m.git_ops, "create_worktree", _create_worktree)
 
         harness_id = f"{prefix}-20260806-ab"
+        identity = WorktreeMachineIdentity("physical-host", platform, machine) if tuple_first else None
         stamp = m._carve_paired_knowledge(
-            _config(machine=machine), harness_id=harness_id,
+            _config(machine="old-config-alias" if tuple_first else machine), harness_id=harness_id,
             timestamp="20260806", suffix="ab", plat=platform,
             plat_short="win" if platform == "windows" else platform,
+            machine_identity=identity,
         )
         # Harness stamp.
         assert stamp is not None
@@ -182,9 +186,13 @@ class TestCarvePairedKnowledge:
         assert krec.codename_source == "built-in"
         assert krec.pair_id == "20260806-ab"
         assert krec.pair_ref == f"{machine}/citadel-harness/{harness_id}"
+        assert krec.machine_identity == identity
+        assert krec.machine == ("physical-host" if tuple_first else machine)
+        assert krec.execution_machine == machine
         assert not (tmp_path / f"{harness_id}-k.yaml").exists()
 
-    def test_non_worktree_class_pairs_anchor(self, monkeypatch, tmp_path):
+    @pytest.mark.parametrize("tuple_first", [False, True])
+    def test_non_worktree_class_pairs_anchor(self, monkeypatch, tmp_path, tuple_first):
         _common_patches(monkeypatch, tmp_path)
         k_anchor = tmp_path / "kb-singleton"
         k_anchor.mkdir()
@@ -220,11 +228,14 @@ class TestCarvePairedKnowledge:
         stamp = m._carve_paired_knowledge(
             _config(), harness_id="h", timestamp="ts", suffix="ab",
             plat="windows", plat_short="win",
+            machine_identity=(
+                WorktreeMachineIdentity("physical-host", "windows", "native-space") if tuple_first else None
+            ),
         )
         assert stamp is not None
         assert stamp["pair_kind"] == "anchor"
         assert stamp["pair_role"] == "harness"
-        assert stamp["pair_ref"] == "test/kb/kb-singleton"
+        assert stamp["pair_ref"] == f"{'native-space' if tuple_first else 'test'}/kb/kb-singleton"
         # No second worktree carved for a non-worktree-class knowledge repo.
         assert called["carve"] is False
         assert refreshed["called"] is True

@@ -303,7 +303,8 @@ Do not rewrite old receipts or backfill identity merely by replaying them.
 
 ### Ordered source slices and acceptance
 
-- [ ] Land this source-interface/replay amendment through ordinary plan review.
+- [x] Land this source-interface/replay amendment through ordinary plan review
+  in #7568.
 - [ ] Implement shared-selection derivation and actual create/system/bridge/
   paired producers behind the internal legacy-default mode, with negative
   pre-effect cases and unchanged legacy output controls.

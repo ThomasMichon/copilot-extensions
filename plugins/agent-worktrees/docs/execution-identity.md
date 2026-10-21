@@ -87,9 +87,28 @@ retain the full tuple while reciprocal references use the execution owner.
 The `run` JSON recognizer also uses that owner; invalid explicit tuple output
 is reported and leaves the pending resource claim unsettled.
 
-**Producer gate:** ordinary create, anchor admission and externally adopted
-checkout producers still emit legacy records. The optional typed factory input
-and tuple-aware retained-pair handling prepare those boundaries, but are not a
-producer rollout. Cross-plugin adapters, prospective creation and retained
-request replay must be integrated before changing that default. No historical
-ID, path, stored reference or session is rewritten.
+### Source-only producer opt-in
+
+`_create_worktree_core` has an internal `identity_mode="tuple-v1"` opt-in;
+omitting it retains `legacy`. It derives the physical/environment/owner tuple
+from the existing receiving registry and actual platform, then revalidates it
+before allocation. Missing or conflicting local execution evidence refuses.
+Callers cannot supply arbitrary tuple metadata through this mode.
+
+New session and bridge names use the selected physical machine and environment;
+a physical name ending in a platform-like suffix is not truncated. System IDs
+keep their existing `sys-...` form. Tracking, JSON and paired worktree records
+share the typed tuple; qualified companion references use its execution owner,
+including anchor companions. Completed creation-key replay retains its stored
+representation even if the caller selects the other supported mode. The
+authoritative creation path validates the retained record against the receiving
+execution space before returning it; a sibling environment cannot reuse the key
+to obtain an allocation owned by the other environment.
+
+The timestamp/suffix-only `allocation` input is not sufficient to admit a new
+tuple: that combination explicitly refuses until complete retained admission is
+integrated. This source API is not a new CLI flag, setting or rollout switch.
+Ordinary create, anchor admission and externally adopted checkout producers
+still emit legacy records. Complete admission/replay, one-term equivalence and
+installed-reader acceptance remain gates before ordinary-default activation.
+No historical ID, path, stored reference or session is rewritten.
