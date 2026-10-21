@@ -1,0 +1,9 @@
+{
+  "comment": "Carry the canonical agent-procutil WSL caller-ownership API into the standalone Chat service dependency release; no service behavior change.",
+  "changes": [
+    {
+      "plugin": "services/chat",
+      "type": "patch"
+    }
+  ]
+}
