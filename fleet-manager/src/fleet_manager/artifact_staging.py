@@ -264,7 +264,7 @@ class StagedArtifacts:
         result = {
             "schema": "fleet-manager.staged-artifacts", "version": 1,
             "status": "retained-byte-stage", "evidence": "current-owned-stage-reverification",
-            "release": authenticated["release"], "release_digest": self.release_digest,
+            "release": authenticated["release"], "release_digest": authenticated["release_digest"],
             "authority": self.authority, "installation": self.installation, "role": self.role,
             "sequence": authenticated["sequence"], "verified_at": authenticated["verified_at"],
             "valid_until": authenticated["valid_until"],

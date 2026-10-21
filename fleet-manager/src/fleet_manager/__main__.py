@@ -1,4 +1,4 @@
-"""Thin fleet planning/diagnostics and explicit opt-in NEW Gateway serving."""
+"""Thin fleet planning, client admission and explicit opt-in NEW Gateway serving."""
 
 import argparse
 import sys
@@ -42,6 +42,21 @@ def main(argv=None):
     profile.add_argument("--config", type=Path)
     profile.add_argument("--service-policy", type=Path)
     hosting.add_argument("--tls-config", type=Path)
+    admission = commands.add_parser(
+        "client-state", help="Explicit client admission journal; never execute or activate artifacts",
+    )
+    state_commands = admission.add_subparsers(dest="state_command", required=True)
+    for operation in ("initialize", "inspect", "admit"):
+        state = state_commands.add_parser(operation)
+        state.add_argument("--root", type=Path, required=True)
+        state.add_argument("--identity", type=Path, required=True)
+        if operation == "admit":
+            state.add_argument("--selection", type=Path, required=True)
+            state.add_argument("--release", type=Path, required=True)
+            state.add_argument("--proof", type=Path, required=True)
+            state.add_argument("--policy", type=Path, required=True)
+            state.add_argument("--sources", type=Path, required=True)
+            state.add_argument("--staging-parent", type=Path, required=True)
     try:
         args = parser.parse_args(argv)
     except SystemExit as exc:
@@ -67,7 +82,37 @@ def main(argv=None):
             return 1
         return serve(args.config)
     try:
-        if args.command == "doctor":
+        if args.command == "client-state":
+            from .artifact_staging import _bytes, stage_authenticated_artifacts
+            from .client_admission import (
+                admit_client_release, initialize_client_admission, inspect_client_admission,
+            )
+
+            def local(path):
+                return decode(_bytes(path.absolute(), MAX_BYTES))
+
+            identity = local(args.identity)
+            if args.state_command == "initialize":
+                result = initialize_client_admission(args.root, identity)
+            elif args.state_command == "inspect":
+                result = inspect_client_admission(args.root, identity)
+            else:
+                inspect_client_admission(args.root, identity)
+                if (
+                    args.staging_parent.absolute().is_relative_to(args.root.absolute())
+                    or args.root.absolute().is_relative_to(args.staging_parent.absolute())
+                ):
+                    raise PlanError("client admission requires a separate explicit staging parent")
+                policy = local(args.policy)
+                selection = local(args.selection)
+                with stage_authenticated_artifacts(
+                    _bytes(args.release.absolute(), MAX_BYTES), local(args.proof), policy,
+                    local(args.sources), authority=identity["authority"],
+                    installation=identity["installation"], role="client",
+                    staging_parent=args.staging_parent,
+                ) as staged:
+                    result = admit_client_release(args.root, identity, selection, staged, policy)
+        elif args.command == "doctor":
             from .client_diagnostics import diagnose_client
 
             result = diagnose_client()
@@ -87,7 +132,7 @@ def main(argv=None):
         print(f"fleet-manager: {exc}", file=sys.stderr)
         return 1
     print(serialized)
-    if args.command == "doctor":
+    if args.command in ("doctor", "client-state"):
         return 0
     if args.command == "inspect":
         return 0 if result["status"] in ("installed", "ready") else 2

@@ -11,6 +11,7 @@ from pathlib import Path
 import socket
 import sys
 import threading
+import time
 
 import pytest
 
@@ -593,10 +594,25 @@ def test_missing_packaged_resource_is_not_replaced_by_repository_helper(tmp_path
     parent.mkdir()
     monkeypatch.setattr(staging, "__file__", str(tmp_path / "without-resource" / "artifact_staging.py"))
     context, _ = stage(fixture, parent)
-    with pytest.raises(PlanError, match="could not be read"):
+    with pytest.raises(PlanError, match="could not be read|no unique SHA-256 RECORD entry"):
         with context:
             pytest.fail("source-only delivery must not stage an installer resource")
     assert list(parent.iterdir()) == []
+
+
+def test_native_cleanup_error_reports_only_the_bounded_os_code(tmp_path, monkeypatch):
+    def refused(*args):
+        raise PermissionError(13, "private path and source details")
+
+    monkeypatch.setattr(
+        cleanup, "_windows_remove" if os.name == "nt" else "_posix_remove", refused,
+    )
+    root = tmp_path / "owned-stage"
+    root.mkdir()
+    with pytest.raises(PlanError) as error:
+        cleanup.remove_owned_stage(root, cleanup.directory_identity(root))
+    assert str(error.value) == "artifact stage cleanup could not safely complete (OS error 13)"
+    assert root.is_dir()
 
 
 @pytest.mark.parametrize("operation", ["read", "copy"])
@@ -692,3 +708,90 @@ print(json.dumps(result))
     assert result["sequence"] == 10
     assert result["verified_at"] == 151
     assert config.read_bytes() == b"preserved configuration"
+
+
+def test_fresh_installed_console_admission_and_durable_reopen_without_hosting(tmp_path, request):
+    artifact, _ = request.getfixturevalue("shared_wheel")
+    uv = shutil.which("uv")
+    assert uv
+    target = tmp_path / "installed-client"
+    installed = run([uv, "pip", "install", "--target", str(target), "--no-deps",
+                     "--no-index", "--offline", str(artifact)])
+    assert installed.returncode == 0, installed.stderr
+    fixture = artifact_fixture(tmp_path)
+    now = int(time.time())
+    payload = {**fixture["proof"]["payload"], "issued_at": now - 5, "expires_at": now + 300}
+    from test_client_admission import identity, independently_sign, selection
+
+    signing = independently_sign([payload], tmp_path)
+    fixture["proof"] = {**fixture["proof"], **signing["proofs"][0]}
+    policy = fixture["policy"]
+    policy.update(valid_from=now - 10, valid_until=now + 600)
+    policy["keys"][0].update(public_key=signing["public_key"],
+                             valid_from=now - 10, valid_until=now + 600)
+    inputs = {
+        "identity": identity(), "selection": selection(fixture), "release": fixture["manifest"],
+        "proof": fixture["proof"], "policy": policy, "sources": fixture["sources"],
+    }
+    files = {}
+    for name, value in inputs.items():
+        path = tmp_path / (name + ".json")
+        path.write_bytes(canonical(value))
+        files[name] = path
+    root, parent, outside = (tmp_path / name for name in ("private-client", "private-stage", "outside"))
+    for directory in (root, parent, outside):
+        directory.mkdir(mode=0o700)
+    import cryptography
+
+    crypto_site = Path(cryptography.__file__).resolve().parent.parent
+    entry = r"""
+import pathlib, socket, ssl, sys
+target, crypto_site = sys.argv[1:3]
+sys.path[:0] = [target, crypto_site]
+import fleet_manager
+assert pathlib.Path(fleet_manager.__file__).absolute().parent == pathlib.Path(target)/'fleet_manager'
+def no_network(*args, **kwargs):
+    raise AssertionError('Python network entry point used')
+socket.socket = socket.create_connection = socket.getaddrinfo = no_network
+from importlib.metadata import distribution
+entry = next(e for e in distribution('fleet-manager').entry_points
+             if e.group == 'console_scripts' and e.name == 'fleet-manager')
+sys.argv = ['fleet-manager', *sys.argv[3:]]
+raise SystemExit(entry.load()())
+"""
+
+    def client(operation, *extra):
+        return run([
+            sys.executable, "-I", "-S", "-B", "-c", entry, str(target), str(crypto_site),
+            "client-state", operation, "--root", str(root), "--identity", str(files["identity"]),
+            *extra,
+        ], cwd=outside)
+
+    initialized = client("initialize")
+    assert initialized.returncode == 0, initialized.stderr
+    sentinel = root / "preserved-user-config"
+    sentinel.write_bytes(b"previous client configuration")
+    arguments = [part for name in ("selection", "release", "proof", "policy", "sources")
+                 for part in ("--" + name, str(files[name]))]
+    arguments += ["--staging-parent", str(parent)]
+    admitted = client("admit", *arguments)
+    assert admitted.returncode == 0, admitted.stderr
+    report = json.loads(admitted.stdout)
+    assert report["status"] == "admitted" and report["mutations_performed"]
+    assert report["admitted"]["sequence"] == 10
+    assert report["admitted"]["selection"] == inputs["selection"]
+    assert not any(report[name] for name in ("constructed", "healthy", "active",
+                                            "activation_authorized", "live_readiness_verified"))
+    retry = client("admit", *arguments)
+    assert retry.returncode == 0, retry.stderr
+    assert not json.loads(retry.stdout)["mutations_performed"]
+    policy["keys"][0]["revoked"] = True
+    files["policy"].write_bytes(canonical(policy))
+    refused = client("admit", *arguments)
+    assert refused.returncode == 1 and "revoked" in refused.stderr
+    reopened = client("inspect")
+    assert reopened.returncode == 0, reopened.stderr
+    assert json.loads(reopened.stdout)["admitted"] == report["admitted"]
+    assert sentinel.read_bytes() == b"previous client configuration"
+    assert not (root / "versions").exists() and not (root / "current-version").exists()
+    assert list(parent.iterdir()) == [] and list(outside.iterdir()) == []

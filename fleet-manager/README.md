@@ -197,6 +197,13 @@ boundary. It reuses immutable-runtime primitives without activating one.
 
 ## Release roles and snapshot inspection
 
+`fleet-manager client-state` supplies the first durable client-admission
+boundary: explicit initialization, read-only inspection and freshly authenticated
+admission of the exact selected release. It does not construct, execute or
+activate artifacts, select a release, install a hosting role or authorize a
+rollout. See [Client release admission](docs/client-admission.md) for trusted
+inputs, monotonic state, privacy/ownership checks, retry and uncertainty.
+
 ```text
 fleet-manager inspect --release release.json --observation observation.json --role client --authority example --installation local-example
 ```

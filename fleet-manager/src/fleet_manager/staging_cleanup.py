@@ -211,5 +211,6 @@ def remove_owned_stage(root: Path, expected: tuple[int, int]) -> None:
                 _windows_remove(root, expected)
         else:
             _posix_remove(root, expected)
-    except OSError:
-        raise PlanError("artifact stage cleanup could not safely complete") from None
+    except OSError as error:
+        code = getattr(error, "winerror", None) or error.errno
+        raise PlanError(f"artifact stage cleanup could not safely complete (OS error {code})") from None
