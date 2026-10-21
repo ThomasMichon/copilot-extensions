@@ -497,3 +497,55 @@ Canonical contract: [README.md](README.md).
 - Research is supplied through batch twenty-six. The effort remains Active;
   no implementation, tests, native probes, rollout, service or claim changes
   were made, and another journal merge will not complete the parent objective.
+
+## 2026-10-21 - Batches twenty-three and twenty-four, 480 original issues reviewed
+
+- The complete paginated census at 12:52 UTC records **1,214 open issues**:
+  1,212 original-cohort issues and inflow #7556/#7587. **480 distinct originals
+  are reviewed; 245 were closed by this campaign**. Including unrelated #5610
+  and concurrent inflow, the live net reduction is 244. No campaign closure
+  was observed reopened. The fixed guidance checkpoint remains at most 729.
+- Completed finite scopes: #3400's actual progress-nudge behavior; #3500's
+  lazy configuration values; #3560's live-only annotation-write CLI;
+  #3561's actual pre-push publication hook; #3565's outside-libs pointers and
+  released documentation mirrors; #3568's catalog-query CLI; and #3570's
+  removed eager PowerShell lookup, with the exact refusal regression retained.
+  These are bounded source/merged-history conclusions, not new test execution,
+  native qualification, full-suite success or installed-runtime claims.
+- #3570 was not closed from the unrelated native-persistence PR: #4255 explicitly
+  left it unresolved. Current canonical and every released vendored credential
+  source now perform the lookup lazily, while the named test still covers both
+  refusal entrypoints and CLI failure without token-state preparation.
+- Transfers: #3382 to #2805; #3412 to #3418; #3419 to #3444; #3506 to #2464;
+  #3558 to #3585; and #3583 to #3581. Full unique checklists were appended and
+  independently read back before closure; prior canonical text and inherited
+  requirements remain intact.
+- #2805 retains the complete versioned-runtime installer/copy consolidation
+  program, not just its repaired resolver. #3418 retains an adopted non-demo
+  end-to-end consumer and whole-path budget. #3444 retains publication, source,
+  payload, installed metadata and actual serving-runtime parity; a later wheel
+  mismatch prevents reducing that obligation to an initial cache hypothesis.
+- #2464 gains narrowly proven-inert failed-before-first-turn cleanup, not
+  permission to tear down every failed or zero-turn session. Queued, live,
+  background-active, remote-unknown and current-owner protections remain.
+  #3585 retains proactive root-qualified claim discovery rather than only
+  direct lookup. #3581 retains stable effort identity and actual Plan/Validation
+  slices with atomic persistence and mid-turn nudging; concurrent slices are
+  not flattened.
+- #3507 retains both real Docker fleet/pivot observation and actual non-fleet
+  exclusion. An archived effort's accepted transfer is not a native pass.
+  #3511 retains current-tree privacy cleanup and an explicitly owned historical
+  exposure disposition; only generic paths and counts were published, never
+  sensitive matching values or an automatic history-rewrite authorization.
+- #3555 retains exact task-to-session CLI parity; #3556 credits the live overlay
+  and evidence inspector but retains the full current lifecycle/Bridge chain.
+  #3557 retains the rendered-conversation-plus-usage decision. #3582 retains
+  journal reinforcement; #3584 retains ACK-gated head succession. Missing ACKs
+  or ambiguous cleanup evidence do not authorize clearing existing custody.
+- Retained UI scopes credit actual visible new-window and current filtering
+  behavior while preserving New/create with a responsive retained Picker,
+  complete search facets, keyboard/focus interaction and the detail-footer
+  idea. Native execution was not inferred from source or planning documents.
+- Four disjoint read-only researchers are supplied through batch twenty-seven.
+  The effort remains Active. No product implementation, tests, native probes,
+  deployment, process/service or live claim changes were made.
