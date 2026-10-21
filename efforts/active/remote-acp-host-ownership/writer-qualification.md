@@ -17,6 +17,11 @@ remain disabled until the implementation and qualification matrix pass.
 Reviewing or merging this proposal authorizes no promotion, installed update,
 daemon restart, credential grant or live external request.
 
+The proposed [lifecycle compatibility amendment](lifecycle-compatibility.md)
+refines the activation, rollback and Worktrees-holder prerequisites below.
+Its two-stage admission floor must clear separate review before implementation;
+the SQLite proof alone does not authorize ordinary startup to install the fence.
+
 This proposal closes existing intent in
 [externally hosted ACP agents](../../../visions/plugins/agent-bridge/README.md#externally-hosted-acp-agents),
 [consumer-enforced compatibility](../../../visions/plugin-services/README.md#compatibility-enforced-at-the-consumer)

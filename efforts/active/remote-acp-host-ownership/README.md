@@ -22,6 +22,7 @@ development workspace merely to obtain tracking.
 |-------------|---------------------|-------------|
 | welded-piston | Proposal, integrated implementation, validation and publication | Public issue #7237 and its claimed managed worktree |
 | grimy-gizmo | Writer-qualification amendment review only; no runtime implementation | Public issue #7237; bounded proposal worktree under the coordinating participant |
+| nimble-bolt | Lifecycle compatibility proposal only; no runtime implementation or rollout | Public issue #7237; distinct proposal slice under the coordinating participant |
 
 ## Coordination
 
@@ -93,6 +94,17 @@ The [writer-qualification amendment](writer-qualification.md) is
 mechanism is implemented. This selection does not authorize runtime changes or
 relax the existing transfer, rollout or live-request gates.
 
+**Lifecycle-compatibility follow-up, verbatim selection:**
+
+> Prepare a source-only lifecycle compatibility amendment for review (recommended)
+
+The [lifecycle compatibility amendment](lifecycle-compatibility.md) is
+**agent-recommended design**, prompted by ordinary passive startup, rollback
+and older Worktrees-holder gaps. Review precedes its new mechanism; production
+writer-fence installation and retained transfer remain disabled pending the
+complete qualification contract. This selection grants no installed update,
+shared restart, deployment or live external operation.
+
 **Validation-policy follow-up, verbatim:**
 
 > Yes, give protocol-validation tests greater timeouts, and create separate perf-focused validation flows.
@@ -136,6 +148,15 @@ production-deadline change, containment/review/CI waiver or invented perf pass.
   a new old-writer exclusion mechanism.
 - [ ] Implement and qualify its Bridge/Worktrees writer closure and lifecycle
   activation/rollback boundary before advertising retained transfer.
+
+### Lifecycle compatibility proposal
+
+- [ ] Review and merge the source-only
+  [lifecycle compatibility amendment](lifecycle-compatibility.md) before
+  implementing its staged admission and state-aware transition mechanism.
+- [ ] Qualify the complete Bridge/Worktrees writer floor and migration-free
+  ordinary lifecycle path, including rollback and legacy-holder closure,
+  before production fence preparation or retained-transfer activation.
 
 ### Phase 3 - Lifecycle and continuity
 
