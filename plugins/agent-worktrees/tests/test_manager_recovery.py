@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import subprocess
 
 import pytest
+from agent_procutil import SyncProcessLaunchError
 
 from agent_worktrees import manager_launch_cli as launch, manager_recovery as recovery
 
@@ -194,12 +195,12 @@ def test_prefix_health_does_not_substitute_for_registered_command(adopted, monke
 
 
 @pytest.mark.parametrize("failure", [
-    OSError("interpreter is not executable"),
+    SyncProcessLaunchError(OSError("interpreter is not executable")),
     subprocess.TimeoutExpired(["probe"], 30),
     recovery.RecoveryTimeout("settled probe timeout"),
 ])
 @pytest.mark.parametrize("registered", [False, True])
-def test_unlaunchable_or_settled_probe_is_unhealthy(adopted, monkeypatch, failure, registered):
+def test_health_failure_classification_preserves_unsettled_errors(adopted, monkeypatch, failure, registered):
     python = adopted.slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     python.parent.mkdir()
     python.touch()
@@ -214,7 +215,11 @@ def test_unlaunchable_or_settled_probe_is_unhealthy(adopted, monkeypatch, failur
         return subprocess.CompletedProcess(arguments, 0, "worktree-manager 0.6.35-dev1")
 
     monkeypatch.setattr(recovery, "_run", run)
-    assert not recovery._healthy(recovery.adopted_manager(), {})
+    if os.name == "nt" and isinstance(failure, subprocess.TimeoutExpired):
+        with pytest.raises(subprocess.TimeoutExpired):
+            recovery._healthy(recovery.adopted_manager(), {})
+    else:
+        assert not recovery._healthy(recovery.adopted_manager(), {})
 
 
 def test_health_cleanup_refusal_does_not_license_repair(adopted, monkeypatch):
@@ -226,6 +231,19 @@ def test_health_cleanup_refusal_does_not_license_repair(adopted, monkeypatch):
     )
     with pytest.raises(InstallerCleanupError, match="unverified"):
         recovery._health_probe(["probe"], adopted.root, {})
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows Job admission error distinction")
+def test_health_job_admission_os_error_does_not_license_repair(adopted, monkeypatch):
+    failure = OSError("Job admission failed after process creation")
+
+    def failed(*args, **kwargs):
+        raise failure
+
+    monkeypatch.setattr(recovery, "_run", failed)
+    with pytest.raises(OSError) as caught:
+        recovery._health_probe(["probe"], adopted.root, {})
+    assert caught.value is failure
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows Job timeout classification")

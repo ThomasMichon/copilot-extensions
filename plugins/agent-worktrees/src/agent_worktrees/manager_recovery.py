@@ -18,7 +18,7 @@ from contextlib import ExitStack
 from collections.abc import Callable
 from pathlib import Path
 
-from agent_procutil import no_window_kwargs
+from agent_procutil import SyncProcessLaunchError, no_window_kwargs
 
 from . import control_plane_providers as providers, manager_launch_cli, output, update_events
 
@@ -317,6 +317,8 @@ def _health_probe(arguments: list[str], root: Path, env: dict[str, str]):
     try:
         return _run(arguments, cwd=root, env=env, timeout=30)
     except (OSError, subprocess.TimeoutExpired, RecoveryTimeout) as error:
+        if os.name == "nt" and not isinstance(error, (SyncProcessLaunchError, RecoveryTimeout)):
+            raise
         output.warn(f"Adopted Manager health probe could not run: {error}")
         return None
 
