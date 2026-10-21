@@ -147,6 +147,10 @@ handoff support.
 - Queue claims, starts/resumes, new reservations and wake-delivery claims honor
   explicit closure. New natural work may still be recorded; unrelated sources
   continue normally.
+- Review follow-through covers create-and-claim, steering-triggered resumes
+  and detached-waiter wake claims as well. The consistent inventory retains
+  both wake outboxes, including pending and already leased detached deliveries;
+  exact accepted creation/steering replays remain intact.
 - No HTTP/CLI control, acknowledgement, destination activation or handback is
   exposed. Runtime enrollment, already admitted launches/deliveries, legacy
   qualification and adopter effects remain explicit barriers. Continue those

@@ -39,6 +39,7 @@ from .queue_producer_fences import (
     ProducerFenceError,
     ProducerScopeValidationError,
 )
+from .queue_execution_handoff import require_execution_admission
 from .queue_records import Status, TaskError
 from .queue_dedup import find_live_dedup_task
 
@@ -851,6 +852,7 @@ class QueueStorageMixin:
                         note="create",
                     )
                     if claim_as and status == Status.QUEUED:
+                        require_execution_admission(conn, task_id)
                         lease = self.lease_seconds
                         conn.execute(
                             "UPDATE tasks SET status = ?, owner = ?, claimed_at = ?, "

@@ -78,10 +78,17 @@ cannot overwrite it. New natural work may still be recorded, but these queue
 admission paths cannot execute it after closure.
 
 `execution_closure_inventory()` reads all matching tasks, reservation history
-and wake records in one read transaction without a pagination limit. It does
+and wake records in one read transaction without a pagination limit. Detached
+waiter deliveries are exposed separately as `run_waiter_wakes`, including
+pending records and already claimed delivery identities and leases. It does
 not omit terminal tasks' retained allocations, relabel legacy work as safe or
 infer process exit from task state. Already accepted launches or deliveries
 remain unresolved until their actual runtime is reconciled.
+
+Create-and-claim and steering-triggered resumes use the same admission fence;
+exact accepted-request replays remain readable without repeating those effects.
+Both ordinary and detached-waiter wake claims exclude closed scopes while
+leaving unrelated scopes eligible.
 
 This remains a construction API with **no HTTP/CLI exposure**, acknowledgement,
 manual destination admission, cancellation, handback or automatic reopening.

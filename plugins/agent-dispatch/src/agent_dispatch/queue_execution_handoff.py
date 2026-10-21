@@ -168,6 +168,11 @@ class QueueExecutionHandoffMixin:
                 "SELECT w.* FROM wake_outbox w JOIN tasks t ON t.id = w.task_id"
                 " WHERE t.repo = ? AND t.source = ? ORDER BY w.task_id, w.wake_seq", params
             ).fetchall()
+            run_waiter_wakes = conn.execute(
+                "SELECT w.* FROM run_waiter_wakes w JOIN tasks t ON t.id = w.task_id"
+                " WHERE t.repo = ? AND t.source = ?"
+                " ORDER BY w.task_id, w.waiter_generation, w.id", params
+            ).fetchall()
             conn.commit()
         return {
             "request": json.loads(closure["request"]),
@@ -179,6 +184,7 @@ class QueueExecutionHandoffMixin:
             "tasks": [dict(row) for row in tasks],
             "reservations": [dict(row) for row in reservations],
             "wakes": [dict(row) for row in wakes],
+            "run_waiter_wakes": [dict(row) for row in run_waiter_wakes],
             "blockers": [
                 "runtime enrollment and final launch barrier not implemented",
                 "legacy execution associations not qualified",

@@ -29,13 +29,14 @@ def setup(tmp_path):
         "operation-a", 1, "automatic", "manual",
     )
 
-    def create(name="task"):
+    def create(name="task", *, claim_as=None):
         return queue.create(
             name, repo=TEST_REPO, source="scheduled",
             producer_scope={"repo": TEST_REPO, "source": "scheduled"},
             producer_id="producer-a", producer_generation=1,
             producer_capability=producer.producer_capability,
             producer_request_id=name,
+            claim_as=claim_as,
         )
 
     return queue, request, create
@@ -246,6 +247,111 @@ def test_execution_handoff_closure_empty_inventory_is_not_acknowledgement(setup)
     close(queue, request)
     inventory = queue.execution_closure_inventory(request.scope)
     assert inventory["tasks"] == inventory["reservations"] == inventory["wakes"] == []
+    assert inventory["run_waiter_wakes"] == []
     assert inventory["state"] == "closing"
     assert inventory["acknowledged"] is False
     assert len(inventory["blockers"]) == 3
+
+
+def test_execution_handoff_closure_blocks_create_claim_but_preserves_replay(setup):
+    queue, request, create = setup
+    accepted = create("accepted", claim_as="worker")
+    close(queue, request)
+    with pytest.raises(ExecutionAdmissionClosed):
+        create("new", claim_as="worker")
+    assert create("accepted", claim_as="worker") == accepted
+    queued = create("new")
+    assert queued.status == "queued" and queued.generation == 0
+    other = queue.create(
+        "unrelated", repo=TEST_REPO, source="unrelated", claim_as="other"
+    )
+    assert other.status == "claimed" and other.generation == 1
+
+
+@pytest.mark.parametrize("wake_requested", [False, True])
+@pytest.mark.parametrize("headless", [False, True])
+def test_execution_handoff_closure_blocks_steering_resume(
+    setup, wake_requested, headless
+):
+    queue, request, create = setup
+    task = create()
+    if headless:
+        reservation, _ = queue.reserve_spawn(task.id)
+        queue.record_spawn(reservation.key, session_handle="local-body:test-session")
+    queue.claim_one("worker", task_id=task.id)
+    queue.start(task.id, "worker", owner_session_id="native-session")
+    queue.suspend(task.id, "worker", reason="waiting")
+    before = queue.get(task.id)
+    close(queue, request)
+    with pytest.raises(ExecutionAdmissionClosed):
+        queue.submit_steer(
+            task.id, fields={"answer": "continue"}, wake_requested=wake_requested,
+            idempotency_key="new-answer",
+        )
+    assert queue.get(task.id) == before
+    assert queue.steer_receipt(task.id, "new-answer") is None
+    assert queue.list_wakes(task.id) == []
+    other = queue.create("unrelated", repo=TEST_REPO, source="unrelated")
+    queue.claim_one("other-worker", task_id=other.id)
+    queue.start(other.id, "other-worker", owner_session_id="other-session")
+    queue.suspend(other.id, "other-worker", reason="waiting")
+    assert queue.submit_steer(
+        other.id, fields={"answer": "continue"}, wake_requested=wake_requested
+    ).status == "started"
+
+
+def test_execution_handoff_closure_preserves_exact_steering_replay(setup):
+    queue, request, create = setup
+    task = create()
+    queue.claim_one("worker", task_id=task.id)
+    queue.start(task.id, "worker", owner_session_id="native-session")
+    queue.suspend(task.id, "worker", reason="waiting")
+    answer = {"fields": {"answer": "continue"}, "wake_requested": True,
+              "idempotency_key": "accepted-answer"}
+    accepted = queue.submit_steer(task.id, **answer)
+    receipt = queue.steer_receipt(task.id, "accepted-answer")
+    close(queue, request)
+    assert queue.submit_steer(task.id, **answer) == accepted
+    assert queue.steer_receipt(task.id, "accepted-answer") == receipt
+    with pytest.raises(ExecutionAdmissionClosed):
+        queue.submit_steer(task.id, **{**answer, "idempotency_key": "new-answer"})
+
+
+def _detached_wake(queue, task):
+    queue.claim_one("worker", task_id=task.id)
+    queue.start(task.id, "worker", owner_session_id="native-session")
+    queue.suspend(task.id, "worker", reason="waiting")
+    waiter = queue.register_run_waiter(
+        task.id, pid=101, host="test-host", start_token="test-token",
+        resume_worktree="test/worker", command=["example-command"], now=100,
+    )
+    queue.recover_dead_run_waiter(
+        task.id, generation=waiter["generation"], reason="waiter exited",
+        message="continue", sender="test-recovery", now=101,
+    )
+    return queue.list_run_waiter_wakes(task.id)[0]
+
+
+@pytest.mark.parametrize("claim_before_close", [False, True])
+def test_execution_handoff_closure_inventories_detached_wake_leases(
+    setup, claim_before_close
+):
+    queue, request, create = setup
+    task = create()
+    wake = _detached_wake(queue, task)
+    if claim_before_close:
+        wake = queue.claim_due_run_waiter_wake(now=102)
+    close(queue, request)
+    assert queue.claim_due_run_waiter_wake(now=103) is None
+    inventory = queue.execution_closure_inventory(request.scope)
+    [record] = inventory["run_waiter_wakes"]
+    assert record["id"] == wake.id
+    assert record["status"] == ("delivering" if claim_before_close else "pending")
+    assert record["delivery_token"] == wake.delivery_token
+    assert record["delivery_expires_at"] == wake.delivery_expires_at
+    assert record["owner_session_id"] == "native-session"
+    assert inventory["acknowledged"] is False
+    other = queue.create("unrelated", repo=TEST_REPO, source="unrelated")
+    other_wake = _detached_wake(queue, other)
+    assert queue.claim_due_run_waiter_wake(now=104).id == other_wake.id
+    assert queue.claim_due_run_waiter_wake(now=105) is None

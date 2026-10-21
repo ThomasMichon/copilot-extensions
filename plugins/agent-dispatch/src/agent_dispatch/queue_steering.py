@@ -27,6 +27,7 @@ from .queue_common import (
     _check_expected_status,
 )
 from .queue_records import SpawnState, Status, TaskError
+from .queue_execution_handoff import require_execution_admission
 from .registrations import RegistrationKind, RegistrationStatus
 from .steering import SteeringError, steer_request_fingerprint
 
@@ -254,6 +255,10 @@ class QueueSteeringMixin:
                         else ""
                     )
                 )
+            if task.status == Status.SUSPENDED or (
+                wake_requested and task.owner and task.owner_session_id is not None
+            ):
+                require_execution_admission(conn, task_id)
             inserted = conn.execute(
                 "INSERT INTO task_steer"
                 " (task_id, ts, fields, sender, idempotency_key, request_fingerprint)"
