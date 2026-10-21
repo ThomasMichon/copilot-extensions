@@ -278,6 +278,60 @@ def test_a_branch_only_synced_to_newer_remote_tips_carries_no_work(env, provider
     assert (ok, err) == (True, None)
 
 
+@pytest.mark.parametrize("later_work", ["none", "commit", "empty", "revert", "other-pr-branch"])
+def test_a_proven_remote_reset_after_merged_work_is_published(
+    env: SimpleNamespace, provider: SimpleNamespace, later_work: str,
+) -> None:
+    head = _two_commit_change(env.clone)
+    _git("checkout", "-q", "-b", env.slug, cwd=env.clone)
+    _squash_onto(env.seed, "dev", SQUASHED)
+    tip = _sync_worktree_branch_to_a_newer_main(env)
+    _git("checkout", "-q", f"worktree/{env.worktree_id}", cwd=env.clone)
+    if later_work in ("commit", "revert"):
+        _commit(env.clone, "mine.txt", "later local work\n", "after the published reset")
+    if later_work == "empty":
+        _git("commit", "-q", "--allow-empty", "-m", "later empty commit", cwd=env.clone)
+    if later_work == "revert":
+        _git("revert", "--no-edit", "HEAD", cwd=env.clone)
+    if later_work == "other-pr-branch":
+        _git("checkout", "-q", env.slug, cwd=env.clone)
+        _commit(env.clone, "mine.txt", "unpublished PR follow-up\n", "after the merged PR")
+        _git("checkout", "-q", f"worktree/{env.worktree_id}", cwd=env.clone)
+    _rewrite_main(env)
+    _git("fetch", "-q", "-f", "origin", cwd=env.clone)
+    provider.head_sha, provider.base_ref = head, "dev"
+    record = _record(env, number=7, state="merged", head_sha=head)
+
+    assert finalize_ref.creation_point(f"worktree/{env.worktree_id}", str(env.clone)) == tip
+    ok, err = finalize._pr_finalize_precondition(
+        record, _repo(), str(env.clone), str(env.clone))
+
+    if later_work == "none":
+        assert (ok, err) == (True, None)
+    else:
+        assert ok is False and "further commits" in err
+
+
+def test_a_later_reset_without_remote_tip_proof_does_not_certify_work(
+    env: SimpleNamespace, provider: SimpleNamespace,
+) -> None:
+    head = _two_commit_change(env.clone)
+    _git("checkout", "-q", "-b", env.slug, cwd=env.clone)
+    _squash_onto(env.seed, "dev", SQUASHED)
+    tip = _sync_worktree_branch_to_a_newer_main(env)
+    _rewrite_main(env)
+    _git("fetch", "-q", "-f", "origin", cwd=env.clone)
+    _git("reflog", "expire", "--expire=now", "refs/remotes/origin/main", cwd=env.clone)
+    provider.head_sha, provider.base_ref = head, "dev"
+    record = _record(env, number=7, state="merged", head_sha=head)
+
+    assert finalize_ref.creation_point(f"worktree/{env.worktree_id}", str(env.clone)) != tip
+    ok, err = finalize._pr_finalize_precondition(
+        record, _repo(), str(env.clone), str(env.clone))
+
+    assert ok is False and "further commits" in err
+
+
 def test_a_commit_after_a_sync_still_counts(env, provider):
     _git("checkout", "-q", "--detach", cwd=env.clone)
     tip = _sync_worktree_branch_to_a_newer_main(env)

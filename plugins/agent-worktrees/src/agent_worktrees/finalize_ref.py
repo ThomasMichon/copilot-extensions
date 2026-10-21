@@ -81,9 +81,9 @@ def creation_point(ref: str, cwd: str) -> str:
     remote-tracking branch (its reflog's oldest entry, ``branch: Created from
     origin/main``) that is proven to have held that commit: everything reachable
     from it was already published when the branch was made, so it is never this
-    branch's own work -- even after that remote rewrites its history. When the
-    branch's only later moves reset it to newer tips of that same source (a sync),
-    the point is the latest of those (:func:`_later_resets_to_source`).
+    branch's own work -- even after that remote rewrites its history. A later
+    reset to a proven tip of that same source advances this published boundary
+    (:func:`_later_resets_to_source`), including after earlier local work.
 
     The reflog message alone doesn't prove where the commit came from (a local
     branch can be named ``origin/x``), so no local branch may share the source's
@@ -127,19 +127,20 @@ def creation_point(ref: str, cwd: str) -> str:
 
 
 def _later_resets_to_source(entries: list[str], created: str, source: str, cwd: str) -> str:
-    """Advance *created* through the branch's later moves that only reset it to a
-    commit the source was proven to hold -- one its own remote-tracking reflog
-    names (a sync to ``origin/main``'s then-tip): those commits were published, not
-    made here. Stops at the first other move (a commit, a rebase, a reset elsewhere)."""
+    """Find the latest reset to an independently proven tip of the original source.
+
+    Earlier local work does not make a subsequent published tip unpublished.
+    Commits beyond that tip remain outside this boundary, including empty or
+    reverted commits; other tracked PR branches are checked separately.
+    """
     tips = git_ops.git("reflog", "show", "--format=%H", f"refs/remotes/{source}", "--",
                        cwd=cwd, check=False)
     held = {ln.strip() for ln in tips.stdout.splitlines()} if tips.returncode == 0 else set()
     point = created
     for entry in reversed(entries[:-1]):  # oldest first, after the creation
         sha, _, subject = entry.partition("\t")
-        if not subject.startswith(("branch: Reset to ", "reset: moving to ")) or sha.strip() not in held:
-            break
-        point = sha.strip()
+        if subject.startswith(("branch: Reset to ", "reset: moving to ")) and sha.strip() in held:
+            point = sha.strip()
     return point
 
 
@@ -287,5 +288,4 @@ def warn_if_tracked_branch_diverged(
         f"preserved (not deleted) through cleanup."
     )
     return True
-
 

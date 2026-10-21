@@ -1,0 +1,9 @@
+{
+  "comment": "Recognize independently proven published resets after earlier merged work without hiding later local commits",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
