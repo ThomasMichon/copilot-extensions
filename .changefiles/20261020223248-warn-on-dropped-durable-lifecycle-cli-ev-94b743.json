@@ -1,0 +1,9 @@
+{
+  "comment": "Warn on dropped durable lifecycle CLI events in the legacy shared-library consumer",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
