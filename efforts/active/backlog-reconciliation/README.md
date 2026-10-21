@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** Independent documentation-only campaign checkpoints
 - **Created:** 2026-10-21
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** `visions/plugins/efforts/README.md`; reconciliation, not a change to standing intent
 - **Umbrella issue:** #7556
 - **Sub-issues:** Existing issues retain their substantive implementation owners
@@ -92,8 +92,8 @@ Operator request, with identifying organizational references redacted:
 
 - [x] Enumerate all scoped open issues with pagination and fix the 50% threshold.
 - [x] Publish coordination #7556 and assign the oldest 20 issues for read-only research.
-- [ ] Land this campaign plan through the normal review gate before issue dispositions.
-- [ ] Preserve the initial cohort and oldest-first cursor in structured session state.
+- [x] Land this campaign plan through the normal review gate before issue dispositions.
+- [x] Preserve the initial cohort and oldest-first cursor in structured session state.
 
 ### Phase 2 - Continuing reconciliation
 
