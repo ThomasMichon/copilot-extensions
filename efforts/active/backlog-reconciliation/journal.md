@@ -354,3 +354,50 @@ Canonical contract: [README.md](README.md).
 - Batch seventeen is under research/adjudication and batch eighteen is being
   supplied. The campaign remains Active; no product implementation, tests,
   native probes, deployment or live claim/process/service changes were made.
+
+## 2026-10-21 - Batches seventeen and eighteen, 360 original issues reviewed
+
+- The complete paginated census at 11:35 UTC records **1,254 open issues**:
+  1,253 original-cohort issues and #7556 inflow. **360 distinct original issues
+  are reviewed; 204 were closed by this campaign**. The unrelated #5610 closure
+  and coordination inflow still cancel in net accounting; no campaign closure
+  was observed reopened. The fixed guidance checkpoint remains at most 729.
+- Completed finite scopes: #2559's ledger-visible dormant-worktree discovery,
+  #2572's historical bounded module-overrun repair, #2579's caption plus
+  explicitly selected stale-task pivot, and #2685's registered current-input
+  denial decorator with enforced configuration ordering. These source/history
+  conclusions do not claim newly run tests, consumer adoption or native rollout.
+- Transfers: #2583/#2597/#2599/#2660 directly to #2594; #2634 to #2467;
+  #2649 to #4101; and all eight #2710-#2717 children to #2709. Complete additive
+  checklists were recorded and read back before source closure; every canonical
+  successor remains open.
+- #2594 retains the author's corrected narrow validation/identity question,
+  default-off unclaimed fallback with owner fences, the full thirteen-stage
+  handoff trace, and actual consume/save identity-resolution call-count and
+  load qualification. #3277's non-PR metadata repair is bounded credit, not
+  proof of the complete consume/save path or permission to raise deadlines.
+- #2467 retains rightful-owner acknowledgement, reciprocal obligations and
+  historical lineage while explicitly distinguishing structural pairing from
+  missing, unreadable or ready sibling checkout state. A live process or absent
+  path cannot authorize reclaiming another holder's responsibility.
+- #4101 retains the newly-WIP/conversation masking defect across batch cleanup,
+  single-item reaping and automatic sweeping. Its existing documentation claim
+  stays documentation-only; fresh revalidation after masking is not a fix, and
+  consolidation does not assign runtime work or permit deletion.
+- #2709 now retains all eight finite Codespaces outcomes, explicitly adding
+  compression #2711 and durable proactive sync/preserving finalize #2712 that
+  its original six-child list omitted. The full relay/helper, supported binary,
+  actual remote cwd, authorized billing, authored-versus-generated content and
+  explicit devcontainer-selection acceptance remains open. #5782's real checkout
+  audit is credited without treating it as generated-file classification or
+  native deletion proof; #5774's separate responsibility is unchanged.
+- Retained originals include #2554/#2556/#2558, #2562/#2567, #2582/#2598/#2628/
+  #2633, #2670/#2680/#2684/#2696/#2700/#2701/#2706/#2709. Their concrete gaps
+  preserve exact unit ownership, unreadable-versus-absent evidence, full target
+  policy, successor retry/cleanup, actual retirement, capability selection,
+  key/pin qualification, complete popup/exit behavior, checkout-free reviewer
+  commands and scheduled machine-wide protective path coverage.
+- Batch nineteen is under research/adjudication, batch twenty is fully
+  assigned, and the next oldest cohort is being supplied. The effort remains
+  Active. No product implementation, tests, native probes, deployment or live
+  claim/process/service changes were made.
