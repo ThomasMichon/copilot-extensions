@@ -182,6 +182,12 @@ print(json.dumps(results),flush=True)
         ]
         stop(process, job)
         assert process.poll() is not None
+        (run_dir / "endpoint-held.json").rename(run_dir / "endpoint.json")
+        stale = subprocess.run([
+            *clients["agent-c"], "members", "room",
+        ], cwd=tmp_path, env=environment, capture_output=True, text=True, timeout=15, **options)
+        assert stale.returncode == 1
+        assert json.loads(stale.stderr)["error"] == "endpoint_unavailable"
     finally:
         if job is not None and job.handle or process.poll() is None:
             stop(process, job)

@@ -61,16 +61,19 @@ def test_local_endpoint_real_tcp_request_uses_canonical_record_and_stable_namesp
     write_endpoint(root, "tcp", "127.0.0.1:1")
     rebound = Client(GatewayTransport(config), config["actor"], config["state_dir"])
     assert rebound.directory == original
-    write_endpoint(root, "tcp", address)
+    write_endpoint(root, "pipe", "synthetic-unavailable-pipe", alt=[("tcp", address)])
     assert not rebound.leave("room")["active"]
 
 
 @pytest.mark.parametrize("mutation", [
-    "absent", "invalid-json", "oversized", "schema-bool", "pid-bool",
+    "absent", "invalid-json", "oversized", "schema-bool", "pid-bool", "pid-overflow",
     "wrong-type", "bad-alternative", "remote", "pipe", "relative-unix", "foreign-unix",
+    "missing-port", "empty-port", "missing-port-alt", "empty-port-alt",
+    "dead-publisher", "dead-publisher-alt",
 ])
 def test_local_endpoint_refusal_is_bounded_without_network_or_fallback(tmp_path, monkeypatch, mutation):
     import agent_chat_service.transport as module
+    import endpoint_rendezvous.rendezvous as rendezvous
 
     root = tmp_path / "run"
     root.mkdir()
@@ -79,6 +82,7 @@ def test_local_endpoint_refusal_is_bounded_without_network_or_fallback(tmp_path,
         "schema": 1, "transport": "tcp", "endpoint": "127.0.0.1:1",
         "pid": os.getpid(), "started_at": "synthetic-start",
     }
+    queried_pids = []
     if mutation == "absent":
         pass
     elif mutation == "invalid-json":
@@ -90,6 +94,8 @@ def test_local_endpoint_refusal_is_bounded_without_network_or_fallback(tmp_path,
             record["schema"] = True
         elif mutation == "pid-bool":
             record["pid"] = True
+        elif mutation == "pid-overflow":
+            record["pid"] = 1 << 64
         elif mutation == "wrong-type":
             record["transport"] = []
         elif mutation == "bad-alternative":
@@ -100,8 +106,24 @@ def test_local_endpoint_refusal_is_bounded_without_network_or_fallback(tmp_path,
             record.update(transport="pipe", endpoint="unsupported-pipe")
         elif mutation == "relative-unix":
             record.update(transport="unix", endpoint="relative.sock")
-        else:
+        elif mutation == "foreign-unix":
             record.update(transport="unix", endpoint=str(tmp_path / "foreign.sock"))
+        elif mutation.startswith(("missing-port", "empty-port")):
+            address = "127.0.0.1" + (":" if mutation.startswith("empty-port") else "")
+            if mutation.endswith("-alt"):
+                record.update(transport="pipe", endpoint="synthetic-unavailable-pipe",
+                              alt=[{"transport": "tcp", "endpoint": address}])
+            else:
+                record["endpoint"] = address
+        else:
+            def dead_publisher(pid):
+                queried_pids.append(pid)
+                return False
+
+            monkeypatch.setattr(rendezvous, "pid_alive", dead_publisher)
+            if mutation.endswith("-alt"):
+                record.update(transport="pipe", endpoint="synthetic-unavailable-pipe",
+                              alt=[{"transport": "tcp", "endpoint": "127.0.0.1:1"}])
         path.write_text(json.dumps(record), encoding="utf-8")
 
     def unexpected(*args, **kwargs):
@@ -116,6 +138,8 @@ def test_local_endpoint_refusal_is_bounded_without_network_or_fallback(tmp_path,
         })
     assert caught.value.code in {"endpoint_unavailable", "invalid_configuration", "provider_unsupported"}
     assert "synthetic-credential" not in caught.value.message
+    if mutation.startswith("dead-publisher"):
+        assert queried_pids == [record["pid"]]
 
 
 @pytest.mark.skipif(os.name == "nt", reason="The native POSIX host advertises a Unix socket")

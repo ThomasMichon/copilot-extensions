@@ -346,6 +346,35 @@ shared-multiplex contracts above.
 
 ## Journal
 
+### 2026-10-21 - Review correction: refuse stale or incomplete advertisements
+
+- Current-head review of #7517 identified two real endpoint-boundary defects:
+  publisher liveness was not checked before alternate selection, and a TCP
+  record without its port could default to port80. Six new primary/alternate
+  refusal cases reproduced both defects before the fix:11 passes and six
+  failures, each reaching the forbidden connection constructor.
+- Reuse canonical `is_stale` on the original advertisement, before `usable`
+  can select an alternate without its PID. Require an explicit valid TCP
+  port before constructing the connection. Bound the untrusted PID field and
+  refuse native integer overflow; no replacement PID/lifecycle framework,
+  implicit route, network probe or replay was added.
+- Preserve all260 previous nodes and add seven refusal parameters, including
+  PID overflow:267 complete,234 acceptance and the same33 full-only. The
+  existing live TCP case also exercises an actual supported alternate, and the
+  installed host case now restores a genuinely dead publisher's advertisement
+  and requires explicit refusal before real restart/rebind and pending recovery.
+- An initial focused post-edit run still imported the older non-editable
+  package in the managed test environment. Its seven failures remain recorded
+  as stale-package diagnostics, not validation of the edited runtime. Normal
+  leased preparation rebuilt the owned package; all31 focused cases passed
+  with one owning-platform skip in70.40 seconds, including the source-removed
+  installed dead-publisher/restart contract.
+- The earlier exact `b4dc805db0f3ab3f74152fc95f5da6299834baf5` passed both
+  native platforms' normal lanes, but these review corrections require a new
+  immutable candidate, both normal120/600 lanes, the existing native qualifier
+  and a current-head review. Previous candidate results do not waive them or
+  complete selected setup, deployment, migration or the parent effort.
+
 ### 2026-10-21 - Local endpoint membership and retained qualification failures
 
 - The local endpoint leaf retains every one of the qualified client's 242

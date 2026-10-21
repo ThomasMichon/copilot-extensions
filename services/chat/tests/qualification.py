@@ -152,7 +152,7 @@ PARAMETER_COUNTS.update({
     "test_hosting.py::test_members_page_controls_are_validated_before_lookup": 6,
     "test_hosting.py::test_request_framing_and_duplicate_auth_refuse_before_dispatch": 5,
     "test_local_endpoint.py::test_local_endpoint_configuration_refuses_ambiguous_or_implicit_routes": 4,
-    "test_local_endpoint.py::test_local_endpoint_refusal_is_bounded_without_network_or_fallback": 11,
+    "test_local_endpoint.py::test_local_endpoint_refusal_is_bounded_without_network_or_fallback": 18,
     "test_store.py::test_drain_fences_held_waits_even_after_immediate_undrain": 4,
     "test_store.py::test_drain_freezes_all_rpc_without_mutating_conversation": 9,
     "test_store.py::test_held_membership_generation_is_independent_of_clock": 8,

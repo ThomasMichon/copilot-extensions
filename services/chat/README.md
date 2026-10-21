@@ -209,7 +209,11 @@ install or start the host, or acquire a different authentication identity.
 Each local RPC reads the canonical rendezvous record inside the same finite,
 isolated HTTP worker used for ordinary HTTP. Reading is capped at 16 KiB;
 linked/reparse paths, nonregular records, malformed or unsupported records and
-nonlocal TCP destinations refuse explicitly. Native POSIX uses the advertised
+nonlocal TCP destinations refuse explicitly. The canonical stale-publisher
+check runs on the original advertisement before selecting a primary or
+alternate transport; a known-dead publisher refuses without dialing.
+TCP records require their advertised port and never default to port 80.
+Native POSIX uses the advertised
 Unix socket directly beneath the owned run directory; Windows uses the host's
 advertised dynamic loopback endpoint. A named pipe without an explicitly
 advertised supported alternate is unsupported. There is no fixed-port,

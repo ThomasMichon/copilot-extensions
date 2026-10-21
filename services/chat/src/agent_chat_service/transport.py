@@ -136,7 +136,7 @@ class _UnixConnection(http.client.HTTPConnection):
 
 def _local_connection(directory, timeout):
     try:
-        from endpoint_rendezvous import Endpoint, endpoint_file
+        from endpoint_rendezvous import Endpoint, endpoint_file, is_stale
     except ImportError:
         raise ClientError("provider_unsupported", "Local discovery requires the client role's rendezvous library.") from None
     root = Path(_endpoint_directory(directory))
@@ -161,7 +161,7 @@ def _local_connection(directory, timeout):
                 or not {"schema", "transport", "endpoint", "pid", "started_at"} <= set(data)
                 or set(data) - {"schema", "transport", "endpoint", "pid", "started_at", "alt"}
                 or type(data["schema"]) is not int or data["schema"] != 1
-                or type(data["pid"]) is not int or data["pid"] <= 0
+                or type(data["pid"]) is not int or not 0 < data["pid"] <= 0xFFFFFFFF
                 or not isinstance(data["started_at"], str) or not data["started_at"]
                 or len(data["started_at"]) > 128):
             raise ValueError("endpoint record")
@@ -176,7 +176,10 @@ def _local_connection(directory, timeout):
                     or not isinstance(item["endpoint"], str) or not item["endpoint"]
                     or not item["endpoint"].isprintable()):
                 raise ValueError("endpoint address")
-        endpoint = Endpoint.from_record(data).usable(
+        advertisement = Endpoint.from_record(data)
+        if is_stale(advertisement):
+            raise ValueError("stale endpoint publisher")
+        endpoint = advertisement.usable(
             lambda transport: transport == "tcp" or transport == "unix" and os.name != "nt",
         )
         if endpoint is None:
@@ -188,10 +191,10 @@ def _local_connection(directory, timeout):
                 raise ValueError("foreign or redirected socket")
             return _UnixConnection(str(address), timeout=timeout)
         parsed, loopback = _origin("http://" + endpoint.address)
-        if not loopback:
-            raise ValueError("nonlocal endpoint")
+        if not loopback or parsed.port is None:
+            raise ValueError("nonlocal or incomplete endpoint")
         return http.client.HTTPConnection(parsed.hostname, parsed.port, timeout=timeout)
-    except (OSError, ValueError, TypeError, KeyError, ChatError):
+    except (OSError, ValueError, TypeError, KeyError, OverflowError, ChatError):
         raise ClientError(
             "endpoint_unavailable", "The explicit local endpoint record is absent or invalid; no fallback or replay.",
         ) from None
