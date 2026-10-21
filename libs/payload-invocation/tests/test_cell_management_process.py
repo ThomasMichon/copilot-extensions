@@ -5,6 +5,9 @@ import json
 import os
 import subprocess
 import sys
+from collections.abc import Iterator
+from contextlib import contextmanager
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
@@ -18,6 +21,51 @@ pytestmark = [
     pytest.mark.effect("filesystem"),
     pytest.mark.effect("process"),
 ]
+
+
+@contextmanager
+def _live_management_owner(
+    fixture: dict,
+) -> Iterator[tuple[Path, dict, subprocess.Popen[str]]]:
+    primitive = fixture["primitive"]
+    root, arguments = _cell(fixture, {})
+    program = """
+import importlib.util,json,os,sys
+from pathlib import Path
+spec=importlib.util.spec_from_file_location("managed_owner_fixture",sys.argv[1])
+helper=importlib.util.module_from_spec(spec)
+sys.modules[spec.name]=helper
+spec.loader.exec_module(helper)
+original=helper._current_environment
+helper._current_environment=lambda **kw: original(**{**kw,"os_profile":Path(sys.argv[2])})
+with helper.runtime_publication_lease(**json.loads(sys.argv[3])) as patch:
+    print(json.dumps(patch),flush=True)
+    sys.stdin.readline()
+    os._exit(0)
+"""
+    child = subprocess.Popen(
+        [
+            sys.executable, "-I", "-B", "-c", program, primitive.__file__,
+            str(fixture["home"]), json.dumps(arguments, default=str),
+        ],
+        env={**os.environ, **fixture["environment"]},
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    try:
+        assert child.stdout is not None and child.stderr is not None
+        line = child.stdout.readline()
+        assert line, child.stderr.read()
+        patch = json.loads(line)
+        yield root, {**arguments, "environment": {**arguments["environment"], **patch}}, child
+    finally:
+        if child.stdin is not None:
+            child.stdin.close()
+        child.wait(timeout=5)
+        if child.stdout is not None:
+            child.stdout.close()
+        if child.stderr is not None:
+            child.stderr.close()
 
 
 def test_current_management_process_has_native_birth_identity(binding_fixture: dict) -> None:
@@ -115,37 +163,9 @@ def test_windows_identity_requires_live_handle_and_native_birth(
 @pytest.mark.timeout(20)
 def test_exited_unreaped_manager_cannot_authorize_publication(binding_fixture: dict) -> None:
     fixture, primitive = binding_fixture, binding_fixture["primitive"]
-    _, arguments = _cell(fixture, {})
-    program = """
-import importlib.util,json,os,sys
-from pathlib import Path
-spec=importlib.util.spec_from_file_location("managed_owner_fixture",sys.argv[1])
-helper=importlib.util.module_from_spec(spec)
-sys.modules[spec.name]=helper
-spec.loader.exec_module(helper)
-original=helper._current_environment
-helper._current_environment=lambda **kw: original(**{**kw,"os_profile":Path(sys.argv[2])})
-with helper.runtime_publication_lease(**json.loads(sys.argv[3])) as patch:
-    print(json.dumps(patch),flush=True)
-    sys.stdin.readline()
-    os._exit(0)
-"""
-    child = subprocess.Popen(
-        [
-            sys.executable, "-I", "-B", "-c", program, primitive.__file__,
-            str(fixture["home"]), json.dumps(arguments, default=str),
-        ],
-        env={**os.environ, **fixture["environment"]},
-        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-    )
-    try:
-        line = child.stdout.readline()
-        assert line, child.stderr.read()
-        patch = json.loads(line)
-        borrowed = {
-            **arguments, "environment": {**arguments["environment"], **patch},
-        }
+    with _live_management_owner(fixture) as (_, borrowed, child):
         primitive.borrow_runtime_publication(**borrowed)
+        assert child.stdin is not None
         child.stdin.write("exit\n")
         child.stdin.flush()
         exited = os.waitid(os.P_PID, child.pid, os.WEXITED | os.WNOWAIT)
@@ -156,8 +176,3 @@ with helper.runtime_publication_lease(**json.loads(sys.argv[3])) as patch:
         with pytest.raises(primitive.InstallationContextError):
             primitive.borrow_runtime_publication(**borrowed)
         assert _snapshot(fixture["home"]) == before
-    finally:
-        child.stdin.close()
-        child.wait(timeout=5)
-        child.stdout.close()
-        child.stderr.close()

@@ -765,6 +765,8 @@ def settle_candidate(
             if guard is None:
                 guard = cutover._acquire_cutover_lock(root / "status-monitor-routing")
                 cutover_custody.callback(guard.release)
+            # Waiting does not extend borrowed management authority.
+            governance.recheck()
             print(f"Runtime {version}: cutover authority acquired", flush=True)
             selected = _selected(root)
             if selected is not None and selected != previous:
@@ -792,6 +794,7 @@ def settle_candidate(
                 f"Runtime {version}: monitor scope={monitor_scope} "
                 f"predecessor={predecessor} already-serving={already_serving}", flush=True,
             )
+            governance.recheck()
             helpers = None
             if frontend is not None:
                 if publication_source_root is None:
@@ -807,6 +810,7 @@ def settle_candidate(
             try:
                 if helpers is not None:
                     helpers.verify()
+                governance.recheck()
                 runtime.activate(root, version, link_free=True)
                 print(f"Runtime {version}: selection published", flush=True)
                 committed = True

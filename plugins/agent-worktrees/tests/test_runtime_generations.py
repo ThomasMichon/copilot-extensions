@@ -336,6 +336,7 @@ def test_manifest_interruption_stays_under_custody_until_restore_or_commit_forwa
     released = []
     governance = SimpleNamespace(
         root=tmp_path, payload=tmp_path, signature=lambda: {},
+        recheck=lambda: None,
         held=lambda *, timeout: nullcontext(),
     )
     monkeypatch.setattr(driver, "Governance", lambda *_args: governance)

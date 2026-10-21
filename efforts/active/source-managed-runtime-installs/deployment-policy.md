@@ -179,6 +179,9 @@ Standalone and managed flows acquire namespace custody before service cutover.
 Explicit modes retain the same governance owner through nested settlement and
 release cutover before releasing the namespace, avoiding an overlap cycle with
 an outer management owner.
+Settlement revalidates after blocking cutover acquisition and preparation,
+before helper or selector publication, including callers without a native
+frontend. A wait cannot extend an expired management owner's authority.
 Manager source selection and other caller/launcher gates remain open.
 
 ## Native bootstrap and early first-use admission

@@ -186,6 +186,9 @@ def test_one_owner_retains_candidate_and_rollback_until_actual_cutover(
         def signature(self):
             return {}
 
+        def recheck(self):
+            pass
+
         @contextmanager
         def held(self, *, timeout=180):
             authority.append("enter")
@@ -317,6 +320,9 @@ def test_publication_failure_retains_custody_through_observed_outcome(
 
         def signature(self):
             return {}
+
+        def recheck(self):
+            pass
 
         @contextmanager
         def held(self, *, timeout=180):
