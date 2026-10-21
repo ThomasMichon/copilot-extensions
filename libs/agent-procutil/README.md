@@ -52,8 +52,10 @@ inspecting descendants. This avoids traversing aliases blocked by Windows Redire
 it does not change runtime-marker selection or disable mitigation.
 Pass `windowless_python_env()` into the child environment when using that base
 interpreter: `__PYVENV_LAUNCHER__` retains the original selected venv's import
-context. `direct_python()` returns the physical console interpreter plus that
-environment mapping; it selects `python.exe` from the same configured home even
+context. It also preserves that identity when a local GUI fallback is a link
+to an executable outside the venv. `direct_python()` returns the physical
+console interpreter plus that environment mapping; it selects `python.exe`
+from the same configured home even
 when the GUI executable is itself a link elsewhere.
 Outside a venv, an available requested console sibling takes precedence; if a
 GUI-file alias has none, its physical target's `python.exe` sibling is used.

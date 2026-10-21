@@ -549,6 +549,10 @@ def _physical_executable(path: str) -> str | None:
     return physical_executable(path)
 
 
+def _local_pythonw(python: str) -> str | None:
+    return _physical_executable(os.path.join(os.path.dirname(python), "pythonw.exe"))
+
+
 def _venv_home_python(python: str, filename: str) -> str | None:
     venv_root = os.path.dirname(os.path.dirname(python))
     cfg_path = os.path.join(venv_root, "pyvenv.cfg")
@@ -639,8 +643,7 @@ def windowless_python(
     base_pythonw = _venv_home_pythonw(python)
     if base_pythonw:
         return base_pythonw
-    candidate = os.path.join(os.path.dirname(python), "pythonw.exe")
-    physical = _physical_executable(candidate)
+    physical = _local_pythonw(python)
     if physical:
         return physical
     if require_windowless:
@@ -664,6 +667,14 @@ def windowless_python_env(
         return {}
     if _venv_home_pythonw(python):
         return {"__PYVENV_LAUNCHER__": python}
+    local_gui = _local_pythonw(python)
+    config = os.path.join(os.path.dirname(os.path.dirname(python)), "pyvenv.cfg")
+    candidate = os.path.abspath(os.path.join(os.path.dirname(python), "pythonw.exe"))
+    if (
+        local_gui and os.path.isfile(config)
+        and os.path.normcase(local_gui) != os.path.normcase(candidate)
+    ):
+        return {"__PYVENV_LAUNCHER__": python}
     return {}
 
 
@@ -679,7 +690,10 @@ def direct_python(executable: str) -> tuple[str, dict[str, str]]:
             "Cannot start daemon directly: the Windows venv's base "
             "pythonw.exe is unavailable; repair the Python installation."
         )
-    if extra_env or python != executable or os.path.basename(python).lower() == "pythonw.exe":
+    if (
+        extra_env or python != executable or os.path.basename(python).lower() == "pythonw.exe"
+        or _local_pythonw(executable)
+    ):
         console = (
             _venv_home_python(executable, "python.exe") if extra_env
             else (

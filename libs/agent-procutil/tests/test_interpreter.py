@@ -229,6 +229,44 @@ def test_nonvenv_gui_link_without_either_console_refuses(monkeypatch, tmp_path):
         pu.direct_python(str(alias))
 
 
+@pytest.mark.parametrize("with_console", [False, True])
+def test_external_local_gui_fallback_preserves_venv_context(monkeypatch, tmp_path, with_console):
+    base = tmp_path / "base"
+    base.mkdir()
+    if with_console:
+        (base / "python.exe").touch()
+    python = _venv(tmp_path / "venv", base)
+    gui_dir = tmp_path / "external-gui"
+    gui_dir.mkdir()
+    gui = gui_dir / "gui-host.exe"
+    gui.touch()
+    _links(monkeypatch, {Path(python).with_name("pythonw.exe"): gui})
+    assert pu.windowless_python(python, require_windowless=True) == str(gui)
+    assert pu.windowless_python_env(python) == {"__PYVENV_LAUNCHER__": python}
+    if with_console:
+        assert pu.direct_python(python) == (
+            str(base / "python.exe"), {"__PYVENV_LAUNCHER__": python},
+        )
+    else:
+        with pytest.raises(RuntimeError, match="base python.exe is unavailable"):
+            pu.direct_python(python)
+
+
+@pytest.mark.parametrize("with_console", [False, True])
+def test_equal_input_and_gui_target_still_requires_console(monkeypatch, tmp_path, with_console):
+    gui = tmp_path / "gui-host.exe"
+    gui.touch()
+    if with_console:
+        (tmp_path / "python.exe").touch()
+    _links(monkeypatch, {tmp_path / "pythonw.exe": gui})
+    assert pu.windowless_python(str(gui)) == str(gui)
+    if with_console:
+        assert pu.direct_python(str(gui)) == (str(tmp_path / "python.exe"), {})
+    else:
+        with pytest.raises(RuntimeError, match="base python.exe is unavailable"):
+            pu.direct_python(str(gui))
+
+
 @pytest.mark.parametrize(
     "select", [pu.windowless_python, pu.windowless_python_env, pu.direct_python],
 )
