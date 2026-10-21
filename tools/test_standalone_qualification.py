@@ -129,9 +129,9 @@ def test_ci_path_gates_smoke_and_promotion_keeps_exhaustive():
     root = SCRIPT.parent.parent
     ci = source_workflow(root, "ci.yml")["jobs"]
     promotion = source_workflow(root, "validate-and-promote.yml")["jobs"]
-    if "unit-plan" in ci:
-        assert set(ci) == {"checks", "unit-plan", "unit-tests", "pr-gate"}
-        assert set(ci["pr-gate"]["needs"]) == {"checks", "unit-plan", "unit-tests"}
+    if "unit-tests" in ci:
+        assert set(ci) == {"checks", "unit-tests", "pr-gate"}
+        assert set(ci["pr-gate"]["needs"]) == {"checks", "unit-tests"}
         for jobs, owner in ((ci, "unit-tests"), (promotion, "source-units")):
             commands = [
                 step["run"] for job in jobs.values() for step in job.get("steps", [])

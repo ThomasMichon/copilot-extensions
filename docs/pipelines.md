@@ -11,13 +11,23 @@ of — link here rather than restating any of it.
 
 ## Standalone PR job admission
 
-Source CI now contains four jobs: operational `checks`, `unit-plan`,
-`unit-tests` and the fixed-name `PR gate (required check)`. The plan reads the
-actual PR base/head diff. Known narrative-only changes may skip testing; unknown,
-code or configuration impact runs only the positively admitted unit packet.
+Source CI contains three jobs: operational `checks`, combined impact/execution
+in `unit-tests`, and the fixed-name `PR gate (required check)`. The unit job
+reads the actual PR base/head diff before installing test tooling or executing
+tests. Known narrative-only changes may skip testing; unknown, code or
+configuration impact runs only the positively admitted unit packet.
 It never falls back to standalone services, fleet, native or general plugin
-suites. The aggregate requires successful guards and impact admission, and
-actual unit success whenever selected.
+suites. Guards and the unit job remain independent and parallel. Combining
+impact and execution removes the separate planning runner and duplicate
+checkout without placing unit execution behind guards. The aggregate requires
+both jobs to succeed, a valid selection, and the actual test step's `success`
+or explicit `skipped` outcome matching that selection. Job success alone is
+not unit-execution evidence.
+
+The nonblocking marketplace-isolation inventory runs on pushes and manual CI,
+not again on each PR update. Admitted Dev-push executions retain that diagnostic;
+strict source guards and required validation remain in PR CI. A cancelled or
+superseded execution is not diagnostic or test evidence.
 
 Push CI performs source-policy admission without repeating promotion's unit
 execution. Manual CI runs the same admitted packet, not the old full portfolio.
@@ -26,18 +36,17 @@ native execution is explicitly unenrolled pending a container route.
 
 See [the unit packet reference](../TESTING.md#unit-only-promotion-packet).
 The [reviewed burndown](../efforts/active/dev-branch-release-pipeline/promotion-burndown.md)
-owns the migration and completion gate. Source CI implementation does not
-activate Main's separately reviewed controller: Main remains paused until the
-unit-reuse control is reviewed, qualified, published and resumed. Historical
-full-candidate descriptions below are not instructions to reactivate those
-integration gates.
+owns the migration and completion gate. Source CI changes do not activate,
+resume or bypass Main's separately governed controller. Inspect its actual
+state and qualification rather than inferring either pause or activation from
+the source-CI layout. Historical full-candidate descriptions below are not
+instructions to reactivate those integration gates.
 
 ### Source-unit promotion receipt
 
-The Source promotion declaration now mirrors an eleven-job controller proposal.
-It is not activated on Main merely by merging this source declaration. The
-independently reviewed Main transaction must pin the reviewed helpers and retain
-the pause until real qualification succeeds.
+The source promotion declaration owns its independent source-unit transaction.
+Its governed Main control must pin reviewed helpers and qualification evidence;
+combining source-CI jobs changes neither that transaction nor its authority.
 
 After source admission, `source-units` runs the full admitted packet once with
 coverage while the credential-free artifact build proceeds independently.

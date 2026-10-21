@@ -14,6 +14,17 @@ supersedes the historical full-suite promotion requirement below. Source CI
 and the independently governed Main control consume the unit-profile contract.
 A local packet result alone does not qualify Main or prove candidate reuse.
 
+Source CI resolves impact and, when selected, executes this packet within one
+hosted job, parallel with source guards. Narrative-only PRs do not install test
+tooling or run units. Pushes leave the release-unit execution to promotion;
+manual CI and unknown event types select units conservatively. The required
+aggregate checks both job results and the real unit step outcome, so a skipped
+selected step or an absent/invalid selection fails rather than becoming a
+success-shaped result.
+
+The report-only marketplace-isolation inventory remains in push/manual source
+CI. Omitting its duplicate PR execution removes no test or strict policy gate.
+
 `tools/run-promotion-unit-tests.py` executes only the exact nodes declared by
 `tools/promotion-unit-manifest.json`, in one Python process with coverage.
 The packet lives in `tools/promotion_unit_tests/`, independent of mixed

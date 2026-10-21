@@ -89,6 +89,7 @@ jobs:
     - name: Runtime resolution (marker-only, uniform)
       run: python tools/check-runtime-resolution.py --strict
     - name: Marketplace isolation inventory (report-only)
+      if: github.event_name != 'pull_request'
       run: python tools/check-marketplace-isolation.py
     - name: Agent Bridge contract registry
       run: python tools/check-agent-bridge-contracts.py
@@ -132,18 +133,20 @@ jobs:
       run: python tools/check-asyncio-timeout-handlers.py
     - name: Ruff (F, E9)
       run: ruff check --select F,E9 --output-format=github .
-  unit-plan:
-    name: Resolve eligible unit impact
+  unit-tests:
+    name: Eligible units with coverage
     runs-on: ubuntu-latest
-    timeout-minutes: 2
+    timeout-minutes: 5
     outputs:
       run: ${{ steps.impact.outputs.run }}
+      result: ${{ steps.units.outcome }}
     steps:
     - uses: actions/checkout@v4
       with:
         fetch-depth: 0
         persist-credentials: false
     - id: impact
+      timeout-minutes: 2
       env:
         EVENT: ${{ github.event_name }}
         BASE: ${{ github.event.pull_request.base.sha }}
@@ -156,39 +159,32 @@ jobs:
         from pathlib import Path
         import sys
         sys.path.insert(0, str(Path("tools").resolve()))
-        from promotion_unit_contract import changed_paths, requires_units
-        event = os.environ["EVENT"]
-        if event == "pull_request":
-            paths = changed_paths(os.environ["BASE"], os.environ["HEAD"], subprocess.check_output)
-            needed = requires_units(paths)
-        else:
-            # Push CI admits the source; promotion owns its one unit/coverage execution.
-            needed = event == "workflow_dispatch"
+        from promotion_unit_contract import ci_requires_units
+        needed = ci_requires_units(
+            os.environ["EVENT"], os.environ["BASE"], os.environ["HEAD"],
+            subprocess.check_output,
+        )
         with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
             output.write("run=" + str(needed).lower() + "\n")
         print(json.dumps({"profile": "copilot-extensions.promotion-units/v1", "run_units": needed}))
         PY
-  unit-tests:
-    name: Eligible units with coverage
-    needs: unit-plan
-    if: needs.unit-plan.outputs.run == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-    - uses: actions/checkout@v4
-      with:
-        persist-credentials: false
     - uses: actions/setup-python@v5
+      if: steps.impact.outputs.run == 'true'
       with:
         python-version: '3.12'
     - uses: astral-sh/setup-uv@v9.0.0
+      if: steps.impact.outputs.run == 'true'
       with:
         version: 0.12.6
     - name: Install seasoned unit tooling
+      if: steps.impact.outputs.run == 'true'
       run: python tools/seasoned_uv.py --uv uv -- --system pytest "coverage>=7.7" packaging pyyaml
     - name: Execute only the positively admitted unit packet once
+      id: units
+      if: steps.impact.outputs.run == 'true'
       run: python tools/run-promotion-unit-tests.py --source-sha "$GITHUB_SHA" --output-dir "$RUNNER_TEMP/promotion-unit-evidence"
     - uses: actions/upload-artifact@v4
+      if: steps.impact.outputs.run == 'true'
       with:
         name: promotion-unit-evidence
         path: ${{ runner.temp }}/promotion-unit-evidence/*
@@ -199,7 +195,6 @@ jobs:
     if: always() && !cancelled() && github.event_name == 'pull_request' && github.event.pull_request.base.ref != 'main'
     needs:
     - checks
-    - unit-plan
     - unit-tests
     runs-on: ubuntu-latest
     timeout-minutes: 2
@@ -212,13 +207,14 @@ jobs:
         import json
         import os
         rows = json.loads(os.environ["RESULTS"])
-        if rows["checks"]["result"] != "success" or rows["unit-plan"]["result"] != "success":
-            raise RuntimeError("source guard or unit-impact admission failed")
-        selected = rows["unit-plan"]["outputs"].get("run")
+        if set(rows) != {"checks", "unit-tests"} or any(row["result"] != "success" for row in rows.values()):
+            raise RuntimeError("source guard or unit-impact execution failed")
+        outputs = rows["unit-tests"]["outputs"]
+        selected = outputs.get("run")
         if selected not in ("true", "false"):
             raise RuntimeError("unit selection is missing or invalid")
         expected = "success" if selected == "true" else "skipped"
-        if rows["unit-tests"]["result"] != expected:
+        if outputs.get("result") != expected:
             raise RuntimeError("selected units did not pass, or unselected work was executed")
         print("Required unit-only PR gate satisfied.")
         PY

@@ -200,6 +200,15 @@ The operator confirmed the explicit main-owned control/dev-owned content model.
 The detailed decomposition and validation cases below are **agent-recommended**,
 reconciled with the other planning agent's public handoff on #6237.
 
+**2026-10-21 - Return to whole-flow optimization (verbatim):**
+
+> What's the wait here? ARC is working; move on to this worktree's original goal of auditing, analyzing, and improving the overall CI and promotion flows. Analyze runner queue times, improve conditional execution, and reduce redundancy across the board
+
+The immediate execution focus is the existing flow-consolidation objective,
+not further capacity setup or individual installer-test repairs. The next
+source reduction and measurement methods are agent-recommended; required
+checks, release-unit coverage and existing source/control boundaries remain.
+
 ## Plan
 
 All slices use the execution gates in [design.md](design.md#phase-execution-gates).

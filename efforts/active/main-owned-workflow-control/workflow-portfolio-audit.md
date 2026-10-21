@@ -125,9 +125,77 @@ Creation-window CI counts and completion-trigger WR counts are not identical
 event cohorts. No job count, allocated runner time, review latency improvement,
 service quota relief or before/after saving is inferred from these totals.
 
+### October 21 current-flow recheck
+
+The operator returned the campaign to whole-flow optimization: queue analysis,
+conditional execution and removal of repeated work, not further capacity setup
+or individual installer-test repairs. This is the same reviewed #6237
+objective. The implementation choices below are **agent-recommended**.
+
+The fixed creation window is `2026-10-21T06:00:00Z..2026-10-21T18:00:00Z`.
+Nine API pages returned **888 distinct run IDs**, equal to the reported total.
+This is a complete run population for that window, not a complete job-timing
+population or an event-normalized before/after experiment.
+
+| Workflow cohort | Runs |
+|---|---:|
+| CI | 203: 143 PR events and 60 pushes |
+| Promote trigger | 202 |
+| Workflow lockdown guard, excluding separately titled promotion invocations | 154 |
+| Departed-source refresh | 107 |
+| Managed Code Review | 102 |
+| Validate and promote | 39 |
+| Main base reminder | 37 |
+
+There were 821 successful, 47 skipped, 16 failed, two action-required and two
+cancelled runs. Repeated workflow/event/head identities are not by themselves
+redundant executions: attempts, separate PRs and metadata epochs matter.
+
+Source inspection pins Dev `632f93d4bce28bd84ed9c4dc019c836b3629180d` and
+Main `bcb55e0899f22dbd89a6dd09cf7fbad586a47582`; the source reduction starts
+from Dev `a45012e38b5476f56d8f6e965d2529f065abb949`.
+Representative job observations were checked against their literal timestamps:
+
+| Boundary | Observation and interpretation |
+|---|---|
+| [PR source CI, run 39646930297](https://github.com/ThomasMichon/copilot-extensions/actions/runs/39646930297), attempt 1 | The four ordinary jobs have created-to-start intervals of 2-4 seconds. These are runner-pickup/dispatch intervals, not evidence of a capacity backlog. |
+| Same run, [guards job 119384842925](https://github.com/ThomasMichon/copilot-extensions/actions/runs/39646930297/job/119384842925) | Execution takes 153 seconds. Sibling tracking-import analysis takes 38 seconds, report-only marketplace inventory 36, headless-launch analysis 25 and asyncio timeout analysis 16. |
+| Same run, impact job 119384843587 | The separate planning runner executes for 12 seconds, then units start in another job after a dependency handoff. This does not require another test execution. |
+| [Promotion 39634436538](https://github.com/ThomasMichon/copilot-extensions/actions/runs/39634436538), attempt 1 | Run creation precedes first job creation by 3m27s. This is an admission/concurrency/platform interval, **not** a pure runner-queue measurement. The gate then starts in two seconds. |
+| Same promotion | Actual execution is 2m58s for composition, 3m33s for premerge publication/readback and 1m12s for merge. Units and artifact construction initially run in parallel. These distinct producer/custody gates are not interchangeable test reruns. |
+
+The bounded wider job sample similarly showed pickup intervals of a few
+seconds. It does not establish a whole-population queue percentile. The
+five-minute review-request residence has an explicit native/manual-request
+grace contract; deleting it blindly would change request semantics, not merely
+remove a sleep. Likewise the promotion trigger also owns PR identifier
+scanning, baseline maintenance and recovery, so a blanket Dev-branch filter
+would delete required consumers.
+
+The selected source reduction preserves guards/units parallelism while
+combining impact admission and positive unit execution in one existing hosted
+job. The fixed-name aggregate requires both jobs to pass and checks the real
+test-step outcome against the selection. This removes one allocated runner
+for selected-unit PRs and a duplicate checkout; narrative-only PRs retain an
+explicit skipped test step rather than fabricated unit success. Dev pushes
+still do not duplicate promotion's independent release-unit pass.
+
+The report-only marketplace inventory moves off PR updates while remaining on
+admitted push/manual source CI. It is not a strict gate or
+unit suite. In the observed PR, removing its repeated execution takes a
+36-second step off the guards critical path; **actual after-change wall time
+still needs the resulting run**, not subtraction asserted as a benchmark.
+
+All previously admitted unit identities and production targets remain.
+New conditional/gate negatives extend the same packet and unchanged
+300-second ceiling. This is not a claim that the packet is the complete unit
+census, that every periodic family passed, or that queues/review throughput
+are now solved. Required provider contexts remain the PR aggregate, lockdown
+and source attribution; the removed planning job is not independently required.
+
 ### Enforcement snapshot
 
-At capture, the Dev ruleset checks were `workflow-lockdown-guard` and
+At the October 18 capture, the Dev ruleset checks were `workflow-lockdown-guard` and
 `source-attribution`. Classic Dev protection additionally required
 `PR gate (required check)`, bound to app ID 15368. Main's ruleset required
 `main source gate` with strict freshness; its classic required-status endpoint

@@ -6,7 +6,7 @@ import hashlib
 import pytest
 
 from promotion_unit_contract import (
-    PROFILE, UnitEvidenceError, admit_manifest, changed_paths, decode_json, manifest_digest, relative_file,
+    PROFILE, UnitEvidenceError, admit_manifest, changed_paths, ci_requires_units, decode_json, manifest_digest, relative_file,
     requires_units, source_sha, verify_observations, verify_sources,
 )
 
@@ -139,3 +139,23 @@ def test_source_to_document_rename_preserves_the_deleted_source_for_impact():
         "git", "diff", "--no-renames", "--name-only", "-z", "a" * 40, "b" * 40,
     ]]
     assert requires_units(paths)
+
+
+@pytest.mark.parametrize("event,expected", [
+    ("push", False), ("workflow_dispatch", True), ("unknown", True),
+])
+def test_ci_events_preserve_promotion_ownership_and_conservative_fallback(event, expected):
+    def no_diff(arguments):
+        pytest.fail("non-PR admission must not attempt a Git diff")
+
+    assert ci_requires_units(event, "", "", no_diff) is expected
+
+
+@pytest.mark.parametrize("paths,expected", [
+    (b"docs/guide.md\0", False),
+    (b"tools/source.py\0", True),
+    (b"tools/source.py\0docs/guide.md\0", True),
+    (b"", True),
+])
+def test_combined_pr_admission_preserves_exact_source_and_narrative_selection(paths, expected):
+    assert ci_requires_units("pull_request", "a" * 40, "b" * 40, lambda _: paths) is expected

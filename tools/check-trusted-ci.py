@@ -18,6 +18,22 @@ TRUSTED_JOB_CONDITION = (
     "needs.authorize.outputs.trusted == 'true' && "
     "vars.TRUSTED_SELF_HOSTED_CI == 'enabled'"
 )
+UNIT_CONDITION = "steps.impact.outputs.run == 'true'"
+UNIT_GATE_SCRIPT = """python - <<'PY'
+import json
+import os
+rows = json.loads(os.environ["RESULTS"])
+if set(rows) != {"checks", "unit-tests"} or any(row["result"] != "success" for row in rows.values()):
+    raise RuntimeError("source guard or unit-impact execution failed")
+outputs = rows["unit-tests"]["outputs"]
+selected = outputs.get("run")
+if selected not in ("true", "false"):
+    raise RuntimeError("unit selection is missing or invalid")
+expected = "success" if selected == "true" else "skipped"
+if outputs.get("result") != expected:
+    raise RuntimeError("selected units did not pass, or unselected work was executed")
+print("Required unit-only PR gate satisfied.")
+PY"""
 PERMISSION_SCRIPT = """
 const sameRepository =
 context.payload.pull_request.head.repo.full_name ===
@@ -388,28 +404,71 @@ def _validate_ci(path: Path) -> list[str]:
                 + ("" if unit_profile else " and tests")
             )
         if unit_profile and ci_jobs is not None:
-            if set(ci_jobs) != {"checks", "unit-plan", "unit-tests", "pr-gate"}:
-                errors.append("unit-only CI must contain only guards, impact, units and aggregate")
+            if set(ci_jobs) != {"checks", "unit-tests", "pr-gate"}:
+                errors.append("unit-only CI must contain only guards, combined units and aggregate")
+            inventory = [
+                step for step in (_mapping(ci_jobs.get("checks")) or {}).get("steps", [])
+                if isinstance(step, dict)
+                and step.get("name") == "Marketplace isolation inventory (report-only)"
+            ]
+            if len(inventory) != 1 or (
+                inventory[0].get("run") != "python tools/check-marketplace-isolation.py"
+                or inventory[0].get("if") != "github.event_name != 'pull_request'"
+                or "continue-on-error" in inventory[0]
+            ):
+                errors.append("report-only inventory must remain on non-PR CI without becoming a strict PR gate")
             units = _mapping(ci_jobs.get("unit-tests"))
             if (
-                units is None or units.get("needs") != "unit-plan"
-                or units.get("if") != "needs.unit-plan.outputs.run == 'true'"
+                units is None or "needs" in units or "if" in units
                 or units.get("runs-on") != "ubuntu-latest"
                 or units.get("timeout-minutes") != "5"
                 or "continue-on-error" in units
+                or units.get("outputs") != {
+                    "run": "${{ steps.impact.outputs.run }}",
+                    "result": "${{ steps.units.outcome }}",
+                }
             ):
-                errors.append("unit packet must have the reviewed conditional hosted five-minute job")
+                errors.append("unit packet must have the reviewed independent hosted five-minute job")
             unit_steps = units.get("steps", []) if units else []
+            impact = [
+                step for step in unit_steps if isinstance(step, dict)
+                and step.get("id") == "impact"
+                and not any(key in step for key in ("if", "continue-on-error"))
+                and isinstance(step.get("run"), str)
+                and "ci_requires_units(" in step.get("run", "")
+            ]
+            if len(impact) != 1:
+                errors.append("combined units must resolve impact before conditional execution")
             runner = [
                 step for step in unit_steps if isinstance(step, dict)
+                and step.get("id") == "units"
                 and step.get("run") == (
                     'python tools/run-promotion-unit-tests.py --source-sha "$GITHUB_SHA" '
                     '--output-dir "$RUNNER_TEMP/promotion-unit-evidence"'
                 )
-                and not any(key in step for key in ("if", "continue-on-error"))
+                and step.get("if") == UNIT_CONDITION
+                and "continue-on-error" not in step
             ]
-            if len(runner) != 1:
+            if (
+                len(runner) != 1 or len(impact) != 1
+                or unit_steps.index(impact[0]) >= unit_steps.index(runner[0])
+            ):
                 errors.append("unit-only CI must execute the exact admitted packet once")
+            gate = _mapping(ci_jobs.get("pr-gate")) or {}
+            gate_steps = gate.get("steps")
+            gate_step = (
+                _mapping(gate_steps[0])
+                if isinstance(gate_steps, list) and len(gate_steps) == 1 else None
+            )
+            if (
+                set(gate.get("needs", [])) != {"checks", "unit-tests"}
+                or gate_step is None or set(gate_step) != {"name", "env", "run"}
+                or gate_step.get("name") != "Require actual admitted unit evidence when selected"
+                or gate_step.get("env") != {"RESULTS": "${{ toJson(needs) }}"}
+                or str(gate_step.get("run", "")).strip() != UNIT_GATE_SCRIPT
+                or "continue-on-error" in gate
+            ):
+                errors.append("unit aggregate must require successful guards and the actual selected outcome")
             for job in ci_jobs.values():
                 if not isinstance(job, dict):
                     continue
