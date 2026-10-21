@@ -16,7 +16,7 @@ from .client import ClientError
 MAX_RESOURCE_BYTES = 1024 * 1024
 PACKAGE_FILES = (
     "__init__.py", "catalog.py", "cli.py",
-    "client.py", "store.py", "transport.py", "hosting.py",
+    "client.py", "store.py", "transport.py", "hosting.py", "workspace.py",
 )
 
 

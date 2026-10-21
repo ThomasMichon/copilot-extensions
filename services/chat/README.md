@@ -303,8 +303,8 @@ interpreter, not a command found by searching `PATH`:
 ```
 
 The version-1 `agent-chat.client-catalog` returns the current distribution
-identity, SHA-256 wheel RECORD evidence for all seven packaged Python modules
-(including `hosting.py`) and one exact
+identity, SHA-256 wheel RECORD evidence for all eight packaged Python modules
+(including `hosting.py` and `workspace.py`) and one exact
 `agent-chat` argv. That argv preserves the current interpreter, including a
 virtual environment's interpreter spelling, and uses isolated module invocation.
 Source-only, editable, user-site-only, mismatched, redirected or incomplete
@@ -323,6 +323,68 @@ installation and its metadata together. Ordinary explicit wheel/package-manager
 setup remains available; receipt-owned managed setup/selection is still the
 existing fleet lifecycle dependency under #6424/#6240. A connection plugin must
 not turn this catalog into a competing installer or silently change selection.
+
+### Optional trusted workspace context
+
+The optional client API
+`agent_chat_service.workspace.resolve_workspace(worktrees_command=..., session_id=..., cwd=...)`
+consumes a host's trusted initialization session ID and absolute working
+directory. The host captures those inputs once. The resolver neither reads an
+environment session ID nor repeatedly compares foreground metadata, imports
+Worktrees source, searches PATH/catalog files, installs anything or changes
+the caller's working directory.
+
+For an installed command boundary, invoke the catalog's exact client argv with
+`workspace --request-file -` and send one bounded JSON object on stdin:
+
+```json
+{
+  "schema": "agent-chat.workspace-request",
+  "version": 1,
+  "session_id": "example-startup-session",
+  "cwd": "/absolute/host-initialization-directory",
+  "worktrees_command": ["/absolute/selected-interpreter", "-I", "-m", "agent_worktrees"]
+}
+```
+
+Use real platform-native absolute paths and the complete executable/interpreter
+argv supplied by the adopter's existing command-selection owner. A shell script
+path alone is not executable argv; its selected interpreter must be explicit.
+The client uses its canonical caller-owned process helper, isolated finite
+children, one 60-second overall deadline, 64-KiB stdout and separate bounded
+stderr. Provider failures, timeouts, inconsistent identity, untracked worktrees,
+invalid paths and unsupported owner contracts are explicit errors, not an
+anchor/standalone fallback. No owner output or stderr is reflected in errors.
+
+The version-1 `agent-chat.workspace-context` reports a participant tuple
+`{machine, repo, kind, id}`. For a real tracked worktree, `id` is the worktree
+ID, stable across startup sessions; `display_name` is the separately observed
+friendly codename, or null when absent. The existing qualified `get owner-ref`
+and exact cached tracking row must agree on execution owner, repository,
+worktree ID and actual path. Versioned execution-space metadata must be complete
+and platform-consistent; physical-host naming never replaces its execution owner.
+For an anchor checkout, `kind` is `anchor` and `id` is the startup session ID;
+the owner's versioned configured `get execution-identity` contract supplies
+machine/repository authority. There is no synthetic managed-worktree owner or
+head lookup. An owner without that anchor capability refuses explicitly;
+ordinary tracked worktrees do not require it.
+
+For worktrees, `head` reports the existing owner's session ID, revision,
+initializing-session match and pending-handoff observation. It never asserts
+or changes a head, reconciles succession, or grants a later mutation. The
+observation is not a lease and may become stale; native admission remains its
+owner's responsibility. `owner_ref` is null for anchors.
+
+This is **workspace resolution only**: `assignment.status` remains
+`unavailable` with reason `chat-assignment-binding-required`. The result
+deliberately contains no Chat actor, inbox or eligible-source assignment.
+It does not join, rename or migrate retained membership, history, cursors or
+uncertain effects, and both `mutations_performed` and
+`native_listening_verified` are false. The existing local service/Bridge owner
+still owes authoritative assignment and shared notification intake.
+Ordinary explicit-actor commands and offline catalog/status/capability paths
+remain independent of Worktrees, Copilot and this optional operation.
+
 ## RPC contract
 
 `dispatch` accepts one strict operation object. Unknown fields, invalid types,

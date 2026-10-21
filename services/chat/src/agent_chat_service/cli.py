@@ -46,6 +46,8 @@ def main(argv=None) -> int:
     parser.add_argument("--config", help="Explicit nonsecret client JSON; no ambient home fallback")
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("catalog", help="Inspect this installed client's exact offline invocation")
+    workspace = sub.add_parser("workspace", help="Resolve trusted host initialization without adopting Chat")
+    workspace.add_argument("--request-file", choices=["-"], required=True)
     sub.add_parser("status", help="Inspect local pending metadata without network or credentials")
     for name in ("join", "leave", "post", "read", "wait", "members"):
         child = sub.add_parser(name)
@@ -74,6 +76,20 @@ def main(argv=None) -> int:
             return 0
         if args.command == "scan" and args.describe:
             emit(SCAN_CAPABILITY, sys.stdout)
+            return 0
+        if args.command == "workspace":
+            from .workspace import resolve_workspace
+            fields = strict_json(sys.stdin.buffer.read(MAX_BODY_BYTES + 1))
+            if (not isinstance(fields, dict) or set(fields) != {
+                    "schema", "version", "session_id", "cwd", "worktrees_command",
+                } or fields["schema"] != "agent-chat.workspace-request"
+                    or type(fields["version"]) is not int or fields["version"] != 1):
+                raise ClientError("invalid_initialization", "Invalid trusted workspace initialization request.")
+            result = resolve_workspace(
+                worktrees_command=fields["worktrees_command"],
+                session_id=fields["session_id"], cwd=fields["cwd"],
+            )
+            emit(result, sys.stdout)
             return 0
         client = configured(args.config)
         if args.command == "status":

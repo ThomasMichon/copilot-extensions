@@ -152,10 +152,17 @@ requirements.
   configuration. Preserve output/flush/CAS and retained stable-request recovery.
 - [ ] Supply hosted endpoint discovery and explicit service setup through the
   existing lifecycle owners; client configuration is not hosting readiness.
+  Explicit installed-client consumption of canonical local endpoints is
+  qualified and merged in #7517. This does not complete governed service setup,
+  activation or selected release adoption.
 - [ ] Resolve trusted host-init session ID and CWD through the workspace owner:
   real-worktree participant continuity, session-segmented anchor participants,
   and existing local service/bridge-owned inbox/source assignment. Keep friendly
   labels separate and preserve existing membership/cursors without migration.
+  The optional read-only installed workspace resolver now supplies the
+  participant tuple and existing head observation. Authoritative inbox/source
+  assignment and native admission remain unresolved; this compound item stays
+  open.
 - [ ] Coordinate trusted materialized-consumer and CI qualification inventory
   support with the existing release owner under #6237 before promoting the
   expanded standalone roster; source review alone is not Main activation.
@@ -326,7 +333,7 @@ an independent SDK version or live native qualification.
 | Recipient inbox and eligible sources | The client accepts explicit actor/channel controls; Bridge `inspect_live_inbox` projects direct-message receipts | No examined client API supplies authoritative Chat recipient/source assignment. The client/service writer coordinates that versioned assignment and its isolation/rebind errors with the existing local service/Bridge owner. A direct-message receipt projection is not this API. |
 | Shared notification intake | Bounded Chat `scan` v1; Bridge remote-event multiplexing and protocol13 `remote/events` | Remote runtime events do not subscribe to the conversation store. The service writer and existing host/Bridge owner must publish the Chat-feed registration, generation, finite callback, cancellation and quiescence binding. No per-session Python helper or continuous Node polling is an acceptable substitute. |
 | Native admission and completion | SDK `session.send`, primary final-ID semantics and optional `originatingMessageId`; bounded queue/event-log observations | Exact own primary correlation is usable. Unknown or non-primary admission remains held until its native host supplies authoritative reconciliation; queue absence, unrelated idle and expired history do not supply it. |
-| Commands, discovery and setup | SDK tools/commands, source-qualified extension identities and host-only reconciliation; installed client-catalog v1 with seven checked resources | The connection writer can expose the supported inert/manual surface. The client and existing lifecycle owners still owe governed selection/setup; a local wheel RECORD or a loaded tool is not that authority. Host reconciliation stays host-owned. |
+| Commands, discovery and setup | SDK tools/commands, source-qualified extension identities and host-only reconciliation; installed client-catalog v1 with eight checked resources | The connection writer can expose the supported inert/manual surface. The client and existing lifecycle owners still owe governed selection/setup; a local wheel RECORD or a loaded tool is not that authority. Host reconciliation stays host-owned. |
 | Resident cost | The native host's ordinary extension process is the baseline | Existing service/host multiplexing owns shared listening. Measure increasing recipients, bounded callback time/bytes, zero quiet/self/irrelevant/reconnect-only model turns and exact deregistration separately from that baseline. |
 
 Repository API homes are `services/chat/src/agent_chat_service/`,
@@ -345,6 +352,97 @@ qualification; native callbacks still require the actual assignment and
 shared-multiplex contracts above.
 
 ## Journal
+
+### 2026-10-21 - Optional trusted workspace resolver
+
+- Added the optional installed client's `workspace --request-file -` boundary
+  and callable resolver. Trusted initialization session/CWD is consumed without
+  an environment-session comparison, foreground resnapshot, workspace registry,
+  head mutation, enrollment or installer. Explicit standalone actors remain
+  independent of this operation and Worktrees.
+- Real managed worktrees retain their qualified owner and stable participant
+  tuple across startup sessions. Friendly codenames are separate labels.
+  Exact cached tracking rows, versioned execution tuples and existing
+  `head-session` observations are checked without assigning succession.
+  Anchors are segmented by startup session and require the owner's configured
+  execution-identity contract; no fictitious worktree head is queried.
+- An actual installed-client/selected-owner check exposed an unnecessary
+  requirement for that newer anchor capability on ordinary worktrees. Removed
+  that requirement in the client: existing qualified owner-ref, exact tracking
+  row/path and head remain the tracked-worktree authority. The corrected
+  installed client then resolved a real worktree from trusted initialization
+  supplied while running in a different directory. The existing selected
+  owner was not changed. Live anchor qualification remains unavailable on an
+  owner without the configured-identity capability, not a simulated success.
+- Preserved all 267 prior parameter nodes and lane assignments, adding 49
+  workspace/catalog cases. The current 316-node membership digest is
+  `03c115567e6bac5ab021f7608ab687f7d52d30d40fb9d2d192852a3665000709`.
+  Current native Windows acceptance passed 281 tests plus the two exact
+  POSIX-only skips, with 33 deferred to full, in 102.98 seconds under the
+  unchanged 120-second contained bound. Full passed 314 plus those two skips
+  in 144.48 seconds under 600. These are pytest timings, not a claim about
+  dependency preparation or complete command duration.
+- The fresh source-removed installed fixture exercised the real isolated
+  client, selected finite owner processes, trusted CWD and ambient-session
+  independence. Canonical caller ownership, separate capture bounds and one
+  total resolver deadline remain in force. Catalog RECORD evidence includes
+  the new workspace module; the default core acquires no dependency.
+- Retain the earlier development attempt's five-second installed-reader
+  synchronization failure and 120-second termination. A separate earlier
+  308-node full pass and the intermediate installed-owner refusal are not
+  current-source platform proof. Source-bound JUnit timing reports and exact
+  membership maps are retained locally; current-source native Linux
+  qualification is still required. No retry-for-speed, skipped family,
+  relaxed deadline or new CI lane is introduced.
+- Every workspace result explicitly reports Chat assignment unavailable,
+  with no actor/inbox/source assignment or native-listening claim. The existing
+  local service/Bridge owner retains that binding and shared feed registration,
+  generation, finite callback, cancellation and quiescence. Governed setup,
+  selected-release adoption and all remaining parent Plan/Validation items
+  stay open.
+
+### 2026-10-21 - Local endpoint consumer merged; workspace binding next
+
+- #7517 actually merged to `dev` as
+  `5da08bb25ffeeaed44871c7c7c61b18adb113d48` at06:49:56Z from qualified
+  `ba8e95252e04ca01e046239fdc2a44ec3a298e74`. Current-head review had no
+  open issues, both original threads were resolved and required checks passed.
+  The normal managed merge reported no review-gate bypass. The merged Chat,
+  three canonical libraries and standalone runner/containment/registry closure
+  are byte-identical to that qualified source.
+- All four current-head native reports retain the same267-node map and digest
+  `4ad9a7e53a10031216bc13144d336262613f2ca6d478bddbc802aad6afcb8d88`,
+  including all260 previous IDs/lane assignments and exactly seven new refusal
+  parameters. Actual execution is complete with zero missing, unexpected,
+  rejected or duplicate nodes and zero test/final exit codes.
+
+| Native platform | Acceptance120: pytest / whole-command seconds | Full600: pytest / whole-command seconds |
+| --- | --- | --- |
+| Linux | 234 passed, no skips,33 deferred;82.41 /135.793 including preparation/cleanup | 267 passed, no skips;88.05 /97.081 |
+| Independent Windows, once only | 232 passed, exactly two declared POSIX skips,33 deferred;49.17 /65.844 including preparation/cleanup | 265 passed, the same two skips;74.34 /77.219 |
+
+- Linux's120-second **contained** allowance passed; its135.793 whole exceeds120
+  and is not an end-to-end-under120 claim. Neither platform changed a selector,
+  guard or deadline, and no retry chased a faster sample. Native Unix executes
+  on Linux; the only Windows skips are the named POSIX private-permission and
+  Unix-client cases. The actual installed stale publisher, valid alternate,
+  restart/rebind, pending/viewer recovery and lifetime witnesses pass.
+- The optional external Windows archive observer was unavailable; raw Windows
+  fixture-wheel SHA values were not captured before ordinary cleanup. Linux
+  hashes are not substitutes or authenticated release evidence. Actual Windows
+  source/installed RECORD/module/three-role assertions and final reports/logs
+  are retained; Linux's collector captured its actual four wheels in each lane.
+  Source-host Windows failures remain failures, not retroactively fixed by a
+  different host's pass or an unproved overload explanation.
+- Re-read both canonical Plan/Validation sets after merge. Only endpoint
+  consumption is complete: standard service/plugin setup and selection,
+  shared notification intake, workspace/inbox assignment, native adoption,
+  migration and the full parent remain open. The next owned client slice is
+  optional trusted host-init workspace binding. The existing local service/
+  Bridge owner still owes authoritative Chat inbox/source assignment and the
+  shared-feed registration/generation/cancellation/quiescence binding; direct
+  message receipt projection is not either API. No replacement registry,
+  supervisor or ownership transfer is implied.
 
 ### 2026-10-21 - Review correction: refuse stale or incomplete advertisements
 

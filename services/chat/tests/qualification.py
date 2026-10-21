@@ -7,12 +7,26 @@ from collections import Counter
 
 
 FAMILIES = {
+    "test_workspace.py": """
+test_worktree_identity_survives_sessions_and_label_changes_without_adoption
+test_anchor_segments_startup_session_and_never_queries_a_synthetic_head
+test_existing_owner_head_and_execution_tuple_are_not_reassigned
+test_invalid_initialization_refuses_before_executing_owner
+test_unresolved_or_inconsistent_owner_evidence_refuses_without_fallback
+test_workspace_reads_share_one_finite_deadline
+test_late_owner_response_cannot_turn_deadline_expiry_into_success
+test_workspace_requires_explicit_complete_owner_argv_before_execution
+test_owner_failure_is_not_retried_or_downgraded_to_anchor
+test_workspace_cli_requires_exact_explicit_initialization_before_owner
+test_installed_workspace_uses_trusted_cwd_and_selected_owner_without_source_or_environment
+""",
     "test_catalog.py": """
 test_exact_current_interpreter_not_path_or_source_selection
 test_catalog_refuses_unusable_installed_evidence
 test_missing_distribution_is_an_explicit_offline_error
 test_catalog_refuses_linked_resource_evidence
 test_catalog_includes_the_host_module_in_its_verified_closure
+test_catalog_includes_the_workspace_module_in_its_verified_closure
 """,
     "test_cli.py": """
 test_real_cli_provider_http_store_and_independent_forward_read
@@ -133,7 +147,13 @@ EXPECTED = {
 
 PARAMETER_COUNTS = dict.fromkeys(EXPECTED, 1)
 PARAMETER_COUNTS.update({
+    "test_workspace.py::test_existing_owner_head_and_execution_tuple_are_not_reassigned": 4,
+    "test_workspace.py::test_invalid_initialization_refuses_before_executing_owner": 6,
+    "test_workspace.py::test_unresolved_or_inconsistent_owner_evidence_refuses_without_fallback": 22,
+    "test_workspace.py::test_workspace_requires_explicit_complete_owner_argv_before_execution": 4,
+    "test_workspace.py::test_workspace_cli_requires_exact_explicit_initialization_before_owner": 4,
     "test_catalog.py::test_catalog_includes_the_host_module_in_its_verified_closure": 3,
+    "test_catalog.py::test_catalog_includes_the_workspace_module_in_its_verified_closure": 3,
     "test_catalog.py::test_catalog_refuses_unusable_installed_evidence": 17,
     "test_cli.py::test_cli_dispatch_preserves_exact_client_controls": 6,
     "test_cli.py::test_http_failures_are_not_retried_or_redirected": 4,
