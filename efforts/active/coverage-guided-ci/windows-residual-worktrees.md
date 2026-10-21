@@ -87,7 +87,58 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Admitted fixture-semantic batches
 
+### B-BASE: private copies of the base Git topology
+
+Baseline: Dev `66ec88c76c013a7833a9c48a9602c094caf4ca4c`, the actual
+#7471 B-SEED merge. Build the bare remote, anchor and two-commit linked
+worktree once in the run-local seed. Each `pr_repo` call physically copies
+all Git stores and repairs administrative links, origin/fork URLs and saved
+record/rewrite identities. Config and tracking bindings remain per case.
+Empty Git templates leave private hook directories; automatic maintenance is
+disabled in this setup-only topology. No published/rebased/fork fixture
+adoption or provider observation caching is included.
+
+Only the existing `pr_repo` body changes; the other 25 existing conftest
+function/class bodies are AST-identical. Existing test bodies, native
+deadlines, parameters and tier/skip declarations are unchanged.
+Five real-Git regressions cover private object files (no hardlinks or
+alternates), repaired links, two-commit history, private config/index/hooks/
+refs/tracking records, sibling isolation and byte-identical seeds.
+Synthetic persisted PR inputs additionally test relocation with and without
+a rewrite identity, stable stamped entry IDs, revision advancement and an
+unrelated PR entry that must not be relocated. These inputs are not live
+publication authority.
+
+All 36 focused cases pass without skips on native Windows in 14.82 seconds
+(19.17 inclusive): all five copy regressions, all 29 merged publication
+regressions and unchanged record-only/real create-pr controls. Exactly two
+work-stealing workers and unchanged 30-second item/resource limits apply,
+with a 240-second diagnostic group. Ruff F/E9 and thirteen-plugin
+install-contract checks pass.
+
+Broader affected-consumer diagnostics are deliberately not qualification:
+ten completed two-file groups pass 358 cases (maximum group 190.50 seconds
+inclusive). The first diagnostic's 900-second aggregate expires in the next
+group with 14.656 seconds remaining. A separate remaining-file diagnostic
+then completes that group but reaches the unchanged 240-second limit in
+the rebase pair. Neither incomplete diagnostic is a passing complete suite,
+and no interrupted group or pre-existing exhaustive skip earns credit.
+The #5682/#5694 budget obligation remains open for the subsequent fixture/
+behavioral waves and repeated complete same-head qualification; limits and
+selection are not relaxed here.
+
+Fresh private Git construction/copy is directly exercised, including actual
+publication and hook effects in the completed consumer groups. Deployment
+clean-room testing is inapplicable to this test-only fixture; unavailable
+Linux/external execution receives no credit. Next are separately scoped
+published/rebased/fork setup consumers, not absorption of those contracts
+into this base-copy wave.
+
 ### B-SEED: run-local seed publication only
+
+**Actually merged:** #7471 as
+`66ec88c76c013a7833a9c48a9602c094caf4ca4c`. This settles seed
+publication only; adoption by copy fixtures and parent qualification remain open.
 
 Baseline: Dev `2b3e36bc9f3bfae5b8fc692e627ecbd859cc7cc1`, the actual
 #7465 B-RECORD foundation merge. Extract only `_seed_directory` and its

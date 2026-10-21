@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import textwrap
 from contextlib import contextmanager
 from pathlib import Path
@@ -574,24 +575,21 @@ def record_repo(tmp_path: Path, monkeypatch):
     return config, worktree_id, wt_path, tmp_path / "remote.git"
 
 
-@pytest.fixture
-def pr_repo(tmp_path: Path, monkeypatch):
-    """A bare 'remote' + anchor + a worktree branch with two commits.
-
-    Returns (config, worktree_id, worktree_path, remote_dir).  Patches
-    tracking_dir so records land in a tmp directory.  PR mode is enabled with
-    ``auto_open=False`` so create_pr exercises only the git side unless a test
-    opts in.
-    """
+def _build_pr_repo_seed(tmp_path):
     remote_dir = tmp_path / "remote.git"
     anchor = tmp_path / "anchor"
     wt_root = tmp_path / "worktrees"
     tracking_d = tmp_path / "tracking"
     tracking_d.mkdir()
 
-    git_ops.git("init", "--bare", "-b", "master", str(remote_dir))
+    git_ops.git("init", "--template=", "--bare", "-b", "master", str(remote_dir))
+    (remote_dir / "hooks").mkdir()
+    _pr_git("--git-dir", str(remote_dir), "config", "maintenance.auto", "false",
+            cwd=remote_dir)
 
-    git_ops.git("init", "-b", "master", str(anchor))
+    git_ops.git("init", "--template=", "-b", "master", str(anchor))
+    (anchor / ".git" / "hooks").mkdir()
+    _pr_git("config", "maintenance.auto", "false", cwd=anchor)
     _pr_git("config", "user.email", "t@example.com", cwd=anchor)
     _pr_git("config", "user.name", "Test", cwd=anchor)
     (anchor / "README.md").write_text("base\n")
@@ -615,6 +613,34 @@ def pr_repo(tmp_path: Path, monkeypatch):
     (wt_path / "b.txt").write_text("two\n")
     _pr_git("add", "-A", cwd=wt_path)
     _pr_git("commit", "-m", "work 2", cwd=wt_path)
+
+    return tmp_path
+
+
+@pytest.fixture(scope="session")
+def _pr_repo_seed(tmp_path_factory):
+    """Build immutable topology once per contained run; copy mutable test state."""
+    with _seed_directory(tmp_path_factory, "base") as (seed, build):
+        if build:
+            _build_pr_repo_seed(seed)
+        return seed
+
+
+def _copy_pr_repo(seed: Path, tmp_path: Path, monkeypatch):
+    """Copy private Git stores and repair the relocated administrative links."""
+    shutil.copytree(
+        seed, tmp_path, dirs_exist_ok=True, copy_function=shutil.copyfile
+    )
+    remote_dir = tmp_path / "remote.git"
+    anchor = tmp_path / "anchor"
+    wt_root = tmp_path / "worktrees"
+    tracking_d = tmp_path / "tracking"
+    worktree_id = "test-wt-20260618-aaaa"
+    wt_path = wt_root / worktree_id
+    _pr_git("worktree", "repair", str(wt_path), cwd=anchor)
+    _pr_git("remote", "set-url", "origin", str(remote_dir), cwd=anchor)
+    if (tmp_path / "fork.git").is_dir():
+        _pr_git("remote", "set-url", "fork", str(tmp_path / "fork.git"), cwd=anchor)
 
     config = cfg.Config(
         srcroot=str(tmp_path), machine="test", platform="linux",
@@ -642,12 +668,40 @@ def pr_repo(tmp_path: Path, monkeypatch):
     # leaked WORKTREE_PROJECT, making these tests order/environment dependent.
     monkeypatch.setattr("agent_worktrees.config.load_config", lambda *a, **k: config)
 
-    tracking.create_new_record(
-        worktree_id, f"worktree/{worktree_id}", str(wt_path),
-        "ext", "test", "linux", tracking_d,
-    )
+    record_path = tracking_d / f"{worktree_id}.yaml"
+    if record_path.exists():
+        record = tracking.load_record(record_path)
+        record.worktree_path = str(wt_path)
+        source_slug = git_ops.slug_from_url(str(seed / "remote.git"))
+        target_slug = git_ops.slug_from_url(str(remote_dir))
+        from agent_worktrees import pr_publish
+
+        target_identity = (
+            pr_publish._identity(str(remote_dir), str(wt_path))
+            if any(pr.rewrite_identity for pr in record.prs) else ""
+        )
+        assert source_slug is not None and target_slug is not None
+        for pr in record.prs:
+            if pr.repo == source_slug:
+                pr.repo = target_slug
+                if pr.rewrite_identity:
+                    assert target_identity
+                    pr.rewrite_identity = target_identity
+                pr.pr_revision += 1
+        tracking.save_record(record, record_path)
+    else:
+        tracking.create_new_record(
+            worktree_id, f"worktree/{worktree_id}", str(wt_path),
+            "ext", "test", "linux", tracking_d,
+        )
 
     return config, worktree_id, wt_path, remote_dir
+
+
+@pytest.fixture
+def pr_repo(tmp_path: Path, monkeypatch, _pr_repo_seed):
+    """Private mutable Git topology and fresh tracking/config bindings per case."""
+    return _copy_pr_repo(_pr_repo_seed, tmp_path, monkeypatch)
 
 
 class _SubprocessRunInstaller:
