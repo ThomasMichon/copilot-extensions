@@ -120,6 +120,10 @@ existing operation with `replayed: true`, even after closure or restart: it is
 observation, **not permission to resend**. A different send ID cannot replay the
 same reservation/task-generation/stage. A different qualified producer scope
 cannot close admission while hiding previously recorded sends.
+Both retained closures and custody bind the qualified scope to its repository
+and source, including when closure precedes the first send. Producer-generation
+rollover does not rebind that scope: fresh operations require the current
+producer generation, while older send identities and outcomes remain retained.
 
 `settle_execution_send()` retains explicit transport evidence as `sent`,
 `not_sent` or `unknown`. Pending and unknown outcomes survive restart and closure;

@@ -47,20 +47,17 @@ class ExecutionSend:
     replayed: bool
 
 
-def require_custody_scope(
-    conn: sqlite3.Connection, key: str, repo: str, source: str, generation: int
-) -> None:
+def require_custody_scope(conn: sqlite3.Connection, key: str, repo: str, source: str) -> None:
     rows = conn.execute(
-        "SELECT DISTINCT scope_key, repo, source, producer_generation"
+        "SELECT scope_key, repo, source"
         " FROM execution_send_custody"
+        " WHERE scope_key = ? OR (repo = ? AND source = ?)"
+        " UNION SELECT scope_key, repo, source"
+        " FROM execution_admission_closures"
         " WHERE scope_key = ? OR (repo = ? AND source = ?)",
-        (key, repo, source),
+        (key, repo, source, key, repo, source),
     ).fetchall()
-    if any(
-        (row["scope_key"], row["repo"], row["source"], row["producer_generation"])
-        != (key, repo, source, generation)
-        for row in rows
-    ):
+    if any((row["scope_key"], row["repo"], row["source"]) != (key, repo, source) for row in rows):
         raise TaskError("execution custody conflicts with the qualified producer scope")
 
 
@@ -129,7 +126,7 @@ class QueueExecutionCustodyMixin:
             self._require_execution_producer(
                 conn, identity.scope, source, expected_producer_generation
             )
-            require_custody_scope(conn, key, repo, source, expected_producer_generation)
+            require_custody_scope(conn, key, repo, source)
             reservation = conn.execute(
                 "SELECT r.*, t.repo, t.source, t.generation AS task_generation"
                 " FROM spawn_reservations r JOIN tasks t ON t.id = r.task_id"

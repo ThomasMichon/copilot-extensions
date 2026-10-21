@@ -239,6 +239,82 @@ def test_same_qualified_scope_cannot_close_another_source_and_hide_custody(setup
     assert len(queue.execution_closure_inventory(identity.scope)["sends"]) == 1
 
 
+@pytest.mark.parametrize("outcome", ["pending", "unknown", "sent", "not_sent"])
+def test_producer_rollover_preserves_old_custody_without_blocking_current_scope(setup, outcome):
+    queue, identity, _ = setup
+    admit(queue, identity)
+    if outcome != "pending":
+        queue.settle_execution_send(identity, outcome=outcome, detail="transport evidence")
+    producer = queue.handoff_producer_scope(
+        TEST_REPO, "scheduled", producer_id="producer-b", expected_generation=1
+    )
+    task = queue.create(
+        "new",
+        repo=TEST_REPO,
+        source="scheduled",
+        producer_scope={"repo": TEST_REPO, "source": "scheduled"},
+        producer_id="producer-b",
+        producer_generation=2,
+        producer_capability=producer.producer_capability,
+        producer_request_id="new",
+    )
+    reservation, _ = queue.reserve_spawn(task.id)
+    current = replace(
+        identity,
+        send_id="send-b",
+        reservation_key=reservation.key,
+        task_generation=task.generation,
+    )
+    assert (
+        queue.admit_execution_send(
+            current, source="scheduled", expected_producer_generation=2
+        ).replayed
+        is False
+    )
+    queue.close_execution_admission(
+        EffectRevocation(identity.scope, "transition-a", 1, "automatic", "manual"),
+        source="scheduled",
+        expected_producer_generation=2,
+    )
+    records = queue.execution_closure_inventory(identity.scope)["sends"]
+    by_id = {row["send_id"]: row for row in records}
+    assert by_id["send-a"]["producer_generation"] == 1
+    assert by_id["send-a"]["state"] == outcome
+    assert by_id["send-b"]["producer_generation"] == 2
+    assert admit(queue, identity).replayed is True
+    assert queue.execution_closure_inventory(identity.scope)["acknowledged"] is False
+
+
+def test_closure_first_without_custody_cannot_rebind_qualified_scope_to_other_source(setup):
+    queue, identity, _ = setup
+    close(queue, identity)
+    producer = queue.handoff_producer_scope(
+        TEST_REPO, "other", producer_id="producer-b", expected_generation=0
+    )
+    task = queue.create(
+        "other",
+        repo=TEST_REPO,
+        source="other",
+        producer_scope={"repo": TEST_REPO, "source": "other"},
+        producer_id="producer-b",
+        producer_generation=1,
+        producer_capability=producer.producer_capability,
+        producer_request_id="other",
+    )
+    reservation, _ = queue.reserve_spawn(task.id)
+    foreign = replace(
+        identity,
+        send_id="send-b",
+        reservation_key=reservation.key,
+        task_generation=task.generation,
+    )
+    with pytest.raises(TaskError, match="custody conflicts"):
+        queue.admit_execution_send(foreign, source="other", expected_producer_generation=1)
+    inventory = queue.execution_closure_inventory(identity.scope)
+    assert inventory["sends"] == []
+    assert all(row["id"] != task.id for row in inventory["tasks"])
+
+
 def test_close_and_send_have_one_serial_order(setup):
     queue, identity, _ = setup
     gate = Barrier(2)

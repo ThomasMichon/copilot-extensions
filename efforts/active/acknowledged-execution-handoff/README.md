@@ -152,6 +152,9 @@ handoff support.
 - Pending and ambiguous sends survive restart and remain in the complete
   closure inventory, including terminal tasks' history. Known transport
   outcomes remain distinct from process exit and adopter-effect settlement.
+- Qualified scope/source bindings apply even when closure precedes custody;
+  producer rollover retains older sends without pinning the binding to its
+  first producer generation. Fresh operations still require the current producer.
 - Deterministic coverage exercises closure/send ordering, durable ambiguity,
   exact replay, conflicting identities and refusal to hide custody by rebinding
   the qualified scope. Runtime enrollment, every actual sender and wake path,

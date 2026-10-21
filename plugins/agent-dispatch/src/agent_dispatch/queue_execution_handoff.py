@@ -146,7 +146,7 @@ class QueueExecutionHandoffMixin:
                 )
                 from .queue_execution_custody import require_custody_scope
 
-                require_custody_scope(conn, key, repo, source, expected_producer_generation)
+                require_custody_scope(conn, key, repo, source)
                 ts = self._now(now)
                 conn.execute(
                     "INSERT INTO execution_admission_closures"
