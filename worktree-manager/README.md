@@ -186,6 +186,25 @@ on PowerShell, restoring the caller's encoding afterward. Bash uses one decoded
 staged-status snapshot for the check, installer root and child environment;
 a peer replacing the status file cannot mix two staged actions.
 
+The default detached Windows installer writes to a unique UTF-8
+`setup-<pid>.<id>.installer.log` beside the launch log; the main log links its
+exact path. A launch-owned observer records start, stdout/stderr progress and
+the original installer's exit outcome using the same formatter. The separate
+sink avoids competing appenders after launch maintenance continues. It retains
+already-framed output and does not echo into quiet or protocol streams. The
+active sink permits readers and appends but is held against log rotation until
+the observer exits. The observer ends with the original invocation, not with
+the launching shell, and
+keeps the existing headless `conhost` and containment behavior. Literal argument
+data is carried separately from observer code; the installer still executes
+through its original `pwsh -NoProfile -File` command and inherited staged
+environment, without changing execution policy or installation authority.
+The measured duration covers the observed invocation and stream drain, not
+the execution cost of individual child lines. Sink preparation and observer
+spawn failures warn and retain the launch's existing continuation policy.
+This adds one observer per detached installation, not a process per line or
+evidence of an update-speed improvement.
+
 The native maintenance sinks share one physical-line envelope with the
 Python updater: `[HH:mm:ss.fffZ] scope state message [elapsed Ns]` or a
 completed action's `[duration Ns]`. Canonical nested envelopes are retained,
@@ -210,10 +229,12 @@ three attempts, native argument vectors, captured stdout, optional stderr
 passthrough and the existing final continuation warning are unchanged.
 Successful preflights do not gain terminal summaries or contaminate protocol
 stdout. No renderer is kept alive across the Picker or interactive session.
-Other early/late Bash diagnostics outside these bounded scopes and detached
-installer streams retain their existing behavior. Standalone Worktrees
+Other early/late Bash diagnostics outside these bounded scopes and Bash detached
+installer streams retain their existing behavior. Legacy standalone Worktrees
 install/update presentation is owned by its existing admission parent, not
-this launcher renderer.
+this launcher renderer. Structured-context installers retain their own native
+validation and staging owner, including its existing internal output buffering;
+the detached Windows observer does not replace that owner with legacy admission.
 
 New and Resume wait for the engine to finish repository synchronization,
 prompt staging and instruction projection rather than imposing a fixed

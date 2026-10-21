@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -260,7 +261,8 @@ def test_native_maintenance_reports_outcomes_and_replans(tmp_path, shell, curren
         "updates[2]['service']='agent-worktrees'; updates[2].pop('phase')\n"
         f"updates.append(dict(service='repository-bootstrap',argv=[sys.executable,{str(independent_script)!r}]))\n"
         f"print(json.dumps(dict(action={('self-update' if boundary == 'bootstrap' else 'reconcile')!r} "
-        f"if n==1 and not {current!r} else 'continue',updates=updates)))\n"
+        f"if n==1 and not {current!r} else 'continue',updates=updates)))\n",
+        encoding="utf-8",
     )
     env = dict(
         os.environ, PYTHONPATH=str(tmp_path), MAINTENANCE_FIXTURE="parent",
@@ -397,7 +399,7 @@ def test_native_maintenance_reports_outcomes_and_replans(tmp_path, shell, curren
 @pytest.mark.parametrize("admission", ["allowed", "managed", "old-engine", "malformed"])
 @pytest.mark.parametrize("blocking", [True, False])
 def test_blocking_marketplace_installer_keeps_native_frames_and_exit(tmp_path, shell, exit_code, admission, blocking):
-    if not blocking and admission == "allowed":
+    if not blocking and admission == "allowed" and shell == "bash":
         pytest.skip("Streaming fixture is synchronous; refused detached execution is covered")
     if shell == "bash" and os.name != "posix":
         pytest.skip("POSIX shell contract")
@@ -409,6 +411,8 @@ def test_blocking_marketplace_installer_keeps_native_frames_and_exit(tmp_path, s
     package.mkdir()
     (package / "__init__.py").write_text("")
     marker = tmp_path / "executed"
+    gate = tmp_path / "installer-continue"
+    detached_pid = tmp_path / "detached-pid"
     stage = tmp_path / "home" / ".agent-worktrees" / "updater-status.json"
     runtime_root = tmp_path / "runtime root caf\u00e9"
     (package / "__main__.py").write_text(
@@ -431,6 +435,7 @@ def test_blocking_marketplace_installer_keeps_native_frames_and_exit(tmp_path, s
         "environment={'MAINTENANCE_FIXTURE':'peer'},unset_environment=[])))\n"
         "    sys.exit(3 if denied else 0)\n"
         "print('{\"action\":\"continue\"}')\n",
+        encoding="utf-8",
     )
     plugin = tmp_path / "installed plugin"
     scripts = plugin / "scripts"
@@ -451,6 +456,8 @@ def test_blocking_marketplace_installer_keeps_native_frames_and_exit(tmp_path, s
     if blocking:
         env["WORKTREE_BLOCKING_INSTALL"] = "1"
     log = tmp_path / "setup.log"
+    project = "space ' \" ; $ ` &" if not blocking else ""
+    project_literal = project.replace("'", "''")
     if shell != "bash":
         source = (root / "bin/launch-session.ps1").read_text(encoding="utf-8")
 
@@ -458,30 +465,59 @@ def test_blocking_marketplace_installer_keeps_native_frames_and_exit(tmp_path, s
             start = source.index(f"function {name} {{")
             return source[start:source.index("\n}\n", start) + 3]
 
+        wait_for_release = (
+            f"& '{python}' -I -c 'import ctypes; k=ctypes.windll.kernel32; u=ctypes.windll.user32; "
+            "k.GetConsoleWindow.restype=ctypes.c_void_p; u.IsWindowVisible.argtypes=[ctypes.c_void_p]; "
+            "assert not u.IsWindowVisible(k.GetConsoleWindow()), \"installer console became visible\"'\n"
+            "if($LASTEXITCODE -ne 0){throw 'headless descendant check failed'}\n"
+            "$deadline=[DateTime]::UtcNow.AddSeconds(10)\n"
+            f"while(-not [IO.File]::Exists('{gate}') -and [DateTime]::UtcNow -lt $deadline){{Start-Sleep -Milliseconds 20}}\n"
+            f"if(-not [IO.File]::Exists('{gate}')){{throw 'detached gate was not released'}}\n"
+            if not blocking else ""
+        )
         (scripts / "install.ps1").write_text(
-            "param($Action,$InstallDir,$ProjectName)\n"
+            "param([string]$Action,[string]$InstallDir,[string]$ProjectName)\n"
             f"[IO.File]::WriteAllText('{marker}','executed')\n"
             f"if($Action -ne 'update' -or $InstallDir -ne '{runtime_root}'){{throw 'arguments changed'}}\n"
+            f"if($ProjectName -cne '{project_literal}'){{throw 'project argument changed'}}\n"
             "if($env:MAINTENANCE_FIXTURE -ne 'child' -or $env:MAINTENANCE_UNSET){throw 'environment changed'}\n"
             "Write-Host 'installer-detail'\n"
+            "Write-Host 'installer-unicode caf\u00e9 \u03a9'\n"
             "[Console]::Error.WriteLine('installer-diagnostic')\n"
             f"Write-Output '{canonical}'\n"
+            f"{wait_for_release}"
             "[Console]::Write('installer-last-line')\n"
             f"exit {exit_code}\n",
+            encoding="utf-8-sig",
         )
+        if not blocking and admission == "allowed":
+            spawn = (
+                "function Start-Process { param($FilePath,$ArgumentList,$WindowStyle)\n"
+                "if($FilePath -ne 'conhost.exe' -or $ArgumentList[0] -ne '--headless' -or "
+                "$ArgumentList[1] -ne 'pwsh.exe' -or $ArgumentList[2] -ne '-NoProfile' -or "
+                "$ArgumentList[3] -ne '-EncodedCommand' -or $WindowStyle -ne 'Hidden'){throw 'detached launch changed'}\n"
+                "if(($FilePath.Length + ($ArgumentList -join ' ').Length) -ge 32767){throw 'Windows command line limit exceeded'}\n"
+                "$child=Microsoft.PowerShell.Management\\Start-Process -FilePath $FilePath "
+                "-ArgumentList $ArgumentList -WindowStyle $WindowStyle -PassThru\n"
+                f"[IO.File]::WriteAllText('{detached_pid}',[string]$child.Id)\n"
+                "}"
+            )
+        else:
+            spawn = f"function Start-Process {{ [IO.File]::WriteAllText('{marker}','spawned'); throw 'unexpected detached spawn' }}"
         script = "\n".join([
             "$ErrorActionPreference='Stop'; $PSNativeCommandUseErrorActionPreference=$true",
             "$OutputEncoding=[Text.Encoding]::ASCII; $initialConsoleEncoding=[Console]::OutputEncoding",
             "$script:LaunchTimer=[Diagnostics.Stopwatch]::StartNew()",
             f"$script:SetupLog='{log}'; $script:ShowLaunchStatus=$false",
-            "$script:UpdateApplied=$false; $script:LaunchProject=''; $noUpdate=$false",
+            f"$script:UpdateApplied=$false; $script:LaunchProject='{project_literal}'; $noUpdate=$false",
             f"$VenvPython='{python}'",
             function("Format-SetupLine"), function("Write-SetupLog"),
             function("Write-SetupStatus"), function("Write-PlanDiagnostics"),
             function("Push-UpdateEnvironment"), function("Pop-UpdateEnvironment"),
             function("Test-UpdateAdmission"),
-            function("Invoke-SetupAction"), function("Invoke-UpdateApply"),
-            f"function Start-Process {{ [IO.File]::WriteAllText('{marker}','spawned'); throw 'unexpected detached spawn' }}",
+            function("Invoke-SetupCommand"), function("Invoke-SetupAction"),
+            function("Start-DetachedSetupInstaller"), function("Invoke-UpdateApply"),
+            spawn,
             "Invoke-UpdateApply",
             "if($env:MAINTENANCE_FIXTURE -ne 'parent' -or $env:MAINTENANCE_UNSET -ne 'parent'){throw 'environment leaked'}",
             "if($ErrorActionPreference -ne 'Stop' -or -not $PSNativeCommandUseErrorActionPreference){throw 'preference leaked'}",
@@ -527,7 +563,55 @@ def test_blocking_marketplace_installer_keeps_native_frames_and_exit(tmp_path, s
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert result.stdout == ""
-    report = log.read_text()
+    assert result.stderr == ""
+    installer_log = None
+    if not blocking and admission == "allowed":
+        sinks = list(tmp_path.glob("setup.*.installer.log"))
+        assert len(sinks) == 1, "detached installer needs exactly one output sink"
+        installer_log = sinks[0]
+        assert f"output: {installer_log}" in log.read_text(encoding="utf-8-sig")
+        try:
+            deadline = time.monotonic() + 10
+            while time.monotonic() < deadline:
+                report = installer_log.read_text(encoding="utf-8-sig")
+                if "installer-detail [elapsed " in report:
+                    break
+                time.sleep(.02)
+            assert "installer-detail [elapsed " in report, "detached progress was not persisted"
+            assert "Installer update done" not in report and "Installer update failed" not in report
+            assert not gate.exists(), "launcher waited for installer completion"
+            with pytest.raises(PermissionError) as error:
+                installer_log.unlink()
+            assert error.value.winerror in {32, 33}, "active sink was not protected against rotation"
+        finally:
+            gate.write_text("continue")
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            report = installer_log.read_text(encoding="utf-8-sig")
+            if f"(exit {exit_code})" in report:
+                break
+            time.sleep(.02)
+        # The log observer and its headless console must finish with the child,
+        # not remain alive after the native operation has completed.
+        import ctypes
+        from ctypes import wintypes
+
+        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        kernel.OpenProcess.restype = wintypes.HANDLE
+        kernel.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+        kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+        handle = kernel.OpenProcess(0x00100000, False, int(detached_pid.read_text()))
+        if handle:
+            try:
+                assert kernel.WaitForSingleObject(handle, 5000) == 0, "detached observer leaked"
+            finally:
+                kernel.CloseHandle(handle)
+        else:
+            assert ctypes.get_last_error() == 87, "detached liveness could not be verified"
+    report = log.read_text(encoding="utf-8-sig")
+    if installer_log:
+        report += installer_log.read_text(encoding="utf-8-sig")
     if admission != "allowed":
         assert not marker.exists(), report
         assert (
@@ -537,6 +621,8 @@ def test_blocking_marketplace_installer_keeps_native_frames_and_exit(tmp_path, s
         assert "Checking bootstrap services" in report
         return
     assert "installer-detail [elapsed " in report
+    if shell != "bash":
+        assert "installer-unicode caf\u00e9 \u03a9 [elapsed " in report
     assert "installer-diagnostic [elapsed " in report
     assert "installer-last-line [elapsed " in report
     assert report.splitlines().count(canonical) == 1
@@ -544,6 +630,51 @@ def test_blocking_marketplace_installer_keeps_native_frames_and_exit(tmp_path, s
     assert re.search(rf"launch/installer {state} Installer update {state} \(exit {exit_code}\).*\[duration [0-9.]+s\]", report)
     assert "installer: [" not in report
     assert "Checking bootstrap services" in report
+
+
+@pytest.mark.parametrize("failure", ["sink", "command-limit", "spawn"])
+def test_detached_installer_observer_surfaces_startup_failures(tmp_path, failure):
+    if os.name != "nt" or not shutil.which("pwsh"):
+        pytest.skip("Windows detached observer contract")
+    root = Path(__file__).resolve().parents[1]
+    source = (root / "bin/launch-session.ps1").read_text(encoding="utf-8")
+
+    def function(name):
+        start = source.index(f"function {name} {{")
+        return source[start:source.index("\n}\n", start) + 3]
+
+    marker = tmp_path / "spawned"
+    log = (
+        tmp_path / "missing-log-directory" / "setup.log"
+        if failure == "sink" else tmp_path / "setup.log"
+    )
+    argument = "x" * 15000 if failure == "command-limit" else "unused-installer.ps1"
+    fixture = tmp_path / "observer-failure.ps1"
+    fixture.write_text("\n".join([
+        "$ErrorActionPreference='Stop'",
+        f"$script:SetupLog='{log}'",
+        *(function(name) for name in (
+            "Format-SetupLine", "Write-SetupLog", "Write-SetupStatus",
+            "Invoke-SetupCommand", "Start-DetachedSetupInstaller",
+        )),
+        f"function Start-Process {{ [IO.File]::WriteAllText('{marker}','spawned'); throw 'synthetic spawn failure' }}",
+        f"try {{ Start-DetachedSetupInstaller -CommandArgv @('pwsh.exe','-NoProfile','-File','{argument}'); throw 'unexpected observer success' }}",
+        "catch { [Console]::Out.Write($_.Exception.Message) }",
+    ]), encoding="utf-8-sig")
+    result = subprocess.run(
+        ["pwsh", "-NoProfile", "-File", str(fixture)],
+        cwd=tmp_path, capture_output=True, text=True, timeout=20,
+        creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stderr == ""
+    expected = {
+        "sink": "missing-log-directory",
+        "command-limit": "Windows command-line limit",
+        "spawn": "synthetic spawn failure",
+    }[failure]
+    assert expected in result.stdout
+    assert marker.exists() is (failure == "spawn")
 
 
 @pytest.mark.parametrize("shell", ["pwsh", "powershell"])
@@ -581,7 +712,7 @@ def test_native_maintenance_status_uses_production_sinks(tmp_path, shell, mode):
         creationflags=subprocess.CREATE_NO_WINDOW,
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    persisted = log.read_text()
+    persisted = log.read_text(encoding="utf-8-sig")
     assert re.search(r"\[\d\d:\d\d:\d\d\.\d{3}Z\] launch starting Plugin reconcile: fixture starting \[elapsed 0.0s\]", persisted)
     assert "launch failed Plugin reconcile: fixture failed (exit 7); continuing [duration 1.0s]" in persisted
     emitted = result.stdout if mode == "interactive" else result.stderr

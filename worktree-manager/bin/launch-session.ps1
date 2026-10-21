@@ -72,7 +72,7 @@ function Write-SetupLog {
         [string]$Scope = 'launch', [string]$State = '', [switch]$Completed
     )
     $lines = @(Format-SetupLine $Message $Level -Seconds $Seconds -Scope $Scope -State $State -Completed:$Completed)
-    try { Add-Content -Path $script:SetupLog -Value $lines -ErrorAction SilentlyContinue } catch {}
+    try { Add-Content -LiteralPath $script:SetupLog -Value $lines -Encoding utf8 -ErrorAction SilentlyContinue } catch {}
 }
 
 function Write-LaunchTrace {
@@ -141,7 +141,7 @@ try {
         "# Host: $env:COMPUTERNAME"
         ""
     ) -join "`n"
-    Set-Content -Path $script:SetupLog -Value $header -ErrorAction SilentlyContinue
+    Set-Content -LiteralPath $script:SetupLog -Value $header -Encoding utf8 -ErrorAction SilentlyContinue
     # Prune old logs (keep last 10)
     Get-ChildItem $script:SetupLogDir -Filter 'setup-*.log' |
         Sort-Object LastWriteTime -Descending |
@@ -614,19 +614,17 @@ function Test-UpdateAdmission {
     }
 }
 
-function Invoke-SetupAction {
+function Invoke-SetupCommand {
     param(
-        [string[]]$CommandArgv, [object]$Update,
+        [string[]]$CommandArgv,
         [string]$Scope, [string]$Label
     )
-    if (-not (Test-UpdateAdmission $Update)) { return }
     $exe = $CommandArgv[0]
     $rest = @($CommandArgv | Select-Object -Skip 1)
     $actionTimer = [Diagnostics.Stopwatch]::StartNew()
     $actionExitCode = $null
     $actionSpawnError = $null
     Write-SetupStatus "$Label starting" -Seconds 0 -Scope $Scope -State starting
-    $savedEnvironment = Push-UpdateEnvironment $Update
     $actionErrorPreference = $ErrorActionPreference
     $actionNativeErrorPreference = $PSNativeCommandUseErrorActionPreference
     try {
@@ -645,17 +643,85 @@ function Invoke-SetupAction {
         $ErrorActionPreference = $actionErrorPreference
         $PSNativeCommandUseErrorActionPreference = $actionNativeErrorPreference
         $actionTimer.Stop()
-        Pop-UpdateEnvironment $savedEnvironment
     }
     $duration = $actionTimer.Elapsed.TotalSeconds
     if ($actionSpawnError) {
         Write-SetupStatus "$Label spawn failed; continuing" 'WARN' -Seconds $duration -Scope $Scope -State failed -Completed
         Write-SetupLog "$Label error: $actionSpawnError" 'WARN'
+        return 1
     } elseif ($actionExitCode -ne 0) {
         Write-SetupStatus "$Label failed (exit $actionExitCode); continuing" 'WARN' -Seconds $duration -Scope $Scope -State failed -Completed
     } else {
         Write-SetupStatus "$Label done (exit 0)" -Seconds $duration -Scope $Scope -State done -Completed
     }
+    return $actionExitCode
+}
+
+function Invoke-SetupAction {
+    param(
+        [string[]]$CommandArgv, [object]$Update,
+        [string]$Scope, [string]$Label
+    )
+    if (-not (Test-UpdateAdmission $Update)) { return }
+    $savedEnvironment = Push-UpdateEnvironment $Update
+    try {
+        $null = Invoke-SetupCommand -CommandArgv $CommandArgv -Scope $Scope -Label $Label
+    } finally {
+        Pop-UpdateEnvironment $savedEnvironment
+    }
+}
+
+function Start-DetachedSetupInstaller {
+    param([string[]]$CommandArgv)
+    # Detached output outlives launch maintenance. A separate, linked sink also
+    # avoids two PowerShell processes racing to append to the launch log.
+    $installerLog = [IO.Path]::ChangeExtension(
+        $script:SetupLog, "$([guid]::NewGuid().ToString('N')).installer.log"
+    )
+    $sink = [IO.File]::Open(
+        $installerLog, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::Read
+    )
+    $sink.Dispose()
+    # Snapshot only the observer and its data, never the launcher's dispatch or
+    # admission machinery. The original -File command still owns installation.
+    $data = @{
+        argv = $CommandArgv
+        log = $installerLog
+    } | ConvertTo-Json -Compress
+    $encodedData = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($data))
+    $functions = foreach ($name in @(
+        'Format-SetupLine', 'Write-SetupLog', 'Write-SetupStatus', 'Invoke-SetupCommand'
+    )) {
+        "function $name {`n$((Get-Item -LiteralPath "Function:$name").Definition)`n}"
+    }
+    $observer = @'
+$ErrorActionPreference = 'Stop'
+$PSNativeCommandUseErrorActionPreference = $false
+[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+$OutputEncoding = [Console]::OutputEncoding
+$script:LaunchTimer = [Diagnostics.Stopwatch]::StartNew()
+$script:ShowLaunchStatus = $false
+'@ + "`n" + (
+        "`$data = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('$encodedData')) | ConvertFrom-Json`n" +
+        "`$script:SetupLog = `$data.log`n" +
+        ($functions -join "`n") + "`n" +
+        # Allow appends/readers, but not log rotation deleting an active sink.
+        "`$sink = [IO.File]::Open(`$script:SetupLog, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)`n" +
+        "try { `$code = Invoke-SetupCommand -CommandArgv @(`$data.argv) -Scope 'launch/installer' -Label 'Installer update' }`n" +
+        "finally { `$sink.Dispose() }`n" +
+        "exit `$code"
+    )
+    $encodedObserver = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($observer))
+    # conhost owns the detached, hidden console; the observer owns the durable
+    # sink. Redirecting conhost itself does not capture its console children.
+    $observerArguments = @(
+        '--headless', 'pwsh.exe', '-NoProfile', '-EncodedCommand', $encodedObserver
+    )
+    if (("conhost.exe " + ($observerArguments -join ' ')).Length -ge 32767) {
+        throw 'Detached installer observer exceeds the Windows command-line limit.'
+    }
+    Start-Process -FilePath 'conhost.exe' -ArgumentList $observerArguments -WindowStyle Hidden | Out-Null
+    return $installerLog
 }
 
 function Invoke-UpdateApply {
@@ -741,22 +807,18 @@ function Invoke-UpdateApply {
                     # single-instance lock, so a concurrent background install can't
                     # collide.
                     Write-SetupStatus 'A new plugin version was downloaded; installing it in the background (applies on the next launch)...'
-                    $bgArgs = @(
-                        '-NoProfile',
-                        '-File',
-                        "`"$pluginInstaller`"",
+                    $bgCommand = @(
+                        'pwsh.exe', '-NoProfile', '-File', $pluginInstaller,
                         'update',
                         '-InstallDir',
-                        "`"$([string]$status.runtime_root)`""
+                        [string]$status.runtime_root
                     )
-                    if ($script:LaunchProject) { $bgArgs += @('-ProjectName', "`"$($script:LaunchProject)`"") }
+                    if ($script:LaunchProject) { $bgCommand += @('-ProjectName', $script:LaunchProject) }
                     try {
-                        # conhost --headless: -WindowStyle Hidden alone is ignored
-                        # by the DefTerm handoff (windows-launch-hardening #786).
-                        Start-Process -FilePath 'conhost.exe' -ArgumentList (@('--headless', 'pwsh.exe') + $bgArgs) -WindowStyle Hidden | Out-Null
-                        Write-SetupLog 'Background install started (new version applies on the next launch)'
+                        $installerLog = Start-DetachedSetupInstaller -CommandArgv $bgCommand
+                        Write-SetupLog "Background install started (new version applies on the next launch); output: $installerLog"
                     } catch {
-                        Write-SetupLog "Background install failed to start ($($_.Exception.Message)) — continuing" 'WARN'
+                        Write-SetupStatus "Background install failed to start ($($_.Exception.Message)) — continuing" 'WARN'
                     } finally {
                         Pop-UpdateEnvironment $savedEnvironment
                     }

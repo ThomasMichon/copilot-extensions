@@ -121,8 +121,11 @@ matrix below are _(agent-recommended)_ implementation details.
 - [x] Frame standalone Worktrees install/update output in the existing
   admitting parent, retaining child-exit timing, native arguments, source
   admission and lease/containment ownership (#7119).
-- [ ] Frame finite post-maintenance Bash preflight log scopes without
-  extending renderer lifetime across the Picker or interactive session.
+- [x] Frame finite post-maintenance Bash preflight log scopes without
+  extending renderer lifetime across the Picker or interactive session
+  (#7672).
+- [ ] Persist detached Windows marketplace-installer output through a
+  launch-owned observer without changing the installer's native authority.
 - [ ] Finish the remaining detached/standalone installer and early/late Bash
   output boundaries through their actual output owners.
 - [ ] Prefix every human-readable install/update line with a wall-clock time;
@@ -230,6 +233,72 @@ Bridge serving-version gap and supervisor framing defect survived that
 bounded source delta inspection.
 
 ## Journal
+
+### 2026-10-21 - Give the detached Windows installer an owned output sink
+
+- Traced the original `conhost --headless pwsh -File` launch: its console
+  output had no explicit persistent sink. The legacy Worktrees installer
+  already has an admitting human-output parent, but structured-context
+  installation has a separate native validator and staging parent. Do not
+  put either under a new installation executor merely to capture output.
+- Reuse the launcher's native command observer and formatter in one
+  detached PowerShell observer. It invokes the same original installer
+  command with literal arguments and the inherited staged environment;
+  admission remains before the detached spawn, and the installer retains
+  ownership, staging, deadlines, execution policy and publication decisions.
+  No Job breakaway or new deployment authority is added.
+- A unique UTF-8 sidecar beside the main setup log receives start, physical
+  progress lines, the native exit and the observed invocation's duration.
+  The main log links that path. Separate files avoid new concurrent
+  appenders; a read-sharing handle protects the active sink against log
+  rotation until the observer exits. Existing canonical frames pass through
+  once. One observer per
+  detached invocation is presentation overhead, not a speed reduction.
+- Native Windows fixtures exercise successful and exit-7 installers from
+  both PowerShell hosts. They prove the launcher finishes before releasing
+  the installer gate, early output is persisted, literal quoted arguments
+  and non-ASCII content survive, the native descendant's console is hidden,
+  and the observer's headless console exits after completion. Missing
+  sinks, oversized Windows command lines and spawn exceptions are explicit
+  startup failures. Existing synchronous action outcomes, fresh planning,
+  refusal paths, quiet/stdio status sinks and deterministic clocks retain
+  their original test limits.
+- These are fresh disposable log/runtime-shaped native fixtures, not a
+  clean-room package installation or a promoted live update. No installer
+  construction or governance algorithm changes in this slice; a Windows
+  `conhost` contract has no equivalent external Linux lane. Source review,
+  required CI and merge still gate this pending boundary. Promoted installed
+  qualification and authorized rollout remain open and unchanged.
+- Structured-context staging still buffers its own captured child output;
+  the detached sink measures arrival at the actual outer owner, not an
+  invented execution cost. Its internal progress boundary, Bash detached
+  streams, remaining early/late records, banner convergence and equivalent
+  whole-flow cost measurements remain follow-on work.
+
+### 2026-10-21 - Finite preflight slice merged; retain the remaining boundaries
+
+- #7672 merged as `b4c46f4b23f668345e39b0005690881b7b059bea` after
+  Copilot approved exact head `20cd77143697a9b1952356152b6bcb7f58c8f5e6`,
+  no unresolved review threads and green current-head CI, including the
+  required PR gate. An earlier approval addressed the preceding head and
+  was not reused for the final correction.
+- The final native regression distinguishes each failed child's exit 7
+  from the unchanged aggregate preflight return 1. The scope completion
+  reports that aggregate result, while each attempt retains its own
+  diagnostic. All six native combinations passed with both contracts
+  asserted and the original limits unchanged.
+- Re-read the Plan and Validation Plan after the actual merge, then marked
+  only this finite log boundary complete. The effort and source worktree
+  remain active. Pull-forward retained the exact merged source on a backup;
+  the installed sync helper refused a deleted PR branch during routine
+  reconciliation, so the confirmed clean, fully merged tip was advanced
+  without replaying or discarding unpublished work. No runtime update or
+  coordination-record repair was used as a workaround.
+- Next output-owner trace: detached marketplace-installer streams and their
+  persistent-log destination, keeping detached lifetime, admission and
+  background failure reporting separate from this finite preflight owner.
+  Other early/late records, banners, equivalent whole-flow performance,
+  promoted-source qualification and authorized rollout remain open.
 
 ### 2026-10-21 - Bound presentation to each post-maintenance preflight
 
