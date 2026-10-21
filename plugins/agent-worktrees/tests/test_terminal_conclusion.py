@@ -90,9 +90,8 @@ def _worker_record(tmp_path: Path, monkeypatch):
     return repo, tracking_dir / f"{worktree_id}.yaml", worktree
 
 
-def _worker(tmp_path: Path, monkeypatch):
-    _build_worker_seed(tmp_path)
-    return _worker_record(tmp_path, monkeypatch)
+def _worker(tmp_path: Path, monkeypatch, _worker_seed: Path):
+    return _copy_worker(_worker_seed, tmp_path, monkeypatch)
 
 
 @pytest.fixture(scope="session")
@@ -189,8 +188,8 @@ def _conclude(record_path: Path, repo, **over):
     )
 
 
-def test_live_session_is_preserved(tmp_path, monkeypatch):
-    repo, record_path, worktree = _worker(tmp_path, monkeypatch)
+def test_live_session_is_preserved(tmp_path, monkeypatch, _worker_seed):
+    repo, record_path, worktree = _worker(tmp_path, monkeypatch, _worker_seed)
     monkeypatch.setattr(sessions, "has_mux_session", lambda _worktree: True)
     (worktree / "valuable.txt").write_text("keep\n", encoding="utf-8")
 
@@ -204,8 +203,8 @@ def test_live_session_is_preserved(tmp_path, monkeypatch):
     assert (worktree / "valuable.txt").exists()
 
 
-def test_different_lifecycle_head_is_preserved(tmp_path, monkeypatch):
-    repo, record_path, _worktree = _worker(tmp_path, monkeypatch)
+def test_different_lifecycle_head_is_preserved(tmp_path, monkeypatch, _worker_seed):
+    repo, record_path, _worktree = _worker(tmp_path, monkeypatch, _worker_seed)
 
     result = _conclude(
         record_path,
@@ -221,8 +220,8 @@ def test_different_lifecycle_head_is_preserved(tmp_path, monkeypatch):
     assert record.session_entry("session-exact").state == "active"
 
 
-def test_pending_handoff_preserves_predecessor(tmp_path, monkeypatch):
-    repo, record_path, _worktree = _worker(tmp_path, monkeypatch)
+def test_pending_handoff_preserves_predecessor(tmp_path, monkeypatch, _worker_seed):
+    repo, record_path, _worktree = _worker(tmp_path, monkeypatch, _worker_seed)
     record = tracking.load_record(record_path)
     tracking.open_handoff(
         record,
@@ -244,8 +243,8 @@ def test_pending_handoff_preserves_predecessor(tmp_path, monkeypatch):
     assert record.pending_handoffs
 
 
-def test_follow_up_preserves_session_and_worktree(tmp_path, monkeypatch):
-    repo, record_path, _worktree = _worker(tmp_path, monkeypatch)
+def test_follow_up_preserves_session_and_worktree(tmp_path, monkeypatch, _worker_seed):
+    repo, record_path, _worktree = _worker(tmp_path, monkeypatch, _worker_seed)
     record = tracking.load_record(record_path)
     record.follow_up = True
     tracking.save_record(record, record_path)
@@ -259,8 +258,8 @@ def test_follow_up_preserves_session_and_worktree(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("state", ["open", "active"])
-def test_open_pr_preserves_session_and_worktree(tmp_path, monkeypatch, state):
-    repo, record_path, _worktree = _worker(tmp_path, monkeypatch)
+def test_open_pr_preserves_session_and_worktree(tmp_path, monkeypatch, _worker_seed, state):
+    repo, record_path, _worktree = _worker(tmp_path, monkeypatch, _worker_seed)
     record = tracking.load_record(record_path)
     record.pr = tracking.PRRecord(state=state, branch="feature/example", number=7)
     tracking.save_record(record, record_path)
@@ -273,8 +272,8 @@ def test_open_pr_preserves_session_and_worktree(tmp_path, monkeypatch, state):
     assert record.session_entry("session-exact").state == "active"
 
 
-def test_non_cli_worktree_preserves_session(tmp_path, monkeypatch):
-    repo, record_path, _worktree = _worker(tmp_path, monkeypatch)
+def test_non_cli_worktree_preserves_session(tmp_path, monkeypatch, _worker_seed):
+    repo, record_path, _worktree = _worker(tmp_path, monkeypatch, _worker_seed)
     record = tracking.load_record(record_path)
     record.interface = "acp"
     tracking.save_record(record, record_path)
@@ -286,8 +285,8 @@ def test_non_cli_worktree_preserves_session(tmp_path, monkeypatch):
     assert record.session_entry("session-exact").state == "active"
 
 
-def test_mismatched_worktree_path_is_preserved(tmp_path, monkeypatch):
-    repo, record_path, _worktree = _worker(tmp_path, monkeypatch)
+def test_mismatched_worktree_path_is_preserved(tmp_path, monkeypatch, _worker_seed):
+    repo, record_path, _worktree = _worker(tmp_path, monkeypatch, _worker_seed)
     record = tracking.load_record(record_path)
     record.worktree_path = str(Path(record.worktree_path).with_name("other-worker"))
     tracking.save_record(record, record_path)
@@ -298,8 +297,8 @@ def test_mismatched_worktree_path_is_preserved(tmp_path, monkeypatch):
     assert result["reason"] == "worktree-path-mismatch"
 
 
-def test_duplicate_worktree_path_is_preserved(tmp_path, monkeypatch):
-    repo, record_path, _worktree = _worker(tmp_path, monkeypatch)
+def test_duplicate_worktree_path_is_preserved(tmp_path, monkeypatch, _worker_seed):
+    repo, record_path, _worktree = _worker(tmp_path, monkeypatch, _worker_seed)
     record = tracking.load_record(record_path)
     peer = tracking.create_new_record(
         "peer-worker",
@@ -319,9 +318,9 @@ def test_duplicate_worktree_path_is_preserved(tmp_path, monkeypatch):
 
 
 def test_dispatch_attempt_policy_concludes_exact_acp_allocation(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, _worker_seed
 ):
-    repo, record_path, _worktree = _worker(tmp_path, monkeypatch)
+    repo, record_path, _worktree = _worker(tmp_path, monkeypatch, _worker_seed)
     record = tracking.load_record(record_path)
     record.interface = "acp"
     record.origin = "delegate"
@@ -354,7 +353,7 @@ def test_dispatch_attempt_policy_concludes_exact_acp_allocation(
 
 
 def test_dispatch_attempt_policy_releases_own_stale_session_claim(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, _worker_seed
 ):
     """Regression: a headless dispatch-created session that crashed/was
     reaped before its own sessionEnd hook could run leaves a `session`-kind
@@ -365,7 +364,7 @@ def test_dispatch_attempt_policy_releases_own_stale_session_claim(
     dispatch-attempt conclusion does. Since agent-dispatch concluding its
     own exactly-matched attempt IS the definitive "we are done" signal, the
     claim must be released so the worktree can still be primed."""
-    repo, record_path, _worktree = _worker(tmp_path, monkeypatch)
+    repo, record_path, _worktree = _worker(tmp_path, monkeypatch, _worker_seed)
     record = tracking.load_record(record_path)
     record.interface = "acp"
     record.origin = "delegate"
@@ -407,14 +406,14 @@ def test_dispatch_attempt_policy_releases_own_stale_session_claim(
 
 
 def test_dispatch_attempt_policy_releases_only_the_concluding_session_claim(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, _worker_seed
 ):
     """A record can hold more than one `session`-kind claim (e.g. an
     earlier, separately-tracked session on the same worktree). Concluding
     THIS attempt's session must release only its own claim -- an unrelated
     still-live session claim must keep blocking disposal (outstanding
     obligations), never be swept up by a blanket release."""
-    repo, record_path, _worktree = _worker(tmp_path, monkeypatch)
+    repo, record_path, _worktree = _worker(tmp_path, monkeypatch, _worker_seed)
     record = tracking.load_record(record_path)
     record.interface = "acp"
     record.origin = "delegate"
@@ -457,7 +456,7 @@ def test_dispatch_attempt_policy_releases_only_the_concluding_session_claim(
 
 
 def test_dispatch_attempt_policy_unrelated_live_claim_blocks_without_persisting(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, _worker_seed
 ):
     """An unrelated still-LIVE session claim must keep blocking disposal
     (outstanding obligations) -- and, per Copilot review on PR #3198, the
@@ -466,7 +465,7 @@ def test_dispatch_attempt_policy_unrelated_live_claim_blocks_without_persisting(
     enough to evaluate that phase's own preservation gate), so a call that
     ultimately reports `skipped` never leaves an irreversible partial
     mutation behind."""
-    repo, record_path, _worktree = _worker(tmp_path, monkeypatch)
+    repo, record_path, _worktree = _worker(tmp_path, monkeypatch, _worker_seed)
     record = tracking.load_record(record_path)
     record.interface = "acp"
     record.origin = "delegate"
@@ -507,12 +506,12 @@ def test_dispatch_attempt_policy_unrelated_live_claim_blocks_without_persisting(
 
 
 def test_dispatch_attempt_policy_does_not_persist_release_when_dirty_work_blocks(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, _worker_seed
 ):
     """The first phase's provisional release must not survive a later
     skip discovered only during the unlocked git inspection (dirty
     uncommitted work) -- the claim must remain exactly as it was on disk."""
-    repo, record_path, worktree = _worker(tmp_path, monkeypatch)
+    repo, record_path, worktree = _worker(tmp_path, monkeypatch, _worker_seed)
     (worktree / "valuable.txt").write_text("keep\n", encoding="utf-8")
     record = tracking.load_record(record_path)
     record.interface = "acp"
@@ -550,12 +549,12 @@ def test_dispatch_attempt_policy_does_not_persist_release_when_dirty_work_blocks
 
 
 def test_dispatch_attempt_policy_does_not_release_claim_on_reservation_mismatch(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, _worker_seed
 ):
     """No definitive reason to end the session -> the claim stays put. A
     mismatched reservation means this call is not the attempt's own
     authoritative conclusion, so it must not release anything."""
-    repo, record_path, _worktree = _worker(tmp_path, monkeypatch)
+    repo, record_path, _worktree = _worker(tmp_path, monkeypatch, _worker_seed)
     record = tracking.load_record(record_path)
     record.interface = "acp"
     record.dispatch_attempt = tracking.DispatchAttempt(
@@ -590,12 +589,12 @@ def test_dispatch_attempt_policy_does_not_release_claim_on_reservation_mismatch(
 
 
 def test_disposable_cli_policy_does_not_release_session_claims(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, _worker_seed
 ):
     """The self-release path is scoped to dispatch-attempt conclusions only
     -- an ordinary disposable-cli sweep carries no such authoritative
     per-attempt provenance to release someone else's session claim on."""
-    repo, record_path, _worktree = _worker(tmp_path, monkeypatch)
+    repo, record_path, _worktree = _worker(tmp_path, monkeypatch, _worker_seed)
     record = tracking.load_record(record_path)
     session_ref = tracking.format_claim_ref(
         record.machine, "demo", record.worktree_id, session="session-exact",
@@ -616,9 +615,9 @@ def test_disposable_cli_policy_does_not_release_session_claims(
 
 
 def test_dispatch_attempt_policy_rejects_wrong_reservation(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, _worker_seed
 ):
-    repo, record_path, _worktree = _worker(tmp_path, monkeypatch)
+    repo, record_path, _worktree = _worker(tmp_path, monkeypatch, _worker_seed)
     record = tracking.load_record(record_path)
     record.interface = "acp"
     record.dispatch_attempt = tracking.DispatchAttempt(
@@ -644,9 +643,9 @@ def test_dispatch_attempt_policy_rejects_wrong_reservation(
 
 
 def test_newer_dispatch_provenance_is_preserved_but_not_trusted(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, _worker_seed
 ):
-    repo, record_path, _worktree = _worker(tmp_path, monkeypatch)
+    repo, record_path, _worktree = _worker(tmp_path, monkeypatch, _worker_seed)
     raw = yaml.safe_load(record_path.read_text(encoding="utf-8"))
     raw["dispatch_attempt"] = {
         "schema_version": 2,
@@ -681,9 +680,9 @@ def test_newer_dispatch_provenance_is_preserved_but_not_trusted(
 
 
 def test_blank_dispatch_provenance_is_preserved_but_not_trusted(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, _worker_seed
 ):
-    repo, record_path, _worktree = _worker(tmp_path, monkeypatch)
+    repo, record_path, _worktree = _worker(tmp_path, monkeypatch, _worker_seed)
     raw = yaml.safe_load(record_path.read_text(encoding="utf-8"))
     raw["dispatch_attempt"] = {
         "task_id": "task-1",
@@ -716,8 +715,8 @@ def test_blank_dispatch_provenance_is_preserved_but_not_trusted(
     assert result["reason"] == "dispatch-provenance-missing"
 
 
-def test_dispatch_provenance_strings_are_normalized(tmp_path, monkeypatch):
-    _repo, record_path, _worktree = _worker(tmp_path, monkeypatch)
+def test_dispatch_provenance_strings_are_normalized(tmp_path, monkeypatch, _worker_seed):
+    _repo, record_path, _worktree = _worker(tmp_path, monkeypatch, _worker_seed)
     raw = yaml.safe_load(record_path.read_text(encoding="utf-8"))
     raw["dispatch_attempt"] = {
         "task_id": " task-1 ",
@@ -746,9 +745,9 @@ def test_dispatch_provenance_strings_are_normalized(tmp_path, monkeypatch):
 
 def test_lifecycle_change_during_git_inspection_blocks_priming(
     tmp_path,
-    monkeypatch,
+    monkeypatch, _worker_seed,
 ):
-    repo, record_path, worktree = _worker(tmp_path, monkeypatch)
+    repo, record_path, worktree = _worker(tmp_path, monkeypatch, _worker_seed)
     original_current_branch = git_ops.current_branch
     changed = False
 
@@ -785,9 +784,9 @@ def test_lifecycle_change_during_git_inspection_blocks_priming(
 
 def test_behind_branch_is_primed_without_rewriting_head(
     tmp_path,
-    monkeypatch,
+    monkeypatch, _worker_seed,
 ):
-    repo, record_path, worktree = _worker(tmp_path, monkeypatch)
+    repo, record_path, worktree = _worker(tmp_path, monkeypatch, _worker_seed)
     anchor = Path(repo.anchor)
     (anchor / "upstream.txt").write_text("new\n", encoding="utf-8")
     _git(anchor, "add", "upstream.txt")
@@ -803,8 +802,8 @@ def test_behind_branch_is_primed_without_rewriting_head(
     assert record_path.exists()
 
 
-def test_dirty_author_work_is_preserved(tmp_path, monkeypatch):
-    repo, record_path, worktree = _worker(tmp_path, monkeypatch)
+def test_dirty_author_work_is_preserved(tmp_path, monkeypatch, _worker_seed):
+    repo, record_path, worktree = _worker(tmp_path, monkeypatch, _worker_seed)
     (worktree / "valuable.txt").write_text("keep\n", encoding="utf-8")
 
     result = _conclude(record_path, repo)
@@ -817,8 +816,8 @@ def test_dirty_author_work_is_preserved(tmp_path, monkeypatch):
     assert (worktree / "valuable.txt").read_text(encoding="utf-8") == "keep\n"
 
 
-def test_committed_author_work_is_preserved(tmp_path, monkeypatch):
-    repo, record_path, worktree = _worker(tmp_path, monkeypatch)
+def test_committed_author_work_is_preserved(tmp_path, monkeypatch, _worker_seed):
+    repo, record_path, worktree = _worker(tmp_path, monkeypatch, _worker_seed)
     (worktree / "valuable.txt").write_text("keep\n", encoding="utf-8")
     _git(worktree, "add", "valuable.txt")
     _git(worktree, "commit", "-m", "valuable work")
@@ -834,9 +833,9 @@ def test_committed_author_work_is_preserved(tmp_path, monkeypatch):
 
 def test_missing_checkout_with_committed_branch_is_preserved(
     tmp_path,
-    monkeypatch,
+    monkeypatch, _worker_seed,
 ):
-    repo, record_path, worktree = _worker(tmp_path, monkeypatch)
+    repo, record_path, worktree = _worker(tmp_path, monkeypatch, _worker_seed)
     (worktree / "valuable.txt").write_text("keep\n", encoding="utf-8")
     _git(worktree, "add", "valuable.txt")
     _git(worktree, "commit", "-m", "valuable work")
@@ -865,8 +864,8 @@ def test_missing_checkout_with_committed_branch_is_preserved(
     )
 
 
-def test_generated_overlay_is_preserved_as_dirty_work(tmp_path, monkeypatch):
-    repo, record_path, worktree = _worker(tmp_path, monkeypatch)
+def test_generated_overlay_is_preserved_as_dirty_work(tmp_path, monkeypatch, _worker_seed):
+    repo, record_path, worktree = _worker(tmp_path, monkeypatch, _worker_seed)
     overlay = worktree / ".github" / "copilot" / "settings.local.json"
     overlay.parent.mkdir(parents=True)
     managed = {
@@ -898,8 +897,8 @@ def test_generated_overlay_is_preserved_as_dirty_work(tmp_path, monkeypatch):
     assert record.session_entry("session-exact").state == "active"
 
 
-def test_repeated_conclusion_is_idempotent(tmp_path, monkeypatch):
-    repo, record_path, _worktree = _worker(tmp_path, monkeypatch)
+def test_repeated_conclusion_is_idempotent(tmp_path, monkeypatch, _worker_seed):
+    repo, record_path, _worktree = _worker(tmp_path, monkeypatch, _worker_seed)
 
     first = _conclude(record_path, repo)
     second = _conclude(record_path, repo)
@@ -912,9 +911,9 @@ def test_repeated_conclusion_is_idempotent(tmp_path, monkeypatch):
 @pytest.mark.guard
 def test_terminal_managed_record_rejects_new_session_activation(
     tmp_path,
-    monkeypatch,
+    monkeypatch, _worker_seed,
 ):
-    repo, record_path, _worktree = _worker(tmp_path, monkeypatch)
+    repo, record_path, _worktree = _worker(tmp_path, monkeypatch, _worker_seed)
     _conclude(record_path, repo)
     config = cli.cfg.Config(
         srcroot=str(tmp_path), machine="host", platform="linux", repo_name="demo",
@@ -945,8 +944,8 @@ def test_terminal_managed_record_rejects_new_session_activation(
         )
 
 
-def test_managed_gc_can_later_remove_primed_tree(tmp_path, monkeypatch):
-    repo, record_path, worktree = _worker(tmp_path, monkeypatch)
+def test_managed_gc_can_later_remove_primed_tree(tmp_path, monkeypatch, _worker_seed):
+    repo, record_path, worktree = _worker(tmp_path, monkeypatch, _worker_seed)
     _conclude(record_path, repo)
     config = cli.cfg.Config(
         srcroot=str(tmp_path), machine="host", platform="linux", repo_name="demo",
@@ -979,8 +978,8 @@ def test_managed_gc_can_later_remove_primed_tree(tmp_path, monkeypatch):
     assert not record_path.exists()
 
 
-def test_managed_gc_preserves_detached_head_commit(tmp_path, monkeypatch):
-    repo, record_path, worktree = _worker(tmp_path, monkeypatch)
+def test_managed_gc_preserves_detached_head_commit(tmp_path, monkeypatch, _worker_seed):
+    repo, record_path, worktree = _worker(tmp_path, monkeypatch, _worker_seed)
     _conclude(record_path, repo)
     detached = _git(worktree, "rev-parse", "HEAD")
     _git(worktree, "checkout", "--detach", detached)
@@ -1070,9 +1069,9 @@ def test_exact_tracking_lookup_rejects_cross_project_collision(
 
 def test_terminal_conclusion_rejects_embedded_identity_mismatch(
     tmp_path,
-    monkeypatch,
+    monkeypatch, _worker_seed,
 ):
-    repo, record_path, _worktree = _worker(tmp_path, monkeypatch)
+    repo, record_path, _worktree = _worker(tmp_path, monkeypatch, _worker_seed)
     mismatched = record_path.with_name("different-worker.yaml")
     record_path.rename(mismatched)
 
@@ -1158,10 +1157,10 @@ def test_cli_remove_is_idempotent_when_record_disappears_after_lookup(
 
 def test_cli_remove_is_idempotent_when_record_disappears_during_conclusion(
     tmp_path,
-    monkeypatch,
+    monkeypatch, _worker_seed,
     capfd,
 ):
-    repo, record_path, _worktree = _worker(tmp_path, monkeypatch)
+    repo, record_path, _worktree = _worker(tmp_path, monkeypatch, _worker_seed)
     config = types.SimpleNamespace(repo_name="demo")
     monkeypatch.setattr(
         session_tracking_cli,
@@ -1201,10 +1200,10 @@ def test_cli_remove_is_idempotent_when_record_disappears_during_conclusion(
 
 def test_cli_remove_runs_exact_managed_sweep_after_eligibility(
     tmp_path,
-    monkeypatch,
+    monkeypatch, _worker_seed,
     capfd,
 ):
-    repo, record_path, _worktree = _worker(tmp_path, monkeypatch)
+    repo, record_path, _worktree = _worker(tmp_path, monkeypatch, _worker_seed)
     config = types.SimpleNamespace(repo_name="demo")
     captured = {}
     monkeypatch.setattr(
@@ -1263,10 +1262,10 @@ def test_cli_remove_runs_exact_managed_sweep_after_eligibility(
 
 def test_cli_remove_surfaces_fresh_managed_sweep_skip(
     tmp_path,
-    monkeypatch,
+    monkeypatch, _worker_seed,
     capfd,
 ):
-    repo, record_path, _worktree = _worker(tmp_path, monkeypatch)
+    repo, record_path, _worktree = _worker(tmp_path, monkeypatch, _worker_seed)
     config = types.SimpleNamespace(repo_name="demo")
     monkeypatch.setattr(
         session_tracking_cli,
@@ -1320,10 +1319,10 @@ def test_cli_remove_surfaces_fresh_managed_sweep_skip(
 
 def test_cli_remove_accepts_concurrent_exact_removal(
     tmp_path,
-    monkeypatch,
+    monkeypatch, _worker_seed,
     capfd,
 ):
-    repo, record_path, _worktree = _worker(tmp_path, monkeypatch)
+    repo, record_path, _worktree = _worker(tmp_path, monkeypatch, _worker_seed)
     config = types.SimpleNamespace(repo_name="demo")
     monkeypatch.setattr(
         session_tracking_cli,
@@ -1598,8 +1597,8 @@ class TestReciprocalDisposal:
     unconditionally (a paired human/CLI conclusion, or an unmatched
     dispatch attempt, still preserves exactly as before)."""
 
-    def _harness(self, tmp_path, monkeypatch, *, pair_ref, pair_kind="worktree"):
-        repo, record_path, worktree = _worker(tmp_path, monkeypatch)
+    def _harness(self, tmp_path, monkeypatch, _worker_seed, *, pair_ref, pair_kind="worktree"):
+        repo, record_path, worktree = _worker(tmp_path, monkeypatch, _worker_seed)
         record = tracking.load_record(record_path)
         record.origin = "delegate"
         record.dispatch_attempt = tracking.DispatchAttempt(
@@ -1617,7 +1616,7 @@ class TestReciprocalDisposal:
         tracking.save_record(record, record_path)
         return repo, record_path, worktree
 
-    def test_concludes_both_halves_of_a_clean_pair(self, tmp_path, monkeypatch):
+    def test_concludes_both_halves_of_a_clean_pair(self, tmp_path, monkeypatch, _worker_seed):
         sibling, sibling_path, _sibling_worktree = _pair_sibling(
             tmp_path,
             monkeypatch,
@@ -1628,7 +1627,7 @@ class TestReciprocalDisposal:
         )
         repo, record_path, _worktree = self._harness(
             tmp_path,
-            monkeypatch,
+            monkeypatch, _worker_seed,
             pair_ref=tracking.format_claim_ref(
                 "host", "knowledge-proj", sibling.worktree_id,
             ),
@@ -1656,13 +1655,13 @@ class TestReciprocalDisposal:
         assert not sibling_record.is_paired
 
     @pytest.mark.parametrize("blocker", [None, "dirty", "live", "receipt", "record", "open-pr", "effort"])
-    def test_pair_progress_recovers_crash_after_sibling_unlink(self, tmp_path, monkeypatch, blocker):
+    def test_pair_progress_recovers_crash_after_sibling_unlink(self, tmp_path, monkeypatch, _worker_seed, blocker):
         sibling, sibling_path, sibling_worktree = _pair_sibling(
             tmp_path, monkeypatch, project="knowledge-proj", harness_machine="host",
             harness_project="demo", harness_worktree_id="worker-20260901-abcd",
         )
         repo, record_path, _ = self._harness(
-            tmp_path, monkeypatch,
+            tmp_path, monkeypatch, _worker_seed,
             pair_ref=tracking.format_claim_ref("host", "knowledge-proj", sibling.worktree_id),
         )
         original = tracking.save_record
@@ -1699,7 +1698,7 @@ class TestReciprocalDisposal:
         assert result["managed_gc_eligible"] is (blocker is None)
         assert tracking.load_record(record_path).is_paired is (blocker is not None)
 
-    def test_pair_progress_blocks_native_gc_until_primary_unlink(self, tmp_path, monkeypatch):
+    def test_pair_progress_blocks_native_gc_until_primary_unlink(self, tmp_path, monkeypatch, _worker_seed):
         from agent_worktrees import reap_cli
 
         project_config_loader = tc.cfg.load_project_config
@@ -1708,7 +1707,7 @@ class TestReciprocalDisposal:
             harness_project="demo", harness_worktree_id="worker-20260901-abcd",
         )
         repo, record_path, _ = self._harness(
-            tmp_path, monkeypatch,
+            tmp_path, monkeypatch, _worker_seed,
             pair_ref=tracking.format_claim_ref("host", "knowledge-proj", sibling.worktree_id),
         )
         original = tracking.save_record
@@ -1851,7 +1850,7 @@ class TestReciprocalDisposal:
         assert [path.read_bytes() for path in paths] == before
 
     @pytest.mark.parametrize("changed_half", ["primary", "sibling"])
-    def test_pair_gc_readback_detects_change_during_identity_loading(self, tmp_path, monkeypatch, changed_half):
+    def test_pair_gc_readback_detects_change_during_identity_loading(self, tmp_path, monkeypatch, _worker_seed, changed_half):
         from agent_worktrees import reap_cli
 
         sibling, sibling_path, sibling_worktree = _pair_sibling(
@@ -1859,7 +1858,7 @@ class TestReciprocalDisposal:
             harness_project="demo", harness_worktree_id="worker-20260901-abcd",
         )
         repo, record_path, _ = self._harness(
-            tmp_path, monkeypatch,
+            tmp_path, monkeypatch, _worker_seed,
             pair_ref=tracking.format_claim_ref("host", "knowledge-proj", sibling.worktree_id),
         )
         result = _conclude(record_path, repo, policy=tc.DISPATCH_ATTEMPT_POLICY,
@@ -1887,13 +1886,13 @@ class TestReciprocalDisposal:
         assert sibling_worktree.exists()
         assert {path: path.read_bytes() for path in paths} == {**before, target: changed}
 
-    def test_pair_progress_interrupted_receipt_publication_keeps_reciprocity(self, tmp_path, monkeypatch):
+    def test_pair_progress_interrupted_receipt_publication_keeps_reciprocity(self, tmp_path, monkeypatch, _worker_seed):
         sibling, sibling_path, _ = _pair_sibling(
             tmp_path, monkeypatch, project="knowledge-proj", harness_machine="host",
             harness_project="demo", harness_worktree_id="worker-20260901-abcd",
         )
         repo, record_path, _ = self._harness(
-            tmp_path, monkeypatch,
+            tmp_path, monkeypatch, _worker_seed,
             pair_ref=tracking.format_claim_ref("host", "knowledge-proj", sibling.worktree_id),
         )
         original = tc.terminal_pair_progress.publish
@@ -1912,13 +1911,13 @@ class TestReciprocalDisposal:
                            reservation_key="dispatch-task:task-1:1")
         assert result["managed_gc_eligible"] is True
 
-    def test_pair_progress_preserves_malformed_receipt_fields(self, tmp_path, monkeypatch):
+    def test_pair_progress_preserves_malformed_receipt_fields(self, tmp_path, monkeypatch, _worker_seed):
         sibling, sibling_path, _ = _pair_sibling(
             tmp_path, monkeypatch, project="knowledge-proj", harness_machine="host",
             harness_project="demo", harness_worktree_id="worker-20260901-abcd",
         )
         repo, record_path, _ = self._harness(
-            tmp_path, monkeypatch,
+            tmp_path, monkeypatch, _worker_seed,
             pair_ref=tracking.format_claim_ref("host", "knowledge-proj", sibling.worktree_id),
         )
         original = tracking.save_record
@@ -1948,13 +1947,13 @@ class TestReciprocalDisposal:
                 assert record_path.read_bytes() == primary_before
                 assert sibling_path.read_bytes() == sibling_before
 
-    def test_pair_progress_rejects_raw_pair_keys_after_unlink(self, tmp_path, monkeypatch):
+    def test_pair_progress_rejects_raw_pair_keys_after_unlink(self, tmp_path, monkeypatch, _worker_seed):
         sibling, sibling_path, _ = _pair_sibling(
             tmp_path, monkeypatch, project="knowledge-proj", harness_machine="host",
             harness_project="demo", harness_worktree_id="worker-20260901-abcd",
         )
         repo, record_path, _ = self._harness(
-            tmp_path, monkeypatch,
+            tmp_path, monkeypatch, _worker_seed,
             pair_ref=tracking.format_claim_ref("host", "knowledge-proj", sibling.worktree_id),
         )
         original = tracking.save_record
@@ -2063,7 +2062,7 @@ class TestReciprocalDisposal:
         assert len(before) == 3
         assert {path: path.read_bytes() for path in before} == before
 
-    def test_blocks_on_sibling_with_unpushed_commits(self, tmp_path, monkeypatch):
+    def test_blocks_on_sibling_with_unpushed_commits(self, tmp_path, monkeypatch, _worker_seed):
         """A sibling with no porcelain dirtiness but local-only commits ahead
         of its own upstream must still block -- exactly like the harness
         side's own ahead-count gate."""
@@ -2080,7 +2079,7 @@ class TestReciprocalDisposal:
         _git(sibling_worktree, "commit", "-m", "local-only work")
         repo, record_path, _worktree = self._harness(
             tmp_path,
-            monkeypatch,
+            monkeypatch, _worker_seed,
             pair_ref=tracking.format_claim_ref(
                 "host", "knowledge-proj", sibling.worktree_id,
             ),
@@ -2101,7 +2100,7 @@ class TestReciprocalDisposal:
         assert sibling_record.kind == "session"
 
     def test_conclude_pair_sibling_revalidates_full_identity_under_lock(
-        self, tmp_path, monkeypatch,
+        self, tmp_path, monkeypatch, _worker_seed,
     ):
         """Regression (Copilot review finding): `_conclude_pair_sibling`
         must re-run the FULL reciprocal-pair validation while holding the
@@ -2118,7 +2117,7 @@ class TestReciprocalDisposal:
         )
         repo, record_path, _worktree = self._harness(
             tmp_path,
-            monkeypatch,
+            monkeypatch, _worker_seed,
             pair_ref=tracking.format_claim_ref(
                 "host", "knowledge-proj", sibling.worktree_id,
             ),
@@ -2146,7 +2145,7 @@ class TestReciprocalDisposal:
         sibling_record = tracking.load_record(sibling_path)
         assert sibling_record.kind == "session"
 
-    def test_blocks_on_dirty_knowledge_sibling(self, tmp_path, monkeypatch):
+    def test_blocks_on_dirty_knowledge_sibling(self, tmp_path, monkeypatch, _worker_seed):
         sibling, sibling_path, _sibling_worktree = _pair_sibling(
             tmp_path,
             monkeypatch,
@@ -2158,7 +2157,7 @@ class TestReciprocalDisposal:
         )
         repo, record_path, _worktree = self._harness(
             tmp_path,
-            monkeypatch,
+            monkeypatch, _worker_seed,
             pair_ref=tracking.format_claim_ref(
                 "host", "knowledge-proj", sibling.worktree_id,
             ),
@@ -2178,13 +2177,13 @@ class TestReciprocalDisposal:
         sibling_record = tracking.load_record(sibling_path)
         assert sibling_record.kind == "session"
 
-    def test_unresolvable_sibling_blocks_the_whole_pair(self, tmp_path, monkeypatch):
+    def test_unresolvable_sibling_blocks_the_whole_pair(self, tmp_path, monkeypatch, _worker_seed):
         monkeypatch.setattr(
             tc.cfg, "project_dir", lambda name=None: tmp_path / f".{name}",
         )
         repo, record_path, _worktree = self._harness(
             tmp_path,
-            monkeypatch,
+            monkeypatch, _worker_seed,
             pair_ref=tracking.format_claim_ref(
                 "host", "knowledge-proj", "does-not-exist",
             ),
@@ -2200,7 +2199,7 @@ class TestReciprocalDisposal:
         assert result["action"] == "skipped"
         assert result["reason"] == "pair-sibling-unresolved"
 
-    def test_non_reciprocal_link_blocks_the_whole_pair(self, tmp_path, monkeypatch):
+    def test_non_reciprocal_link_blocks_the_whole_pair(self, tmp_path, monkeypatch, _worker_seed):
         """Regression (Copilot review finding): a record whose `pair_ref`
         resolves to an EXISTING worktree that is not genuinely its
         reciprocal sibling (e.g. a stale/malformed link pointing at some
@@ -2216,7 +2215,7 @@ class TestReciprocalDisposal:
         )
         repo, record_path, _worktree = self._harness(
             tmp_path,
-            monkeypatch,
+            monkeypatch, _worker_seed,
             pair_ref=tracking.format_claim_ref(
                 "host", "knowledge-proj", unrelated.worktree_id,
             ),
@@ -2237,7 +2236,7 @@ class TestReciprocalDisposal:
         assert unrelated_record.kind == "session"
 
     def test_disposable_cli_policy_still_blocks_unconditionally_on_pairing(
-        self, tmp_path, monkeypatch,
+        self, tmp_path, monkeypatch, _worker_seed,
     ):
         """The reciprocal-disposal fix is scoped to dispatch-attempt
         conclusions only -- a plain CLI/human conclusion of a paired
@@ -2251,7 +2250,7 @@ class TestReciprocalDisposal:
             harness_project="demo",
             harness_worktree_id="worker-20260901-abcd",
         )
-        repo, record_path, _worktree = _worker(tmp_path, monkeypatch)
+        repo, record_path, _worktree = _worker(tmp_path, monkeypatch, _worker_seed)
         record = tracking.load_record(record_path)
         record.pair_id = "pair1"
         record.pair_role = "harness"
@@ -2269,7 +2268,7 @@ class TestReciprocalDisposal:
         assert harness_record.kind == "session"
 
     def test_unit_pair_clearance_is_scoped_to_dispatch_attempt_policy(
-        self, tmp_path, monkeypatch,
+        self, tmp_path, monkeypatch, _worker_seed,
     ):
         """Direct unit check: `_dispatch_pair_clearance` must return
         ``(False, None)`` -- deferring entirely to `_preservation_reason`'s
@@ -2287,7 +2286,7 @@ class TestReciprocalDisposal:
         )
         repo, record_path, _worktree = self._harness(
             tmp_path,
-            monkeypatch,
+            monkeypatch, _worker_seed,
             pair_ref=tracking.format_claim_ref(
                 "host", "knowledge-proj", sibling.worktree_id,
             ),
@@ -2306,7 +2305,7 @@ class TestReciprocalDisposal:
             record, policy=tc.DISPOSABLE_CLI_POLICY, pair_clear=pair_clear,
         ) == "outstanding-obligations"
 
-    def test_blocks_on_sibling_active_lifecycle_head(self, tmp_path, monkeypatch):
+    def test_blocks_on_sibling_active_lifecycle_head(self, tmp_path, monkeypatch, _worker_seed):
         """A sibling with an ENDED-but-still-resumable tracked lifecycle
         head must block -- independent of `_session_is_live`, which only
         detects a currently-running process."""
@@ -2328,7 +2327,7 @@ class TestReciprocalDisposal:
         tracking.save_record(sibling_record, sibling_path)
         repo, record_path, _worktree = self._harness(
             tmp_path,
-            monkeypatch,
+            monkeypatch, _worker_seed,
             pair_ref=tracking.format_claim_ref(
                 "host", "knowledge-proj", sibling.worktree_id,
             ),
@@ -2347,7 +2346,7 @@ class TestReciprocalDisposal:
         assert harness_record.kind == "session"
 
     def test_blocks_on_missing_sibling_checkout_with_unpushed_branch(
-        self, tmp_path, monkeypatch,
+        self, tmp_path, monkeypatch, _worker_seed,
     ):
         """Regression (Copilot review finding): even when the sibling's own
         worktree directory is entirely gone, its branch may still exist
@@ -2371,7 +2370,7 @@ class TestReciprocalDisposal:
 
         repo, record_path, _worktree = self._harness(
             tmp_path,
-            monkeypatch,
+            monkeypatch, _worker_seed,
             pair_ref=tracking.format_claim_ref(
                 "host", "knowledge-proj", sibling.worktree_id,
             ),
@@ -2390,7 +2389,7 @@ class TestReciprocalDisposal:
         assert harness_record.kind == "session"
 
     def test_anchor_pair_concludes_harness_and_discharges_link_only(
-        self, tmp_path, monkeypatch,
+        self, tmp_path, monkeypatch, _worker_seed,
     ):
         """An anchor-kind pair (a non-worktree-class/singleton knowledge
         repo) has no disposable sibling worktree at all -- only the
@@ -2398,7 +2397,7 @@ class TestReciprocalDisposal:
         (nonexistent, shared) anchor is never touched."""
         repo, record_path, _worktree = self._harness(
             tmp_path,
-            monkeypatch,
+            monkeypatch, _worker_seed,
             pair_ref=tracking.format_claim_ref("host", "knowledge-proj", "anchor"),
             pair_kind="anchor",
         )

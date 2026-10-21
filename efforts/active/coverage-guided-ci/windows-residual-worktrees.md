@@ -87,7 +87,43 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Admitted fixture-semantic batches
 
+### B-TERMINAL private-copy consumers
+
+Baseline: the actual #7678 foundation merge. `_worker` now returns
+`_copy_worker` output from the immutable session seed. Explicitly
+forward that fixture through 52 consumer/helper functions, including
+reciprocal-disposal `_harness`. The copied anchor, origin, linked
+checkout and fresh lifecycle record remain private to each case.
+Every actual live-session, foreign-head, dirty-work, claim, finality,
+managed-GC and reciprocal-disposal decision remains per-case.
+
+All old test names, decorators, assertions and body structure remain;
+normalizing only the added fixture parameter/argument makes the 54
+other existing top-level functions/classes AST-identical. The two
+foundation isolation cases are literally unchanged. No external test
+module imports this module, and no production behavior is changed.
+
+Complete native Windows terminal-conclusion module: 142 passed,
+zero skips, 76.06 seconds pytest / 89.67 preparation-cleanup inclusive.
+Exactly two work-stealing workers retain the original 30-second
+item watchdog, all existing marks/resource ceilings and the
+240-second diagnostic group. Functional integration only, not
+quiet-host, whole-suite or repeated same-head qualification.
+
+This below-altitude test setup conversion affects only this ledger's
+documentation. Commands, configuration, installation, architecture
+and runtime contracts remain unchanged; clean-room provisioning and
+external-venue lanes do not apply. Other B/N and S/F/G/P/R/A
+contracts remain separately owned.
+
 ### B-TERMINAL seed/copy foundation
+
+Actual disposition: #7678 merged as
+`e4f0a55052ab6ceb2282f37165756a0817da9ac6`; full Copilot review
+`5607103580` approved exact head
+`32185bb49bd3372276717170d6b94f743fef02d7`. Overview, inline/general
+channels and threads had no findings; required CI was green. The child
+worktree is finalized.
 
 Baseline: the actual #7674 merge. Split the existing `_worker` helper
 into a template-free Git builder and fresh record setup. Its old
