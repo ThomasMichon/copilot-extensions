@@ -103,6 +103,10 @@ or detached spawn. A refusal retains its diagnostic; an older engine without
 the capability or a malformed decision warns and skips runtime publication.
 Independent bootstrap and non-publication actions still run. This does not
 replace installer-side ownership checks or grant explicit management authority.
+Admission preserves non-ASCII installation identity through a scoped UTF-8 pipe
+on PowerShell, restoring the caller's encoding afterward. Bash uses one decoded
+staged-status snapshot for the check, installer root and child environment;
+a peer replacing the status file cannot mix two staged actions.
 
 The native maintenance sinks share one physical-line envelope with the
 Python updater: `[HH:mm:ss.fffZ] scope state message [elapsed Ns]` or a

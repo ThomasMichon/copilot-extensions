@@ -585,11 +585,15 @@ function Test-UpdateAdmission {
     if (-not $Update -or $Update.phase -ne 'runtime') { return $true }
     $savedErrorPreference = $ErrorActionPreference
     $savedNativePreference = $PSNativeCommandUseErrorActionPreference
+    $savedOutputEncoding = $OutputEncoding
+    $savedConsoleEncoding = [Console]::OutputEncoding
     try {
         $ErrorActionPreference = 'Continue'
         $PSNativeCommandUseErrorActionPreference = $false
+        $OutputEncoding = [Text.UTF8Encoding]::new($false)
+        [Console]::OutputEncoding = $OutputEncoding
         $reply = ($Update | ConvertTo-Json -Depth 20 -Compress) |
-            & $VenvPython -m agent_worktrees reconcile-plugins --check-update 2>&1
+            & $VenvPython -X utf8 -m agent_worktrees reconcile-plugins --check-update 2>&1
         $code = $LASTEXITCODE
         $decision = ($reply -join "`n") | ConvertFrom-Json -ErrorAction Stop
         foreach ($diagnostic in @($decision.diagnostics)) {
@@ -605,6 +609,8 @@ function Test-UpdateAdmission {
     } finally {
         $ErrorActionPreference = $savedErrorPreference
         $PSNativeCommandUseErrorActionPreference = $savedNativePreference
+        $OutputEncoding = $savedOutputEncoding
+        [Console]::OutputEncoding = $savedConsoleEncoding
     }
 }
 

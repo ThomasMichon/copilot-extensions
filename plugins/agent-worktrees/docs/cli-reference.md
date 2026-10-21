@@ -1197,7 +1197,8 @@ not runtime publication.
 Native launch wrappers use `reconcile-plugins --check-update` with one runtime
 action on JSON stdin immediately before execution. It returns
 `{"allowed": true, "diagnostics": []}` with exit 0, or `allowed: false`
-and recovery diagnostics with exit 3. It never discovers a repository,
+and recovery diagnostics with exit 3. It bypasses project resolution and never
+discovers a repository,
 replans or executes the action. Cached payload/root/context changes are refused
 through the same execution admission used by `--apply`.
 An older standalone payload without policy needs no new policy helper.

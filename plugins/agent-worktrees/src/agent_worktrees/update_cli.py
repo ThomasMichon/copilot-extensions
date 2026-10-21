@@ -793,6 +793,10 @@ def cmd_reconcile_plugins(args: argparse.Namespace) -> int:
                 or not isinstance(update.get("service"), str)
                 or not update["service"]
                 or not isinstance(update.get("environment", {}), dict)
+                or any(
+                    not isinstance(key, str) or not key or not isinstance(value, str)
+                    for key, value in update.get("environment", {}).items()
+                )
             ):
                 raise ValueError("Expected one runtime action with service and environment metadata.")
             diagnostic = execution_diagnostic(update)

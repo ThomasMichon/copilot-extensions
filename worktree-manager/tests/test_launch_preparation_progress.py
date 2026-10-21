@@ -229,12 +229,14 @@ def test_native_maintenance_reports_outcomes_and_replans(tmp_path, shell, curren
     independent_script.write_text(
         f"from pathlib import Path\nPath({str(independent)!r}).write_text('retained')\n",
     )
+    runtime_root = tmp_path / "runtime caf\u00e9"
     (package / "__main__.py").write_text(
         "import json,os,sys\nfrom pathlib import Path\n"
         f"state=Path({str(state)!r})\n"
         "if '--check-update' in sys.argv:\n"
         "    update=json.load(sys.stdin)\n"
         "    assert update['phase']=='runtime'\n"
+        f"    assert update['runtime_root']=={str(runtime_root)!r}, 'runtime identity was recoded'\n"
         f"    admission=Path({str(policy)!r}).read_text()\n"
         "    if admission=='old-engine':\n"
         "        print('unrecognized arguments: --check-update',file=sys.stderr); sys.exit(2)\n"
@@ -254,6 +256,7 @@ def test_native_maintenance_reports_outcomes_and_replans(tmp_path, shell, curren
         "unset_environment=['MAINTENANCE_UNSET']) for label,args in "
         f"[('failed',argv+['7',{literal!r}]),"
         f"('spawn-error',[{str(tmp_path / 'missing-executable')!r}]),('success',argv+['0',{literal!r}])]]\n"
+        f"for update in updates: update['runtime_root']={str(runtime_root)!r}\n"
         "updates[2]['service']='agent-worktrees'; updates[2].pop('phase')\n"
         f"updates.append(dict(service='repository-bootstrap',argv=[sys.executable,{str(independent_script)!r}]))\n"
         f"print(json.dumps(dict(action={('self-update' if boundary == 'bootstrap' else 'reconcile')!r} "
@@ -282,6 +285,7 @@ def test_native_maintenance_reports_outcomes_and_replans(tmp_path, shell, curren
             block = text[start:text.index("\n}\n", start)]
         script = "\n".join([
             "$ErrorActionPreference='Stop'; $PSNativeCommandUseErrorActionPreference=$true; $WithReconcile=$true",
+            "$OutputEncoding=[Text.Encoding]::ASCII; $initialConsoleEncoding=[Console]::OutputEncoding",
             "$script:LaunchTimer=[Diagnostics.Stopwatch]::StartNew()",
             formatter,
             helpers,
@@ -294,6 +298,7 @@ def test_native_maintenance_reports_outcomes_and_replans(tmp_path, shell, curren
             "if($env:MAINTENANCE_FIXTURE -ne 'parent' -or $env:MAINTENANCE_UNSET -ne 'parent'){throw 'environment leaked'}",
             "if($ErrorActionPreference -ne 'Stop'){throw 'error preference leaked'}",
             "if($PSNativeCommandUseErrorActionPreference -ne $true){throw 'native error preference leaked'}",
+            "if($OutputEncoding.CodePage -ne 20127 -or [Console]::OutputEncoding.CodePage -ne $initialConsoleEncoding.CodePage){throw 'encoding leaked'}",
         ])
         fixture = tmp_path / "maintenance.ps1"
         fixture.write_text(script)
@@ -404,11 +409,14 @@ def test_blocking_marketplace_installer_keeps_native_frames_and_exit(tmp_path, s
     package.mkdir()
     (package / "__init__.py").write_text("")
     marker = tmp_path / "executed"
+    stage = tmp_path / "home" / ".agent-worktrees" / "updater-status.json"
+    runtime_root = tmp_path / "runtime root caf\u00e9"
     (package / "__main__.py").write_text(
         "import json,sys\n"
         "if '--check-update' in sys.argv:\n"
         "    update=json.load(sys.stdin)\n"
         "    assert update['phase']=='runtime' and update['service']=='agent-worktrees'\n"
+        f"    assert update['runtime_root']=={str(runtime_root)!r}, 'runtime identity was recoded'\n"
         f"    admission={admission!r}\n"
         "    if admission=='old-engine':\n"
         "        print('unrecognized arguments: --check-update',file=sys.stderr); sys.exit(2)\n"
@@ -417,15 +425,16 @@ def test_blocking_marketplace_installer_keeps_native_frames_and_exit(tmp_path, s
         "    denied=admission=='managed'\n"
         "    print(json.dumps(dict(allowed=not denied,diagnostics=[dict("
         "reason='deployment-managed',message='policy changed after staging')] if denied else [])))\n"
+        f"    if not denied: __import__('pathlib').Path({str(stage)!r}).write_text(json.dumps(dict("
+        "stage_done=True,plugin_changed=True,plugin_dir='peer-payload',runtime_root='peer-root',"
+        "environment={'MAINTENANCE_FIXTURE':'peer'},unset_environment=[])))\n"
         "    sys.exit(3 if denied else 0)\n"
         "print('{\"action\":\"continue\"}')\n",
     )
     plugin = tmp_path / "installed plugin"
     scripts = plugin / "scripts"
     scripts.mkdir(parents=True)
-    runtime_root = tmp_path / "runtime root"
     canonical = "[12:00:01.120Z] update/nested running preserved detail [elapsed 3.1s]"
-    stage = tmp_path / "home" / ".agent-worktrees" / "updater-status.json"
     stage.parent.mkdir(parents=True)
     stage.write_text(json.dumps(dict(
         stage_done=True, plugin_changed=True, plugin_dir=str(plugin),
@@ -461,6 +470,7 @@ def test_blocking_marketplace_installer_keeps_native_frames_and_exit(tmp_path, s
         )
         script = "\n".join([
             "$ErrorActionPreference='Stop'; $PSNativeCommandUseErrorActionPreference=$true",
+            "$OutputEncoding=[Text.Encoding]::ASCII; $initialConsoleEncoding=[Console]::OutputEncoding",
             "$script:LaunchTimer=[Diagnostics.Stopwatch]::StartNew()",
             f"$script:SetupLog='{log}'; $script:ShowLaunchStatus=$false",
             "$script:UpdateApplied=$false; $script:LaunchProject=''; $noUpdate=$false",
@@ -474,6 +484,7 @@ def test_blocking_marketplace_installer_keeps_native_frames_and_exit(tmp_path, s
             "Invoke-UpdateApply",
             "if($env:MAINTENANCE_FIXTURE -ne 'parent' -or $env:MAINTENANCE_UNSET -ne 'parent'){throw 'environment leaked'}",
             "if($ErrorActionPreference -ne 'Stop' -or -not $PSNativeCommandUseErrorActionPreference){throw 'preference leaked'}",
+            "if($OutputEncoding.CodePage -ne 20127 -or [Console]::OutputEncoding.CodePage -ne $initialConsoleEncoding.CodePage){throw 'encoding leaked'}",
         ])
         fixture = tmp_path / "blocking.ps1"
         fixture.write_text(script, encoding="utf-8-sig")

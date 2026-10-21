@@ -117,8 +117,10 @@ def _is_no_project_invocation(args_list: list[str]) -> bool:
         # still auto-resolves its target from CWD via `cfg.active_project()`,
         # so it keeps needing ordinary project resolution here.
         return True
-    if command == "reconcile-plugins" and any(
-        arg == "--repo" or arg.startswith("--repo=") for arg in args_list[1:]
+    if command == "reconcile-plugins" and (
+        "--check-update" in args_list[1:] or any(
+            arg == "--repo" or arg.startswith("--repo=") for arg in args_list[1:]
+        )
     ):
         return True
     return command == "config-root" and any(

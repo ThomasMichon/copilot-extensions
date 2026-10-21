@@ -525,12 +525,12 @@ invoke_update_apply() {
     _start_setup_progress
 
     local status_file="$HOME/.agent-worktrees/updater-status.json"
-    local stage_done="" plugin_changed="" skipped="" plugin_dir="" runtime_root="" runtime_apply_blocked=""
+    local stage_done="" plugin_changed="" skipped="" plugin_dir="" runtime_root="" runtime_apply_blocked="" stage_snapshot=""
 
     _parse_stage_status() {
         [[ -f "$status_file" ]] || return 0
         local _stage_key
-        for _stage_key in stage_done plugin_changed skipped plugin_dir runtime_root runtime_apply_blocked; do
+        for _stage_key in stage_done plugin_changed skipped plugin_dir runtime_root runtime_apply_blocked stage_snapshot; do
             if ! IFS= read -r -d '' "$_stage_key"; then
                 stage_done=""
                 setup_log WARN 'Plugin-update stage metadata could not be decoded'
@@ -550,6 +550,7 @@ for value in [
     str(d.get('plugin_dir', '')),
     str(d.get('runtime_root', '')),
     str(d.get('runtime_apply_blocked', '')),
+    json.dumps(d),
 ]:
     sys.stdout.write(value + '\0')
 " "$status_file" 2>/dev/null
@@ -583,12 +584,12 @@ for value in [
             local _stage_update
             if ! _stage_update=$("$PYTHON" -c '
 import json, sys
-status = json.load(open(sys.argv[1], encoding="utf-8"))
+status = json.load(sys.stdin)
 print(json.dumps(dict(
     phase="runtime", service="agent-worktrees", payload_root=status.get("plugin_dir"),
     runtime_root=status.get("runtime_root"), environment=status.get("environment", {}),
 )))
-' "$status_file") || ! check_update_admission "$_stage_update"; then
+' <<< "$stage_snapshot") || ! check_update_admission "$_stage_update"; then
                 setup_log WARN 'Staged runtime execution refused; continuing with the existing runtime'
                 plugin_changed="False"
             fi
@@ -596,7 +597,7 @@ print(json.dumps(dict(
             local _stage_env=()
             if ! _stage_env_text=$("$PYTHON" -c "
 import sys, json
-status = json.load(open(sys.argv[1], encoding='utf-8'))
+status = json.load(sys.stdin)
 unset = status.get('unset_environment', [])
 environment = status.get('environment', {})
 if (
@@ -614,7 +615,7 @@ for key in unset:
     print(key)
 for key, value in environment.items():
     print(f'{key}={value}')
-" "$status_file" 2>/dev/null); then
+" <<< "$stage_snapshot" 2>/dev/null); then
                 setup_log WARN 'Plugin installer environment metadata is invalid -- skipping'
                 plugin_changed="False"
             fi

@@ -205,7 +205,8 @@ def test_native_execution_cli_rechecks_cached_plan(
 @pytest.mark.parametrize(
     "raw",
     ["not json", "[]", "null", '{"phase":"payload","service":"agent-index"}',
-     '{"phase":"runtime","service":"agent-index","environment":null}'],
+     '{"phase":"runtime","service":"agent-index","environment":null}',
+     '{"phase":"runtime","service":"agent-index","environment":{"COPILOT_EXTENSIONS_CONTEXT":1}}'],
 )
 def test_native_execution_cli_refuses_invalid_input(
     raw: str, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
@@ -238,6 +239,31 @@ def test_native_execution_cli_refuses_changed_installation(
     report = json.loads(capsys.readouterr().out)
     assert report["allowed"] is False
     assert "changed; rebuild the plan" in report["diagnostics"][0]["message"]
+
+
+@pytest.mark.parametrize("managed", [False, True])
+def test_native_execution_front_door_needs_no_project(
+    deployment: Any, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str], managed: bool,
+) -> None:
+    from agent_worktrees import __main__ as main
+
+    step = reconcile.build_plan(
+        deployment.repo, machine="test", cache={}, save=False,
+    )["updates"][0]
+    if managed:
+        deployment.policy("managed")
+    main.cfg.set_active_project(None)
+    monkeypatch.delenv("WORKTREE_PROJECT", raising=False)
+    monkeypatch.chdir(deployment.home)
+    monkeypatch.setattr(
+        main, "_resolve_active_project",
+        lambda project: pytest.fail("Execution admission tried to resolve a project"),
+    )
+    monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(step)))
+    assert main.main(["reconcile-plugins", "--check-update"]) == (3 if managed else 0)
+    report = json.loads(capsys.readouterr().out)
+    assert report["allowed"] is not managed
 
 
 @pytest.mark.parametrize("phase", ["payload", "uninstall"])
