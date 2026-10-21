@@ -401,3 +401,48 @@ Canonical contract: [README.md](README.md).
   assigned, and the next oldest cohort is being supplied. The effort remains
   Active. No product implementation, tests, native probes, deployment or live
   claim/process/service changes were made.
+
+## 2026-10-21 - Batches nineteen and twenty, 400 original issues reviewed
+
+- The complete paginated census at 12:08 UTC records **1,243 open issues**:
+  1,241 original-cohort issues and inflow #7556/#7587. **400 distinct originals
+  are reviewed; 216 were closed by this campaign**. With the unrelated #5610
+  closure and two inflow issues, the live net reduction is 215. No campaign
+  closure was observed reopened; the fixed checkpoint remains at most 729.
+- Completed finite scopes: #2720's non-fatal missing-Docker initialization
+  guard; #2795's explicitly accepted recovery-guidance alternative; #2924's
+  isolated ensure-daemon fixture; #2947's substantive client/queue splits; and
+  #2961's exact home/registry fixture alignment. These do not claim fresh
+  execution, whole-suite success, installed rollout or broader parent completion.
+- Transfers: #2726 to #2729; #2730 to #2805; #2749 to #1918; #2755 to #5791;
+  #2876 to #2801; #2878 to #2885; and #2881 to #2700. Complete checklists were
+  appended and read back before closure, preserving every canonical body.
+- #1918's assigned owner and held-attempt recovery obligations remain unchanged.
+  #2749 is an existing failed-attempt allocation subcase, not an expanded
+  cleanup claim. Missing handles or apparently pristine allocations cannot
+  authorize removal, lease expiry or reset of a held responsibility.
+- #5791 retains the entire inherited #330 stale/rejected-credential contract
+  plus short/qualified-name parity. #3050's lookup repair does not fix execution
+  under ambient credentials after an explicitly selected account cannot mint
+  one. Explicit identity and derived-owner compatibility remain distinct.
+- #2801 retains all-state claimed/created age separately from per-state
+  duration, activity/liveness and Actions-agent information. #2885 retains the
+  full clarification attention/query contract and accepted general-session
+  chat/elicitation direction, not only a permanent card flag. #2700 retains the
+  entire checkout-free ADO lifecycle, policy/build/thread and reviewer-command
+  matrix; explicit status and foreign creation are bounded implementation credit.
+- #2795 closes through its original procedural alternative, not an assertion of
+  globally single-successor spawning. #912's non-expiring pickup and #6106's
+  independent ownership remain intact. Assigned #2847 and #2882 remain open;
+  delivered plan/vision text does not waive their ownership acknowledgement.
+- Retained outcomes include full Codespaces lifecycle/takeover and installed-tree
+  publication safety; cross-layer supervisor configuration; actual PR-ground-
+  truth goal reconciliation; pending cleanup diagnosis; blank-mux plus process
+  ownership; source hoisting collisions; the complete installer freshness audit;
+  hosted feed/SSH/GPU validation; real inline review postback; and ordinary
+  terminal-PR reuse. Narrow mitigations were credited without replacing native
+  gates, discarding an idea or accepting unknown evidence as success.
+- Batches twenty-one through twenty-four are supplied for disjoint read-only
+  research, with completed proposals undergoing chronological adjudication.
+  The effort remains Active. No product implementation, tests, native probes,
+  deployment or live claim/process/service changes were made.
