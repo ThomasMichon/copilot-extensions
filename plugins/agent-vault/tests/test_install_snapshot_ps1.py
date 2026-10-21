@@ -638,6 +638,7 @@ def provisioned_snapshot(stamped_snapshot):
             check=False,
         )
         assert provision.returncode == 0, provision.stdout + provision.stderr
+        assert "Releasing legacy .venv" not in provision.stdout
     else:
         provision = subprocess.run(
             [

@@ -538,6 +538,57 @@ function Write-DeployManifest {
     Write-Ok "Deploy manifest written (source: $kind)"
 }
 
+function Publish-LegacySnapshotSource {
+    param(
+        [Parameter(Mandatory)][string]$SnapshotDir,
+        [Parameter(Mandatory)][string]$HelperDirectory,
+        [Parameter(Mandatory)][string]$PayloadRoot,
+        [Parameter(Mandatory)][string]$PluginId,
+        [Parameter(Mandatory)][string]$RuntimeRoot,
+        [Parameter(Mandatory)][string]$ProjectRoot
+    )
+    if ($env:COPILOT_EXTENSIONS_CONTEXT) { return }
+    $helper = Join-Path $HelperDirectory 'installation-context\installation-context.ps1'
+    $resolved = @(& $helper -Action resolve -PayloadRoot $PayloadRoot `
+        -PluginId $PluginId -ProjectRoot $ProjectRoot)
+    if ($LASTEXITCODE -ne 0) {
+        if (Test-Path -LiteralPath (Join-Path $RuntimeRoot 'runtime-deployment.json')) {
+            throw 'Cannot preserve canonical snapshot source under an explicit deployment policy.'
+        }
+        Write-Warning 'Snapshot has no canonical source evidence; explicit deployment ownership will require repair.'
+        return
+    }
+    $resolution = ($resolved -join "`n") | ConvertFrom-Json -ErrorAction Stop
+    $receipt = Join-Path $SnapshotDir 'snapshot-provenance.json'
+    if (Test-Path -LiteralPath $receipt) {
+        $entry = Get-Item -LiteralPath $receipt -Force
+        if ($entry.PSIsContainer -or ($entry.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+            throw 'Snapshot source must be an ordinary file.'
+        }
+        $previous = Get-Content -LiteralPath $receipt -Raw | ConvertFrom-Json -ErrorAction Stop
+        if ($previous.schema -cne 'copilot-extensions.legacy-snapshot-source' -or
+            ($previous.version -isnot [int] -and $previous.version -isnot [long]) -or
+            $previous.version -ne 1 -or
+            $previous.resolution.sourceFingerprint -cne $resolution.sourceFingerprint -or
+            $previous.resolution.pluginId -cne $resolution.pluginId) {
+            throw 'Existing snapshot source belongs to another owner or is invalid.'
+        }
+        return
+    }
+    $document = [ordered]@{
+        schema = 'copilot-extensions.legacy-snapshot-source'
+        version = 1
+        resolution = $resolution
+    } | ConvertTo-Json -Depth 30
+    $temporary = Join-Path $SnapshotDir ('.source-provenance-' + [guid]::NewGuid().ToString('N'))
+    try {
+        [IO.File]::WriteAllText($temporary, $document, [Text.UTF8Encoding]::new($false))
+        [IO.File]::Move($temporary, $receipt)
+    } finally {
+        if ([IO.File]::Exists($temporary)) { [IO.File]::Delete($temporary) }
+    }
+}
+
 function Write-SimpleBinstub {
     param(
         [Parameter(Mandatory)][string]$CommandName,
@@ -574,6 +625,23 @@ function Write-SimpleBinstub {
             throw "Binstub resolver source is unavailable: $source"
         }
     }
+    if ($ResolverPs1Source -and (Test-Path -LiteralPath (Join-Path $RuntimeRoot 'payload-dir') -PathType Leaf)) {
+        $snapshot = ([IO.File]::ReadAllText((Join-Path $RuntimeRoot 'payload-dir'))).Trim()
+        $snapshotParent = [IO.Path]::GetFullPath((Join-Path $RuntimeRoot 'snapshots')) +
+            [IO.Path]::DirectorySeparatorChar
+        if ([IO.Path]::GetFullPath($snapshot).StartsWith($snapshotParent, [StringComparison]::OrdinalIgnoreCase)) {
+            $helperDirectory = Split-Path -Parent $ResolverPs1Source
+            $sourcePayload = if ($env:COPILOT_PLUGIN_STAGED_FROM) {
+                $env:COPILOT_PLUGIN_STAGED_FROM
+            } else { Split-Path -Parent $helperDirectory }
+            $sourceProject = if ($env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT) {
+                $env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT
+            } else { (Get-Location).ProviderPath }
+            Publish-LegacySnapshotSource -SnapshotDir $snapshot -HelperDirectory $helperDirectory `
+                -PayloadRoot $sourcePayload -PluginId $CommandName -RuntimeRoot $RuntimeRoot `
+                -ProjectRoot $sourceProject
+        }
+    }
     if (-not (Test-Path $LocalBin)) { New-Item -ItemType Directory -Path $LocalBin -Force -ErrorAction Stop | Out-Null }
     if (-not (Test-Path $InstallBinDir)) { New-Item -ItemType Directory -Path $InstallBinDir -Force -ErrorAction Stop | Out-Null }
     if ($ResolverPs1Source) {
@@ -599,14 +667,36 @@ function Write-SimpleBinstub {
 `$env:PYTHONUTF8 = '1'
 `$_root = '$runtimeRootLiteral'
 `$_resolver = Join-Path `$_root 'bin\resolve-runtime.ps1'
-function _Resolve-Py {
+if (-not (Test-Path -LiteralPath `$_resolver -PathType Leaf) -or
+    -not (Select-String -LiteralPath `$_resolver -SimpleMatch '# Trace contract: normal/read-only/ready-v1' -Quiet)) {
+    [Console]::Error.WriteLine('[$commandLiteral] read-only runtime resolver is unavailable. Re-enable/update the plugin, then retry.')
+    exit 126
+}
+function _Resolve-Py([string]`$TraceMode = 'ready') {
     `$AgentRtPy = `$null
-    if (Test-Path -LiteralPath `$_resolver) { `$env:AGENT_RT_ROOT = `$_root; . `$_resolver }
+    if (Test-Path -LiteralPath `$_resolver) { `$env:AGENT_RT_ROOT = `$_root; . `$_resolver -TraceMode `$TraceMode }
     return `$AgentRtPy
 }
 `$_py = _Resolve-Py
 if (`$_py) { & `$_py -m $moduleLiteral @args; exit `$LASTEXITCODE }
 if (`$env:$NoSelfProvisionEnv) { [Console]::Error.WriteLine('[$commandLiteral] runtime not provisioned ($NoSelfProvisionEnv set).'); exit 1 }
+`$_snap = ''
+try { `$_snap = ([IO.File]::ReadAllText((Join-Path `$_root 'payload-dir'))).Trim() } catch {}
+`$_inst = if (`$_snap) { Join-Path `$_snap '$snapshotInstallerLiteral' } else { '' }
+if (-not (`$_inst -and (Test-Path -LiteralPath `$_inst -PathType Leaf))) {
+    [Console]::Error.WriteLine("[$commandLiteral] cannot self-provision: owning snapshot installer unavailable: `$_inst")
+    exit 127
+}
+`$_probe = Join-Path `$_snap 'scripts\installation-context\plugin-publication-probe.ps1'
+if (-not (Test-Path -LiteralPath `$_probe -PathType Leaf)) {
+    [Console]::Error.WriteLine('[$commandLiteral] Runtime publication refused: snapshot admission helper is unavailable. Re-enable/update the plugin, then retry.')
+    exit 126
+}
+`$global:LASTEXITCODE = 0
+& `$_probe -PayloadRoot `$_snap -PluginId '$commandLiteral' -LegacyRoot `$_root
+if (`$LASTEXITCODE -ne 0) { exit `$LASTEXITCODE }
+`$_py = _Resolve-Py normal
+if (`$_py) { & `$_py -m $moduleLiteral @args; exit `$LASTEXITCODE }
 if (-not (Test-Path -LiteralPath `$_root)) { New-Item -ItemType Directory -Path `$_root -Force | Out-Null }
 `$_lockPath = Join-Path `$_root '.provision.lock'
 `$_lock = `$null

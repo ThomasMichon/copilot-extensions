@@ -153,6 +153,8 @@ def test_shared_payload_pin_validator_rejects_foreign_cell_and_invalid_json(tmp_
 )
 @pytest.mark.parametrize("mode", ["legacy", "namespaced"])
 def test_actual_payload_cache_only_reader_preserves_two_database_scopes(tmp_path, monkeypatch, mode):
+    if os.name != "nt":
+        pytest.importorskip("cryptography.fernet", reason="POSIX cache reads require the cache extra")
     home, payload, runtime, installation_id, context = prepare_payload(tmp_path, mode)
     prepare_runtime(runtime, payload)
     env = {

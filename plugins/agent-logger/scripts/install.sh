@@ -1033,48 +1033,8 @@ _materialize_snapshot_libs() {
 }
 
 _publish_snapshot_source() {
-    [[ -z "${COPILOT_EXTENSIONS_CONTEXT:-}" ]] || return 0
-    local snapshot="$1" resolution receipt previous_fingerprint fingerprint previous_plugin temporary schema version version_type
-    local helper="$SCRIPT_DIR/installation-context/installation-context.sh"
-    local query="$SCRIPT_DIR/installation-context/json-query.awk"
-    if ! resolution="$(bash "$helper" resolve --payload-root "$__publication_payload" \
-        --plugin-id agent-logger --project-root "$__publication_project")"; then
-        if [[ -e "$INSTALL_DIR/runtime-deployment.json" || -L "$INSTALL_DIR/runtime-deployment.json" ]]; then
-            _fail 'Cannot preserve canonical snapshot source under an explicit deployment policy.'
-            return 1
-        fi
-        printf '%s\n' 'WARNING: snapshot has no canonical source evidence; explicit deployment ownership will require repair.' >&2
-        return 0
-    fi
-    receipt="$snapshot/snapshot-provenance.json"
-    fingerprint="$(LC_ALL=C awk -f "$query" -v mode=get -v query_path=sourceFingerprint <<<"$resolution")" || return 1
-    if [[ -e "$receipt" || -L "$receipt" ]]; then
-        [[ -f "$receipt" && ! -L "$receipt" ]] || {
-            _fail 'Snapshot source must be an ordinary file.'
-            return 1
-        }
-        schema="$(LC_ALL=C awk -f "$query" -v mode=get -v query_path=schema "$receipt")" || return 1
-        version="$(LC_ALL=C awk -f "$query" -v mode=get -v query_path=version "$receipt")" || return 1
-        version_type="$(LC_ALL=C awk -f "$query" -v mode=type -v query_path=version "$receipt")" || return 1
-        previous_fingerprint="$(LC_ALL=C awk -f "$query" -v mode=get \
-            -v query_path=$'resolution\034sourceFingerprint' "$receipt")" || return 1
-        previous_plugin="$(LC_ALL=C awk -f "$query" -v mode=get \
-            -v query_path=$'resolution\034pluginId' "$receipt")" || return 1
-        if [[ "$schema" != copilot-extensions.legacy-snapshot-source || "$version_type" != number ||
-              "$version" != 1 || "$previous_fingerprint" != "$fingerprint" || "$previous_plugin" != agent-logger ]]; then
-            _fail 'Existing snapshot source belongs to another owner or is invalid.'
-            return 1
-        fi
-        return 0
-    fi
-    temporary="$(mktemp "$snapshot/.source-provenance.XXXXXX")" || return 1
-    if ! printf '{"schema":"copilot-extensions.legacy-snapshot-source","version":1,"resolution":%s}\n' \
-        "$resolution" > "$temporary" || ! ln -- "$temporary" "$receipt"; then
-        rm -f -- "$temporary"
-        _fail 'Cannot atomically publish canonical snapshot source.'
-        return 1
-    fi
-    rm -f -- "$temporary" || return 1
+    publish_legacy_snapshot_source "$1" "$SCRIPT_DIR" "$__publication_payload" \
+        agent-logger "$INSTALL_DIR" "$__publication_project"
 }
 
 publish_payload_snapshot() {

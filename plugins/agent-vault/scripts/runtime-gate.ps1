@@ -33,6 +33,10 @@ if (
     )
     exit 126
 }
+if (-not (Select-String -LiteralPath $runtimeResolver -SimpleMatch '# Trace contract: normal/read-only/ready-v1' -Quiet)) {
+    [Console]::Error.WriteLine('[agent-vault] read-only runtime resolver is unavailable. Re-enable/update the plugin, then retry.')
+    exit 126
+}
 
 $hostExe = (Get-Process -Id $PID).Path
 if (-not $hostExe) {
@@ -177,10 +181,19 @@ else {
     exit 126
 }
 
+if (-not $context) {
+    $runtimeRoot = [string]$resolution.legacy.root
+    if (-not $runtimeRoot -or -not [IO.Path]::IsPathRooted($runtimeRoot)) {
+        [Console]::Error.WriteLine('[agent-vault] installation context is missing the canonical legacy root.')
+        exit 126
+    }
+}
+
 function Resolve-RuntimePython {
+    param([string]$TraceMode = 'ready')
     $script:AgentRtPy = $null
     $env:AGENT_RT_ROOT = $runtimeRoot
-    . $runtimeResolver
+    . $runtimeResolver -TraceMode $TraceMode
     return $AgentRtPy
 }
 
@@ -274,6 +287,40 @@ if ($env:AGENT_VAULT_NO_SELFPROVISION) {
     exit 1
 }
 
+$publicationArgs = @(
+    '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $modeRunner,
+    'probe-plugin-publication', '-PayloadRoot', $payloadRoot,
+    '-PluginId', 'agent-vault', '-LegacyRoot', $runtimeRoot
+)
+if ($context) {
+    $publicationArgs += @('-Context', $context, '-DurableHome', $validationDurableHome)
+}
+$publicationJson = @(& $hostExe @publicationArgs)
+$publicationCode = $LASTEXITCODE
+try {
+    $publication = ($publicationJson -join "`n") | ConvertFrom-Json -ErrorAction Stop
+    $publicationRoot = if ($context) {
+        [string]$publication.runtimeRoot
+    } else { [string]$publication.legacy.root }
+    if ($publicationCode -ne 0 -or
+        $publication.deployment.allowPluginPublication -isnot [bool] -or
+        -not $publication.deployment.allowPluginPublication -or
+        $publicationRoot -cne $runtimeRoot -or
+        [string]$publication.deployment.path -cne
+            (Join-Path $runtimeRoot 'runtime-deployment.json')) {
+        throw ($publicationJson -join ' ')
+    }
+} catch {
+    [Console]::Error.WriteLine(
+        "[agent-vault] Runtime publication refused: $($_.Exception.Message) " +
+        'Use explicit installation management to install or repair this runtime.'
+    )
+    exit 3
+}
+$runtimePython = Resolve-RuntimePython -TraceMode normal
+if ($runtimePython) {
+    Invoke-Runtime -Python $runtimePython
+}
 New-Item -ItemType Directory -Force -Path $runtimeRoot | Out-Null
 $statusPath = Join-Path $runtimeRoot '.provision-status'
 $_lockPath = Join-Path $runtimeRoot '.provision.lock'
@@ -308,8 +355,14 @@ try {
         } catch {}
 
         Set-RuntimeEnvironment
-        & $hostExe -NoProfile -ExecutionPolicy Bypass -File $installer provision -InstallDir $runtimeRoot 2>&1 |
-            ForEach-Object { [Console]::Error.WriteLine($_) }
+        $previousEap = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        try {
+            & $hostExe -NoProfile -ExecutionPolicy Bypass -File $installer provision -InstallDir $runtimeRoot 2>&1 |
+                ForEach-Object { [Console]::Error.WriteLine($_) }
+        } finally {
+            $ErrorActionPreference = $previousEap
+        }
         $_provisionRc = $LASTEXITCODE
         if ($_provisionRc -eq 0) {
             $_provisionedPy = Resolve-RuntimePython

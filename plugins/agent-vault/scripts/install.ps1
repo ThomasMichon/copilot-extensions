@@ -377,7 +377,8 @@ function Invoke-VersionedActivate {
     if ($script:SourceRuntimeIdentity) { Publish-SourceSnapshot | Out-Null }
     Assert-SourceRuntime
     if (-not $VersionedRuntime) { return $true }
-    if ((Test-Path $LinkDir) -and -not (Test-VenvIsLink $LinkDir)) {
+    $legacyVenv = Join-Path $InstallDir '.venv'
+    if ((Test-Path $legacyVenv) -and -not (Test-VenvIsLink $legacyVenv)) {
         Write-Step 'Releasing legacy .venv for versioned migration (stopping daemon)...'
         Invoke-Stop | Out-Null
     }
@@ -1078,9 +1079,9 @@ function Invoke-Stamp {
     }
     $snapDir = Join-Path (Join-Path $InstallDir 'snapshots') $SrcVersion
     Assert-SourceRuntime
-    Write-Binstubs
     if ($script:SourceRuntimeIdentity) {
         Publish-SourcePayload
+        Write-Binstubs
         Write-Ok 'Stamped: agent-vault binstub on PATH; runtime provisions on first use.'
         return
     }
@@ -1097,6 +1098,7 @@ function Invoke-Stamp {
     Move-Item -LiteralPath $snapTmp -Destination $snapDir -Force
     [System.IO.File]::WriteAllText((Join-Path $InstallDir 'payload-dir'), $snapDir, $utf8NoBom)
     [System.IO.File]::WriteAllText((Join-Path $InstallDir 'stamped-version'), $SrcVersion, $utf8NoBom)
+    Write-Binstubs
     Write-Ok "Snapshot: $snapDir"
     Write-Ok 'Stamped: agent-vault binstub on PATH; runtime provisions on first use.'
 }

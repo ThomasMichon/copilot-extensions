@@ -423,6 +423,52 @@ EOF
     _ok "Deploy manifest written (source: $kind)"
 }
 
+publish_legacy_snapshot_source() {
+    [[ -z "${COPILOT_EXTENSIONS_CONTEXT:-}" ]] || return 0
+    local snapshot="$1" helper_directory="$2" payload="$3" plugin="$4" runtime_root="$5" project="$6"
+    local resolution receipt previous_fingerprint fingerprint previous_plugin temporary schema version version_type
+    local helper="$helper_directory/installation-context/installation-context.sh"
+    local query="$helper_directory/installation-context/json-query.awk"
+    if ! resolution="$(bash "$helper" resolve --payload-root "$payload" \
+        --plugin-id "$plugin" --project-root "$project")"; then
+        if [[ -e "$runtime_root/runtime-deployment.json" || -L "$runtime_root/runtime-deployment.json" ]]; then
+            _fail 'Cannot preserve canonical snapshot source under an explicit deployment policy.'
+            return 1
+        fi
+        printf '%s\n' 'WARNING: snapshot has no canonical source evidence; explicit deployment ownership will require repair.' >&2
+        return 0
+    fi
+    receipt="$snapshot/snapshot-provenance.json"
+    fingerprint="$(LC_ALL=C awk -f "$query" -v mode=get -v query_path=sourceFingerprint <<<"$resolution")" || return 1
+    if [[ -e "$receipt" || -L "$receipt" ]]; then
+        [[ -f "$receipt" && ! -L "$receipt" ]] || {
+            _fail 'Snapshot source must be an ordinary file.'
+            return 1
+        }
+        schema="$(LC_ALL=C awk -f "$query" -v mode=get -v query_path=schema "$receipt")" || return 1
+        version="$(LC_ALL=C awk -f "$query" -v mode=get -v query_path=version "$receipt")" || return 1
+        version_type="$(LC_ALL=C awk -f "$query" -v mode=type -v query_path=version "$receipt")" || return 1
+        previous_fingerprint="$(LC_ALL=C awk -f "$query" -v mode=get \
+            -v query_path=$'resolution\034sourceFingerprint' "$receipt")" || return 1
+        previous_plugin="$(LC_ALL=C awk -f "$query" -v mode=get \
+            -v query_path=$'resolution\034pluginId' "$receipt")" || return 1
+        if [[ "$schema" != copilot-extensions.legacy-snapshot-source || "$version_type" != number ||
+              "$version" != 1 || "$previous_fingerprint" != "$fingerprint" || "$previous_plugin" != "$plugin" ]]; then
+            _fail 'Existing snapshot source belongs to another owner or is invalid.'
+            return 1
+        fi
+        return 0
+    fi
+    temporary="$(mktemp "$snapshot/.source-provenance.XXXXXX")" || return 1
+    if ! printf '{"schema":"copilot-extensions.legacy-snapshot-source","version":1,"resolution":%s}\n' \
+        "$resolution" > "$temporary" || ! ln -- "$temporary" "$receipt"; then
+        rm -f -- "$temporary"
+        _fail 'Cannot atomically publish canonical snapshot source.'
+        return 1
+    fi
+    rm -f -- "$temporary" || return 1
+}
+
 write_simple_binstub() {
     local command_name="$1" module_name="$2" runtime_root="$3" local_bin="$4" install_bin_dir="$5" snapshot_installer_rel="$6" no_self_provision_env="$7"
     local resolver_ps1_source="${8:-}" resolver_sh_source="${9:-}"
@@ -436,6 +482,18 @@ write_simple_binstub() {
             return 1
         fi
     done
+    if [[ -n "$resolver_sh_source" && -f "$runtime_root/payload-dir" ]]; then
+        local snapshot helper_directory source_payload source_project
+        snapshot="$(cat "$runtime_root/payload-dir")" || return 1
+        case "$snapshot" in "$runtime_root"/snapshots/*)
+            helper_directory="$(dirname "$resolver_sh_source")"
+            source_payload="${COPILOT_PLUGIN_STAGED_FROM:-$(dirname "$helper_directory")}"
+            source_project="${COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT:-$PWD}"
+            publish_legacy_snapshot_source "$snapshot" "$helper_directory" "$source_payload" \
+                "$command_name" "$runtime_root" "$source_project" || return 1
+            ;;
+        esac
+    fi
     mkdir -p "$local_bin" "$install_bin_dir" || {
         _fail "Binstub directories cannot be prepared: $local_bin"; return 1;
     }
@@ -472,10 +530,16 @@ _name="$command_name"
 _root=$runtime_root_literal
 _snapshot_installer_rel=$snapshot_installer_literal
 _resolver="\$_root/bin/resolve-runtime.sh"
+if [ ! -f "\$_resolver" ] ||
+   ! grep -Fq '# Trace contract: normal/read-only/ready-v1' "\$_resolver"; then
+    printf '[%s] read-only runtime resolver is unavailable. Re-enable/update the plugin, then retry.\n' "\$_name" >&2
+    exit 126
+fi
 _resolve() {
     AGENT_RT_PY=""
     if [ -f "\$_resolver" ]; then
         AGENT_RT_ROOT="\$_root"
+        local AGENT_RT_RESOLVE_TRACE_MODE="\${1:-ready}"
         . "\$_resolver"
     fi
 }
@@ -485,6 +549,20 @@ if [ -n "\${$no_self_provision_env:-}" ]; then
     printf '[%s] runtime not provisioned (%s set).\n' "\$_name" "$no_self_provision_env" >&2
     exit 1
 fi
+_snapshot="\$(cat "\$_root/payload-dir" 2>/dev/null || true)"
+_install="\$_snapshot/\$_snapshot_installer_rel"
+if [ ! -f "\$_install" ]; then
+    printf '[%s] cannot self-provision: owning snapshot installer unavailable: %s\n' "\$_name" "\$_install" >&2
+    exit 127
+fi
+_probe="\$_snapshot/scripts/installation-context/plugin-publication-probe.sh"
+if [ ! -f "\$_probe" ]; then
+    printf '[%s] Runtime publication refused: snapshot admission helper is unavailable. Re-enable/update the plugin, then retry.\n' "\$_name" >&2
+    exit 126
+fi
+bash "\$_probe" "\$_snapshot" "\$_name" "\$_root" || exit \$?
+_resolve normal
+[ -n "\$AGENT_RT_PY" ] && exec "\$AGENT_RT_PY" -m "$module_name" "\$@"
 mkdir -p "\$_root"
 _lock="\$_root/.provision.lock"
 _lock_link=""

@@ -32,6 +32,12 @@ assembly rather than rematerializing its dependencies from a checkout.
 An existing source-qualified snapshot is reused only after its complete receipt
 matches the selected source; it is never replaced in place.
 
+The installed legacy first-use wrapper uses the shared
+[publication admission](../../libs/installation-context/README.md) before cold
+trace or provisioning-lock writes. Managed deployments retain healthy runtime
+dispatch; cold refusal and missing/older helper readiness do not provision.
+Retained snapshots preserve canonical source identity after publisher removal.
+
 The installer's `uninstall` action holds the same transaction lock as
 install/update. It removes runtime/config contents but retains the lock files
 and `.install-stage` coordination, so the install directory may remain.

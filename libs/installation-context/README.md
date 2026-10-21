@@ -31,6 +31,12 @@ cells. Mutation remains explicit and non-automatic:
   Healthy current runtimes remain a read-only no-op; independent session hooks
   retain their separate invocation. An older helperless bootstrap retains
   standalone behavior only when its deployment policy is absent.
+  Logger and the shared Pull Requests/Vault installed first-use wrappers also
+  call this adapter before cold trace or provisioning-lock writes. Their
+  [ready-only resolver probes](../versioned-runtime/README.md) retain healthy
+  managed dispatch without granting cold publication. Vault's payload dispatcher
+  instead probes publication against its independently validated selected cell
+  or canonical legacy root; a legacy-only adapter never admits a namespaced cell.
 
 All three normalize marketplace source descriptors, derive source fingerprints
 and marketplace ids, resolve payload provenance, compute the approved durable
@@ -65,6 +71,10 @@ paths are documentary, not context receipts or management authority. This
 evidence preserves source identity only: the live installation/environment owner,
 mode, deployment policy and lifecycle custody still govern every mutation.
 Namespaced snapshots retain their existing separate provenance contract.
+The canonical installer engine owns legacy sidecar publication for Logger and
+the shared Pull Requests/Vault wrapper producers. It captures evidence only in
+retained runtime snapshots, never in an ordinary publisher payload. Windows
+Vault stamping publishes its selected snapshot before its generated wrapper.
 
 `stamp` creates or
 updates only `namespace.json` and `install.json`. `activation-cas` explicitly
