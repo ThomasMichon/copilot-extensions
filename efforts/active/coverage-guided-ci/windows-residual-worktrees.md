@@ -87,7 +87,47 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Admitted fixture-semantic batches
 
+### B-TERMINAL seed/copy foundation
+
+Baseline: the actual #7674 merge. Split the existing `_worker` helper
+into a template-free Git builder and fresh record setup. Its old
+consumers still build their own Git topology; none is converted yet.
+`_worker_seed` runs the same builder under the existing hermetic
+environment and run-local seed lock. `_copy_worker` physically copies
+Git stores and linked checkouts, repairs administrative links,
+relocates origin and creates fresh tracking/session records.
+
+Two isolation cases verify initial Git bytes, private physical file
+identity, origins/common directories and fresh records. Commit,
+push, configuration and record mutation plus removal of the first
+checkout leave every seed/sibling byte unchanged. The second copy
+retains its complete linked-worktree topology; no object alternates
+or shared files are introduced.
+
+All existing test functions/classes, assertions and decorators remain
+AST-identical; only `_worker` is split into the shared preparation
+helpers. Complete native Windows terminal-conclusion module:
+142 passed, zero skips, 114.94 seconds pytest / 121.12 preparation-cleanup
+inclusive. Exactly two work-stealing workers retain the original
+30-second item watchdog, marks and resource ceilings under a
+240-second diagnostic group. This is functional integration, not
+quiet-host, whole-suite or repeated same-head qualification.
+
+The consumer conversion, including reciprocal-disposal `_harness`,
+remains a separate next slice. Live/foreign/dirty/claim/finality and
+disposal decisions are unchanged. This below-altitude test preparation
+refactor changes no production, command, installation, configuration
+or architecture contract; documentation impact is this ledger.
+Clean-room provisioning and external-venue lanes are inapplicable.
+
 ### B-RESOURCE private finalization inputs
+
+Actual disposition: #7674 merged as
+`4a18e654de6c47a83484de38a238154bc1ffe319`; full Copilot review
+`5606924751` approved exact head
+`9e59060f9888e05a59a07eed078b6e9f02c14c9a`. Overview, inline/general
+channels and threads had no findings; required CI was green. The child
+worktree is finalized.
 
 Baseline: the actual #7668 merge. `_final_owner_seed` runs the original
 transitive-finalization `_env` builder under the existing run-local

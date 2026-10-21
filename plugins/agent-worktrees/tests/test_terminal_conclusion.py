@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import types
 from pathlib import Path
 
@@ -12,24 +13,23 @@ from agent_worktrees import __main__ as cli
 from agent_worktrees import session_tracking_cli
 from agent_worktrees import git_ops, sessions, tracking
 from agent_worktrees import terminal_conclusion as tc
+from conftest import _published_seed_environment, _seed_directory
 
 
 def _git(cwd: Path, *args: str) -> str:
     return git_ops.git(*args, cwd=cwd).stdout.strip()
 
 
-def _worker(tmp_path: Path, monkeypatch):
+def _build_worker_seed(tmp_path: Path):
     remote = tmp_path / "remote.git"
     anchor = tmp_path / "anchor"
     root = tmp_path / "worktrees"
-    tracking_dir = tmp_path / "tracking"
     worktree_id = "worker-20260901-abcd"
     worktree = root / worktree_id
-    tracking_dir.mkdir()
     root.mkdir()
 
-    git_ops.git("init", "--bare", "-b", "main", str(remote))
-    git_ops.git("init", "-b", "main", str(anchor))
+    git_ops.git("init", "--template=", "--bare", "-b", "main", str(remote))
+    git_ops.git("init", "--template=", "-b", "main", str(anchor))
     _git(anchor, "config", "user.email", "test@example.com")
     _git(anchor, "config", "user.name", "Test")
     (anchor / "README.md").write_text("base\n", encoding="utf-8")
@@ -49,6 +49,14 @@ def _worker(tmp_path: Path, monkeypatch):
     _git(worktree, "config", "user.email", "test@example.com")
     _git(worktree, "config", "user.name", "Test")
 
+
+def _worker_record(tmp_path: Path, monkeypatch):
+    anchor = tmp_path / "anchor"
+    root = tmp_path / "worktrees"
+    tracking_dir = tmp_path / "tracking"
+    worktree_id = "worker-20260901-abcd"
+    worktree = root / worktree_id
+    tracking_dir.mkdir()
     record = tracking.create_new_record(
         worktree_id,
         f"worktree/{worktree_id}",
@@ -80,6 +88,94 @@ def _worker(tmp_path: Path, monkeypatch):
         default_branch="main",
     )
     return repo, tracking_dir / f"{worktree_id}.yaml", worktree
+
+
+def _worker(tmp_path: Path, monkeypatch):
+    _build_worker_seed(tmp_path)
+    return _worker_record(tmp_path, monkeypatch)
+
+
+@pytest.fixture(scope="session")
+def _worker_seed(tmp_path_factory):
+    with _seed_directory(tmp_path_factory, "terminal-worker") as (root, build):
+        if build:
+            with _published_seed_environment(tmp_path_factory):
+                _build_worker_seed(root)
+        return root
+
+
+def _copy_worker(seed: Path, tmp_path: Path, monkeypatch):
+    shutil.copytree(seed, tmp_path, dirs_exist_ok=True, copy_function=shutil.copyfile)
+    anchor = tmp_path / "anchor"
+    worktree = tmp_path / "worktrees" / "worker-20260901-abcd"
+    _git(anchor, "worktree", "repair", str(worktree))
+    _git(anchor, "remote", "set-url", "origin", str(tmp_path / "remote.git"))
+    return _worker_record(tmp_path, monkeypatch)
+
+
+def _worker_snapshot(root: Path):
+    return {path.relative_to(root): path.read_bytes()
+            for path in root.rglob("*") if path.is_file()}
+
+
+@pytest.mark.parametrize("attempt", range(2))
+def test_terminal_worker_copies_isolate_commit_push_and_removal(
+    tmp_path, monkeypatch, _worker_seed, attempt,
+):
+    seed = _worker_seed
+    before = _worker_snapshot(seed)
+    first_root = tmp_path / f"first-{attempt}"
+    second_root = tmp_path / f"second-{attempt}"
+    first_repo, first_record, first = _copy_worker(seed, first_root, monkeypatch)
+    second_repo, second_record, second = _copy_worker(seed, second_root, monkeypatch)
+    second_before = _worker_snapshot(second_root)
+    for root, repo, record_path, worktree in (
+        (first_root, first_repo, first_record, first),
+        (second_root, second_repo, second_record, second),
+    ):
+        assert repo.anchor == str(root / "anchor")
+        assert repo.worktree_root == str(root / "worktrees")
+        assert record_path.parent == root / "tracking"
+        record = tracking.load_record(record_path)
+        assert record.worktree_path == str(worktree)
+        assert record.head_session == "session-exact"
+        assert record.session_entry("session-exact").state == "active"
+        assert record.resources == []
+        assert _git(worktree, "remote", "get-url", "origin") == str(root / "remote.git")
+        assert _git(worktree, "rev-parse", "--git-common-dir").replace("\\", "/") == (
+            root / "anchor" / ".git"
+        ).as_posix()
+        assert _git(worktree, "rev-parse", "HEAD") == _git(
+            root, "--git-dir", str(root / "remote.git"), "rev-parse", "main",
+        )
+        assert (worktree / "README.md").read_text(encoding="utf-8") == "base\n"
+        for relative, data in before.items():
+            copied = root / relative
+            if relative.parts != ("anchor", ".git", "config") and relative.name not in {
+                ".git", "gitdir",
+            }:
+                assert copied.read_bytes() == data
+            assert not copied.samefile(seed / relative)
+            assert not copied.samefile((second_root if root == first_root else first_root) / relative)
+            assert relative.name != "alternates"
+    (first / "isolated.txt").write_text("first copy only\n", encoding="utf-8")
+    _git(first, "config", "fixture.private", "first-only")
+    _git(first, "add", "isolated.txt")
+    _git(first, "commit", "-m", "isolated terminal work")
+    first_head = _git(first, "rev-parse", "HEAD")
+    _git(first, "push", "origin", "HEAD:refs/heads/main")
+    assert _git(
+        first_root, "--git-dir", str(first_root / "remote.git"), "rev-parse", "main",
+    ) == first_head
+    record = tracking.load_record(first_record)
+    record.follow_up = True
+    tracking.save_record(record, first_record)
+    _git(Path(first_repo.anchor), "worktree", "remove", "--force", str(first))
+    assert not first.exists()
+    assert second.exists()
+    assert _git(Path(second_repo.anchor), "worktree", "list", "--porcelain").count("worktree ") == 2
+    assert _worker_snapshot(seed) == before
+    assert _worker_snapshot(second_root) == second_before
 
 
 def _conclude(record_path: Path, repo, **over):
