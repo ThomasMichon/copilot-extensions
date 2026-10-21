@@ -90,15 +90,19 @@ Historical launcher disposition and
 installed acceptance remain open; a reviewed source repair does not authorize
 live command transfer or state deletion.
 
-The #7494 Windows construction repair adds an explicit, installation-owned
+The #7494 Windows construction repair merged in #7645. It adds an explicit, installation-owned
 signed base-Python preference rather than weakening the required MCP dependency
 closure or changing machine-wide Python discovery. The plugin README owns its
 input, persistence and fail-closed contract. Native PowerShell coverage includes
 publication/failure/supersession boundaries and an opt-in real signed-base/venv
-probe. Qualified release, actual configured-feed dependency installation and
-running coordinator readiness remain separate acceptance gates. The shared
-dependency-cleanup error-classification defect remains tracked under #7494;
-this slice does not change the shared dependency policy.
+probe. The source repair is now in qualified Main; actual configured-feed
+dependency installation and running coordinator readiness remain separate
+acceptance gates. The shared #7494 cleanup repair preserves primary exceptions
+and nonzero UV results, independently reports retained-input cleanup failures,
+and fails cleanup-only errors. Its release and installed acceptance remain
+distinct from the signed-base repair. The coordinated updater retains ownership
+of the normal installed-readiness attempt; conditional registry and launcher
+reconciliation stays on hold until the required readiness evidence exists.
 
 The #7441 per-review-layer authority fix is qualified by promotion #7448 and
 present in the selected, importable Worktrees 1.24.106-dev1 runtime. That is

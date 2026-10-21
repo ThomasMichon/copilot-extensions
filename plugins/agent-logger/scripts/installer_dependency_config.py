@@ -4,6 +4,9 @@ from __future__ import annotations
 import json
 import os
 import re
+import sys
+import tempfile
+from contextlib import contextmanager
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 
@@ -11,6 +14,42 @@ _STRUCTURED_CUTOFF = re.compile(
     r"ExcludeNewerValue\s*\{\s*timestamp:\s*([^,\s]+),\s*span:\s*"
     r"(?:None|Some\(\s*ExcludeNewerSpan\(\s*([^,\s]+),?\s*\),?\s*\)),?\s*\}"
 )
+
+
+class RetainedInputCleanupError(RuntimeError):
+    """Installation inputs could not be removed after execution settled."""
+
+
+def report_cleanup_error(error):
+    print(f"retained-input-cleanup: {error}", file=sys.stderr)
+
+
+def native_retained_path(path):
+    value = os.path.abspath(path)
+    if os.name != "nt" or value.startswith("\\\\?\\"):
+        return value
+    return "\\\\?\\UNC\\" + value[2:] if value.startswith("\\\\") else "\\\\?\\" + value
+
+
+@contextmanager
+def temporary_inputs(parent):
+    prefix = "uv-" if parent is not None else "seasoned-uv-"
+    temporary = tempfile.TemporaryDirectory(prefix=prefix, dir=parent)
+    failed = False
+    try:
+        yield temporary.name
+    except BaseException:
+        failed = True
+        raise
+    finally:
+        temporary.name = native_retained_path(temporary.name)
+        try:
+            temporary.cleanup()
+        except OSError as exc:
+            if failed:
+                report_cleanup_error(exc)
+            else:
+                raise RetainedInputCleanupError(str(exc)) from exc
 
 
 def config_inputs(arguments, environment, base, *, argument_pairs, toml, error_type):

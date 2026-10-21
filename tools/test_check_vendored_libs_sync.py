@@ -258,7 +258,7 @@ def test_verify_ignores_editable_pointer_only_libs_with_a_single_real_copy(
     assert check_vendored_libs_sync.verify() == []
 
 
-def test_verify_fails_closed_on_symlinked_consumer_pyproject(fake_repo: Path):
+def test_verify_fails_closed_on_symlinked_consumer_pyproject(fake_repo: Path, native_file_symlink):
     """The regression this test exists for (PR #4954 review): if the ONLY
     editable-pointer consumer's `pyproject.toml` is a symlink,
     `find_uv_editable_refs()` returns no references for it (its own explicit
@@ -279,7 +279,7 @@ def test_verify_fails_closed_on_symlinked_consumer_pyproject(fake_repo: Path):
         '[tool.uv.sources]\nshared-lib = { path = "../../libs/shared-lib", editable = true }\n',
         encoding="utf-8",
     )
-    (consumer_dir / "pyproject.toml").symlink_to(real)
+    native_file_symlink(consumer_dir / "pyproject.toml", real)
 
     with pytest.raises(SystemExit, match="(?i)symlink"):
         check_vendored_libs_sync.verify()

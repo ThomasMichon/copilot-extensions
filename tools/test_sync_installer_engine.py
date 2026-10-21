@@ -522,7 +522,7 @@ def test_verify_rejects_mixed_local_and_canonical_forms(fake_repo):
     assert any("mixes installer-engine forms" in p for p in problems)
 
 
-def test_verify_rejects_symlinked_canonical_engine(fake_repo):
+def test_verify_rejects_symlinked_canonical_engine(fake_repo, native_file_symlink):
     scripts = _mk_plugin_scripts(fake_repo, "agent-registered")
     _write_canonical_refs(scripts)
     real = fake_repo / "outside"
@@ -531,14 +531,14 @@ def test_verify_rejects_symlinked_canonical_engine(fake_repo):
     (real / "installer-engine.sh").write_text("canonical sh\n", encoding="utf-8")
     for name in ("installer-engine.ps1", "installer-engine.sh"):
         (fake_repo / "libs" / "installer-engine" / name).unlink()
-        (fake_repo / "libs" / "installer-engine" / name).symlink_to(real / name)
+        native_file_symlink(fake_repo / "libs" / "installer-engine" / name, real / name)
 
     problems = sync_installer_engine.verify()
 
     assert any("is a symlink -- refusing" in p for p in problems)
 
 
-def test_verify_rejects_symlinked_canonical_engine_in_local_mode(fake_repo):
+def test_verify_rejects_symlinked_canonical_engine_in_local_mode(fake_repo, native_file_symlink):
     scripts = _mk_plugin_scripts(fake_repo, "agent-registered")
     _write_local_refs(scripts)
     (scripts / "installer-engine.ps1").write_text("canonical ps1\n", encoding="utf-8")
@@ -549,7 +549,7 @@ def test_verify_rejects_symlinked_canonical_engine_in_local_mode(fake_repo):
     (real / "installer-engine.sh").write_text("canonical sh\n", encoding="utf-8")
     for name in ("installer-engine.ps1", "installer-engine.sh"):
         (fake_repo / "libs" / "installer-engine" / name).unlink()
-        (fake_repo / "libs" / "installer-engine" / name).symlink_to(real / name)
+        native_file_symlink(fake_repo / "libs" / "installer-engine" / name, real / name)
 
     problems = sync_installer_engine.verify()
 
@@ -632,7 +632,7 @@ def test_sync_repairs_python_support_in_both_wrapper_modes(fake_repo, mode, init
     assert sync_installer_engine.sync() == []
 
 
-def test_sync_refuses_symlinked_canonical_engine_in_local_mode(fake_repo):
+def test_sync_refuses_symlinked_canonical_engine_in_local_mode(fake_repo, native_file_symlink):
     scripts = _mk_plugin_scripts(fake_repo, "agent-registered")
     _write_local_refs(scripts)
     real = fake_repo / "outside"
@@ -641,7 +641,7 @@ def test_sync_refuses_symlinked_canonical_engine_in_local_mode(fake_repo):
     (real / "installer-engine.sh").write_text("canonical sh\n", encoding="utf-8")
     for name in ("installer-engine.ps1", "installer-engine.sh"):
         (fake_repo / "libs" / "installer-engine" / name).unlink()
-        (fake_repo / "libs" / "installer-engine" / name).symlink_to(real / name)
+        native_file_symlink(fake_repo / "libs" / "installer-engine" / name, real / name)
 
     with pytest.raises(RuntimeError, match="symlink -- refusing"):
         sync_installer_engine.sync()
@@ -650,7 +650,9 @@ def test_sync_refuses_symlinked_canonical_engine_in_local_mode(fake_repo):
 @pytest.mark.parametrize("mode", ["canonical", "local"])
 @pytest.mark.parametrize("name", sync_installer_engine.ier.SUPPORT_FILES)
 @pytest.mark.parametrize("target_state", ["different", "matching", "dangling"])
-def test_sync_refuses_linked_support_without_touching_target(fake_repo, mode, name, target_state):
+def test_sync_refuses_linked_support_without_touching_target(
+    fake_repo, native_file_symlink, mode, name, target_state,
+):
     scripts = _mk_plugin_scripts(fake_repo, "agent-registered")
     writer = _write_canonical_refs if mode == "canonical" else _write_local_refs
     writer(scripts)
@@ -670,7 +672,7 @@ def test_sync_refuses_linked_support_without_touching_target(fake_repo, mode, na
         )
         target.chmod(0o600)
     destination = scripts / name
-    destination.symlink_to(target)
+    native_file_symlink(destination, target)
     original_link = os.readlink(destination)
     before = (
         target.read_bytes(), stat.S_IMODE(target.stat().st_mode), target.stat().st_mtime_ns,

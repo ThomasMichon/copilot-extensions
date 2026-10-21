@@ -61,6 +61,53 @@ def test_child_failure_preserves_unicode_diagnostic_and_original_error(engine, m
     assert b"\\u2502 build failed" in stream.getvalue()
 
 
+@pytest.mark.timeout(120)
+@pytest.mark.parametrize("primary", [
+    subprocess.CalledProcessError(17, ["uv"], output="child output", stderr="child failure"),
+    OSError("child could not start"),
+])
+def test_candidate_failure_survives_retained_cleanup(
+    engine, tmp_path, build_inputs, monkeypatch, capsys, primary,
+):
+    plugin, uv = build_inputs
+    root = tmp_path / "runtime"
+    policy = sys.modules[engine.retain_uv_install.__module__]
+    temporary_directory = policy.tempfile.TemporaryDirectory
+    cleanup_attempts = []
+
+    class CleanupFailure:
+        def __init__(self, **kwargs):
+            self.temporary = temporary_directory(**kwargs)
+            self.name = self.temporary.name
+
+        def cleanup(self):
+            cleanup_attempts.append(self.name)
+            self.temporary.name = self.name
+            self.temporary.cleanup()
+            raise PermissionError("injected retained cleanup failure")
+
+    def fail(*args, **kwargs):
+        raise primary
+
+    monkeypatch.setattr(policy.tempfile, "TemporaryDirectory", CleanupFailure)
+    monkeypatch.setattr(engine, "_construct", fail)
+    with pytest.raises(type(primary)) as caught:
+        with engine.numbered_candidate(
+            root, "1.0.0", plugin=plugin, uv=uv, base_python=Path(sys.executable),
+            health_module="example_module",
+        ):
+            pytest.fail("a failed construction cannot yield a ready candidate")
+    assert caught.value is primary
+    assert len(cleanup_attempts) == 1
+    assert not Path(cleanup_attempts[0]).exists()
+    assert not engine.runtime.marker_path(root, "1.0.0").exists()
+    with engine.runtime.construction_lease(root, "1.0.0", timeout=0):
+        pass
+    diagnostic = capsys.readouterr().err
+    assert diagnostic.count("retained-input-cleanup:") == 1
+    assert "injected retained cleanup failure" in diagnostic
+
+
 def test_child_timeout_surfaces_captured_backend_diagnostic(engine, monkeypatch, capsys):
     failure = subprocess.TimeoutExpired(
         ["uv"], 1, output="building example\n", stderr="backend stalled\n",

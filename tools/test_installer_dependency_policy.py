@@ -1386,6 +1386,56 @@ def test_retained_transaction_refuses_copy_mutation_before_execution(tmp_path, m
             pytest.fail("mutated input cannot reach the admitted execution boundary")
 
 
+@pytest.mark.parametrize("outcome", ["nonzero", "checked", "success", "admission"])
+def test_real_retained_graph_preserves_primary_failure_on_cleanup(tmp_path, monkeypatch, capsys, outcome):
+    source = source_project(tmp_path / "source")
+    temporary_directory = policy.tempfile.TemporaryDirectory
+    retained_paths = []
+    allocations = []
+    primary = subprocess.CalledProcessError(17, ["uv"], output="output", stderr="error")
+
+    class CleanupFailure:
+        def __init__(self, **kwargs):
+            self.temporary = temporary_directory(**kwargs)
+            self.name = self.temporary.name
+            allocations.append(Path(self.name))
+
+        def cleanup(self):
+            self.temporary.name = self.name
+            self.temporary.cleanup()
+            raise PermissionError("injected retained cleanup failure")
+
+    def run(command, **kwargs):
+        if "--show-settings" in command:
+            if outcome == "admission" and allocations:
+                raise primary
+            return CompletedProcess(command, 0, settings(), "")
+        retained_paths.append(Path(next(value for value in command if (Path(value) / "pyproject.toml").is_file())))
+        assert retained_paths[0] != source
+        if kwargs.get("check"):
+            raise primary
+        return CompletedProcess(command, 0 if outcome == "success" else 17, "output", "error")
+
+    monkeypatch.setattr(policy.tempfile, "TemporaryDirectory", CleanupFailure)
+    monkeypatch.setattr(policy.subprocess, "run", run)
+    options = dict(env={}, cwd=tmp_path, now=NOW, trusted_source_roots=(source,))
+    if outcome in {"checked", "admission"}:
+        with pytest.raises(subprocess.CalledProcessError) as caught:
+            policy.run_uv_install("uv", ["--no-config", str(source)], check=True, **options)
+        assert caught.value is primary
+    elif outcome == "success":
+        with pytest.raises(policy.RetainedInputCleanupError):
+            policy.run_uv_install("uv", ["--no-config", str(source)], **options)
+    else:
+        result = policy.run_uv_install("uv", ["--no-config", str(source)], **options)
+        assert (result.returncode, result.stdout, result.stderr) == (17, "output", "error")
+    assert source.is_dir()
+    assert allocations and all(not path.exists() for path in allocations)
+    assert all(not path.exists() for path in retained_paths if path != source)
+    diagnostic = capsys.readouterr().err
+    assert diagnostic.count("retained-input-cleanup:") == (0 if outcome == "success" else 1)
+
+
 def offline_environment(tmp_path):
     import os
 

@@ -7,6 +7,15 @@ How to run the plugin test suites, the fast gates to run before a push, and the
 > keeps only a short inline summary; the per-plugin release/versioning rules live
 > in [`docs/pipelines.md`](docs/pipelines.md).
 
+## Native file-link prerequisites
+
+Repository-tool installer-sync and vendor-guard link controls use the shared
+`native_file_symlink` fixture. Only Windows error 1314, raised by actual file-link
+creation, produces an explicit missing-privilege skip; other failures propagate.
+Supported POSIX and provisioned Windows hosts still execute the real linked-file
+refusal assertions. No test enables Developer Mode or elevates the process.
+`tools/test_symlink_capability.py` checks that classification independently.
+
 ## Unit-only promotion packet
 
 The reviewed [promotion burndown](efforts/active/dev-branch-release-pipeline/promotion-burndown.md)

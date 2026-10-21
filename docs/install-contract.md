@@ -2740,6 +2740,14 @@ constraints and stricter package cutoffs; an unsupported merge or mismatch
 refuses installation. `prepare_uv_install` is only a preflight API, not an
 installation boundary.
 
+Retained-input cleanup preserves an active exception or a nonzero UV child
+result, including captured output and the original exit status. A secondary
+filesystem cleanup failure is reported independently as `retained-input-cleanup`,
+not as dependency-seasoning rejection. Cleanup failure after otherwise successful
+execution raises `RetainedInputCleanupError` and makes the CLI fail; it never
+turns an incomplete cleanup into success. Context-owned runtime construction
+uses the same exception-preserving cleanup path.
+
 Absolute, non-editable source-only installations retain the common source/resource
 layout without reproducing unrelated caller-directory or staging ancestry.
 An unrelated caller uses a separate private working directory; its effective

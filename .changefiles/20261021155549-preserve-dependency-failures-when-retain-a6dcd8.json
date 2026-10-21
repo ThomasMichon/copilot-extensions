@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve dependency failures when retained input cleanup also fails",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
