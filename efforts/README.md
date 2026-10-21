@@ -10,7 +10,7 @@ that pattern to this repository.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
-| [RedirectionGuard Adoption](active/redirectionguard-adoption/README.md) | Draft; audit and bounded repair proposal before implementation | #7445; preserves #7420/#7410 and #7305 consumer-recovery owners |
+| [RedirectionGuard Adoption](active/redirectionguard-adoption/README.md) | Active; helper qualification complete, independent diagnostics sequencing amendment proposed | #7445; preserves #7420/#7410 and #7305 consumer-recovery owners |
 | [Acknowledged Execution Handoff](active/acknowledged-execution-handoff/README.md) | Blocked; generic contract reviewed and merged, implementation authorization and owner assignment next | #7268; no runtime implementation or adoption |
 | [Remote ACP Host Ownership](active/remote-acp-host-ownership/README.md) | Active; proposal and target-contribution prerequisite merged, qualified relationship claim integration next | #7237; existing session, claims and dispatch owners retained |
 | [Agent Chat Graduation](active/agent-chat-graduation/README.md) | Draft; one vision/architecture/plugin/service/lifecycle proposal before implementation | #7238; existing fleet, service and session-host owners retained |

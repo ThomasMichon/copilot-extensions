@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent reviewed slices targeting `dev`
 - **Created:** 2026-10-20
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** Closes the existing installer vision's trustworthy front door and
   repair behavior; preserves uniform runtime resolution and Windows launch
   hardening rather than introducing another resolver or security exception.
@@ -24,7 +24,7 @@ Windows mitigations, configured dependency sources and seven-day seasoning.
 | Participant | Role in this effort | Reached via |
 |-------------|---------------------|-------------|
 | Audit coordinator | Owns the audit, reviewed plan, integration and completion accounting. | Managed source worktree `oiled-blueprint`; #7445. |
-| Shared-interpreter implementer | Owns only the accepted shared base-interpreter repair and its canonical fan-out. | Separate managed source worktree allocated after plan review; #7445. |
+| Shared-interpreter implementer | Owns only the accepted shared base-interpreter repair and its canonical fan-out. | Managed source worktree `quiet-bearing`; #7445. |
 | Front-door implementer | Owns only the accepted bare-provider diagnostics and failure-result repair. | Separate managed source worktree allocated after plan review; #7445. |
 
 ## Coordination
@@ -42,8 +42,12 @@ Windows mitigations, configured dependency sources and seven-day seasoning.
   diagnostics. Existing #7254 retains Windows-command execution from WSL.
   Findings in those scopes go to their current owners, not competing patches.
 - The current #7420 head also changes the Worktrees Manager-launch adapter.
-  The front-door slice must build on that change after it lands, or be
-  incorporated by its existing owner; do not publish a parallel adapter patch.
+  Hunk-level audit found no semantic prerequisite for the diagnostics slice:
+  it must not modify probe subprocess construction, selected-slot runtime
+  invocation, Manager construction/publication/cancellation, or #7420's tests.
+  Preserve the existing probe/command tuple APIs and verify both test groups
+  together when #7420 rebases. Resolve any actual context conflict deliberately,
+  never by taking a whole file or replacing the existing owner's implementation.
 - #7305 retains the broader published-update and installed-consumer recovery
   obligation. This effort does not take over that objective or the entire
   Worktree Manager control-plane effort.
@@ -84,7 +88,7 @@ not add Linux/WSL deployment work or authorize persistent security changes.
 - [x] Finish the bounded current-code audit of canonical interpreter handling,
   Manager's pending repair and bare-front-door behavior; retain only
   evidence-backed findings.
-- [ ] Record overlap boundaries with existing owners and land this proposal
+- [x] Record overlap boundaries with existing owners and land this proposal
   before implementation.
 
 ### Phase 2 - Shared base-interpreter adoption
@@ -102,8 +106,9 @@ not add Linux/WSL deployment work or authorize persistent security changes.
   unsupported stale-binstub diagnosis or a fallback that is not available.
 - [ ] Distinguish first-run onboarding, intentional headless use and an
   installed-provider launch failure. Return a failure for the latter without
-  changing unrelated successful launch behavior. Coordinate adapter changes
-  with #7420 before editing or publishing that file.
+  changing unrelated successful launch behavior. Own only provider-health
+  interpretation, factual diagnostics and bare-dispatch result handling;
+  preserve the probe loop and runtime invocation owned by #7420.
 
 ### Phase 4 - Integration and completion
 
@@ -117,7 +122,7 @@ not add Linux/WSL deployment work or authorize persistent security changes.
 
 - [ ] Run focused existing unit/contract selections for each changed helper and
   caller, including blocked link traversal and preserved venv context.
-- [ ] Exercise the real interpreter helper in an inherited-RedirectionGuard
+- [x] Exercise the real interpreter helper in an inherited-RedirectionGuard
   Windows context, using a healthy real binary behind an inaccessible alias.
   Confirm the mitigation remains enabled and test two repeated invocations.
 - [ ] Exercise a real failed child provider through the bare-front-door
@@ -130,10 +135,53 @@ not add Linux/WSL deployment work or authorize persistent security changes.
 
 ## Proposal
 
-Pending automated review. No implementation or production rollout is authorized
-by the existence of this draft alone.
+The proposal passed automated review and merged in #7447. The bounded source
+implementation may proceed; production rollout remains separately qualified.
+The hunk-level independent front-door sequencing amendment requires its own
+review before that slice starts.
 
 ## Journal
+
+### 2026-10-20 - Hunk-level sequencing correction
+
+- The initial same-file hold was more restrictive than the actual dependency.
+  A read-only comparison against #7420's exact current head found its probe
+  spawning and concrete-runtime hunks separate from health interpretation and
+  bare-dispatch results. Shared file ownership alone is not a semantic gate.
+- Propose independent diagnostics-only implementation while preserving #7420's
+  substantive hunks and the public tuple contracts. Do not refactor the probe
+  loop merely to distinguish its currently collapsed spawn/timeout result.
+- This amendment passes review before the front-door implementation begins.
+  Existing runtime ownership and the published-consumer gate remain unchanged.
+
+### 2026-10-20 - Enforced consumer qualification
+
+- A path-only candidate failed the real contextualized consumer: the physical
+  base interpreter ran alone, but CPython reread the blocked configuration home
+  when preserving the selected venv and failed during path initialization.
+  Extended-path spelling was not the cause. Publication was stopped.
+- The revised helper explicitly refuses an inaccessible configuration home with
+  a reconstruction diagnostic. It does not rewrite installed configuration,
+  drop venv identity or override Python startup environment.
+- Qualified that refusal twice through all three selection APIs in an actual
+  enforcement-enabled SSH context. A separate disposable physical-home venv
+  then ran the candidate's console and GUI selections twice each, preserving
+  its prefix and importing a selected-environment-only module. Native policy
+  flags remained enabled throughout; private test scratch was removed.
+- Existing legacy-runtime reconstruction still belongs to #7420/#7305.
+  Qualified source-helper behavior is not a recovered installed Manager.
+- #7410 has merged; its existing owner retains published-consumer qualification.
+  #7420 remains under its own review/fix loop. The subsequent hunk-level
+  sequencing amendment separates the independent diagnostics work.
+
+### 2026-10-20 - Proposal reviewed
+
+- #7447 merged after exact-head approval with no findings and green required
+  checks. Synced the coordinator onto the reviewed Dev plan.
+- Allocated `quiet-bearing` for the shared-interpreter repair. Its ownership
+  excludes the WSL-command feature in #7254 and Manager construction in #7420.
+- The front-door repair waits for #7420's adapter changes to land or for its
+  owner to incorporate the bounded fix. Existing ownership was notified.
 
 ### 2026-10-20 - Audit intake
 
