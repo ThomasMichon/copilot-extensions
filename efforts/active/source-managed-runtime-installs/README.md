@@ -112,8 +112,10 @@ publication and command-ownership boundaries; it does not disable whole hooks.
 - [x] Land and qualify the shared installation-owned decision on Python,
   no-Python POSIX and PowerShell 5.1 before wiring every publication caller.
 - [x] Gate each plugin's reconciliation plan and in-process execution without suppressing marketplace refresh or independent targets.
-- [ ] Qualify shared legacy lifecycle publication admission and explicit management purpose on the existing source-qualified lease.
+- [x] Qualify shared legacy lifecycle publication admission and explicit management purpose on the existing source-qualified lease.
 - [ ] Cover session bootstrap and indirect first-use publication without disabling other hook or extension behavior.
+- [x] Qualify Worktrees' native bootstrap and payload-local early first-use
+  publication gates, retaining standalone reconciliation and healthy dispatch.
 - [ ] Keep adapters thin and enforce drift-compatible service interaction without implicit runtime replacement.
 
 ### Phase 4 - Integrate Manager-owned runtime source selection
@@ -440,3 +442,15 @@ onto one branch.
 - Installation-cell admission, bootstrap lib-copy reconciliation, early first-use writes, retained hooks, skew and Manager source selection remain open. No live policy, deployment or maintenance cadence is enabled.
 - Review found that native ticket checks did not compare the requested action to the lease operation. All borrowers now require the expected operation, and both native installers pass it before staging and before dispatch. Real teardown-to-stamp/install/update/provision/helper negatives and a valid uninstall reentry guard the correction.
 - A concurrent admission-interpreter update required only a combined installer capability digest in the rebase. Its executable canonicalization also exposed a fixture isolation gap; the synthetic interpreter now reports its own profile-preserving wrapper. Native Windows passes 129 cases with 28 platform skips; the complete Linux selection passes 134 with 23 skips in two bounded batches.
+
+### 2026-10-20 - Shared legacy publication admission merged
+- PR #7439 merged as `7b41160374038e2e5bd3697708976885d9071550` after exact-head Copilot approval with no open findings and successful required checks. Native operation matching closes the review-discovered teardown-to-publication gap across both installers and direct helper borrowers.
+- Preserved two concurrent installer changes during digest-only rebases. Current-base deployment coverage passes 38 Windows cases with four platform skips and all 42 Linux cases; the complete lifecycle/binding/output selection also passed on both platforms.
+- Re-read the Plan and Validation Plan. Only shared legacy lifecycle admission closes. Next gate bootstrap lib-copy reconciliation and early indirect first-use writes before root/lock creation, retaining healthy-runtime dispatch and non-deployment hook behavior. Installation-cell admission, skew, independent Manager/service source selection, maintenance and native adoption remain open.
+
+### 2026-10-20 - Native bootstrap and early first-use gates
+- Added native canonical deployment probes before first stamping and old lib-copy replacement, outside the legacy swallowing error handler. The invoked payload owns the probe; old manifest source hints do not choose policy authority. A deployed hook without a capable native helper retains standalone behavior only when policy is absent.
+- Early first use checks before provisioning commitment, trace/root/lock writes and again under the existing provision lock after healthy-runtime recheck. Typed results use the actual governed canonical policy path, retaining aliased homes and active-cell scope. Healthy dispatch never requires publication permission.
+- The focused forty-four-case native matrix passes across Linux Bash/PowerShell and Windows PowerShell hosts, with platform-inapplicable cases skipped on Windows. Real policy adapters cover no-write refusal, standalone stamping/lib-copy, older deployed hooks, canonical aliases, namespaced scope and a policy arriving while the provision lock is held. A separate composition regression positively executes independent project, registration, nudge and hygiene hooks after deployment refusal.
+- Corrected the initialized PowerShell test host to capture direct console output without starting another profiled shell. POSIX native fixtures isolate the OS account lookup just as their Python counterpart does; production guest identity and ownership validation remain unchanged.
+- Installation-cell installer admission, launcher-executed plans, remaining hook/extension callers, declared skew, source selection, maintenance and native adoption remain open. No host deployment or maintenance opt-in is implied.

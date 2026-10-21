@@ -79,6 +79,16 @@ ownership, not invented readiness. See the
 [shared binding contract](../../libs/payload-invocation/README.md#source-qualified-command-binding)
 for selection/refusal semantics and consumer compatibility.
 
+The installation-owned runtime deployment policy also gates native bootstrap
+stamping, legacy lib-copy reconciliation and payload-local first-use
+provisioning. These paths use the canonical deployment probe before publication;
+first use repeats admission under its existing provision lock. A refusal leaves
+the hook's other components and healthy runtime dispatch usable and reports
+explicit installation-management recovery. Absent policy retains standalone
+behavior. This protects these native entrypoints, not every installer or launcher
+publication path. The [canonical deployment policy contract](../../libs/installation-context/README.md)
+owns the policy schema and decision semantics.
+
 Project launchers are attributable global entry points with ownership receipts
 under `~/.agent-worktrees/binstub-receipts/`. Legacy launchers delegate to the
 installed user-side `agent-worktrees` command in their resolved local-bin

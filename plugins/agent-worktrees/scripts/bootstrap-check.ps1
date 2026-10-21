@@ -51,6 +51,53 @@ $_r         = Join-Path $InstallDir 'bin\resolve-runtime.ps1'
 $VenvPython = if (Test-Path -LiteralPath $_r) { . $_r; $AwPy } else { $null }
 $Manifest   = Join-Path $InstallDir 'deploy-manifest.json'
 
+function Assert-BootstrapPublication {
+    $helper = Join-Path $PSScriptRoot 'installation-context\installation-context.ps1'
+    $policy = Join-Path $InstallDir 'runtime-deployment.json'
+    if (-not [IO.File]::Exists($helper)) {
+        # Older deployed hooks have no native adapter. Only an absent policy
+        # retains their standalone behavior; a link or unreadable policy denies.
+        try {
+            $null = Get-Item -LiteralPath $policy -Force -ErrorAction Stop
+        } catch [System.Management.Automation.ItemNotFoundException] {
+            return
+        } catch {
+            [Console]::Error.WriteLine($_.Exception.Message)
+        }
+        [Console]::Error.WriteLine(
+            '[agent-worktrees] Runtime publication refused: deployment policy requires ' +
+            'a capable installation helper. Use explicit installation management to repair it.'
+        )
+        [Console]::Out.Write('{}')
+        exit 3
+    }
+    $payloadRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
+    $probe = @(& $helper -Action probe-plugin-publication -PayloadRoot $payloadRoot `
+        -PluginId agent-worktrees -LegacyRoot $InstallDir)
+    $probeCode = $LASTEXITCODE
+    try {
+        $decision = ($probe -join "`n") | ConvertFrom-Json -ErrorAction Stop
+        if ($probeCode -eq 0 -and $decision.actualMode -ceq 'legacy' -and
+            $decision.deployment.allowPluginPublication -is [bool] -and
+            $decision.deployment.allowPluginPublication -and
+            $decision.legacy.root -is [string] -and $decision.legacy.root -and
+            [string]$decision.deployment.path -ceq
+                (Join-Path $decision.legacy.root 'runtime-deployment.json')) {
+            return
+        }
+    } catch {
+        [Console]::Error.WriteLine(
+            '[agent-worktrees] Runtime publication probe returned an invalid decision.'
+        )
+    }
+    [Console]::Error.WriteLine(
+        "[agent-worktrees] Runtime publication refused: $($probe -join ' ') " +
+        'Use explicit installation management to install or repair this runtime.'
+    )
+    [Console]::Out.Write('{}')
+    exit 3
+}
+
 # Is the tools-half runtime already provisioned? (#581/#1393: a `.venv` link OR a
 # current-version marker whose slot python exists.) A tools-half box has no
 # full-launcher resolve-runtime.ps1 (so $VenvPython is null) yet IS provisioned;
@@ -71,6 +118,7 @@ function Test-AwProvisioned {
 if ((-not $VenvPython) -and (-not (Test-AwProvisioned))) {
     $installer = Join-Path $PSScriptRoot 'install.ps1'
     if ((Test-Path $installer) -and (Select-String -Path $installer -Pattern "'stamp'" -Quiet)) {
+        Assert-BootstrapPublication
         if ($BootstrapPython) {
             $bindingHelper = Join-Path $PSScriptRoot 'command_binding.py'
             if (-not [IO.File]::Exists($BootstrapPython) -or -not [IO.File]::Exists($bindingHelper)) {
@@ -130,7 +178,13 @@ try {
         [Console]::Out.Write('{}')
         exit 0
     }
+} catch {
+    [Console]::Out.Write('{}')
+    exit 0
+}
 
+Assert-BootstrapPublication
+try {
     # Stale -- re-deploy package. Progress notices are diagnostics, not model
     # context: route them to stderr and keep stdout a single JSON object.
     [Console]::Error.WriteLine('[agent-worktrees] Updating runtime payload...')

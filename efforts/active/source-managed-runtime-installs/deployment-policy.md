@@ -150,9 +150,34 @@ source-qualified token rather than trusting an environment boolean. A borrowed
 plugin lease cannot become management, invalid/unsupported/foreign deployment
 policy remains blocking, and teardown cannot become publication.
 
-This slice does not wire Manager source selection, installation-cell admission,
-bootstrap lib-copy reconciliation or early first-use writes. Their actual
-mutation gates and positive retained-hook behavior remain required.
+This slice does not wire Manager source selection or installation-cell installer
+admission. Their actual mutation gates remain required.
+
+## Native bootstrap and early first-use admission
+
+Worktrees' native bootstrap now probes its own invoked payload's canonical
+installation helper before deferred stamping or the older lib-copy replacement.
+It does not use the old deployment manifest's source hint as policy authority
+or wrap that old manifest in a newer command-binding schema. Older deployed
+hooks without the native helper retain standalone behavior only when no
+deployment policy exists; a present policy requires capable explicit management.
+The gate is outside the legacy reconciliation error handler, so refusal and
+recovery diagnostics cannot disappear into that compatibility path.
+
+The payload-local first-use dispatchers retain their healthy fast path. A
+runtime miss probes the actual governed root before committing to provisioning,
+boot-trace writes, root creation or lock creation. It repeats the probe under
+the existing provision lock after checking for a now-available runtime. Both
+native adapters validate the decision's type and governed policy path, including
+canonical home aliases and active-cell versus legacy-root scope.
+
+Focused native regressions exercise real policy adapters and inventory all
+product writes on refusal. They separately preserve standalone first stamping
+and legacy lib-copy replacement, healthy dispatch, and policy changes at the
+held provision lock. A hook-composition regression runs the independent
+project, registration, nudge and hygiene siblings even when the bootstrap
+component returns a deployment refusal. These fixtures do not claim the
+remaining assembled-use, installer-cell, launcher-plan or version-skew gates.
 
 ## Validation before claiming Phase 3 complete
 
