@@ -30,6 +30,7 @@ from .queue_common import (
     _task_transition_spec,
 )
 from .queue_progress import QueueProgressMixin
+from .queue_execution_handoff import require_execution_admission
 from .queue_records import SpawnState, Status, TaskError
 
 # marketplace-isolation: allow release-verb (a business verb, "release from
@@ -741,6 +742,8 @@ class QueueLifecycleMixin(QueueProgressMixin):
                 validate_start(
                     conn, task, (extra or {}).get("owner_session_id"), start_acquisition_authority,
                 )
+            if to == Status.STARTED:
+                require_execution_admission(conn, task_id)
             try:
                 _check_expected_status(task, expected_status)
             except TaskError:

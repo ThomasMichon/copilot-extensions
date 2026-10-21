@@ -598,6 +598,9 @@ class QueueSteeringMixin:
                 row = conn.execute(
                     "SELECT * FROM wake_outbox"
                     " WHERE status = 'pending' AND not_before <= ?"
+                    " AND NOT EXISTS (SELECT 1 FROM execution_admission_closures c"
+                    " JOIN tasks t ON t.repo = c.repo AND t.source = c.source"
+                    " WHERE t.id = wake_outbox.task_id)"
                     " ORDER BY created_at ASC, id ASC LIMIT 1",
                     (ts,),
                 ).fetchone()

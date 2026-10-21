@@ -46,6 +46,7 @@ from collections.abc import Callable
 from .queue_allocation_revisions import revision_disposed
 from .queue_records import ExclusiveKeyBusyError, SpawnReservation, SpawnState, Status, TaskError
 from .queue_spawn_deferral import SpawnDeferralMixin
+from .queue_execution_handoff import require_execution_admission
 
 log = logging.getLogger("agent-dispatch.queue")
 
@@ -170,6 +171,7 @@ class SpawnReservationMixin(SpawnDeferralMixin):
             if task is None:
                 conn.execute("COMMIT")
                 raise TaskError(f"no such task {task_id!r}")
+            require_execution_admission(conn, task_id)
             if task.source == "ci-repair":
                 if admission != authority_snapshot(conn, task):
                     raise TaskError("CI repair reservation requires its registered admission lane")

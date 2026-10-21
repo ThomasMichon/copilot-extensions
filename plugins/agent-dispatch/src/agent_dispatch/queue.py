@@ -77,6 +77,7 @@ from .queue_common import (  # noqa: F401 -- re-exported for existing call sites
 )
 from .queue_completion_review import QueueCompletionReviewMixin
 from .queue_excludes import QueueExcludeMixin
+from .queue_execution_handoff import QueueExecutionHandoffMixin
 from .queue_handoff_fallback import HandoffFallbackMixin
 from .queue_lifecycle import QueueLifecycleMixin
 from .queue_liveness import LivenessMixin
@@ -137,6 +138,7 @@ from .routing_provenance import (  # noqa: F401 -- re-exported for existing call
 
 
 class TaskQueue(
+    QueueExecutionHandoffMixin,
     CategoryQueueMixin,
     ScheduleRegistrationMixin,
     RoutingAssignmentMixin,
@@ -236,6 +238,7 @@ class TaskQueue(
             run_queue_schema_migrations(conn, now_fn=self._now)
             self._ensure_handoff_fallback_schema(conn)
             self._migrate_producer_schema(conn)
+            self._migrate_execution_handoff(conn)
             conn.execute(
                 "CREATE TABLE IF NOT EXISTS coordinator_fencing ("
                 " singleton INTEGER PRIMARY KEY CHECK (singleton = 1),"

@@ -64,3 +64,30 @@ The [effort](../../../efforts/active/acknowledged-execution-handoff/README.md)
 retains durable coordinator/supervisor integration, adapter-owned final-effect
 enforcement, crash recovery and isolated process/handback qualification.
 No deployment, schema migration or process action is part of this API.
+
+## Durable admission-closure construction
+
+The internal `TaskQueue.close_execution_admission()` construction primitive
+records an initial automatic-to-manual request in the **existing queue DB**,
+under the same write lock as task claims, starts/resumes, spawn reservations
+and wake-delivery claims. It requires an owner-resolved qualified scope, the
+exact queue identity and a current managed producer generation. Producer
+generation and execution generation are separate. Labels are not resolution.
+An identical retry returns the retained operation; another scope or operation
+cannot overwrite it. New natural work may still be recorded, but these queue
+admission paths cannot execute it after closure.
+
+`execution_closure_inventory()` reads all matching tasks, reservation history
+and wake records in one read transaction without a pagination limit. It does
+not omit terminal tasks' retained allocations, relabel legacy work as safe or
+infer process exit from task state. Already accepted launches or deliveries
+remain unresolved until their actual runtime is reconciled.
+
+This remains a construction API with **no HTTP/CLI exposure**, acknowledgement,
+manual destination admission, cancellation, handback or automatic reopening.
+Its inventory always reports `acknowledged: false`, including an empty scope,
+and names the missing runtime-enrollment, legacy-association and adopter-effect
+barriers. Installation identity, registration-to-source resolution and control
+authentication belong to the future owning coordinator integration, not to a
+caller constructing a scope value. Existing unconfigured execution is unchanged.
+Do not call this primitive against a live queue to simulate a supported switch.

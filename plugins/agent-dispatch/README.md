@@ -17,10 +17,11 @@ Held housekeeping on a completed task has a separate preview-first
 [`reservations retry-cleanup` recovery flow](docs/cleanup-recovery.md).
 It preserves failure and attachment history and never rearms completed work.
 
-The optional [execution effect adapter](docs/execution-handoff.md) is a
-construction-stage library boundary for acknowledged execution handoff.
-It does not yet close coordinator/supervisor admission or expose a live handoff
-command; ordinary execution is unchanged.
+The optional [execution handoff construction APIs](docs/execution-handoff.md)
+define the effect-adapter boundary and durable queue-level admission closure.
+They expose no live handoff command, destination activation or acknowledgement;
+coordinator authentication, runtime enrollment and final-effect integration
+remain unwired. Unconfigured ordinary execution is unchanged.
 
 Internal coordinator deployment accepts optional `conditional`/`routing_dir`
 keyword arguments using the shared
