@@ -67,6 +67,37 @@ def require_custody_scope(conn: sqlite3.Connection, key: str, repo: str, source:
         raise TaskError("execution custody conflicts with the qualified producer scope")
 
 
+def require_execution_send_reconciliation(
+    conn: sqlite3.Connection,
+    task_id: str,
+    *,
+    exclusive_key: str | None,
+    creation_prefix: str | None = None,
+) -> None:
+    """Do not turn terminal reservation bookkeeping into transport absence."""
+    row = conn.execute(
+        "SELECT c.send_id, c.state, c.reservation_key"
+        " FROM execution_send_custody c"
+        " JOIN spawn_reservations r ON r.key = c.reservation_key"
+        " WHERE c.state IN ('pending', 'unknown')"
+        " AND (c.task_id = ? OR r.exclusive_key = ?"
+        " OR (? IS NOT NULL AND r.creation_key LIKE ?))"
+        " LIMIT 1",
+        (
+            task_id,
+            exclusive_key,
+            creation_prefix,
+            creation_prefix + "%" if creation_prefix is not None else None,
+        ),
+    ).fetchone()
+    if row is not None:
+        raise TaskError(
+            f"unresolved execution send {row['send_id']!r} ({row['state']})"
+            f" on reservation {row['reservation_key']!r};"
+            " reconcile its transport outcome before retrying execution"
+        )
+
+
 def _result(row: sqlite3.Row, identity: ExecutionSendIdentity, replayed: bool) -> ExecutionSend:
     return ExecutionSend(
         identity,

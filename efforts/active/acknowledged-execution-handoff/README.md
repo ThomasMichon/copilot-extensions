@@ -146,6 +146,19 @@ handoff support.
 
 ## Journal
 
+### 2026-10-21 - Preserve unresolved sends across reservation retries
+- New reservation attempts, operator rearm and fresh-conversation authorization
+  now refuse pending or unknown transport custody under the existing queue write
+  transaction. Shared exclusive keys and logical workspace lineage cannot hide
+  an earlier task's unresolved send by allocating another attempt.
+- Active-reservation observation remains observation-only. Explicit transport
+  settlement permits the existing recovery policy without erasing send history,
+  changing task generation or claiming process exit.
+- #7635 merged retained-runtime custody validation to `dev` as
+  `d32355b81c2aa65d13db5789b3022d96c10ac6fe`. Neither slice wires production
+  senders, completes supervisor enrollment or proves release/running adoption.
+  Continue Phase 2's actual sender, wake, legacy and effect integration.
+
 ### 2026-10-21 - Bind fresh custody to retained runtime enrollment
 - Fresh reservation-send custody now requires an existing coordinator runtime
   in the exact scope, source, repository and current producer generation under

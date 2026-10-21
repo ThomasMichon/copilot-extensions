@@ -47,6 +47,7 @@ from .queue_allocation_revisions import revision_disposed
 from .queue_records import ExclusiveKeyBusyError, SpawnReservation, SpawnState, Status, TaskError
 from .queue_spawn_deferral import SpawnDeferralMixin
 from .queue_execution_handoff import require_execution_admission
+from .queue_execution_custody import require_execution_send_reconciliation
 
 log = logging.getLogger("agent-dispatch.queue")
 
@@ -138,8 +139,9 @@ class SpawnReservationMixin(SpawnDeferralMixin):
           ``dispatch-task:<task_id>:<attempt>``, in state ``reserving``. Return
           it with ``True`` -- the caller owns this spawn.
 
-        A prior ``failed``/``settled`` reservation therefore does not block a
-        retry: the next attempt gets a fresh key.
+        A prior ``failed``/``settled`` reservation normally permits a retry
+        with a fresh key, but unresolved send custody still requires transport
+        reconciliation. Reservation state alone does not establish send absence.
 
         ``allow_suspended_reembodiment`` (PR #2913 review finding): the default
         eligibility gate requires ``queued`` and unowned -- the normal
@@ -234,6 +236,9 @@ class SpawnReservationMixin(SpawnDeferralMixin):
                             raise TaskError("active reservation conflicts with requested allocation revision")
                         conn.execute("COMMIT")
                         return SpawnReservation._from_row(row), False
+            require_execution_send_reconciliation(
+                conn, task_id, exclusive_key=task.exclusive_key, creation_prefix=creation_prefix,
+            )
             eligible = task.status == Status.QUEUED and task.owner is None
             if allow_suspended_reembodiment and task.status == Status.SUSPENDED:
                 eligible = True

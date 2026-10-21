@@ -133,6 +133,16 @@ contradictory or late result. A successful send is not proof of task completion,
 process exit or adopter-effect settlement. The closure inventory retains every
 send, including those associated with terminal tasks.
 
+New spawn attempts, operator rearm and fresh-conversation authorization refuse
+pending or unknown custody for the same task or shared exclusive execution key.
+New reservations also check the retained logical workspace across task IDs and
+allocation revisions. A failed or settled reservation does not establish
+transport absence. The refusal names the retained send for reconciliation;
+exact active-reservation observation still returns no new send permission.
+Explicit `sent` or `not_sent` settlement removes only this ambiguity fence:
+existing task, holder, allocation and recovery rules still apply, and a known
+send outcome is not process-exit evidence.
+
 Fresh custody now requires a retained coordinator runtime enrollment matching
 the exact qualified scope, repository, source and current producer generation,
 checked inside the same admission transaction. An arbitrary runtime string,

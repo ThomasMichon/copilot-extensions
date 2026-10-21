@@ -14,6 +14,7 @@ and is not usable standalone.
 
 from __future__ import annotations
 
+from .queue_execution_custody import require_execution_send_reconciliation
 from .queue_records import SpawnState, Status, TaskError
 
 
@@ -74,6 +75,9 @@ class SpawnRearmMixin:
             ).fetchone()
             if exclusive_owner:
                 raise TaskError("exclusive-key spawn authority is still active")
+            require_execution_send_reconciliation(
+                conn, task_id, exclusive_key=task.exclusive_key,
+            )
             timestamp = self._now(None)
             conn.execute(
                 "UPDATE tasks SET generation=generation+1, updated_at=? WHERE id=?",
@@ -167,6 +171,9 @@ class SpawnRearmMixin:
                     f"at least {min_failures} required"
                 )
 
+            require_execution_send_reconciliation(
+                conn, task_id, exclusive_key=task.exclusive_key,
+            )
             keys: list[str] = []
             for row in failed:
                 keys.append(row["key"])
