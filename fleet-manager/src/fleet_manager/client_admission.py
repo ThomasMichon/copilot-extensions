@@ -349,6 +349,23 @@ def _sync_directory(path):
             os.close(descriptor)
 
 
+def _sync_initialization_lease(root):
+    if os.name != "nt":
+        lock = root / ".construction-leases" / (
+            hashlib.sha256(LEASE.encode("ascii")).hexdigest() + ".lock"
+        )
+        before = _ordinary_file(lock)
+        descriptor = os.open(lock, os.O_RDONLY | os.O_NOFOLLOW)
+        try:
+            if artifact_staging._identity(os.fstat(descriptor)) != artifact_staging._identity(before):
+                raise PlanError("client initialization ownership metadata changed")
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+        _sync_directory(lock.parent)
+        _sync_directory(root)
+
+
 def initialize_client_admission(root, identity):
     """Explicitly initialize an empty private root, or inspect its exact owned identity."""
     identity = _identity(identity)
@@ -407,6 +424,7 @@ def initialize_client_admission(root, identity):
             unchanged()
             if database.exists():
                 raise PlanError("client admission database appeared during initialization")
+            _sync_initialization_lease(path)
             os.replace(candidate / DATABASE, database)
             _sync_directory(database_root)
             _clear_initialization(path / initialization)

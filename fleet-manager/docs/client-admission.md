@@ -37,6 +37,9 @@ preserved.
 On POSIX, the temporary directory is retained until the final rename's parent
 directory has been synced. A retry after an interrupted publication completes
 that durability barrier before removing the temporary directory or succeeding.
+The construction lock file, its containing lease directory and the installation
+directory are synced before initial database publication, so the durable
+database cannot be acknowledged ahead of its required ownership metadata.
 
 The selected-release input reuses `ReleaseSelection` with schema
 `fleet-manager.release-selection`, version `1`. It binds `decision`, positive

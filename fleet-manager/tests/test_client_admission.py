@@ -532,7 +532,13 @@ elif value['operation'] == 'initialize':
         print('INITIALIZATION_BOUNDARY',flush=True)
         time.sleep(30)
     if value['pause']=='publication':
-        admission._sync_directory=interrupted_initialization
+        real_sync=admission._sync_directory
+        def interrupted_publication(path):
+            if (root/admission.DATABASE).exists():
+                print('INITIALIZATION_BOUNDARY',flush=True)
+                time.sleep(30)
+            real_sync(path)
+        admission._sync_directory=interrupted_publication
     else:
         admission._commit=interrupted_initialization
     print(json.dumps(admission.initialize_client_admission(root,value['identity'])),flush=True)
@@ -619,6 +625,50 @@ def test_actual_initialization_death_can_retry_without_publishing_partial_state(
     assert not candidate.exists()
     assert admission.inspect_client_admission(root, identity())["admitted"] is None
     assert not admission.initialize_client_admission(root, identity())["mutations_performed"]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX directory and lock-file durability barriers")
+@pytest.mark.parametrize("fault", [None, "lock", "lease-directory"])
+def test_initialization_syncs_ownership_metadata_before_database_publication(
+    tmp_path, primitive, monkeypatch, fault,
+):
+    root = root_at(tmp_path)
+    events = []
+    inject = [True]
+    sync = os.fsync
+    replace_file = os.replace
+
+    def observed_sync(descriptor):
+        info = os.fstat(descriptor)
+        lease_root = root / ".construction-leases"
+        candidates = [("root", root), ("lease-directory", lease_root)]
+        if lease_root.exists():
+            candidates.extend(("lock", path) for path in lease_root.iterdir())
+        for label, path in candidates:
+            if path.exists() and (path.stat().st_dev, path.stat().st_ino) == (info.st_dev, info.st_ino):
+                events.append(label)
+                if label == fault and inject[0]:
+                    inject[0] = False
+                    raise OSError("injected ownership sync failure")
+                break
+        sync(descriptor)
+
+    def observed_publication(source, destination):
+        if Path(destination).name == admission.DATABASE:
+            assert events.index("lock") < events.index("lease-directory") < events.index("root")
+            events.append("publish")
+        return replace_file(source, destination)
+
+    monkeypatch.setattr(admission.os, "fsync", observed_sync)
+    monkeypatch.setattr(admission.os, "replace", observed_publication)
+    if fault:
+        with pytest.raises(PlanError, match="durable state"):
+            admission.initialize_client_admission(root, identity())
+        assert not (root / admission.DATABASE).exists() and "publish" not in events
+        events.clear()
+    report = admission.initialize_client_admission(root, identity())
+    assert report["status"] == "initialized"
+    assert admission.inspect_client_admission(root, identity())["admitted"] is None
 
 
 @pytest.mark.parametrize("boundary", ["before", "after"])
