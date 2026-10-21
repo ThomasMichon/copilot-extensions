@@ -85,7 +85,8 @@ not omit terminal tasks' retained allocations, relabel legacy work as safe or
 infer process exit from task state. Already accepted launches or deliveries
 remain unresolved until their actual runtime is reconciled.
 
-Create-and-claim and steering-triggered resumes use the same admission fence;
+Create-and-claim, steering-triggered resumes and evaluator rejection restoring
+submitted-task ownership use the same admission fence;
 exact accepted-request replays remain readable without repeating those effects.
 Both ordinary and detached-waiter wake claims exclude closed scopes while
 leaving unrelated scopes eligible.

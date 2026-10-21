@@ -151,6 +151,9 @@ handoff support.
   and detached-waiter wake claims as well. The consistent inventory retains
   both wake outboxes, including pending and already leased detached deliveries;
   exact accepted creation/steering replays remain intact.
+- Evaluator rejection cannot restore submitted-task ownership after closure;
+  an exact rejection accepted before closure remains replayable without another
+  mutation or wake.
 - No HTTP/CLI control, acknowledgement, destination activation or handback is
   exposed. Runtime enrollment, already admitted launches/deliveries, legacy
   qualification and adopter effects remain explicit barriers. Continue those

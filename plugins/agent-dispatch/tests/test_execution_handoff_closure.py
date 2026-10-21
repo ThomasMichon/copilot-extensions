@@ -29,7 +29,7 @@ def setup(tmp_path):
         "operation-a", 1, "automatic", "manual",
     )
 
-    def create(name="task", *, claim_as=None):
+    def create(name="task", *, claim_as=None, require_verification=False):
         return queue.create(
             name, repo=TEST_REPO, source="scheduled",
             producer_scope={"repo": TEST_REPO, "source": "scheduled"},
@@ -37,6 +37,7 @@ def setup(tmp_path):
             producer_capability=producer.producer_capability,
             producer_request_id=name,
             claim_as=claim_as,
+            require_verification=require_verification,
         )
 
     return queue, request, create
@@ -355,3 +356,38 @@ def test_execution_handoff_closure_inventories_detached_wake_leases(
     other_wake = _detached_wake(queue, other)
     assert queue.claim_due_run_waiter_wake(now=104).id == other_wake.id
     assert queue.claim_due_run_waiter_wake(now=105) is None
+
+
+@pytest.mark.parametrize("accepted_before_close", [False, True])
+def test_execution_handoff_closure_fences_submission_rejection(
+    setup, accepted_before_close
+):
+    queue, request, create = setup
+    task = create(require_verification=True)
+    queue.claim_one("worker", task_id=task.id)
+    queue.start(task.id, "worker", owner_session_id="native-session")
+    submitted = queue.complete(task.id, "worker", result={"goal": "unfinished"})
+    rejection = {
+        "reason": "goal remains open",
+        "expected_generation": submitted.generation,
+        "expected_owner_session_id": submitted.owner_session_id,
+        "expected_completed_by": submitted.completed_by,
+        "expected_updated_at": submitted.updated_at,
+    }
+    if accepted_before_close:
+        queue.reject_submission(task.id, **rejection)
+    close(queue, request)
+    before = (
+        queue.get(task.id), queue.steer_log(task.id),
+        queue.list_wakes(task.id), queue.events(task.id),
+    )
+    if accepted_before_close:
+        replay = queue.reject_submission(task.id, **rejection)
+        assert replay.task == before[0] and replay.event_type is None
+    else:
+        with pytest.raises(ExecutionAdmissionClosed):
+            queue.reject_submission(task.id, **rejection)
+    assert (
+        queue.get(task.id), queue.steer_log(task.id),
+        queue.list_wakes(task.id), queue.events(task.id),
+    ) == before

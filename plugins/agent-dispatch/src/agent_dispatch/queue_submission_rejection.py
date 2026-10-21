@@ -6,6 +6,7 @@ import json
 
 from .producers.evaluator import Reject
 from .queue_common import CompletionOutcome, _task_transition_spec
+from .queue_execution_handoff import require_execution_admission
 from .queue_records import SpawnState, Status, TaskError
 
 
@@ -53,6 +54,7 @@ class QueueSubmissionRejectionMixin:
                     raise TaskError("rejected submission or recovery incarnation changed")
                 conn.execute("COMMIT")
                 return CompletionOutcome(task, None)
+            require_execution_admission(conn, task_id)
             if (
                 task.status not in allowed
                 or not task.require_verification
