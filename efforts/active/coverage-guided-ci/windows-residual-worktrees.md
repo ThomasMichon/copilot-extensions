@@ -87,7 +87,40 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Admitted fixture-semantic batches
 
+### B-CONTEXT private context-resolution topology
+
+Baseline: the actual #7639 merge. Add only the named session
+`_context_repo_seed`, `_copy_context_repo`, adapted `adopted_repo` and
+`test_context_repo_copies_preserve_seed_and_sibling`. Construction uses the
+existing hermetic HOME/Git/identity environment and run-local seed lock.
+Each case copies real Git stores and repairs its relocated linked worktree;
+project/repos registration, configuration and tracking remain fresh per case.
+Actual CWD/project/worktree resolution is not cached or substituted.
+
+Two repeated cases require exact private registration and tracking inputs,
+real relocated roots and branch identity, then mutate the first copy's
+branch, bare config, file and tracking bytes. Every seed and sibling file
+remains unchanged. All 49 other existing functions and original decorators
+are AST-identical; no production, selection, skip, timeout or resource-limit
+change is included.
+
+The complete affected module passes on native Windows: 49 passed, zero
+skips, 19.16 seconds pytest / 31.00 preparation-cleanup inclusive, exactly
+two work-stealing workers, unchanged 30-second item watchdog and resource
+limits under a 240-second diagnostic group. Ruff F/E9 and the 13-plugin
+install contract pass. This is functional evidence without a quiet-host,
+whole-suite or repeated same-head performance qualification claim.
+
+Documentation impact is this ledger only; runtime, command, installation and
+configuration contracts remain unchanged. Provisioning clean-room and
+external deployment are inapplicable to this test-only fixture slice.
+Parent #5694/#5682 and complete repeated same-head Windows qualification
+remain open.
+
 ### B-ADVANCED private upstream advancement for recovery consumers
+
+**Actually merged:** #7639 as
+`6170fd59e1a4cc4e2d3f2ba1790fc011fbd5b7ab`.
 
 Baseline: the actual #7634 merge. Add only the named recovery seed,
 module-private copied `pr_repo`, raw `legacy_pr_repo`, extracted upstream

@@ -1,0 +1,9 @@
+{
+  "comment": "Reuse private context-resolution Git fixture seeds while preserving fresh per-case registries and real identity resolution.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
