@@ -1,0 +1,13 @@
+{
+  "comment": "Frame finite Bash preflight logs through the existing phase-owned renderer while preserving retries, native streams and launch continuation.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

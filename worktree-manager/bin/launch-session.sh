@@ -370,7 +370,11 @@ run_runtime_preflight() {
     fi
     local max_attempts=3
     local retry_delay_s=0.4
-    local attempt py output rc
+    local attempt py output rc=1
+    local _SETUP_PROGRESS_DIR="" _SETUP_PROGRESS_PID="" _SETUP_PROGRESS_JOB="" _SETUP_PROGRESS_SEQUENCE=0 _SETUP_PROGRESS_FAILED=0
+    local _SHOW_LAUNCH_STATUS=0
+    _start_setup_progress
+    _setup_progress_begin "preflight/$label"
     for ((attempt = 1; attempt <= max_attempts; attempt++)); do
         py="$(resolve_runtime_python)" || py=""
         [[ -n "$py" && -x "$py" ]] || py="$PYTHON"
@@ -384,7 +388,7 @@ run_runtime_preflight() {
             fi
             if ((rc == 0)); then
                 setup_log INFO "$label completed: $output"
-                return 0
+                break
             fi
             setup_log WARN "$label failed on attempt $attempt/$max_attempts (exit $rc): ${output:-no details}"
         fi
@@ -392,10 +396,19 @@ run_runtime_preflight() {
             sleep "$retry_delay_s"
         fi
     done
-    setup_log ERROR "$label failed after $max_attempts attempts -- continuing launch without it"
-    printf 'WARNING: %s failed after %s attempts -- continuing launch without it (see %s)\n' \
-        "$label" "$max_attempts" "${WORKTREE_SETUP_LOG:-the setup log}" >&2
-    return 1
+    if ((rc == 0)); then
+        _setup_progress_end done 'exit 0'
+    else
+        setup_log ERROR "$label failed after $max_attempts attempts -- continuing launch without it"
+        _setup_progress_end failed "exit $rc; continuing launch"
+    fi
+    _stop_setup_progress
+    if ((rc != 0)); then
+        printf 'WARNING: %s failed after %s attempts -- continuing launch without it (see %s)\n' \
+            "$label" "$max_attempts" "${WORKTREE_SETUP_LOG:-the setup log}" >&2
+        return 1
+    fi
+    return 0
 }
 
 if [[ -n "$PYTHON" && -x "$PYTHON" ]]; then

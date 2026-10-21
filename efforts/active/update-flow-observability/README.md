@@ -118,6 +118,11 @@ matrix below are _(agent-recommended)_ implementation details.
   persistent/status sinks (#6869 and #6904).
 - [x] Route synchronous bootstrap and blocking marketplace installer output
   through the native timing, outcome and persistent-log adapters (#6920).
+- [x] Frame standalone Worktrees install/update output in the existing
+  admitting parent, retaining child-exit timing, native arguments, source
+  admission and lease/containment ownership (#7119).
+- [ ] Frame finite post-maintenance Bash preflight log scopes without
+  extending renderer lifetime across the Picker or interactive session.
 - [ ] Finish the remaining detached/standalone installer and early/late Bash
   output boundaries through their actual output owners.
 - [ ] Prefix every human-readable install/update line with a wall-clock time;
@@ -136,9 +141,10 @@ matrix below are _(agent-recommended)_ implementation details.
   refusals through real native construction adapters (#6940).
 - [x] Remove PowerShell UV acquisition from admitted healthy reuse while
   preserving fresh-construction acquisition and cleanup (#7054).
-- [ ] Reconcile Bridge serving-version drift through the admitted runtime's
+- [x] Reconcile Bridge serving-version drift through the admitted runtime's
   existing cutover path rather than returning a misleading local-content
-  no-op or rebuilding an already current slot (#6826).
+  no-op or rebuilding an already current slot (#6826, #6877); installed
+  serving-state proof remains in the rollout validation below.
 - [ ] Verify #6598's existing Codespaces admitted-construction reuse after
   promotion instead of reimplementing it; attribute any remaining
   package/completion/activation failure with the new phase outcomes.
@@ -224,6 +230,61 @@ Bridge serving-version gap and supervisor framing defect survived that
 bounded source delta inspection.
 
 ## Journal
+
+### 2026-10-21 - Bound presentation to each post-maintenance preflight
+
+- Traced both late runtime-preflight callers after the maintenance renderer
+  has stopped. Their successful/failing/retried setup-log records used the
+  legacy raw sink, even when the preflight's own stderr already supplied
+  canonical progress.
+- Reuse the existing phase-owned renderer for one finite preflight at a
+  time. The preflight scope includes its attempts and retry waits; its
+  completion is drained before returning. Runtime re-resolution, maximum
+  three attempts, retry delay, native argv, captured stdout, optional stderr
+  passthrough and the existing final continuation warning remain unchanged.
+  No helper survives into the Picker or interactive session.
+- An exact-source native Linux fixture passed six real Bash combinations:
+  immediate success, third-attempt success and exhausted retries, each with
+  captured or passed-through stderr. It verifies one renderer, no per-line
+  clock process, UTC/monotonic setup-log framing, credential redaction,
+  unchanged stdout/return behavior, and absence of live jobs or spools.
+  The existing native Bash preparation/maintenance group passed 36 cases
+  with two platform skips; no test was dropped or deadline raised.
+- These are isolated native fixtures, not a full fresh-machine installation
+  or a live rollout. No Windows producer changed; an actual macOS Bash host
+  was not available for this source qualification. Existing renderer-failure
+  and ownership-fenced shutdown regressions remain covered by the native
+  preparation group. Hosted review and CI remain required before landing.
+- Other early/late launch records, detached installers, banner convergence
+  and equivalent whole-flow cost measurements remain explicit follow-on
+  work. One bounded helper per finite preflight is presentation cost, not
+  evidence that the complete update flow became faster.
+
+### 2026-10-21 - Reconcile the merged standalone slice and continue the output audit
+
+- Confirmed #7119 merged on 2026-10-19 as
+  `c335e85435df6f15cd386bc39ce5f63b8fe98f2d`, with final source head
+  `8acd1007f7a0dc35c3d99507c35a8c752b41913f` approved by Copilot.
+  The landed slice includes the child-exit sample before Windows Job
+  cleanup, completion after cleanup/drain/lease verification, the merged
+  installer declaration refresh, and synchronization of the newly adopted
+  PR-owner installation-context consumer.
+- Re-read this effort after confirming the provider merge. The standalone
+  Worktrees boundary is complete at source; the combined detached/other
+  standalone and early/late Bash item is not complete. Reconciled the
+  already-journaled #6877 Bridge source merge without claiming an installed
+  serving-state proof.
+- Retained the exact merged source on a backup before pulling forward.
+  The normal sync refused replaying squash-merged history and auto-aborted;
+  after confirming no unpublished commits or working-tree changes remained,
+  advanced only that confirmed merged tip and completed the managed sync.
+  No unmerged work was discarded and this active effort was not finalized.
+- Next slice: trace the remaining Bash launch-log boundaries around the
+  bounded maintenance renderer, preserving its phase-owned lifetime,
+  machine-stream isolation, redaction and monotonic timing contract.
+  Banners, equivalent whole-flow cost measurements, other native producers
+  and promoted installed acceptance remain open. No update, production
+  recovery, seed delivery or deployment-hold change was performed.
 
 ### 2026-10-17 - Keep standalone build guards independent of runtime imports
 

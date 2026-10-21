@@ -203,9 +203,17 @@ signalling; a cached PID alone never authorizes termination. A final receipt
 is written after output closes and the clock thread joins. Cleanup requires
 both that receipt and the absence of a live owned job, even if Bash already
 reaped its exit status. Job-table checks run only at lifecycle boundaries.
-Early/late Bash launcher diagnostics outside maintenance and detached or
-standalone installer output retain their existing behavior;
-these are not evidence of standalone installer presentation convergence.
+Each finite Bash runtime preflight also owns one renderer for its setup-log
+records, stopped before returning to the launcher. Its scope covers all
+attempts and retry delays, not a single child execution. Runtime re-resolution,
+three attempts, native argument vectors, captured stdout, optional stderr
+passthrough and the existing final continuation warning are unchanged.
+Successful preflights do not gain terminal summaries or contaminate protocol
+stdout. No renderer is kept alive across the Picker or interactive session.
+Other early/late Bash diagnostics outside these bounded scopes and detached
+installer streams retain their existing behavior. Standalone Worktrees
+install/update presentation is owned by its existing admission parent, not
+this launcher renderer.
 
 New and Resume wait for the engine to finish repository synchronization,
 prompt staging and instruction projection rather than imposing a fixed
