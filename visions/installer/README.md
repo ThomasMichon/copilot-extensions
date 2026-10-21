@@ -64,10 +64,13 @@ Two roles at first, a third as the harness grows — **one app**:
   launchable by a human*; it is never a prerequisite for the plugins to function.
 
 Because it is the surface a user runs directly, the app also **keeps itself
-current**: it is fetched by the one-line bootstrap and thereafter **auto-updates
-itself**, out-of-band from any Copilot session — precisely so the one piece that
+current**: it is fetched by the one-line bootstrap and, when automatic
+maintenance is explicitly adopted, **auto-updates itself**, out-of-band from any
+Copilot session — precisely so the one piece that
 *wraps* session launches can stay up to date without needing a session to update
 it (a plugin cannot reliably update the very launcher that spawns it).
+Automatic installation is off by default. An explicit user choice or a trusted
+consuming harness's setup can adopt it for the addressed user or installation.
 
 Success is **turnkey**: a newcomer runs one line, answers a few prompts, and has
 a coherent, self-consistent harness; and thereafter has one visual place to see
@@ -122,8 +125,8 @@ and fix how it is wired.
   each plugin's own ability to provision and reconcile itself.
 - **Self-update** — because it is fetched and run directly (not through the
   plugin pipe) and *wraps* session launches, the app **keeps itself up to date on
-  its own**, out-of-band from any Copilot session, so the launcher never depends
-  on a session to refresh the launcher.
+  its own when automatic maintenance is adopted**, out-of-band from any
+  Copilot session, so the launcher never depends on a session to refresh it.
 - **Presets** — a shareable configuration bundle a `<repo>-harness` plugin
   carries **as part of its own payload** (related-repo declarations, venue/
   CodeSpace product defaults, and more), so adopting the plugin preconfigures
@@ -245,10 +248,29 @@ blocked selection; they never substitute an ambient checkout or newer payload.
 Ordinary marketplace delivery of skills, instructions, hooks and extensions
 continues independently, including their non-deployment behavior.
 
+### consented-background-maintenance
+Manager owns the optional background maintenance of an installation, including
+its enrollment, observable lifetime and update outcomes. It remains off unless
+the user or an explicitly run trusted consuming-harness setup opts in for the
+addressed user or local installation. A harness that installs Manager can
+finish its approved setup with this maintenance enabled; opening or discovering
+a repository alone does not authorize background installation.
+
+Maintenance does not depend on an open Picker, a foreground Copilot session or
+the machine-dependency manager. Current-user startup does not require an
+administrative registration ceremony. Its platform lifecycle remains
+unobtrusive, and disabled, pending-activation, blocked and healthy operation are
+distinguishable.
+
+One owner maintains the suite. An explicitly selected external controller is
+an alternative to Manager-owned maintenance, not a concurrent updater.
+Ownership changes preserve the existing installation and update authorities;
+general machine/dependency convergence remains independent.
+
 ### source-backed-maintenance
 An opted-in installation stays healthy and current through regular,
 observable maintenance at an explicitly selected bounded cadence. The
-existing maintenance owner checks its dedicated source, advances the chosen
+selected maintenance owner checks its dedicated source, advances the chosen
 tracking ref when appropriate and invokes the same canonical installation
 flow used interactively. Exact pins remain pinned; unchanged source reuses
 verified immutable generations without rewriting them.

@@ -30,6 +30,7 @@ another product or a change to service-supervision ownership.
 | Participant | Role in this effort | Reached via |
 |-------------|---------------------|-------------|
 | Implementation coordinator | Owns the plan, integration, public PRs and completion gate | Managed source worktree |
+| Manager maintenance implementer | Owns the bounded background-maintenance enrollment, lifecycle and ownership-handover slice | Managed source worktree; public coordination on #7028 |
 | Linux clean-room runner | Reproduces and verifies actual source installation and activation | Existing Docker clean-room rig; WSL is a supported host |
 | Windows validation runner | Verifies native installer, resolver and non-deployment hook behavior | Isolated Windows fixtures, then an explicitly authorized runtime-only pilot |
 | Independent reviewer | Reviews each coherent proposal or implementation change | Repository PR review |
@@ -79,9 +80,21 @@ separately in #7031, with exclusive source replacement rather than shadowing.
 services and tools, including their management tools, rather than ending at a
 successful canary. A regular flow must keep the dedicated merged-dev source
 healthy and updated and rerun canonical installation at a bounded interval,
-reusing Agent Machines maintenance where supported. The
+using the selected maintenance owner. The
 [maintenance slice](maintenance.md) proposes the portable integration and
 validation; it must clear review before implementation.
+
+**Maintenance ownership revision (2026-10-20):** automatic suite installation
+remains off by default, but an explicitly run trusted consuming-harness setup
+may opt in for the user or local installation. Manager owns that background
+capability. Windows enrollment uses current-user Autorun for a headless
+maintenance process rather than requiring Task Scheduler registration. A
+harness's approved setup can enable maintenance after installing Manager.
+An external update controller remains an exclusive alternative. Agent Machines
+retains general machine/dependency convergence rather than another concurrent
+suite-update loop. The operator selected **implement-and-adopt**, following
+review of this ownership amendment; source-backed installation prerequisites
+and adopter-specific change gates remain intact.
 
 The [inception record](inception-transcript.md) retains the operator's words,
 with private host identifiers redacted. Implementation choices below marked
@@ -129,12 +142,17 @@ publication and command-ownership boundaries; it does not disable whole hooks.
 - [ ] Preserve exact selection across retries and source failures; never fall back to an ambient checkout or marketplace payload.
 - [ ] Qualify Manager's own clean-source, immutable non-editable installation and recovery independently of the selected service-runtime source.
 
-### Phase 4a - Maintain selected source through existing update ownership
+### Phase 4a - Manager-owned opt-in background maintenance
 The [maintenance slice](maintenance.md) owns the detailed proposal and evidence
 matrix; no schedule or cadence is enabled by this plan.
 
 - [x] Land the portable source-backed maintenance intent and implementation plan through review before adding that capability.
-- [ ] Extend the existing Manager update path and Agent Machines maintenance owner for bounded source health, selected-ref synchronization and canonical installation; do not add a parallel updater.
+- [ ] Review the ownership revision, default-off policy, trusted-harness setup consent and current-user Windows Autorun lifecycle before implementation.
+- [ ] Implement Manager-owned enrollment, background lifetime, bounded recurring invocation and status through the existing canonical update path, without requiring Agent Machines or an open Picker.
+- [ ] Preserve explicit local choice and support an exclusive external-controller owner; hand over legacy suite-update responsibility without disabling general machine/dependency convergence.
+- [ ] Add the portable setup enrollment seam and qualify an explicitly consenting adopter after Manager installation; keep private adopter implementation and evidence in its own repository.
+- [ ] Prove default-off, trusted-setup enrollment, no-elevation Windows startup, durable headless operation, failure visibility and unchanged/advancing cycles on native Windows and Linux.
+- [ ] After the Phase 3 and Phase 4 prerequisites, extend that same maintenance owner for bounded source health, selected-ref synchronization and canonical source-backed installation; do not add another updater.
 - [ ] Preserve independent Manager/service/plugin-content selections, configured roles and exact per-run source identity across scheduled operation and retries.
 - [ ] Prove unchanged-source reuse, a merged-source advance and explicit dirty/unavailable/overlapping/failed-candidate outcomes on Linux and Windows.
 
@@ -162,6 +180,8 @@ matrix; no schedule or cadence is enabled by this plan.
 - [ ] **Skew:** newer-plugin/older-service and older-plugin/newer-service interactions work within declared capabilities or return precise readiness outcomes.
 - [ ] **Source modes:** main tracking, stable/exact pins and dev tracking converge through one source-assembly path without moving midway through a run.
 - [ ] **Maintenance:** the existing owner runs bounded, observable source health/sync/install cycles at the selected cadence; unchanged input is reused and source/candidate/overlap failures preserve healthy runtimes and edits.
+- [ ] **Background ownership:** default-off enrollment accepts explicit user or trusted-setup consent, current-user Windows Autorun requires no UAC registration, the worker survives its setup caller without visible consoles, and only the selected owner performs suite updates.
+- [ ] **Setup adoption:** approved consuming-harness setup finishes with verified enrollment or a precise activation/readiness blocker; unrelated repository discovery cannot enroll maintenance and external-controller ownership cannot overlap Manager.
 - [ ] **Management continuity:** Manager and the selected service runtimes can use distinct clean merged-source selections; the management tools remain usable for update and supported recovery.
 - [x] **Clean-room:** a structured Tier-P report proves fresh Linux installation and real service use; report the exact source and serving identities.
 - [ ] **Windows:** native installer/resolver fixtures pass; any installed pilot has explicit change consent and attributable running-state evidence.
@@ -474,3 +494,9 @@ onto one branch.
 - Native refusal fixtures preserve complete home inventories; positive fixtures retain standalone staging. Backend cases cover ordinary construction, explicit modes, settlement, live/stale management custody and policy changes under the actual namespace locks. Native Windows PowerShell 7 and 5.1 pass 55 cases each with 22 platform skips; all 77 Linux cases pass in three bounded batches. Existing retained lifecycle coverage passes thirty cases; stationary final-source repair on all three native Windows entrypoints plus candidate closure preparation passes four focused cases.
 - Explicit managed-cell installation remains a separate unchecked item. Manager source selection, other caller/launcher gates, skew, maintenance and native adoption remain open; no host rollout or policy change has occurred.
 - Review found a Windows Bash representation mismatch: the canonical Python probe returns a Windows root while the installer already holds a converted shell path. Normalize the probe root through the existing path helper before comparison. Real Git Bash absent-policy and explicit-standalone cell staging both pass, along with the corresponding POSIX Bash cases.
+
+### 2026-10-20 - Manager maintenance ownership revision proposed
+- Recorded the operator's default-off, consuming-harness opt-in and Windows Autorun requirements in the inception record without publishing private adopter identities.
+- The operator selected implementation and adoption after plan review. Manager owns background suite maintenance; Agent Machines retains general dependency/host work, and an external controller remains an exclusive alternative.
+- This bounded trigger/enrollment slice can use today's canonical selected update path. It does not close Phase 3/4 source-management prerequisites or authorize unfinished source-backed publication.
+- Reused #7028 for public coordination. Review precedes implementation, and this proposal registers no startup entry, launches no worker and changes no adopter policy.

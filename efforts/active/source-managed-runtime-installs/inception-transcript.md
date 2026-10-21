@@ -74,3 +74,23 @@ retaining dependency/profile identities alongside the commit, testing source
 removal and failed candidates, and keeping a known-good Manager recovery
 selection while canarying services. These are marked agent-recommended in
 the effort where they exceed the literal request.
+
+## Manager-owned automatic maintenance
+
+Private consuming-harness names, the private machine name and the private
+alternative-controller name are replaced below. The default-off choice,
+delegated setup consent, Windows startup preference and end-of-setup outcome
+are retained. The operator's reference to Windows Task Manager concerns
+scheduled-task registration in the preceding discussion; the implementation
+must not assume that every current-user scheduled task requires elevation.
+
+> The problem with Windows Task Manager is it requires a UAC prompt, which works well from some agent-driven situations but not others. It's easier to use Windows Autorun registrations to launch custom daemons than to use Task Scheduler.
+>
+> copilot-extensions should make auto-update opt-in, but we can allow the consuming harness repo to do that opt-in on behalf of the user or local machine. [A consuming harness] would enable it (though we could also use [an external update controller]). And [another consuming harness, available on its owning machine] would also enable it; at the end of setup of that repo, which installs worktree manager, we'd want auto-update to be enabled.
+
+The coordinator clarified planning-only versus implementation and adoption.
+The operator selected:
+
+```text
+scope=implement-and-adopt
+```
