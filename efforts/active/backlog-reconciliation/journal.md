@@ -132,3 +132,46 @@ Canonical contract: [README.md](README.md).
   transfer and disposition. This was operational tooling only, not product work.
 - Batch seven is being adjudicated and batch eight researched. Continue the
   campaign; all unfinished ownership, compatibility and activation gates remain.
+
+## 2026-10-21 - One hundred sixty issues reconciled
+
+- Checkpoint #7567 passed current-head review and required checks, merged, and
+  was followed by a managed pull-forward and reread of the continuing contract.
+- Full enumeration at 09:48:24 UTC found **1,364 open issues**: 1,363 original
+  cohort members plus #7556. **160 distinct original issues are reviewed and
+  94 were closed by this campaign**. With the separately observed #5610 closure
+  and coordination inflow, the net reduction is 94. No campaign closure was
+  observed reopened; the fixed guidance checkpoint remains 729.
+- Additional completed scopes: #1395's four canonical-payload fixture mocks;
+  #1423's original cross-API Windows metadata/fixture defect; #1434's atomic
+  resource-scoped spawn exclusivity primitive; and #1598's active-manifest
+  CodeSpace configuration discovery. #1423 does not reopen #7208's distinct
+  accepted investigation boundary or claim that reruns fixed it.
+- Additional transfers: #1270/#1402/#1465/#1575/#1586 to #1303; #1361 to the
+  compact delegation facade; #1362 to #4477; #1451/#1453/#1454/#1506 to
+  #1448; #1496/#1497/#1498 to #2173; #1519 to #6620; #1584 to #2155; and
+  #1602 to #5842. Every source retains an audited public disposition and every
+  unfinished checklist was appended/read back before closure.
+- Before closing intermediary #1506, forwarded the full already-accepted
+  #1361 launch-input checklist directly to open #1448. Updated #1361's original
+  disposition comment and current ledger successor, preserving the historical
+  event rather than stranding its requirements in a closing chain.
+- #1448 retains separate steering, represented-session admission, facade and AHP
+  integration phases with their ordering and single-writer gates. Assigned #1266
+  remains the AHP implementation lane; protocol fixtures and existing queue
+  primitives are not end-to-end native or single-inference acceptance.
+- The #2173 transfers preserve diagnostics, repository ownership and platform
+  outcomes through current owner-local file delivery, not a restored aggregator.
+  #5842 preserves readiness as a distinct prerequisite alongside atomic resource
+  acceptance; neither gate is presented as equivalent to the other.
+- Retained #1488 rather than expand assigned #1918's explicit per-attempt
+  ownership without its owner's disposition. #1519's trust-lifecycle acceptance
+  is preserved in a planning-only objective; implementation, collection
+  activation and deletion remain separately unauthorized.
+- Remaining retained issues from these batches: #1239, #1246, #1266, #1303,
+  #1323, #1346, #1349, #1414, #1417, #1419, #1437, #1438, #1448, #1460,
+  #1475, #1488, #1508, #1544 and #1548. Specialized semantic lanes, native
+  evidence gaps, active claims and assigned owners remain visible.
+- Batch nine is researched in disjoint scopes and batch ten is being supplied.
+  No product implementation, tests, deployment or live claim/lease/service
+  mutation has been performed by this campaign.
