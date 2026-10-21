@@ -195,6 +195,103 @@ def _partial_success_then_rebase(pr_repo, monkeypatch):
     return config, wid, path, remote, branch, old, accepted
 
 
+@pytest.fixture(scope="session")
+def _partial_success_seed(tmp_path_factory, _published_refspec_pr_seed):
+    with _seed_directory(tmp_path_factory, "rebase-partial-success") as (seed, build):
+        if build:
+            with _published_seed_environment(tmp_path_factory) as patch:
+                *_, branch, old, accepted = _partial_success_then_rebase(
+                    _copy_pr_repo(_published_refspec_pr_seed, seed, patch), patch,
+                )
+                (seed / "partial-success-input.json").write_text(json.dumps({
+                    "branch": branch, "old": old, "accepted": accepted,
+                }), encoding="utf-8")
+        return seed
+
+
+@pytest.fixture
+def partial_success_repo(tmp_path, monkeypatch, _partial_success_seed):
+    config, wid, path, remote = _copy_pr_repo(_partial_success_seed, tmp_path, monkeypatch)
+    config = dataclasses.replace(config, repos={"ext": dataclasses.replace(
+        config.default_repo, pr=dataclasses.replace(config.default_repo.pr, head_scheme="refspec"),
+    )})
+    monkeypatch.setattr(cfg, "load_config", lambda *a, **k: config)
+    inputs = json.loads((tmp_path / "partial-success-input.json").read_text(encoding="utf-8"))
+    return config, wid, path, remote, inputs["branch"], inputs["old"], inputs["accepted"]
+
+
+@pytest.mark.parametrize("iteration", range(2))
+def test_partial_success_copy_preserves_saved_inputs_and_private_history(
+    partial_success_repo, _partial_success_seed, iteration, tmp_path, monkeypatch,
+):
+    config, wid, path, remote, branch, old, accepted = partial_success_repo
+    assert config.default_repo.pr.head_scheme == "refspec"
+    assert cfg.load_config() is config
+    record = _record(wid)
+    assert record.worktree_path == str(path)
+    assert record.title == "Own change" and record.pr.state == "open"
+    assert record.pr.repo == git_ops.slug_from_url(str(remote))
+    assert record.pr.rewrite_identity == pr_publish.push_identity("origin", cwd=str(path))
+    assert record.pr.head_sha == old != accepted
+    assert _git("--git-dir", str(remote), "rev-parse", branch, cwd=path) == accepted
+    assert _git("rev-parse", f"{accepted}^", cwd=path) == old
+    assert _git("log", "-1", "--format=%s", old, cwd=path) == "Own change"
+    assert _git("log", "-1", "--format=%s", accepted, cwd=path) == "source feedback"
+    assert _git("show", f"{accepted}:accepted.txt", cwd=path) == "already accepted source feedback"
+    head = _git("rev-parse", "HEAD", cwd=path)
+    assert not git_ops.is_commit_ancestor(accepted, head, cwd=str(path))
+    assert _git("rev-parse", "HEAD~3", cwd=path) == _git("rev-parse", "origin/master", cwd=path)
+    assert _git("log", "--format=%s", "origin/master..HEAD", cwd=path).splitlines() == [
+        "unpublished source feedback", "source feedback", "Own change",
+    ]
+    assert _git("log", "-1", "--format=%s", cwd=path) == "unpublished source feedback"
+    assert (path / "accepted.txt").read_text() == "already accepted source feedback\n"
+    assert (path / "unpublished.txt").read_text() == "preserve final local feedback\n"
+    assert _git("remote", "get-url", "origin", cwd=path) == str(remote)
+    inputs_path = remote.parent / "partial-success-input.json"
+    assert json.loads(inputs_path.read_text(encoding="utf-8")) == {
+        "branch": branch, "old": old, "accepted": accepted,
+    }
+    seed_files = {
+        entry.relative_to(_partial_success_seed): entry.read_bytes()
+        for entry in _partial_success_seed.rglob("*") if entry.is_file()
+    }
+    sibling_root = tmp_path / "sibling"
+    with monkeypatch.context() as patch:
+        _, _, sibling, sibling_remote = _copy_pr_repo(_partial_success_seed, sibling_root, patch)
+        assert _git("rev-parse", "HEAD", cwd=sibling) == head
+        assert _record(wid).pr.head_sha == old
+        assert _git("--git-dir", str(sibling_remote), "rev-parse", branch, cwd=sibling) == accepted
+    assert cfg.load_config() is config
+    sibling_files = {
+        entry.relative_to(sibling_root): entry.read_bytes()
+        for entry in sibling_root.rglob("*") if entry.is_file()
+    }
+    assert not inputs_path.samefile(_partial_success_seed / inputs_path.name)
+    assert not inputs_path.samefile(sibling_root / inputs_path.name)
+    inputs_path.write_text("{}\n", encoding="utf-8")
+    (remote / "hooks" / "private-only").write_text("private hook\n")
+    _git("--git-dir", str(remote), "config", "fixture.private", str(iteration), cwd=path)
+    (path / "private-only.txt").write_text(f"private feedback {iteration}\n")
+    _git("add", "private-only.txt", cwd=path)
+    _git("commit", "-m", "private partial-success update", cwd=path)
+    changed = _git("rev-parse", "HEAD", cwd=path)
+    _git("push", f"--force-with-lease=refs/heads/{branch}:{accepted}",
+         "origin", f"HEAD:refs/heads/{branch}", cwd=path)
+    record.pr.head_sha = changed
+    tracking.save_record(record)
+    assert _record(wid).pr.head_sha == changed != old
+    assert _git("--git-dir", str(remote), "rev-parse", branch, cwd=path) == changed
+    assert {
+        entry.relative_to(_partial_success_seed): entry.read_bytes()
+        for entry in _partial_success_seed.rglob("*") if entry.is_file()
+    } == seed_files
+    assert {
+        entry.relative_to(sibling_root): entry.read_bytes()
+        for entry in sibling_root.rglob("*") if entry.is_file()
+    } == sibling_files
+
+
 def test_partial_success_before_rebase_recovers_only_verified_source_lineage(pr_repo, monkeypatch):
     config, wid, path, remote, branch, old, accepted = _partial_success_then_rebase(pr_repo, monkeypatch)
     monkeypatch.setattr(pr_publish, "_provider_head", lambda repo, pr, **kwargs: accepted)
@@ -212,8 +309,12 @@ def test_partial_success_before_rebase_recovers_only_verified_source_lineage(pr_
 
 
 @pytest.mark.parametrize("provider", ["unavailable", "different", "foreign", "racing"])
-def test_partial_success_recovery_rejects_unconfirmed_or_unrelated_remote_heads(pr_repo, monkeypatch, provider):
-    config, wid, path, remote, branch, old, accepted = _partial_success_then_rebase(pr_repo, monkeypatch)
+def test_partial_success_recovery_rejects_unconfirmed_or_unrelated_remote_heads(
+    partial_success_repo, monkeypatch, provider, _partial_success_seed,
+):
+    config, wid, path, remote, branch, old, accepted = partial_success_repo
+    seed_tracking = (_partial_success_seed / "tracking" / f"{wid}.yaml").read_bytes()
+    seed_refs = _git("--git-dir", str(_partial_success_seed / "remote.git"), "show-ref", cwd=path)
     remote_head = accepted
     if provider in ("foreign", "racing"):
         other = remote.parent / "concurrent"
@@ -228,15 +329,20 @@ def test_partial_success_recovery_rejects_unconfirmed_or_unrelated_remote_heads(
         if provider == "foreign":
             _git("push", "origin", branch, cwd=other)
     observed = "" if provider == "unavailable" else "0" * 40 if provider == "different" else remote_head
+    observations = []
     def provider_head(repo, pr, **kwargs):
+        observations.append(observed)
         if provider == "racing":
             _git("push", "origin", branch, cwd=other)
             return accepted
         return observed
     monkeypatch.setattr(pr_publish, "_provider_head", provider_head)
     assert not finalize.push_changes(wid, config)
+    assert bool(observations) is (provider != "foreign")
     assert _git("--git-dir", str(remote), "rev-parse", branch, cwd=path) == remote_head
     assert _record(wid).pr.head_sha == old
+    assert (_partial_success_seed / "tracking" / f"{wid}.yaml").read_bytes() == seed_tracking
+    assert _git("--git-dir", str(_partial_success_seed / "remote.git"), "show-ref", cwd=path) == seed_refs
 
 
 @pytest.mark.parametrize("scheme,command,flow", [

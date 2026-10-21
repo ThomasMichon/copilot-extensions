@@ -87,7 +87,54 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Admitted fixture-semantic batches
 
+### B-PARTIAL private accepted-head fixture and refusal consumers
+
+Baseline: the actual #7544 merge. Add only the named session
+`_partial_success_seed` and per-case `partial_success_repo` in
+`test_pr_rebase.py`. Construction uses the existing hermetic HOME/Git/identity
+context, run-local seed lock and real lost-acknowledgement publication helper.
+The seed contains the actual accepted remote commit, stale saved PR head,
+rebased unpublished source and saved JSON inputs; copying repairs private
+worktree/remote/record identity and restores the refspec config binding.
+
+The four original refusal parameter cases consume independent copies.
+Unavailable/different provider, unrelated foreign remote and racing update
+checks retain real publication refusal, remote-head and stale-record
+assertions. The foreign case additionally proves the provider is never
+observed; every refused outcome preserves the immutable seed record and refs.
+The positive recovery case still constructs its own real partial publication,
+so fixture reuse cannot replace that behavior under test.
+
+Two repeated-copy cases check exact saved JSON, old/accepted/rebased ancestry,
+feedback messages/content, config and relocated ownership. Mutating a private
+copy's JSON, hook, Git config, source commit, remote head and record leaves all
+seed and sibling bytes unchanged. All other 30 existing function bodies and
+all original decorators/parameter selections are unchanged. No production
+batching, transport snapshot adaptation, R/P absorption, new skip, selection
+or deadline change is included.
+
+The complete partial-success family passes on native Windows: seven passed,
+zero skips, 86.76 seconds pytest / 91.42 including preparation and cleanup.
+Exactly two work-stealing workers retain the 30-second default item watchdog,
+original module marks and resource limits under a 240-second diagnostic group.
+Initial new copy-regression failures were incorrect ancestry expectations:
+fresh publication squashes both schemes, leaving one `Own change` commit
+before accepted and unpublished feedback, not the two original work commits.
+The corrected regression checks the exact three-message sequence and base.
+Ruff F/E9, unchanged-body AST comparison and the 13-plugin install contract
+pass. This focused family is functional evidence, not full-module or
+whole-suite qualification; the outstanding complete rebase-module budget
+remains tracked by #5682.
+
+Documentation impact is this ledger only: command, runtime, installation and
+configuration contracts remain unchanged. Provisioning clean-room and external
+deployment are inapplicable to this test-only fixture conversion. Parent
+#5694/#5682 and repeated complete same-head native qualification remain open.
+
 ### B-FORK prepared helper and rerun consumers
+
+**Actually merged:** #7544 as
+`855ffa066206401e0b02bfddfac375ca5dc5ca1c`.
 
 Baseline: the actual #7539 foundation merge. The existing
 `pr_workflow_setup.PRWorkflowSetup._fork_headed_rerun` helper recognizes the
