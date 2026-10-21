@@ -87,7 +87,34 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Admitted fixture-semantic batches
 
+### B-DOCTOR isolate unrelated daemon reporting
+
+Baseline: the actual #7647 merge. Add only the named local
+`daemon_health.doctor_report` replacement to
+`test_doctor_json_repairs_pair_from_untracked_knowledge_cwd`.
+The case's subject is actual persisted pair-integrity repair and JSON
+projection from an untracked knowledge CWD, not host daemon diagnosis or
+repair. Its existing records, invalid project entry, project resolution,
+repair counts and resulting knowledge tracking-record assertion remain
+unchanged. Removing the one added patch restores the exact original
+module AST. Production daemon reporting and its dedicated tests are untouched.
+
+Complete native Windows pair-integrity module: three passed, zero skips,
+4.10 seconds pytest / 14.42 preparation-cleanup inclusive, exactly two
+work-stealing workers with unchanged 30-second item watchdog and resource
+limits under a 240-second diagnostic group. Ruff F/E9 and the 13-plugin
+install contract pass. This is actual in-process doctor/record integration,
+not daemon-health, quiet-host or whole-suite qualification.
+
+Documentation impact is this ledger only; runtime/command/install/config
+contracts are unchanged. Provisioning clean-room and external deployment
+are inapplicable to this fixture-only change. Parent #5694/#5682 and
+complete repeated same-head native qualification remain open.
+
 ### B-CREATION private native creation anchors
+
+**Actually merged:** #7647 as
+`bf3099d764aadc2155c209817aaa7b53f25eeae0`.
 
 Baseline: the actual #7644 merge. Add only the named
 `_creation_anchor_seed`, adapted `_creation_fixture`/`native_creation` and
