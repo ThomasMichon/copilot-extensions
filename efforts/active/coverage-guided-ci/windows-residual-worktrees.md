@@ -87,7 +87,42 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Admitted fixture-semantic batches
 
+### B-MUX: explicit no-mux boundary for Git-only finalization fixtures
+
+Add the opt-in `git_only_mux` fixture and apply it only to
+`test_finalize_pr.py`, `test_finalize_diverged_branch.py` and
+`test_finalize_landing.py`. These fixtures create Git repositories, not mux
+sessions. Discovery and mux termination return absent without contacting the
+host service. The handmade-PR landing case additionally checks the exact
+worktree ID/path passed to its synthetic mux/process termination doubles.
+Its real `validate_and_finalize` result assertion is unchanged.
+
+Two regression cases put failing canaries behind the original discovery and
+termination bindings, prove the fixture cannot reach either, and prove
+teardown restores both. No native process/kernel/session-ownership module,
+production function, subprocess admission rule or global autouse behavior
+changes. These explicit Git-only doubles are not process-ownership evidence.
+
+All four complete affected modules pass without skips on native Windows:
+9 boundary/diverged cases, 18 PR-finalization cases and 24 landing cases
+(51 total). Exactly two work-stealing workers retain 30-second item and
+existing resource limits; diagnostic groups take 33.67/105.81/122.11 seconds
+under the unchanged 240-second group bound, 266.05 seconds including aggregate
+preparation/cleanup. Runtime clean-room/external deployment testing is
+inapplicable to this test-only isolation boundary. No complete-suite
+qualification is claimed.
+
+Documentation impact is this ledger's explicit fixture scope and evidence
+limits; no command/install/runtime behavior changes. B-PUBLISHED finalization
+consumers remain unchanged in this slice, as do B-LANDING seed reuse and
+assertion consolidation. Those follow independently after this boundary lands.
+Parent #5694/#5682 and all remaining contracts stay open.
+
 ### B-PUBLISHED create/target/state consumers
+
+**Actually merged:** #7490 as
+`5ae60e3699ee2b8dd12128c39fd3d917479de98f`. Finalization and
+rebase consumers are not included in that merge.
 
 Baseline: the actual #7483 foundation merge
 `a74f203c3927dd392878662bd66d70dfac6b2d01`. Convert exactly

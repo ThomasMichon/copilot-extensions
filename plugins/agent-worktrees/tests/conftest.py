@@ -44,6 +44,15 @@ def native_powershell():
         pytest.skip(str(exc))
 
 
+@pytest.fixture
+def git_only_mux(monkeypatch):
+    """Git-only fixtures never own a mux or contact the host's mux service."""
+    from agent_worktrees import sessions
+
+    monkeypatch.setattr(sessions, "has_mux_session", lambda _worktree: False)
+    monkeypatch.setattr(sessions, "kill_tmux_session", lambda _worktree: False)
+
+
 @pytest.fixture(autouse=True)
 def _isolate_identity_key(monkeypatch, tmp_path):
     monkeypatch.setenv("AGENT_WORKTREES_IDENTITY_KEY", str(tmp_path / "absent-identity.key"))

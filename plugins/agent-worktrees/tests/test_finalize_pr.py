@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import pytest
+
 from pr_test_helpers import _git
 from pr_workflow_setup import PRWorkflowSetup
 
 from agent_worktrees import config as cfg
 from agent_worktrees import git_ops, pr_ops, tracking
+
+
+pytestmark = pytest.mark.usefixtures("git_only_mux")
 
 
 class TestPRFinalize(PRWorkflowSetup):

@@ -23,6 +23,9 @@ import pytest
 from agent_worktrees import finalize, finalize_landing, finalize_ref
 
 
+pytestmark = pytest.mark.usefixtures("git_only_mux")
+
+
 def _git(*args: str, cwd: Path) -> str:
     return subprocess.run(["git", *args], cwd=str(cwd), check=True,
                           capture_output=True, text=True).stdout.strip()
@@ -479,6 +482,17 @@ def test_a_pr_tracked_without_its_branch_finalizes_where_explain_says_it_landed(
         report = finalize_landing.explain(record, repo_cfg, str(env.clone), str(env.seed))
         assert (report["content_ref"], report["landed"]) == ("pr/hand-made", True)
     else:
+        # This Git-only fixture never starts a mux or a background process.
+        def absent_mux(worktree_id):
+            assert worktree_id == env.worktree_id
+            return False
+
+        def no_owned_processes(worktree_path):
+            assert Path(worktree_path) == env.clone
+            return []
+
+        monkeypatch.setattr(finalize.sessions, "kill_tmux_session", absent_mux)
+        monkeypatch.setattr(finalize.procs, "terminate_processes_under", no_owned_processes)
         assert finalize.validate_and_finalize(env.worktree_id, config) is True
 
 
