@@ -260,3 +260,49 @@ Canonical contract: [README.md](README.md).
 - Batch thirteen is being adjudicated while disjoint batch-fourteen research
   is supplied. The campaign remains Active; no product implementation, tests,
   deployment, process termination or live reservation cleanup was performed.
+
+## 2026-10-21 - Batches thirteen and fourteen, 280 original issues reviewed
+
+- The full paginated census at 10:47 UTC records **1,288 open issues**:
+  1,287 original-cohort issues and #7556 inflow. **280 distinct original issues
+  are reviewed; 170 were closed by this campaign**. The unrelated #5610 closure
+  and coordination inflow still cancel in net accounting; no campaign closure
+  was observed reopened. The guidance checkpoint remains at most 729.
+- Completed scopes: #2160's production-domain platform triage; #2172's configured
+  watchdog supervision; #2220's IPv6 and residual materialized-library drift;
+  #2228's intentional MCP bootstrap-family classification; #2247's exact
+  worktree-handle addressing; #2250's file-locator JS fixture; #2327's native
+  Bash selection; #2328's rejected-shutdown endpoint fixture; #2357's scoped
+  Phase 9 declarations/simulation tranche; and #2364's keyword-compatible
+  knowledge-overlay fixture. Historical native results remain attributed to
+  their merged sources, not claimed as new executions.
+- Transfers: #2162/#2182/#2214/#2240/#2286 to #1303; #2183/#2360 to #2118;
+  #2208/#2357 to #2423; #2221 to #2256; #2262 to #6086; #2352 to #1096;
+  #2378/#2379 to #2464; and both #2339 and #2341 directly to #1448.
+  Full checklists were recorded and read back before source closure.
+- The corrected #2339 incident is represented-inbox delivery, not the retracted
+  status-monitor/post-tool hypothesis. Its complete boundary and audit contract
+  went directly to #1448 alongside #2341's provenance, startup priming, exact
+  routing and restart-surviving audit requirements, avoiding a closed
+  intermediate successor. Existing phased admission and consumer owners remain.
+- #2357's scoped completion does not finish Phase 10. #2423 retains a full
+  current-code disposition of all five deferred design candidates plus the
+  independent #2087 carried-attempt and #2208 transactional application-ack
+  contracts. Consumption, delivery and semantic application remain distinct.
+- #2256 retains the catalog-framing classification/documentation discrepancy
+  and all #907 history-delivery acceptance. #2173 ordinary delivery/latency and
+  #1508 generation recovery remain separate. No generator/projection change or
+  restored custom aggregation authority was used to retire a mechanism proposal.
+- Retained: #2165, #2166, #2173, #2203, #2207, #2256, #2268, #2295, #2307,
+  #2309, #2312, #2316, #2320, #2335 and #2350. These preserve write-time artifact
+  enforcement, unknown stop/end and held-key evidence, systemic peer context,
+  incomplete multi-installer BSD fixes, exact path/descriptor semantics, native
+  goal continuity, the interactive-SSH HOLD, explicit contention-retest hold
+  and shared activation design.
+- #2295 was not conditionally closed: the old declaration was retired, but an
+  accepted current-mode mapping to #5768 was not established. Its complete
+  candidate checklist remains on the original tracker without expanding the
+  existing standalone custodian's assignment.
+- Batch fifteen is under research/adjudication and batch sixteen is being
+  supplied. The campaign remains Active, with no product implementation,
+  tests, native probes, deployment or live claim/process/service changes.
