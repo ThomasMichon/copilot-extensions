@@ -13,13 +13,13 @@ from agent_worktrees import pr_ops, tracking
 
 @pytest.fixture
 def recorded_pr(record_repo):
-    """Synthetic fork-headed record input, not evidence of a publication."""
+    """Synthetic legacy fork record input, not evidence of a publication."""
     config, wid, worktree, remote = record_repo
     record = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
     record.prs = [tracking.PRRecord(
         state="open", branch="feature/recorded", repo="acme/ext",
         provider="gitea", remote="fork", head_repo="alice/ext",
-        head_identity="github.com/alice/ext", head_owner="alice",
+        head_owner="alice",
         head_sha="published-head", base_sha="base", patch_id="patch",
     )]
     tracking.stamp_frozen_attribution(
@@ -46,7 +46,7 @@ def test_recorded_pr_preserves_explicit_inputs_without_git(request, monkeypatch)
         "open", "feature/recorded", "acme/ext", "gitea",
     )
     assert (pr.remote, pr.head_repo, pr.head_identity, pr.head_owner) == (
-        "fork", "alice/ext", "github.com/alice/ext", "alice",
+        "fork", "alice/ext", "", "alice",
     )
     assert (pr.head_sha, pr.base_sha, pr.patch_id) == ("published-head", "base", "patch")
     assert pr.pr_id and pr.pr_revision == 1
@@ -81,7 +81,9 @@ class TestPRRecordReassignment(PRWorkflowSetup):
         legacy.pr.remote, legacy.pr.head_repo, legacy.pr.head_identity = "fork", "alice/ext", ""
         tracking.save_record(legacy)
         stale = tracking.load_record(path)
+        assert stale.pr.head_identity == ""
         fresh = tracking.load_record(path)
+        assert fresh.pr.head_identity == ""
         fresh.pr.head_identity = "github.com/alice/ext"
         tracking.save_record(fresh)
         stale.title = "an unrelated update"

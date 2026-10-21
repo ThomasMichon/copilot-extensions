@@ -107,7 +107,8 @@ control retains its original `pr_repo` and actual publication.
 Complete real collection preserves every original 317 identity and adds two
 fixture regressions. All original subject/assertion/decorator/parameter/mark/
 base AST is preserved: only the named fixture arguments/unpacks and the
-reassignment methods' setup-only `_fork_headed_rerun` calls change.
+reassignment methods' setup-only `_fork_headed_rerun` calls change, with
+additive missing-identity precondition assertions described below.
 The other 275 original cases have identical full method and resolved-fixture
 metadata. Collection passes take 23.92 and 13.61 seconds inclusive.
 
@@ -119,6 +120,17 @@ control. Exactly two work-stealing workers and unchanged 30-second item,
 thirteen-plugin install-contract guard pass with zero violations.
 No provider double, production code, seed reuse, native-operation assertion,
 test tier or CI admission changes enter this batch.
+
+Review identified a masked backfill precondition: an initially populated
+`head_identity` was restored by the record merge before the stale writer loaded.
+The shared synthetic fixture now leaves that identity absent from its first
+persisted state; the case explicitly asserts both loaded snapshots still lack
+it before the other writer backfills. All 45 cases then pass without skips in
+18.18 seconds (22.17 inclusive); final collection takes 14.38 seconds inclusive.
+A separate contained in-memory mutation suppressing only identity backfill
+causes this case to fail at its original final preservation assertion, not
+at the new preconditions (3.23 seconds pytest / 6.62 inclusive). This negative
+control is expected failure evidence, not a passing suite or qualification.
 
 This admits only the named B-RECORD foundation/consumers; other record-only
 conversions in legacy/native-state files remain separately scoped. B-SEED,
