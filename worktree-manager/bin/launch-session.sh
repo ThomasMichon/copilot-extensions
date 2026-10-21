@@ -1316,10 +1316,10 @@ print(str(leg.get('state', '')) if isinstance(leg, dict) and leg.get('provider')
             local sess="$1"
             local spath="$2"
             [[ -n "$sess" && -n "${LAUNCH_PROJECT:-}" && -n "${WORKTREE_ID:-}" ]] || return 0
-            command -v uv >/dev/null 2>&1 || return 0
             local wm_root
             wm_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P 2>/dev/null || true)"
             [[ -n "$wm_root" ]] || return 0
+            source "$wm_root/bin/manager-runtime.sh" || return 0
             # The real mux session's own stable identity (Copilot review
             # finding on PR #3906): stored so a later teardown's own live
             # probe of the SAME tmux session (pane-wrapper.sh) can be
@@ -1329,21 +1329,16 @@ print(str(leg.get('state', '')) if isinstance(leg, dict) and leg.get('provider')
             # below.
             local incarnation=""
             incarnation="$(tmux display-message -t "$sess" -p '#{session_id}:#{session_created}' 2>/dev/null || true)"
-            # Dispatch detached rather than blocking attach on this call
-            # (real-bug follow-up to #3825): the bundled register edge can
-            # spend tens of seconds (mux metadata probes, daemon boot-wait,
-            # status-monitor-restart) before it returns, plus `uv run`'s own
-            # resolve overhead -- never block create/join on it. Mirrors the
-            # existing background-subshell dispatch already used above for
-            # activity-log.
-            ( uv run --quiet --project "$wm_root" -m worktree_manager mux-daemon register \
+            # Only the canonical spawn handshake is synchronous; expensive
+            # registration continues outside the launcher's lifetime.
+            aw_manager_callback "$wm_root" register \
                 --project="$LAUNCH_PROJECT" \
                 --worktree-id="$WORKTREE_ID" \
                 --worktree-path="$spath" \
                 --mux-session="$sess" \
                 --mux-bin=tmux \
                 ${incarnation:+--session-incarnation="$incarnation"} \
-                >/dev/null 2>&1 & ) || true
+                >/dev/null 2>&1 || true
         }
 
         # Deliver a worktree's queued `pending_seed` (picker-new-session-

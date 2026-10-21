@@ -24,7 +24,9 @@ REPO = Path(__file__).resolve().parents[1]
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, required=True)
-    root = parser.parse_args().root.resolve()
+    parser.add_argument("--contract", choices=("runtime", "callbacks"), default="runtime")
+    args = parser.parse_args()
+    root = args.root.resolve()
     if root == REPO or not root.is_relative_to(REPO):
         raise ValueError("Acceptance storage must be an explicit directory below this checkout")
     root.mkdir(parents=True, exist_ok=True)
@@ -37,7 +39,8 @@ def main() -> int:
     python = REPO / ".test-venvs" / sys.platform / "worktree-manager" / (
         "Scripts/python.exe" if os.name == "nt" else "bin/python"
     )
-    native = REPO / "worktree-manager" / "tests" / "native" / "test_manager_runtime_install.py"
+    filename = "test_manager_mux_callbacks.py" if args.contract == "callbacks" else "test_manager_runtime_install.py"
+    native = REPO / "worktree-manager" / "tests" / "native" / filename
     with ExitStack() as ownership:
         lease = acquire(0, python.parent.parent)
         ownership.callback(lease.release)
@@ -49,7 +52,7 @@ def main() -> int:
         commands = (
             [str(python), "-I", "-B", str(native), "--prepare", str(sandbox)],
             [sys.executable, str(REPO / "tools" / "run-plugin-tests.py"), "worktree-manager",
-             "--test-file", "tests/native/test_manager_runtime_install.py"],
+             "--test-file", "tests/native/" + filename],
         )
         for command in commands:
             remaining = 300 - (time.monotonic() - started)

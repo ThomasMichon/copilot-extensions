@@ -67,6 +67,13 @@ Mux routes and target readiness use the constructed slot's immutable generation,
 including repair/source qualifiers. Health preserves the semantic package
 `version` and separately reports `runtime_generation` from its own interpreter
 prefix, never from the mutable selected marker.
+The retained launch-session registration and pane-wrapper removal callbacks
+also use that payload's constructed interpreter and retention bootstrap, without
+requiring `uv`. Their bounded metadata work is dispatched through the existing
+`agent-procutil` background primitive; only its spawn handshake is synchronous.
+Source and legacy project layouts retain their `uv run --project` entry.
+Update availability compares the canonical package version, not the selected
+repair/source-qualified slot name; selection and mux identity remain unchanged.
 
 Enter this migration through the current published bootstrap once when the
 selected Manager predates the canonical engine. Already-running legacy updater

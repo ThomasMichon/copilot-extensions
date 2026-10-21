@@ -1425,6 +1425,22 @@ fixture mux cutover to the source-qualified target. Injected failures before and
 after the second selector replacement prove both selector states and runtime
 receipts survive, with no failed-update cutover. Fixture mux processes suppress
 production breakaway and are terminated/waited within the containing test.
+
+Retained mux shell callbacks have a separate, independently contained contract:
+
+```text
+python tools/run-manager-runtime-acceptance.py --root .validation --contract callbacks
+```
+
+This does not replace or split the original ten runtime checks. Each contract
+keeps the existing 300-second aggregate budget and 30-second pytest item limit.
+The callback contract cold-constructs a real package while recovering an
+unchanged selector whose old slot is missing, then executes the actual retained
+PowerShell/Bash registration and removal bodies with `uv` absent. It observes
+real registry updates/tombstones against a private live rendezvous and an owned
+fake engine, not command-string assertions. A distinct contract avoids adding
+another cold construction plus consumer subprocesses to the original group,
+whose measured native Windows execution is already close to its unchanged bound.
 The payload suite's PowerShell contracts require a real `pwsh`; when it is absent
 from the isolation container, run that target through the host's contained runner
 rather than counting skipped PowerShell contracts as validation.

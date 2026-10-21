@@ -1660,6 +1660,7 @@ function Invoke-ManagedMuxRegister {
     ) { return }
     try {
         $managerRoot = Split-Path -Parent $PSScriptRoot
+        . (Join-Path $managerRoot 'bin/manager-runtime.ps1')
         # The real mux session's own stable identity (Copilot review finding
         # on PR #3906): stored so a later teardown's own live probe of the
         # SAME psmux session (pane-wrapper.ps1) can be compared against it --
@@ -1671,11 +1672,7 @@ function Invoke-ManagedMuxRegister {
             $incarnation = (& $script:AwPsmuxBin display-message -t $Session -p '#{session_id}:#{session_created}' 2>$null)
         } catch {}
         $registerArgs = @(
-            'run',
-            '--quiet',
-            '--project', $managerRoot,
-            '-m', 'worktree_manager',
-            'mux-daemon', 'register',
+            'register',
             "--project=$($script:LaunchProject)",
             "--worktree-id=$([string]$plan.worktree_id)",
             "--worktree-path=$WorkDir",
@@ -1685,13 +1682,8 @@ function Invoke-ManagedMuxRegister {
         if (-not [string]::IsNullOrWhiteSpace([string]$incarnation)) {
             $registerArgs += "--session-incarnation=$incarnation"
         }
-        # Dispatch detached rather than blocking on `& uv @registerArgs`
-        # (real-bug follow-up to #3825): the bundled register edge can
-        # spend tens of seconds (mux metadata probes, daemon boot-wait,
-        # status-monitor-restart) before it returns, and this call sits on
-        # the launcher's own attach path -- never block create/join on it.
-        Start-Process -FilePath 'uv' -ArgumentList $registerArgs `
-            -WindowStyle Hidden -ErrorAction Stop | Out-Null
+        # Wait only for the canonical spawn handshake, not registration work.
+        Invoke-ManagerMuxCallback -PayloadRoot $managerRoot -CallbackArguments $registerArgs
     } catch {
         Write-SetupLog "psmux: managed mux registration failed: $($_.Exception.Message)" 'WARN'
     }

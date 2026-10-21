@@ -299,9 +299,9 @@ if (
 ) {
     try {
         $managerRoot = Split-Path -Parent $PSScriptRoot
+        . (Join-Path $managerRoot 'bin/manager-runtime.ps1')
         $removeArgs = @(
-            'run', '--quiet', '--project', $managerRoot,
-            '-m', 'worktree_manager', 'mux-daemon', 'remove',
+            'remove',
             "--project=$awProject", "--worktree-id=$awWt"
         )
         # `--mux-session`, when known (#3838 fix): lets the daemon-side
@@ -331,12 +331,9 @@ if (
                 $removeArgs += "--session-incarnation=$incarnation"
             }
         } catch {}
-        # Dispatch detached (real-bug follow-up to #3825): this is
-        # teardown, not attach, but blocking the pane's own exit on the
-        # same tens-of-seconds-worst-case CLI edge delays it for no
-        # benefit.
-        Start-Process -FilePath 'uv' -ArgumentList $removeArgs `
-            -WindowStyle Hidden -ErrorAction Stop | Out-Null
+        # Wait for the canonical spawn handshake, not the metadata operation.
+        # Its worker survives the pane's kill-on-close Job via agent-procutil.
+        Invoke-ManagerMuxCallback -PayloadRoot $managerRoot -CallbackArguments $removeArgs
     } catch {}
 }
 

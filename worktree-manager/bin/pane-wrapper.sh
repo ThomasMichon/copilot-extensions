@@ -145,10 +145,10 @@ if command -v agent-worktrees >/dev/null 2>&1; then
         --field "exit_code=$EXIT_CODE" --field "runtime=$RUNTIME" \
         >/dev/null 2>&1 & ) || true
 fi
-if command -v uv >/dev/null 2>&1 \
-    && [[ -n "$AW_PROJECT" && -n "$AW_WT" ]]; then
+if [[ -n "$AW_PROJECT" && -n "$AW_WT" ]]; then
     WM_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P 2>/dev/null || true)"
     if [[ -n "$WM_ROOT" ]]; then
+        source "$WM_ROOT/bin/manager-runtime.sh" || true
         # Derive the real mux session's own stable identity (Copilot review
         # finding on PR #3906): the display session name alone is NOT
         # unique per launch incarnation -- both launchers derive the same
@@ -166,22 +166,20 @@ if command -v uv >/dev/null 2>&1 \
         if command -v tmux >/dev/null 2>&1; then
             AW_SESSION_INCARNATION="$(tmux display-message -p '#{session_id}:#{session_created}' 2>/dev/null || true)"
         fi
-        # Dispatch detached (real-bug follow-up to #3825): this is
-        # teardown, not attach, but the pane process itself is exiting --
-        # blocking here on the same tens-of-seconds-worst-case CLI edge
-        # delays the pane's own exit for no benefit, mirroring the
-        # activity-log dispatch immediately above.
+        # Wait only for the canonical spawn handshake. The metadata worker
+        # then survives this pane's cleanup without delaying teardown on its
+        # potentially expensive CLI operation.
         # `--mux-session`, when known (#3838 fix): lets the daemon-side
         # registry reject this removal as a stale no-op if a newer
         # session already superseded this one for the same
         # (project, worktree_id) -- an old pane's delayed teardown must
         # never tombstone a newer, still-live session's mapping.
-        ( uv run --quiet --project "$WM_ROOT" -m worktree_manager mux-daemon remove \
+        aw_manager_callback "$WM_ROOT" remove \
             --project="$AW_PROJECT" \
             --worktree-id="$AW_WT" \
             ${AW_MUX_SESSION:+--mux-session="$AW_MUX_SESSION"} \
             ${AW_SESSION_INCARNATION:+--session-incarnation="$AW_SESSION_INCARNATION"} \
-            >/dev/null 2>&1 & ) || true
+            >/dev/null 2>&1 || true
     fi
 fi
 

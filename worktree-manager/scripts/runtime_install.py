@@ -101,18 +101,21 @@ def activate(root: Path, version: str, *, expected: str | None) -> None:
     publication = runtime._runtime_component("versioned_runtime_publication")
     targets = [root / "current-version", root / "last-known-good"]
     with runtime._publication_lease(root):
-        if runtime.current_version(root) not in (expected, version):
-            raise RuntimeError("Manager selection changed during construction")
         baseline = {path: publication.state_path(path) for path in targets}
         contents = {
             path: publication.CopyPublication._bytes(path, before)
             for path, before in baseline.items() if before is not None
         }
+        selected = contents.get(targets[0], b"").decode("utf-8").strip() or None
+        if selected not in (expected, version):
+            raise RuntimeError("Manager selection changed during construction")
     # Cleanup takes retention before publication. Acquire in that same order,
     # then compare both snapshots under publication to close the unlocked gap.
     with ExitStack() as custody:
         generations = {version, *(data.decode("utf-8").strip() for data in contents.values())}
         for generation in sorted(generations):
+            # Canonical ordinary-slot validation also governs rollback references.
+            runtime._validate_dev_previous_version(generation)
             if runtime.version_dir(root, generation).is_dir():
                 custody.enter_context(runtime.retention_lease(root, generation))
         with runtime._publication_lease(root):

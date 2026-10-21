@@ -249,3 +249,28 @@ def test_selector_snapshot_is_rechecked_after_retention_acquisition(tmp_path, mo
         adapter.activate(root, "2.0.0", expected=None)
     assert not (root / "current-version").exists()
     assert (root / "last-known-good").read_text() == "external\n"
+
+
+def test_unchanged_raw_selector_with_missing_slot_allows_bootstrap_recovery(tmp_path):
+    adapter = si._runtime_installer()
+    root = tmp_path / "root"
+    adapter.runtime.mark_complete(root, "2.0.0", payload_hash="a" * 64)
+    (root / "current-version").write_text("1.0.0\n")
+    assert not (root / "versions" / "1.0.0").exists()
+    assert si.current_version(root) == "1.0.0"
+    assert adapter.runtime.current_version(root) is None
+    adapter.activate(root, "2.0.0", expected="1.0.0")
+    assert si.current_version(root) == "2.0.0"
+    assert (root / "last-known-good").read_text().strip() == "2.0.0"
+
+
+def test_raw_selector_does_not_admit_an_unsafe_missing_slot(tmp_path):
+    adapter = si._runtime_installer()
+    root = tmp_path / "root"
+    adapter.runtime.mark_complete(root, "2.0.0", payload_hash="a" * 64)
+    marker = root / "current-version"
+    marker.write_text("../foreign\n")
+    with pytest.raises(ValueError):
+        adapter.activate(root, "2.0.0", expected="../foreign")
+    assert marker.read_text() == "../foreign\n"
+    assert not (root / "last-known-good").exists()

@@ -107,6 +107,8 @@ def check_now(root: Path | None = None) -> dict:
     if os.environ.get("WORKTREE_NO_UPDATE") == "1":
         return {}
     local = self_install.current_version(root) or self_install.payload_version()
+    if local:
+        local = self_install._runtime_installer().runtime.package_version(local)
     remote = self_install.fetch_remote_version(root)
     data = {
         "checked_at": time.time(),
