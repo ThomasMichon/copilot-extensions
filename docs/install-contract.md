@@ -2921,6 +2921,14 @@ venv/package writers, even when construction tools are absent. Unfinished
 builders recheck under the canonical OS lease; completed content drift or
 invalid evidence refuses instead of rewriting a published slot.
 
+Reused installed-health failures request distinct-generation repair when the
+probe exits unsuccessfully, cannot create its child, or reaches its deadline
+after every owned writer has settled. Process creation is distinguished by
+`agent_procutil.SyncProcessLaunchError`; the installer propagates a separate
+settled-child timeout type. Ownership, Job admission and cleanup failures are
+not repair licenses. Fresh construction still fails its health gate rather
+than reporting an unhealthy candidate ready.
+
 For a materialized source deployment, the Python lifecycle validates
 `runtime-source.json`, publishes the canonical source snapshot and selects its
 exact source-qualified runtime identity. It does not coalesce across source

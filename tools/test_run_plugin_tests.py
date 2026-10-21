@@ -686,7 +686,10 @@ def test_explicit_test_files_preserve_default_grouping_and_filter_only_collectio
 def test_manager_default_discovery_excludes_only_its_prepared_native_lane():
     root = runner._plugin_dir("worktree-manager")
     native = set((root / "tests" / "native").glob("test_*.py"))
-    assert len(native) == 2
+    assert {path.name for path in native} == {
+        "test_manager_runtime_install.py", "test_manager_mux_callbacks.py",
+        "test_manager_updater_recovery.py",
+    }
     default = {path for group in runner._test_file_groups("worktree-manager", 25) for path in group}
     assert default == set((root / "tests").rglob("test_*.py")) - native
 

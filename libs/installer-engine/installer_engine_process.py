@@ -15,6 +15,14 @@ from pathlib import Path
 from types import ModuleType
 
 
+class ChildLaunchError(RuntimeError):
+    """An owned child could not start; no child cleanup was attempted."""
+
+
+class ChildTimeoutExpired(subprocess.TimeoutExpired):
+    """The child's deadline expired and every owned writer has settled."""
+
+
 def _settle(operation: Callable[[], object]) -> None:
     failure: BaseException | None = None
     while True:
@@ -45,11 +53,14 @@ def run_owned(
     timeout_error = None
     if os.name == "nt":
         # An explicit application path avoids MAX_PATH command-token parsing.
-        process, job = procutil.spawn_sync_in_kill_on_close_job(
-            argv, require_job=True, allow_breakaway=False,
-            executable=argv[0],
-            **procutil.no_window_kwargs(), **options,
-        )
+        try:
+            process, job = procutil.spawn_sync_in_kill_on_close_job(
+                argv, require_job=True, allow_breakaway=False,
+                executable=argv[0],
+                **procutil.no_window_kwargs(), **options,
+            )
+        except procutil.SyncProcessLaunchError as error:
+            raise ChildLaunchError(f"Installer child could not start: {error}") from error
         try:
             stdout, stderr = process.communicate(timeout=timeout)
         except subprocess.TimeoutExpired as error:
@@ -64,11 +75,14 @@ def run_owned(
         try:
             # The guardian retains the custody descriptor until all children
             # exit, including after SIGKILL closes the caller's liveness pipe.
-            process = subprocess.Popen(
-                [sys.executable, "-I", str(Path(__file__).resolve()),
-                 "--owner-fd", str(owner_read), "--", *argv],
-                pass_fds=(owner_read, construction_fd), start_new_session=True, **options,
-            )
+            try:
+                process = subprocess.Popen(
+                    [sys.executable, "-I", str(Path(__file__).resolve()),
+                     "--owner-fd", str(owner_read), "--", *argv],
+                    pass_fds=(owner_read, construction_fd), start_new_session=True, **options,
+                )
+            except OSError as error:
+                raise ChildLaunchError(f"Installer child could not start: {error}") from error
             os.close(owner_read)
             owner_read = -1
             try:
@@ -87,9 +101,9 @@ def run_owned(
     if timeout_error is not None:
         # Read both captured streams only after every owned writer has settled.
         stdout, stderr = process.communicate(timeout=10)
-        timeout_error.output = stdout
-        timeout_error.stderr = stderr
-        raise timeout_error
+        raise ChildTimeoutExpired(
+            timeout_error.cmd, timeout_error.timeout, output=stdout, stderr=stderr,
+        ) from timeout_error
     result = subprocess.CompletedProcess(argv, process.returncode, stdout, stderr)
     result.check_returncode()
     return result

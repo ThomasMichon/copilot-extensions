@@ -392,6 +392,21 @@ def exercise_safety(directory):
         finally:
             legacy_python.write_bytes(interpreter)
 
+        restore()
+        canonical_slot = Path(witness["manager_slot"])
+        canonical_python = canonical_slot / "Scripts" / "python.exe"
+        interpreter = canonical_python.read_bytes()
+        try:
+            canonical_python.write_bytes(b"not an executable")
+            repaired = normal("unexecutable-completed-canonical-interpreter")
+            assert repaired.returncode == 0, repaired.stdout + repaired.stderr
+            selected = root / "versions" / (root / "current-version").read_text().strip()
+            assert selected != canonical_slot and (selected / ".install-complete.json").is_file()
+            assert canonical_python.read_bytes() == b"not an executable"
+            witness["completed_canonical_interpreter_recovers"] = True
+        finally:
+            canonical_python.write_bytes(interpreter)
+
         broken()
         old = aw_root / "versions" / OLD_UPDATER
         # A caller already running when a peer publishes cannot reload itself.
@@ -427,7 +442,7 @@ def test_archived_normal_update_recovers_manager_without_operator_bootstrap(witn
 @pytest.mark.parametrize("case", [
     "healthy_reused_without_source", "unadopted_untouched", "source_pin_failure_preserved",
     "credential_admission_preserved", "unexecutable_interpreter_recovers",
-    "skipped_installer_next_invocation_recovers",
+    "completed_canonical_interpreter_recovers", "skipped_installer_next_invocation_recovers",
 ])
 def test_installed_recovery_admission_and_concurrent_caller(witness, case):
     assert witness[case] is True

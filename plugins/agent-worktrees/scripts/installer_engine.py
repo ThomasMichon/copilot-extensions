@@ -21,7 +21,7 @@ import tomllib
 import versioned_runtime as runtime
 import versioned_runtime_source as runtime_source
 from installer_dependency_policy import RetainedUVInstall, retain_uv_install
-from installer_engine_process import run_owned
+from installer_engine_process import ChildLaunchError, ChildTimeoutExpired, run_owned
 
 _GENERATED_DIRECTORIES = {
     ".git", ".venv", "__pycache__", ".pytest_cache", ".ruff_cache",
@@ -315,12 +315,12 @@ for name, expected in expected_origins.items():
              health_callable or "", "fresh" if require_frozen_origin else "reuse"],
             inputs=inputs, descriptor=descriptor, timeout=timeout,
         )
-    except subprocess.CalledProcessError as error:
+    except (subprocess.CalledProcessError, ChildLaunchError, ChildTimeoutExpired) as error:
         if require_frozen_origin:
             raise
         raise HealthRepairRequired(
             f"Published runtime {slot.name} failed isolated installed health; "
-            f"use distinct-generation repair.\n{error.stderr}"
+            f"use distinct-generation repair.\n{getattr(error, 'stderr', None) or error}"
         ) from error
 
 

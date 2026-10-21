@@ -94,6 +94,38 @@ def test_child_preserves_canonical_transaction_environment_and_cwd(engine, monke
     )
 
 
+@pytest.mark.parametrize("windows", [False, True])
+def test_process_creation_failure_has_a_distinct_os_error_type(procutil, monkeypatch, windows):
+    failure = OSError(193, "not an executable", "broken-python")
+    monkeypatch.setattr(procutil, "_is_windows", lambda: windows)
+
+    def failed(*args, **kwargs):
+        raise failure
+
+    monkeypatch.setattr(procutil.subprocess, "Popen", failed)
+    with pytest.raises(procutil.SyncProcessLaunchError) as caught:
+        procutil.spawn_sync_in_kill_on_close_job(["broken-python"], require_job=True)
+    assert isinstance(caught.value, OSError)
+    assert caught.value.errno == failure.errno and caught.value.filename == failure.filename
+    assert caught.value.__cause__ is failure
+
+
+def test_post_creation_job_failure_is_not_a_launch_error(procutil, monkeypatch):
+    from types import SimpleNamespace
+
+    failure = OSError("Job assignment accounting unavailable")
+    monkeypatch.setattr(procutil, "_is_windows", lambda: True)
+    monkeypatch.setattr(procutil.subprocess, "Popen", lambda *args, **kwargs: SimpleNamespace(pid=1))
+
+    def failed(*args, **kwargs):
+        raise failure
+
+    monkeypatch.setattr(procutil, "_assign_suspended_to_kill_on_close_job", failed)
+    with pytest.raises(OSError) as caught:
+        procutil.spawn_sync_in_kill_on_close_job(["python"], require_job=True)
+    assert caught.value is failure and not isinstance(caught.value, procutil.SyncProcessLaunchError)
+
+
 def test_freeze_closes_transitive_external_paths_without_editing_source(engine, tmp_path):
     leaf = _package(tmp_path / "repo" / "libs" / "leaf", "example-leaf")
     middle = _package(
@@ -795,6 +827,52 @@ def test_reuse_failed_direct_health_preserves_published_identity(engine, tmp_pat
     assert before == {file: (file.read_bytes(), file.stat().st_ino, file.stat().st_mtime_ns)
                       for file in slot.rglob("*") if file.is_file()}
     assert selectors == {name: (root / name).read_bytes() for name in selectors}
+
+
+@pytest.mark.parametrize("failure", ["unexecutable", "timeout"])
+def test_completed_runtime_launch_failure_requests_distinct_repair(
+    engine, tmp_path, build_inputs, failure,
+):
+    plugin, uv = build_inputs
+    root = tmp_path / "runtime"
+    arguments = dict(plugin=plugin, uv=uv, base_python=Path(sys.executable), health_module="example_module")
+    with engine.numbered_candidate(root, "1.0.0", **arguments) as candidate:
+        slot = candidate.slot
+    engine.runtime.activate(root, "1.0.0", link_free=True)
+    if failure == "unexecutable":
+        engine.runtime.slot_python(root, "1.0.0").write_bytes(b"not an executable")
+    else:
+        next(slot.glob("**/site-packages/example_module.py")).write_text(
+            "import time\ntime.sleep(60)\n", encoding="utf-8",
+        )
+    before = {path: path.read_bytes() for path in slot.rglob("*") if path.is_file()}
+    selectors = {name: (root / name).read_bytes() for name in ("current-version", "last-known-good")}
+    with pytest.raises(engine.HealthRepairRequired):
+        with engine.numbered_candidate(root, "1.0.0", child_timeout=1, **arguments):
+            pytest.fail("broken completed health cannot license an in-place rebuild")
+    assert before == {path: path.read_bytes() for path in slot.rglob("*") if path.is_file()}
+    assert selectors == {name: (root / name).read_bytes() for name in selectors}
+
+
+@pytest.mark.parametrize("failure", [
+    OSError("cleanup accounting failed"),
+    subprocess.TimeoutExpired(["cleanup"], 1),
+    RuntimeError("ownership refused"),
+])
+def test_reused_health_does_not_classify_cleanup_or_ownership_failure_as_repair(
+    engine, tmp_path, monkeypatch, failure,
+):
+    monkeypatch.setattr(engine, "_input_origins", lambda inputs: {})
+
+    def failed(*args, **kwargs):
+        raise failure
+
+    monkeypatch.setattr(engine, "_child", failed)
+    with pytest.raises(type(failure)) as caught:
+        engine._verify_installed(
+            None, tmp_path, tmp_path / "python", "example", 0, 1, require_frozen_origin=False,
+        )
+    assert caught.value is failure
 
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows Job accounting failure")

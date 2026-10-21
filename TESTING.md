@@ -1448,8 +1448,9 @@ Archived-fixture preparation and normal-update consumption each retain a
 300-second containment boundary. A separate 300-second admission/concurrent-caller
 phase reuses those constructed fixtures: it checks healthy reuse without source
 parsing, unadopted no-op, failed source pin and denied credentials with prior
-selection preserved, repair of an unexecutable interpreter, and an in-flight old
-caller skipping installation followed by recovery on the next normal invocation.
+selection preserved, repair of unexecutable legacy and completed canonical
+interpreters, and an in-flight old caller skipping installation followed by
+recovery on the next normal invocation.
 Pytest items retain their 30-second limit.
 This proves the updater migration contract, not release qualification or a
 live-host rollout.

@@ -98,6 +98,7 @@ __all__ = [
     "JobHandle",
     "spawn_in_kill_on_close_job",
     "spawn_sync_in_kill_on_close_job",
+    "SyncProcessLaunchError",
     "detached_kwargs",
     "windowless_daemon_kwargs",
     "windowless_python",
@@ -458,6 +459,16 @@ async def spawn_in_kill_on_close_job(
     return process, job_handle
 
 
+class SyncProcessLaunchError(OSError):
+    """Process creation failed before any child or Job handle was returned."""
+
+    def __init__(self, error: OSError):
+        super().__init__(*error.args)
+        for name in ("errno", "strerror", "filename", "filename2", "winerror"):
+            if hasattr(error, name):
+                setattr(self, name, getattr(error, name))
+
+
 def spawn_sync_in_kill_on_close_job(
     argv: list[str] | str,
     *,
@@ -494,6 +505,8 @@ def spawn_sync_in_kill_on_close_job(
     charge -- containment is a best-effort hardening layer, not a hard
     dependency for the child to execute at all. Off Windows this is a plain
     ``subprocess.Popen`` call returning ``(process, None)``.
+    Process-creation OS errors are ``SyncProcessLaunchError`` instances;
+    subsequent containment or cleanup errors retain their original types.
     """
     if type(allow_breakaway) is not bool:
         raise ValueError("allow_breakaway must be a boolean")
@@ -503,13 +516,19 @@ def spawn_sync_in_kill_on_close_job(
     ):
         raise ValueError("CREATE_BREAKAWAY_FROM_JOB conflicts with allow_breakaway=False")
     if not _is_windows():
-        return subprocess.Popen(argv, **kwargs), None  # noqa: S603 - argv list, no shell
+        try:
+            return subprocess.Popen(argv, **kwargs), None  # noqa: S603 - argv list, no shell
+        except OSError as error:
+            raise SyncProcessLaunchError(error) from error
 
     spawn_kwargs = dict(kwargs)
     spawn_kwargs["creationflags"] = (
         int(spawn_kwargs.get("creationflags", 0)) | _CREATE_SUSPENDED
     )
-    process = subprocess.Popen(argv, **spawn_kwargs)  # noqa: S603 - argv list, no shell
+    try:
+        process = subprocess.Popen(argv, **spawn_kwargs)  # noqa: S603 - argv list, no shell
+    except OSError as error:
+        raise SyncProcessLaunchError(error) from error
     job_handle: JobHandle | None = None
     try:
         pid = process.pid
