@@ -1,0 +1,9 @@
+{
+  "comment": "Synchronize Manager installer dependency policy with the exact bundled dbus-next wheel workaround.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

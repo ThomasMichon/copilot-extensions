@@ -1269,8 +1269,19 @@ def source_project(path, name="fixture-source", sources="", dependencies=""):
     return path
 
 
+@pytest.fixture(params=[
+    PATH,
+    PATH.parents[2] / "worktree-manager" / "scripts" / "installer_dependency_policy.py",
+], ids=["canonical", "manager"])
+def bundled_policy(request):
+    spec = importlib.util.spec_from_file_location("bundled_installer_dependency_policy", request.param)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 @pytest.mark.parametrize("change", ["none", "bytes", "package", "project", "filename"])
-def test_bundled_dbus_next_exception_is_exact(tmp_path, change):
+def test_bundled_dbus_next_exception_is_exact(tmp_path, change, bundled_policy):
     name = "other" if change == "package" else "dbus-next"
     filename = "other.whl" if change == "filename" else "dbus_next-0.2.3-py3-none-any.whl"
     source = source_project(
@@ -1283,13 +1294,13 @@ def test_bundled_dbus_next_exception_is_exact(tmp_path, change):
     bundled = PATH.parents[2] / "worktree-manager" / "vendor" / "dbus_next-0.2.3-py3-none-any.whl"
     wheel.write_bytes(b"changed" if change == "bytes" else bundled.read_bytes())
     if change == "none":
-        policy._check_project(source, (tmp_path,), set())
+        bundled_policy._check_project(source, (tmp_path,), set())
     else:
-        with pytest.raises(policy.DependencyPolicyError, match="local UV artifacts"):
-            policy._check_project(source, (tmp_path,), set())
+        with pytest.raises(bundled_policy.DependencyPolicyError, match="local UV artifacts"):
+            bundled_policy._check_project(source, (tmp_path,), set())
 
 
-def test_native_bundled_dbus_next_installs_through_retained_policy_offline(tmp_path):
+def test_native_bundled_dbus_next_installs_through_retained_policy_offline(tmp_path, bundled_policy):
     uv = shutil.which("uv")
     assert uv, "native UV is required for the bundled wheel contract"
     source = source_project(
@@ -1309,7 +1320,7 @@ def test_native_bundled_dbus_next_installs_through_retained_policy_offline(tmp_p
     )
     assert created.returncode == 0, created.stderr
     python = target / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
-    installed = policy.run_uv_install(
+    installed = bundled_policy.run_uv_install(
         uv, ["--no-config", "--offline", "--python", str(python), str(source)],
         env=environment, cwd=tmp_path, trusted_source_roots=(source,),
         capture_output=True, text=True, timeout=30,
