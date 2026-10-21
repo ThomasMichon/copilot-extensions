@@ -175,6 +175,18 @@ preserve the existing Worktrees import path." The
 [bounded integration plan](physical-machine-environment-boundary.md#shared-raw-json-codec-integration)
 implements that choice without enabling tuple producers or installing runtimes.
 
+**2026-10-20 producer implementation decision (operator-selected form):**
+
+The operator selected `gated-producer-implementation`, the form option:
+
+> Resume full tuple producer implementation; keep defaults and rollout gated on replay, equivalence and installed-reader acceptance
+
+The form explicitly preserved existing records, IDs and references and
+authorized no live rollout or migration. Full source producer implementation
+is resumed; ordinary producer defaults are not thereby enabled. The subsequent
+regression-led release-test request is the driver's current bounded priority,
+not abandonment of this producer objective.
+
 ## Plan
 
 ### Phase 0 - Empty-mux readiness prerequisite

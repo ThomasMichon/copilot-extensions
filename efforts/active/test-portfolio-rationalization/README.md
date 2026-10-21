@@ -38,6 +38,13 @@ and standalone residuals. Unavailable capacity supplies no passing evidence and
 is not a release dependency. The replacement tournament follows stable
 under-thirty-minute release operation, not the reverse.
 
+The operator's subsequent measured-headroom request is carried by the
+[first regression-led admission cohort](../dev-branch-release-pipeline/promotion-burndown.md#first-regression-led-unit-admission-cohort)
+and release Phase 9b. That bounded contribution may restore valuable genuine
+units inside the unchanged budget; it does not transfer this effort's broad
+periodic inventory or failure-repair ownership, reactivate full suites as
+release gates, or count unexecuted native coverage as passing.
+
 ## Participants
 
 | Participant | Role in this effort | Reached via |

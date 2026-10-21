@@ -20,7 +20,7 @@ that pattern to this repository.
 | [Venue Plugin Staging and Registration Parity](active/venue-plugin-staging-parity/README.md) | Active; source-preserving local CLI/ACP and owned startup gate merged; SSH/privileged, live-container and release acceptance open | #5286, #5072; sub-effort of #954 |
 | [Source-Managed Runtime Installs](active/source-managed-runtime-installs/README.md) | Active; thirteen merged-source installers qualified; deployment policy/Manager integration open, recurring maintenance intent proposed | #7028; #3905, #7029, #7030; future plugin-source switch #7031 |
 | [PR Lifecycle Conformance](active/pr-lifecycle-conformance/README.md) | Active; Phase 1 evidence and contract proposed, adapter implementation and acceptance open | #7051; existing #2357 lifecycle ownership retained |
-| [Machine Alias Compatibility and Locality](active/machine-alias-compatibility-and-locality/README.md) | Active; Worktrees tuple consumers merged, shared codec/adapters proposed; installed Windows/WSL acceptance open | #5674 · #6739; original identity repair retained, wider transport convergence remains separately owned |
+| [Machine Alias Compatibility and Locality](active/machine-alias-compatibility-and-locality/README.md) | Active; shared identity readers merged; full producer implementation authorized with defaults/rollout gated; installed Windows/WSL acceptance open | #5674 · #6739; original identity repair retained, wider transport convergence remains separately owned |
 | [Manual Task Session Resume](active/manual-task-session-resume/README.md) | Draft; manual exit pause and explicit local CLI/mux resume, planning only | #6677; existing lifecycle/recovery owners retained |
 | [Artifact Publication Boundary Hardening](active/artifact-publication-boundary-hardening/README.md) | Blocked; proposal merged, containing primary repairs and attested hosted publication still required | #6639; #6535/#6632 owners retained |
 | [Continuous Worktree Reclamation](active/continuous-worktree-reclamation/README.md) | Draft; vision and implementation/performance plan only, execution separately authorized | #6620; preserves #1488/#1918/#3114, #6060 and #6471 |
@@ -68,7 +68,7 @@ that pattern to this repository.
 | [Worktree/Effort Railroad Binding](active/worktree-effort-railroad-binding/README.md) | Draft | #3581 |
 | [Worktree Head-Succession Hardening](active/worktree-head-succession-hardening/README.md) | Draft | #3584 |
 | [Picker Creature Comforts](active/picker-creature-comforts/README.md) | Draft | #3586 |
-| [Dev/Main Release Pipeline](active/dev-branch-release-pipeline/README.md) | Active (Phases 7 and 9) | #3336 |
+| [Dev/Main Release Pipeline](active/dev-branch-release-pipeline/README.md) | Active (Phases 7 and 9); bounded contributor-regression admission cohort proposed | #3336 |
 | [Promotion-Failure Reactive Fix Agent](active/promotion-failure-reactive-fix-agent/README.md) | Active | _TBD_ |
 | [Agent-Process Self-Report Registry](active/agent-process-self-report-registry/README.md) | Draft | #5559 |
 | [Full-Harness Startup Reliability](active/full-harness-startup-reliability/README.md) | Active | #3303 |
