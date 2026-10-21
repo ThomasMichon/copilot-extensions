@@ -2650,7 +2650,9 @@ dependency when the exact plugin test consumer explicitly installs that
 inventoried project's literal source path. Removing or redirecting that
 consumer binding revokes attribution; a package name alone is never exempt.
 Being a local path is not attribution: local wheels, archives and unattributed
-projects are refused. Source-directory admission verifies project identity,
+projects are refused, except Manager's temporary exact-checksum
+[dbus-next 0.2.3 wheel](../worktree-manager/vendor/README.md).
+Source-directory admission verifies project identity,
 resolved containment and the recursive local dependency graph, including
 symlink escapes and hidden requirement-file references.
 

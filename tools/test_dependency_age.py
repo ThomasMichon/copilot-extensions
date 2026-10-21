@@ -219,6 +219,31 @@ def test_arbitrary_sources_do_not_exempt(tmp_path, source):
     assert len(errors) == 1
 
 
+@pytest.mark.parametrize("corrupt", [False, True])
+def test_bundled_dbus_next_still_requires_canonical_release_age(tmp_path, corrupt):
+    path = write(tmp_path / "worktree-manager" / "pyproject.toml", """
+[project]
+name = "copilot-extensions-worktree-manager"
+dependencies = ["dbus-next==0.2.3; sys_platform == 'linux'"]
+[tool.uv.sources]
+dbus-next = {path = "vendor/dbus_next-0.2.3-py3-none-any.whl"}
+""")
+    wheel = path.parent / "vendor" / "dbus_next-0.2.3-py3-none-any.whl"
+    wheel.parent.mkdir()
+    wheel.write_bytes(b"changed" if corrupt else (REPO / "worktree-manager" / "vendor" / wheel.name).read_bytes())
+    for timestamp, expected in ((BOUNDARY, 0 if not corrupt else 1), (NOW, 1)):
+        calls = []
+
+        def fetch(url):
+            calls.append(url)
+            return json.dumps({"releases": {"0.2.3": release(timestamp)}})
+
+        _, errors = age.audit(tmp_path, fetch=fetch, now=NOW)
+        assert len(errors) == expected, errors
+        if not corrupt:
+            assert any("/dbus-next/" in url for url in calls)
+
+
 def test_name_alone_is_not_repository_source_attribution(tmp_path):
     project(tmp_path, dependencies='"owned"')
     write(tmp_path / "libs" / "owned" / "pyproject.toml", '[project]\nname = "owned"\n')

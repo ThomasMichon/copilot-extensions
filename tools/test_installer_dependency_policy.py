@@ -1269,6 +1269,62 @@ def source_project(path, name="fixture-source", sources="", dependencies=""):
     return path
 
 
+@pytest.mark.parametrize("change", ["none", "bytes", "package", "project", "filename"])
+def test_bundled_dbus_next_exception_is_exact(tmp_path, change):
+    name = "other" if change == "package" else "dbus-next"
+    filename = "other.whl" if change == "filename" else "dbus_next-0.2.3-py3-none-any.whl"
+    source = source_project(
+        tmp_path / "manager",
+        name="other" if change == "project" else "copilot-extensions-worktree-manager",
+        sources=f'{name} = {{path="vendor/{filename}"}}',
+    )
+    wheel = source / "vendor" / filename
+    wheel.parent.mkdir()
+    bundled = PATH.parents[2] / "worktree-manager" / "vendor" / "dbus_next-0.2.3-py3-none-any.whl"
+    wheel.write_bytes(b"changed" if change == "bytes" else bundled.read_bytes())
+    if change == "none":
+        policy._check_project(source, (tmp_path,), set())
+    else:
+        with pytest.raises(policy.DependencyPolicyError, match="local UV artifacts"):
+            policy._check_project(source, (tmp_path,), set())
+
+
+def test_native_bundled_dbus_next_installs_through_retained_policy_offline(tmp_path):
+    uv = shutil.which("uv")
+    assert uv, "native UV is required for the bundled wheel contract"
+    source = source_project(
+        tmp_path / "manager", name="copilot-extensions-worktree-manager",
+        sources='dbus-next = {path="vendor/dbus_next-0.2.3-py3-none-any.whl"}',
+        dependencies='"dbus-next==0.2.3"',
+    )
+    wheel = source / "vendor" / "dbus_next-0.2.3-py3-none-any.whl"
+    wheel.parent.mkdir()
+    shutil.copyfile(PATH.parents[2] / "worktree-manager" / "vendor" / wheel.name, wheel)
+    environment = offline_environment(tmp_path)
+    target = tmp_path / "venv"
+    created = subprocess.run(
+        [uv, "venv", "--python", sys._base_executable, str(target)],
+        env=environment, capture_output=True, text=True, timeout=30,
+        creationflags=policy._HEADLESS,
+    )
+    assert created.returncode == 0, created.stderr
+    python = target / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    installed = policy.run_uv_install(
+        uv, ["--no-config", "--offline", "--python", str(python), str(source)],
+        env=environment, cwd=tmp_path, trusted_source_roots=(source,),
+        capture_output=True, text=True, timeout=30,
+    )
+    assert installed.returncode == 0, installed.stdout + installed.stderr
+    imported = subprocess.run(
+        [str(python), "-c",
+         "from dbus_next.aio import MessageBus; from dbus_next.auth import AuthExternal; "
+         "assert isinstance(MessageBus.connected, property)"],
+        env=environment, capture_output=True, text=True, timeout=10,
+        creationflags=policy._HEADLESS,
+    )
+    assert imported.returncode == 0, imported.stderr
+
+
 def test_retained_transaction_exposes_only_admitted_inputs_until_context_exit(tmp_path, monkeypatch):
     source = source_project(tmp_path / "source")
     original = (source / "pyproject.toml").read_bytes()

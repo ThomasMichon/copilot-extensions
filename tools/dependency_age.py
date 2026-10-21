@@ -29,6 +29,7 @@ from packaging.utils import canonicalize_name
 from packaging.version import InvalidVersion, Version
 
 from seasoned_public_feed import DEFAULT_MIN_AGE_DAYS, _default_fetch
+from seasoned_uv import _bundled_dbus_next
 from standalone_consumers import local_dependency_source
 
 MIN_AGE_SECONDS = DEFAULT_MIN_AGE_DAYS * 86400
@@ -362,7 +363,10 @@ def local_source(req: Requirement, path: Path, projects: dict[Path, dict], root:
         return contract_source(req, path, projects, root) is not None
     if not isinstance(source, dict) or set(source) - {"path", "editable"} or not isinstance(source.get("path"), str):
         raise DeclarationError("non-path source override lacks public release-age evidence")
-    return attributed_project(req, path.parent / source["path"], projects, root)
+    target = contained_path(path.parent / source["path"], root)
+    if _bundled_dbus_next(own_name, req.name, target):
+        return False
+    return attributed_project(req, target, projects, root)
 
 
 def attributed_project(req: Requirement, target: Path, projects: dict[Path, dict], root: Path) -> bool:

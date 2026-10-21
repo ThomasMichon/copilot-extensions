@@ -189,6 +189,13 @@ def _check_requirement(
     return candidate
 
 
+def _bundled_dbus_next(project, name, wheel):
+    return (project == "copilot-extensions-worktree-manager" and name == "dbus-next"
+            and wheel.name == "dbus_next-0.2.3-py3-none-any.whl" and wheel.is_file()
+            and hashlib.sha256(wheel.read_bytes()).hexdigest()
+            == "58948f9aff9db08316734c0be2a120f6dc502124d9642f55e90ac82ffb16a18b")
+
+
 def _check_project(
     source: Path, roots: tuple[Path, ...], seen: set[Path], expected: str | None = None,
 ) -> None:
@@ -235,6 +242,8 @@ def _inspect_project(
                         or not isinstance(entry["path"], str)):
                     raise DependencyPolicyError("local UV path source is unsupported")
                 child = _contained(source / entry["path"], roots)
+                if _bundled_dbus_next(identity, name, child):
+                    continue
                 if not child.is_dir():
                     raise DependencyPolicyError("local UV artifacts cannot prove release age")
                 _check_project(child, roots, seen, _identity(name))

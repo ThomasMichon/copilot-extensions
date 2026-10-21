@@ -57,6 +57,14 @@ def test_payload_version_reads_init(tmp_path):
     assert payload_version(pd) == "9.9.9-dev1"
 
 
+def test_copy_payload_preserves_bundled_dbus_next_wheel(tmp_path):
+    payload = Path(__file__).resolve().parents[1]
+    slot = tmp_path / "slot"
+    si._copy_payload(payload, slot)
+    wheel = Path("vendor") / "dbus_next-0.2.3-py3-none-any.whl"
+    assert (slot / wheel).read_bytes() == (payload / wheel).read_bytes()
+
+
 def test_dry_run_writes_nothing(tmp_path, monkeypatch):
     pd = _fake_payload(tmp_path, "1.2.3")
     root = tmp_path / "root"
