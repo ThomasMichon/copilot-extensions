@@ -72,6 +72,10 @@ also use that payload's constructed interpreter and retention bootstrap, without
 requiring `uv`. Their bounded metadata work is dispatched through the existing
 `agent-procutil` background primitive; only its spawn handshake is synchronous.
 Source and legacy project layouts retain their `uv run --project` entry.
+The existing Ctrl+K Companion popup uses the same runtime resolver through its
+separate interactive entry: it inherits the popup terminal and all standard
+streams, rather than using the background metadata dispatcher. Its key, popup
+dimensions and close-on-exit behavior are unchanged.
 Update availability compares the canonical package version, not the selected
 repair/source-qualified slot name; selection and mux identity remain unchanged.
 

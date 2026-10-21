@@ -1441,6 +1441,15 @@ real registry updates/tombstones against a private live rendezvous and an owned
 fake engine, not command-string assertions. A distinct contract avoids adding
 another cold construction plus consumer subprocesses to the original group,
 whose measured native Windows execution is already close to its unchanged bound.
+`tests/test_companion_popup_runtime.py` separately executes the generated Ctrl+K
+popup command through the Windows command shell against a synthetic installed
+fixture CLI and real retention bootstrap (not a package-construction proof).
+It checks paths with spaces, exact Companion argv, the held lease, target prefix,
+root binding, stdin/stdout/stderr and exit status without opening a popup/TUI.
+Source and legacy entries execute through an owned `uv` stand-in. Since the
+PowerShell runtime resolver is shared, also run the real callback contract after
+changing it; the original ten-case cold contract need not repeat for popup text
+and equivalent resolver extraction alone.
 The payload suite's PowerShell contracts require a real `pwsh`; when it is absent
 from the isolation container, run that target through the host's contained runner
 rather than counting skipped PowerShell contracts as validation.

@@ -255,10 +255,9 @@ def test_windows_launcher_applies_companion_keybind_after_passthrough():
 
 def test_companion_keybind_fragment_builds_the_popup_command():
     """mux-bind-relay Step 1: the generated root-table directive must bind
-    Ctrl+K to a `display-popup` that resolves the Companion via `uv run`
-    against the caller-supplied ManagerRoot, mirroring
-    Invoke-ManagedMuxRegister's own invocation pattern (no separately-
-    published `worktree-manager` binstub needed) -- and must NOT (yet) bind
+    Ctrl+K to a `display-popup` through the payload-local interactive runtime
+    helper (no separately-published `worktree-manager` binstub needed) --
+    and must NOT (yet) bind
     any MouseDown1Status/mouse-click directive: empirically confirmed
     (mux-bind-relay effort Journal) that sourcing one on this psmux build
     corrupts the session's entire root key table, silently wiping the Ctrl+K
@@ -267,8 +266,9 @@ def test_companion_keybind_fragment_builds_the_popup_command():
     assert "function Get-AwMuxCompanionKeybindFragment" in so
     assert "function Invoke-AwMuxCompanionBind" in so
     assert "bind-key -T root C-k display-popup" in so
-    assert "uv run --quiet --project" in so
-    assert "-m worktree_manager companion" in so
+    assert "'bin', 'manager-runtime.ps1'" in so
+    assert '-Companion"' in so
+    assert "mux_callback" not in so
     assert "source-file -t $Session" in so
     # The corruption finding: no mouse-click directive ships (yet) in any
     # executable line (comments may reference it to explain why it's absent).
