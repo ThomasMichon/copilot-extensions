@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import importlib.util
+import ast
+import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -67,3 +70,26 @@ def test_bare_bootstrap_does_not_resolve_a_project_before_construction(extension
     assert "uv run" not in text
     assert "uv python find --no-project" in text
     assert "runtime_install.py" in text
+
+
+def test_recovery_fingerprints_match_manager_owned_templates():
+    source = REPO / "plugins" / "agent-worktrees" / "src" / "agent_worktrees" / "manager_recovery.py"
+    expected = next(
+        ast.literal_eval(node.value) for node in ast.parse(source.read_text(encoding="utf-8")).body
+        if isinstance(node, ast.Assign)
+        and any(isinstance(target, ast.Name) and target.id == "_OWNED_STUBS" for target in node.targets)
+    )
+    script = (
+        "import sys,json,hashlib;"
+        "sys.path.insert(0,sys.argv[1]);"
+        "from worktree_manager import runtime_launchers as r;"
+        "print(json.dumps({name:hashlib.sha256(getattr(r,fn)().encode()).hexdigest() "
+        "for name,fn in [('worktree-manager.cmd','_cmd_binstub'),"
+        "('worktree-manager.ps1','_ps1_binstub'),('worktree-manager','_sh_binstub')]}))"
+    )
+    result = subprocess.run(
+        [sys.executable, "-I", "-B", "-c", script, str(REPO / "worktree-manager" / "src")],
+        capture_output=True, text=True, check=True, timeout=10,
+        **({"creationflags": subprocess.CREATE_NO_WINDOW} if sys.platform == "win32" else {}),
+    )
+    assert all(digest in expected[name] for name, digest in json.loads(result.stdout).items())

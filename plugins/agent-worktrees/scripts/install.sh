@@ -1152,6 +1152,7 @@ _deploy_python_runtime() {
             ;;
     esac
     [[ -z "$OWNER_ARG" ]] || mode_args+=(--owner "$OWNER_ARG")
+    [[ "$ACTION" != update ]] || mode_args+=(--recover-adopted-manager)
     base="$(_bootstrap_python exclude-venv-dir)" || {
         err "The Python-owned installer requires a base Python 3.11+ outside the target slot"
         return 1

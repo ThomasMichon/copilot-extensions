@@ -85,23 +85,29 @@ dimensions and close-on-exit behavior are unchanged.
 Update availability compares the canonical package version, not the selected
 repair/source-qualified slot name; selection and mux identity remain unchanged.
 
-Enter this migration through the current published bootstrap once when the
-selected Manager predates the canonical engine. Already-running legacy updater
-code cannot acquire the new construction contract merely by copying a new
-payload. After bootstrap has selected a canonical runtime, ordinary `update`
-uses the new construction and selection path.
+Normal `agent-worktrees update` also repairs an already-adopted Manager whose
+registered launcher cannot run. Its new installer settles under the newly
+constructed updater interpreter before returning to an older update caller;
+the current updater also checks recovery before local profile integration when
+its runtime is already current. If an old caller skips installation because a
+concurrent update already selected the new runtime, run the same normal update
+again: that invocation uses the new caller's recovery check. Copying a payload
+alone does not replace code already loaded by an old process.
 
-In particular, normal `agent-worktrees update` delegates only to a healthy
-registered Manager; a failing Manager probe falls back to plugin-only updating,
-not Manager bootstrap. A pre-engine `worktree-manager update` still runs its
-old implementation and can select a copied payload without installing it.
-Neither is the migration entrypoint. After this adopter is present on the
-published ref selected by the existing source configuration, invoke the
-published bootstrap command in **One-line bootstrap** below (PowerShell:
-`iex (irm https://raw.githubusercontent.com/ThomasMichon/copilot-extensions/main/worktree-manager/bootstrap.ps1)`).
-It honors `WORKTREE_MANAGER_ROOT` and that root's `[source]` configuration;
-the selected payload ref must contain the canonical adapter. Do not rewrite a
-deployed launcher or use update bypass flags to force this transition.
+Recovery requires the existing provider registration and an unedited,
+Manager-owned local-bin launcher. It reuses a healthy registered Manager without
+source acquisition, never adopts an unregistered installation, and preserves the
+Manager's own root, source repository, ref/pin and credential context. The
+selected source must contain the canonical recovery adapter; a pinned older
+source is an explicit failure, not permission to fall back to `main`. Candidate
+construction, selection and mux activation use the canonical installer and the
+constructed Manager interpreter, retaining the previous runtime and restoring
+selectors on activation failure.
+
+The **One-line bootstrap** below remains the fresh-install entry, not a required
+manual migration step for an adopted Manager. Do not rewrite a deployed launcher,
+install application dependencies into ambient Python, or use update bypass flags
+to force recovery.
 
 `doctor` also reports **plugin-catalog alignment**: whether the authored
 catalog (`data/plugins.toml`) still matches the discovered plugin membership

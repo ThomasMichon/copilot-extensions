@@ -10,6 +10,13 @@ import pytest
 from agent_worktrees import maintenance_cli, picker_profiles_cli, update_integration as integration
 
 
+@pytest.fixture(autouse=True)
+def healthy_adopted_manager(monkeypatch):
+    from agent_worktrees import manager_recovery
+
+    monkeypatch.setattr(manager_recovery, "recover", lambda: {"status": "current"})
+
+
 def test_finish_pins_selected_payload_and_restores_caller(monkeypatch, tmp_path):
     monkeypatch.setenv("AGENT_WORKTREES_PAYLOAD_ROOT", "old-snapshot")
     monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", "caller-context")
@@ -55,7 +62,7 @@ def test_windows_profile_finishing_resolves_selected_state_and_restores_caller(
     monkeypatch.setattr(picker_profiles_cli.cfg, "project_name", lambda: "demo")
     monkeypatch.setattr(
         manager_launch_cli, "_discover_control_plane_provider_manifests",
-        lambda **kwargs: {"worktree-manager": SimpleNamespace(command=("manager",))},
+        lambda **kwargs: {"worktree-manager": SimpleNamespace(command=("manager",), provider_root="")},
     )
     selected, inherited = tmp_path / "selected", tmp_path / "inherited"
     for path, machine in [(selected, "selected-host"), (inherited, "wrong-host")]:
@@ -119,6 +126,47 @@ def test_profile_failure_is_required_and_attempted_once(monkeypatch, tmp_path):
     )
     assert integration.finish(tmp_path, "windows", {}) is False
     assert calls == ["profiles"]
+
+
+def test_unadopted_manager_does_not_install_or_refresh_profiles(monkeypatch, tmp_path):
+    from agent_worktrees import manager_recovery
+
+    monkeypatch.setattr(manager_recovery, "recover", lambda: {"status": "not-adopted"})
+    monkeypatch.setattr(integration.installer, "reconcile_binstubs", lambda: {})
+    monkeypatch.setattr(
+        integration.picker_profiles_cli, "_refresh_terminal_profiles",
+        lambda: pytest.fail("unadopted Manager profile integration was invoked"),
+    )
+    assert integration.finish(tmp_path, "windows", {})
+
+
+@pytest.mark.parametrize("status", ["current", "not-adopted", "recovered"])
+def test_successful_recovery_preserves_the_final_update_exit(monkeypatch, tmp_path, status):
+    from agent_worktrees import manager_recovery, update_events
+
+    monkeypatch.setattr(manager_recovery, "recover", lambda: {"status": status})
+    monkeypatch.setattr(integration.installer, "reconcile_binstubs", lambda: {})
+    update_events.start("engine")
+    try:
+        assert integration.finish(tmp_path, "linux", {})
+        assert update_events.finish(0) == 0
+    finally:
+        update_events.finish(None)
+
+
+def test_failed_manager_recovery_stops_integration_visibly(monkeypatch, tmp_path, capsys):
+    from agent_worktrees import manager_recovery
+
+    def refused():
+        raise manager_recovery.RecoveryRefused("selected pin cannot recover")
+
+    monkeypatch.setattr(manager_recovery, "recover", refused)
+    monkeypatch.setattr(
+        integration.installer, "reconcile_binstubs",
+        lambda: pytest.fail("integration continued after failed recovery"),
+    )
+    assert not integration.finish(tmp_path, "windows", {})
+    assert "selected pin cannot recover" in capsys.readouterr().out
 
 
 def test_reconcile_exception_restores_context(monkeypatch, tmp_path):

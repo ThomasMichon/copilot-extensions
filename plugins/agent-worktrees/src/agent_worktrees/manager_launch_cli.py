@@ -70,11 +70,16 @@ def _select_control_plane_provider_manifest() -> _ControlPlaneProviderManifest |
     return manifest
 
 
-def _control_plane_provider_selection() -> tuple[_ControlPlaneProviderManifest | None, str]:
-    manifests = _core_helper(
+def _control_plane_provider_selection(
+    *, directory: Path | None = None,
+) -> tuple[_ControlPlaneProviderManifest | None, str]:
+    # Preserve the upstream selection result; recovery also binds the standalone
+    # machine registry explicitly, as the Terminal-profile consumer already does.
+    discover = _core_helper(
         "_discover_control_plane_provider_manifests",
         _discover_control_plane_provider_manifests,
-    )()
+    )
+    manifests = discover(directory=directory) if directory is not None else discover()
     selected = os.environ.get(_CONTROL_PLANE_PROVIDER_ENV, "").strip()
     if selected:
         manifest = manifests.get(selected)

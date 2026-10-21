@@ -636,6 +636,7 @@ def install(
     wait_timeout: float = 180, child_timeout: float = 180,
     expected_source_identity: dict | None = None,
     frontend: dict | None = None,
+    recover_adopted_manager: bool = False,
 ) -> dict:
     if base_python.resolve(strict=True) != Path(sys.executable).resolve():
         raise InstallationRefused("The lifecycle driver must run under the selected base interpreter")
@@ -695,6 +696,8 @@ def install(
                              "--child-timeout", str(child_timeout)])
             if previous is not None:
                 argv.extend(["--previous-version", previous])
+            if recover_adopted_manager:
+                argv.append("--recover-adopted-manager")
             environment = dict(os.environ)
             for name in ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV"):
                 environment.pop(name, None)
@@ -733,6 +736,7 @@ def settle_candidate(
     child_timeout: float = 180,
     base_python: Path | None = None,
     governance: Governance | None = None,
+    recover_adopted_manager: bool = False,
 ) -> dict:
     governance = governance if governance is not None else Governance(root, payload)
     if governance.signature() != expected_governance:
@@ -747,6 +751,10 @@ def settle_candidate(
             custody.enter_context(runtime.retention_lease(root, previous))
         print(f"Runtime {version}: verifying publication under its own interpreter", flush=True)
         _load_installed(lifecycle_slot if lifecycle_slot is not None else candidate_slot)
+        if recover_adopted_manager:
+            from agent_worktrees.manager_recovery import recover
+
+            recover()
         from agent_worktrees import (
             config as cfg, status_monitor_cutover as cutover, runtime_deployment as deployment,
         )
@@ -896,6 +904,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--package-version")
     parser.add_argument("--expected-source-identity", type=json.loads)
     parser.add_argument("--frontend", type=json.loads)
+    parser.add_argument("--recover-adopted-manager", action="store_true")
     parser.add_argument("--publication-source-root", type=Path)
     parser.add_argument("--inspect-helper-publication", type=Path)
     parser.add_argument("--complete-helper-publication", type=Path)
@@ -940,6 +949,7 @@ def main(argv: list[str] | None = None) -> int:
             frontend=arguments.frontend, publication_source_root=arguments.publication_source_root,
             child_timeout=arguments.child_timeout,
             base_python=arguments.base_python,
+            recover_adopted_manager=arguments.recover_adopted_manager,
         )
     elif arguments.mode != "ordinary":
         import runtime_install_modes as modes
@@ -974,6 +984,7 @@ def main(argv: list[str] | None = None) -> int:
             wait_timeout=arguments.wait_timeout, child_timeout=arguments.child_timeout,
             expected_source_identity=arguments.expected_source_identity,
             frontend=arguments.frontend,
+            recover_adopted_manager=arguments.recover_adopted_manager,
         )
     temporary = arguments.result.with_name(f"{arguments.result.name}.tmp-{os.getpid()}")
     temporary.write_text(json.dumps(result) + "\n", encoding="utf-8")

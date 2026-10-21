@@ -1,5 +1,5 @@
 {
-  "comment": "Probe canonical Manager runtimes through their retained interpreter and resolve launcher assets from the retained payload without project resolution.",
+  "comment": "Probe canonical Manager runtimes through their retained interpreter; hand normal updates to fresh updater code to recover only an attributable broken Manager through its own source/ref and credential admission before required profile integration.",
   "changes": [
     {
       "plugin": "agent-worktrees",

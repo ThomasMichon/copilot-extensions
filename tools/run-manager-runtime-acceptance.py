@@ -24,7 +24,7 @@ REPO = Path(__file__).resolve().parents[1]
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, required=True)
-    parser.add_argument("--contract", choices=("runtime", "callbacks"), default="runtime")
+    parser.add_argument("--contract", choices=("runtime", "callbacks", "updater"), default="runtime")
     args = parser.parse_args()
     root = args.root.resolve()
     if root == REPO or not root.is_relative_to(REPO):
@@ -39,7 +39,11 @@ def main() -> int:
     python = REPO / ".test-venvs" / sys.platform / "worktree-manager" / (
         "Scripts/python.exe" if os.name == "nt" else "bin/python"
     )
-    filename = "test_manager_mux_callbacks.py" if args.contract == "callbacks" else "test_manager_runtime_install.py"
+    filename = {
+        "runtime": "test_manager_runtime_install.py",
+        "callbacks": "test_manager_mux_callbacks.py",
+        "updater": "test_manager_updater_recovery.py",
+    }[args.contract]
     native = REPO / "worktree-manager" / "tests" / "native" / filename
     with ExitStack() as ownership:
         lease = acquire(0, python.parent.parent)
@@ -48,23 +52,32 @@ def main() -> int:
         sandbox = Path(raw)
         env = isolated_environment(os.environ, sandbox)
         env["MANAGER_RUNTIME_ACCEPTANCE_DATA"] = str(sandbox / "fixtures.json")
-        started = time.monotonic()
-        commands = (
-            [str(python), "-I", "-B", str(native), "--prepare", str(sandbox)],
-            [sys.executable, str(REPO / "tools" / "run-plugin-tests.py"), "worktree-manager",
-             "--test-file", "tests/native/" + filename],
+        prepare_command = [str(python), "-I", "-B", str(native), "--prepare", str(sandbox)]
+        assertions = [sys.executable, str(REPO / "tools" / "run-plugin-tests.py"), "worktree-manager",
+                      "--test-file", "tests/native/" + filename]
+        groups = (
+            [("archived-fixture preparation", [prepare_command]),
+             ("normal-update consumer", [
+                 [str(python), "-I", "-B", str(native), "--exercise", str(sandbox)],
+             ]),
+             ("recovery admission and concurrent caller", [
+                 [str(python), "-I", "-B", str(native), "--safety", str(sandbox)], assertions,
+             ])]
+            if args.contract == "updater" else [("construction and assertions", [prepare_command, assertions])]
         )
-        for command in commands:
-            remaining = 300 - (time.monotonic() - started)
-            if remaining <= 0:
-                return 124
-            print("Manager native acceptance: " + ("constructing fixtures" if "--prepare" in command else "checking assertions"), flush=True)
-            result = run_contained(
-                command, cwd=REPO, env=env, sandbox=sandbox,
-                limits=Limits(wall_seconds=remaining),
-            )
-            if result:
-                return result
+        for label, commands in groups:
+            started = time.monotonic()
+            for command in commands:
+                remaining = 300 - (time.monotonic() - started)
+                if remaining <= 0:
+                    return 124
+                print(f"Manager native acceptance ({label}): running", flush=True)
+                result = run_contained(
+                    command, cwd=REPO, env=env, sandbox=sandbox,
+                    limits=Limits(wall_seconds=remaining),
+                )
+                if result:
+                    return result
     return 0
 
 

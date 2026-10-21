@@ -1782,6 +1782,31 @@ activation restoration failures after launch do not erase the usage evidence.
 fixable sources remain unresolved. `CE_UPDATE_AUTH=off` skips this preflight.
 There is no persistent configuration cleanup or cleanup-consent flag.
 
+### Recovery of an adopted standalone Manager
+
+The normal updater repairs an unusable, already-adopted Worktree Manager before
+profile integration. Admission requires one selected provider registration,
+its Manager root and an exact known Manager-owned launcher. A healthy registered
+command is reused without source acquisition; an unadopted host is not enrolled.
+Recovery snapshots the selection, registration, launcher and source evidence,
+then fetches only the Manager's own configured repository/ref, with its normal
+authentication admission. Missing canonical recovery support at that ref blocks
+the update; it never substitutes the updater's marketplace or a different branch.
+
+The new Worktrees installer runs this check under its constructed interpreter
+before settling publication, so an older running updater can hand off during
+self-upgrade. The new update caller also checks before local integration when
+the Worktrees runtime is already current. An old caller which skips installation
+after concurrent publication cannot acquire new in-memory code: the next normal
+invocation performs that check. No force flag or standalone bootstrap is needed.
+
+The Manager adapter constructs through the canonical engine, retains candidate
+and rollback custody, and runs completion/mux activation under the constructed
+Manager interpreter. It does not import application dependencies into the
+stdlib bootstrap interpreter or recursively run the full update flow. Adoption
+is reverified before publication; failed activation restores both selectors
+using canonical publication receipts.
+
 The Worktree Manager consumes the same report through its existing engine JSON
 process seam before its own Git fetch. Its engine environment preserves an
 overlay when present while still discarding parent Python runtime variables.

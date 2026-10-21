@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import os
 import re
 import shutil
 import stat
+import subprocess
 import sys
 import tempfile
 import uuid
@@ -95,7 +97,7 @@ def candidate(payload: Path, root: Path, *, assemble, uv: Path | None = None):
             yield ready
 
 
-def activate(root: Path, version: str, *, expected: str | None) -> None:
+def activate(root: Path, version: str, *, expected: str | None, after_publish=None) -> None:
     """Publish or recover both selectors without releasing runtime custody."""
     root = root.resolve()
     publication = runtime._runtime_component("versioned_runtime_publication")
@@ -166,6 +168,8 @@ def activate(root: Path, version: str, *, expected: str | None) -> None:
 
                 try:
                     runtime._activate(root, version, link_free=True, ownership_receipt=forward)
+                    if after_publish is not None:
+                        after_publish()
                 except BaseException:
                     if forward.exists():
                         receipts.append(forward)
@@ -175,10 +179,20 @@ def activate(root: Path, version: str, *, expected: str | None) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--root", type=Path, required=True)
+    parser.add_argument("--root", type=Path)
     parser.add_argument("--payload", type=Path, default=SCRIPTS.parent)
+    parser.add_argument("--recover-adopted", type=Path)
+    parser.add_argument("--describe-recovery", action="store_true")
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args(argv)
+    if args.describe_recovery:
+        print(json.dumps({
+            "schema": "copilot-extensions.manager-recovery-entry", "version": 1,
+            "provider": "worktree-manager",
+        }))
+        return 0
+    if args.root is None:
+        parser.error("--root is required for installation")
     os.environ.pop("__PYVENV_LAUNCHER__", None)
     os.environ["WORKTREE_MANAGER_ROOT"] = str(args.root.resolve())
     # Only bootstrap installer modules are read from source. Application execution
@@ -186,11 +200,50 @@ def main(argv: list[str] | None = None) -> int:
     sys.path.insert(0, str(args.payload / "src"))
     from worktree_manager.self_install import self_install
 
-    result = self_install(args.payload, root=args.root, dry_run=False)
-    if result.action == "error":
-        print(result.reason, file=sys.stderr)
-        return 1
-    slot = Path(result.slot)
+    if args.recover_adopted is not None:
+        evidence = json.loads(args.recover_adopted.read_text(encoding="utf-8"))
+        if evidence.get("root") != str(args.root.resolve()):
+            raise RuntimeError("Recovery adoption names another Manager root")
+        from worktree_manager.self_install import _copy_payload
+
+        with candidate(args.payload, args.root, assemble=_copy_payload) as ready:
+            slot = ready.slot
+            python = runtime.slot_python(args.root, slot.name)
+            if python is None:
+                raise RuntimeError("Constructed Manager has no interpreter")
+            activation = [
+                str(python), "-I", "-S", "-B", "-X", "utf8",
+                str(slot / ".runtime-bootstrap" / "runtime_launcher.py"),
+                "-m", "worktree_manager.runtime_recovery", "--root", str(args.root),
+                "--evidence", str(args.recover_adopted),
+            ]
+            if ready.reused:
+                activation.append("--reused")
+            process = subprocess.Popen(
+                activation, stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                text=True, encoding="utf-8",
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+            )
+            try:
+                stdout, stderr = process.communicate()
+            except BaseException:
+                # Activation owns publication and cutover. Retain its candidate
+                # until that owner settles, like the Worktrees runtime handoff.
+                process.communicate()
+                raise
+            if stdout:
+                print(stdout, end="", flush=True)
+            if stderr:
+                print(stderr, end="", file=sys.stderr, flush=True)
+            if process.returncode:
+                return process.returncode
+    else:
+        result = self_install(args.payload, root=args.root, dry_run=False)
+        if result.action == "error":
+            print(result.reason, file=sys.stderr)
+            return 1
+        slot = Path(result.slot)
     command = args.command[1:] if args.command[:1] == ["--"] else args.command
     python = runtime.slot_python(args.root, slot.name)
     if python is None:

@@ -274,3 +274,50 @@ def test_raw_selector_does_not_admit_an_unsafe_missing_slot(tmp_path):
         adapter.activate(root, "2.0.0", expected="../foreign")
     assert marker.read_text() == "../foreign\n"
     assert not (root / "last-known-good").exists()
+
+
+@pytest.mark.parametrize("current", [None, b"", b"1.0.0\r\n"])
+@pytest.mark.parametrize("last_good", [None, b" \t\n", b"0.9.0\n"])
+def test_after_publication_failure_restores_selection_with_runtime_custody(
+    tmp_path, monkeypatch, current, last_good,
+):
+    adapter = si._runtime_installer()
+    root = tmp_path / "root"
+    for generation in ("0.9.0", "1.0.0", "2.0.0"):
+        adapter.runtime.mark_complete(root, generation, payload_hash="a" * 64)
+    paths = [root / "current-version", root / "last-known-good"]
+    for path, contents in zip(paths, (current, last_good)):
+        if contents is not None:
+            path.write_bytes(contents)
+    before = {path: path.read_bytes() if path.exists() else None for path in paths}
+    receipts = {path: path.read_bytes() for path in root.glob("versions/*/.install-complete.json")}
+    retained = set()
+    retain = adapter.runtime.retention_lease
+
+    @contextmanager
+    def retaining(root, generation, **kwargs):
+        with retain(root, generation, **kwargs) as slot:
+            retained.add(generation)
+            try:
+                yield slot
+            finally:
+                retained.remove(generation)
+
+    monkeypatch.setattr(adapter.runtime, "retention_lease", retaining)
+
+    def failed_cutover():
+        assert all(path.read_bytes() == b"2.0.0\n" for path in paths)
+        assert "2.0.0" in retained
+        assert current is None or not current.strip() or "1.0.0" in retained
+        assert last_good is None or not last_good.strip() or "0.9.0" in retained
+        raise RuntimeError("target cutover refused")
+
+    with pytest.raises(RuntimeError, match="cutover refused"):
+        adapter.activate(
+            root, "2.0.0",
+            expected=current.decode().strip() or None if current is not None else None,
+            after_publish=failed_cutover,
+        )
+    assert {path: path.read_bytes() if path.exists() else None for path in paths} == before
+    assert all(path.read_bytes() == value for path, value in receipts.items())
+    assert not retained

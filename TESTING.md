@@ -1430,6 +1430,30 @@ after the second selector replacement prove both selector states and runtime
 receipts survive, with no failed-update cutover. Fixture mux processes suppress
 production breakaway and are terminated/waited within the containing test.
 
+The archived normal-updater consumer has its own explicit Windows contract:
+
+```text
+python tools/run-manager-runtime-acceptance.py --root .validation --contract updater
+```
+
+It prepares the actual Worktrees `1.24.91-dev1` release and broken Manager
+`0.6.35-dev1`, then invokes the old payload's normal project `update` command
+without force or Manager-bypass flags. A staged-index snapshot is materialized
+through the release helpers into a private published-like Git artifact.
+Copilot delivery and credential transport are controlled fixture processes;
+Git checkout, canonical package construction, the fresh-interpreter handoff,
+registered Manager launch and the private Windows Terminal profile writer are
+real. The resulting profile must report `verified_current`.
+Archived-fixture preparation and normal-update consumption each retain a
+300-second containment boundary. A separate 300-second admission/concurrent-caller
+phase reuses those constructed fixtures: it checks healthy reuse without source
+parsing, unadopted no-op, failed source pin and denied credentials with prior
+selection preserved, repair of an unexecutable interpreter, and an in-flight old
+caller skipping installation followed by recovery on the next normal invocation.
+Pytest items retain their 30-second limit.
+This proves the updater migration contract, not release qualification or a
+live-host rollout.
+
 Retained mux shell callbacks have a separate, independently contained contract:
 
 ```text

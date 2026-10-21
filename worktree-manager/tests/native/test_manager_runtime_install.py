@@ -120,7 +120,7 @@ def _prepare_constructed(directory):
          "commit", "--quiet", "-m",
          "Construct isolated qualified Manager fixture\n\n"
          "Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>\n"
-         "Copilot-Session: ad55de48-947f-4dcf-a85d-053f0c9c76f9"],
+         "Copilot-Session: 00000000-0000-4000-8000-000000000001"],
     ):
         git = _run([
             "git", "-c", "core.autocrlf=false", "-c", "core.safecrlf=false",

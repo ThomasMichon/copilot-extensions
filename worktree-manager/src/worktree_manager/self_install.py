@@ -741,12 +741,44 @@ class SelfInstallResult:
     cleaned: tuple[str, ...] = ()
 
 
+def _complete_candidate(
+    ready, payload: Path, root: Path, *, previous: str | None,
+    was_current: bool, before_publish=None, after_activate=None,
+    transactional_activation: bool = False,
+) -> SelfInstallResult:
+    slot = ready.slot
+    version = payload_version(payload)
+    if before_publish is not None:
+        before_publish()
+    cleaned = tuple(clean_legacy_artifacts(root))
+    stubs = _deploy_binstubs()
+    _write_control_plane_provider_manifest(payload, root=root)
+    installer = _runtime_installer()
+    if transactional_activation:
+        installer.activate(
+            root, slot.name, expected=previous,
+            after_publish=(lambda: after_activate(slot)) if after_activate is not None else None,
+        )
+    else:
+        installer.activate(root, slot.name, expected=previous)
+    if after_activate is not None and not transactional_activation:
+        after_activate(slot)
+    return SelfInstallResult(
+        version=version, action="already-current"
+        if was_current and ready.reused and previous == slot.name else "installed",
+        root=str(root), slot=str(slot), marker=slot.name,
+        binstubs=tuple(str(stub) for stub in stubs), cleaned=cleaned,
+    )
+
+
 def self_install(
     payload_dir: Path | None = None,
     *,
     root: Path | None = None,
     dry_run: bool = True,
     _after_activate=None,
+    _before_publish=None,
+    _transactional_activation: bool = False,
 ) -> SelfInstallResult:
     """Construct and health-gate with the canonical engine before selection."""
     r = (root or default_root()).resolve()
@@ -769,17 +801,10 @@ def self_install(
         installer = _runtime_installer()
         with installer.candidate(pd, r, assemble=_copy_payload) as ready:
             slot = ready.slot
-            cleaned = tuple(clean_legacy_artifacts(r))
-            stubs = _deploy_binstubs()
-            _write_control_plane_provider_manifest(pd, root=r)
-            installer.activate(r, slot.name, expected=previous)
-            if _after_activate is not None:
-                _after_activate(slot)
-            return SelfInstallResult(
-                version=version, action="already-current"
-                if was_current and ready.reused and previous == slot.name else "installed",
-                root=str(r), slot=str(slot), marker=slot.name,
-                binstubs=tuple(str(s) for s in stubs), cleaned=cleaned,
+            return _complete_candidate(
+                ready, pd, r, previous=previous, was_current=was_current,
+                before_publish=_before_publish, after_activate=_after_activate,
+                transactional_activation=_transactional_activation,
             )
     except (OSError, ImportError, RuntimeError, ValueError, subprocess.SubprocessError) as error:
         return SelfInstallResult(

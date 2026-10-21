@@ -2796,6 +2796,7 @@ function Deploy-PythonRuntime {
     Ensure-InstallDir $resultDir
     $resultPath = Join-Path $resultDir ("result-$PID-" + [Guid]::NewGuid().ToString('N') + '.json')
     $modeArgs = @()
+    if ($Action -eq 'update') { $modeArgs += '--recover-adopted-manager' }
     if ($Action -in @('repair', 'dev', 'dev-release')) { $modeArgs = @('--mode', $Action) }
     $runtimeInputs = if ($modeArgs.Count) { $RuntimeInputPlugin } else { $PluginDir.ToString() }
     if ($Owner) { $modeArgs += @('--owner', $Owner) }
