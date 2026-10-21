@@ -1632,7 +1632,15 @@ function Deploy-SelfProvisioningBinstub {
 export PYTHONUTF8=1
 _root="$HOME/.agent-logger"
 AGENT_RT_PY=""
-if [ -f "$_root/bin/resolve-runtime.sh" ]; then AGENT_RT_ROOT="$_root"; . "$_root/bin/resolve-runtime.sh"; fi
+_resolver="$_root/bin/resolve-runtime.sh"
+if [ ! -f "$_resolver" ] ||
+   ! grep -Fq '# Trace contract: normal/read-only/ready-v1' "$_resolver"; then
+    echo '[agent-logger] read-only runtime resolver is unavailable. Re-enable/update the plugin, then retry.' >&2
+    exit 126
+fi
+AGENT_RT_ROOT="$_root"
+AGENT_RT_RESOLVE_TRACE_MODE=ready
+. "$_resolver"
 [ -n "$AGENT_RT_PY" ] && exec "$AGENT_RT_PY" -m agent_logger "$@"
 _i="$(cat "$_root/payload-dir" 2>/dev/null)/scripts/install.sh"
 [ -f "$_i" ] || _i="$(ls "$HOME"/.copilot/installed-plugins/*/agent-logger/scripts/install.sh 2>/dev/null | head -n1)"
@@ -1648,9 +1656,15 @@ exit 1
 $env:PYTHONUTF8 = '1'
 $_root = Join-Path $env:USERPROFILE '.agent-logger'
 $_resolver = Join-Path $_root 'bin\resolve-runtime.ps1'
-function _Resolve-Py {
+if (-not (Test-Path -LiteralPath $_resolver) -or
+    -not (Select-String -LiteralPath $_resolver -SimpleMatch '# Trace contract: normal/read-only/ready-v1' -Quiet)) {
+    [Console]::Error.WriteLine('[agent-logger] read-only runtime resolver is unavailable. Re-enable/update the plugin, then retry.')
+    exit 126
+}
+function _Resolve-Py([string]$TraceMode = 'ready') {
     $AgentRtPy = $null
-    if (Test-Path -LiteralPath $_resolver) { $env:AGENT_RT_ROOT = $_root; . $_resolver }
+    $env:AGENT_RT_ROOT = $_root
+    . $_resolver -TraceMode $TraceMode
     return $AgentRtPy
 }
 $_py = _Resolve-Py
@@ -1660,6 +1674,16 @@ $_snap = ''
 try { $_snap = ([IO.File]::ReadAllText((Join-Path $_root 'payload-dir'))).Trim() } catch {}
 $_inst = if ($_snap) { Join-Path $_snap 'scripts\install.ps1' } else { '' }
 if (-not ($_inst -and (Test-Path -LiteralPath $_inst))) { [Console]::Error.WriteLine('[agent-logger] cannot self-provision: snapshot installer not found. Re-enable the plugin, then retry.'); exit 127 }
+$_probe = Join-Path $_snap 'scripts\installation-context\plugin-publication-probe.ps1'
+if (-not (Test-Path -LiteralPath $_probe -PathType Leaf)) {
+    [Console]::Error.WriteLine('[agent-logger] Runtime publication refused: snapshot admission helper is unavailable. Re-enable/update the plugin, then retry.')
+    exit 126
+}
+$global:LASTEXITCODE = 0
+& $_probe -PayloadRoot $_snap -PluginId agent-logger -LegacyRoot $_root
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+$_py = _Resolve-Py normal
+if ($_py) { & $_py -m agent_logger @args; exit $LASTEXITCODE }
 [Console]::Error.WriteLine('[agent-logger] runtime not provisioned -- provisioning on first use (acquires uv + builds a venv; ~30-120s). Do not kill; extend your timeout.')
 [Console]::Error.WriteLine('::agent-provisioning:: plugin=agent-logger eta_seconds=120 reason=first-use')
 $_pwsh = Get-Command pwsh -ErrorAction SilentlyContinue

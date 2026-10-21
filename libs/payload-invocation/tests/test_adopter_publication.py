@@ -83,10 +83,14 @@ def _adopter(fixture: dict, plugin: str, source: Path | None = None) -> dict[str
 @pytest.mark.portfolio_tier("T3")
 @pytest.mark.timeout(240)
 @pytest.mark.filterwarnings("ignore:Unknown pytest.mark.guard:pytest.PytestUnknownMarkWarning")
-@pytest.mark.parametrize("state", ["standalone", "managed"])
-@pytest.mark.parametrize("stamp_python", [False, True])
+@pytest.mark.parametrize(("entry", "state", "stamp_python"), [
+    (entry, state, python)
+    for entry in ("global", "payload", "auxiliary")
+    for state in ("standalone", "managed")
+    for python in (False, True)
+] + [("legacy-resolver", "managed", False), ("missing-admission", "managed", False)])
 def test_logger_actual_stamp_first_use_revalidates_snapshot_owner(
-    binding_fixture: dict, state: str, stamp_python: bool, tmp_path: Path,
+    binding_fixture: dict, state: str, stamp_python: bool, entry: str, tmp_path: Path,
 ) -> None:
     helpers = runpy.run_path(str(ROOT / "plugins/agent-logger/tests/test_install_binstub.py"))
     released = helpers["_stage_release_payload"](tmp_path / "publisher")
@@ -100,6 +104,7 @@ def test_logger_actual_stamp_first_use_revalidates_snapshot_owner(
     if not stamp_python:
         _without_python(binding_fixture, environment)
     root = binding_fixture["legacy"]
+    environment["AGENT_LOGGER_HOME"] = str(root)
     _policy(binding_fixture, root, binding_fixture["arguments"], "standalone")
     shell = "powershell" if os.name == "nt" else "bash"
     stamped = _run(
@@ -117,13 +122,24 @@ def test_logger_actual_stamp_first_use_revalidates_snapshot_owner(
         "COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT",
     ):
         environment.pop(key, None)
-    # Wrapper trace/status/locking admission is a separate bootstrap slice.
-    trace_paths = {".", "logs", "logs/boot-trace.jsonl", ".provision.lock", ".provision-status"}
-    before = {key: value for key, value in _snapshot(root).items() if key not in trace_paths}
-    wrapper = binding_fixture["home"] / ".local/bin/agent-logger"
+    if entry == "legacy-resolver":
+        resolver = root / "bin" / ("resolve-runtime.ps1" if os.name == "nt" else "resolve-runtime.sh")
+        resolver.write_text(resolver.read_text(encoding="utf-8").replace(
+            "# Trace contract: normal/read-only/ready-v1", "# Older resolver without deferred tracing",
+        ), encoding="utf-8")
+    elif entry == "missing-admission":
+        suffix = "ps1" if os.name == "nt" else "sh"
+        (snapshot / f"scripts/installation-context/plugin-publication-probe.{suffix}").unlink()
+    before = _snapshot(root)
+    wrapper = (
+        snapshot / "bin/agent-logger" if entry == "payload" else
+        binding_fixture["home"] / ".local/bin" /
+        ("read-session-digest" if entry == "auxiliary" else "agent-logger")
+    )
+    arguments = ["--help"] if entry == "auxiliary" else ["version"]
     command = (
-        [POWERSHELL, "-NoLogo", "-NoProfile", "-File", str(wrapper.with_suffix(".ps1")), "version"]
-        if os.name == "nt" else [str(wrapper), "version"]
+        [POWERSHELL, "-NoLogo", "-NoProfile", "-File", str(wrapper.with_suffix(".ps1")), *arguments]
+        if os.name == "nt" else [str(wrapper), *arguments]
     )
     result = subprocess.run(
         command, env=environment, cwd=snapshot, capture_output=True, text=True,
@@ -131,14 +147,94 @@ def test_logger_actual_stamp_first_use_revalidates_snapshot_owner(
     )
     if state == "managed":
         assert result.returncode != 0
-        assert "deployment-managed" in result.stdout + result.stderr
-        assert {key: value for key, value in _snapshot(root).items() if key not in trace_paths} == before
+        diagnostic = (
+            "read-only runtime resolver is unavailable" if entry == "legacy-resolver" else
+            "snapshot admission helper is unavailable" if entry == "missing-admission" else
+            "deployment-managed"
+        )
+        assert diagnostic in result.stdout + result.stderr
+        assert _snapshot(root) == before
         assert not calls.exists()
     else:
         assert result.returncode == 0, result.stdout + result.stderr
-        assert "agent-logger " in result.stdout
+        assert ("usage:" if entry == "auxiliary" else "agent-logger ") in result.stdout.lower()
         helpers["_assert_complete_runtime"](binding_fixture["home"])
         assert calls.exists()
+        installed_calls = calls.read_bytes()
+        trace = root / "logs/boot-trace.jsonl"
+        before_trace = trace.read_bytes()
+        policy = root / "runtime-deployment.json"
+        _write(policy, {**json.loads(policy.read_text(encoding="utf-8")), "managed": True})
+        healthy = subprocess.run(
+            command, env=environment, cwd=snapshot, capture_output=True, text=True,
+            timeout=30, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        assert healthy.returncode == 0, healthy.stdout + healthy.stderr
+        assert calls.read_bytes() == installed_calls
+        assert trace.read_bytes().startswith(before_trace)
+        assert len(trace.read_bytes()) > len(before_trace)
+
+
+@pytest.mark.portfolio_tier("T3")
+@pytest.mark.parametrize("managed", [False, True])
+@pytest.mark.parametrize("shell", SHELLS)
+def test_logger_cold_payload_uses_selected_cell_publication_policy(
+    binding_fixture: dict, shell: str, managed: bool,
+) -> None:
+    environment = _adopter(binding_fixture, "agent-logger")
+    primitive = binding_fixture["primitive"]
+    cell = primitive.stamp_context(
+        payload_version="1.0.0", payload_origin="installed",
+        expected_namespace_generation=0, expected_install_generation=0,
+        **{key: binding_fixture["arguments"][key]
+           for key in ("payload_root", "plugin_id", "environment")},
+    )
+    primitive.compare_and_swap_activation(
+        context=cell["installReceipt"],
+        expected_marketplace_id=cell["marketplaceId"],
+        expected_plugin_id="agent-logger",
+        expected_namespace_generation=cell["namespaceGeneration"],
+        expected_install_generation=cell["generation"],
+        expected_activation_generation=0,
+        activation_mode="namespaced", activation_state="active",
+        legacy_disposition="absent",
+        legacy_probe={"declared": True, "result": "absent", "checkedAt": "2026-01-01T00:00:00Z"},
+        legacy_root=binding_fixture["legacy"], environment=binding_fixture["environment"],
+    )
+    _write(binding_fixture["home"] / ".copilot-extensions/installation-mode.json", {
+        "schema": "copilot-extensions.installation-mode", "version": 1,
+        "installationMode": {"enabled": True, "marketplaces": {}},
+    })
+    root = Path(cell["pluginRoot"])
+    arguments = {**binding_fixture["arguments"], "context": cell["installReceipt"]}
+    _policy(binding_fixture, root, arguments, "managed" if managed else "standalone")
+    _write(binding_fixture["legacy"] / "runtime-deployment.json", {"managed": not managed})
+    environment.update(
+        AGENT_LOGGER_HOME=str(binding_fixture["legacy"]),
+        AGENT_LOGGER_PAYLOAD_ROOT=str(binding_fixture["payload"]),
+        COPILOT_EXTENSIONS_CONTEXT=cell["installReceipt"],
+    )
+    suffix = "ps1" if shell == "powershell" else "sh"
+    installer = binding_fixture["payload"] / f"scripts/install.{suffix}"
+    installer.write_text(
+        "[IO.File]::WriteAllText((Join-Path $env:AGENT_LOGGER_HOME 'installer-ran'), 'yes'); exit 37\n"
+        if shell == "powershell" else
+        '#!/usr/bin/env bash\nprintf yes > "$AGENT_LOGGER_HOME/installer-ran"\nexit 37\n',
+        encoding="utf-8",
+    )
+    before = _snapshot(root)
+    legacy_before = _snapshot(binding_fixture["legacy"])
+    result = _run(binding_fixture, environment, _command(binding_fixture, shell, "runtime-gate"))
+    assert _snapshot(binding_fixture["legacy"]) == legacy_before
+    if managed:
+        assert result.returncode == 3, result.stdout + result.stderr
+        assert "deployment-managed" in result.stdout + result.stderr
+        assert _snapshot(root) == before
+    else:
+        assert result.returncode == 37, result.stdout + result.stderr
+        assert (root / "installer-ran").read_text(encoding="utf-8") == "yes"
+        assert "failed rc=37" in (root / ".provision-status").read_text(encoding="utf-8-sig")
+        assert (root / "logs/boot-trace.jsonl").is_file()
 
 
 def _without_python(fixture: dict, environment: dict[str, str]) -> None:

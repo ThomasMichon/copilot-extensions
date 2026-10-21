@@ -291,6 +291,7 @@ def _stage_release_payload(tmp_path: Path) -> Path:
         entry for entry in roster["plugins"] if entry["name"] == "agent-logger"
     ]
     assert len(roster["plugins"]) == 1
+    roster["plugins"][0]["source"] = "release/agent-logger"
     staged_roster = tmp_path / roster_path
     staged_roster.parent.mkdir(parents=True)
     staged_roster.write_text(json.dumps(roster), encoding="utf-8")
@@ -761,6 +762,7 @@ def test_stamp_supports_first_use_provision_from_snapshot_only(tmp_path: Path) -
     )
     assert (snapshot / "scripts" / "installer-engine.sh").is_file()
     assert (snapshot / "scripts" / "installer-engine.ps1").is_file()
+    assert (snapshot / "snapshot-provenance.json").is_file()
     for component in (
         "versioned_runtime.py",
         "versioned_runtime_leases.py",

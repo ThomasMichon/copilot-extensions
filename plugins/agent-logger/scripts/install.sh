@@ -761,25 +761,44 @@ export PYTHONUTF8=1
 _name="agent-logger"
 _root="$HOME/.$_name"
 _resolver="$_root/bin/resolve-runtime.sh"
+if [ ! -f "$_resolver" ] ||
+   ! grep -Fq '# Trace contract: normal/read-only/ready-v1' "$_resolver"; then
+    printf '%s\n' "[$_name] read-only runtime resolver is unavailable. Re-enable/update the plugin, then retry." >&2
+    exit 126
+fi
 _resolve() {
     AGENT_RT_PY=""
     if [ -f "$_resolver" ]; then
         AGENT_RT_ROOT="$_root"
+        local AGENT_RT_RESOLVE_TRACE_MODE="${1:-ready}"
         . "$_resolver"
     fi
 }
 _resolve
 [ -n "$AGENT_RT_PY" ] && exec "$AGENT_RT_PY" -m agent_logger "$@"
-mkdir -p "$_root"
-_status="$_root/.provision-status"
-printf '%s\n' "[$_name] runtime not provisioned -- provisioning on first use (may take ~30-120s: acquires uv + builds a venv). Do not kill; extend your timeout." >&2
-printf '::agent-provisioning:: plugin=%s eta_seconds=120 reason=first-use status=%s\n' "$_name" "$_status" >&2
+if [ -n "${AGENT_LOGGER_NO_SELFPROVISION:-}" ]; then
+    printf '%s\n' "[$_name] runtime not provisioned (AGENT_LOGGER_NO_SELFPROVISION set)." >&2
+    exit 1
+fi
 _install="$(cat "$_root/payload-dir" 2>/dev/null)/scripts/install.sh"
 [ -f "$_install" ] || _install="$(ls "$HOME"/.copilot/installed-plugins/*/"$_name"/scripts/install.sh 2>/dev/null | head -n1)"
 if [ ! -f "$_install" ]; then
     printf '%s\n' "[$_name] cannot self-provision: installer not found in plugin payload. Ensure the plugin is enabled, then retry." >&2
     exit 127
 fi
+_payload="${_install%/scripts/install.sh}"
+_probe="$_payload/scripts/installation-context/plugin-publication-probe.sh"
+if [ ! -f "$_probe" ]; then
+    printf '%s\n' "[$_name] Runtime publication refused: snapshot admission helper is unavailable. Re-enable/update the plugin, then retry." >&2
+    exit 126
+fi
+bash "$_probe" "$_payload" "$_name" "$_root" || exit $?
+_resolve normal
+[ -n "$AGENT_RT_PY" ] && exec "$AGENT_RT_PY" -m agent_logger "$@"
+mkdir -p "$_root"
+_status="$_root/.provision-status"
+printf '%s\n' "[$_name] runtime not provisioned -- provisioning on first use (may take ~30-120s: acquires uv + builds a venv). Do not kill; extend your timeout." >&2
+printf '::agent-provisioning:: plugin=%s eta_seconds=120 reason=first-use status=%s\n' "$_name" "$_status" >&2
 _lock="$_root/.provision.lock"
 exec 9>"$_lock"
 command -v flock >/dev/null 2>&1 && flock 9 2>/dev/null

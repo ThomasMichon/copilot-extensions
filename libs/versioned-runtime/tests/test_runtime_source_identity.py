@@ -176,8 +176,9 @@ def test_source_recovery_uses_explicit_identity_never_hash_order(
 @pytest.mark.parametrize("host", ["pwsh", "powershell", "bash"])
 @pytest.mark.parametrize("selector", [None, "current-version", "last-known-good"])
 @pytest.mark.parametrize("owner", ["canonical", "agent-worktrees"])
+@pytest.mark.parametrize("trace_mode", ["normal", "read-only", "ready"])
 def test_native_source_recovery_matches_explicit_python_selection(
-    tmp_path: Path, host: str, selector: str | None, owner: str,
+    tmp_path: Path, host: str, selector: str | None, owner: str, trace_mode: str,
 ) -> None:
     executable = _bash() if host == "bash" else (
         shutil.which(host) if host != "powershell" or os.name == "nt" else None
@@ -193,13 +194,17 @@ def test_native_source_recovery_matches_explicit_python_selection(
     if host == "bash":
         command = (
             f"AGENT_RT_ROOT='{_posix(tmp_path)}'; "
+            f"AGENT_RT_RESOLVE_TRACE_MODE='{trace_mode}'; "
             f". '{_posix(scripts / 'resolve-runtime.sh')}'; printf '%s' \"$AGENT_RT_PY\""
         )
         argv = [executable, "-c", command]
     else:
         root = str(tmp_path).replace("'", "''")
         resolver = str(scripts / "resolve-runtime.ps1").replace("'", "''")
-        command = f"$env:AGENT_RT_ROOT='{root}'; . '{resolver}'; [Console]::Out.Write($AgentRtPy)"
+        command = (
+            f"$env:AGENT_RT_ROOT='{root}'; . '{resolver}' -TraceMode '{trace_mode}'; "
+            "[Console]::Out.Write($AgentRtPy)"
+        )
         argv = [executable, "-NoProfile", "-Command", command]
     result = subprocess.run(
         argv, capture_output=True, text=True, timeout=15,
@@ -213,6 +218,15 @@ def test_native_source_recovery_matches_explicit_python_selection(
     else:
         assert result.stdout == ""
         assert "refusing unordered source fallback" in result.stderr
+    logs = tmp_path / "logs"
+    if trace_mode == "read-only" or (trace_mode == "ready" and not selector):
+        assert not logs.exists()
+    else:
+        name = "boot-trace.jsonl" if owner == "canonical" else "activity.jsonl"
+        records = [json.loads(line) for line in (logs / name).read_text(encoding="utf-8").splitlines()]
+        results = [record for record in records if record["phase"] == "resolver-slot-result"]
+        assert len(results) == 1
+        assert results[0]["result"] == ("resolved" if selector else "miss")
 
 
 def test_source_identity_cannot_select_another_installer_owner(payload: Path) -> None:

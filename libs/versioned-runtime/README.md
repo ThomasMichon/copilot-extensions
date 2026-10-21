@@ -99,6 +99,17 @@ spellings remain prereleases before the matching final package release,
 including repair generations. Source-qualified slots instead require an exact
 current or last-known-good selection; hashes are not ordered recovery candidates.
 
+Native resolution supports three durable-trace modes: normal (the unchanged
+default), read-only (no durable trace), and ready (buffer records and append them
+only when a completed interpreter resolves). PowerShell callers pass
+`-TraceMode`; shell callers scope `AGENT_RT_RESOLVE_TRACE_MODE` around sourcing.
+Opt-in stderr trace remains available in every mode. Cold first-use callers use
+ready before publication admission, then normal only after admission succeeds.
+Installed wrappers require the resolver's declared
+`normal/read-only/ready-v1` contract before sourcing it; an older or missing
+helper returns an explicit readiness error rather than assuming it suppresses
+writes. These modes do not grant installation or publication permission.
+
 ## Construction ownership (Python API)
 
 `construction_lease(root, version, *, timeout=60.0, poll_interval=0.05)` is a

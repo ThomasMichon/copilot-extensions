@@ -101,6 +101,17 @@ Legacy snapshots retain
 [canonical frozen source evidence](../../libs/installation-context/README.md)
 for fresh-process policy admission, including stamps made without Python.
 The live deployment policy is never cached as permission in that evidence.
+Generated compatibility wrappers and payload-local commands resolve a healthy
+runtime before considering publication. Cold misses defer durable resolver
+tracing until the live canonical deployment decision admits publication, before
+any provision status or orchestration-lock write. Payload-local commands check
+the validated selected installation root, including namespaced cells; they do
+not substitute legacy-root policy. Healthy managed runtimes remain callable
+without invoking an installer, and retain their normal resolution trace.
+An older deployed resolver without the deferred-trace contract, or a cold
+snapshot without the admission helper, returns an explicit readiness error
+without writing runtime state; update/re-enable the plugin or use explicit
+installation management rather than falling back to unguarded provisioning.
 Identical inputs reuse snapshots and completion evidence. Recovery requires an
 exact current or last-known-good selector rather than ordering source hashes.
 `agent-logger version` reports the selected source generation without changing
