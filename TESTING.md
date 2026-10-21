@@ -1223,6 +1223,8 @@ acceptance collection explicitly deselects full-only families, while `full`
 executes their union. Direct pytest/partial diagnostics without the runner's
 explicit qualification environment remain unqualified and unpartitioned.
 Filters and collection/setup-only modes are rejected for either lane.
+The runner validates membership even without external report retention:
+an early zero exit such as pytest help/version is not qualification.
 
 The native caller-death case reuses the process utility's test-only birth-pinned
 Windows handle/Linux pidfd observer. It observes the actual installed provider,

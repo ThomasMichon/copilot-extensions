@@ -217,7 +217,10 @@ def prepare(component: str, python: Path, *, smoke: bool = False) -> None:
         )
 
 
-def export_chat_membership(sandbox: Path, destination: Path, profile: str, outcome: int) -> int:
+def export_chat_membership(
+    sandbox: Path, destination: Path | None, profile: str, outcome: int,
+) -> int:
+    """Validate every Chat outcome; optionally retain its membership report."""
     try:
         report = json.loads((sandbox / "pytest" / "chat-membership.json").read_text("utf-8"))
         if not isinstance(report, dict):
@@ -235,6 +238,8 @@ def export_chat_membership(sandbox: Path, destination: Path, profile: str, outco
         report["membership_status"] = "available"
         result = outcome
     report.update(test_exit_code=outcome, exit_code=result)
+    if destination is None:
+        return result
     try:
         with destination.open("x", encoding="utf-8") as output:
             json.dump(report, output, sort_keys=True)
@@ -384,7 +389,7 @@ def main(argv: list[str] | None = None) -> int:
                 sandbox=sandbox,
                 limits=limits,
             )
-            if args.chat_membership_report:
+            if chat_suite is not None:
                 return export_chat_membership(
                     sandbox, args.chat_membership_report, chat_suite, outcome,
                 )

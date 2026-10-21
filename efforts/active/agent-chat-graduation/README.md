@@ -340,6 +340,30 @@ shared-multiplex contracts above.
 
 ## Journal
 
+### 2026-10-21 - Membership validation is mandatory, retention is optional
+
+- Addressed the subsequent current-head finding4332180223: normal commands
+  without an export flag now perform the same mandatory membership validation.
+  An early zero exit before collection cannot qualify merely because no
+  external report was requested. External retention alone remains optional;
+  original nonzero containment results are still preserved.
+- Expanded the missing/collected/partial/wrong-type map matrix across both
+  retained and non-retained modes, including default Chat selection. Updated
+  the synthetic alias consumer to supply its real collection map rather than
+  bypass the new contract. Combined runner contracts passed107 with one native
+  platform skip. Real inherited pytest help without an export flag returned
+  the required nonzero refusal. A version-option diagnostic instead executed
+  tests and reached124; that invalid early-exit probe is not claimed as a
+  passing help/no-collection test or used to alter pytest semantics.
+- Both documented normal Windows commands then passed with no export flag,
+  filters or diagnostic options: acceptance208 passed/one POSIX skip/33
+  deselected109.20s/120; complete241 passed/the same skip118.46s/600.
+  Each collected242 nodes with the unchanged050845af membership digest.
+  The full original236-node set and all six new guards remain selected in
+  complete qualification. No runtime, utility, operation deadline or other
+  consumer default changed. Independent native qualification and review/CI
+  must still be bound to the replacement immutable source.
+
 ### 2026-10-21 - Preserve failure evidence and bound fixture command ownership
 
 - Addressed the current optional-report finding at its failure boundary.

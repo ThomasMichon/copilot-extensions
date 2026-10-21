@@ -51,8 +51,9 @@ def test_chat_qualification_lane_defaults_preserve_full_collection(
 
 @pytest.mark.parametrize("outcome", [0, 4, 124])
 @pytest.mark.parametrize("map_state", ["missing", "collected", "partial", "wrong-type"])
-def test_membership_export_preserves_original_failure_without_terminal_summary(
-    tmp_path, monkeypatch, capsys, outcome, map_state,
+@pytest.mark.parametrize("retain", [False, True])
+def test_membership_validation_preserves_original_failure_without_terminal_summary(
+    tmp_path, monkeypatch, capsys, outcome, map_state, retain,
 ):
     monkeypatch.setattr(runner, "REPO", tmp_path)
     (tmp_path / "services" / "chat" / "tests").mkdir(parents=True)
@@ -78,17 +79,21 @@ def test_membership_export_preserves_original_failure_without_terminal_summary(
     monkeypatch.setattr(runner, "run_contained", run)
     destination = tmp_path / "retained.json"
     expected = outcome if map_state == "collected" else outcome or 1
-    assert runner.main([
-        "services/chat", "--chat-suite", "acceptance",
-        "--chat-membership-report", str(destination),
-    ]) == expected
-    report = json.loads(destination.read_text("utf-8"))
-    assert report["test_exit_code"] == outcome and report["exit_code"] == expected
-    assert report["membership_status"] == (
-        "available" if map_state == "collected" else "unavailable"
-    )
+    args = ["services/chat"]
+    if retain:
+        args.extend(("--chat-membership-report", str(destination)))
+    assert runner.main(args) == expected
+    if retain:
+        report = json.loads(destination.read_text("utf-8"))
+        assert report["test_exit_code"] == outcome and report["exit_code"] == expected
+        assert report["membership_status"] == (
+            "available" if map_state == "collected" else "unavailable"
+        )
+        if map_state != "collected":
+            assert "nodes" not in report
+    else:
+        assert not destination.exists()
     if map_state != "collected":
-        assert "nodes" not in report
         assert "membership unavailable" in capsys.readouterr().err
     assert all(not sandbox.exists() for sandbox in owned_sandboxes)
 
