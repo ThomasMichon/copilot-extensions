@@ -87,7 +87,50 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Admitted fixture-semantic batches
 
+### B-SEED: run-local seed publication only
+
+Baseline: Dev `2b3e36bc9f3bfae5b8fc692e627ecbd859cc7cc1`, the actual
+#7465 B-RECORD foundation merge. Extract only `_seed_directory` and its
+publication regressions from the pinned residual source. No existing fixture
+uses this helper yet; B-BASE, published/rebased/fork copies and their isolation
+regressions remain independently scoped.
+
+Contained calls use the runner's private plugin sandbox, outside per-group
+temporary directories. A mandatory cross-process sidecar lock spans build,
+atomic readiness publication and consumption. Readiness must match the exact
+version/key/path object, including an integer (not boolean or floating-point)
+version. Invalid keys, missing/relative/non-directory sandbox roots,
+symlink controls, incomplete builds and invalid readiness fail explicitly.
+Uncontained calls retain independent `tmp_path_factory` directories.
+These seeds hold test setup, never authority or mutable provider results.
+
+All 25 pre-existing conftest functions/classes have identical AST bodies.
+Twenty-nine seed-publication cases exercise independent group factories,
+readiness shape/type/content failures, symlink predicates, missing published
+directories, mandatory-lock failure, builder exceptions, abrupt process exit,
+invalid keys and uncontained fallback. The real two-process test waits for an
+observed failed native sidecar acquisition before allowing the builder to
+finish: it proves actual contention, build-once publication and reuse after
+group cleanup rather than relying on a startup-delay race.
+
+All 31 targeted cases pass without skips on native Windows in 12.04 seconds
+(15.11 inclusive): all 29 new publication cases, the unchanged record-only
+construction regression and the unchanged real create-pr association control.
+Exactly two work-stealing workers, 30-second items, the 240-second diagnostic
+group and unchanged process/memory/storage limits apply. Ruff F/E9 and the
+thirteen-plugin install-contract guard pass with zero violations. This is
+focused contract evidence, not complete same-head Windows qualification.
+Fresh private sandbox publication is exercised directly; no installer/runtime
+behavior changes require a clean-room deployment. Linux/external execution
+is unavailable and receives no credit. No production code, provider doubles,
+existing fixture consumers, test tiers or CI admission changes are included.
+
 ### B-RECORD foundation: persisted records without publication setup
+
+**Actually merged:** #7465 as
+`2b3e36bc9f3bfae5b8fc692e627ecbd859cc7cc1`. This settles only the
+foundation and named consumers below, not the remaining B-RECORD conversions
+or the parent Windows qualification.
 
 Baseline: Dev `8a70551c987775375310794e38d3c89aaee4607d`, the actual
 #7457 final mechanical-family merge. Add function-private `record_repo` with

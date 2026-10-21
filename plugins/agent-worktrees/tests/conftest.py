@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import json
+import os
+import re
 import textwrap
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -498,6 +502,46 @@ from agent_worktrees import git_ops  # noqa: E402
 
 def _pr_git(*args: str, cwd) -> str:
     return git_ops.git(*args, cwd=str(cwd)).stdout.strip()
+
+
+@contextmanager
+def _seed_directory(tmp_path_factory, key):
+    """Publish one immutable seed within the runner-owned plugin sandbox."""
+    if not re.fullmatch(r"[a-z0-9-]+", key):
+        raise ValueError(f"invalid fixture seed key: {key!r}")
+    sandbox = os.environ.get("COPILOT_EXTENSIONS_TEST_SANDBOX")
+    if os.environ.get("COPILOT_EXTENSIONS_TEST_CONTAINED") != "1" or not sandbox:
+        yield tmp_path_factory.mktemp(key), True
+        return
+    parent = Path(sandbox)
+    if not parent.is_absolute() or not parent.is_dir() or parent.is_symlink():
+        raise ValueError("fixture seeds require an existing real absolute test sandbox")
+    root = parent / "s"
+    if root.is_symlink():
+        raise ValueError("fixture seed cache cannot be a symlink")
+    root.mkdir(exist_ok=True)
+    seed = root / key
+    ready = root / f"{key}.ready"
+    if ready.is_symlink() or ready.with_suffix(".lock").is_symlink():
+        raise ValueError("fixture seed control files cannot be symlinks")
+    expected = {"version": 1, "key": key, "path": str(seed)}
+    with tracking._RecordLock(ready, timeout=30, require_sidecar=True):
+        if ready.exists():
+            readiness = json.loads(ready.read_text("utf-8"))
+            if (
+                not seed.is_dir()
+                or seed.is_symlink()
+                or readiness != expected
+                or type(readiness["version"]) is not int
+            ):
+                raise ValueError(f"invalid fixture seed readiness: {key}")
+            yield seed, False
+            return
+        if seed.exists() or seed.is_symlink():
+            raise RuntimeError(f"incomplete fixture seed: {key}")
+        seed.mkdir()
+        yield seed, True
+        tracking._atomic_write(ready, json.dumps(expected))
 
 
 @pytest.fixture
