@@ -7566,7 +7566,7 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/session-host/current/wrapper-authority-v1.json",
-          "sha256": "1f2f8d7aebc538894d30e4fa31ad1d2c77c4f806ecbfab7cedd6eca66b35ae1a",
+          "sha256": "4bc5d3f1f2767e4dc8ff6cebe60abd9b9d2afbcc147d17016dbe2f9f843ca607",
           "role": "launch-bound wrapper v1 authority and receipt-v2 validity vectors",
           "generation": 1
         },
@@ -7578,13 +7578,13 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/session-host/current/wrapper-exec.json",
-          "sha256": "458122748e65d83eda76f781b5d406df19cba4ee37e8ac78fd857c02715d224c",
+          "sha256": "2848379467c0934c6c7069f09d978324a79a542ddbca264bc045050e96932c26",
           "role": "terminal exec consent, private environment closure and PID preservation",
           "generation": 1
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/session-host/current/wrapper-consent.json",
-          "sha256": "19d4cbce287130892dc6dbb38c263cf84f21219e979c34598346b2fcbf02fed3",
+          "sha256": "4885b043901e640066107684eefb2e7899e347d468fd409e22f05b59e2f5cd55",
           "role": "complete staged authority closure and consent-owner failure ordering",
           "generation": 1
         },
@@ -7914,6 +7914,30 @@
         },
         {
           "commit": "25a5685be6ab272691609bde32c4209eb4b1649d",
+          "plugin_version": "0.4.1-dev3",
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_host/preference_spawn.py",
+          "source_git_blob": "ef684ca179f87826028d1cbe25791ce8fdf9ceab",
+          "generation": 1,
+          "capture_method": "Committed-source capture_bridge_current_authority.py: real terminal settings reader, receipt emitter/verifier and Host consent/refusal ordering with deterministic synthetic execution-space inputs; normalize only standalone root-module release labels."
+        },
+        {
+          "commit": "99d85042c87ff43d93aa94807f3d9dca528c9ae3",
+          "plugin_version": "0.4.1-dev3",
+          "source_path": "plugins/agent-bridge/src/agent_bridge/preference_attestation.py",
+          "source_git_blob": "b7b62f6ab7bb3ca499359f8a3fdb26e037a79743",
+          "generation": 1,
+          "capture_method": "Committed-source capture_bridge_current_authority.py: real terminal settings reader, receipt emitter/verifier and Host consent/refusal ordering with deterministic synthetic execution-space inputs; normalize only standalone root-module release labels."
+        },
+        {
+          "commit": "99d85042c87ff43d93aa94807f3d9dca528c9ae3",
+          "plugin_version": "0.4.1-dev3",
+          "source_path": "plugins/agent-bridge/src/agent_bridge/preference_exec.py",
+          "source_git_blob": "7855f9816afcc72090e91dfd146fa1eb62393b8f",
+          "generation": 1,
+          "capture_method": "Committed-source capture_bridge_current_authority.py: real terminal settings reader, receipt emitter/verifier and Host consent/refusal ordering with deterministic synthetic execution-space inputs; normalize only standalone root-module release labels."
+        },
+        {
+          "commit": "99d85042c87ff43d93aa94807f3d9dca528c9ae3",
           "plugin_version": "0.4.1-dev3",
           "source_path": "plugins/agent-bridge/src/agent_bridge/session_host/preference_spawn.py",
           "source_git_blob": "ef684ca179f87826028d1cbe25791ce8fdf9ceab",

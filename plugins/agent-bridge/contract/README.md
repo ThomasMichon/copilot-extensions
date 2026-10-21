@@ -6,8 +6,34 @@ The registry is repository-side evidence; no runtime component reads it.
 
 ## Updating a contract
 
+Classify the change before touching a golden packet:
+
+- An implementation-only flow change leaves every fixture and its original
+  `captured_from` provenance untouched. Refresh only that source's fingerprint
+  in `registry.json`, set `semantic: false`, and explain the unchanged wire
+  behavior in `non_semantic_reason`. Run the affected producer/consumer tests;
+  the classification is not permission to skip behavioral validation.
+- A semantic change keeps `semantic: true` and requires matching current
+  evidence for the affected source. Add the affected capture and its provenance;
+  unrelated captures may retain their original commits and packets. They do not
+  need to share the newest capture's commit or source bytes.
+- Actual protocol generations, capability floors and meaningful wire digests
+  remain contract assertions. This maintenance path does not bypass a version
+  bump or mixed-version validation when the contract really changes.
+
+The registry checker owns source freshness, capture provenance and immutable
+fixture hashes. Packet replay tests own behavioral expectations; they must not
+add a second, stricter rule that every capture matches today's implementation.
+The checker still rejects unrefreshed source hashes, unjustified non-semantic
+classification, uncovered semantic changes and corrupt historical provenance.
+Never bulk-rebaseline goldens to make an implementation-only update pass.
+
+When a wire contract does change:
+
 1. Change the owning source and its tests.
-2. Update the affected immutable fixture or add a new generation fixture.
+2. Add the affected capture or a new generation fixture; preserve historical
+   captures. The three refreshable current authority vectors use the bounded
+   capture flow below.
 3. Record exact source commit, plugin version, capture method, support window,
    and removal gate in `registry.json`.
 4. Refresh every changed fixture and source SHA-256 in the registry. Text
@@ -56,6 +82,12 @@ negative vector, terminal consent/refusal, and the real Host's
 verify-before-consent and refusal/reaping order. It refuses changes to receipt
 semantics, authority closure, binding environment or wire generation rather than
 silently broadening this capture.
+
+The component digest is an actual attested wire value, not just provenance
+bookkeeping. Changing an included authority component legitimately changes it,
+even without a framing-version bump. Refresh those three current captures with
+this tool; do not relax their live-digest assertions or re-attest unrelated
+HTTP packets to accommodate that bounded change.
 
 Only the three current `wrapper-authority-v1`, `wrapper-exec` and
 `wrapper-consent` fixtures and their registry hashes/provenance are written.

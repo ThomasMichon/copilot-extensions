@@ -767,3 +767,114 @@ def test_semantic_source_hash_cannot_advance_without_fixture(repo: Path) -> None
     assert result.returncode == 1
     assert "semantic current sources lack matching current fixtures" in result.stderr
     assert SOURCE in result.stderr
+
+
+@pytest.mark.parametrize(
+    ("refresh_hash", "reason", "expected_error"),
+    [
+        (True, "Internal flow refactor; wire packets and capability floors are unchanged.", None),
+        (False, "Internal flow refactor; wire packets and capability floors are unchanged.", "stale sha256"),
+        (True, None, "non_semantic_reason is required"),
+    ],
+)
+def test_implementation_only_update_keeps_every_fixture_unchanged(
+    repo: Path, refresh_hash: bool, reason: str | None, expected_error: str | None,
+) -> None:
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "registry baseline")
+    base = _git(repo, "rev-parse", "HEAD")
+    before = {path: (repo / path).read_bytes() for path in (FIXTURE, HOST_FIXTURE)}
+    source = repo / SOURCE
+    _write(
+        repo, SOURCE,
+        source.read_text(encoding="utf-8")
+        + "\ndef _flow(value):\n    result = value\n    return result\n",
+    )
+
+    def classify_update(data: dict[str, Any]) -> None:
+        record = data["contracts"][0]["source_paths"][0]
+        record.update(semantic=False, non_semantic_reason=reason)
+        if refresh_hash:
+            record["sha256"] = _sha256(repo, SOURCE)
+
+    _mutate_registry(repo, classify_update)
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "implementation-only flow update")
+    result = _run(repo, "--base", base)
+    assert {path: (repo / path).read_bytes() for path in before} == before
+    assert set(_git(repo, "diff", "--name-only", base, "HEAD").splitlines()) == {
+        SOURCE, "plugins/agent-bridge/contract/registry.json",
+    }
+    if expected_error is None:
+        assert result.returncode == 0, result.stderr
+    else:
+        assert result.returncode == 1
+        assert expected_error in result.stderr
+
+
+def test_one_semantic_capture_does_not_require_recapturing_its_peers(repo: Path) -> None:
+    registry_path = "plugins/agent-bridge/contract/registry.json"
+    peer_path = FIXTURE.replace("health.json", "peer.json")
+    peer = json.loads((repo / FIXTURE).read_text(encoding="utf-8"))
+    _write(repo, peer_path, peer)
+
+    def register_peer(data: dict[str, Any]) -> None:
+        data["contracts"][0]["fixtures"].append({
+            "path": peer_path, "sha256": _sha256(repo, peer_path),
+            "role": "independent peer capture", "generation": 12,
+        })
+
+    _mutate_registry(repo, register_peer)
+    before = {path: (repo / path).read_bytes() for path in (FIXTURE, peer_path, HOST_FIXTURE)}
+    source = repo / SOURCE
+    _write(repo, SOURCE, source.read_text(encoding="utf-8") + "NEW_FIELD = 11\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "updated semantic source")
+    commit = _git(repo, "rev-parse", "HEAD")
+    blob = _git(repo, "rev-parse", f"{commit}:{SOURCE}")
+    refreshed = copy.deepcopy(peer)
+    refreshed["captured_from"].update(
+        commit=commit, source_git_blob=blob, source_sha256=_sha256(repo, SOURCE),
+    )
+    refreshed_path = FIXTURE.replace("health.json", "health-refreshed.json")
+    _write(repo, refreshed_path, refreshed)
+    registry = json.loads((repo / registry_path).read_text(encoding="utf-8"))
+    contract = registry["contracts"][0]
+    contract["source_paths"][0]["sha256"] = _sha256(repo, SOURCE)
+    contract["fixtures"].append({
+        "path": refreshed_path, "sha256": _sha256(repo, refreshed_path),
+        "role": "updated source capture", "generation": 12,
+    })
+    contract["provenance"].append({
+        **contract["provenance"][0], "commit": commit, "source_git_blob": blob,
+    })
+    _write(repo, registry_path, registry)
+
+    result = _run(repo)
+    assert result.returncode == 0, result.stderr
+    assert {path: (repo / path).read_bytes() for path in before} == before
+    assert refreshed["response"] == peer["response"]
+    assert refreshed["captured_from"]["commit"] != peer["captured_from"]["commit"]
+
+    refreshed["captured_from"]["source_sha256"] = "0" * 64
+    _write(repo, refreshed_path, refreshed)
+    contract["fixtures"][-1]["sha256"] = _sha256(repo, refreshed_path)
+    _write(repo, registry_path, registry)
+    corrupted = _run(repo)
+    assert corrupted.returncode == 1
+    assert "historical source" in corrupted.stderr
+
+
+def test_nonsemantic_classification_does_not_relax_packet_hashes(repo: Path) -> None:
+    def classify_update(data: dict[str, Any]) -> None:
+        data["contracts"][0]["source_paths"][0].update(
+            semantic=False, non_semantic_reason="Implementation-only maintenance.",
+        )
+
+    _mutate_registry(repo, classify_update)
+    fixture = json.loads((repo / FIXTURE).read_text(encoding="utf-8"))
+    fixture["response"]["status_code"] = 500
+    _write(repo, FIXTURE, fixture)
+    result = _run(repo)
+    assert result.returncode == 1
+    assert "fixtures[0]: stale sha256" in result.stderr

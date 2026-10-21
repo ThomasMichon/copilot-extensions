@@ -211,7 +211,6 @@ def _wire_generation(value, generation):
 def test_reattestations_retain_independent_historical_expectations(generation, reattested):
     registry = json.loads((CONTRACT / "registry.json").read_text(encoding="utf-8"))
     contract = next(item for item in registry["contracts"] if item["id"] == "agent-bridge.http-wire")
-    vector = _targets_vector(generation)
     count = 0
     for registered in contract["fixtures"]:
         if registered["generation"] != generation:
@@ -231,28 +230,7 @@ def test_reattestations_retain_independent_historical_expectations(generation, r
         expected.pop("captured_from")
         expected.pop("reattested_from", None)
         assert actual == expected
-        assert current["captured_from"]["commit"] == vector["captured_from"]["commit"]
     assert count == reattested
-
-
-def test_generation_44_capture_matches_current_registered_sources():
-    registry = json.loads((CONTRACT / "registry.json").read_text(encoding="utf-8"))
-    contract = next(item for item in registry["contracts"] if item["id"] == "agent-bridge.http-wire")
-    sources = {item["path"]: item["sha256"] for item in contract["source_paths"]}
-    captures = {
-        (item["commit"], item["plugin_version"], item["generation"], item["source_path"], item["source_git_blob"])
-        for item in contract["provenance"]
-    }
-    for registered in contract["fixtures"]:
-        if registered["generation"] != 44:
-            continue
-        current = json.loads((REPO / registered["path"]).read_text(encoding="utf-8"))
-        captured = current["captured_from"]
-        assert captured["source_sha256"] == sources[captured["source_path"]]
-        assert (
-            captured["commit"], captured["plugin_version"], captured["protocol_generation"],
-            captured["source_path"], captured["source_git_blob"],
-        ) in captures
 
 
 OWNED = json.loads(

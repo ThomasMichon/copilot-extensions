@@ -115,6 +115,15 @@ preservation, repository scope, target-local registration before startup, or
 failure reporting. Modes requiring explicit directories must still have usable
 payload paths when those directories are supplied.
 
+### Fixture-maintenance constraint
+
+> We should ensure that minor updates to the flows don't require heavy rewrites
+> to all the fixtures.
+
+Use the existing registry distinction between implementation-only and semantic
+changes. Preserve frozen packets and their original capture provenance rather
+than recapturing unrelated flows to satisfy a shared commit or source snapshot.
+
 ## Plan
 
 ### Phase 0 - Reconcile and review
@@ -230,6 +239,11 @@ payload paths when those directories are supplied.
 - [x] Native startup acquisition completes before task delivery; a failed or
   incomplete selection prevents ready status and task submission, including
   cancellation, retry and modes with no skill contribution to observe.
+- [x] Implementation-only flow updates require zero golden-fixture rewrites
+  after an explicit source classification/fingerprint update. Within an
+  unchanged wire generation, a semantic source can receive its affected capture
+  without recapturing unrelated peers; stale fingerprints, missing rationale,
+  uncovered semantic changes and corrupted packet/provenance hashes still fail.
 - [x] Existing own-plugin, related-plugin, Session Host resume, and native
   repository settings behavior remain intact.
 
@@ -265,6 +279,28 @@ on malformed configuration. These are reliability details, not new authority
 or a reason to create a daemon.
 
 ## Journal
+
+### 2026-10-21 - Bound fixture maintenance to the changed flow
+
+- The bounded follow-up to #1164 aligns HTTP evidence tests with the existing
+  canonical registry policy. Removed duplicate assertions that required every
+  current packet to match today's source bytes and every re-attestation to
+  share one capture commit. The checker and its schema remain unchanged.
+- Added a permanent isolated-copy regression using the real corpus and actual
+  checker/HTTP consumer tests. An implementation-only source comment plus one
+  explicit registry update passes with all 406 fixture files byte-identical.
+  The previous extra source-equality assertion fails on that same case.
+- Added checker cases for explicit non-semantic changes, missing rationale,
+  stale fingerprints, a selectively refreshed semantic capture with untouched
+  peers, and corruption despite a non-semantic classification. The maintenance
+  correction changes no production wire version, capability floor or runtime.
+- Full guards also detected the real authority-component digest change from
+  already-merged #7455. The capture-time digest was reproduced from its exact
+  old sources and the new value traced to `agent-procutil`. The existing checked
+  capture path refreshes only three current authority vectors and registry
+  provenance; unrelated packets and historical authority captures stay frozen.
+- This closes the requested maintenance constraint, not the remaining venue,
+  release or authorized-rollout gates.
 
 ### 2026-10-21 - Merge the source-preserving local and startup-readiness slice
 
