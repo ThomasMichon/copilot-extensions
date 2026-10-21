@@ -82,7 +82,7 @@ private worktree paths and session locators are intentionally omitted.
 | PB-09 | P0 | Keep bounded production build/signing/provenance/freshness/publication/merge safeguards. | Actual canary built, signed, verified, published, merged and tagged |
 | PB-10 | P0 | Measure the whole flow under thirty minutes; remove long tasks rather than increasing deadlines. | Canary 11m28s; natural cycles 11m38s/15m50s; subsequent sampled attempt 14m27s |
 | PB-11 | P0 | Land reviewed control, prove the unit-only release, resume canonically and observe stable natural cycles. | Done for source cadence: controls, canary, resume and two natural qualified cycles; client acceptance separate |
-| PB-12 | P1 | Run the first value-for-cost regression-led admission tournament after stable operation. | First bounded cohort proposed below; enrollment and expanded-release proof pending |
+| PB-12 | P1 | Run the first value-for-cost regression-led admission tournament after stable operation. | First cohort complete: #7554, 86 runtime cases added, exact 322-node proof reused in natural 12m12s release; later contenders and periodic repair remain |
 
 The recovery owner owns the manifest, Source publication, Main control proposal,
 release/resume and deployment. The existing portfolio owner retains periodic
@@ -144,13 +144,17 @@ not a new per-stage allowance or permission to exceed the overall limit.
 
 ## First regression-led unit admission cohort
 
-The following is **agent-recommended implementation**, not a claim that the
-tests have been admitted. The exact baseline packet contains 236 units,
+The following **agent-recommended implementation** was reviewed in #7543 and
+landed in #7554. The exact pre-cohort baseline packet contained 236 units,
 28 declared Python sources and 18 production coverage targets with a
 300-second cap; it passed locally in 8.355 seconds. Release
 `39553184584`, attempt 1, spent 21 seconds in its unit job and 14m27s
 event-to-completion including queueing. The first cohort uses this headroom
 without raising either budget or introducing another workflow/runner role.
+The resulting packet has 322 nodes, 35 declared Python sources and 23
+production coverage targets. Natural promotion `39570244030` qualified the
+exact expanded source, reused its unit proof at the immutable candidate and
+completed publication/Main merge/tag in 12m12s including queueing.
 
 | Report | First-cohort unit target | Boundary retained outside promotion |
 |---|---|---|
@@ -179,23 +183,32 @@ proxies:
 
 ### Cohort validation
 
-- [ ] Record original report, actual production boundary, owner/fix status,
+- [x] Record original report, actual production boundary, owner/fix status,
       exact admitted nodes and periodic counterpart for every selected case.
       Open/closed tracker state alone is not source or installed proof.
-- [ ] Prove relevant faulty behavior is detected, with mutation-denial,
+- [x] Prove relevant faulty behavior is detected, with mutation-denial,
       unknown/unconfirmed and legacy controls. Keep the existing release
       integrity tests unless stronger evidence justifies retirement.
-- [ ] Run the canonical single-process packet, collecting coverage once;
+- [x] Run the canonical single-process packet, collecting coverage once;
       verify every admitted node/phase/import/source/production call and no
       prohibited effect. No skips, xfails, hidden selection or budget increase.
-- [ ] Measure marginal runtime, coverage, defect detection and flakiness against
+- [x] Measure marginal runtime, coverage, defect detection and flakiness against
       the baseline; keep the packet under 300 seconds and the ordinary release
       under thirty minutes including queue/publication/merge/tag.
-- [ ] Verify impact-conditional PR selection and exact candidate proof reuse
+- [x] Verify impact-conditional PR selection and exact candidate proof reuse
       for the expanded packet, without duplicating its execution.
-- [ ] Keep actual shell/native/Git/process families enrolled or visibly
+- [x] Keep actual shell/native/Git/process families enrolled or visibly
       unenrolled in the existing periodic inventory with named repair owners.
       Unavailable capacity is not passing evidence or a new release gate.
+
+**Recorded first-cohort result:** four real #5610 assertions failed before the
+fix with 82 runtime controls passing; the effect-fenced packet rejected the
+first new failure after its 236 existing cases. After the fix, the same
+admitted bytes passed in working-tree, committed, published-head and natural
+release executions with no observed failed/skipped phases or effects. Local
+whole-packet samples were 8.603/8.234/7.738 seconds; the actual release packet
+took 7.034 seconds and its job took 24 seconds. These small samples do not
+establish a statistical flake-rate guarantee or a causal speedup.
 
 ## Validation and closure
 
@@ -216,7 +229,7 @@ proxies:
       tag, completes in less than thirty minutes including queueing.
 - [x] Canonical resume and two natural qualified cycles demonstrate stable
       source operation; client acceptance remains separate.
-- [ ] The first tournament records defect-detection value, coverage, runtime,
+- [x] The first tournament records defect-detection value, coverage, runtime,
       flakiness and maintenance cost, admitting valuable regressions within the
       unchanged budget and replacing redundant cases when stronger evidence
       supports removal.

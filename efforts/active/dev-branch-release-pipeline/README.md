@@ -886,22 +886,22 @@ periodic corpus and broader tournament ownership remain intact.)_
 - [x] Measure the existing admitted packet and a successful release attempt:
       236 passing units in 8.355 seconds locally; the sampled release unit job
       takes 21 seconds and attempt 1 completes in 14m27s including queueing.
-- [ ] Review the [first admission cohort](promotion-burndown.md#first-regression-led-unit-admission-cohort)
+- [x] Review the [first admission cohort](promotion-burndown.md#first-regression-led-unit-admission-cohort)
       before changing production helpers or the positive manifest.
-- [ ] Add genuine runtime-decision regressions for the first eligible cohort,
+- [x] Add genuine runtime-decision regressions for the first eligible cohort,
       with a narrow #5610 front-door routing repair where the new test exposes
       the still-present defect. Preserve existing APIs and behavior outside
       the reported contract.
-- [ ] Enroll the exact tests, complete import/fixture/source closure and
+- [x] Enroll the exact tests, complete import/fixture/source closure and
       production coverage targets. Every test must call relevant production
       code, pass all phases and attempt no prohibited effects.
-- [ ] Measure marginal execution, coverage, defect detection and maintenance
+- [x] Measure marginal execution, coverage, defect detection and maintenance
       cost while preserving the 300-second packet cap and existing deadlines.
       Do not remove valid release safeguards merely to keep the old case count.
-- [ ] Reconcile real shell/native/Git/process counterparts with the existing
+- [x] Reconcile real shell/native/Git/process counterparts with the existing
       periodic inventory and failure ownership; unexecuted capacity remains
       visibly unproven and cannot become a promotion dependency.
-- [ ] Pass required impact-conditional Source CI and current-head review,
+- [x] Pass required impact-conditional Source CI and current-head review,
       then verify an ordinary promotion reuses the exact expanded unit proof
       and remains under thirty minutes through publication, merge and tag.
 
@@ -1044,11 +1044,11 @@ governs test routing. Production integrity assertions below are exercised by
 units and enforced by production operations; actual-Git, native and end-to-end
 test witnesses run periodically and cannot hold promotion.
 
-- [ ] The Phase 9b cohort maps real contributor failure modes to relevant
+- [x] The Phase 9b cohort maps real contributor failure modes to relevant
       production assertions, not merely passing counts or mocks past the
       faulty decision. Exact-node/effect/source/coverage guards and the
       300-second unit ceiling remain unchanged.
-- [ ] Source fixes already claimed by reporters retain their owner; coverage
+- [x] Source fixes already claimed by reporters retain their owner; coverage
       awaiting a fix or canonical contract is explicit rather than admitted as
       a skip, xfail, assumed resolution or false passing reproduction.
 
@@ -1126,6 +1126,32 @@ The separately governed control-preservation policy is not changed by this
 proposal.
 
 ## Journal
+
+### 2026-10-21 - Expanded first cohort released in 12m12s
+- Source #7554 merged as
+  `a1f431264eede9764c1e051112b0869b0351d88a` after exact-head approval
+  of `a4639c6115d51dd288be3fd3c8528d7f6bc48add`, no open findings and
+  passing required CI. The source repair and 86 admitted runtime cases are
+  complete; no budget, effect or source-admission safeguard was weakened.
+- Natural promotion `39570244030`, attempt 1, qualified that exact Dev source.
+  Its actual downloaded packet verifies canonically: 322 nodes, 966 passing
+  phases, 23 production coverage files, zero prohibited effects, 7.034 seconds
+  in execution. The original source-unit job took 24 seconds including setup.
+- The immutable-candidate `source-units-v2` receipt binds original job
+  `119122527247`, artifact `12331392769`, its provider archive digest and all
+  three packet byte digests. The candidate gate reused that proof; it did not
+  rerun the packet or substitute metadata-only Main CI.
+- Main PR #7558 merged candidate
+  `67a3182cff7cc1579ac8aebe180733add8a4ef25` as
+  `2b39ea86eead1c24eccee4b547a0c084301721c1`; provider trees match
+  `332527049d0c379e77a3052fb1839405fcf62ca9`. Main's recorded Dev source
+  and source-named annotated tag both bind the same release.
+- The exact `python-artifacts-<Dev source>` release owns 13 payload assets plus
+  its read-back index. Publication/readback preceded Main merge; the completed
+  workflow ran from 08:34:03Z to 08:46:15Z, **12m12s including queueing**.
+- Phase 9b's first bounded cohort is complete. The broader portfolio,
+  explicitly unenrolled real-boundary cases, source-owner holds, installed
+  acceptance and the retained gated tuple-producer objective remain open.
 
 ### 2026-10-21 - First runtime cohort detects the routing regression
 - The reviewed cohort plan merged in #7543 after its additive-policy closure
