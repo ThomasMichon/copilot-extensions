@@ -96,13 +96,14 @@ leaving unrelated scopes eligible. Detached waiter claim-release-only records
 remain deliverable: they release the retained hibernation worktree claim without
 resuming its owner. Terminal completion and housekeeping are not new execution.
 
-This remains a construction API with **no HTTP/CLI exposure**, acknowledgement,
+This remains a construction API with **no closure HTTP/CLI exposure**, acknowledgement,
 manual destination admission, cancellation, handback or automatic reopening.
 Its inventory always reports `acknowledged: false`, including an empty scope,
 and names the missing runtime-enrollment, legacy-association and adopter-effect
-barriers. Installation identity, registration-to-source resolution and control
-authentication belong to the future owning coordinator integration, not to a
-caller constructing a scope value. Existing unconfigured execution is unchanged.
+barriers. [Authenticated scope resolution](#authenticated-scope-resolution)
+provides installation and producer provenance, not runtime admission or
+permission from a caller constructing a scope value. Existing unconfigured
+execution is unchanged.
 Do not call this primitive against a live queue to simulate a supported switch.
 
 ## Reservation-send custody construction
@@ -140,3 +141,36 @@ at their actual send boundary and reconcile ambiguous responses through the
 existing transport authority. No HTTP/CLI control, acknowledgement, destination
 admission or handback is exposed; `acknowledged` remains false. The internal
 accounting alone must never be advertised as universal execution fencing.
+
+## Authenticated scope resolution
+
+The control-only `POST /execution-scopes/resolve` records a qualified binding
+for an **already managed** `(repo, source)` producer registration. It accepts
+only that selector and its expected current producer generation, never a
+caller-provided installation, coordinator, scope or supervision label. It
+requires configured control authority even when legacy data ingress is open;
+data credentials and task-scoped credentials cannot use it.
+
+The coordinator reuses canonical installation-governance receipt validation
+before and after binding. Missing receipts, legacy mode, maintenance, generation
+drift and foreign provenance refuse resolution. A stable installation identity
+is derived from the validator's canonical receipt, marketplace and plugin;
+mutable receipt generations and legacy ownership provenance remain bound
+separately. The queue resolves its own retained identity and derives the stable
+producer-registration identity from the stored repository/source tuple, not
+from a replaceable producer generation or a what-to-run supervisor record.
+
+Bindings are retained in the existing queue DB under its write transaction.
+Exact retries observe the same binding, including after restart. A producer
+rollover requires its current generation without changing scope identity.
+Another installation, changed receipt provenance or an incompatible historical
+closure/send scope cannot silently rebind the producer or hide its history.
+Receipt drift detected after insertion returns an explicit conflict, not a
+capability; the retained binding is not deleted as a response-loss workaround.
+
+This endpoint resolves provenance only. It neither enrolls a runtime nor
+admits a send, closes execution, acknowledges a transition, transfers a task
+or activates a destination. Responses explicitly report `runtime_enrolled:
+false` and `acknowledged: false`. Runtime enrollment and integration of every
+actual sender and both wake outboxes remain required before any supported
+handoff control or universal-fencing claim.

@@ -89,9 +89,10 @@ grants.
 - [ ] Extend the existing coordinator/supervisor admission and drain accounting,
       including complete existing-assignment enumeration and legacy refusal.
       The internal queue construction slice persists closure and inventories
-      tasks, reservations and wakes under existing transactions; authenticated
-      coordinator resolution, runtime enrollment and final launch gates remain
-      open. Internal reservation-send custody also serializes first admission
+      tasks, reservations and wakes under existing transactions. Control-only
+      coordinator scope resolution now binds canonical installation receipts and
+      existing managed producers; runtime enrollment and final launch gates
+      remain open. Internal reservation-send custody also serializes first admission
       with closure and retains pending/ambiguous transport outcomes; it is not
       yet wired to production senders. An empty inventory is never an
       acknowledgement.
@@ -143,6 +144,17 @@ do not treat a validated adapter response as complete task admission or live
 handoff support.
 
 ## Journal
+
+### 2026-10-21 - Authenticated scope-binding construction
+- Added control-authenticated resolution through canonical installation-governance
+  receipt validation and the existing queue/managed-producer authorities.
+- Persisted immutable scope/provenance bindings in the same queue transaction.
+  Replays preserve identity; generation drift, unqualified legacy callers and
+  incompatible historical closure/send scopes remain explicit conflicts.
+- Data ingress, task credentials and caller labels cannot supply qualification.
+  The endpoint returns no execution capability, runtime enrollment or transition
+  acknowledgement. Every production sender, both wake paths, legacy cohorts,
+  adopter effects and handback remain Phase 2 obligations.
 
 ### 2026-10-21 - Reservation-send custody construction
 - Added immutable reservation-stage send identities and same-queue admission

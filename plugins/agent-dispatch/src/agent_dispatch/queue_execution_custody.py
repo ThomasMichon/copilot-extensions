@@ -54,8 +54,11 @@ def require_custody_scope(conn: sqlite3.Connection, key: str, repo: str, source:
         " WHERE scope_key = ? OR (repo = ? AND source = ?)"
         " UNION SELECT scope_key, repo, source"
         " FROM execution_admission_closures"
+        " WHERE scope_key = ? OR (repo = ? AND source = ?)"
+        " UNION SELECT scope_key, repo, source"
+        " FROM execution_scope_bindings"
         " WHERE scope_key = ? OR (repo = ? AND source = ?)",
-        (key, repo, source, key, repo, source),
+        (key, repo, source, key, repo, source, key, repo, source),
     ).fetchall()
     if any((row["scope_key"], row["repo"], row["source"]) != (key, repo, source) for row in rows):
         raise TaskError("execution custody conflicts with the qualified producer scope")

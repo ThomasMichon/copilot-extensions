@@ -1,0 +1,9 @@
+{
+  "comment": "Resolve qualified execution scopes under control authentication and canonical installation provenance without granting runtime authority",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}
