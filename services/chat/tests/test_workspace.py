@@ -51,6 +51,8 @@ def owner(tmp_path, monkeypatch):
         args = tuple(argv[5 + len(selected):])
         calls.append(args)
         value = values[args]
+        if isinstance(value, bytes):
+            return value
         return (value if isinstance(value, str) else json.dumps(value)).encode("utf-8")
 
     monkeypatch.setattr(workspace, "run_command", read)
@@ -257,6 +259,25 @@ def test_owner_failure_is_not_retried_or_downgraded_to_anchor(owner, monkeypatch
     with pytest.raises(ClientError) as caught:
         resolve(owner)
     assert caught.value.code == "provider_failed" and len(calls) == 1
+
+
+@pytest.mark.parametrize("raw", [b"not json", b'{"duplicate":1,"duplicate":2}', b"\xff", b"null"])
+def test_malformed_owner_json_has_the_client_response_error_boundary(owner, raw):
+    owner["values"][("list", "--json", "--cache-only", "--worktree-id", "worktree-1")] = raw
+    with pytest.raises(ClientError) as caught:
+        resolve(owner)
+    assert caught.value.code == "workspace_response_invalid"
+    assert "not json" not in caught.value.message and "duplicate" not in caught.value.message
+
+
+@pytest.mark.parametrize("source", [[], {}, None, 1, True, "detected"])
+def test_anchor_source_type_is_checked_before_configured_provenance(owner, source):
+    owner["values"][("get", "repo-dir")] = str(owner["root"])
+    owner["values"][("get", "worktree-dir")] = ""
+    owner["values"][("get", "execution-identity")]["source"] = source
+    with pytest.raises(ClientError) as caught:
+        resolve(owner)
+    assert caught.value.code == "workspace_unresolved"
 
 
 @pytest.mark.parametrize("damage", ["schema", "version", "extra", "missing"])

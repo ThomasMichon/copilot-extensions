@@ -42,7 +42,7 @@ def test_membership_is_exact_and_full_retains_every_parameter(request, monkeypat
     assert membership_digest(mapping) == membership_digest(membership(list(reversed(original))))
     changed = [node.replace("[case-", "[changed-") for node in original]
     assert membership_digest(mapping) != membership_digest(membership(changed))
-    assert sum(PARAMETER_COUNTS.values()) == 236 + 6 + 18 + 7 + 46 + 3
+    assert sum(PARAMETER_COUNTS.values()) == 236 + 6 + 18 + 7 + 46 + 3 + 10
     for profile in ("acceptance", "full"):
         selected = {
             node for node, lane in mapping.items() if profile == "full" or lane == "acceptance"

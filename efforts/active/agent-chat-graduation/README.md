@@ -353,6 +353,41 @@ shared-multiplex contracts above.
 
 ## Journal
 
+### 2026-10-21 - Review exposed missing non-enrolling owner resolution
+
+- Review of #7553 found that the proposed owner calls do not establish the
+  promised read-only boundary: `get worktree-dir` can adopt an untracked linked
+  checkout, cache-only `list` can activate its resident, and project-agnostic
+  `head-session` can choose another project's colliding ID. Source tracing
+  confirmed all three. The earlier genuine already-tracked/running-owner
+  smoke is not evidence for these negative states.
+- Keep #7553 draft while the substantive corrections are being built, with
+  no merge, native adoption or platform waiver. Existing qualification retains
+  any finite attempt already running, then stops stale-head starts and retries.
+  The published snapshot's acceptance run failed its unchanged five-second
+  installed-reader startup assertion: 280 passes, two exact POSIX skips and
+  one failure, in 90.18 seconds; whole preparation/cleanup command 123.996
+  seconds. Its distinct full run passed 314 plus those two skips in 258.46
+  seconds, 265.334 whole. That full pass does not erase the acceptance failure
+  or the owner-contract defects.
+- Normalize malformed owner JSON, including `ChatError`, to the client's
+  structured response error. Check anchor provenance is a string before set
+  membership so arrays/objects cannot escape as an unhandled `TypeError`.
+  Ten focused malformed-response/type regressions pass through the existing
+  environment lease, preparation and containment helpers. They are not a
+  replacement for platform or negative-state owner qualification.
+- The existing Worktrees owner must identify or supply a supported
+  non-enrolling, non-activating CWD lookup with project-scoped asserted-head
+  semantics. Exact `record --worktree-id` reads are appropriately scoped and
+  non-activating but require an already known ID; the claims ownership snapshot
+  reports resource claims, not CWD resolution. No private YAML parsing,
+  Git-derived ID, sibling-runtime import, registry, accidental resident-routing
+  flag bypass or owner-source takeover is an acceptable substitute.
+- Retain the owner-boundary dependency explicitly with the existing workspace
+  owner. This request grants no shared-family thaw, new source lease,
+  installation/update, release or host operation. Inbox/source assignment,
+  shared notification intake, governed setup and the parent effort remain open.
+
 ### 2026-10-21 - Optional trusted workspace resolver
 
 - Added the optional installed client's `workspace --request-file -` boundary

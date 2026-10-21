@@ -17,6 +17,8 @@ test_workspace_reads_share_one_finite_deadline
 test_late_owner_response_cannot_turn_deadline_expiry_into_success
 test_workspace_requires_explicit_complete_owner_argv_before_execution
 test_owner_failure_is_not_retried_or_downgraded_to_anchor
+test_malformed_owner_json_has_the_client_response_error_boundary
+test_anchor_source_type_is_checked_before_configured_provenance
 test_workspace_cli_requires_exact_explicit_initialization_before_owner
 test_installed_workspace_uses_trusted_cwd_and_selected_owner_without_source_or_environment
 """,
@@ -151,6 +153,8 @@ PARAMETER_COUNTS.update({
     "test_workspace.py::test_invalid_initialization_refuses_before_executing_owner": 6,
     "test_workspace.py::test_unresolved_or_inconsistent_owner_evidence_refuses_without_fallback": 22,
     "test_workspace.py::test_workspace_requires_explicit_complete_owner_argv_before_execution": 4,
+    "test_workspace.py::test_malformed_owner_json_has_the_client_response_error_boundary": 4,
+    "test_workspace.py::test_anchor_source_type_is_checked_before_configured_provenance": 6,
     "test_workspace.py::test_workspace_cli_requires_exact_explicit_initialization_before_owner": 4,
     "test_catalog.py::test_catalog_includes_the_host_module_in_its_verified_closure": 3,
     "test_catalog.py::test_catalog_includes_the_workspace_module_in_its_verified_closure": 3,

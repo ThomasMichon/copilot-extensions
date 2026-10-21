@@ -8,7 +8,7 @@ import sys
 import time
 
 from .client import ClientError
-from .store import strict_json
+from .store import ChatError, strict_json
 from .transport import command, run_command
 
 _KEY = re.compile(r"[A-Za-z0-9_.-]{1,256}")
@@ -70,7 +70,7 @@ def resolve_workspace(*, worktrees_command, session_id, cwd):
             _refuse("workspace_timeout")
         try:
             return strict_json(raw) if structured else raw.decode("utf-8").strip()
-        except (ValueError, UnicodeError):
+        except (ChatError, ValueError, UnicodeError):
             _refuse("workspace_response_invalid")
 
     anchor = _directory(read("get", "repo-dir"), "workspace_unresolved")
@@ -87,7 +87,8 @@ def resolve_workspace(*, worktrees_command, session_id, cwd):
                 or identity.get("schema") != "agent-worktrees.execution-identity"
                 or type(identity.get("version")) is not int or identity["version"] != 1
                 or identity.get("status") != "ready" or identity.get("configured") is not True
-                or identity.get("source") not in {"project-machine-config", "global-machine-config"}
+                or not isinstance(identity.get("source"), str)
+                or identity["source"] not in {"project-machine-config", "global-machine-config"}
                 or not all(_key(identity.get(key)) for key in ("machine", "project"))
                 or _platform(identity.get("platform")) is None):
             _refuse()
