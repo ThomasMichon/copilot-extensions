@@ -497,6 +497,26 @@ scenarios.
 
 ## Journal
 
+### 2026-10-20 - Direct producer CLI regression coverage
+
+Added `plugins/agent-dispatch/tests/test_producers_cli.py` to exercise the
+extracted producer commands directly: current-module proxy resolution,
+label-attempt parsing, reservation and schedule client arguments and emitted
+results, webhook configuration precedence, and emitter scope/error/output
+forwarding. Reservation failure tests independently preserve `--force` and
+`--confirmed-absent`; rearm uses the parser's boolean authorization contract.
+Emitter serve remains covered by the existing `test_cli.py` re-execution
+`cli_argv` contract rather than an obsolete static-target serve signature.
+
+The 46 new parameter nodes and two existing serve-wiring cases passed through
+the bounded supervisor and disconnected devcontainer runner. Keyword selection
+retains isolation while the exact-file preparation defect remains tracked by
+[#7408](https://github.com/ThomasMichon/copilot-extensions/issues/7408).
+This is a behavior-preserving regression slice under
+[#2423](https://github.com/ThomasMichon/copilot-extensions/issues/2423), not a
+claim that the broader Phase 10 plan or validation is complete. It does not
+enroll tests in required PR/promotion packets or change runtime behavior.
+
 ### 2026-09-21 - Reconciled and completed the stale reservations extraction (PR #2578 superseded)
 
 Investigated a week-stale, worktree-orphaned PR #2578 ("extract
