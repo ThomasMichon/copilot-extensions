@@ -125,6 +125,24 @@ print(json.dumps(results),flush=True)
         assert result.returncode == 0, result.stdout + result.stderr
         return json.loads(result.stdout)
 
+    clients = {}
+    for name in ("agent-c", "agent-d"):
+        path = tmp_path / (name + ".json")
+        path.write_text(json.dumps({
+            "schema": "agent-chat.client", "version": 1,
+            "endpoint_dir": str(run_dir), "state_dir": str(tmp_path / "client-state"),
+            "actor": {"codename": name},
+            "token_command": [
+                str(installed_chat.interpreter), "-I", "-c",
+                "from pathlib import Path; import sys; print(Path(sys.argv[1]).read_text().strip())",
+                config["token_file"],
+            ],
+        }), encoding="utf-8")
+        clients[name] = [str(installed_chat.console), "--config", str(path)]
+
+    def client(name, *args):
+        return json.loads(run([*clients[name], *args], cwd=tmp_path))
+
     post = {"op": "post", "channel": "room", "codename": "agent-a",
             "text": "independent installed participant", "request_id": "installed-host-request"}
     read = {"op": "read", "channel": "room", "codename": "agent-b"}
@@ -146,6 +164,22 @@ print(json.dumps(results),flush=True)
         assert page["messages"] == [event] and page["cursor"] == 0
         assert repeated == page and committed["cursor"] == page["next_cursor"]
         assert empty["messages"] == []
+        joined = requests(endpoint, [
+            {"op": "join", "channel": "room", "actor": {"codename": name}}
+            for name in clients
+        ])
+        assert all(value["membership"]["active"] for value in joined)
+        assert client("agent-d", "read", "room")["messages"] == [event]
+        (run_dir / "endpoint.json").rename(run_dir / "endpoint-held.json")
+        uncertain = subprocess.run([
+            *clients["agent-c"], "post", "room", "retained across rebind",
+            "--request-id", "local-retained",
+        ], cwd=tmp_path, env=environment, capture_output=True, text=True, timeout=15, **options)
+        assert uncertain.returncode == 1
+        assert json.loads(uncertain.stderr)["error"] == "post_unconfirmed"
+        assert client("agent-c", "status")["pending_posts"] == [
+            {"channel": "room", "request_id": "local-retained"},
+        ]
         stop(process, job)
         assert process.poll() is not None
     finally:
@@ -161,5 +195,17 @@ print(json.dumps(results),flush=True)
             read, {"op": "leave", "channel": "room", "codename": "agent-b"},
         ])
         assert empty["messages"] == [] and not left["active"]
+        assert client("agent-d", "read", "room")["messages"] == []
+        assert client("agent-c", "status")["pending_posts"] == [
+            {"channel": "room", "request_id": "local-retained"},
+        ]
+        retained = client("agent-c", "post", "room", "retained across rebind",
+                          "--request-id", "local-retained")
+        assert not retained["duplicate"]
+        assert client("agent-d", "read", "room")["messages"] == [retained["event"]]
+        assert client("agent-c", "status")["pending_posts"] == []
+        assert all(not value["active"] for value in requests(endpoint, [
+            {"op": "leave", "channel": "room", "codename": name} for name in clients
+        ]))
     finally:
         stop(process, job)

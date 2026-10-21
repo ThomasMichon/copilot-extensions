@@ -25,9 +25,10 @@ def configured(path: str | None) -> Client:
     with Path(path).open("rb") as stream:
         config = strict_json(stream.read(MAX_BODY_BYTES + 1))
     if (not isinstance(config, dict)
-            or not {"schema", "version", "endpoint", "actor", "state_dir"} <= set(config)
+            or not {"schema", "version", "actor", "state_dir"} <= set(config)
             or set(config) - {
-                "schema", "version", "endpoint", "actor", "state_dir", "token_command", "request_command",
+                "schema", "version", "endpoint", "endpoint_dir", "actor", "state_dir",
+                "token_command", "request_command",
             }
             or config["schema"] != "agent-chat.client" or type(config["version"]) is not int
             or config["version"] != 1 or not isinstance(config["state_dir"], str)):

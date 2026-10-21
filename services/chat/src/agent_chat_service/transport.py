@@ -1,4 +1,4 @@
-"""Explicit authenticated RPC transport; no discovery, installation or retries."""
+"""Explicit authenticated RPC transport; no ambient discovery, installation or retries."""
 
 from __future__ import annotations
 
@@ -8,6 +8,8 @@ import math
 import os
 from pathlib import Path
 import re
+import socket
+import stat
 import subprocess
 import sys
 from urllib.parse import urlsplit
@@ -24,6 +26,7 @@ HTTP_ALLOWANCE = 15
 MAX_HTTP_INPUT = 3 * MAX_BODY_BYTES
 MAX_STDERR_BYTES = 64 * 1024
 MAX_CREDENTIAL_BYTES = 32768 + 2
+MAX_ENDPOINT_BYTES = 16384
 
 
 def command(value: object) -> list[str]:
@@ -113,18 +116,102 @@ def _origin(endpoint):
     return parsed, loopback
 
 
+def _endpoint_directory(value):
+    if (not isinstance(value, str) or not value or len(value.encode("utf-8")) > 4096
+            or not value.isprintable() or not Path(value).is_absolute()):
+        raise ClientError("invalid_configuration", "Provide an explicit absolute local endpoint directory.")
+    return str(Path(value).absolute())
+
+
+class _UnixConnection(http.client.HTTPConnection):
+    def __init__(self, address, *, timeout):
+        super().__init__("localhost", timeout=timeout)
+        self.address = address
+
+    def connect(self):
+        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.sock.settimeout(self.timeout)
+        self.sock.connect(self.address)
+
+
+def _local_connection(directory, timeout):
+    try:
+        from endpoint_rendezvous import Endpoint, endpoint_file
+    except ImportError:
+        raise ClientError("provider_unsupported", "Local discovery requires the client role's rendezvous library.") from None
+    root = Path(_endpoint_directory(directory))
+    path = endpoint_file(root)
+    try:
+        for current in (*reversed(path.parents), path):
+            info = current.lstat()
+            if stat.S_ISLNK(info.st_mode) or (
+                getattr(info, "st_file_attributes", 0)
+                & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+            ):
+                raise ValueError("redirected endpoint")
+            if not (stat.S_ISREG(info.st_mode) if current == path else stat.S_ISDIR(info.st_mode)):
+                raise ValueError("endpoint file type")
+        with path.open("rb") as stream:
+            opened = os.fstat(stream.fileno())
+            if ((opened.st_dev, opened.st_ino) != (info.st_dev, info.st_ino)
+                    or not stat.S_ISREG(opened.st_mode)):
+                raise ValueError("endpoint changed")
+            data = strict_json(stream.read(MAX_ENDPOINT_BYTES + 1), max_bytes=MAX_ENDPOINT_BYTES)
+        if (not isinstance(data, dict)
+                or not {"schema", "transport", "endpoint", "pid", "started_at"} <= set(data)
+                or set(data) - {"schema", "transport", "endpoint", "pid", "started_at", "alt"}
+                or type(data["schema"]) is not int or data["schema"] != 1
+                or type(data["pid"]) is not int or data["pid"] <= 0
+                or not isinstance(data["started_at"], str) or not data["started_at"]
+                or len(data["started_at"]) > 128):
+            raise ValueError("endpoint record")
+        alternatives = data.get("alt", [])
+        if not isinstance(alternatives, list) or len(alternatives) > 16:
+            raise ValueError("endpoint alternatives")
+        for item in [data, *alternatives]:
+            if (not isinstance(item, dict)
+                    or not {"transport", "endpoint"} <= set(item)
+                    or item is not data and set(item) != {"transport", "endpoint"}
+                    or item["transport"] not in {"unix", "pipe", "tcp"}
+                    or not isinstance(item["endpoint"], str) or not item["endpoint"]
+                    or not item["endpoint"].isprintable()):
+                raise ValueError("endpoint address")
+        endpoint = Endpoint.from_record(data).usable(
+            lambda transport: transport == "tcp" or transport == "unix" and os.name != "nt",
+        )
+        if endpoint is None:
+            raise ClientError("provider_unsupported", "No advertised native local transport is supported.")
+        if endpoint.transport == "unix":
+            address = Path(endpoint.address)
+            if (not address.is_absolute() or address.parent != root
+                    or not stat.S_ISSOCK(address.lstat().st_mode)):
+                raise ValueError("foreign or redirected socket")
+            return _UnixConnection(str(address), timeout=timeout)
+        parsed, loopback = _origin("http://" + endpoint.address)
+        if not loopback:
+            raise ValueError("nonlocal endpoint")
+        return http.client.HTTPConnection(parsed.hostname, parsed.port, timeout=timeout)
+    except (OSError, ValueError, TypeError, KeyError, ChatError):
+        raise ClientError(
+            "endpoint_unavailable", "The explicit local endpoint record is absent or invalid; no fallback or replay.",
+        ) from None
+
+
 class GatewayTransport:
     def __init__(self, config: dict, *, runner=run_command):
+        if ("endpoint" in config) == ("endpoint_dir" in config):
+            raise ClientError("invalid_configuration", "Select exactly one explicit origin or local endpoint directory.")
+        self.endpoint_dir = _endpoint_directory(config["endpoint_dir"]) if "endpoint_dir" in config else None
         endpoint = config.get("endpoint")
-        parsed, loopback = _origin(endpoint)
+        parsed, loopback = _origin(endpoint) if self.endpoint_dir is None else (None, True)
         if ("token_command" in config) == ("request_command" in config):
             raise ClientError("invalid_configuration", "Select exactly one explicit credential or RPC provider.")
         self.request_command = command(config["request_command"]) if "request_command" in config else None
         self.token_command = command(config["token_command"]) if "token_command" in config else None
-        if self.request_command is not None and not loopback:
+        if self.request_command is not None and (not loopback or self.endpoint_dir is not None):
             raise ClientError("invalid_configuration", "The fixed-route stdio provider requires loopback.")
         self.parsed, self.runner = parsed, runner
-        self.identity = endpoint.rstrip("/")
+        self.identity = "local:" + self.endpoint_dir if self.endpoint_dir is not None else endpoint.rstrip("/")
 
     @staticmethod
     def _result(status: int, result: dict) -> dict:
@@ -165,9 +252,8 @@ class GatewayTransport:
         except UnicodeError:
             raise ClientError("invalid_credential", "Credential provider returned invalid UTF-8.") from None
         authorization(token)
-        frame = json_bytes({
-            "endpoint": self.identity, "payload": payload, "credential": token, "timeout": timeout,
-        })
+        route = {"endpoint": self.identity} if self.endpoint_dir is None else {"endpoint_dir": self.endpoint_dir}
+        frame = json_bytes({**route, "payload": payload, "credential": token, "timeout": timeout})
         if len(frame) > MAX_HTTP_INPUT:
             raise ClientError("invalid_request", "Internal HTTP input exceeds its bound.")
         try:
@@ -198,19 +284,24 @@ class GatewayTransport:
 
 
 def _http_exchange(frame: dict) -> tuple[int, bytes]:
-    if (not isinstance(frame, dict) or set(frame) != {"endpoint", "payload", "credential", "timeout"}
+    if (not isinstance(frame, dict)
+            or set(frame) not in ({"endpoint", "payload", "credential", "timeout"},
+                                  {"endpoint_dir", "payload", "credential", "timeout"})
             or type(frame["timeout"]) not in (int, float) or not math.isfinite(frame["timeout"])
             or not 0 < frame["timeout"] <= 315):
         raise ClientError("invalid_request", "Invalid internal HTTP controls.")
-    parsed, _ = _origin(frame["endpoint"])
     validate_request(frame["payload"])
     raw = json_bytes(frame["payload"])
     if len(raw) > MAX_BODY_BYTES or not isinstance(frame["credential"], str):
         raise ClientError("invalid_request", "Invalid internal HTTP input.")
     headers = authorization(frame["credential"])
     headers["Content-Type"] = "application/json"
-    connection_type = http.client.HTTPSConnection if parsed.scheme == "https" else http.client.HTTPConnection
-    connection = connection_type(parsed.hostname, parsed.port, timeout=frame["timeout"])
+    if "endpoint_dir" in frame:
+        connection = _local_connection(frame["endpoint_dir"], frame["timeout"])
+    else:
+        parsed, _ = _origin(frame["endpoint"])
+        connection_type = http.client.HTTPSConnection if parsed.scheme == "https" else http.client.HTTPConnection
+        connection = connection_type(parsed.hostname, parsed.port, timeout=frame["timeout"])
     try:
         connection.request("POST", "/api/v1/chat", body=raw, headers=headers)
         response = connection.getresponse()

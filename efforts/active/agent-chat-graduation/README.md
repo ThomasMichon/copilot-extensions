@@ -142,10 +142,12 @@ requirements.
   existing lifecycle primitives before plugin/harness adoption. The service
   writer owns this integration; connection and adopter code must not fork
   an installer or infer selection from PATH.
-- [ ] Package an independently operable hosted service with no source checkout,
+- [x] Package an independently operable hosted service with no source checkout,
   sibling venv or Copilot plugin requirement.
-  The foreground `service` artifact merged in #7361 with Windows qualification;
-  native POSIX qualification and managed installation/activation remain open.
+  The foreground `service` artifact merged in #7361; #7266 subsequently
+  qualified both native Windows and Linux artifact/host cases. This resolves
+  independent artifact packaging, not the managed installation/activation
+  obligations in Phase4.
 - [x] Publish client bounds, errors, offline scan capability and explicit
   configuration. Preserve output/flush/CAS and retained stable-request recovery.
 - [ ] Supply hosted endpoint discovery and explicit service setup through the
@@ -228,7 +230,9 @@ requirements.
 
 - [x] **Portable store:** monotonic event identity, independent viewers,
   bounded pages, stable request replay/conflict and visible capacity refusal;
-  installed source-independent artifacts and both native platform CI lanes.
+  installed source-independent artifacts and qualified native Windows/Linux
+  on-demand lanes. Required source CI remains the admitted unit-only packet,
+  not this native portfolio.
 - [x] **Installed client:** flush-before-cursor-CAS and crash-released reader
   locks through the actual installed command, not just the callable core.
 - [ ] **Installed boundary:** fresh and repeat installation, actual console/
@@ -271,6 +275,8 @@ requirements.
 - [ ] **Platforms:** direct Windows and native Linux cleanup, plus a separate
   real WSL-to-Windows descendant test for timeout/interruption/caller death.
   POSIX process groups are not claimed as Windows tree ownership.
+  Direct native client/host and caller-death cases passed in #7266; the
+  separate cross-OS boundary and future native integration remain open.
 - [ ] **Portfolio:** keep fast portable contracts in required change-scoped CI;
   isolate real process/native/fresh-environment matrices in their existing
   appropriate lanes. Record why a genuinely unavailable venue was not exercised.
@@ -339,6 +345,69 @@ qualification; native callbacks still require the actual assignment and
 shared-multiplex contracts above.
 
 ## Journal
+
+### 2026-10-21 - Local endpoint membership and retained qualification failures
+
+- The local endpoint leaf retains every one of the qualified client's 242
+  nodes and adds 18 explicit local-rendezvous nodes: 260 complete, 227
+  acceptance and the same 33 full-only nodes. Both lanes retain the exact
+  actual-execution guard. Windows may skip only the two named POSIX
+  permissions/Unix-host cases; their owning platform still requires execution.
+- Candidate `a3f6c6a90` did not qualify on native Windows. The normal
+  120-second acceptance runner returned 124 with execution still pending;
+  the whole command including preparation took 148.374 seconds. Its complete
+  600-second lane finished with 257 passes, two owning-platform skips and
+  one failure in 246.46 pytest seconds. Both maps retain membership digest
+  `bd55afd32a889d1034e744858a89a01af5cbadea21cdb6c7b6516b9f44db8ae0`.
+- The failing installed-console death witness did not enter its held-read
+  barrier within the existing five seconds. A contained focused diagnostic
+  reproduced the failure with the console alive and neither provider nor
+  descendant ready: 23 passes, one skip and one failure in 39.91 seconds.
+  Added test-only entry/readiness diagnostics without changing the five-second
+  startup bound, three-second retirement bound, birth-pinned ancestry or
+  required observation before outer cleanup. A distinct stage diagnostic then
+  passed that actual installed witness in 29.68 seconds; this is neither a
+  root-cause fix nor a passing acceptance/full qualification. All failed
+  attempts remain evidence, not samples to discard after a retry.
+- Source-only publication supplies an immutable candidate for the existing
+  native qualifier. It does not open a ready PR, satisfy either lane, authorize
+  deployment or change the already-qualified predecessor's evidence.
+  Managed service/plugin/Manager setup, assignment, migration, native matrix
+  and the parent effort remain open.
+
+### 2026-10-21 - Qualified installed client merged; local consumption next
+
+- Original #7266 actually merged at
+  `1538d76d8dbbdf0470344118d2878eafce21f477` from exact qualified
+  `da79da43f140886ca4c5f2b374b5dec90391577a`. Actual current-head
+  review5594420511 had no open issues, required CI passed and every review
+  thread was resolved before the normal managed merge; no review/CI bypass
+  or extra approval ceremony was used.
+- Independent native Linux ran both normal lanes on that same candidate:
+  acceptance209 passing calls/zero skips/33 deferred75.63s pytest under120;
+  complete242 passing calls/zero skips83.60s pytest/95.444s whole under600.
+  Actual execution was complete with no missing/extra/rejected/duplicate
+  outcomes, and both maps matched the declared242-node050845af membership.
+  Installed caller/provider/leaf birth pins retired before observer cleanup
+  and the held watchdog, with normal lock/body recovery; source removal,
+  POSIX private retained posts and native Unix-host cases also passed.
+- Timing scope remains literal: acceptance with environment preparation and
+  cleanup took138.887s whole. That is **not** an end-to-end-under120s result.
+  The unchanged standalone timeout bounds the contained test phase, not
+  preceding preparation; the first-touch artifact fixtures remain inside
+  that phase. No retry chased a faster whole time or moved fixture work
+  outside its budget. Prior failed attempts remain failures.
+- Re-read the complete parent Plan/Validation after merge. The client and
+  foreground artifact slice is qualified, not a released/selected installation,
+  live-agent/JWT proof, full plugin/native adoption or managed lifecycle.
+  #7238 stays Active. The same writer's already-claimed local-endpoint leaf
+  now builds on the merged predecessor; it retains the qualified execution
+  guards, native death witness and all historical journals. Its new runtime/
+  installed tests need their own membership and platform qualification.
+- Continue standard selection/setup, host-init workspace/inbox assignment,
+  shared notification multiplexing, typed collaboration and normal lifecycle
+  with their existing owners. No competing installer/Bridge/library source,
+  migration, role, peer restart or live deployment is authorized by this merge.
 
 ### 2026-10-21 - Qualification requires execution, not only collection
 
@@ -539,6 +608,40 @@ shared-multiplex contracts above.
   acceptance-contract decision; the source writer retains fixes and review.
   The full parent, normal selection/setup, shared assignment/multiplexing,
   independent lifecycle and actual adoption remain Active.
+
+### 2026-10-20 - Isolated local endpoint consumer
+
+- Added explicit `endpoint_dir` configuration as an alternative to an origin,
+  not ambient discovery or a different installer. The installed client reads
+  the canonical bounded local record inside its existing finite isolated HTTP
+  worker, uses a directly owned native Unix socket or advertised loopback
+  endpoint, and refuses unsupported/invalid discovery without fallback.
+- The logical run-directory namespace preserves pending requests and viewer
+  state across endpoint rebinds. The existing credential provider remains
+  explicit; the client does not read the host's key file or silently migrate
+  origin-based pending state. Core dependencies remain empty; the client role
+  explicitly adds the small canonical rendezvous library.
+- Reused the existing fresh installed host fixture for two actual installed
+  clients. After source removal, normal reading advances only its viewer;
+  an unavailable advertisement leaves the original post pending. A real host
+  crash/restart republishes discovery, preserves the reader position and pending
+  namespace, and permits only explicit original-ID recovery. No second
+  artifact-build matrix, live deployment or observer-manufactured cleanup
+  witness was added.
+- The first focused Windows packet passed62 with one explicit native Unix skip
+  in74.30s/120. The earlier full248-case evaluation passed246 with two native
+  POSIX skips in183.93s/600; it predates the subsequent shared test-portfolio
+  restructuring and is not credited to a changed full packet. The final
+  focused local-endpoint/transport/installed-host packet passed62 with one
+  explicit native Unix skip and191 deselected in68.33s/120. The real installed
+  host/client crash/rebind call cost45.43s, shared artifact setup7.46s and
+  actual local TCP consumption6.75s. This focused result is not full120s or
+  native POSIX qualification.
+- This next slice remains separate from the original client's qualification
+  pin. Reconcile that predecessor before publishing it; new source needs its
+  own explicit platform pin and relevant execution. Standard lifecycle,
+  connection-plugin ownership, recipient assignment/multiplexing and full
+  parent completion remain unchanged.
 
 ### 2026-10-20 - Review correction: private retained post creation
 

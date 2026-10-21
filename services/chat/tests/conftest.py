@@ -190,12 +190,12 @@ def installed_chat(tmp_path_factory):
     assert json.loads(run_artifact([
         str(interpreter), "-I", "-c",
         "import importlib.util,json,sys; from pathlib import Path; "
-        "import agent_chat_service, agent_procutil.owned_process; "
+        "import agent_chat_service, agent_procutil.owned_process, endpoint_rendezvous; "
         "root=Path(sys.argv[1]).resolve(); "
         "assert Path(agent_chat_service.__file__).resolve().is_relative_to(root); "
         "assert Path(agent_procutil.owned_process.__file__).resolve().is_relative_to(root); "
         "assert importlib.util.find_spec('single_instance_lease') is None; "
-        "assert importlib.util.find_spec('endpoint_rendezvous') is None; "
+        "assert Path(endpoint_rendezvous.__file__).resolve().is_relative_to(root); "
         "print(json.dumps({'source_independent':True}))",
         str(target),
     ], cwd=root))["source_independent"]

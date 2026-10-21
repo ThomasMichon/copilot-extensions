@@ -50,6 +50,13 @@ test_installed_catalog_worker_preserves_isolation
     "test_host_distribution.py": """
 test_fresh_installed_host_source_removed_independent_participants_and_crash_restart
 """,
+    "test_local_endpoint.py": """
+test_local_endpoint_offline_status_never_resolves_or_executes
+test_local_endpoint_configuration_refuses_ambiguous_or_implicit_routes
+test_local_endpoint_real_tcp_request_uses_canonical_record_and_stable_namespace
+test_local_endpoint_refusal_is_bounded_without_network_or_fallback
+test_local_endpoint_real_unix_client_uses_the_published_host
+""",
     "test_hosting.py": """
 test_two_participants_auth_read_progress_and_restart
 test_real_singleton_refuses_second_host_before_store_open
@@ -144,6 +151,8 @@ PARAMETER_COUNTS.update({
     "test_hosting.py::test_held_wait_drain_and_health_keep_independent_requests_responsive": 2,
     "test_hosting.py::test_members_page_controls_are_validated_before_lookup": 6,
     "test_hosting.py::test_request_framing_and_duplicate_auth_refuse_before_dispatch": 5,
+    "test_local_endpoint.py::test_local_endpoint_configuration_refuses_ambiguous_or_implicit_routes": 4,
+    "test_local_endpoint.py::test_local_endpoint_refusal_is_bounded_without_network_or_fallback": 11,
     "test_store.py::test_drain_fences_held_waits_even_after_immediate_undrain": 4,
     "test_store.py::test_drain_freezes_all_rpc_without_mutating_conversation": 9,
     "test_store.py::test_held_membership_generation_is_independent_of_clock": 8,
@@ -191,6 +200,7 @@ def execution_summary(mapping, profile, reports):
     }
     allowed_skips = {
         "test_client.py::test_posix_uncertain_post_is_private_under_umask_022_without_changing_test_process",
+        "test_local_endpoint.py::test_local_endpoint_real_unix_client_uses_the_published_host",
     } if os.name == "nt" else set()
     completed, called, skipped, rejected = [], [], [], []
     for report in reports:

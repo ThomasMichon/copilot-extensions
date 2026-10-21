@@ -42,7 +42,7 @@ def test_membership_is_exact_and_full_retains_every_parameter(request, monkeypat
     assert membership_digest(mapping) == membership_digest(membership(list(reversed(original))))
     changed = [node.replace("[case-", "[changed-") for node in original]
     assert membership_digest(mapping) != membership_digest(membership(changed))
-    assert sum(PARAMETER_COUNTS.values()) == 236 + 6
+    assert sum(PARAMETER_COUNTS.values()) == 236 + 6 + 18
     for profile in ("acceptance", "full"):
         selected = {
             node for node, lane in mapping.items() if profile == "full" or lane == "acceptance"
@@ -64,12 +64,22 @@ def test_membership_is_exact_and_full_retains_every_parameter(request, monkeypat
         xfail = SimpleNamespace(**vars(reports[0]), wasxfail="synthetic")
         assert execution_summary(mapping, profile, [xfail, *reports[1:]])["status"] == "incomplete"
         assert execution_summary({}, profile, [])["status"] == "incomplete"
-        if os.name == "nt":
-            posix = next(
-                report for report in reports if "test_posix_uncertain_post" in report.nodeid
+        for family in (
+            "test_client.py::test_posix_uncertain_post_is_private_under_umask_022_without_changing_test_process",
+            "test_local_endpoint.py::test_local_endpoint_real_unix_client_uses_the_published_host",
+        ):
+            platform_reports = [
+                SimpleNamespace(nodeid=report.nodeid, when="setup", outcome="skipped")
+                if report.nodeid == "tests/" + family else report
+                for report in reports
+            ]
+            assert execution_summary(mapping, profile, platform_reports)["status"] == (
+                "complete" if os.name == "nt" else "incomplete"
             )
-            posix.when, posix.outcome = "setup", "skipped"
-            assert execution_summary(mapping, profile, reports)["status"] == "complete"
+            for platform, expected_status in (("nt", "complete"), ("posix", "incomplete")):
+                with monkeypatch.context() as platform_patch:
+                    platform_patch.setattr("qualification.os", SimpleNamespace(name=platform))
+                    assert execution_summary(mapping, profile, platform_reports)["status"] == expected_status
 
 
 @pytest.mark.parametrize("change", ["missing", "new", "duplicate", "parameter"])

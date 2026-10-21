@@ -1,0 +1,9 @@
+{
+  "comment": "Consume explicit canonical local endpoint records through the installed client while preserving pending state across endpoint rebinds.",
+  "changes": [
+    {
+      "plugin": "services/chat",
+      "type": "patch"
+    }
+  ]
+}

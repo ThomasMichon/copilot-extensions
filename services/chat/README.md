@@ -113,9 +113,10 @@ Both endpoints require the external key on **every** request, including health.
 The host publishes its actually bound endpoint through the canonical
 `endpoint-rendezvous` file at `data_dir/run/endpoint.json`, and emits one
 nonsecret `agent-chat.host-ready` descriptor on stdout. The existing lifecycle
-owner supplies discovery to clients; no PATH search or ambient endpoint fallback
-is introduced. The held client slice's HTTP-only endpoint selection still needs
-the explicit Unix-socket consumption seam before direct POSIX client adoption.
+owner supplies this explicit run directory to clients; no PATH search or ambient
+endpoint fallback is introduced. The client can consume that canonical record
+through the explicit `endpoint_dir` mode below. Source support is not native
+platform qualification or a selected managed installation.
 
 Only `POST /api/v1/chat` and authenticated `GET /health` exist. Busy health
 probes return the core's structured HTTP 503, not a disconnected connection.
@@ -154,7 +155,8 @@ from the host's lease, health response or endpoint descriptor.
 
 Install the selected distribution's `client` extra through the adopter's normal
 verified artifact/role flow. It adds the standalone `agent-chat` console command
-and the canonical `agent-procutil` dependency; it does not provide an installer
+and the canonical `agent-procutil` and dependency-free
+`agent-endpoint-rendezvous` dependencies; it does not provide an installer
 or change an existing selected client. No Copilot, source checkout or sibling
 runtime is required. An older helper without `owned_process.run_caller_owned` reports
 an explicit unsupported capability rather than falling back to unowned execution.
@@ -195,6 +197,33 @@ All network operations require an explicit nonsecret configuration:
 Paths are illustrative; supply actual absolute owned paths appropriate for the
 platform. Provider argv must name a complete native executable/interpreter
 invocation, not a relative command or implicit shell/script launcher.
+
+For the independently hosted local service, replace `endpoint` with
+`"endpoint_dir": "/path/to/owned/chat-data/run"` and retain the explicit
+`token_command`. Exactly one origin or local run directory is required; a
+fixed-route `request_command` cannot be combined with local discovery.
+The existing credential owner still supplies the local access key through that
+provider. The client does not read the host's key file, mint a credential,
+install or start the host, or acquire a different authentication identity.
+
+Each local RPC reads the canonical rendezvous record inside the same finite,
+isolated HTTP worker used for ordinary HTTP. Reading is capped at 16 KiB;
+linked/reparse paths, nonregular records, malformed or unsupported records and
+nonlocal TCP destinations refuse explicitly. Native POSIX uses the advertised
+Unix socket directly beneath the owned run directory; Windows uses the host's
+advertised dynamic loopback endpoint. A named pipe without an explicitly
+advertised supported alternate is unsupported. There is no fixed-port,
+environment, source-checkout or network-discovery fallback, retry, or endpoint
+liveness claim from file existence alone.
+
+The logical local client namespace binds the explicit run directory, not its
+current port/socket name, so endpoint rebinds preserve reader serialization and
+uncertain-post custody. Pending requests remain held until an explicit retry
+under their original ID; reconnecting does not automatically send them.
+Changing an existing origin-based configuration to this local mode is **not**
+an implicit migration of that origin's pending namespace. Retain and reconcile
+the old configuration's uncertain requests before an explicitly owned change.
+
 `token_command` returns an ASCII credential on stdout, within its deadline;
 stderr is not exposed as protocol output. Credentials are not written to state,
 messages or diagnostics. The client uses HTTPS or an existing owned loopback

@@ -1208,7 +1208,8 @@ defaults to 600 seconds. Other consumers keep their existing 600-second
 defaults. Neither lane substitutes for the other. The acceptance packet runs
 the real source-removed installed client, native caller/provider/descendant
 death, protocol, authentication, durable data/progress, deadlines and raw
-capture contracts. The complete lane additionally runs all host and
+capture contracts, plus explicit local rendezvous refusal, TCP rebinding and
+the native POSIX Unix-socket client. The complete lane additionally runs all host and
 source-removed service lifecycle cases, with no test removed or marked skipped
 by this partition. Existing platform-specific skips still require positive
 qualification on their owning platform.
@@ -1234,7 +1235,8 @@ Filters and collection/setup-only modes are rejected for either lane.
 The runner validates membership even without external report retention:
 an early zero exit such as pytest help/version is not qualification.
 Fixture-listing modes are also refused. At session completion, actual
-passed-call reports and the explicitly allowed native-platform skip must
+passed-call reports and the explicitly allowed Windows skips for POSIX
+private-file permissions and the native Unix-socket host must
 exactly cover the selected nodes, without duplicates, unexpected skips,
 xfails or failing phases. The map records pending/complete/incomplete
 execution separately from collection. A zero exit with collection alone

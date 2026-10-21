@@ -153,12 +153,14 @@ def test_actual_installed_cli_death_releases_reader_lock_before_outer_cleanup(
     fixture.write_bytes(Path(caller_observer.fixture.__file__).read_bytes())
     provider = tmp_path / "observed-provider.py"
     provider.write_text("""
-import json,runpy,subprocess,sys
+import sys
 from pathlib import Path
-import agent_chat_service,agent_procutil
 fixture,original,endpoint,directory=sys.argv[1:]
-support=runpy.run_path(fixture)
 root=Path(directory)
+(root/"provider-entry").write_text("entered",encoding="ascii")
+import json,runpy,subprocess
+import agent_chat_service,agent_procutil
+support=runpy.run_path(fixture)
 subprocess.Popen(
     [sys.executable,"-I",fixture,"leaf",directory,"kill"],
     stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,
@@ -194,7 +196,11 @@ runpy.run_path(original,run_name="__main__")
         ready_deadline = time.monotonic() + 5
         assert rpc_endpoint.state.read_entered.wait(5), (
             "Installed read did not reach the fixture before its existing synchronization bound; "
-            f"console_returncode={process.poll()}."
+            f"console_returncode={process.poll()}; "
+            f"provider_entered={(tmp_path / 'provider-entry').exists()}; "
+            f"provider_ready={bool(caller_observer._read(tmp_path / 'provider.json'))}; "
+            f"leaf_ready={bool(caller_observer._read(tmp_path / 'leaf.json'))}; "
+            f"descendant_pids={[child.pid for child in caller_observer.psutil.Process(process.pid).children(recursive=True)]}."
         )
         def ready():
             records = [
