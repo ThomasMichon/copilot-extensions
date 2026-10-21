@@ -91,3 +91,44 @@ Canonical contract: [README.md](README.md).
   assigned. No product implementation, runtime test execution or rollout has
   occurred. Continue the oldest-first sweep rather than treating this journal
   checkpoint as campaign completion.
+
+## 2026-10-21 - One hundred twenty issues reconciled
+
+- Journal checkpoint #7566 received current-head approval without findings and
+  passed required checks, then merged through the managed flow. The campaign
+  contract remains open and the worktree was pulled forward for the next slice.
+- At 09:32:36 UTC, full enumeration found **1,385 open issues**: 1,384 original
+  cohort members and #7556 inflow. The campaign has audited **120 distinct
+  original issues and closed 73**. The unrelated #5610 closure and coordination
+  inflow cancel in the net calculation: 73 fewer open issues than the baseline.
+  No campaign-closed issue was observed reopened. The fixed checkpoint is 729.
+- Additional completed scopes: #1055, #1057 and #1070's precise fixture/platform
+  repairs; #1063's project-independent Manager version entry point; #1104's
+  bounded installation-context primitive/exemplar phase; #1140's declarative
+  power-resource feature; #1191's PS5-compatible readiness contract; #1208's
+  exact-canonical-name precedence; and #1226's quick-skip fixture isolation.
+  None asserts new native execution, deployment or actual machine changes.
+- Additional unfinished-work transfers: #1052/#1085 to #1303; #1087 to #6389;
+  #1103/#1110 to #1096; #1146 to #5286; #1181 to #6476; #1195 to #7030 under
+  #7028; #1215 to #3303; #1228 to #1219; and #1234 to #2173. #1104's later
+  family-wide acceptance was also preserved directly under #1096 before its
+  bounded completed closure, avoiding a transfer through the closing #1110.
+- #1157 was superseded by reviewed retirement of automatic anchor marketplace
+  overrides, not by silently abandoning declared-source behavior. Explicit
+  registered-repository and checkout-relative sourcing remain distinct.
+  #1234 preserves multi-plugin guidance outcomes through current session-file
+  delivery rather than restoring the retired custom aggregation mechanism.
+- Explicitly reconciled prior separate-tracker exclusions in #5286 and #6476
+  before their accepted requirement transfers. #1228's sparse CI observation is
+  aggregated as unclassified, not asserted to share #1219's proven cause.
+- Retained specialized or claimed work includes #1038, #1043, #1045, #1082,
+  #1088, #1096, #1100, #1132, #1138, #1145, #1151, #1164, #1167, #1176,
+  #1192, #1193, #1219, #1230 and #1238. In particular, canonical-template
+  repairs do not prove all generated consumers, and a test changing a lone dash
+  to a filename does not fix the original CMD/PS5 argument defect.
+- The tracker-maintenance helper encountered an empty successor issue body.
+  A scoped read confirmed GitHub's legitimate null body; explicit nullable-body
+  handling preserved existing text and the idempotent retry audited every
+  transfer and disposition. This was operational tooling only, not product work.
+- Batch seven is being adjudicated and batch eight researched. Continue the
+  campaign; all unfinished ownership, compatibility and activation gates remain.
