@@ -3,7 +3,7 @@
 - **Subject:** continuous publication of development snapshots and their artifacts
 - **Scope:** leaf
 - **Status:** Active
-- **Last revised:** 2026-10-19
+- **Last revised:** 2026-10-20
 - **Reality docs:** [`docs/pipelines.md`](../../docs/pipelines.md) ·
   [`docs/patterns/dev-main-promotion-pipeline.md`](../../docs/patterns/dev-main-promotion-pipeline.md)
 
@@ -17,8 +17,13 @@ without treating an incidental generated Git commit as another release identity.
 
 Promotion should continuously deliver qualified development changes in less
 than thirty minutes end-to-end, including queueing, while changes await release.
-Its test gate consists only of unit tests with coverage; required PR testing
-selects that unit portfolio conditionally by impact. Repeated bookkeeping,
+Its test portfolio consists only of unit tests with coverage; required PR testing
+selects that unit portfolio conditionally by impact. A separate, bounded
+construction and installed-entry-point qualification must establish that every
+declared release environment can be assembled and launched under the selected
+package-feed restrictions before publication. This is an explicit exception to
+unit-only release execution, not permission to reclassify integration as unit
+evidence or restore the general integration portfolio. Repeated bookkeeping,
 composition or bootstrap
 failures should not turn release control into a barrier to its own repair.
 Agreement between artifact production and verification belongs in ordinary
@@ -73,10 +78,11 @@ to belong to a different release.
 
 ### qualified-before-complete
 
-Complete admitted unit evidence and production artifact-availability/integrity
-establish the actual release, not merely successful submission or an open PR.
-Real-Git, multi-process, native, installation and end-to-end integration tests
-belong to periodic containerized validation, not release qualification.
+Complete admitted unit evidence, production artifact-availability/integrity and
+complete configured-feed construction/launch qualification establish the actual
+release, not merely successful submission or an open PR. Apart from that bounded
+construction/launch exception, real-Git, multi-process, native, installation and
+end-to-end integration tests belong to periodic containerized validation.
 Publication and runtime activation remain distinct outcomes. Optional client
 artifact use and governed source assembly follow the
 [runtime admission contract](../plugin-services/runtime-assembly/README.md).
@@ -136,9 +142,31 @@ a green wrapper, a larger deadline or an ever-growing test gate.
 ### unit-only-release-test-gate
 
 Promotion runs eligible unit tests and collects coverage once. Conditional PR
-testing uses that bounded unit portfolio. Integration does not rejoin the gate
-through a baseline, preflight, generated-consumer or qualification dependency.
-Slow or unclassified cases remain outside the release path.
+testing uses that bounded unit portfolio. General integration does not rejoin the
+gate through a baseline, preflight or generated-consumer dependency. The separate
+configured-feed construction/launch qualification below is the sole bounded
+exception; it does not change unit eligibility or credit integration coverage as
+unit proof.
+
+### configured-feed-construction-and-first-launch
+
+Every independently constructed Python environment in the release has an
+authoritative owner, declared platform/profile, actual interpreter architecture
+and ABI, and complete bootstrap, build and runtime dependency closure.
+Contribution CI and promotion prove fresh
+construction through the selected governed feeds with the applicable age and
+security policy intact, then launch the installed entry points from the
+constructed environments. A declaration-age audit, a first-party wheel build,
+an import from the source checkout or an already-populated environment cannot
+substitute for that proof.
+
+Qualification covers the complete inventory, including standalone and selected
+optional runtime environments. Unknown owners, missing platform/profile results,
+unavailable feeds and failed or skipped construction are visible release
+refusals, not green omissions. Evidence binds the admitted source and composed
+candidate, environment inventory, platform/profile and package-policy inputs.
+Provider coordinates remain adopter configuration; no public-index fallback or
+policy exception is inferred from a successful build on another host.
 
 ### periodic-integration-and-replacement
 
@@ -152,7 +180,8 @@ eligible units within the same or smaller budget, instead of accumulating them.
 - No generated-main commit as a second durable release or artifact identity.
 - No fake or omitted admitted-unit evidence, or removal of byte integrity,
   signing, exact locks, source governance or publication authority.
-- No end-to-end, actual-Git or multi-process integration test in promotion.
+- No general end-to-end, actual-Git or multi-process integration-test portfolio
+  in promotion; only the bounded configured-feed construction/launch exception.
 - No implicit authorization for a main repair, stale overwrite, forced tag
   movement or change to independently governed control preservation.
 - No second release channel, competing publisher or separate client provenance
