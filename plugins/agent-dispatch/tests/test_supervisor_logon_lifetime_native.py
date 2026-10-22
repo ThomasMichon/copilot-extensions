@@ -67,16 +67,24 @@ def test_logon_launcher_survives_nested_caller_jobs(tmp_path):
     source = INSTALLER.read_text(encoding="utf-8-sig")
     start = source.index("function Start-DispatchDetachedLogonLauncher {")
     function = source[start:source.index("\nfunction ", start + 1)]
+    publisher = (
+        "function Write-FixtureRecord { param([string]$Path,[hashtable]$Record)\n"
+        "$pending=$Path+'.pending'\n"
+        "[IO.File]::WriteAllText($pending,($Record|ConvertTo-Json -Compress),"
+        "[Text.UTF8Encoding]::new($false))\n"
+        "[IO.File]::Move($pending,$Path)\n"
+        "}\n"
+    )
     for cycle in range(2):
         root = tmp_path / f"cycle-{cycle}"
         root.mkdir()
         launcher = root / "fixture launcher.ps1"
         launcher.write_text(
             "$ErrorActionPreference='Stop'\n"
-            "@{pid=$PID}|ConvertTo-Json -Compress|Set-Content "
-            "(Join-Path $PSScriptRoot 'resident.json')\n"
+            + publisher
+            + "Write-FixtureRecord (Join-Path $PSScriptRoot 'resident.json') @{pid=$PID}\n"
             "for($i=1;$i -le 2;$i++){"
-            "$i|Set-Content (Join-Path $PSScriptRoot 'heartbeat');"
+            "Write-FixtureRecord (Join-Path $PSScriptRoot \"heartbeat-$i.json\") @{iteration=$i};"
             "Start-Sleep -Milliseconds 100}\n"
             "Start-Sleep -Seconds 90\n",
             encoding="utf-8",
@@ -85,15 +93,14 @@ def test_logon_launcher_survives_nested_caller_jobs(tmp_path):
         leaf.write_text(
             "$ErrorActionPreference='Stop'\n"
             f"$InstallDir=$PSScriptRoot; $LinkPython='{sys.executable}'\n"
-            + function + "\n"
+            + publisher + function + "\n"
             "$psi=[Diagnostics.ProcessStartInfo]::new();"
             "$psi.FileName=$LinkPython;"
             "$psi.Arguments='-c \"import time; time.sleep(90)\"';"
             "$psi.UseShellExecute=$false;$psi.CreateNoWindow=$true;"
             "$psi.RedirectStandardOutput=$true;$psi.RedirectStandardError=$true\n"
             "$control=[Diagnostics.Process]::Start($psi)\n"
-            "@{pid=$control.Id}|ConvertTo-Json -Compress|"
-            "Set-Content (Join-Path $PSScriptRoot 'bounded.json')\n"
+            "Write-FixtureRecord (Join-Path $PSScriptRoot 'bounded.json') @{pid=$control.Id}\n"
             "Start-DispatchDetachedLogonLauncher "
             "-Launcher (Join-Path $PSScriptRoot 'fixture launcher.ps1')\n"
             "$deadline=[DateTime]::UtcNow.AddSeconds(30)\n"
@@ -119,12 +126,12 @@ def test_logon_launcher_survives_nested_caller_jobs(tmp_path):
                     if not handle:
                         raise ctypes.WinError(ctypes.get_last_error())
                     handles[name] = handle
-                _wait_file(root / "heartbeat", caller)
+                _wait_file(root / "heartbeat-2.json", caller)
                 (root / "release").touch()
                 assert caller.wait(timeout=15) == 0, (root / "caller.log").read_text()
                 assert kernel.WaitForSingleObject(handles["bounded"], 2000) == 0
                 assert kernel.WaitForSingleObject(handles["resident"], 500) == 0x102
-                assert (root / "heartbeat").read_text(encoding="utf-8-sig").strip() == "2"
+                assert json.loads((root / "heartbeat-2.json").read_text()) == {"iteration": 2}
                 assert (root / "supervise-launcher.log").is_file()
             finally:
                 (root / "release").touch()
