@@ -10,6 +10,7 @@ that pattern to this repository.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
+| [Namespace Discovery Latency](active/namespace-discovery-latency/README.md) | Draft; reviewed plan before bounded provider/startup repair, unchanged foreground deadline | #5761 latency slice; preserves #3963/#5559 owners and broader diagnostics |
 | [Coordinated Launch Maintenance](active/coordinated-launch-maintenance/README.md) | Active; source-only Windows broker amendment precedes implementation; release and rollout remain open | #7694; prerequisite #6859; preserves #6812/#6820/#7667 owners |
 | [SSH Reverse Candidate Forward](active/ssh-reverse-candidate-forward/README.md) | Active; reviewed intent merged; finite SSH owner candidate and lifecycle review corrections in progress | #7720; complements #7719 publication without a second selector; actual OpenSSH/adoption remain separate |
 | [Backlog Reconciliation](active/backlog-reconciliation/README.md) | Active; oldest-first evidence and requirement-preserving consolidation, no implementation | #7556; 1,458 baseline, 729 guidance checkpoint |
