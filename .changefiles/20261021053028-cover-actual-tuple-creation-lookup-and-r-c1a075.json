@@ -1,9 +1,0 @@
-{
-  "comment": "Cover actual tuple creation, lookup and resume equivalence through declared one-term selectors and existing execution-authority refusals",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Mechanically split PR CLI, claim and status tests while preserving all cases and fixture semantics.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

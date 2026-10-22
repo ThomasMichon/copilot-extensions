@@ -1,9 +1,0 @@
-{
-  "comment": "Retain keyed local creation identity after a proven launch preparation refusal",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

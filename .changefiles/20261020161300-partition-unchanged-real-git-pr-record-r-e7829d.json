@@ -1,9 +1,0 @@
-{
-  "comment": "Partition unchanged real-Git PR record reassignment and stale-writer tests.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}
