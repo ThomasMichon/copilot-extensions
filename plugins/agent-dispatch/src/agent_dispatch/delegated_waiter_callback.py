@@ -18,8 +18,11 @@ from agent_dispatch.delegated_waiter_contract import PROTOCOL, validate_delegati
 
 def _validated_envelope(envelope: dict) -> dict:
     identity = validate_delegation(envelope["delegation"])
+    fields = {"task_id", "generation", "delegation"}
+    if "legacy_root" in envelope and "installation" not in identity:
+        fields.add("legacy_root")
     if (
-        set(envelope) != {"task_id", "generation", "delegation"}
+        set(envelope) != fields
         or not isinstance(envelope["task_id"], str) or not envelope["task_id"]
         or type(envelope["generation"]) is not int or not 0 < envelope["generation"] < 2**63
     ):
@@ -61,6 +64,9 @@ def main(argv: list[str] | None = None) -> int:
             result = enter(identity["installation"], envelope)
             if result is not None:
                 return result
+        else:
+            from agent_dispatch.delegated_waiter_context import restore_legacy
+            restore_legacy(envelope.get("legacy_root"))
         raw = sys.stdin.read(65537)
         if len(raw) > 65536:
             raise ValueError("oversized callback")

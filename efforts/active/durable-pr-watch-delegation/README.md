@@ -256,6 +256,37 @@ callback an implicit credential store.
 
 ## Journal
 
+### 2026-10-21 - Isolate legacy ownership and bound notification descendants
+
+- The next review confirms the first three fixes and identifies four further
+  boundaries: legacy owner package isolation, callback reconstruction of the
+  subscriber's route, caller-only watch-home overrides, and Windows callback
+  descendants surviving wrapper timeout. These remain part of #7714, not a
+  reason to bypass review.
+- Legacy owner commands now launch the attributable interpreter with `-I`.
+  A real installed-package test places a shadow package in both the caller's
+  working directory and `PYTHONPATH` and proves the installed owner still runs.
+  `AGENT_PULL_REQUESTS_HOME` selects process fallback before an owner probe.
+- A legacy callback retains the subscriber's nonsecret Dispatch root, discards
+  foreign resident-owner Dispatch overrides, and reconstructs ordinary routing
+  there before authentication. Real independent coordinators prove that an
+  owner routed to another coordinator cannot redirect completion or replay.
+- Acknowledged PR-owner notifications now use the existing canonical
+  owned-process runner without requiring the worktrees observation provider.
+  The native Windows regression stalls an actual stable-entry callback and its
+  descendant, pins their process handles, observes all exits after timeout
+  before replay, and then proves the original event completes once.
+- Focused Dispatch qualification completes 87 cases before one test-only
+  incorrect helper invocation; after that fixture correction the affected
+  foreign-route and native timeout cases both pass. The complete PR-owner
+  acknowledged-delivery module passes 88 cases, including legacy best-effort
+  compatibility. The final combined four-module Dispatch selection passes all
+  125 cases. Fatal lint, installer, headless and module-size checks pass.
+- The preceding repaired head passed both selected hosted platform jobs in run
+  39714176699. These additional changes still owe their own current-head checks,
+  hosted qualification and review. Installed native-account, fleet and release
+  obligations remain open; no deployed runtime or shared service is changed.
+
 ### 2026-10-21 - Repair the first delegation review findings
 
 - #7714's first review identified three concrete blockers: forge/config

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from concurrent.futures import ThreadPoolExecutor
 import json
 import os
 from pathlib import Path
@@ -104,6 +105,11 @@ def serving_coordinator(queue, port=0):
     try:
         thread.start()
         wait(lambda: server.started)
+        from agent_dispatch import rendezvous
+        rendezvous.write_endpoint(
+            Path(os.environ["AGENT_DISPATCH_INSTALL_DIR"]) / "run",
+            "tcp", f"127.0.0.1:{sock.getsockname()[1]}",
+        )
         yield f"http://127.0.0.1:{sock.getsockname()[1]}"
     finally:
         server.should_exit = True
@@ -144,7 +150,10 @@ def test_actual_callback_exit_codes_and_stale_generation(isolated, state):
     task_id = task(queue)
     spec = identity(queue)
     prepare(queue, task_id, spec)
-    envelope = {"task_id": task_id, "generation": 1, "delegation": spec}
+    envelope = {
+        "task_id": task_id, "generation": 1, "delegation": spec,
+        "legacy_root": os.environ["AGENT_DISPATCH_INSTALL_DIR"],
+    }
     fired = event(spec)
     if state != "preparing":
         queue.arm_run_waiter(task_id, generation=1, kind="delegated",
@@ -223,6 +232,134 @@ def test_lazy_queue_package_import_order_remains_supported(module):
         text=True, capture_output=True, timeout=15, check=False, **no_window_kwargs(),
     )
     assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.timeout(60)
+def test_legacy_owner_prefix_ignores_pythonpath_and_working_directory(tmp_path, monkeypatch):
+    from tests.test_procutil import FIRST_MARKETPLACE_ID, _make_live_peer
+
+    cell = tmp_path / "marketplaces" / FIRST_MARKETPLACE_ID
+    python = _make_live_peer(cell, "agent-pull-requests", "1.0.0")
+    legacy = tmp_path / ".agent-pull-requests"
+    shutil.move(str(python.parent.parent.parent.parent), legacy)
+    shadow = tmp_path / "shadow"
+    package = shadow / "agent_pull_requests"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("raise AssertionError('shadow imported')", encoding="utf-8")
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.setenv("PYTHONPATH", str(shadow))
+    prefix = procutil.agent_pull_requests_launch_prefix()
+    assert prefix is not None and prefix[1:] == ["-I", "-m", "agent_pull_requests"]
+    result = subprocess.run(
+        [*prefix, "health"], cwd=shadow, text=True, capture_output=True,
+        timeout=15, check=False, **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)["isolated"] == 1
+
+
+@pytest.mark.timeout(60)
+def test_legacy_callback_discards_foreign_resident_dispatch_route(isolated, tmp_path, monkeypatch):
+    queue, _, _ = isolated
+    task_id = task(queue)
+    spec = identity(queue)
+    prepare(queue, task_id, spec)
+    queue.arm_run_waiter(task_id, generation=1, kind="delegated",
+                         delegation={**spec, "registration_id": "registration"})
+    callback = delegated_waiter_cli.callback_argv(task_id, 1, spec)
+    foreign = TaskQueue(tmp_path / "foreign.db")
+    with monkeypatch.context() as resident:
+        resident.setenv("AGENT_DISPATCH_INSTALL_DIR", str(tmp_path / "foreign"))
+        with serving_coordinator(foreign) as foreign_url:
+            resident.setenv("AGENT_DISPATCH_URL", foreign_url)
+            resident.setenv("AGENT_DISPATCH_TOKEN", "synthetic-foreign-token")
+            resident.setenv("AGENT_DISPATCH_TASK_AUTHORITY", "central")
+            resident.setenv("AGENT_DISPATCH_ENDPOINT", "tcp:127.0.0.1:1")
+            for _ in range(2):
+                result = subprocess.run(
+                    callback, input=json.dumps(event(spec)), text=True, capture_output=True,
+                    timeout=30, check=False, **no_window_kwargs(),
+                )
+                assert result.returncode == 0, result.stderr
+    assert len(queue.list_run_waiter_wakes(task_id)) == 1
+    assert not foreign.list_run_waiter_wakes(task_id)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows callback wrapper and Job cleanup contract")
+@pytest.mark.timeout(60)
+def test_notification_timeout_retires_callback_descendants_before_replay(isolated, tmp_path, monkeypatch):
+    import ctypes
+    from ctypes import wintypes
+    from agent_pull_requests.watch_contract import PRSnapshot
+    from agent_pull_requests.watch_notification import default_notify
+    from agent_pull_requests.watch_registry import WatchKey, WatchRegistry
+
+    queue, _, _ = isolated
+    task_id = task(queue)
+    spec = identity(queue)
+    prepare(queue, task_id, spec)
+    registry = WatchRegistry()
+    key = WatchKey(spec["repo"], spec["number"])
+    registry.register(
+        key, spec["subscriber_id"], until=tuple(spec["until"]), acknowledged=True,
+        notify={"argv": delegated_waiter_cli.callback_argv(task_id, 1, spec), "timeout": 10},
+    )
+    fired = registry.apply_snapshot(key, PRSnapshot(merged=True))[0]
+    queue.arm_run_waiter(
+        task_id, generation=1, kind="delegated",
+        delegation={**spec, "registration_id": fired.subscriber.registration_id},
+    )
+    root = Path(os.environ["AGENT_DISPATCH_INSTALL_DIR"])
+    callback = root / "versions" / "1.0.0" / "Lib" / "site-packages" / "agent_dispatch" / "delegated_waiter_callback.py"
+    original = callback.read_text(encoding="utf-8")
+    stalled = """
+import os, pathlib, subprocess, time
+from agent_procutil import no_window_kwargs
+if os.environ.get("CALLBACK_STALL_MARKER"):
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"],
+                             **no_window_kwargs())
+    marker = pathlib.Path(os.environ["CALLBACK_STALL_MARKER"])
+    staged = marker.with_suffix(".tmp")
+    staged.write_text(json.dumps([os.getppid(), os.getpid(), child.pid]), encoding="utf-8")
+    staged.replace(marker)
+    time.sleep(60)
+"""
+    callback.write_text(original.replace("import httpx\n", stalled + "\nimport httpx\n"), encoding="utf-8")
+    marker = tmp_path / "stalled.json"
+    monkeypatch.setenv("CALLBACK_STALL_MARKER", str(marker))
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel.OpenProcess.restype = wintypes.HANDLE
+    kernel.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+    kernel.WaitForSingleObject.restype = wintypes.DWORD
+    kernel.TerminateProcess.argtypes = [wintypes.HANDLE, wintypes.UINT]
+    kernel.TerminateProcess.restype = wintypes.BOOL
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel.CloseHandle.restype = wintypes.BOOL
+    handles = []
+    try:
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            attempt = pool.submit(default_notify, fired)
+            wait(lambda: marker.exists() or attempt.done())
+            assert marker.exists()
+            for pid in json.loads(marker.read_text(encoding="utf-8")):
+                handle = kernel.OpenProcess(0x1000 | 0x100000 | 0x0001, False, pid)
+                assert handle, ctypes.get_last_error()
+                handles.append(handle)
+            with pytest.raises(subprocess.TimeoutExpired):
+                attempt.result(timeout=20)
+        assert all(kernel.WaitForSingleObject(handle, 0) == 0 for handle in handles)
+        assert not queue.list_run_waiter_wakes(task_id)
+        monkeypatch.delenv("CALLBACK_STALL_MARKER")
+        assert default_notify(fired) == 0
+        assert len(queue.list_run_waiter_wakes(task_id)) == 1
+    finally:
+        for handle in handles:
+            if kernel.WaitForSingleObject(handle, 0) == 0x102:
+                kernel.TerminateProcess(handle, 137)
+                assert kernel.WaitForSingleObject(handle, 5000) == 0
+            kernel.CloseHandle(handle)
 
 
 @pytest.mark.parametrize("marketplace_index", [0, 1])

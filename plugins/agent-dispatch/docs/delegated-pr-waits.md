@@ -48,6 +48,7 @@ needed.
 | Explicit task authority (`AGENT_DISPATCH_TASK_AUTHORITY`) or WSL Windows-client routing | Existing process waiter; a resident PR owner cannot attest to the caller's routing environment. |
 | Credential environment variables, including command-backed token configuration | Existing process waiter: this owner protocol cannot attest that a resident daemon inherited the caller's environment. Command-backed auth still uses the existing resolver in the process child. |
 | Explicit `GH_HOST` or `GH_CONFIG_DIR` | Existing process waiter, before probing: a resident owner may use a different forge or account configuration. |
+| Explicit `AGENT_PULL_REQUESTS_HOME` | Existing process waiter, before probing: coordinator recovery cannot reconstruct a caller-only watch-owner home. |
 | Installer-owned stable callback entry unavailable | Existing process waiter, before preparing a delegated generation. |
 | Custom `--message` or credential-bearing command options | Existing process waiter; do not durably copy custom text or credentials into a subscription. |
 | Default local ambient context, or exactly canonical same-cell routing, and both ready protocols | Transactional delegated preparation, acknowledged subscribe, then arm. |
@@ -72,6 +73,12 @@ does not inherit the PR daemon's installation or client overrides. Only intrinsi
 routing values that exactly match the canonical Dispatch receipt remain eligible.
 Foreign, invalid or deactivated installation receipts refuse completion without
 acknowledging the delivery or selecting a legacy coordinator.
+
+Legacy callbacks also retain the subscribing Dispatch installation root, discard
+the resident PR owner's Dispatch environment overrides, and reconstruct routing
+from that root's ordinary configuration and rendezvous. Legacy owner commands
+run the selected installed interpreter with `-I`; caller working directories
+and `PYTHONPATH` cannot substitute another owner package.
 
 ## Durability, replay and recovery
 
@@ -104,6 +111,10 @@ or PATH lookup, so ordinary upgrade/garbage collection cannot strand a dormant
 subscription on a deleted slot. The Windows entry uses the system PowerShell
 host's positional-safe slash options; the event still travels unchanged on stdin.
 Same-cell deliveries retain the receipt/governance checks described above.
+Acknowledged delivery uses the PR owner's canonical owned-process runner on both
+platforms, even with the ordinary forge provider. A timeout retires the complete
+callback tree before the attempt returns and becomes eligible for replay; on
+Windows this includes the PowerShell wrapper, Python and peer descendants.
 
 The existing recovery sweep handles unarmed preparations after its arm grace.
 After its two startup passes, that same coordinator-owned recovery task checks

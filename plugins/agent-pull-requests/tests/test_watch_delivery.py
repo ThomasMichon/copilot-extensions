@@ -88,6 +88,29 @@ def test_actual_callback_stdin_and_exit_code(tmp_path, code):
     assert expected["transitions"] == ["merged"] and expected["merged"] is True
 
 
+def test_acknowledged_callback_owns_tree_without_worktrees_provider(monkeypatch):
+    from agent_pull_requests import watch_notification
+
+    calls = []
+
+    def owned(argv, **kwargs):
+        calls.append((argv, kwargs))
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(watch_notification, "run_owned", owned)
+    monkeypatch.setattr(watch_notification.subprocess, "run", lambda *_a, **_kw: pytest.fail("unowned launch"))
+    registry = WatchRegistry()
+    key = WatchKey("example/project", 1)
+    registry.register(key, "one", until=(MERGED,), acknowledged=True,
+                      notify={"argv": ["consumer"], "timeout": 2})
+    fired = registry.apply_snapshot(key, PRSnapshot(merged=True))[0]
+    assert not key.worktrees_command
+    assert default_notify(fired) == 0
+    assert calls == [(["consumer"], {
+        "timeout": 2, "input_text": json.dumps(event_payload(fired)), "capture": False,
+    })]
+
+
 @pytest.mark.parametrize("failure", ["nonzero", "timeout", "exception"])
 def test_failed_callback_remains_pending_and_replays_after_restart(make, failure):
     payloads = []

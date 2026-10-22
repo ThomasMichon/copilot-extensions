@@ -272,7 +272,7 @@ def agent_pull_requests_launch_prefix() -> list[str] | None:
         from .peer_launch import launch_prefix
         return launch_prefix("agent-dispatch", install_dir(), explicit_context, "agent-pull-requests")
     python = resolve_runtime_python(Path.home() / ".agent-pull-requests")
-    return [str(python), "-m", "agent_pull_requests"] if python is not None else None
+    return [str(python), "-I", "-m", "agent_pull_requests"] if python is not None else None
 
 
 def sibling_absent(plugin_id: str) -> bool:

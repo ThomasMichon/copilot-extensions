@@ -38,6 +38,7 @@ def clean_context(monkeypatch):
         if key.startswith("AGENT_DISPATCH_") or key in {
             "GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN",
             "GH_HOST", "GH_CONFIG_DIR",
+            "AGENT_PULL_REQUESTS_HOME",
         }:
             monkeypatch.delenv(key)
 
@@ -107,6 +108,7 @@ def test_explicit_context_falls_back_before_owner_probe(clean_context, monkeypat
     "AGENT_DISPATCH_TASK_ID", "AGENT_DISPATCH_TASK_WORKER_ID",
     "AGENT_DISPATCH_WSL_WINDOWS_CLIENT",
     "GH_HOST", "GH_CONFIG_DIR",
+    "AGENT_PULL_REQUESTS_HOME",
 ])
 def test_environment_credentials_select_process_without_copy(clean_context, monkeypatch, name):
     monkeypatch.setenv(name, "sensitive-value")

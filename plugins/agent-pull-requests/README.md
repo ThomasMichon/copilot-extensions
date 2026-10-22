@@ -107,6 +107,9 @@ alongside the legacy event fields. **Exit code 0 acknowledges that event**;
 nonzero, launch errors and callback timeout retain it. Callback stdout/stderr
 are discarded. Callbacks run headlessly with a positive, finite deadline
 (default 30 seconds, configurable up to 30 with `--notify-timeout`).
+Every acknowledged attempt uses the canonical owned-process runner, independently
+of the observation provider. Timeout cleanup owns the entire callback tree,
+including Windows wrappers and their descendants, before replay can begin.
 The subscription's optional `--timeout` must also be a finite positive number;
 expiration fires a durable `timed_out` event, even during polling outages.
 Acknowledged subscriptions retain their original absolute deadline across

@@ -50,6 +50,7 @@ def credentials_reconstructable(
         or key in {
             "GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN",
             "GH_HOST", "GH_CONFIG_DIR",
+            "AGENT_PULL_REQUESTS_HOME",
         }
         for key, value in os.environ.items()
     )
@@ -118,10 +119,13 @@ def callback_prefix(installation: dict | None) -> list[str]:
 
 
 def callback_argv(task_id: str, generation: int, identity: dict) -> list[str]:
+    from .install_paths import install_dir
+
     return [
         *callback_prefix(identity.get("installation")),
         "hex:" + json.dumps({
             "task_id": task_id, "generation": generation, "delegation": identity,
+            **({"legacy_root": str(install_dir())} if "installation" not in identity else {}),
         }, separators=(",", ":")).encode("utf-8").hex(),
     ]
 

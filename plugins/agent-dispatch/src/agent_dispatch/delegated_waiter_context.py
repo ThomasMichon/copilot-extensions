@@ -74,3 +74,26 @@ def restore(installation: dict) -> None:
     environment = peer_launch.peer_environment(context, inherited)
     os.environ.clear()
     os.environ.update(environment)
+
+
+def restore_legacy(root: object) -> None:
+    if (
+        not isinstance(root, str) or not root or len(root) > 4096
+        or "\0" in root or not Path(root).is_absolute()
+    ):
+        raise ValueError("invalid delegated legacy root")
+    environment = {
+        key: value for key, value in os.environ.items()
+        if not key.upper().startswith("AGENT_DISPATCH_")
+        and key.upper() not in {
+            "COPILOT_EXTENSIONS_CONTEXT", "COPILOT_PLUGIN_ROOT", "AGENT_RT_ROOT",
+        }
+    }
+    environment.update({
+        "AGENT_RT_ROOT": root,
+        "AGENT_DISPATCH_INSTALL_DIR": root,
+        "AGENT_DISPATCH_ROUTING_DIR": root,
+        "AGENT_DISPATCH_RUN_DIR": str(Path(root) / "run"),
+    })
+    os.environ.clear()
+    os.environ.update(environment)
