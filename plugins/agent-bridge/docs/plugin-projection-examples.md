@@ -9,6 +9,11 @@ startup; native repo-scoped Git acquisition may complete during that startup.
 No task is delivered until the effective plugin selection is confirmed ready.
 The active effort records which integration and readiness gates remain open.
 
+The self-contained [host/child projection atlas](plugin-projection-atlas.html)
+provides a relationship matrix, an authority decision flow and a same-repository
+worktree diagram. Open the HTML file locally; it needs no server, script or
+external asset.
+
 ## Source-preservation rule
 
 The declaration in the controller determines the source kind. An installed
@@ -163,6 +168,32 @@ automatic argument set for this selection is:
 
 This does not authorize deleting a separately authored command-line argument.
 An explicit operator flag is not an automatic projection entry.
+
+#### Same repository, different worktrees
+
+When a controller worktree drives another worktree of the **same repository**,
+the child's own marketplace declaration is still target-native authority.
+For example, both worktrees may declare `control-tools` at `./.ai`, while
+their `app-agent` payloads contain different revisions. The child resolves
+`./.ai` against its own execution checkout and receives
+`<child-worktree>/.ai/app-agent`, never the parent's payload just because the
+parent initiated the task. The repository anchor is not a substitute either.
+
+The controller can still supply eligible plugins from other marketplaces that
+the child does not override. Same-repository delegation does not mean copying
+the parent's whole enabled stack. A child's explicit disablement remains
+authoritative, and an enabled but missing child-local payload is an error, not
+permission to use the parent's revision. A separately authored external
+target-local source remains an explicit operator choice, not an automatically
+rebased path.
+
+The linked-worktree regression in
+[`test_sibling_worktree_plugins.py`](../tests/test_sibling_worktree_plugins.py)
+creates different committed parent/child revisions and exercises ordinary ACP,
+the CLI acquisition preparation request, copy-mode preparation, and an
+independent on-disk settings consumer. Repeat preparation observes child edits
+without snapshotting the parent. This is source-consumer evidence, not a new
+live Copilot, remote-SSH or container acceptance claim.
 
 ### 3. The same controller-local plugin in a remote venue
 

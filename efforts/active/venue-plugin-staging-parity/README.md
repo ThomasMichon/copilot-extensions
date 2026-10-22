@@ -124,6 +124,23 @@ Use the existing registry distinction between implementation-only and semantic
 changes. Preserve frozen packets and their original capture provenance rather
 than recapturing unrelated flows to satisfy a shared commit or source snapshot.
 
+### Same-repository child and relationship-map clarification
+
+Public-safe capture; only the private control-repository name is abstracted:
+
+> Great, keep driving. One edge case I missed: if one [control-harness] worktree
+> drives another [control-harness] worktree as a sub-agent, the child worktree
+> should draw from its *own* local marketplace, not the source worktree.
+>
+> It's probably worth making a table/flowchart of the host/child relationships of
+> agent-bridge and how plugin projection will work in each. HTML and some
+> diagrams would work for this.
+
+This makes the target-native precedence rule explicit for two worktrees of the
+same repository. It does not replace an explicitly authored external
+target-local source, expand plugin eligibility, or waive the remaining venue,
+release or authorized-rollout gates.
+
 ## Plan
 
 ### Phase 0 - Reconcile and review
@@ -180,6 +197,12 @@ than recapturing unrelated flows to satisfy a shared commit or source snapshot.
 - [x] Apply the same registration barrier through the existing local
   acquisition owner in CLI and ACP modes; settings-only consumer discovery is
   not proof that this adapter prepares its target.
+- [x] Prove that a same-repository child worktree draws from its own local
+  marketplace revision rather than the controller worktree or anchor, retaining
+  child disablement and missing-payload refusal.
+- [x] Publish an HTML host/child relationship matrix and diagrams showing
+  plugin source authority, projection, settings, launch and readiness, with
+  implemented and still-unqualified lanes distinguished.
 - [ ] Apply the same contract to genuine remote static-registry SSH targets:
   target-owned resolution plus control-repository payload staging.
 - [ ] Resolve the privileged launch's real identity/filesystem context and
@@ -220,6 +243,11 @@ than recapturing unrelated flows to satisfy a shared commit or source snapshot.
 - [x] An independent CLI consumer discovers the merged base/local settings, and
   ACP receives one `--plugin-dir` for every effective prepared plugin, including
   both remote-installed and worktree-copied sources.
+- [x] Real linked Git worktrees at different committed revisions exercise
+  same-repository child marketplace authority through ACP launch composition,
+  CLI acquisition preparation and copy-mode preparation. Independent settings
+  consumers, repeat preparation, explicit child disablement and missing child
+  payloads never substitute the parent revision or mutate global preferences.
 - [x] Synthetic fresh-checkout integration uses the real configuration writer
   and plugin resolver, verifies on-disk payloads and local marketplace sources,
   and launches an independent consumer rather than mocking past registration.
@@ -279,6 +307,37 @@ on malformed configuration. These are reliability details, not new authority
 or a reason to create a daemon.
 
 ## Journal
+
+### 2026-10-22 - Prove sibling-worktree authority and map projection relationships
+
+- Captured the same-repository child clarification and HTML relationship-map
+  request without changing plugin eligibility or source-kind policy. The
+  existing target-native precedence path already resolves the child's own
+  declared marketplace; no runtime rewrite or wire/fixture rebaseline is needed.
+- Added nine regressions using real linked Git worktrees at different committed
+  revisions. ACP launch composition, CLI acquisition preparation and copy-mode
+  preparation all retain child-local payloads, observe child edits on repeat,
+  preserve global preferences, honor child disablement and refuse an enabled
+  missing child payload instead of substituting the parent's revision.
+- The focused contained projection/acquisition/venue selection passes 193
+  cases. An independent subprocess reads the actual child settings and marker
+  bytes; it does not merely assert constructed argument strings.
+- Added a self-contained HTML atlas with a twelve-row relationship matrix,
+  role boundaries, sibling-worktree diagram and authority-to-readiness flow.
+  Both accessible SVGs, local links and unique IDs validate without a renderer,
+  external asset or script. README and worked examples link the atlas.
+- This is source-consumer regression and documentation, not a new live
+  Copilot/SSH/privileged/container acceptance claim. Remaining venue,
+  simultaneous-user-union, release and authorized-rollout gates stay open.
+- The full guard pass also found a real current authority-digest change after
+  #7254 modified `agent-procutil`. Reconstructing all authority inputs from the
+  preceding capture and current committed sources isolates that one module.
+  The existing capture tool refreshed only three current vectors and their
+  registry provenance against public source
+  `2d42fad24d9724d677bc3eaea3497bf6b4ab6497`; the other 453 registered fixtures
+  remain untouched. Strict attestation assertions are unchanged. All 456
+  registry fixtures validate; the full Bridge guard suite passes 351 cases
+  with eight explicit platform/tier skips.
 
 ### 2026-10-21 - Bound fixture maintenance to the changed flow
 

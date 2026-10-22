@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Agent Bridge: host/child plugin projection</title>
+  <style>
+    :root { color-scheme: light dark; font: 16px/1.55 system-ui, sans-serif; }
+    body { max-width: 1180px; margin: auto; padding: 2rem; }
+    h1, h2, h3 { line-height: 1.2; }
+    h2 { margin-top: 2.5rem; }
+    a { color: #1768bc; }
+    code { font-size: .9em; overflow-wrap: anywhere; }
+    .lead { max-width: 80ch; font-size: 1.15rem; }
+    .callout { border-left: 5px solid #1768bc; padding: .7rem 1rem; background: #edf5ff; }
+    .scroll { overflow-x: auto; }
+    table { border-collapse: collapse; width: 100%; font-size: .92rem; }
+    th, td { border: 1px solid #a9b4c0; padding: .7rem; text-align: left; vertical-align: top; }
+    th { background: #edf2f7; }
+    caption { text-align: left; margin-bottom: .7rem; font-weight: 650; }
+    .status { display: inline-block; font-weight: 650; border-radius: .3rem; padding: .1rem .4rem; }
+    .implemented { color: #135e37; background: #e0f3e8; }
+    .pending { color: #764600; background: #fff0ce; }
+    .refused { color: #8b2424; background: #fde7e7; }
+    svg { display: block; min-width: 720px; width: 100%; height: auto; }
+    svg text { font: 16px system-ui, sans-serif; fill: #17283b; }
+    svg .label { font-size: 14px; }
+    svg .heading { font-weight: 700; }
+    svg rect { fill: #edf5ff; stroke: #3973ac; stroke-width: 1.5; rx: 9; }
+    svg .child { fill: #e0f3e8; stroke: #28794b; }
+    svg .warning { fill: #fff0ce; stroke: #93611d; }
+    svg .arrow { fill: none; stroke: #47596d; stroke-width: 2; marker-end: url(#arrow); }
+    svg .blocked { fill: none; stroke: #a63838; stroke-width: 2; stroke-dasharray: 6 5; }
+    footer { margin-top: 3rem; border-top: 1px solid #a9b4c0; padding-top: 1rem; }
+    @media (prefers-color-scheme: dark) {
+      a { color: #86bfff; }
+      .callout, th { background: #182b40; }
+      .implemented { color: #b2f1cc; background: #173c2a; }
+      .pending { color: #ffe3a5; background: #4b3518; }
+      .refused { color: #ffc4c4; background: #4e2424; }
+      svg { background: #f6f8fb; border-radius: .5rem; }
+    }
+    @media print { body { padding: 0; } .scroll { overflow: visible; } a { color: inherit; } }
+  </style>
+</head>
+<body>
+  <header>
+    <p>Agent Bridge / Plugin delivery</p>
+    <h1>Which worktree supplies the child's plugins?</h1>
+    <p class="lead">Resolve the actual execution checkout first. Its native
+      marketplace declarations and explicit choices remain authoritative.
+      Project only the eligible controller additions, preserve their source
+      kinds, then register and verify the child's effective selection.</p>
+    <p class="callout"><strong>Same repository is not the same worktree.</strong>
+      When worktree A drives worktree B, B's <code>./.ai</code> means B's
+      marketplace and B's revision. Neither A nor a repository anchor silently
+      supplies B's own plugins.</p>
+    <nav aria-label="Page sections">
+      <a href="#roles">Roles</a> |
+      <a href="#relationships">Relationship matrix</a> |
+      <a href="#siblings">Sibling-worktree diagram</a> |
+      <a href="#flow">Selection and launch flow</a> |
+      <a href="#evidence">Evidence and limits</a>
+    </nav>
+  </header>
+
+  <main>
+    <section id="roles">
+      <h2>Do not conflate these hosts</h2>
+      <table>
+        <caption>Ownership is independent of where a process happens to run.</caption>
+        <thead><tr><th scope="col">Role</th><th scope="col">Owns</th><th scope="col">Does not imply</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">Controller / calling worktree</th><td>The task, current related-plugin selection and source declarations.</td><td>Authority to overwrite child-native origins or enable the whole controller stack.</td></tr>
+          <tr><th scope="row">Bridge coordination owner</th><td>Selection, shared preparation, launch composition and task-readiness admission.</td><td>That the daemon's cwd or installed cache is the child's source checkout.</td></tr>
+          <tr><th scope="row">Workspace allocation / native launch owner</th><td>The actual child checkout and supported native CLI launch.</td><td>That the repository anchor is the execution worktree.</td></tr>
+          <tr><th scope="row">Venue provider / transport</th><td>Provisioning, reaching the execution world and carrying preparation.</td><td>A separate plugin-selection policy or automatic permission to project into restricted venues.</td></tr>
+          <tr><th scope="row">Session Host / execution process</th><td>The child's process and session boundary.</td><td>That connecting or acknowledging a session proves its plugins are ready.</td></tr>
+          <tr><th scope="row">Child / executing worktree</th><td>Its native settings, explicit local choices and local marketplace revision.</td><td>Permission to rewrite user-global enablement or source declarations.</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="relationships">
+      <h2>Host / child relationship matrix</h2>
+      <p><strong>Source implemented</strong> describes the preparation path in
+        source, not an assertion that a released runtime is installed. An
+        unqualified or pending lane is not a successful parity result.</p>
+      <div class="scroll">
+        <table>
+          <caption>Settings always belong to the resolved child checkout.</caption>
+          <thead>
+            <tr><th scope="col">Relationship</th><th scope="col">Source authority</th><th scope="col">Payload route</th><th scope="col">Child settings and launch</th><th scope="col">Integration / evidence</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <th scope="row">Same checkout, ordinary local execution</th>
+              <td>The checkout's native settings and explicit local overrides.</td>
+              <td>Use existing local payloads directly; do not snapshot them.</td>
+              <td>Merge repository-local settings. ACP gets every effective directory; CLI reads merged settings.</td>
+              <td><span class="status implemented">Source implemented</span> Local consumer and startup-admission contracts.</td>
+            </tr>
+            <tr id="same-repository-row">
+              <th scope="row">Worktree A to worktree B of the same repository</th>
+              <td><strong>B's own declared local marketplace wins.</strong> B may have different plugins or revisions. A supplies only eligible additions not overridden by B.</td>
+              <td>B-local payloads stay in B. Do not point B's own identity at A or the anchor. No copy is needed in the same execution world.</td>
+              <td>B's <code>settings.json</code> plus B's <code>settings.local.json</code>; ACP directories point inside B for those native local identities.</td>
+              <td><span class="status implemented">Source implemented</span> Real linked-worktree regressions cover ACP, CLI preparation, copy mode, repeat, disable and missing-payload refusal.</td>
+            </tr>
+            <tr>
+              <th scope="row">Different repositories, same local execution world</th>
+              <td>Child-native origins win. Other eligible controller-local plugins retain the caller worktree's source, not its anchor.</td>
+              <td>Direct filesystem references to the original selected source; no reflected snapshot.</td>
+              <td>Register in the child checkout; ACP receives the effective union. Preserve explicit child disables and unrelated settings.</td>
+              <td><span class="status implemented">Source implemented</span> Ordinary local ACP and native CLI acquisition.</td>
+            </tr>
+            <tr>
+              <th scope="row">Controller to a trusted Codespace checkout</th>
+              <td>Child-native choices first. An authored absolute local source proven to belong to the target repo is rebound to the actual target checkout; other local sources remain controller-owned.</td>
+              <td>Use target-local payloads in place; reflect other selected local payloads into the venue; acquire selected Git sources there.</td>
+              <td>Target-local settings precede startup. ACP uses every prepared directory; supported headed CLI uses merged settings.</td>
+              <td><span class="status implemented">Source implemented</span> Selected-skill ACP/CLI evidence exists. Complete target-user plus staged-plugin union acceptance remains open.</td>
+            </tr>
+            <tr>
+              <th scope="row">Controller to a trusted container checkout</th>
+              <td>The same source-preservation and child-native precedence contract.</td>
+              <td>Shared preparation via the container's supported transport; target-owned sources are not controller snapshots.</td>
+              <td>The same target-local registration, ACP directory and CLI settings contract.</td>
+              <td><span class="status pending">Live acceptance open</span> Shared source path and contracts exist; actual headed/headless skill proof is not yet complete.</td>
+            </tr>
+            <tr>
+              <th scope="row">Static-registry target over genuine SSH</th>
+              <td>Owes the same effective selection, under the receiver's actual account and checkout.</td>
+              <td>Needs explicit remote resolution and controller-payload staging through the existing SSH owner.</td>
+              <td>Required outcome is target-local settings plus complete mode-specific launch inputs; a reachable SSH command is not preparation.</td>
+              <td><span class="status pending">Integration open</span> Do not infer it from the delivered local-loopback adapter.</td>
+            </tr>
+            <tr>
+              <th scope="row">Different account or platform on the same physical machine</th>
+              <td>The actual executing identity and filesystem, not the controller's home.</td>
+              <td>Not local loopback. Follow its resolved SSH or privileged channel.</td>
+              <td>Registration and paths must be usable by that receiver.</td>
+              <td><span class="status pending">Separate acceptance</span> Physical proximity does not waive the identity boundary.</td>
+            </tr>
+            <tr>
+              <th scope="row">Privileged / elevated sub-daemon</th>
+              <td>The privileged receiver's real execution checkout and supported filesystem context.</td>
+              <td>Prepare through the channel that reaches that process; do not assume plain SSH can write its stage root.</td>
+              <td>The same required outputs, with explicit failure if preparation is unsupported.</td>
+              <td><span class="status pending">Integration open</span> Not covered by ordinary unprivileged local preparation.</td>
+            </tr>
+            <tr>
+              <th scope="row">Wrapped command or receiver-local launch</th>
+              <td>The final execution owner must establish the concrete child context.</td>
+              <td>A wrapper command is not proof of its backend, account or filesystem.</td>
+              <td>Do not fabricate a preparation receipt from the controller-side command.</td>
+              <td><span class="status pending">Separate integration</span> These paths are intentionally excluded from ordinary-local preparation.</td>
+            </tr>
+            <tr>
+              <th scope="row">Restricted / untrusted container</th>
+              <td>The restricted venue's explicitly bounded policy.</td>
+              <td>No automatic controller projection.</td>
+              <td>No implicit host-plugin enablement or credential expansion.</td>
+              <td><span class="status refused">Projection refused</span> Outside trusted-venue parity by design.</td>
+            </tr>
+            <tr>
+              <th scope="row">Any supported lane, Git-sourced selection</th>
+              <td>Preserve the authored Git origin, revision and location unless an explicit child-native choice overrides that identity.</td>
+              <td>Resolve an actual installed payload in the child's execution world.</td>
+              <td>Settings retain the Git declaration; ACP directory arguments name usable installed payloads. Cache paths are not source declarations.</td>
+              <td><span class="status implemented">Shared contract</span> Does not make a pending transport integrated.</td>
+            </tr>
+            <tr>
+              <th scope="row">Chained delegation: A to B to C</th>
+              <td>For the second hop, B is the current controller and C is the execution checkout.</td>
+              <td>Resolve that hop's eligible set and actual sources again; do not transitively copy A's whole loadout.</td>
+              <td>C-native settings retain authority. A root claim or common repository name is not plugin source authority.</td>
+              <td><span class="status pending">Per-hop contract</span> Integration and evidence depend on each concrete launch lane.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="siblings">
+      <h2>Same repository, independent marketplace revisions</h2>
+      <div class="scroll">
+        <svg viewBox="0 0 1100 430" role="img" aria-labelledby="siblings-title siblings-desc">
+          <title id="siblings-title">A controller worktree drives a sibling worktree without replacing its plugins</title>
+          <desc id="siblings-desc">Parent A supplies a task and eligible additions to Bridge. Bridge resolves child B as the execution checkout. B's relative marketplace points to B's own plugin revision. Neither A's plugin nor the repository anchor substitutes for B.</desc>
+          <defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#47596d"/></marker></defs>
+          <rect x="20" y="25" width="300" height="100"/>
+          <text x="40" y="55" class="heading">Controller worktree A</text>
+          <text x="40" y="82">./.ai/sample = revision A</text>
+          <text x="40" y="107" class="label">Task + eligible related selections</text>
+          <rect x="390" y="25" width="300" height="100"/>
+          <text x="410" y="55" class="heading">Bridge preparation</text>
+          <text x="410" y="82">Resolve actual child cwd first</text>
+          <text x="410" y="107" class="label">Retain child-native source authority</text>
+          <path class="arrow" d="M 320 75 H 385"/>
+          <rect class="child" x="770" y="25" width="310" height="100"/>
+          <text x="790" y="55" class="heading">Child worktree B</text>
+          <text x="790" y="82">./.ai/sample = revision B</text>
+          <text x="790" y="107" class="label">Own settings + own payloads</text>
+          <path class="arrow" d="M 690 75 H 765"/>
+          <rect class="child" x="770" y="210" width="310" height="125"/>
+          <text x="790" y="240" class="heading">Child effective loadout</text>
+          <text x="790" y="270">ACP: --plugin-dir B/.ai/sample</text>
+          <text x="790" y="297">CLI: B's merged repo settings</text>
+          <text x="790" y="322" class="label">Readiness before task delivery</text>
+          <path class="arrow" d="M 925 125 V 205"/>
+          <rect class="warning" x="20" y="210" width="570" height="125"/>
+          <text x="40" y="240" class="heading">No silent substitution</text>
+          <text x="40" y="269">Not A/.ai/sample; not anchor/.ai/sample</text>
+          <text x="40" y="296">Child disabled: keep disabled</text>
+          <text x="40" y="323">Child enabled but missing: fail, do not use A</text>
+          <path class="blocked" d="M 320 110 L 745 275"/>
+          <text x="20" y="390" class="label">A and B can share Git storage while their working files, settings and selected revisions differ.</text>
+        </svg>
+      </div>
+      <p>This diagram assumes B declares the marketplace locally (for example,
+        <code>./.ai</code>). An operator-authored external target-local source
+        remains an explicit choice. Same-repository identity does not authorize
+        rewriting every external path.</p>
+    </section>
+
+    <section id="flow">
+      <h2>Selection, projection and launch are distinct</h2>
+      <div class="scroll">
+        <svg viewBox="0 0 1100 660" role="img" aria-labelledby="flow-title flow-desc">
+          <title id="flow-title">Plugin authority and preparation flow</title>
+          <desc id="flow-desc">Allocate the execution checkout, resolve target-native authority and eligible controller additions, retain native local paths or rebind proven target-owned sources, directly reference or reflect other local sources, and preserve Git sources while acquiring payloads. Register child settings before startup. ACP receives all prepared directories; CLI reads merged repository settings. Native startup may finish Git acquisition, but task delivery waits for confirmed plugin readiness.</desc>
+          <rect x="290" y="15" width="520" height="65"/>
+          <text x="315" y="43" class="heading">1. Allocate / resolve the actual execution checkout</text>
+          <text x="315" y="67" class="label">Verify execution world and identity; restricted projection is refused</text>
+          <path class="arrow" d="M 550 80 V 115"/>
+          <rect x="290" y="120" width="520" height="80"/>
+          <text x="315" y="150" class="heading">2. Resolve source authority and eligible selection</text>
+          <text x="315" y="178" class="label">Explicit child choice / disable first; then eligible controller additions</text>
+          <path class="arrow" d="M 550 200 V 225 H 180 V 250"/>
+          <path class="arrow" d="M 550 200 V 250"/>
+          <path class="arrow" d="M 550 225 H 920 V 250"/>
+          <rect class="child" x="20" y="255" width="320" height="115"/>
+          <text x="40" y="285" class="heading">Child-native / target-owned local</text>
+          <text x="40" y="312">Use the child's local payload</text>
+          <text x="40" y="338" class="label">Rebind proven target-owned absolute</text>
+          <text x="40" y="358" class="label">sources to the actual child checkout</text>
+          <rect x="390" y="255" width="320" height="115"/>
+          <text x="410" y="285" class="heading">Other selected local source</text>
+          <text x="410" y="312">Same world: direct original path</text>
+          <text x="410" y="338">Different world: reflect payload</text>
+          <text x="410" y="358" class="label">Keep a local source declaration</text>
+          <rect x="760" y="255" width="320" height="115"/>
+          <text x="780" y="285" class="heading">Selected Git source</text>
+          <text x="780" y="312">Keep origin / ref / location</text>
+          <text x="780" y="338">Acquire a usable child-world payload</text>
+          <text x="780" y="358" class="label">Never substitute a cache declaration</text>
+          <path class="arrow" d="M 180 370 V 400 H 550 V 425"/>
+          <path class="arrow" d="M 550 370 V 425"/>
+          <path class="arrow" d="M 920 370 V 400 H 550"/>
+          <rect x="230" y="430" width="640" height="65"/>
+          <text x="255" y="457" class="heading">3. Publish child repository-local settings before process startup</text>
+          <text x="255" y="482" class="label">Preserve unrelated entries, explicit overrides and user-global preferences</text>
+          <path class="arrow" d="M 550 495 V 525"/>
+          <rect class="child" x="230" y="530" width="640" height="100"/>
+          <text x="255" y="558" class="heading">4. Launch through the existing owner, then admit the task</text>
+          <text x="255" y="584">ACP: every effective --plugin-dir | CLI: merged child settings</text>
+          <text x="255" y="611" class="label">Native Git startup acquisition may finish here; task delivery waits for readiness</text>
+        </svg>
+      </div>
+      <p>A connection, process ID, copied directory or settings file is not
+        readiness. Failure or cancellation must not deliver the task with an
+        incomplete selection. This flow specifies required outputs; the matrix
+        identifies launch adapters whose integration is still open.</p>
+    </section>
+
+    <section id="evidence">
+      <h2>Evidence and current limits</h2>
+      <p>The same-repository regression uses actual linked Git worktrees with
+        different committed payloads. It exercises ordinary ACP launch
+        composition, the CLI acquisition preparation request, copy-mode
+        preparation and an independent settings resolver process. It also
+        checks repeated child edits, explicit disables, missing-payload refusal,
+        unchanged global preferences and no source-catalog writes.</p>
+      <p>Those checks establish source-consumer behavior. They do not assert a
+        new live Copilot run, genuine SSH or privileged preparation, live trusted
+        container acceptance, release promotion or installed-runtime rollout.
+        Existing Codespace selected-skill evidence likewise does not close the
+        full simultaneous target-user and staged-repository capability matrix.</p>
+      <ul>
+        <li><a href="plugin-projection-examples.md">Worked settings and ACP argument examples</a></li>
+        <li><a href="startup-plugin-readiness.md">Startup readiness and task-admission contract</a></li>
+        <li><a href="../tests/test_sibling_worktree_plugins.py">Linked-worktree regression</a></li>
+        <li><a href="../../../efforts/active/venue-plugin-staging-parity/README.md">Canonical effort: remaining implementation and acceptance gates</a></li>
+      </ul>
+    </section>
+  </main>
+  <footer>
+    Offline reference: inline CSS and SVG only. No script, external font,
+    renderer dependency, credential, service call or auto-refresh.
+  </footer>
+</body>
+</html>

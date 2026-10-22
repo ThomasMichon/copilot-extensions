@@ -371,6 +371,11 @@ ACP directory arguments, including source preservation, repository scoping and
 target-owned relocation. They distinguish the required outputs from adapters
 whose integration remains open in the active effort.
 
+The [host/child projection atlas](docs/plugin-projection-atlas.html) adds an
+offline relationship matrix and diagrams. In particular, a same-repository
+child worktree uses its own target-native local marketplace, not its parent's
+or the repository anchor's revision.
+
 Ordinary static local ACP targets prepare plugins after real Worktrees
 allocation (or an explicit existing cwd), before either the raw child or local
 Session Host starts. Related selection and payload declarations prefer the

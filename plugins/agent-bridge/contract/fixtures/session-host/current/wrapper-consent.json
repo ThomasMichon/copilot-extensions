@@ -1,13 +1,13 @@
 {
   "captured_from": {
-    "commit": "0623ffb063962633b5eda0cfdd0f8df68746d8f1",
+    "commit": "2d42fad24d9724d677bc3eaea3497bf6b4ab6497",
     "plugin_version": "0.4.1-dev3",
     "protocol_generation": 1,
     "source_path": "plugins/agent-bridge/src/agent_bridge/session_host/preference_spawn.py",
     "source_git_blob": "ef684ca179f87826028d1cbe25791ce8fdf9ceab",
     "source_sha256": "d72b281b0bbbe63108bd1bac5fbe932e90419516a96d5280d159a436cdfb1f8d"
   },
-  "component_digest": "277806da61ddafa37c2e95bc5f6adafe70e06914345e5fea61df48e0c5f9a610",
+  "component_digest": "58695b12e6c70bc7c848dd70b160fc33c85ac14bb3e3fa952241111551ee6769",
   "release_metadata_normalized": "agent_bridge._FALLBACK_VERSION and legacy agent_bridge.__version__",
   "authority_modules": [
     "agent_bridge",

@@ -1,6 +1,6 @@
 {
   "captured_from": {
-    "commit": "0623ffb063962633b5eda0cfdd0f8df68746d8f1",
+    "commit": "2d42fad24d9724d677bc3eaea3497bf6b4ab6497",
     "plugin_version": "0.4.1-dev3",
     "protocol_generation": 1,
     "source_path": "plugins/agent-bridge/src/agent_bridge/preference_attestation.py",
@@ -32,7 +32,7 @@
     },
     "authority": {
       "kind": "wrapper-v1",
-      "digest": "277806da61ddafa37c2e95bc5f6adafe70e06914345e5fea61df48e0c5f9a610",
+      "digest": "58695b12e6c70bc7c848dd70b160fc33c85ac14bb3e3fa952241111551ee6769",
       "mode": "defaults",
       "target": "9032997c94da9512223bde48704c19c2d587c4ff4f1105f61204524b68662819",
       "space": {
