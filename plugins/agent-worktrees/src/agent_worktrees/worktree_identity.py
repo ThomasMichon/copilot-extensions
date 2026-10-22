@@ -63,7 +63,7 @@ def _confirmed_anchor_checkout(cwd: Path, anchor: Path) -> bool:
     try:
         result = git_ops.git(
             "rev-parse", "--is-bare-repository", "--absolute-git-dir",
-            cwd=str(cwd), check=False, timeout=10,
+            cwd=str(cwd), check=False, timeout=10, isolated_repository=True,
         )
         lines = (result.stdout or "").strip().splitlines()
         if result.returncode != 0 or len(lines) != 2:

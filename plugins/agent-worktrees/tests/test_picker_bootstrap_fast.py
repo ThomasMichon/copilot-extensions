@@ -105,3 +105,17 @@ def test_failed_git_probe_keeps_nested_tracking_fallback(monkeypatch, tmp_path, 
     )
     assert context_cli.cmd_picker_bootstrap(SimpleNamespace(json=True)) == 0
     assert json.loads(capfd.readouterr().out)["workspace"] == str(root)
+
+
+def test_anchor_confirmation_ignores_inherited_git_selector(adopted_repo, monkeypatch):
+    anchor, _root, _workspace, _wid, _config = adopted_repo
+    nested = anchor / "nested-linked"
+    worktree_identity.git_ops.git(
+        "worktree", "add", "-b", "nested-fixture", str(nested), cwd=anchor,
+        isolated_repository=True,
+    )
+    git_dir = worktree_identity.git_ops.git(
+        "rev-parse", "--absolute-git-dir", cwd=anchor, isolated_repository=True,
+    ).stdout.strip()
+    monkeypatch.setenv("GIT_DIR", git_dir)
+    assert worktree_identity._confirmed_anchor_checkout(nested, anchor) is False
