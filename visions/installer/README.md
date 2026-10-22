@@ -279,6 +279,16 @@ Ordinary CLI, agent, hook and maintenance callers submit durable requests rather
 than becoming independent installers. Waiting observes that same operation;
 closing a caller does not abandon its execution or result.
 
+The execution owner has a standalone installation foundation available before
+plugin provisioning, including first installation without an existing Python
+runtime. A plugin can establish that foundation from its own installation
+surface without requiring Manager, another plugin, or an independently
+administered always-on coordinator. Foundation construction has one bounded,
+recoverable owner; it is not a general-purpose exception for running plugin
+installers. Once ready, first-use publication follows the same durable request
+contract as later updates. Missing, incompatible or interrupted foundation state
+is explicit, never permission to fall back to an independent installer.
+
 Equivalent pending requests can coalesce without erasing an explicit target,
 source selection or installation boundary. Pending, running, interrupted,
 blocked and completed outcomes remain attributable and observable. Recovery
