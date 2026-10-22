@@ -15,14 +15,16 @@ invented to make validation pass. A legacy command-binding lock uses kind
 
 ```text
 <python> <published-installation_context.py> lock-inspect --lock-path <absolute-lock> --kind <kind> --marketplace-id <marketplace> --plugin-id <plugin>
-<python> <published-installation_context.py> lock-repair --lock-path <absolute-lock> --kind <kind> --marketplace-id <marketplace> --plugin-id <plugin> --expected-evidence <inspection.expectedEvidence>
+<python> <published-installation_context.py> lock-repair --lock-path <absolute-lock> --kind <kind> --marketplace-id <marketplace> --plugin-id <plugin> --expected-evidence <inspection.expectedEvidence> --inactive-owner-evidence "<verified owner AND descendant settlement evidence>"
 ```
 
 Inspect is read-only. Repair acquires kernel exclusion, rechecks the exact
 directory/file/content evidence and native owner state, then quarantines the
 directory with a prepared/completed receipt. It never deletes the original owner
-bytes. New normal writers use the same exclusion and automatically quarantine
-provably dead local owners. Legacy live PIDs remain protected; new receipts
+bytes. New normal writers use the same short mutation exclusion, but do not
+automatically reap dead admitting parents: an installer child can still be
+writing. Independently assess the original operation's descendants before
+**every** repair, including a valid stale owner. Legacy live PIDs remain protected; new receipts
 also bind native process birth so PID reuse is not mistaken for ownership.
 The kernel releases mutation exclusion after a process dies or a machine reboots.
 The persistent `.mutation-guard` file is **not** a stale lock to delete.
@@ -38,8 +40,8 @@ the specific inactivity evidence in the parent skill, inspect in manual mode:
 ```
 
 The evidence argument is an explicit assertion by the authorized repairer, not
-an automatically verified boot/stop certificate. It is preserved in the recovery
-receipt. It enables only the incomplete-owner path; it never overrides a valid
+an automatically verified boot/stop certificate. It is preserved in every
+recovery receipt. It additionally enables the incomplete-owner path; it never overrides a valid
 live/foreign/unknown owner, unsafe path, changed evidence or unexpected contents.
 Do not use a generic "probably stale" explanation, rewrite a malformed record
 into invented valid metadata, or use this mode merely because automatic repair

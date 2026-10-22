@@ -170,6 +170,15 @@ def inspect_installation_lock(
     return {"schema": "copilot-extensions.lock-inspection", "version": 1, **snapshot}
 
 
+def _sync_lock_directory(path: Path) -> None:
+    if os.name != "nt":
+        descriptor = os.open(path, os.O_RDONLY)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+
+
 def _quarantine_stale_lock(
     lock: _DirectoryLock, expected: Mapping[str, Any], *, inactive_owner_evidence: str = "",
 ) -> dict[str, Any]:
@@ -179,6 +188,7 @@ def _quarantine_stale_lock(
         _fail(f"Installation lock '{lock.path}' changed or is not provably stale.")
     backup = lock.path.with_name(lock.path.name + ".recovery-" + secrets.token_hex(8))
     backup.mkdir()
+    _sync_lock_directory(lock.path.parent)
     receipt = {
         "schema": "copilot-extensions.lock-recovery", "version": 1,
         "state": "prepared", "createdAt": _utc_now(),
@@ -192,6 +202,8 @@ def _quarantine_stale_lock(
     if checked != current:
         _fail(f"Installation lock '{lock.path}' changed before quarantine; no lock was moved.")
     os.rename(lock.path, backup / "lock")
+    _sync_lock_directory(backup)
+    _sync_lock_directory(lock.path.parent)
     moved = _DirectoryLock(backup / "lock", kind=lock.kind, marketplace_id=lock.marketplace_id,
                            plugin_id=lock.plugin_id)
     captured, _owner = _lock_snapshot(moved, allow_incomplete=bool(inactive_owner_evidence))
@@ -214,6 +226,11 @@ def repair_installation_lock(
     with _lock_mutation_guard(lock.path, deadline=time.monotonic() + 5):
         if not isinstance(inactive_owner_evidence, str) or len(inactive_owner_evidence) > 8192:
             _fail("Manual recovery evidence must be bounded text.")
+        if not inactive_owner_evidence.strip():
+            _fail(
+                "Independent inactivity assessment is required for the owner and its descendants; "
+                "supply --inactive-owner-evidence after verification."
+            )
         current, _owner = _lock_snapshot(lock, allow_incomplete=bool(inactive_owner_evidence.strip()))
         evidence = json.dumps(current.get("evidence"), sort_keys=True, separators=(",", ":"))
         if hashlib.sha256(evidence.encode()).hexdigest() != expected_evidence:

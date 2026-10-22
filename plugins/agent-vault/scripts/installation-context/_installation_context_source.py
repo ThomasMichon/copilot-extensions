@@ -2,10 +2,16 @@
 # Executed into installation_context.py's shared module globals.
 from __future__ import annotations
 
+def _lock_openprocess_failure_means_live(last_error: int) -> bool:
+    return last_error != 87  # ERROR_INVALID_PARAMETER is the absent-PID result.
+
+
 def _pid_is_live(pid: int) -> bool:
     if pid < 1:
         return False
     if os.name == "nt":
+        if pid > 0xFFFFFFFF:
+            return True
         import ctypes
         from ctypes import wintypes
 
@@ -30,7 +36,7 @@ def _pid_is_live(pid: int) -> bool:
             pid,
         )
         if not handle:
-            return _openprocess_denied_means_live(ctypes.get_last_error())
+            return _lock_openprocess_failure_means_live(ctypes.get_last_error())
         try:
             wait_result = kernel32.WaitForSingleObject(handle, 0)
             if wait_result == wait_object_0:
@@ -171,18 +177,13 @@ class _DirectoryLock(AbstractContextManager["_DirectoryLock"]):
                 owner_pid = _property(owner, "pid")
                 if owner_host == self.host:
                     if _lock_owner_state(owner) == "stale":
-                        with _lock_mutation_guard(self.path, deadline=deadline):
-                            snapshot, current_owner = _lock_snapshot(self)
-                            if current_owner != dict(owner):
-                                continue
-                            receipt = _quarantine_stale_lock(self, snapshot)
-                        warnings.warn(
-                            f"Recovered stale installation lock '{self.path}'; "
-                            f"evidence retained at '{receipt['backupPath']}'. "
-                            "The interrupted operation still requires verification.",
-                            RuntimeWarning, stacklevel=2,
+                        _fail(
+                            f"Installation lock '{self.path}' has a stale owner; "
+                            "the owner's descendants must be independently confirmed inactive. "
+                            "Use installation_context.py lock-inspect, then lock-repair with "
+                            "--expected-evidence and --inactive-owner-evidence; "
+                            "see recovering-operational-locks."
                         )
-                        continue
                     if time.monotonic() >= deadline:
                         _fail(f"Installation lock '{self.path}' remained busy.")
                     time.sleep(LOCK_POLL_SECONDS)

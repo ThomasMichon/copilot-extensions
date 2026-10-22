@@ -3,24 +3,25 @@
 Canonical, dependency-light management foundation for marketplace installation
 cells. Mutation remains explicit and non-automatic:
 
-The Python directory-lock primitive is the narrow exception for **coordination
-residue**, not installation/update admission. It records native process birth
-where supported and quarantines provably stale local owners before retrying the
-already-authorized operation. New mutation/repair writers share a kernel-held
-guard that releases on death/reboot. Live legacy owners and foreign/unknown
-owners are not stolen. The dependency-light native shell adapters retain their
-explicit-repair refusal; the Python recovery entry below can repair their
-compatible directory receipts without changing their interpreter prerequisites.
+The Python directory-lock primitive records native process birth where supported.
+An admitting parent's death does not prove its installer descendants stopped:
+normal acquisition remains fail-closed and names the supported recovery entry.
+Explicit repair requires independent inactivity assessment for the owner and
+its descendants before quarantining residue. New mutation/repair writers share
+a short kernel-held guard that releases on death/reboot; it is not a lifetime
+lease on those descendants. Live legacy owners and foreign/unknown owners are
+not stolen. The Python recovery entry below also repairs compatible native-shell
+directory receipts without changing their interpreter prerequisites.
 
 The standalone `installation_context.py lock-inspect` and `lock-repair` actions
 work even when normal command dispatch is blocked. They require the exact lock
 path/kind/marketplace/plugin and bind repair to the inspection's
 `expectedEvidence`. Original bytes remain under a unique sibling
 `<lock>.recovery-<id>/lock`, with a prepared/completed `recovery.json`.
-`--allow-incomplete` inspection and `--inactive-owner-evidence` repair provide an
-explicit manual path for missing/malformed owner receipts after independent
-inactivity assessment. The evidence text is the authorized repairer's assertion,
-not automatic proof. It cannot override a valid live/foreign/unknown owner or
+`--inactive-owner-evidence` is required for every repair, not only malformed
+receipts. `--allow-incomplete` inspection adds a manual path for missing/malformed
+owners. The evidence text is the authorized repairer's assertion, not automatic
+proof. It cannot override a valid live/foreign/unknown owner or
 unsafe/changed contents. See
 [`recovering-operational-locks`](../../plugins/agent-conduct-guidance/skills/recovering-operational-locks/SKILL.md)
 for authority and executable recipes. Never unlink permanent `.mutation-guard`
