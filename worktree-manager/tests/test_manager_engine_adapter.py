@@ -136,6 +136,40 @@ def test_python_engine_path_arguments_are_not_reinterpreted_as_command_names(
             engine._construct(None, root, Path(name), Path(sys.executable), -1, 1)
 
 
+@pytest.mark.parametrize("boundary", [
+    "retention", "construction",
+    pytest.param("manager", marks=pytest.mark.skipif(os.name != "nt", reason="Windows SDK selection")),
+])
+def test_explicit_uv_parent_components_survive_binding_until_resolution(tmp_path, monkeypatch, boundary):
+    adapter = si._runtime_installer()
+    engine = adapter.engine
+    payload, root, _uv = _source(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    relative = Path("linked") / ".." / "uv.exe"
+    expected = tmp_path / relative
+
+    class ObservedPath(Exception):
+        pass
+
+    def select(command):
+        assert Path(command) == expected
+        assert ".." in Path(command).parts
+        raise ObservedPath
+
+    monkeypatch.setattr(engine, "_select_uv_executable", select)
+    with pytest.raises(ObservedPath):
+        if boundary == "manager":
+            with adapter.candidate(payload, root, assemble=si._copy_payload, uv=relative):
+                pytest.fail("selection witness was not reached")
+        elif boundary == "retention":
+            with engine._retained_inputs(
+                engine.FrozenInputs(payload, (payload,), ""), relative, Path(sys.executable), refresh=False,
+            ):
+                pytest.fail("selection witness was not reached")
+        else:
+            engine._construct(None, root, relative, Path(sys.executable), -1, 1)
+
+
 def _bundled_wheel_source(tmp_path):
     payload, root, _ = _source(tmp_path)
     manager = Path(__file__).resolve().parents[1]
