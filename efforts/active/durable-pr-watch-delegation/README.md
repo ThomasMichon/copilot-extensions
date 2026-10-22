@@ -199,7 +199,11 @@ _Operator-required scope; agent-recommended implementation and validation._
   Authenticated serving/dispatch and full fleet acceptance remain below.
 - [x] Land an opt-in trusted caller handoff in the real Gateway/connector SDK,
   preserving the identity-less HTTP proxy path (confirmed by #7810). PR-specific
-  scope mapping, operations and full serving acceptance remain below.
+  serving and full fleet acceptance remain below.
+- [x] Land the optional PR-owned configured-scope Gateway serving adapter and
+  durable complete-envelope disk transactions, without activating a daemon,
+  credentials or placement (confirmed by #7832). Production enrollment/effect
+  fencing, observation, consumer and lifecycle acceptance remain below.
 - [ ] Define and deliver the [PR-service consumer contract](pr-service-contract.md)
   through normal reviewed source changes, including missing shared seams and
   real serving/consumer proof. Consult related campaigns without a separate
@@ -279,8 +283,38 @@ callback an implicit credential store.
 
 ## Journal
 
+### 2026-10-22 - Reuse central native PR operations without a second provider
+
+- Added an explicitly selected `--worktrees-command` path for the PR plugin's
+  existing status, create, merge and wait verbs. The default GitHub interface
+  remains unchanged. Native reads reuse the validated snapshot contract and
+  preserve ADO votes, approval events and human/policy gates independently.
+- Native create calls central `pr-create --from-branch`, retaining target
+  registration, publication checks, attribution, idempotent reuse and claimant
+  journaling. Native merge calls `pr-merge --now`; role refusal and pending
+  native auto-completion remain central decisions, not client-side overrides.
+  Flags the central CLI cannot honor fail before mutation.
+- Added bounded caller-owned command invocation, including a real Windows
+  PowerShell argument-data boundary for multiline bodies, quotes and Unicode.
+  Missing or incompatible commands and uncertain mutation results never retry
+  through the GitHub adapter.
+- Validation: focused CLI/watch contracts passed, including all four real
+  front-door command boundaries and legacy GitHub regressions. The new behavior
+  does not alter installation or first-provisioning paths, so a new clean-room
+  scenario is not applicable. No synthetic configured, authorized live ADO
+  target is available to this slice; real forge and fleet acceptance remain
+  open rather than inferred from controlled protocol peers.
+- This narrows `first-class-provider-neutral-pr-surface` under the PR vision
+  and composes the existing independent-installation, attributable-command and
+  fail-loud patterns. It adds no daemon, credential store, forge adapter or
+  deployment authority. Source publication/review remains pending; the parent
+  effort is Active.
+
 ### 2026-10-22 - Bind admitted PR callers to durable replay operations
 
+- #7832 merged as `ea2a6b8408f3271760d4c544faefb2815af38cac` after
+  current-head Copilot approval, resolution of the deadline finding and all
+  required CI checks. This is source delivery, not promotion or rollout.
 - Added the optional PR-owned `WatchGateway` source adapter around the merged
   real connector SDK. Trusted configuration maps the admitted
   fleet/Gateway/slot/principal and a target alias to `ConsumerScope`; request
@@ -327,6 +361,12 @@ callback an implicit credential store.
   Reload and admitted-caller regressions retain another scope's existing
   receipt, and the actual TLS flow also refuses the input without a write.
   The focused replay/store/handler/transport/native contracts pass 229 cases.
+- Re-read the parent Plan and Validation Plan after merge. Only the optional
+  scoped source adapter item closes; installed/deployed credentials,
+  enrollment/effect fencing, observation, shared consumer and full fleet
+  acceptance remain open. The next source slice reuses the existing central
+  ADO `pr-*` provider/contracts in `agent-pull-requests`, rather than adding
+  another forge adapter or weakening worktree publication policy.
 
 ### 2026-10-22 - Carry authenticated callers into a bounded service handler
 

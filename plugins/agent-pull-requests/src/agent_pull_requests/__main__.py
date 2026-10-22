@@ -265,6 +265,8 @@ def _render_status(status: dict[str, Any]) -> str:
 
 
 def _cmd_status(args: argparse.Namespace) -> int:
+    if args.worktrees_command:
+        return _cmd_native(args)
     try:
         status = _github_status(args.repo, args.number)
     except RuntimeError as exc:
@@ -278,6 +280,20 @@ def _cmd_status(args: argparse.Namespace) -> int:
     else:
         print(_render_status(status))
     return 0
+
+
+def _cmd_native(args: argparse.Namespace) -> int:
+    from .native_cli import run
+
+    try:
+        prefix = _agent_worktrees_prefix() if _WATCH_INVOCATION is not None else None
+    except (RuntimeError, OSError) as exc:
+        if args.json:
+            print(json.dumps({"error": str(exc), "repo": args.repo}))
+        else:
+            print(f"agent-pull-requests: {exc}", file=sys.stderr)
+        return 1
+    return run(args, prefix=prefix)
 
 
 def _run_agent_worktrees_raw(argv: list[str]) -> subprocess.CompletedProcess[str]:
@@ -368,6 +384,8 @@ def _github_create(
 
 
 def _cmd_create(args: argparse.Namespace) -> int:
+    if args.worktrees_command:
+        return _cmd_native(args)
     worktree_id = _resolve_claimant_worktree_id()
     if not worktree_id:
         if args.json:
@@ -432,6 +450,8 @@ def _github_merge(
 
 
 def _cmd_merge(args: argparse.Namespace) -> int:
+    if args.worktrees_command:
+        return _cmd_native(args)
     try:
         result = _github_merge(args.repo, args.number, args.method, args.auto, args.delete_branch)
     except RuntimeError as exc:
@@ -448,6 +468,8 @@ def _cmd_merge(args: argparse.Namespace) -> int:
 
 
 def _cmd_wait(args: argparse.Namespace) -> int:
+    if args.worktrees_command:
+        return _cmd_native(args)
     deadline = time.monotonic() + args.timeout
     status: dict[str, Any] | None = None
     timed_out = False
@@ -803,7 +825,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--repo",
         required=True,
         type=_validate_repo_slug,
-        help="target GitHub repo as owner/name",
+        help="owner/name (or configured project/repository with --worktrees-command)",
     )
     status.add_argument("--number", required=True, type=int, help="pull request number")
     status.add_argument("--json", action="store_true", help="emit machine-readable JSON")
@@ -850,6 +872,12 @@ def build_parser() -> argparse.ArgumentParser:
     wait.add_argument("--timeout", type=float, default=600.0, help="give up after this many seconds")
     wait.add_argument("--json", action="store_true", help="emit machine-readable JSON")
     wait.set_defaults(handler=_cmd_wait)
+
+    for command in (status, create, merge, wait):
+        command.add_argument(
+            "--worktrees-command",
+            help="absolute attributable Worktrees command for native configured PR operations",
+        )
 
     watch = subparsers.add_parser(
         "watch", help="non-blocking subscription against the shared watch daemon"

@@ -1,0 +1,9 @@
+{
+  "comment": "Reuse configured native PR commands for status, checkout-free creation, policy-gated completion and wait without a second provider adapter.",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}

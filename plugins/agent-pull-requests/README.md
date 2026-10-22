@@ -72,10 +72,57 @@ agent-pull-requests merge  --repo <owner/repo> --number <n> [--squash|--merge|--
 agent-pull-requests wait   --repo <owner/repo> --number <n> [--interval <s>] [--timeout <s>] [--json]
 ```
 
-`create` and `merge` shell out to `gh pr create`/`gh pr merge` with an explicit
+By default these verbs retain their GitHub interface. `create` and `merge`
+shell out to `gh pr create`/`gh pr merge` with an explicit
 `--repo`/`--head` pair so no local checkout or branch context is required;
 `wait` polls `status` until the pull request reaches `MERGED` or `CLOSED`, or
 the timeout elapses (exit code `3`).
+
+### Explicit native provider commands
+
+Add `--worktrees-command <absolute-command>` to any of these four verbs to
+reuse the configured Worktrees PR command family, including Azure DevOps.
+Select the exact command from the session command catalog, not an ambient
+same-named executable. In an installation cell, the validated same-cell peer
+is authoritative instead of the legacy command hint. The selected runtime
+must support `pr-create --from-branch`, `pr-merge --now` and the versioned
+`pr-watch snapshot` contract; a missing command, invalid response or target
+configuration error refuses the operation without falling back to GitHub.
+
+```text
+agent-pull-requests status --repo <project/repository> --number <n> --worktrees-command <absolute-command> --json
+agent-pull-requests create --repo <project/repository> --head <pushed-branch> --title <t> --draft --worktrees-command <absolute-command> --json
+agent-pull-requests merge --repo <project/repository> --number <n> --worktrees-command <absolute-command> --json
+agent-pull-requests wait --repo <project/repository> --number <n> --timeout 600 --worktrees-command <absolute-command> --json
+```
+
+Native output preserves the central command's JSON shape, not the legacy
+GitHub status shape. Status and wait retain the complete validated native
+snapshot, including separate persistent votes, approval events, threads,
+policies and human gates. Wait adds `timedOut` and retains the existing exit
+codes: `0` merged, `1` closed without merging/error, `3` timed out.
+
+Create delegates to `pr-create --from-branch`. It requires a tracked caller
+worktree and a different registered target, uses the target's configured base,
+and retains central publication checks, attribution, idempotent reuse and claim
+journaling. No second claim is written here. `--base` is refused before creation:
+the central CLI does not expose that override. `claimed: false` and its recovery
+warning remain visible if the PR exists but its claim could not be recorded.
+
+Merge delegates to `pr-merge --now`; the central role/profile gate may refuse
+it. Native ADO auto-completion, policy evaluation, latest-push evidence and
+authorized bypass configuration remain owned by Worktrees. An accepted,
+pending auto-completion is not reported as a completed merge. `--auto`,
+`--merge`, `--rebase` and `--delete-branch` are refused before mutation rather
+than silently overriding repository policy. Use the central consent workflow
+for a target whose profile does not allow `--now`.
+
+Each read has a 20-second deadline; each mutation has a 90-second deadline and
+bounded output. A lost mutation response is uncertain: reconcile with native
+status before retrying, never retry through the GitHub path. On Windows,
+PowerShell command arguments travel as JSON data over stdin, preserving
+multiline bodies and quotes. Batch command shims refuse shell-sensitive
+arguments; use the catalog's PowerShell command for those inputs.
 
 ## Acknowledged watch callbacks (opt-in)
 
