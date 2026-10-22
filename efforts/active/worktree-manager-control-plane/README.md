@@ -1247,6 +1247,19 @@ claiming discipline alone.
 
 ## Journal
 
+- **2026-10-21** - Reconciled the first native Repositories Configuration
+  consumer: #6725 merged on October 18 as
+  `1911d28ad9de2fbb15f287440d72ab279f51344e`, from reviewed head
+  `ea47cc28b81b228bd0f50edd3ff036ba32d02dff`. Native provider status
+  confirms approval and successful checks. The owner CLI and production Manager
+  UI exercise registration/route/binding/tracked-pair inspection, revisioned
+  machine-local Copilot preference set/reset, native inheritance, ordinary
+  concurrent-writer conflicts and source safety. This closes #6721's bounded
+  consumer, not the whole Wave 1/2, presets, domain panels or installed/live
+  acceptance. The source worktree is being closed at the operator's request;
+  its Phase 5 binding is released back to this canonical effort for a separately
+  claimed continuation. No rollout, service or pool activation is claimed.
+
 - **2026-10-20** - Implemented explicit exact-original survivor inspection in
   the owner and Manager for the [focused recovery slice](machine-restart-recovery.md).
   Fresh hosting remains distinct from launch/seed receipts; no adoption,
