@@ -35,6 +35,12 @@ skill, documented in the table above and in **What's in this plugin** below.
 
 ## What it does (and how to use it)
 
+The on-demand [recovering-operational-locks](skills/recovering-operational-locks/SKILL.md)
+procedure also authorizes bounded operational-state hand-edits and stale-guard
+bypasses during an already-authorized repair. It preserves owner evidence,
+quarantine and actual-operation verification without permitting installed-code
+patches or weakened update gates.
+
 | Entry point | When it applies | What it does |
 |-------------|-----------------|--------------|
 | checked-in instruction projections | Every adopting repository | Loads each module's bounded owner-marked reminder without a startup output hook |

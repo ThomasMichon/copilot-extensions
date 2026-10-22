@@ -47,7 +47,7 @@ def _pid_is_live(pid: int) -> bool:
     except PermissionError:
         return True
     except OSError:
-        return False
+        return True
     return True
 
 
@@ -96,7 +96,35 @@ class _DirectoryLock(AbstractContextManager["_DirectoryLock"]):
             _fail(f"Installation lock owner receipt '{self.owner_path}' is incomplete.")
         return owner
 
+    def _create(self, deadline: float) -> None:
+        with _lock_mutation_guard(self.path, deadline=deadline):
+            self.path.mkdir()
+            owner = {
+                "schema": LOCK_SCHEMA,
+                "version": LOCK_VERSION,
+                "kind": self.kind,
+                "marketplaceId": self.marketplace_id,
+                "pluginId": self.plugin_id or "",
+                "token": self.token,
+                "host": self.host,
+                "pid": os.getpid(),
+                "acquiredAt": _utc_now(),
+            }
+            birth = _runtime_publication_process_identity(os.getpid())
+            if birth is not None:
+                owner["processIdentity"] = birth
+            try:
+                _atomic_write_json(self.owner_path, owner)
+            except BaseException:
+                if self.owner_path.exists():
+                    self.owner_path.unlink()
+                self.path.rmdir()
+                raise
+            self.acquired = True
+
     def acquire(self) -> None:
+        self.path = _lock_path(self.path)
+        self.owner_path = self.path / "owner.json"
         self.path.parent.mkdir(parents=True, exist_ok=True)
         deadline = time.monotonic() + self.timeout_seconds
         while True:
@@ -113,7 +141,7 @@ class _DirectoryLock(AbstractContextManager["_DirectoryLock"]):
                         )
                 _fail(f"Installation lock '{self.path}' remained busy.")
             try:
-                self.path.mkdir()
+                self._create(deadline)
             except FileExistsError:
                 if not self.owner_path.exists():
                     try:
@@ -142,25 +170,19 @@ class _DirectoryLock(AbstractContextManager["_DirectoryLock"]):
                 owner_host = _string_property(owner, "host")
                 owner_pid = _property(owner, "pid")
                 if owner_host == self.host:
-                    if not _pid_is_live(owner_pid):
-                        time.sleep(LOCK_POLL_SECONDS)
-                        try:
-                            current_owner = self._owner()
-                        except _FileIdentityChanged:
-                            time.sleep(LOCK_POLL_SECONDS)
-                            continue
-                        except InstallationContextError:
-                            if not self.path.exists() or not self.owner_path.exists():
+                    if _lock_owner_state(owner) == "stale":
+                        with _lock_mutation_guard(self.path, deadline=deadline):
+                            snapshot, current_owner = _lock_snapshot(self)
+                            if current_owner != dict(owner):
                                 continue
-                            raise
-                        if _string_property(current_owner, "token") != _string_property(
-                            owner, "token"
-                        ):
-                            continue
-                        _fail(
-                            f"Installation lock '{self.path}' has a stale owner "
-                            f"(host={owner_host}, pid={owner_pid}); explicit repair is required."
+                            receipt = _quarantine_stale_lock(self, snapshot)
+                        warnings.warn(
+                            f"Recovered stale installation lock '{self.path}'; "
+                            f"evidence retained at '{receipt['backupPath']}'. "
+                            "The interrupted operation still requires verification.",
+                            RuntimeWarning, stacklevel=2,
                         )
+                        continue
                     if time.monotonic() >= deadline:
                         _fail(f"Installation lock '{self.path}' remained busy.")
                     time.sleep(LOCK_POLL_SECONDS)
@@ -170,25 +192,6 @@ class _DirectoryLock(AbstractContextManager["_DirectoryLock"]):
                     f"(host={owner_host}, pid={owner_pid})."
                 )
             else:
-                owner = {
-                    "schema": LOCK_SCHEMA,
-                    "version": LOCK_VERSION,
-                    "kind": self.kind,
-                    "marketplaceId": self.marketplace_id,
-                    "pluginId": self.plugin_id or "",
-                    "token": self.token,
-                    "host": self.host,
-                    "pid": os.getpid(),
-                    "acquiredAt": _utc_now(),
-                }
-                try:
-                    _atomic_write_json(self.owner_path, owner)
-                except BaseException:
-                    if self.owner_path.exists():
-                        self.owner_path.unlink()
-                    self.path.rmdir()
-                    raise
-                self.acquired = True
                 return
 
     def assert_owned(self) -> None:
@@ -201,6 +204,10 @@ class _DirectoryLock(AbstractContextManager["_DirectoryLock"]):
     def release(self) -> None:
         if not self.acquired:
             return
+        with _lock_mutation_guard(self.path, deadline=time.monotonic() + 1):
+            self._release_directory()
+
+    def _release_directory(self) -> None:
         self.assert_owned()
         deadline = time.monotonic() + 1.0
         while True:

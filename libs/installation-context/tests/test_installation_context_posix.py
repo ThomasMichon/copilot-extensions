@@ -535,7 +535,7 @@ def test_python_lock_release_gives_each_windows_operation_a_retry_window(
     original_unlink = Path.unlink
     original_rmdir = Path.rmdir
     attempts = {"unlink": 0, "rmdir": 0}
-    moments = iter((0.0, 0.6, 0.9, 1.0, 1.5))
+    moments = iter((0.0, 0.0, 0.6, 0.9, 1.0, 1.5))
 
     def flaky_unlink(path: Path, *args: object, **kwargs: object) -> None:
         if path == lock.owner_path:
@@ -647,7 +647,7 @@ def test_stamp_blocks_a_live_install_owner(
 
 
 @pytest.mark.parametrize(("runner_name", "command"), RUNNERS)
-def test_stamp_fails_closed_on_a_dead_install_owner(
+def test_stamp_recovers_a_dead_python_owner_or_preserves_native_shell_refusal(
     tmp_path: Path,
     runner_name: str,
     command: tuple[str, ...],
@@ -675,7 +675,19 @@ def test_stamp_fails_closed_on_a_dead_install_owner(
             "acquiredAt": "2026-01-01T00:00:00Z",
         },
     )
-    result = _run(command, *arguments, check=False)
+    warning = (
+        pytest.warns(RuntimeWarning, match="Recovered stale installation lock")
+        if runner_name == "python" else contextlib.nullcontext()
+    )
+    with warning:
+        result = _run(command, *arguments, check=False)
+    if runner_name == "python":
+        assert result.returncode == 0, result.stderr
+        assert not lock.exists()
+        backups = list(lock.parent.glob(lock.name + ".recovery-*"))
+        assert len(backups) == 1
+        assert (backups[0] / "lock" / "owner.json").is_file()
+        return
     assert result.returncode != 0
     assert "stale owner" in result.stderr
     assert lock.exists()

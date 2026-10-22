@@ -23,6 +23,7 @@ py-modules = [
     "_installation_context_base",
     "_installation_context_files",
     "_installation_context_source",
+    "_installation_context_lock_recovery",
     "_installation_context_receipts",
     "_installation_context_snapshot",
     "_installation_context_runtime_slot_ownership",

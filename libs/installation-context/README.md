@@ -3,6 +3,30 @@
 Canonical, dependency-light management foundation for marketplace installation
 cells. Mutation remains explicit and non-automatic:
 
+The Python directory-lock primitive is the narrow exception for **coordination
+residue**, not installation/update admission. It records native process birth
+where supported and quarantines provably stale local owners before retrying the
+already-authorized operation. New mutation/repair writers share a kernel-held
+guard that releases on death/reboot. Live legacy owners and foreign/unknown
+owners are not stolen. The dependency-light native shell adapters retain their
+explicit-repair refusal; the Python recovery entry below can repair their
+compatible directory receipts without changing their interpreter prerequisites.
+
+The standalone `installation_context.py lock-inspect` and `lock-repair` actions
+work even when normal command dispatch is blocked. They require the exact lock
+path/kind/marketplace/plugin and bind repair to the inspection's
+`expectedEvidence`. Original bytes remain under a unique sibling
+`<lock>.recovery-<id>/lock`, with a prepared/completed `recovery.json`.
+`--allow-incomplete` inspection and `--inactive-owner-evidence` repair provide an
+explicit manual path for missing/malformed owner receipts after independent
+inactivity assessment. The evidence text is the authorized repairer's assertion,
+not automatic proof. It cannot override a valid live/foreign/unknown owner or
+unsafe/changed contents. See
+[`recovering-operational-locks`](../../plugins/agent-conduct-guidance/skills/recovering-operational-locks/SKILL.md)
+for authority and executable recipes. Never unlink permanent `.mutation-guard`
+files. A coordination repair never proves an interrupted update succeeded or
+its whole working set rolled back.
+
 - `installation_context.py` provides the stdlib-only management/runtime API and
   CLI composition root; its sibling `_installation_context_*.py` fragments keep
   the canonical Python implementation componentized while the sync tool vendors

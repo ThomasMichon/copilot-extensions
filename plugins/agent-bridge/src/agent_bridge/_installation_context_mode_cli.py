@@ -402,6 +402,18 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="action", required=True)
 
+    for action in ("lock-inspect", "lock-repair"):
+        lock_parser = subparsers.add_parser(action)
+        lock_parser.add_argument("--lock-path", required=True)
+        lock_parser.add_argument("--kind", required=True)
+        lock_parser.add_argument("--marketplace-id", required=True)
+        lock_parser.add_argument("--plugin-id")
+        if action == "lock-repair":
+            lock_parser.add_argument("--expected-evidence", required=True)
+            lock_parser.add_argument("--inactive-owner-evidence", default="")
+        else:
+            lock_parser.add_argument("--allow-incomplete", action="store_true")
+
     guest_parser = subparsers.add_parser("guest-register")
     guest_parser.add_argument("--distribution", required=True)
     guest_status_parser = subparsers.add_parser("guest-status")
@@ -680,7 +692,22 @@ def main(argv: Sequence[str] | None = None) -> int:
             if hasattr(arguments, "legacy_probe_json")
             else None
         )
-        if arguments.action == "guest-register":
+        if arguments.action in {"lock-inspect", "lock-repair"}:
+            lock_arguments = {
+                "kind": arguments.kind, "marketplace_id": arguments.marketplace_id,
+                "plugin_id": arguments.plugin_id,
+            }
+            if arguments.action == "lock-inspect":
+                result = inspect_installation_lock(
+                    arguments.lock_path, **lock_arguments, allow_incomplete=arguments.allow_incomplete,
+                )
+            else:
+                result = repair_installation_lock(
+                    arguments.lock_path, **lock_arguments,
+                    expected_evidence=arguments.expected_evidence,
+                    inactive_owner_evidence=arguments.inactive_owner_evidence,
+                )
+        elif arguments.action == "guest-register":
             result = register_guest_environment(arguments.distribution)
         elif arguments.action == "guest-status":
             result = inspect_guest_environment(distribution=arguments.distribution)
