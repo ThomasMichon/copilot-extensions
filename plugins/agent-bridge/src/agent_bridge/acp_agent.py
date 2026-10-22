@@ -64,6 +64,7 @@ from .events import SseEvent
 from .models import SessionStatus
 from .session_manager import Session, SessionManager
 from .transport import SpawnTarget
+from .privileged_plugins import PrivilegedContext
 
 log = logging.getLogger("agent-bridge")
 
@@ -227,8 +228,11 @@ class BridgeAgent(Agent):
             protocol_version,
             client_info.name if client_info else "unknown",
         )
+        from .privileged_plugins import capabilities
+
         return InitializeResponse(
             protocol_version=PROTOCOL_VERSION,
+            **capabilities(),
             agent_info=Implementation(name="agent-bridge", version=__version__),
             agent_capabilities=AgentCapabilities(
                 load_session=True,
@@ -247,15 +251,23 @@ class BridgeAgent(Agent):
         mcp_servers: list[Any] | None = None,
         **kwargs: Any,
     ) -> NewSessionResponse:
+        from .privileged_plugins import apply_context, read_context
+
+        context = read_context(kwargs, self._default_agent)
         # Adopt mode: bind this connection to an existing bridge session
         # (e.g. /acp/session/<id>) rather than spawning a new downstream agent.
         if self._adopt_session_id:
+            if context is not None:
+                raise RequestError.invalid_params("Privileged preparation cannot adopt an existing session")
             return await self._adopt_existing(
                 self._adopt_session_id, role="guest",
             )
 
         agent_name = self._default_agent
         target = await self._resolve_target(cwd, agent_name)
+        if context is not None:
+            target = apply_context(target, context)
+            return await self._start_owned_session(target, agent_name, context=context)
         singleton_slot = self._singleton_slot_key(target)
         if singleton_slot is not None:
             async with _hold_singleton_slot_lock(singleton_slot):
@@ -333,9 +345,16 @@ class BridgeAgent(Agent):
         mcp_servers: list[Any] | None = None,
         **kwargs: Any,
     ) -> LoadSessionResponse | None:
+        from .privileged_plugins import read_context, receipt, require_bound_session
+
+        context = read_context(kwargs, self._default_agent)
         session = self._sm.get_session(session_id)
         if not session:
             raise RequestError.invalid_params(f"Session '{session_id}' not found")
+        if context is not None:
+            require_bound_session(session, context)
+            if session.status != SessionStatus.STOPPED:
+                receipt(session, context)
         if session.status == SessionStatus.STOPPED:
             permission_cb = self._make_permission_callback()
             # An upstream load must land a working session: opt into the
@@ -345,9 +364,11 @@ class BridgeAgent(Agent):
             # submit_prompt's auto-resume (dotfiles#1610).
             await self._sm.resume_session(
                 session_id, permission_callback=permission_cb,
-                allow_recreate=True,
+                allow_recreate=context is None,
             )
         self._track_session(session_id)
+        if context is not None:
+            return LoadSessionResponse(field_meta=receipt(session, context))
         return LoadSessionResponse()
 
     async def resume_session(
@@ -358,6 +379,10 @@ class BridgeAgent(Agent):
         mcp_servers: list[Any] | None = None,
         **kwargs: Any,
     ) -> ResumeSessionResponse:
+        from .privileged_plugins import META_KEY
+
+        if META_KEY in kwargs:
+            raise RequestError.invalid_params("Privileged context requires session/load")
         session = self._sm.get_session(session_id)
         if not session:
             raise RequestError.invalid_params(f"Session '{session_id}' not found")
@@ -423,7 +448,7 @@ class BridgeAgent(Agent):
         )
 
     async def _start_owned_session(
-        self, target: SpawnTarget, agent_name: str | None,
+        self, target: SpawnTarget, agent_name: str | None, *, context: PrivilegedContext | None = None,
     ) -> NewSessionResponse:
         """Start a fresh owned bridge session for this connection."""
         permission_cb = self._make_permission_callback()
@@ -432,6 +457,16 @@ class BridgeAgent(Agent):
             target,
             agent_name=agent_name,
             permission_callback=permission_cb,
+            **({
+                "caller_id": context.caller_id,
+                "caller_session_id": context.caller_session_id,
+                "caller_owner_ref": context.caller_owner_ref,
+                "copilot_args": context.copilot_args,
+                "env_overrides": context.env,
+                "mcp_servers": context.mcp_servers,
+                "model": context.model,
+                "effort": context.effort,
+            } if context is not None else {}),
         )
 
         if session.status == SessionStatus.FAILED:
@@ -444,7 +479,12 @@ class BridgeAgent(Agent):
             "Upstream new_session -> bridge session %s (agent=%s)",
             session.session_id, agent_name,
         )
-        return self._session_response(session.session_id, role="owner")
+        response = self._session_response(session.session_id, role="owner")
+        if context is not None:
+            from .privileged_plugins import receipt
+
+            response.field_meta = {**(response.field_meta or {}), **receipt(session, context)}
+        return response
 
     def _singleton_slot_key(self, target: SpawnTarget) -> str | None:
         """Return the singleton-slot coordination key for guest-join targets."""

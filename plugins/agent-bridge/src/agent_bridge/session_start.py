@@ -39,6 +39,7 @@ from .session_manager import (
 from .transport import AgentProcess, SpawnTarget
 from .session_preferences import client_preferences
 from .venue_launch_policy import LaunchRefusedError
+from .privileged_plugins import relay_agent, start_client
 
 if TYPE_CHECKING:
     from .acp_client import AcpClient
@@ -156,14 +157,17 @@ class _SessionStartMixin:
                 target,
                 copilot_args=[*target.copilot_args, *copilot_args],
             )
-        if self._provider_backed_target(target):
+        privileged_relay = relay_agent(target) is not None
+        if self._provider_backed_target(target) or privileged_relay:
             target = replace(
                 target,
                 venue={
                     **(target.venue or {}),
                     _REQUEST_OVERRIDES_KEY: {
+                        **(existing_overrides if isinstance(existing_overrides, dict) else {}),
                         "env": request_env,
                         "copilot_args": request_copilot_args,
+                        **({"mcp_servers": mcp_servers} if privileged_relay else {}),
                     },
                 },
             )
@@ -356,7 +360,7 @@ class _SessionStartMixin:
             )
             if (
                 cs_target is not None or container_target is not None or target.local_plugin_preparation
-                or (target.type == "ssh" and target.static_plugin_args is not None)
+                or (target.type == "ssh" and target.static_plugin_args is not None) or privileged_relay
             ):
                 from .venue_plugins import with_controller_origin
                 target = with_controller_origin(
@@ -685,7 +689,7 @@ class _SessionStartMixin:
                     try:
                         step_started = time.monotonic()
                         await asyncio.wait_for(
-                            client.start(agent_proc.proc),
+                            start_client(client, agent_proc.proc, session),
                             timeout=self._timeouts.session_start,
                         )
                         timing.add("acp_initialize", time.monotonic() - step_started)

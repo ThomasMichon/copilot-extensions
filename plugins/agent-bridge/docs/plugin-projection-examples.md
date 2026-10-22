@@ -50,7 +50,9 @@ checkout, the daemon's working directory, or an assumed repository anchor.
 | Trusted Codespace ACP | Actual resolved checkout inside the Codespace | Every effective prepared plugin |
 | Trusted container ACP | Actual resolved checkout inside the container | Every effective prepared plugin |
 | Existing headed Codespace/container CLI owner | That same prepared venue checkout | None for identities already registered through settings |
-| Static SSH, privileged or receiver-local integration | Separate integration work; do not infer preparation from a successful connection | Not established by the ordinary local adapters |
+| Static SSH ACP | Actual remote checkout, prepared through the existing SSH owner | Every effective prepared plugin; headed SSH CLI remains separate |
+| Windows privileged ACP relay | Actual receiver-owned allocated checkout, using negotiated privileged context | Every effective prepared plugin; live elevation acceptance remains separate |
+| Wrapped or receiver-local integration | Separate integration work; do not infer preparation from a successful connection | Not established by the ordinary local adapters |
 | Restricted container | Automatic controller projection is refused | No automatic projection |
 
 The file is always `<execution-checkout>/.github/copilot/settings.local.json`.

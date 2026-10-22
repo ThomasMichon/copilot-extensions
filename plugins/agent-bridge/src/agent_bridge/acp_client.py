@@ -67,6 +67,7 @@ from .acp_preferences import (
 )
 from .acp_continuation import IdleAcpTransport, idle_operation
 from .acp_host_streams import AcpHostStreamsMixin
+from .privileged_plugins import lifecycle_rpc
 
 if TYPE_CHECKING:
     from .events import EventLog
@@ -519,18 +520,14 @@ class AcpClient(RemoteAcpClientMixin, AcpHostStreamsMixin, AcpPreferencesMixin):
     async def _init_connection(
         self, input_stream: asyncio.StreamWriter, output_stream: asyncio.StreamReader,
     ) -> None:
-        """Create + initialize the ACP ClientSideConnection over a stream pair.
-
-        ``input_stream`` is where the ACP connection *writes* (client->agent);
-        ``output_stream`` is where it *reads* (agent->client).
-        """
+        """Initialize the ACP connection over the supplied write/read streams."""
         client_impl = _BridgeClientImpl(self)
         if self._idle_transport is None:
             self._connection = ClientSideConnection(client_impl, input_stream, output_stream)
         else:
             self._connection = ClientSideConnection(client_impl, self._idle_transport)
         self._subagent_attr.install_route(self._connection)
-        await self._subagent_attr.call_with_meta(
+        self._initialize_result = await self._subagent_attr.call_with_meta(
             self._connection.initialize,
             protocol_version=PROTOCOL_VERSION,
             client_capabilities=client_capabilities(subagent_event_meta()),
@@ -561,7 +558,7 @@ class AcpClient(RemoteAcpClientMixin, AcpHostStreamsMixin, AcpPreferencesMixin):
             timing_callback("session_new_mcp_build", time.monotonic() - started)
         started = time.monotonic()
         self._subagent_attr.reset()
-        result = await self._lifecycle_rpc(
+        result = await lifecycle_rpc(self,
             self._connection.new_session,
             cwd=cwd, mcp_servers=servers,
         )
@@ -636,7 +633,7 @@ class AcpClient(RemoteAcpClientMixin, AcpHostStreamsMixin, AcpPreferencesMixin):
             if timing_callback is not None:
                 timing_callback("session_load_mcp_build", time.monotonic() - started)
             started = time.monotonic()
-            result = await self._lifecycle_rpc(
+            result = await lifecycle_rpc(self,
                 self._connection.load_session,
                 cwd=cwd, session_id=session_id,
                 mcp_servers=servers,

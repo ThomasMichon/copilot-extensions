@@ -206,9 +206,9 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/session_resume.py",
-          "sha256": "bc62b07c43e8b0e702433398bd24871891ac963ba6406b8b34e1bff54b3628f4",
-          "semantic": true,
-          "non_semantic_reason": null
+          "sha256": "58cbc6352a6c9aee8b90f40af63dcf4f92e64551123b81a57ae4ae757d016546",
+          "semantic": false,
+          "non_semantic_reason": "Privileged ACP relay initialization carries its separately negotiated version-1 launch context and treats context refusal as terminal rather than recreating an incumbent. HTTP-45 fields, response shapes, negotiation floors and existing ordinary session behavior are unchanged; privileged ACP metadata is covered by focused SDK round-trip and receiver-preparation tests."
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/session_core.py",

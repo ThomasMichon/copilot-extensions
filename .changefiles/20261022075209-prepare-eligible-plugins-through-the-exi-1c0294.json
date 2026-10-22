@@ -1,0 +1,9 @@
+{
+  "comment": "Prepare eligible plugins through the existing privileged ACP receiver after real workspace allocation, preserving caller source authority and refusing incompatible peers or incumbents.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

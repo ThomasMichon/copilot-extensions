@@ -203,8 +203,12 @@ release or authorized-rollout gates.
 - [x] Publish an HTML host/child relationship matrix and diagrams showing
   plugin source authority, projection, settings, launch and readiness, with
   implemented and still-unqualified lanes distinguished.
-- [ ] Apply the same contract to genuine remote static-registry SSH targets:
-  target-owned resolution plus control-repository payload staging.
+- [x] Apply the preparation contract to the existing genuine static-registry
+  SSH ACP owner: actual target resolution, eligible controller reflection,
+  target-native authority and complete directory arguments before productive
+  stdio. Native cross-machine skill acceptance remains in the matrix below.
+- [ ] Close supported headed static-SSH CLI integration through its existing
+  owner, without introducing another launcher.
 - [ ] Resolve the privileged launch's real identity/filesystem context and
   prepare through its supported channel; do not assume it shares the
   unprivileged account's home.
@@ -213,13 +217,13 @@ release or authorized-rollout gates.
 
 ### Phase 3 - Release and acceptance
 
-Earlier source slices through #7534 are confirmed in the promoted `main`
-snapshot from `dev` commit `9c70ad31b355de63ea76e42c367bb0cbd3670974`.
-Canonical Main state at `c6edcc9625ccebcd8c0013664370e8d2206806af` is unpaused;
-the selected preparation/readiness and fixture-maintenance bytes match the
-promoted source. This supersedes the earlier pause observation, not the
-requirement for authorized rollout or proof of the effective running version.
-The later #7841 slice and subsequent work still need their own publication.
+Current source through #7856 is confirmed in canonical Main commit
+`809fd1114af48d86ed710f56b6f2048053bc86f6`, whose unpaused release state records
+the exact `2057089fd9880843d254f3a3650f9535419f1863` Dev snapshot promoted at
+`2026-10-22T13:20:39Z`. Ten selected Bridge/shared-preparation production files
+match the merged source byte-for-byte. This includes #7841 and supersedes the
+earlier publication observation, not the requirement to verify subsequent
+slices, perform only authorized rollout or prove the effective running version.
 
 - [ ] Verify publication from `dev` to `main`; perform only authorized rollout
   through the unified update path and record the effective running version.
@@ -321,6 +325,78 @@ on malformed configuration. These are reliability details, not new authority
 or a reason to create a daemon.
 
 ## Journal
+
+### 2026-10-22 - Integrate the actual privileged receiver in source
+
+- Completed the existing owner trace: `LocalSpawner` always starts a fresh
+  Session Host under the receiver's inherited token and resolved environment.
+  Preparation belongs after its own allocation/profile merge, not inside a
+  replacement launcher or the primary's unprivileged filesystem assumptions.
+- The source candidate uses optional version-1 ACP metadata on the existing
+  authenticated elevated relay. The primary verifies controller source authority
+  separately from caller affinity and qualified allocation ownership; the
+  receiver retains its named-target registry and actual productive profile.
+  It prepares repository settings and the complete directory set before spawn,
+  binding ACP cwd to the checkout that was actually prepared.
+- Required capability and matching preparation receipts fail explicitly.
+  Legacy/mismatched incumbents cannot trigger ordinary resume's fresh-session
+  fallback. No global protocol minimum changed. The HTTP source classification
+  is implementation-only; all 456 frozen contract fixtures remain unchanged.
+- The final targeted managed suite passed 544 cases across privileged context, actual
+  SDK metadata/registration, local preparation, registry, serialization and
+  existing ACP/session lifecycle behavior. Elevation is simulated in source
+  tests, not asserted as live evidence. Review, merge and publication are still
+  pending for this candidate; the Phase 2 checkbox remains open until it lands.
+- Refined privileged controls pass 30 cases, including the actual `AcpClient`
+  lifecycle through both SDK endpoints, preserved productive HOME/global
+  settings, stopped receiver re-preparation after serialization, refusal of an
+  unprepared live incumbent, and transport-error retries that never create a
+  replacement conversation. Compatibility guards pass 351 cases with eight
+  explicitly skipped existing live/optional lanes.
+- No installed updater, shared-service restart, task registration or live
+  elevation was performed. Native privileged, different-account and combined
+  capability acceptance remain open alongside headed static SSH CLI and the
+  other parent validation lanes.
+
+### 2026-10-22 - Verify actual Main publication without installing it
+
+- Pinned canonical Main `809fd1114af48d86ed710f56b6f2048053bc86f6`.
+  Its release state is unpaused and records the exact #7856 merge
+  `2057089fd9880843d254f3a3650f9535419f1863` as the Dev snapshot promoted at
+  `2026-10-22T13:20:39Z`.
+- Compared ten actual Main production blobs, covering Bridge's static SSH
+  preparation/receiver/transport/selection and the shared Git preparation,
+  ownership and execution helpers, against that merged source. All match
+  byte-for-byte. This is published source, not an installed or running-runtime
+  result. No release-control action or updater was invoked.
+- The privileged lane trace confirms the current Windows relay is transparent
+  ACP-over-WebSocket and resolves its default agent inside the actual receiver.
+  Its `session/new` currently drops caller provenance and request overrides;
+  `requires_admin` targets also remain excluded from local preparation.
+  Continue tracing actual Session Host ownership before selecting the bounded
+  receiver-side integration. No privileged daemon was started or modified.
+
+### 2026-10-22 - Land static SSH ACP and continue the active parent
+
+- #7856 merged at `2057089fd9880843d254f3a3650f9535419f1863` after Copilot
+  approved the exact `114ac566713be161099d5024a6153216f645c820` head,
+  required checks succeeded and all four review threads were resolved.
+  The actual landed commit retains both required attribution trailers.
+- Credited only the static SSH ACP source integration. The native Windows SSH
+  preparation/cancellation controls and actual POSIX receiver cleanup controls
+  do not establish headed SSH CLI or cross-machine native skill acceptance.
+  The validation matrix, inherited simultaneous-user union, trusted-container,
+  privileged and lifecycle gates remain open.
+- A keep-alive completion initially aborted an attempted rebase safely while
+  local PR tracking still said open. Ordinary merged-state reconciliation and
+  the supported retry then advanced past the verified squash, retaining a
+  backup ref. No manual rebase/reset, worktree finalization, installed update,
+  shared-service restart or new worker campaign was performed.
+- Re-read the canonical Plan and Validation Plan after merge. Continue with
+  the privileged receiver's actual identity/filesystem and existing relay
+  channel, retaining the separate supported headed-SSH CLI obligation. Source
+  publication and authorized effective-running-version proof are not inferred
+  from this merge. This effort remains **Active**.
 
 ### 2026-10-22 - Keep probe and engine Git authority consistent
 

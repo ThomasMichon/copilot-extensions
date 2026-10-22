@@ -596,18 +596,28 @@ async def resolve_local_launch(
 
     if (
         prepare_plugins and target.type == "local" and target.local_plugin_preparation
-        and not target.elevated and not target.spawn_command
+        and not target.spawn_command
         and not target.codespace and not target.container
     ):
         from .venue_plugins import prepare_local_plugins
 
+        if target.elevated:
+            from .privileged_plugins import require_local_receiver
+
+            require_local_receiver(target)
         prepared_context = {}
         target.prepared_plugins = None
         replacement = await prepare_local_plugins(target, work_dir, env, prepared_context=prepared_context)
         target.prepared_plugins = prepared_context
+        if target.elevated and (
+            prepared_context.get("applicable") is False or not prepared_context.get("cwd")
+        ):
+            raise RuntimeError("Privileged plugin preparation requires a repository-backed checkout")
         if replacement is not None:
             launch_prefix = args[:-len(target.copilot_args)] if target.copilot_args else args
             args = [*launch_prefix, *_prepared_plugin_args(target, replacement)]
+            if target.elevated:
+                target.cwd = work_dir
     args = _wrap_batch_for_windows(args, env)
     return args, work_dir, env
 

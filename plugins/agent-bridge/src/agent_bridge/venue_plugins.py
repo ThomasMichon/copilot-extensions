@@ -30,9 +30,13 @@ async def local_plugin_request(target, workspace: str, environment: dict[str, st
     from .session_manager import _REQUEST_OVERRIDES_KEY
 
     provenance = (target.venue or {}).get(_REQUEST_OVERRIDES_KEY, {})
-    controller = await resolve_controller_cwd(
-        target, caller_session_id=provenance.get("controller_session_id"),
-    )
+    from .privileged_plugins import controller_source
+
+    verified, controller = controller_source(target)
+    if not verified:
+        controller = await resolve_controller_cwd(
+            target, caller_session_id=provenance.get("controller_session_id"),
+        )
     roots = list(dict.fromkeys([
         *([Path(controller)] if controller else []), *control_plane_anchors(),
     ]))

@@ -170,7 +170,7 @@ async def test_real_allocation_and_plan_environment_precede_barrier(tmp_path, mo
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("excluded", ["ssh", "native", "elevated", "command", "receiver", "legacy"])
+@pytest.mark.parametrize("excluded", ["ssh", "native", "legacy-elevated", "command", "receiver", "legacy"])
 async def test_deferred_paths_do_not_prepare(tmp_path, monkeypatch, excluded):
     target = target_for(tmp_path)
     options = {}
@@ -178,8 +178,9 @@ async def test_deferred_paths_do_not_prepare(tmp_path, monkeypatch, excluded):
         target.type = "ssh"
     elif excluded in {"native", "legacy"}:
         target.local_plugin_preparation = False
-    elif excluded == "elevated":
+    elif excluded == "legacy-elevated":
         target.elevated = True
+        target.local_plugin_preparation = False
     elif excluded == "command":
         target.spawn_command = ["wrapper"]
     else:

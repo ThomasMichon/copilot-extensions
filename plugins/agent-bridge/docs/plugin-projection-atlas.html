@@ -145,9 +145,9 @@
             <tr>
               <th scope="row">Privileged / elevated sub-daemon</th>
               <td>The privileged receiver's real execution checkout and supported filesystem context.</td>
-              <td>Prepare through the channel that reaches that process; do not assume plain SSH can write its stage root.</td>
-              <td>The same required outputs, with explicit failure if preparation is unsupported.</td>
-              <td><span class="status pending">Integration open</span> Not covered by ordinary unprivileged local preparation.</td>
+              <td>Negotiate context over the existing authenticated Windows ACP relay; the actual elevated receiver allocates and prepares locally.</td>
+              <td>Child-native authority, original accessible local sources, repository settings and every effective ACP directory; no implicit controller HOME forwarding.</td>
+              <td><span class="status pending">Source integrated; live acceptance open</span> Older peers and mismatched incumbents are refused, not silently recreated.</td>
             </tr>
             <tr>
               <th scope="row">Wrapped command or receiver-local launch</th>
@@ -291,7 +291,12 @@
         early-exit descendant leak and confirms cleanup on success, error,
         deadline and lost supervisor. This qualifies process cleanup, not an
         executing agent's skill set.</p>
-      <p>Those checks do not assert a new live Copilot run, privileged preparation, live trusted
+      <p>Privileged source controls additionally round-trip the optional context
+        through both actual ACP SDK connections and prepare a real allocated
+        child checkout with native-source precedence. They cover old-peer
+        refusal, request ownership and non-recreating resume, with elevation
+        simulated rather than a live admin token.</p>
+      <p>Those checks do not assert a new live Copilot run, live privileged acceptance, live trusted
         container acceptance, release promotion or installed-runtime rollout.
         Existing Codespace selected-skill evidence likewise does not close the
         full simultaneous target-user and staged-repository capability matrix.</p>
@@ -300,6 +305,7 @@
         <li><a href="startup-plugin-readiness.md">Startup readiness and task-admission contract</a></li>
         <li><a href="../tests/test_sibling_worktree_plugins.py">Linked-worktree regression</a></li>
         <li><a href="../tests/test_ssh_plugin_preparation.py">Static SSH preparation and cleanup controls</a></li>
+        <li><a href="../tests/test_privileged_plugins.py">Privileged context and receiver-registration controls</a></li>
         <li><a href="../../../efforts/active/venue-plugin-staging-parity/README.md">Canonical effort: remaining implementation and acceptance gates</a></li>
       </ul>
     </section>

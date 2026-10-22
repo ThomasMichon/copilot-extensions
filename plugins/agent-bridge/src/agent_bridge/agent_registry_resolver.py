@@ -571,7 +571,10 @@ class AgentResolver(_ProviderDiscoveryMixin):
             from . import elevated
 
             if elevated.is_process_elevated():
-                return replace(target, elevated=True)
+                return replace(
+                    target, elevated=True,
+                    local_plugin_preparation=target.type == "local" and target.static_plugin_args is not None,
+                )
         return target
 
     async def _maybe_elevated_relay(

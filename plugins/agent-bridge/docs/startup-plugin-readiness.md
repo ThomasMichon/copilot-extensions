@@ -71,8 +71,10 @@ The acquisition journal retains this semantic metadata across delivery/recovery,
 not prepared argv or secret environment. Explicit caller worktree, qualified
 owner and session context have separate optional request fields; opaque
 acquisition affinity labels are never filesystem origins. Gitless legacy
-launches remain explicitly not applicable. Existing privileged, wrapped and
-different-world exclusions are not promoted to ordinary local preparation.
+launches remain explicitly not applicable. Existing wrapped and different-world
+exclusions are not promoted to ordinary local preparation. Privileged execution
+uses the separate receiver-owned contract below, not a weakened ordinary-loopback
+identity check.
 
 For fresh/cold-resume CLI acquisition, Worktrees advertises preparation capability
 in the existing `embody` preflight. A bounded producer request is consumed after
@@ -111,6 +113,48 @@ without a native marketplace origin; CLI refuses these rather than inventing
 one, while ACP retains the complete verified directory set.
 Emitting that record does not by itself integrate a provider's seed
 delivery; each owner must explicitly consume it and withhold its typed seed.
+
+## Privileged ACP receiver
+
+The existing Windows elevated sub-daemon advertises optional
+`agent-bridge/privileged-launch` version-1 ACP initialization metadata only when
+it is actually elevated. A primary Bridge using its existing authenticated
+ACP-over-WebSocket relay requires that capability before `session/new`.
+An older receiver is refused before productive session creation; this is not
+a new global HTTP or ACP protocol floor.
+
+The primary verifies the controller's filesystem source using its own caller
+and qualified-owner context. Namespaced session metadata carries that verified
+source separately from affinity and allocation ownership, plus only explicit
+request arguments, environment, MCP and model/effort overrides and the existing
+preference-source/context policy. It does not carry the primary's ambient
+environment, home, credential stores or registry. A different receiver account need
+not have the same Worktrees registry; the original same-filesystem local source
+must still be accessible to it, or preparation fails explicitly.
+
+The receiver resolves the named agent through its own registry. Only an actual
+local elevated static target can consume this context; opaque wrappers, SSH,
+containers and adoption are not promoted by a `requires_admin` label. Its
+existing worktree owner allocates the checkout and merges the productive
+profile before canonical local preparation. Child-native sources and explicit
+disables retain precedence. Settings and every effective ACP directory are
+prepared there before the fresh Session Host starts, and ACP uses that same
+allocated cwd. No alternate launcher, account, elevation method, authentication
+path or native reload is introduced.
+
+The session response confirms the exact launch context after preparation.
+Load requires that same persisted context and an actual prepared launch;
+stopped sessions re-prepare through the existing owner. Legacy or mismatched
+incumbents are not retrofitted, adopted or silently replaced by a new
+conversation. This refusal is terminal even when ordinary resume allows a
+fresh-conversation fallback. Old callers without the metadata keep their
+existing ACP shape; already-elevated static launches can prepare their own
+receiver-native selection.
+
+Source tests exercise SDK metadata and real registration with a simulated
+elevation predicate. They do not prove a live Windows admin token, a second
+account's access, installed rollout or native privileged skill acceptance.
+Those remain separate authorized validation lanes.
 
 ## Productive joined-session observation
 

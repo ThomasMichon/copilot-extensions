@@ -513,6 +513,16 @@ This presents agent-bridge as an ACP-compatible agent for chat UIs that
 connect via ACP protocol directly. The bridge routes prompts to the named
 downstream agent.
 
+The Windows privileged relay retains this existing ACP channel and the
+receiver's own target registry. Its optional, versioned launch-context metadata
+carries verified controller source authority and explicit request overrides,
+without forwarding ambient HOME or account state. The actual local elevated
+owner prepares plugins in its allocated checkout before starting a fresh
+Session Host. An older receiver or mismatched incumbent is refused before task
+delivery, not recreated around. See
+[privileged receiver preparation](startup-plugin-readiness.md#privileged-acp-receiver)
+for the compatibility, cwd and acceptance boundaries.
+
 ## Deployment
 
 ### Declared lifecycle tier (per `service-lifecycle-supervision`)
