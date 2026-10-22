@@ -19,7 +19,7 @@ from agent_dispatch.execution_scope_binding import resolve_execution_installatio
 from agent_dispatch.queue import TaskQueue
 from agent_dispatch.queue_execution_runtimes import CoordinatorExecutionRuntime
 from agent_dispatch.queue_execution_scopes import ExecutionScopeBinding
-from agent_dispatch.queue_execution_wakes import Wake, wake_table
+from agent_dispatch.queue_execution_wakes import Wake, WakeSendAdmission, wake_table
 from agent_dispatch.queue_records import TaskError
 from agent_dispatch.run_waiter_wake import drain_run_waiter_wakes
 from agent_dispatch.wake import drain_wake_outbox
@@ -374,3 +374,133 @@ def test_wake_history_keeps_qualification_when_binding_records_are_missing(
     monkeypatch.setattr(sender, "LoopGovernance", lambda: _governance(state))
     with pytest.raises((TaskError, ValueError)):
         deliver_execution_wake(queue, wake, INCARNATION, lambda: pytest.fail("historical fallback"))
+
+
+def test_no_reservation_unknown_wake_fences_replacement_logical_workspace(cohort: Cohort) -> None:
+    queue, pending, _binding = cohort
+    wake = _claim(queue, pending)
+    with queue._connect() as conn:
+        conn.execute("UPDATE tasks SET dedup_key = 'logical-lane' WHERE id = ?", (wake.task_id,))
+        conn.commit()
+    assert queue.latest_reservation(wake.task_id) is None
+    assert deliver_execution_wake(queue, wake, INCARNATION, lambda: False) is False
+    queue.abandon(wake.task_id, permitted=True, reason="synthetic terminal bookkeeping")
+    replacement = queue.create("replacement", repo=REPO, dedup_key="logical-lane")
+    # Same dedup text in another repository is a separate logical workspace.
+    other = queue.create("other", repo="example/other", dedup_key="logical-lane")
+    assert queue.reserve_spawn(other.id)[1] is True
+    with pytest.raises(TaskError, match="unresolved execution wake"):
+        queue.reserve_spawn(replacement.id)
+    row = _row(queue, wake)
+    queue.settle_execution_wake(
+        wake, WakeSendAdmission(row["execution_send"], True),
+        outcome="not_sent", detail="synthetic authoritative absence",
+    )
+    assert queue.reserve_spawn(replacement.id)[1] is True
+
+
+@pytest.mark.parametrize("next_kind", ["owner", "waiter"])
+@pytest.mark.parametrize("outcome", ["pending", "unknown"])
+def test_shared_key_refusal_preserves_unsent_wake_retry_budget(
+    cohort: Cohort, next_kind: str, outcome: str,
+) -> None:
+    queue, pending, _binding = cohort
+    wake = _claim(queue, pending)
+    with queue._connect() as conn:
+        conn.execute("UPDATE tasks SET exclusive_key = 'blocked-lane' WHERE id = ?", (wake.task_id,))
+        conn.commit()
+    provenance = sender.CoordinatorExecutionProvenance(queue, queue.get(wake.task_id), INCARNATION).prepare()
+    admission = queue.admit_execution_wake(wake, provenance=provenance)
+    if outcome == "unknown":
+        queue.settle_execution_wake(wake, admission, outcome="unknown", detail="synthetic lost response")
+    next_wake = _next_shared_wake(queue, next_kind)
+    for _ in range(10):
+        assert _claim(queue, next_wake) is None
+    assert _row(queue, next_wake)["attempts"] == 0
+    assert _row(queue, next_wake)["status"] == "pending"
+    queue.settle_execution_wake(wake, admission, outcome="sent", detail="synthetic accepted response")
+    current = _claim(queue, next_wake)
+    assert current is not None and current.id == next_wake.id
+    assert deliver_execution_wake(queue, current, None, lambda: True)
+    assert _finish(queue, current, delivered=True).status == "delivered"
+
+
+def _next_shared_wake(queue: TaskQueue, kind: str) -> Wake:
+    task = queue.create("next", repo=REPO, exclusive_key="blocked-lane")
+    queue.claim_one("host/next", task_id=task.id)
+    queue.start(task.id, "host/next", owner_session_id="session-next")
+    queue.suspend(task.id, "host/next", reason="external")
+    if kind == "owner":
+        queue.resume(task.id, "host/next", wake_requested=True)
+        [next_wake] = queue.list_wakes(task.id)
+    else:
+        waiter = queue.register_run_waiter(
+            task.id, pid=456, host="host", start_token="next-start",
+            resume_worktree="host/next", command=["synthetic-wait"],
+        )
+        queue.recover_dead_run_waiter(
+            task.id, generation=waiter["generation"], reason="external",
+            message="continue", sender="recovery",
+        )
+        [next_wake] = queue.list_run_waiter_wakes(task.id)
+    return next_wake
+
+
+@pytest.mark.parametrize("next_kind", ["owner", "waiter"])
+def test_custody_appearing_after_claim_does_not_spend_transport_budget(
+    cohort: Cohort, monkeypatch: pytest.MonkeyPatch, next_kind: str,
+) -> None:
+    queue, pending, _binding = cohort
+    wake = _claim(queue, pending)
+    with queue._connect() as conn:
+        conn.execute("UPDATE tasks SET exclusive_key = 'blocked-lane' WHERE id = ?", (wake.task_id,))
+        conn.commit()
+    next_wake = _next_shared_wake(queue, next_kind)
+    provenance = sender.CoordinatorExecutionProvenance(queue, queue.get(wake.task_id), INCARNATION).prepare()
+    original = queue.admit_execution_wake
+    admissions = []
+    deliveries = []
+
+    def admit(candidate: Wake, **kwargs: Any) -> WakeSendAdmission:
+        if candidate.id == next_wake.id and not admissions:
+            admissions.append(original(wake, provenance=provenance))
+        return original(candidate, **kwargs)
+
+    monkeypatch.setattr(queue, "admit_execution_wake", admit)
+
+    def deliver(*args: Any) -> bool:
+        deliveries.append(args)
+        return True
+
+    async def scenario() -> None:
+        drain = (
+            drain_wake_outbox(queue, EventBus(), deliver=deliver, interval=0.01, max_attempts=1)
+            if next_kind == "owner"
+            else drain_run_waiter_wakes(queue, deliver=deliver, interval=0.01, max_attempts=1)
+        )
+        loop = asyncio.create_task(drain)
+        try:
+            for _ in range(100):
+                row = _row(queue, next_wake)
+                if admissions and row["status"] == "pending":
+                    assert row["attempts"] == 0 and deliveries == []
+                    queue.settle_execution_wake(
+                        wake, admissions[0], outcome="sent", detail="synthetic late acceptance",
+                    )
+                    break
+                await asyncio.sleep(0.01)
+            else:
+                raise AssertionError("unsent wake did not defer")
+            for _ in range(100):
+                if _row(queue, next_wake)["status"] == "delivered":
+                    break
+                await asyncio.sleep(0.01)
+            else:
+                raise AssertionError("reconciled wake was not deliverable")
+        finally:
+            loop.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await loop
+
+    asyncio.run(scenario())
+    assert len(deliveries) == 1

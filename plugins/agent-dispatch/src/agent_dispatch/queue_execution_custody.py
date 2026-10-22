@@ -15,6 +15,10 @@ SendKind = Literal["launch", "resume", "deliver", "redrive"]
 SendOutcome = Literal["sent", "not_sent", "unknown"]
 
 
+class ExecutionSendUnresolved(TaskError):
+    """Admission is deferred until an earlier transport outcome is reconciled."""
+
+
 @dataclass(frozen=True)
 class ExecutionSendIdentity:
     scope: ExecutionScope
@@ -103,7 +107,7 @@ def require_execution_send_reconciliation(
         conn, task_id, exclusive_key=exclusive_key, creation_prefix=creation_prefix
     )
     if wake is not None:
-        raise TaskError(
+        raise ExecutionSendUnresolved(
             f"unresolved execution wake send {wake['id']!r} has unresolved transport custody;"
             " reconcile its transport outcome"
         )
@@ -123,7 +127,7 @@ def require_execution_send_reconciliation(
         ),
     ).fetchone()
     if row is not None:
-        raise TaskError(
+        raise ExecutionSendUnresolved(
             f"unresolved execution send {row['send_id']!r} ({row['state']})"
             f" on reservation {row['reservation_key']!r};"
             " reconcile its transport outcome before retrying execution"

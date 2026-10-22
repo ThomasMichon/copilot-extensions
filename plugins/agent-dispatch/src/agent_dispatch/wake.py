@@ -8,6 +8,7 @@ from collections.abc import Callable
 
 from .events import EventBus
 from .coordinator_execution_wakes import deliver_execution_wake
+from .queue_execution_custody import ExecutionSendUnresolved
 from .queue import (
     DEFAULT_WAKE_DELIVERY_LEASE_SECONDS,
     TaskError,
@@ -126,6 +127,15 @@ async def drain_wake_outbox(
                 ),
             )
             delivery_error = None if delivered else "bridge delivery unavailable"
+        except ExecutionSendUnresolved as exc:
+            log.info("wake transport deferred for %s: %s", wake.id, exc)
+            try:
+                result = await asyncio.to_thread(queue.defer_execution_wake, wake, detail=str(exc))
+            except TaskError:
+                log.info("wake delivery ownership changed for %s", wake.id)
+            else:
+                bus.publish(_event(result))
+            continue
         except Exception as exc:
             log.warning("wake delivery raised for %s", wake.id, exc_info=True)
             delivered = False

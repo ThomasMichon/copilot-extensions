@@ -8,6 +8,7 @@ from collections.abc import Callable
 
 from .queue import TaskError, TaskQueue
 from .coordinator_execution_wakes import deliver_execution_wake
+from .queue_execution_custody import ExecutionSendUnresolved
 from .queue_run_waiter_transition_cleanup import CLAIM_RELEASE_SENDER
 
 DeliverWake = Callable[[str, str, str, str, str, str | None], bool]
@@ -91,6 +92,13 @@ async def drain_run_waiter_wakes(
                     ),
                 )
             delivery_error = None if delivered else "bridge delivery unavailable"
+        except ExecutionSendUnresolved as exc:
+            log.info("run-waiter wake transport deferred for %s: %s", wake.id, exc)
+            try:
+                await asyncio.to_thread(queue.defer_execution_wake, wake, detail=str(exc))
+            except TaskError:
+                log.info("run-waiter wake delivery ownership changed for %s", wake.id)
+            continue
         except Exception as exc:
             log.warning("run-waiter wake delivery raised for %s", wake.id, exc_info=True)
             delivered = False

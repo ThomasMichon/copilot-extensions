@@ -28,6 +28,7 @@ from .queue_common import (
 )
 from .queue_records import SpawnState, Status, TaskError
 from .queue_execution_handoff import require_execution_admission
+from .queue_execution_wakes import wake_custody_clear_sql
 from .registrations import RegistrationKind, RegistrationStatus
 from .steering import SteeringError, steer_request_fingerprint
 
@@ -605,12 +606,7 @@ class QueueSteeringMixin:
                     "SELECT * FROM wake_outbox"
                     " WHERE status = 'pending' AND not_before <= ?"
                     " AND (execution_send_state = 'sent' OR ("
-                    " NOT EXISTS (SELECT 1 FROM wake_outbox w"
-                    " WHERE w.task_id = wake_outbox.task_id"
-                    " AND w.execution_send_state IN ('pending', 'unknown'))"
-                    " AND NOT EXISTS (SELECT 1 FROM run_waiter_wakes w"
-                    " WHERE w.task_id = wake_outbox.task_id"
-                    " AND w.execution_send_state IN ('pending', 'unknown'))"
+                    + wake_custody_clear_sql("wake_outbox") +
                     " AND NOT EXISTS (SELECT 1 FROM execution_admission_closures c"
                     " JOIN tasks t ON t.repo = c.repo AND t.source = c.source"
                     " WHERE t.id = wake_outbox.task_id)))"

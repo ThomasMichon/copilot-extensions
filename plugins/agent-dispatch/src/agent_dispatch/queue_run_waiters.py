@@ -9,6 +9,7 @@ from typing import Any
 
 from .queue_common import PROGRESS_SUMMARY_MAX, RunWaiterWakeOperation, Task, _clip
 from .queue_records import Status, TaskError
+from .queue_execution_wakes import wake_custody_clear_sql
 from .queue_run_waiter_transition_cleanup import CLAIM_RELEASE_SENDER
 from .queue_delegated_waiters import DelegatedWaiterBindingMixin
 from .queue_run_waiter_records import run_waiter_from_row, select_waiter_row
@@ -728,12 +729,7 @@ class QueueRunWaitersMixin(DelegatedWaiterBindingMixin):
                 row = conn.execute(
                     "SELECT * FROM run_waiter_wakes WHERE status = 'pending' AND not_before <= ?"
                     " AND (sender = ? OR execution_send_state = 'sent' OR ("
-                    " NOT EXISTS (SELECT 1 FROM wake_outbox w"
-                    " WHERE w.task_id = run_waiter_wakes.task_id"
-                    " AND w.execution_send_state IN ('pending', 'unknown'))"
-                    " AND NOT EXISTS (SELECT 1 FROM run_waiter_wakes w"
-                    " WHERE w.task_id = run_waiter_wakes.task_id"
-                    " AND w.execution_send_state IN ('pending', 'unknown'))"
+                    + wake_custody_clear_sql("run_waiter_wakes") +
                     " AND NOT EXISTS (SELECT 1 FROM execution_admission_closures c"
                     " JOIN tasks t ON t.repo = c.repo AND t.source = c.source"
                     " WHERE t.id = run_waiter_wakes.task_id)))"

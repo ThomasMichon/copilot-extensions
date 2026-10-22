@@ -157,6 +157,9 @@ handoff support.
 - Accepted owner delivery is not repeated when finishing or detached claim
   release needs a retry. Cleanup-only claim releases remain outside owner
   execution custody, including after closure.
+- Review follow-through retains repository/dedup lineage for directly claimed
+  tasks without reservations. Both selectors defer shared-lineage conflicts,
+  and a late custody refusal preserves the unsent wake's transport retry budget.
 - This advances Phase 2 only. Supervisor enrollment and other senders, legacy
   qualification, adopter effects, acknowledgement and handback remain open.
   Source/test work does not establish release, installation or running adoption.

@@ -31,7 +31,12 @@ expiry. It cannot be reset to pending delivery, reclaimed, overwritten by a new
 delivery token or hidden by a newer wake in either outbox for that task.
 Reservation retry/rearm checks also refuse unresolved wake custody for the same
 task or shared exclusive execution key; new reservations retain the existing
-logical-workspace lineage check across task IDs.
+logical-workspace lineage check across task IDs. Repository/dedup identity
+matches directly claimed tasks even when no reservation was ever created.
+Both selectors defer conflicting task/key/logical-workspace wakes before
+leasing them. If unresolved custody appears after a lease but before final
+admission, the drainer returns that unsent wake to pending without spending
+its transport retry budget; settlement makes it eligible again.
 Reconciliation requires the original retained send identity and actual transport
 evidence; an expired lease is not that evidence. There is no public reconciliation
 endpoint or automatic timeout-to-absence conversion.

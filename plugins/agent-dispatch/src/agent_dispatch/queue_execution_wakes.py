@@ -34,6 +34,30 @@ class WakeSendAdmission:
     send_required: bool
 
 
+def _wake_lineage_match(retained: str, current: str) -> str:
+    # Queue identity is common; repository/dedup define workspace identity even
+    # for directly claimed tasks that never had a spawn reservation.
+    return (
+        f"({retained}.id = {current}.id"
+        f" OR {retained}.exclusive_key = {current}.exclusive_key"
+        f" OR ({retained}.repo = {current}.repo"
+        f" AND {retained}.dedup_key = {current}.dedup_key))"
+    )
+
+
+def wake_custody_clear_sql(outbox: str) -> str:
+    if outbox not in TABLES:
+        raise TaskError("unknown execution wake outbox")
+    return " AND ".join(
+        f"NOT EXISTS (SELECT 1 FROM {table} w"
+        " JOIN tasks retained ON retained.id = w.task_id"
+        f" JOIN tasks current ON current.id = {outbox}.task_id"
+        " WHERE w.execution_send_state IN ('pending', 'unknown') AND "
+        + _wake_lineage_match("retained", "current") + ")"
+        for table in TABLES
+    )
+
+
 def unresolved_wake_send(
     conn: sqlite3.Connection, task_id: str, *,
     exclusive_key: str | None = None, creation_prefix: str | None = None,
@@ -42,9 +66,10 @@ def unresolved_wake_send(
         row = conn.execute(
             f"SELECT w.id, w.execution_send_state FROM {table} w"
             " JOIN tasks t ON t.id = w.task_id"
+            " JOIN tasks current ON current.id = ?"
             " LEFT JOIN spawn_reservations r ON r.task_id = t.id"
             " WHERE w.execution_send_state IN ('pending', 'unknown')"
-            " AND (w.task_id = ? OR t.exclusive_key = ?"
+            " AND (" + _wake_lineage_match("t", "current") + " OR t.exclusive_key = ?"
             " OR (? IS NOT NULL AND r.creation_key LIKE ?)) LIMIT 1",
             (
                 task_id, exclusive_key, creation_prefix,
@@ -69,6 +94,33 @@ class QueueExecutionWakesMixin:
                 if name not in columns:
                     conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} TEXT")
         conn.commit()
+
+    def defer_execution_wake(self, wake: Wake, *, detail: str) -> Wake:
+        """A pre-transport custody refusal does not spend a delivery attempt."""
+        table = wake_table(wake)
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(f"SELECT * FROM {table} WHERE id = ?", (wake.id,)).fetchone()
+            if row is None or (
+                row["status"] != "delivering" or row["delivery_token"] != wake.delivery_token
+            ):
+                raise TaskError("wake deferral requires the current delivery token")
+            if row["execution_send"] is None:
+                ts = self._now(None)
+                conn.execute(
+                    f"UPDATE {table} SET status = 'pending', attempts = MAX(0, attempts - 1),"
+                    " delivery_token = NULL, delivery_expires_at = NULL,"
+                    " last_error = ?, updated_at = ? WHERE id = ?",
+                    (detail, ts, wake.id),
+                )
+                if table == "wake_outbox":
+                    conn.execute(
+                        "UPDATE tasks SET wake_status = 'pending' WHERE id = ? AND wake_operation_id = ?",
+                        (wake.task_id, wake.id),
+                    )
+            result = conn.execute(f"SELECT * FROM {table} WHERE id = ?", (wake.id,)).fetchone()
+            conn.commit()
+        return WakeOperation._from_row(result) if table == "wake_outbox" else RunWaiterWakeOperation._from_row(result)
 
     def admit_execution_wake(
         self,
