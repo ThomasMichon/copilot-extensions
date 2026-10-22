@@ -15,6 +15,7 @@ from pr_test_helpers import _stub_remote_target
 from agent_worktrees import pr_break_glass as recovery
 from agent_worktrees import config as cfg, finalize, finalize_cli, git_ops, pr_ops, pr_publish, pr_rewrite, tracking
 from agent_worktrees.providers.base import PullResult
+from agent_worktrees import pr_recovery
 
 pytestmark = [
     pytest.mark.contract("agent_worktrees.pr.operator_recovery"),
@@ -233,6 +234,113 @@ def _recovered_pr(pr_repo, monkeypatch: pytest.MonkeyPatch, *, stub_attribution=
     return config, wid, wt, remote, old, record.pr.branch
 
 
+@pytest.fixture(scope="session")
+def _recovered_pr_seed(tmp_path_factory, _pr_repo_seed):
+    from conftest import _copy_pr_repo, _published_seed_environment, _seed_directory
+
+    with _seed_directory(tmp_path_factory, "recovered-pr") as (seed, build):
+        if build:
+            with _published_seed_environment(tmp_path_factory) as patch:
+                _recovered_pr(_copy_pr_repo(_pr_repo_seed, seed, patch), patch)
+        return seed
+
+
+def _copy_recovered_pr(seed, tmp_path, monkeypatch):
+    from conftest import _copy_pr_repo
+
+    config, wid, wt, remote = _copy_pr_repo(seed, tmp_path, monkeypatch)
+    config = replace(config, repos={
+        config.repo_name: replace(config.default_repo, pr=replace(
+            config.default_repo.pr, head_scheme="refspec",
+        )),
+    })
+    record = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+    if record.pr.rewrite_identity:
+        record.pr.rewrite_identity = pr_publish._identity(str(remote), str(wt))
+    record.pr.pr_revision += 1
+    tracking.save_record(record)
+    old, branch = record.pr.head_sha, record.pr.branch
+    monkeypatch.setattr(cfg, "load_config", lambda *a, **k: config)
+    monkeypatch.setattr(git_ops, "remote_slug", lambda *a, **k: "example/project")
+    _stub_remote_target(monkeypatch, None, "example/project")
+    monkeypatch.setattr(pr_rewrite, "observe_pr", lambda config, pr: PullResult(
+        number=pr.number, head_sha=pr_publish._tip("origin", pr.branch, str(wt)),
+        head_ref=pr.branch, head_url=str(remote),
+    ))
+    monkeypatch.setattr(pr_ops, "refresh_head_observation", lambda *a: "")
+    monkeypatch.setattr(pr_ops, "refresh_source_attribution", lambda *a: "")
+    return config, wid, wt, remote, old, branch
+
+
+@pytest.fixture
+def recovered_pr(tmp_path, monkeypatch, _recovered_pr_seed):
+    """Copy prepared recovery state; each test still performs its own recovery."""
+    return _copy_recovered_pr(_recovered_pr_seed, tmp_path, monkeypatch)
+
+
+def test_recovered_copies_isolate_commits_refs_records_and_files(
+    _recovered_pr_seed, tmp_path,
+):
+    seed = _recovered_pr_seed
+    before = {
+        path.relative_to(seed): path.read_bytes()
+        for path in seed.rglob("*") if path.is_file()
+    }
+    with pytest.MonkeyPatch.context() as patch:
+        config, wid, wt, remote, saved, branch = _copy_recovered_pr(
+            seed, tmp_path / "first", patch,
+        )
+        source = git_ops.git("rev-parse", "HEAD", cwd=wt).stdout.strip()
+        assert not pr_recovery._path(str(wt)).exists()
+        record_path = cfg.tracking_dir() / f"{wid}.yaml"
+        current = tracking.load_record(record_path)
+        assert current.pr.rewrite_identity == ""
+        assert config.default_repo.pr.head_scheme == "refspec"
+        (wt / "first-copy.txt").write_text("first copy only\n")
+        git_ops.git("add", "first-copy.txt", cwd=wt)
+        git_ops.git("commit", "-m", "first copy only", cwd=wt)
+        git_ops.git("update-ref", "refs/isolation-test/first", "HEAD", cwd=wt)
+        git_ops.git(
+            "push", "origin", f"HEAD:refs/heads/{branch}",
+            f"--force-with-lease=refs/heads/{branch}:{saved}", cwd=wt,
+        )
+        current.title = "first-copy-only"
+        tracking.save_record(current)
+        (remote / "hooks" / "first-only").write_text("private hook\n")
+    with pytest.MonkeyPatch.context() as patch:
+        _, wid, wt, remote, second_saved, second_branch = _copy_recovered_pr(
+            seed, tmp_path / "second", patch,
+        )
+        assert second_saved == saved and second_branch == branch
+        assert not (wt / "first-copy.txt").exists()
+        assert not (remote / "hooks" / "first-only").exists()
+        assert git_ops.git("rev-parse", "HEAD", cwd=wt).stdout.strip() == source
+        assert pr_publish._tip("origin", branch, str(wt)) == saved
+        assert git_ops.git(
+            "show-ref", "--verify", "refs/isolation-test/first", cwd=wt, check=False,
+        ).returncode != 0
+        assert tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml").title != "first-copy-only"
+    assert {
+        path.relative_to(seed): path.read_bytes()
+        for path in seed.rglob("*") if path.is_file()
+    } == before
+
+
+def test_recovered_copy_remaps_only_existing_rewrite_identity(_recovered_pr_seed, tmp_path):
+    first = tmp_path / "first"
+    with pytest.MonkeyPatch.context() as patch:
+        _, wid, wt, _, _, _ = _copy_recovered_pr(_recovered_pr_seed, first, patch)
+        current = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        current.pr.rewrite_identity = pr_publish.push_identity("origin", cwd=str(wt))
+        original_identity = current.pr.rewrite_identity
+        tracking.save_record(current)
+    with pytest.MonkeyPatch.context() as patch:
+        _, wid, wt, _, _, _ = _copy_recovered_pr(first, tmp_path / "second", patch)
+        current = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        assert current.pr.rewrite_identity == pr_publish.push_identity("origin", cwd=str(wt))
+        assert current.pr.rewrite_identity != original_identity
+
+
 @pytest.mark.guard
 @pytest.mark.timeout(120)
 @pytest.mark.parametrize("source_repository", ["project", "other"])
@@ -266,9 +374,14 @@ def test_azure_recovery_preview_matches_ssh_destination(
 @pytest.mark.guard
 @pytest.mark.timeout(120)
 def test_real_recovery_requires_confirmation_and_retains_commits(
-    pr_repo, monkeypatch: pytest.MonkeyPatch,
+    recovered_pr, _recovered_pr_seed, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    config, wid, wt, remote, old, branch = _recovered_pr(pr_repo, monkeypatch)
+    config, wid, wt, remote, old, branch = recovered_pr
+    seed_record = _recovered_pr_seed / "tracking" / f"{wid}.yaml"
+    seed_before = seed_record.read_bytes()
+    seed_refs = git_ops.git(
+        "--git-dir", str(_recovered_pr_seed / "remote.git"), "show-ref", cwd=wt,
+    ).stdout
     source = git_ops.git("rev-parse", "HEAD", cwd=str(wt)).stdout.strip()
     assert not finalize.push_changes(wid, config, rewrite_pr=True)
     before = (cfg.tracking_dir() / f"{wid}.yaml").read_bytes()
@@ -291,13 +404,17 @@ def test_real_recovery_requires_confirmation_and_retains_commits(
     assert audit["outcome"] == "succeeded"
     for name, expected in (("source", source), ("published", old)):
         assert git_ops.git("rev-parse", audit["recovery_refs"][name], cwd=str(wt)).stdout.strip() == expected
+    assert seed_record.read_bytes() == seed_before
+    assert git_ops.git(
+        "--git-dir", str(_recovered_pr_seed / "remote.git"), "show-ref", cwd=wt,
+    ).stdout == seed_refs
 
 
 @pytest.mark.timeout(120)
 def test_real_recovery_refuses_unseen_local_commit(
-    pr_repo, monkeypatch: pytest.MonkeyPatch,
+    recovered_pr, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    config, wid, wt, _remote, old, branch = _recovered_pr(pr_repo, monkeypatch)
+    config, wid, wt, _remote, old, branch = recovered_pr
     with pytest.raises(recovery.ConfirmationRequired) as required:
         finalize.push_changes(wid, config, break_glass_reason="Approved recovered plan")
     (wt / "later.txt").write_text("not previewed\n")
@@ -313,11 +430,11 @@ def test_real_recovery_refuses_unseen_local_commit(
 
 @pytest.mark.timeout(120)
 def test_recovery_cli_returns_bound_preview_json(
-    pr_repo, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str],
+    recovered_pr, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str],
 ) -> None:
     from agent_worktrees import __main__ as cli
 
-    config, wid, wt, _remote, old, branch = _recovered_pr(pr_repo, monkeypatch)
+    config, wid, wt, _remote, old, branch = recovered_pr
     monkeypatch.setattr(cfg, "load_config", lambda *a, **k: config)
     monkeypatch.chdir(wt)
     capfd.readouterr()
@@ -334,10 +451,10 @@ def test_recovery_cli_returns_bound_preview_json(
 
 
 @pytest.mark.timeout(120)
-def test_recovery_cli_selects_target_project_from_other_cwd(pr_repo, monkeypatch, capfd):
+def test_recovery_cli_selects_target_project_from_other_cwd(recovered_pr, monkeypatch, capfd):
     from agent_worktrees import __main__ as cli
 
-    config, wid, wt, _remote, old, branch = _recovered_pr(pr_repo, monkeypatch)
+    config, wid, wt, _remote, old, branch = recovered_pr
     selected = cfg.tracking_dir()
     caller = wt.parent / "caller-context"
     caller.mkdir()
@@ -373,9 +490,9 @@ def test_recovery_cli_selects_target_project_from_other_cwd(pr_repo, monkeypatch
 @pytest.mark.timeout(120)
 @pytest.mark.parametrize("defect", ["moved", "deleted", "provider-head", "protected", "dirty", "hook"])
 def test_recovery_keeps_transport_and_protected_history_gates(
-    pr_repo, monkeypatch: pytest.MonkeyPatch, defect: str,
+    recovered_pr, monkeypatch: pytest.MonkeyPatch, defect: str,
 ) -> None:
-    config, wid, wt, remote, old, branch = _recovered_pr(pr_repo, monkeypatch)
+    config, wid, wt, remote, old, branch = recovered_pr
     with pytest.raises(recovery.ConfirmationRequired) as required:
         finalize.push_changes(wid, config, break_glass_reason="Approved recovered plan")
     if defect == "moved":
@@ -416,8 +533,8 @@ def test_recovery_keeps_transport_and_protected_history_gates(
 
 @pytest.mark.timeout(120)
 @pytest.mark.parametrize("race", ["remote", "local"])
-def test_recovery_transport_pins_approved_objects(pr_repo, monkeypatch, race):
-    config, wid, wt, remote, old, branch = _recovered_pr(pr_repo, monkeypatch)
+def test_recovery_transport_pins_approved_objects(recovered_pr, monkeypatch, race):
+    config, wid, wt, remote, old, branch = recovered_pr
     source = git_ops.git("rev-parse", "HEAD", cwd=str(wt)).stdout.strip()
     moved = git_ops.git("rev-parse", "origin/master", cwd=str(wt)).stdout.strip()
     with pytest.raises(recovery.ConfirmationRequired) as required:
@@ -441,8 +558,8 @@ def test_recovery_transport_pins_approved_objects(pr_repo, monkeypatch, race):
 
 @pytest.mark.timeout(120)
 @pytest.mark.parametrize("remote_state", ["accepted", "unchanged", "unreadable", "changed"])
-def test_recovery_reconciles_failed_transport_before_audit(pr_repo, monkeypatch, remote_state, capfd):
-    config, wid, wt, remote, old, branch = _recovered_pr(pr_repo, monkeypatch)
+def test_recovery_reconciles_failed_transport_before_audit(recovered_pr, monkeypatch, remote_state, capfd):
+    config, wid, wt, remote, old, branch = recovered_pr
     source = git_ops.git("rev-parse", "HEAD", cwd=str(wt)).stdout.strip()
     moved = git_ops.git("rev-parse", "origin/master", cwd=str(wt)).stdout.strip()
     with pytest.raises(recovery.ConfirmationRequired) as required:
@@ -482,8 +599,8 @@ def test_recovery_reconciles_failed_transport_before_audit(pr_repo, monkeypatch,
 
 
 @pytest.mark.timeout(120)
-def test_recovery_missing_tip_fetch_is_bounded_and_audited(pr_repo, monkeypatch):
-    config, wid, wt, _remote, old, branch = _recovered_pr(pr_repo, monkeypatch)
+def test_recovery_missing_tip_fetch_is_bounded_and_audited(recovered_pr, monkeypatch):
+    config, wid, wt, _remote, old, branch = recovered_pr
     with pytest.raises(recovery.ConfirmationRequired) as required:
         finalize.push_changes(wid, config, break_glass_reason="Approved recovered plan")
     real_git = git_ops.git
@@ -516,8 +633,8 @@ def test_recovery_missing_tip_fetch_is_bounded_and_audited(pr_repo, monkeypatch)
 
 @pytest.mark.timeout(120)
 @pytest.mark.parametrize("failure", ["begin", "tracking", "finish"])
-def test_recovery_audit_failures_report_actual_transport(pr_repo, monkeypatch, capfd, failure):
-    config, wid, wt, _remote, old, branch = _recovered_pr(pr_repo, monkeypatch)
+def test_recovery_audit_failures_report_actual_transport(recovered_pr, monkeypatch, capfd, failure):
+    config, wid, wt, _remote, old, branch = recovered_pr
     source = git_ops.git("rev-parse", "HEAD", cwd=str(wt)).stdout.strip()
     with pytest.raises(recovery.ConfirmationRequired) as required:
         finalize.push_changes(wid, config, break_glass_reason="Approved recovered plan")

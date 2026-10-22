@@ -1,0 +1,9 @@
+{
+  "comment": "Reuse isolated recovered-PR topology while keeping real recovery decisions per test.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

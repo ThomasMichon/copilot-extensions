@@ -13,6 +13,8 @@ from agent_worktrees import finalize, git_collab, git_ops, pr_break_glass, pr_op
 from agent_worktrees.config import Config
 from agent_worktrees.providers.base import PullResult
 from test_pr_break_glass import _recovered_pr
+from test_pr_break_glass import _recovered_pr_seed as _recovered_pr_seed
+from test_pr_break_glass import recovered_pr as recovered_pr
 
 pytestmark = [
     pytest.mark.contract("agent_worktrees.pr.operator_recovery"),
@@ -21,6 +23,7 @@ pytestmark = [
 
 REASON = "Recover the exact inspected publication"
 PrRepo = tuple[Config, str, Path, Path]
+RecoveredPR = tuple[Config, str, Path, Path, str, str]
 
 
 def git(*args: str, cwd: Path) -> str:
@@ -50,9 +53,9 @@ def metadata(wt: Path) -> Path:
 
 
 def test_advanced_head_preview_is_no_effect_and_keeps_normal_refusal(
-    pr_repo: PrRepo, monkeypatch: pytest.MonkeyPatch,
+    recovered_pr: RecoveredPR,
 ) -> None:
-    config, wid, wt, remote, saved, branch = _recovered_pr(pr_repo, monkeypatch)
+    config, wid, wt, remote, saved, branch = recovered_pr
     actual = advance(wt, remote, branch, saved)
     assert not finalize.push_changes(wid, config)
     assert not finalize.push_changes(wid, config, rewrite_pr=True)
@@ -69,9 +72,9 @@ def test_advanced_head_preview_is_no_effect_and_keeps_normal_refusal(
 
 
 def test_confirmed_advanced_head_retains_actual_objects_and_original_evidence(
-    pr_repo: PrRepo, monkeypatch: pytest.MonkeyPatch,
+    recovered_pr: RecoveredPR,
 ) -> None:
-    config, wid, wt, remote, saved, branch = _recovered_pr(pr_repo, monkeypatch)
+    config, wid, wt, remote, saved, branch = recovered_pr
     actual = advance(wt, remote, branch, saved)
     source = git("rev-parse", "HEAD", cwd=wt)
     operation = preview(wid, config)
@@ -91,9 +94,9 @@ def test_confirmed_advanced_head_retains_actual_objects_and_original_evidence(
 
 @pytest.mark.parametrize("change", ["saved-head", "saved-base", "source", "remote"])
 def test_changed_bound_inputs_require_new_confirmation(
-    pr_repo: PrRepo, monkeypatch: pytest.MonkeyPatch, change: str,
+    recovered_pr: RecoveredPR, change: str,
 ) -> None:
-    config, wid, wt, remote, saved, branch = _recovered_pr(pr_repo, monkeypatch)
+    config, wid, wt, remote, saved, branch = recovered_pr
     actual = advance(wt, remote, branch, saved)
     first = preview(wid, config)
     if change.startswith("saved"):
@@ -115,9 +118,9 @@ def test_changed_bound_inputs_require_new_confirmation(
 
 
 def test_provider_and_ref_must_agree_before_advanced_preview(
-    pr_repo: PrRepo, monkeypatch: pytest.MonkeyPatch,
+    recovered_pr: RecoveredPR, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    config, wid, wt, remote, saved, branch = _recovered_pr(pr_repo, monkeypatch)
+    config, wid, wt, remote, saved, branch = recovered_pr
     advance(wt, remote, branch, saved)
     monkeypatch.setattr(pr_rewrite, "observe_pr", lambda *a: PullResult(
         number=42, head_sha=saved, head_ref=branch, head_url=str(remote),
@@ -128,9 +131,9 @@ def test_provider_and_ref_must_agree_before_advanced_preview(
 
 
 def test_recovery_cas_never_falls_back_to_unapproved_fast_forward(
-    pr_repo: PrRepo, monkeypatch: pytest.MonkeyPatch,
+    recovered_pr: RecoveredPR, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    config, wid, wt, remote, saved, branch = _recovered_pr(pr_repo, monkeypatch)
+    config, wid, wt, remote, saved, branch = recovered_pr
     actual = advance(wt, remote, branch, saved)
     source = git("rev-parse", "HEAD", cwd=wt)
     racing = git("rev-parse", "origin/master^", cwd=wt)
@@ -279,9 +282,9 @@ def test_settlement_updates_base_and_patch_before_next_sync_publication(
 
 
 def test_remote_equal_to_source_without_proof_is_not_automatic_settlement(
-    pr_repo: PrRepo, monkeypatch: pytest.MonkeyPatch,
+    recovered_pr: RecoveredPR,
 ) -> None:
-    config, wid, wt, remote, saved, branch = _recovered_pr(pr_repo, monkeypatch)
+    config, wid, wt, remote, saved, branch = recovered_pr
     source = git("rev-parse", "HEAD", cwd=wt)
     git("--git-dir", str(remote), "fetch", "--no-tags", str(wt), source, cwd=wt)
     git("--git-dir", str(remote), "update-ref", f"refs/heads/{branch}", source, saved, cwd=wt)
@@ -290,10 +293,10 @@ def test_remote_equal_to_source_without_proof_is_not_automatic_settlement(
 
 @pytest.mark.parametrize("changed", ["provider", "tracking", "source", "remote", "destination"])
 def test_confirmed_plan_revalidates_after_retention_before_effect(
-    pr_repo: PrRepo, monkeypatch: pytest.MonkeyPatch, changed: str,
+    recovered_pr: RecoveredPR, monkeypatch: pytest.MonkeyPatch, changed: str,
 ) -> None:
     real_push_slug = pr_publish.push_slug
-    config, wid, wt, remote, saved, branch = _recovered_pr(pr_repo, monkeypatch)
+    config, wid, wt, remote, saved, branch = recovered_pr
     if changed == "destination":
         # Keep real fetch/push destination validation; the common fixture only
         # stubs slug extraction because local paths have no provider slug.
@@ -350,9 +353,9 @@ def test_plan_fields_bind_action_original_record_and_evidence() -> None:
 
 
 def test_remote_only_advanced_commit_is_fetched_only_after_confirmation(
-    pr_repo: PrRepo, monkeypatch: pytest.MonkeyPatch,
+    recovered_pr: RecoveredPR,
 ) -> None:
-    config, wid, wt, remote, saved, branch = _recovered_pr(pr_repo, monkeypatch)
+    config, wid, wt, remote, saved, branch = recovered_pr
     other = remote.parent / "prior-publisher"
     git("clone", str(remote), str(other), cwd=remote.parent)
     git("config", "user.email", "publisher@example.com", cwd=other)
@@ -408,11 +411,11 @@ def test_settlement_failures_report_bookkeeping_effect_without_claiming_a_push(
 
 
 def test_advanced_head_cli_returns_actual_plan_with_exit_two(
-    pr_repo: PrRepo, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str],
+    recovered_pr: RecoveredPR, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str],
 ) -> None:
     from agent_worktrees import __main__ as cli, finalize_cli
 
-    config, wid, wt, remote, saved, branch = _recovered_pr(pr_repo, monkeypatch)
+    config, wid, wt, remote, saved, branch = recovered_pr
     actual = advance(wt, remote, branch, saved)
     monkeypatch.setattr(cfg, "load_config", lambda *a, **k: config)
     monkeypatch.chdir(wt)

@@ -87,6 +87,52 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Admitted narrow batches
 
+### B-RECOVERED private copies of prepared divergent PR topology
+
+The recovered-PR session seed performs the existing publish/rebase/association
+setup once through `_seed_directory` and `_published_seed_environment`.
+The latter supplies the existing isolated HOME, Git configuration, identity
+key and disabled resident monitor; session setup must not rely on
+function-scoped autouse isolation. `_copy_pr_repo` gives each case private
+object stores, refs, hooks, config and tracking, with repaired native
+worktree links and relocated URLs.
+
+`_copy_recovered_pr` restores the refspec configuration, preserves an absent
+rewrite identity and remaps only an existing one to the copied destination.
+It advances the private record revision and observes the actual copied
+remote tip. The P adapter still validates real transport before relabeling
+the synthetic provider repository. Per-case confirmation, ref retention,
+fetch, lease/race, effect and audit assertions remain in the original tests.
+Custom Azure/attribution setups and the existing four-field
+`backed_publication` helper remain unchanged; B-BACKED is not bundled.
+
+Two added native controls verify complete seed-byte preservation,
+first-copy commit/ref/tracking/hook effects cannot reach a sibling,
+and an existing rewrite identity relocates without inventing one.
+The original confirmed-recovery case also checks the seed record and
+remote refs remain unchanged after the real recovery.
+An initial new assertion incorrectly expected the intentionally absent
+legacy rewrite identity to exist; it failed, was corrected to preserve
+that absence, and the final complete modules were rerun. That failed
+diagnostic receives no aggregate pass credit.
+
+The final unpartitioned break-glass and advanced-head modules passed all
+57/23 nodes without skips in sequential 148.02/145.67-second groups.
+Total including preparation and cleanup was 296.74 seconds; either
+group plus the entire shared overhead remains below 240 seconds.
+Exactly two workers and every item/native/process/memory bound remain
+unchanged. Ruff, thirteen install contracts and diff checks pass.
+No assertions, marks, skips, test identities or normal groups are retired.
+These consumer diagnostics are not complete-plugin or repeated same-head
+performance qualification.
+
+Documentation impact is this census: no runtime command, configuration
+or public behavior changes. This is below-altitude fixture reuse, not
+authority caching. Real temporary Git repositories exercise copy and
+recovery consumers. No install/bootstrap/first-provision or external
+development-venue behavior changes, so those production lanes are
+inapplicable. B-BACKED, other residuals and parent qualification remain open.
+
 ### A fresh recovery objects and atomic retention
 
 `prepare` and `retain_rewrite` resolve the current decision's commit refs
