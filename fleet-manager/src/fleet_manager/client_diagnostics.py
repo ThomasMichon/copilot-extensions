@@ -12,12 +12,22 @@ from .planning import PlanError
 
 def diagnose_client():
     """Require wheel RECORD-bound resources from this exact imported package."""
+    package = Path(__file__).absolute().parent
     try:
-        distribution = metadata.distribution("fleet-manager")
+        installed = list(metadata.Distribution.discover(
+            name="fleet-manager", path=[str(package.parent)],
+        ))
+        if not installed:
+            raise PlanError("fleet client distribution is not installed")
+        if len(installed) != 1:
+            raise PlanError("fleet client distribution has ambiguous local metadata")
+        distribution = installed[0]
         version = distribution.version
         files = distribution.files
     except metadata.PackageNotFoundError:
         raise PlanError("fleet client distribution is not installed") from None
+    except PlanError:
+        raise
     except (OSError, ValueError):
         raise PlanError("fleet client distribution metadata could not be read") from None
     if version not in {__version__, __version__.replace("-dev", ".dev")}:
@@ -28,9 +38,9 @@ def diagnose_client():
         "__init__.py", "_versioned_runtime.py",
         "versioned_runtime_leases.py", "versioned_runtime_construction.py",
         "versioned_runtime_source.py",
+        "_installer_process.py", "_construction_procutil.py",
     )
     resource_digests = {}
-    package = Path(__file__).absolute().parent
     for name in required:
         member = f"fleet_manager/{name}"
         matches = [item for item in files if str(item) == member]

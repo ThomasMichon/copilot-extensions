@@ -53,7 +53,7 @@ def select_bytes(paths, label, *, optional_paths=()):
     return candidates[0]
 
 
-def commands(project, package, canonical_directory=None):
+def commands(project, package, canonical_directory=None, *, companion_resources=None):
     """Bind one package's hooks; generated sdist resources are not source mirrors."""
     project = Path(project).absolute()
     resources = {
@@ -77,6 +77,12 @@ def commands(project, package, canonical_directory=None):
                 paths = [canonical_directory / name]
             label = "runtime primitive" if name == "versioned_runtime.py" else name
             primitives[resource.name] = select_bytes(paths, label, optional_paths=optional)
+        for name, source in (companion_resources or {}).items():
+            included = project / "src" / package / name
+            paths = [Path(source)] if source is not None else [included]
+            primitives[name] = select_bytes(
+                paths, name, optional_paths=[included] if source is not None else [],
+            )
         return (
             primitives,
             select_bytes(helper_paths, "runtime build helper", optional_paths=optional_helpers),
@@ -93,8 +99,9 @@ def commands(project, package, canonical_directory=None):
 
         def get_outputs(self, include_bytecode=1):
             outputs = super().get_outputs(include_bytecode)
-            for resource in resources.values():
-                name = str(Path(self.build_lib) / package / resource.name)
+            for filename in (*[resource.name for resource in resources.values()],
+                             *(companion_resources or {})):
+                name = str(Path(self.build_lib) / package / filename)
                 if name not in outputs:
                     outputs.append(name)
             return outputs

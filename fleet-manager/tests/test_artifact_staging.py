@@ -77,6 +77,11 @@ def test_actual_signed_selected_bytes_retained_without_runtime_activation(
         assert evidence["sequence"] == 10 and evidence["verified_at"] == 151
         assert not evidence["activation_authorized"] and not evidence["live_readiness_verified"]
         assert evidence["release_digest"] == frozen.release_digest
+        assert frozen.read_manifest(trusted, clock=lambda: 151) == canonical(fixture["manifest"])
+        assert frozen.artifact_filenames == {
+            name: Path(path).name for name, path in fixture["sources"]["components"].items()
+            if name in selected
+        }
         for name, path in frozen._artifacts:
             assert frozen.read_artifact(name, trusted, clock=lambda: 151) == (
                 Path(fixture["sources"]["components"][name]).read_bytes()
@@ -98,6 +103,8 @@ def test_actual_signed_selected_bytes_retained_without_runtime_activation(
         frozen.reverify(trusted, clock=lambda: 152)
     with pytest.raises(PlanError, match="retention has ended"):
         frozen.read_artifact(selected[0], trusted, clock=lambda: 152)
+    with pytest.raises(PlanError, match="retention has ended"):
+        frozen.read_manifest(trusted, clock=lambda: 152)
 
 
 @pytest.mark.parametrize("count", [1, 16, 256])

@@ -19,3 +19,13 @@ libs/versioned-runtime/**
 !libs/versioned-runtime/versioned_runtime_construction.py
 !libs/versioned-runtime/versioned_runtime_publication.py
 !libs/versioned-runtime/versioned_runtime_source.py
+!libs/installer-engine/
+libs/installer-engine/**
+!libs/installer-engine/installer_engine_process.py
+!libs/agent-procutil/
+libs/agent-procutil/**
+!libs/agent-procutil/src/
+libs/agent-procutil/src/**
+!libs/agent-procutil/src/agent_procutil/
+libs/agent-procutil/src/agent_procutil/**
+!libs/agent-procutil/src/agent_procutil/__init__.py

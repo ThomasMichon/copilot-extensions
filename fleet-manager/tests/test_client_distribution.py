@@ -31,6 +31,10 @@ COMPANIONS = (
     "versioned_runtime_leases.py", "versioned_runtime_construction.py",
     "versioned_runtime_source.py", "versioned_runtime_publication.py",
 )
+PROCESS_RESOURCES = {
+    "_installer_process.py": Path("installer-engine") / "installer_engine_process.py",
+    "_construction_procutil.py": Path("agent-procutil") / "src" / "agent_procutil" / "__init__.py",
+}
 
 
 def run(argv, *, cwd=None, env=None):
@@ -49,6 +53,10 @@ def project_at(root, *, nested=False):
     library.mkdir(parents=True)
     for name in ("versioned_runtime.py", "standalone_build.py", *COMPANIONS):
         shutil.copy2(LIBRARY / name, library / name)
+    for relative in PROCESS_RESOURCES.values():
+        target = library.parent / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(LIBRARY.parent / relative, target)
     return project, library
 
 
@@ -110,6 +118,13 @@ def test_wheel_contains_record_bound_exact_primitive_and_no_runtime_dependencies
             assert archive.read(member) == content
             digest = "sha256=" + base64.urlsafe_b64encode(hashlib.sha256(content).digest()).rstrip(b"=").decode()
             assert [row for row in rows if row[0] == member] == [[member, digest, str(len(content))]]
+        for name, source in PROCESS_RESOURCES.items():
+            member = f"fleet_manager/{name}"
+            content = (library.parent / source).read_bytes()
+            assert archive.namelist().count(member) == 1
+            assert archive.read(member) == content
+            digest = "sha256=" + base64.urlsafe_b64encode(hashlib.sha256(content).digest()).rstrip(b"=").decode()
+            assert [row for row in rows if row[0] == member] == [[member, digest, str(len(content))]]
         metadata = next(name for name in archive.namelist() if name.endswith(".dist-info/METADATA"))
         requirements = [
             Requirement(line.removeprefix("Requires-Dist:").strip())
@@ -119,7 +134,7 @@ def test_wheel_contains_record_bound_exact_primitive_and_no_runtime_dependencies
         assert all(requirement.marker is not None
                    and not requirement.marker.evaluate({"extra": ""})
                    and any(requirement.marker.evaluate({"extra": extra})
-                           for extra in ("dev", "release-verification", "auth", "server",
+                           for extra in ("dev", "release-verification", "construction", "auth", "server",
                                          "service-gateway",
                                          "runtime-authentication"))
                    for requirement in requirements)
@@ -128,6 +143,11 @@ def test_wheel_contains_record_bound_exact_primitive_and_no_runtime_dependencies
         assert len(verification) == 1
         assert canonicalize_name(verification[0].name) == "cryptography"
         assert verification[0].specifier == SpecifierSet(">=46,<47")
+        construction = [requirement for requirement in requirements
+                        if requirement.marker.evaluate({"extra": "construction"})]
+        assert len(construction) == 1
+        assert canonicalize_name(construction[0].name) == "pip"
+        assert construction[0].specifier == SpecifierSet(">=25.1,<26")
         for extra in ("auth", "server"):
             enabled = {canonicalize_name(requirement.name) for requirement in requirements
                        if requirement.marker.evaluate({"extra": extra})}
@@ -147,6 +167,7 @@ def test_sdist_rebuild_is_self_contained_after_repository_removal(tmp_path):
     assert result.returncode == 0, result.stderr
     expected = (library / "versioned_runtime.py").read_bytes()
     companions = {name: (library / name).read_bytes() for name in COMPANIONS}
+    companions.update({name: (library.parent / path).read_bytes() for name, path in PROCESS_RESOURCES.items()})
     helper = (library / "standalone_build.py").read_bytes()
     extracted = tmp_path / "extracted"
     extracted.mkdir()
@@ -198,17 +219,19 @@ def test_nested_service_directory_uses_same_canonical_resource(tmp_path):
 
 @pytest.mark.client_distribution_full
 @pytest.mark.parametrize("resource", [
-    "versioned_runtime.py", "standalone_build.py", *COMPANIONS,
+    "versioned_runtime.py", "standalone_build.py", *COMPANIONS, *PROCESS_RESOURCES,
 ])
 @pytest.mark.parametrize("included_copy", [False, True])
 def test_missing_build_resource_is_not_a_successful_partial_wheel(tmp_path, resource, included_copy):
     project, library = project_at(tmp_path)
+    source = (library.parent / PROCESS_RESOURCES[resource]
+              if resource in PROCESS_RESOURCES else library / resource)
     if included_copy:
         name = "_versioned_runtime.py" if resource == "versioned_runtime.py" else resource
         included = (project / "_standalone_runtime_build.py" if resource == "standalone_build.py"
                     else project / "src" / "fleet_manager" / name)
-        shutil.copy2(library / resource, included)
-    (library / resource).unlink()
+        shutil.copy2(source, included)
+    source.unlink()
     result = build(project, tmp_path / "artifacts")
     assert result.returncode != 0
     assert not list((tmp_path / "artifacts").glob("*.whl"))
@@ -388,10 +411,17 @@ def test_gateway_build_inputs_deliver_the_complete_runtime_family(
         if not line.startswith("COPY "):
             continue
         words = shlex.split(line)
-        copied.update(name for name in words[1:-1] if name.startswith("libs/versioned-runtime/"))
+        copied.update(name for name in words[1:-1] if name.startswith("libs/"))
     patterns = (recipe / "Dockerfile.dockerignore").read_text(encoding="utf-8").splitlines()
-    for resource in library.iterdir():
-        name = f"libs/versioned-runtime/{resource.name}"
+    resources = {
+        f"libs/versioned-runtime/{resource.name}": resource
+        for resource in library.iterdir()
+    }
+    resources.update({
+        f"libs/{relative.as_posix()}": library.parent / relative
+        for relative in PROCESS_RESOURCES.values()
+    })
+    for name, resource in resources.items():
         included = True
         for pattern in patterns:
             if pattern and not pattern.startswith("#"):

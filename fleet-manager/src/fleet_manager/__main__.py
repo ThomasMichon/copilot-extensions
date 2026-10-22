@@ -1,4 +1,4 @@
-"""Thin fleet planning, client admission and explicit opt-in NEW Gateway serving."""
+"""Thin fleet planning, explicit client lifecycle and opt-in NEW Gateway serving."""
 
 import argparse
 import sys
@@ -43,20 +43,22 @@ def main(argv=None):
     profile.add_argument("--service-policy", type=Path)
     hosting.add_argument("--tls-config", type=Path)
     admission = commands.add_parser(
-        "client-state", help="Explicit client admission journal; never execute or activate artifacts",
+        "client-state", help="Explicit client admission and construction; never activate a runtime",
     )
     state_commands = admission.add_subparsers(dest="state_command", required=True)
-    for operation in ("initialize", "inspect", "admit"):
+    for operation in ("initialize", "inspect", "admit", "construct"):
         state = state_commands.add_parser(operation)
         state.add_argument("--root", type=Path, required=True)
         state.add_argument("--identity", type=Path, required=True)
-        if operation == "admit":
+        if operation in ("admit", "construct"):
             state.add_argument("--selection", type=Path, required=True)
             state.add_argument("--release", type=Path, required=True)
             state.add_argument("--proof", type=Path, required=True)
             state.add_argument("--policy", type=Path, required=True)
             state.add_argument("--sources", type=Path, required=True)
             state.add_argument("--staging-parent", type=Path, required=True)
+        if operation == "construct":
+            state.add_argument("--target", type=Path, required=True)
     try:
         args = parser.parse_args(argv)
     except SystemExit as exc:
@@ -112,7 +114,16 @@ def main(argv=None):
                     installation=identity["installation"], role="client",
                     staging_parent=args.staging_parent,
                 ) as staged:
-                    result = admit_client_release(args.root, identity, selection, staged, policy)
+                    if args.state_command == "construct":
+                        from .client_construction import construct_client_release
+
+                        result = construct_client_release(
+                            args.root, identity, selection, staged,
+                            current_policy=lambda: local(args.policy),
+                            current_target=lambda: local(args.target),
+                        )
+                    else:
+                        result = admit_client_release(args.root, identity, selection, staged, policy)
         elif args.command == "doctor":
             from .client_diagnostics import diagnose_client
 

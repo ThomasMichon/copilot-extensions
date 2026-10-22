@@ -91,13 +91,14 @@ def _read_bytes(path: Path, limit: int) -> bytes:
         data = incoming.read(limit + 1)
         after = os.fstat(incoming.fileno())
         named = _file_stat(path)
-        if (
-            not 1 <= len(data) <= limit or len(data) != opened.st_size
-            or _content_stamp(after) != _content_stamp(opened)
-            or _identity(named) != _identity(before)
-            or _content_stamp(named) != _content_stamp(before)
-        ):
-            raise PlanError("staged input changed during admission")
+        if not 1 <= len(data) <= limit or len(data) != opened.st_size:
+            raise PlanError("staged input changed during admission (read-size)")
+        if _content_stamp(after) != _content_stamp(opened):
+            raise PlanError("staged input changed during admission (descriptor-stamp)")
+        if _identity(named) != _identity(before):
+            raise PlanError("staged input changed during admission (named-identity)")
+        if _content_stamp(named) != _content_stamp(before):
+            raise PlanError("staged input changed during admission (named-stamp)")
     return data
 
 
@@ -206,6 +207,19 @@ class StagedArtifacts:
     def artifacts(self) -> tuple[str, ...]:
         """Selected component names, never reusable filesystem paths."""
         return tuple(name for name, _ in self._artifacts)
+
+    @property
+    def artifact_filenames(self) -> dict[str, str]:
+        """Portable artifact names only; no reusable stage pathname."""
+        return {name: path.name for name, path in self._artifacts}
+
+    def read_manifest(
+        self, policy: object, *, clock: Callable[[], int] = _clock,
+    ) -> bytes:
+        """Return the exact manifest bytes after current live-stage authentication."""
+        with self._operation_lock:
+            self._reverify(policy, clock=clock)
+            return self._manifest_bytes
 
     def read_artifact(
         self, component: str, policy: object, *, clock: Callable[[], int] = _clock,

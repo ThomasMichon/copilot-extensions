@@ -167,7 +167,9 @@ Implementation sequencing below is **agent-recommended**:
   The common authenticated byte-stage prerequisite is merged in #6569.
   [Client lifecycle admission](client-lifecycle-admission.md) proposes the next
   serial durable-admission, construction and owned-activation/removal gates;
-  it does not deliver a managed installer or authorize a live rollout.
+  durable admission is merged in #7459. Construction, compatibility/health,
+  owned activation/removal and a managed installer remain open; the admission
+  receipt does not authorize execution or a live rollout.
   [Installation repair conductor](installation-repair-conductor.md) is the
   agent-recommended #6464 setup prerequisite proposal. Its ordinary-owner
   source implementation is merged in #6944; fresh-environment/native acceptance
@@ -638,3 +640,137 @@ These bounded Windows selections are not a new full Windows-suite claim.
   89 retained runner/native-selection/probe guards pass. This fixes package
   closure, not a new native container or production qualification claim;
   Docker definitions, privileges and deadlines remain unchanged.
+
+### 2026-10-21 - Durable selected client admission merged
+- #7459 merged into `dev` at `2026-10-21T02:25:47Z`, commit
+  `ad37a0df743b8121e4811b2f7c0a4f9e0e235378`. The actual current-head Balanced
+  review approved `a6aa69e611dc0a20741da233327c5ca9a0ed1d3b`; its required CI
+  and source-attribution checks succeeded.
+- The delivered `client-state initialize/inspect/admit` operations reuse the
+  shared `ReleaseSelection` and authenticated immutable stage. They persist a
+  monotonic installation-owned floor, not an execution grant. Reports retain
+  constructed, healthy, active, activation-authorized and live-readiness fields
+  as false. No runtime, service, enrollment, credential or selector was changed.
+- Native Windows and Linux source/installed-consumer contracts cover actual
+  signatures, owner privacy, interrupted initialization and admission, hot
+  rollback-journal CLI recovery, concurrent transactions and durable reopen.
+  Linux additionally proves retained reader locks, WAL refusal without sidecar
+  mutation, publication/ownership sync ordering and actual quarantine failures.
+  Complete selected Linux files passed 43 admission, 60 staging, 51 planning,
+  33 diagnostics and 82 shared-selection cases, with two explicit platform skips.
+  These are not a full development-suite or fresh Docker qualification claim.
+- Full local development preparation remains refused by the configured index's
+  per-file age metadata under the unchanged dependency policy. Equivalent bytes
+  carrying different source-index timestamps do not authorize an index switch,
+  metadata override, lower floor or local waiver. The previously recorded
+  fresh-box package-feed failure remains uncredited; qualification and release/
+  installed adoption are distinct from the source merge.
+- The next retained #6424 slice is authenticated candidate construction,
+  explicit compatibility and actual client health through the canonical
+  versioned-runtime owner before any selector activation. Preserve the active
+  client, accepted admission floor and unrelated configuration on every failure.
+  The merged #7083/#7087 SSH leaves remain policy/runtime dependencies, not
+  managed-apply hooks. Shared construction/lifecycle stays with this campaign;
+  Chat architecture and artifact work remains separately owned under #7238.
+- The campaign and routing foundation remain Active. Reviewed source work
+  continues in dependency order; live installation, enrollment, migration and
+  activation still require their actual source, identity and resource gates.
+
+### 2026-10-21 - Construction source qualification; publication remains gated
+- The retained #6424 continuation implements explicit client construction,
+  current API/config/retained-data compatibility and actual installed console
+  health as local source WIP. It does not advance admission or activate a
+  runtime. Owner-side `construction` tooling remains an explicit optional
+  dependency; the candidate receives only the dependency-free client wheel.
+- Standard canonical slots, construction/retention ownership and completion
+  are reused. Candidate intent is stored outside the removable tree so an
+  interrupted or partial removal cannot erase the sole ownership receipt.
+  Reuse proves actual bytes and fresh health without rewriting completion;
+  failed health preserves the accepted floor, prior selectors and user config.
+- Current bounded Linux selections passed 26 construction, four independent
+  process/installed-console, 35 diagnostics, 60 staging, 43 admission and 18
+  selected wheel/sdist/resource cases; the staging/admission selections each
+  have one explicit Windows-only skip. Native Windows separately passed the
+  real construction/reuse pair, retry/partial-removal, independent installed
+  owners, actual console initialize/admit/construct, failed-doctor preservation
+  and caller-death cleanup fencing. Windows regressions passed 55 staging
+  with six platform skips, 39 admission with five platform skips, 35
+  diagnostics and 18 selected distribution cases. These are separate
+  portfolios, not a combined full development-suite result.
+- Earlier native timeout and post-read stability failures were not converted
+  into a deadline, dependency-policy or integrity waiver. Fixed helpers retain
+  one owning-SDK RECORD snapshot and recheck their bytes; SDK discovery stays
+  qualified to the imported package. The unexplained earlier snapshot refusal
+  remains an investigation, not an accepted flake: strict checks now name a
+  bounded reason, and the owned-wheel 64-read stability contract passes.
+  Qualification detail and the outstanding source gate are recorded on #6424.
+- The canonical shared child-custody draft remains frozen and unpublished
+  pending the actual retained source owner's interface agreement on #5472.
+  Consumer success is not that grant. No vendored propagation, signing,
+  enrollment, selector publication, live install, updater or service migration
+  was performed. Fresh-box/full-profile acceptance and normal release/adoption
+  remain separate gates.
+- The read-only install-contract audit refuses publication on precisely the
+  two canonical/shared-process differences from the agent-worktrees vendored
+  engine. The existing #5472 coordination request has no response as of this
+  audit. No sync, source publication or gate waiver was used to clear it.
+- The reviewed Machine Fleet amendment #7513 and #6681's handback preserve the
+  existing ordered lifecycle/setup-consumer integration. They require an
+  explicit broader artifact-publisher/module-integration assignment, not a
+  parallel controller or an implicit promotion of these client prerequisites
+  into an executor. The campaign and routing foundation remain Active.
+
+### 2026-10-22 - Use actual claims for PR ownership
+- Correct the prior coordination interpretation: an issue or PR comment is
+  not a source-custody lease, and waiting for a reply does not establish a
+  publication hold. Discover competing PR ownership from actual worktree
+  claim records on the relevant machines over SSH, then trace their owner
+  references and liveness. Cross-check provider state independently; local
+  tracked "open" records can outlive the actual PR.
+- The accessible claim inventories identify other live owners for the
+  matching currently open PRs. Those PRs remain with their owners; this
+  campaign does not adopt, supersede or merge them. An unavailable machine
+  or an unsupported query is unknown coverage, not evidence of abandonment
+  or a repository-wide lock.
+- The client implementation worktree has no outstanding PR claim: its plan
+  and admission claims are released. Construction remains unpublished WIP.
+  The real install-contract drift still needs ordinary source integration,
+  propagation and qualification before publication; the absence of a comment
+  reply is no longer treated as a separate authority gate. Review, required CI,
+  release, authorized adoption and the campaign's remaining lifecycle gates
+  are unchanged.
+
+### 2026-10-22 - Construction integration and native qualification
+- Integrated the client constructor with current shared child-launch/timeout
+  outcomes and propagated the canonical engine to both vendored consumers.
+  The finite Windows guardian retains the existing candidate lease through
+  native Job settlement, including caller death. Success, child failure,
+  launch refusal and settled deadline outcomes have native Windows contracts.
+  No resident service or alternate installer framework was introduced.
+- Current isolated Linux selections passed 26 construction, four installed/
+  independent-process, 35 diagnostics, 60 staging and 43 admission cases,
+  with the two existing Windows-only skips. Native Windows ARM64 passed the
+  construction/reuse, retry, failed-doctor, installed-console, independent-owner
+  and caller-death selections; shared guardian contracts passed 11 cases with
+  one POSIX-only skip. Diagnostics passed 35 and admission passed 39 with five
+  platform skips.
+- The complete Windows staging membership passed 55 cases with six platform
+  skips in explicit bounded groups. A prior whole-file attempt exceeded its
+  aggregate deadline; it is not credited as a pass. No item or group deadline,
+  integrity check, dependency age or configured index was weakened.
+- Earlier emulated-interpreter timeouts and executable cleanup errors were
+  not treated as native qualification. Restart Manager identified the Windows
+  translation-cache process holding a failed fixture executable. Qualification
+  used an already installed, signed native interpreter; no OS service was
+  stopped or reconfigured. Its admitted binary dependencies remained within
+  the declared ranges and unchanged seasoning policy.
+- A real pinned Gateway package build exposed missing newly bundled process
+  resources. The existing Docker recipe, closed-world source materializer and
+  regression now carry the exact companions and new client module. Both
+  repository and pinned-context wheel builds and a repository-independent
+  sdist rebuild pass. This repairs the shared package closure, not Gateway
+  deployment or native container qualification.
+- The client remains construction-only and unpublished at this journal point.
+  Current-head review/CI, actual merge, release and authorized installed
+  adoption remain separate. Activation/removal and the broader campaign's
+  useful-service, persistence and continuity obligations remain open.

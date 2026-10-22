@@ -235,6 +235,7 @@ def _child(
     argv: list[str], *, inputs: FrozenInputs, descriptor: int,
     timeout: float, delays: tuple[float, ...] = (), transient: str = "",
     environment: dict[str, str] | None = None, cwd: Path | None = None,
+    candidate: Path | None = None,
 ) -> subprocess.CompletedProcess:
     env = dict(os.environ if environment is None else environment)
     if environment is None:
@@ -246,6 +247,10 @@ def _child(
             return run_owned(
                 argv, cwd=cwd or Path(Path(argv[0]).resolve().anchor), env=env, timeout=timeout,
                 procutil=procutil, construction_fd=descriptor,
+                **({
+                    "runtime_root": candidate.parent.parent, "runtime_version": candidate.name,
+                    "runtime_path": Path(runtime.__file__),
+                } if candidate is not None else {}),
             )
         except subprocess.CalledProcessError as error:
             diagnostic = error.stdout + error.stderr
@@ -332,7 +337,7 @@ for name, expected in expected_origins.items():
         _child(
             [str(python), "-I", "-B", "-c", probe, str(slot), module, json.dumps(origins),
              health_callable or "", "fresh" if require_frozen_origin else "reuse"],
-            inputs=inputs, descriptor=descriptor, timeout=timeout,
+            inputs=inputs, descriptor=descriptor, timeout=timeout, candidate=slot,
         )
     except (subprocess.CalledProcessError, ChildLaunchError, ChildTimeoutExpired) as error:
         if require_frozen_origin:
@@ -353,7 +358,7 @@ def _construct(
     if not refresh or not python.is_file() or not (slot / "pyvenv.cfg").is_file():
         _child(
             [str(base_python), "-I", "-m", "venv", "--without-pip", "--copies", str(slot)],
-            inputs=inputs, descriptor=descriptor, timeout=timeout,
+            inputs=inputs, descriptor=descriptor, timeout=timeout, candidate=slot,
             delays=(0.75, 0.75) if os.name == "nt" else (),
             transient=r"Access is denied|failed to persist temporary file",
         )
@@ -364,7 +369,7 @@ def _construct(
         raise RuntimeError("Runtime construction requires the canonical retained UV transaction")
     _child(
         list(transaction.argv),
-        inputs=inputs, descriptor=descriptor, timeout=timeout,
+        inputs=inputs, descriptor=descriptor, timeout=timeout, candidate=slot,
         delays=(3, 6, 10), transient=r"SRE module mismatch",
         environment=transaction.environment, cwd=transaction.cwd,
     )
@@ -391,7 +396,7 @@ getattr(module, sys.argv[3])(json.loads(sys.argv[4]))
     _child(
         [str(python), "-I", "-B", "-c", probe, str(slot), module, function,
          json.dumps({**data, "frozen_plugin": str(inputs.plugin)})],
-        inputs=inputs, descriptor=descriptor, timeout=timeout,
+        inputs=inputs, descriptor=descriptor, timeout=timeout, candidate=slot,
     )
 
 

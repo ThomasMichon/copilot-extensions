@@ -15,14 +15,14 @@ from pathlib import Path, PurePosixPath
 PROOF = "tools/clean-room/gateway-role-tunnels/"
 IMAGE = "fleet-manager/containers/gateway/"
 PACKAGE_MODULES = frozenset("""
-__init__ __main__ allocation artifact_staging artifacts client_admission client_diagnostics
+__init__ __main__ allocation artifact_staging artifacts client_admission client_construction client_diagnostics
 gateway_auth gateway_broker gateway_client gateway_cloudflare gateway_contract gateway_controller
 gateway_index gateway_manifest gateway_reconcile gateway_server
 gateway_service_channel gateway_service_connector gateway_service_context
 gateway_service_listener gateway_service_policy gateway_service_server
 gateway_ssh_policy gateway_ssh_runtime gateway_transport gateway_worker komodo_roles ledger
 node_journal observation_store observations operations planning release release_auth
-release_selection role_bindings role_deployment role_plan runtime_admission runtime_identity staging_cleanup
+release_selection reverse_listener_reservations role_bindings role_deployment role_plan runtime_admission runtime_identity staging_cleanup
 """.split())
 RESOURCES = frozenset("""
 standalone_build.py versioned_runtime.py versioned_runtime_leases.py
@@ -36,6 +36,8 @@ REQUIRED = frozenset({
     "fleet-manager/pyproject.toml", "fleet-manager/setup.py", "fleet-manager/README.md",
     *(f"fleet-manager/src/fleet_manager/{name}.py" for name in PACKAGE_MODULES),
     *(f"libs/versioned-runtime/{name}" for name in RESOURCES),
+    "libs/installer-engine/installer_engine_process.py",
+    "libs/agent-procutil/src/agent_procutil/__init__.py",
     *(PROOF + name for name in RUNNER_FILES),
     IMAGE + "Dockerfile", IMAGE + "Dockerfile.dockerignore",
 })

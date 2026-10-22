@@ -10,6 +10,7 @@ import sys
 from types import SimpleNamespace
 
 import pytest
+import agent_procutil
 from agent_procutil import no_window_kwargs
 
 
@@ -89,3 +90,47 @@ def test_real_guardian_without_waitid_preserves_child_exit(guardian, tmp_path):
         **no_window_kwargs(),
     )
     assert result.returncode == 23, result.stdout + result.stderr
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows retained Job guardian")
+@pytest.mark.parametrize("outcome", ["success", "exit", "timeout", "launch"])
+@pytest.mark.timeout(30)
+def test_retained_windows_child_preserves_outcome_and_releases_custody(
+    guardian, tmp_path, outcome,
+):
+    runtime_path = (
+        Path(__file__).resolve().parents[3]
+        / "libs" / "versioned-runtime" / "versioned_runtime.py"
+    )
+    runtime = guardian._load_resource("retained_guardian_test_runtime", runtime_path)
+    root = tmp_path / "runtime"
+    root.mkdir()
+    slot = runtime.slot(root, "probe")
+    commands = {
+        "success": [sys.executable, "-I", "-c", "print('owned')"],
+        "exit": [sys.executable, "-I", "-c", "raise SystemExit(23)"],
+        "timeout": [sys.executable, "-I", "-c", "import time; time.sleep(60)"],
+        "launch": [str(tmp_path / "missing-child.exe")],
+    }
+    errors = {
+        "exit": subprocess.CalledProcessError,
+        "timeout": guardian.ChildTimeoutExpired,
+        "launch": guardian.ChildLaunchError,
+    }
+    with runtime.construction_lease(root, "probe") as descriptor:
+        def run():
+            return guardian.run_owned(
+                commands[outcome], cwd=slot, env=dict(os.environ),
+                timeout=3, procutil=agent_procutil, construction_fd=descriptor,
+                runtime_root=root, runtime_version="probe", runtime_path=runtime_path,
+            )
+
+        if outcome == "success":
+            assert run().stdout == "owned\n"
+        else:
+            with pytest.raises(errors[outcome]) as caught:
+                run()
+            if outcome == "exit":
+                assert caught.value.returncode == 23
+        with runtime._cleanup_lease(root, "probe", allow_construction_owner=True) as admitted:
+            assert admitted

@@ -3099,6 +3099,13 @@ introduces no deploy-time import or alternate lock protocol.
 
 `installer_engine_process.py` owns bounded child execution. Windows uses the
 frozen canonical `agent-procutil` strict, non-breakaway Job implementation.
+For candidate-backed Windows children, a finite guardian acquires the existing
+canonical candidate retention lease before starting the Job. It observes its
+caller's liveness pipe and retains that lease until the Job is settled even
+after caller death; release of the caller's construction byte lock alone does
+not admit destructive cleanup. The supplied runtime root, version and helper
+path must form a complete custody context. Child launch and settled-timeout
+outcomes retain their existing explicit error classes.
 POSIX uses an owner-death pipe guardian retaining the construction descriptor,
 an unreaped process-group leader and verified process-group teardown. The
 canonical POSIX lease releases on final descriptor close, not an explicit

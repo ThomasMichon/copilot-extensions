@@ -5,6 +5,11 @@ not a delivered installer or permission to deploy.** The common authenticated
 staging prerequisite merged in #6569. Product release authority remains with
 #6240; Gateway/node integration remains with #6443.
 
+The durable-admission slice merged in #7459. Its actual CLI and state contract
+are documented in [client admission](../../../fleet-manager/docs/client-admission.md).
+The construction, compatibility/health, activation and removal sections below
+remain the next serial obligations, not delivered lifecycle behavior.
+
 ## Scope and ownership
 
 Implement the client-only managed lifecycle in independently reviewable serial

@@ -63,6 +63,11 @@ Replacing a path after verification cannot substitute what the consumer reads;
 each new read independently authenticates its own snapshot. At most one
 64 MiB component is materialized per call. Returned bytes remain an immutable
 snapshot, not a lifetime, freshness or execution grant.
+`artifact_filenames` exposes a fresh mapping of portable component filenames,
+not their stage paths. `read_manifest(current_policy)` returns the exact
+immutable manifest bytes only after fresh in-context authentication. Neither
+surface authorizes construction; the separate lifecycle owner still admits
+its own installation, selected release and compatibility.
 `reverify(current_policy)` re-reads the
 frozen manifest, authenticates it under the supplied current policy and clock,
 and hashes selected frozen artifacts again. It does not trust a saved report,

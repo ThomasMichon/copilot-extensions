@@ -1,6 +1,6 @@
 # Client release admission
 
-`fleet-manager client-state` records durable admission of an explicitly selected,
+`fleet-manager client-state initialize|inspect|admit` records durable admission of an explicitly selected,
 authenticated client release. It does not construct, execute, activate, update
 or uninstall a runtime. A successful admission receipt is not an execution
 grant, a Gateway credential or evidence of fleet readiness.
@@ -96,9 +96,12 @@ an administrator or another principal with overriding system privileges.
 Reports explicitly retain `constructed`, `healthy`, `active`,
 `activation_authorized` and `live_readiness_verified` as `false`. No selector,
 runtime slot, service registration, hosting role or network connection is
-created. Construction, compatibility/health checks, activation, retained-good
-recovery, owned uninstall and installation identity retirement remain separate
-transitions under the reviewed client lifecycle plan.
+created by admission. The separate, explicit
+[`client-state construct`](client-construction.md) transition consumes this
+durable admission; its constructed/healthy result is not an admission report or
+an activation grant. Activation, retained-good recovery, owned uninstall and
+installation identity retirement remain separate transitions under the reviewed
+client lifecycle plan.
 
 The agent-free `fleet-manager-client-admission` clean-room scenario exercises
 the actual freshly installed console in a disposable base image. It requires

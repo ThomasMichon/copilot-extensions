@@ -3,7 +3,8 @@
 Standalone fleet system home and thin CLI. **Current scope: offline configuration/
 capacity planning, explicit release-snapshot inspection, installed-client
 resource diagnostics, explicitly authenticated artifact staging and an explicit
-local current-observation storage API, and an opt-in authenticated NEW
+admitted-client construction/health transition, a local current-observation
+storage API, and an opt-in authenticated NEW
 Gateway/SDK/subscribed-controller boundary.**
 The [resident boundary](docs/gateway-runtime.md) is a first bounded slice:
 no production Gateway/index offload or managed install/update/uninstall,
@@ -103,6 +104,14 @@ an independently trusted current owner decision to exact manifest content,
 sequence, scope and role closure. It does not choose or authenticate a decision,
 persist admission, execute artifacts or grant activation. Signed or
 higher-sequence releases are not automatically selected.
+
+The separate [client admission](docs/client-admission.md) and
+[construction](docs/client-construction.md) transitions persist an explicitly
+selected release before building its client-only candidate and checking its
+real installed console. Construction rechecks current policy and explicit
+API/config/retained-data compatibility, preserves failed-candidate ownership for
+retry, and never publishes an active selector. These prerequisites do not
+complete managed install/update/uninstall or establish fleet readiness.
 
 The [current-observation storage API](docs/current-observations.md) provides
 separate explicit SQLite current slots, origin-generation comparison, atomic

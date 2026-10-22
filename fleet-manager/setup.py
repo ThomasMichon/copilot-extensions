@@ -30,4 +30,14 @@ helpers = runpy.run_path(str(selected))
 helpers["select_bytes"](
     [selected], "runtime build helper", optional_paths=[included] if canonical else [],
 )
-setup(cmdclass=helpers["commands"](project, "fleet_manager", canonical))
+companions = {
+    "_installer_process.py": (
+        canonical.parent / "installer-engine" / "installer_engine_process.py" if canonical else None
+    ),
+    "_construction_procutil.py": (
+        canonical.parent / "agent-procutil" / "src" / "agent_procutil" / "__init__.py" if canonical else None
+    ),
+}
+setup(cmdclass=helpers["commands"](
+    project, "fleet_manager", canonical, companion_resources=companions,
+))
