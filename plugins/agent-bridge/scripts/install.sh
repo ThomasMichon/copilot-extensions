@@ -1863,9 +1863,7 @@ _install_slot_build() {
 }
 
 do_install() {
-    echo ""
-    echo "=== agent-bridge install ==="
-    echo ""
+    _step "agent-bridge install"
 
     # Prerequisite: uv (self-acquired if absent) + governed-feed index
     _ensure_uv || exit 1
@@ -2577,9 +2575,7 @@ _lifecycle_finish() {
 }
 
 do_update() {
-    echo ""
-    echo "=== agent-bridge update ==="
-    echo ""
+    _step "agent-bridge update"
 
     # Prerequisite: uv (self-acquired if absent) + governed-feed index
     _ensure_uv || exit 1

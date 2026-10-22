@@ -1,0 +1,9 @@
+{
+  "comment": "Use ordinary progress lines for installer action identity instead of decorative banners.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

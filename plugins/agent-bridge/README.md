@@ -20,6 +20,11 @@ first accepted candidate and reuses it only within that installer process,
 checking its existence and Authenticode signature on each use. An unsuccessful
 lookup is not cached, and required native-operation failures remain visible.
 
+Both installers identify install/update with one ordinary progress line instead
+of a blank/banner/blank block. Standalone output retains the action name; an
+existing timed parent renders that line as running progress, not completion.
+Other diagnostics and empty lines are not filtered.
+
 Both installers co-deploy the canonical Python runtime resolver and its lease
 and construction companions into the Bridge installation's `scripts/` directory,
 alongside the existing native-shell resolver deployment in `bin/`. Native

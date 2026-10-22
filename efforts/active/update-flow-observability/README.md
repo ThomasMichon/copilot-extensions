@@ -140,7 +140,8 @@ matrix below are _(agent-recommended)_ implementation details.
   suffix it with honestly labeled monotonic elapsed time or completed-step
   duration. Do not represent arbitrary child-line arrival as execution cost.
 - [x] Normalize known legacy native progress markers to the shared human state
-  vocabulary without changing owner states, completion or structured outcomes.
+  vocabulary without changing owner states, completion or structured outcomes
+  (#7736).
 - [ ] Consolidate banners, status names, nesting and error presentation;
   preserve useful detail without duplicate timestamps, repeated status
   prefixes or contradictory aggregate success.
@@ -243,6 +244,53 @@ Bridge serving-version gap and supervisor framing defect survived that
 bounded source delta inspection.
 
 ## Journal
+
+### 2026-10-21 - Replace Bridge's decorative action banners at the emitter
+
+- Traced the launch parent's ordinary line relay and Bridge's actual native
+  install/update entrypoints. Replaced only their four blank/banner/blank
+  blocks with the existing progress helper. The standalone action identity
+  remains, while a timed parent renders one running line rather than three
+  decorative records. No general banner regex or blank-line filter was added.
+- The new native regression first failed for both actions under PowerShell 7
+  and Windows PowerShell 5.1. Final Windows identity/lifecycle coverage passed
+  18 cases with 15 platform skips in 32.98 seconds; the staged-source POSIX
+  counterpart passed 16 with 17 platform skips in 7.85 seconds.
+- Both standalone and real captured-child cases execute the shipped action
+  and progress helper, with a failing prerequisite before deployment. They
+  preserve an arbitrary diagnostic banner and empty line, verify exactly one
+  action record, canonical UTC/running/elapsed framing and the real exit-one
+  completion. The existing lifecycle tests retain their outcome/cleanup checks.
+  Original item, group and resource limits remain unchanged.
+- The generated source-bound native-output declaration and install-contract,
+  payload-generation, Python lint and documentation guards pass. Bridge's
+  README records the presentation contract. This is below the existing
+  reviewed architecture; no installation, lease, cutover or release policy
+  changed. Two decorative records per action are removed; no execution-time
+  improvement or equivalent whole-flow cost result is claimed.
+- Fresh-machine provisioning and live external deployment were not exercised:
+  the changed statements precede prerequisite admission, the isolated native
+  fixture covers their actual output contract, and rollout remains held under
+  the effort's existing owner. Other installers' banners, standalone output,
+  full-flow measurement and promoted-installed proof remain open.
+
+### 2026-10-21 - Native vocabulary merged; continue at the remaining owners
+
+- #7736 merged as `a2c6cf215e7bfdb133020cfaeebc08ba662883cc` after
+  Copilot approved exact head `8258d3b1926441805bc07807344bd90b162bd7a5`,
+  the actual review reported no blocking findings, there were no inline
+  threads and all current-head required checks passed.
+- Re-read the effort's Plan and Validation Plan after actual merge. Closed
+  only native marker normalization, retained the published tip on a backup
+  and advanced confirmed merged history. No whole-flow speed or deployment
+  claim follows from the presentation fixtures.
+- Next presentation work must distinguish a redundant installer banner from
+  useful child diagnostics at the actual native output owner. The separate
+  structured-context pump still awaits the original #6928 owner; no competing
+  wait/termination adapter or second ownership request was introduced.
+- Standalone coverage, full-flow formatting and equivalent cost/installed
+  evidence remain open. Existing deployment and protected-session holds are
+  unchanged; the effort is active and this source worktree is not finalized.
 
 ### 2026-10-21 - Normalize native progress markers at their existing sinks
 

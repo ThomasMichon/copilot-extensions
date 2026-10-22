@@ -2497,9 +2497,7 @@ function Invoke-InstallSlotBuild {
 }
 
 function Invoke-Install {
-    Write-Host ''
-    Write-Host '=== agent-bridge install ===' -ForegroundColor Cyan
-    Write-Host ''
+    Write-Step 'agent-bridge install'
 
     if (-not (Ensure-Uv)) { exit 1 }
 
@@ -3226,9 +3224,7 @@ function Invoke-ServingRuntimeReconcile {
 }
 
 function Invoke-Update {
-    Write-Host ''
-    Write-Host '=== agent-bridge update ===' -ForegroundColor Cyan
-    Write-Host ''
+    Write-Step 'agent-bridge update'
 
     if (-not (Ensure-Uv)) { exit 1 }
 
