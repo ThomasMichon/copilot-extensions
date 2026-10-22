@@ -149,6 +149,26 @@ namespace-provider pattern, without changing architectural ownership.
 
 ## Journal
 
+### 2026-10-22 - Code review and unit-admission reconciliation
+
+- #7998 opened for implementation review. The publication rebase conflicted
+  only in the effort index; all peer effort rows were retained. The activation
+  compatibility and bounded-overlap suite passed all 88 cases after rebasing.
+- Upstream enrolled the activation import closure in the unit-only packet while
+  implementation was in progress. The first source CI correctly refused the
+  changed `_memo.py` and `resolver.py` bytes. Their exact hashes were refreshed
+  after reviewing the existing adapter and original preservation tests: the
+  default path remains serial, and no thread-enabled test or observer exemption
+  was admitted. All other source hashes and packet nodes remain unchanged.
+- A local Windows packet attempt reached 839 passes and one platform skip
+  before the unchanged preservation reader attempted `ctypes.dlopen`; the
+  effect observer correctly refused it. This is not a passing packet receipt
+  and no native-loader exception was added. Required Linux source CI remains
+  the packet acceptance gate.
+- The focused Linux threaded/I/O lane remains unexecuted: this Windows host
+  has neither Docker nor the devcontainer CLI required by the existing isolated
+  runner. Installing another venue or weakening the runner is not implied.
+
 ### 2026-10-22 - Windows source qualification
 
 - Final five real payload-command cold processes completed in 5.8888, 5.8586,
