@@ -279,7 +279,7 @@ class WorktreeManagerApp(App):
         yield Horizontal(*(
             Button(action.label, id=f"view-{descriptor.key}-{action.key}")
             for descriptor in self._pivots for action in descriptor.pivot.view_actions
-            if action.run
+            if action.kind == "command" and action.run
         ), id="view-actions")
         table: DataTable = DataTable(zebra_stripes=True, cursor_type="row")
         yield table
@@ -532,7 +532,8 @@ class WorktreeManagerApp(App):
         summary = self._states[descriptor.key].summary
         actions = [
             action for action in descriptor.pivot.view_actions
-            if action.available and action.run and entry_matches(action.when, summary)
+            if action.kind == "command" and action.available
+            and action.run and entry_matches(action.when, summary)
         ]
         container.display = bool(actions)
         visible = {f"view-{descriptor.key}-{action.key}" for action in actions}
@@ -549,7 +550,8 @@ class WorktreeManagerApp(App):
         state = self._states[descriptor.key]
         action = next((
             action for action in descriptor.pivot.view_actions
-            if event.button.id == f"view-{descriptor.key}-{action.key}" and action.available
+            if action.kind == "command"
+            and event.button.id == f"view-{descriptor.key}-{action.key}" and action.available
             and action.run and entry_matches(action.when, state.summary)
         ), None)
         if action is None:

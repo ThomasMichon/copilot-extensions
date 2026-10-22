@@ -143,6 +143,16 @@ def test_vendor_result_verified_before_adoption(tmp_path, monkeypatch, actual, s
         monkeypatch.setattr(gh_account.shutil, "which", lambda _: "gh")
         assert gh_account.token_for_account("example-user") == "synthetic-new-credential"
         assert not (tmp_path / "auth/example-user/hosts.yml").exists()
+        from agent_codespaces import account_binding, config
+
+        monkeypatch.setattr(gh_account, "mapped_accounts", lambda: ())
+        monkeypatch.setattr(gh_account, "active_account", lambda: None)
+        monkeypatch.setattr(account_binding, "bound_accounts_or_raise", lambda: ())
+        monkeypatch.setattr(config, "load_merged_config", lambda **_: SimpleNamespace(repos={}))
+        global_probe = Mock(side_effect=subprocess.TimeoutExpired("unrelated global probe", 15))
+        monkeypatch.setattr(picker_auth, "status", global_probe)
+        assert picker_auth.probe()["status"] == "ready"
+        global_probe.assert_not_called()
     else:
         with pytest.raises(RuntimeError, match="not example-user|codespace scope"):
             authorize.authorize("example-user", lambda _: None)
@@ -276,3 +286,48 @@ def test_missing_owned_keyring_credential_never_uses_global_keyring(tmp_path, mo
     with pytest.raises(oauth_device.CredentialUnavailable):
         credential_store.load(path, "example-user")
     assert get.call_args.args[0].startswith("agent-codespaces:")
+
+
+def test_unknown_ambient_identity_is_selection_error_not_missing_auth(monkeypatch):
+    from agent_codespaces import account_binding, config
+
+    monkeypatch.setattr(gh_account, "mapped_accounts", lambda: ())
+    monkeypatch.setattr(gh_account, "active_account", lambda: None)
+    monkeypatch.setattr(account_binding, "bound_accounts_or_raise", lambda: ())
+    monkeypatch.setattr(config, "load_merged_config", lambda **_: SimpleNamespace(repos={}))
+    monkeypatch.setattr(picker_auth, "authorized_configs", lambda: {})
+    monkeypatch.setattr(picker_auth, "status", lambda: (0, status_text(scope="codespace")))
+    result = picker_auth.probe()
+    assert result["status"] == "error"
+    assert "selection" in result["message"]
+    assert picker_auth.classify(
+        0, status_text(scope="codespace") + "  - Active account: true\n", "",
+    )["account"] == "example-user"
+
+
+def test_held_subscription_reads_rotated_provider_credential(monkeypatch):
+    current = ["old-credential"]
+    used = []
+    monkeypatch.setattr(picker_auth, "credential_token", lambda _: current[0])
+    monkeypatch.setattr(picker_auth, "probe", lambda: {
+        "status": "ready", "account": "example-user", "message": "",
+    })
+
+    def build(**_):
+        used.append(gh_account.token_for_account("example-user"))
+        return [], object()
+
+    monkeypatch.setattr(pool, "build_pool", build)
+    monkeypatch.setattr(pool, "picker_payload", lambda *_: {"entries": [], "summary": {}})
+    ticks = iter([None, KeyboardInterrupt])
+
+    def sleep(_):
+        if next(ticks) is KeyboardInterrupt:
+            raise KeyboardInterrupt
+        current[0] = "new-credential"
+
+    monkeypatch.setattr(picker_pool.time, "sleep", sleep)
+    monkeypatch.setattr("sys.__stdout__", io.StringIO())
+    args = SimpleNamespace(budget=None, stale_after=None, stream=True, subscribe=True, interval=1)
+    assert picker_pool.command(args) == 0
+    assert used == ["old-credential", "new-credential"]

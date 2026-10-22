@@ -116,7 +116,7 @@ requirements, not optional implementation details.
   verification; existing per-process account pinning consumes verified results.
   No reusable authentication broker exists in the provider, so no optional
   sibling or adopter-private broker is imported.
-- Source validation: 256 provider/CLI/lifecycle tests and 225 Manager
+- Source validation: 258 provider/CLI/lifecycle tests and 229 Manager
   contract/production-widget/preview tests pass in isolated bounded runs.
   Tests drive actual clicks, visible device instructions, cancel/error/success,
   provider refresh, account mismatch and credential adoption with mocked vendor
@@ -143,3 +143,10 @@ requirements, not optional implementation details.
 - One shared candidate selector now serves authentication and inventory,
   including mapped-only accounts. Pointer activation is constrained to the
   actual button row; blank-row clicks are explicitly non-authorizing.
+- An unknown ambient identity reports selection error, not missing credentials.
+  Provider-only candidates do not consult an unrelated global status probe, and
+  each inventory request reads current provider credentials without memoization.
+  Preview command buttons reject form/internal actions and bind through the
+  same payload-root resolver as production. Tests execute a benign contributed
+  provider with a conflicting provider first on PATH and refuse missing owned
+  commands rather than falling through to that peer.

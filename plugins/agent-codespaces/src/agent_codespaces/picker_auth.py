@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -65,6 +66,19 @@ def status(env: dict[str, str] | None = None) -> tuple[int, str]:
 
 def classify(rc: int, text: str, login: str) -> dict[str, str]:
     scopes = {key.casefold(): value for key, value in parse_gh_account_scopes(text).items()}
+    if not login and scopes:
+        current = ""
+        for line in text.splitlines():
+            if match := re.search(r"\baccount\s+([A-Za-z0-9][A-Za-z0-9-]*)", line):
+                current = match.group(1)
+            if "active account: true" in line.lower():
+                login = current
+                break
+        if not login:
+            return {
+                "status": "error", "account": "",
+                "message": "GitHub active account selection is unknown; refresh to retry.",
+            }
     failures = gh_account_failures(text)
     failure = failures.get(login.casefold())
     if failure == "timeout":
@@ -91,13 +105,16 @@ def probe() -> dict[str, object]:
     from .account_candidates import candidates
 
     try:
-        global_rc, global_text = status()
+        global_status = None
         results = []
         for account in candidates():
             login = account or ""
             try:
                 credential = credential_token(login) if login else None
                 if credential is None:
+                    if global_status is None:
+                        global_status = status()
+                    global_rc, global_text = global_status
                     results.append(classify(global_rc, global_text, login))
                 else:
                     results.append(oauth_device.verify(credential, login))

@@ -116,6 +116,14 @@ def _payload_command(root: Path | None, command: str) -> Path | None:
                 return candidate
         except OSError:
             continue
+    try:
+        declaration = json.loads((root / "payload-invocation.json").read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return None
+    except (OSError, ValueError) as exc:
+        raise ManifestError(f"Payload command declaration is unreadable: {exc}") from exc
+    if isinstance(declaration, dict) and declaration.get("command") == command:
+        return candidates[0]
     return None
 
 
@@ -168,6 +176,7 @@ def _rewrite_manifest_commands(
     *,
     root: Path | None,
     require_targets: bool,
+    reject_unusable: bool = False,
 ) -> dict[str, object]:
     """Validate executable targets and bind absolute invocation paths."""
     from worktree_manager.configuration_preview import validate_preview_actions
@@ -189,8 +198,14 @@ def _rewrite_manifest_commands(
         except ManifestError:
             raise
         except (FileNotFoundError, OSError, TargetUnusableError) as exc:
-            if require_targets and not optional:
+            if not optional and (
+                require_targets or (reject_unusable and isinstance(exc, TargetUnusableError))
+            ):
                 raise
+            if root is not None:
+                declared = _payload_command(root, cast(Sequence[str], value)[0])
+                if declared is not None:
+                    container[key] = [str(declared.absolute()), *cast(Sequence[str], value)[1:]]
             if optional and root is not None:
                 first = cast(Sequence[str], value)[0]
                 candidate = Path(first).expanduser()

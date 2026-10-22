@@ -77,8 +77,16 @@ def _account_for_repo(slug: str | None) -> str | None:
 
 def token_for_account(login: str | None) -> str | None:
     """Avoid reusing credentials across explicit installation contexts."""
-    if worktrees.explicit_context():
+    explicit = worktrees.explicit_context()
+    if explicit:
         worktrees.validate_context()
+    if login:
+        from .picker_auth import credential_token
+
+        provider_token = credential_token(login)
+        if provider_token is not None:
+            return provider_token
+    if explicit:
         return _token_for_account.__wrapped__(login)
     return _token_for_account(login)
 
@@ -92,11 +100,6 @@ def _token_for_account(login: str | None) -> str | None:
     """
     if not login or shutil.which("gh") is None:
         return None
-    from .picker_auth import credential_token
-
-    provider_token = credential_token(login)
-    if provider_token is not None:
-        return provider_token
     try:
         result = subprocess.run(
             ["gh", "auth", "token", "--user", login],

@@ -62,6 +62,11 @@ Version-1 compatibility also covers the existing declarative fields:
   these actions. Commands receive the same payload/provenance resolution as row
   actions. The CodeSpaces contribution uses this for Sign in / Authorize, while
   credential selection and vendor authentication remain provider-owned;
+- the lightweight preview exposes only command view actions as buttons; forms,
+  cards and internal argument arrays are never treated as subprocess commands.
+  Preview discovery resolves commands against the contributing payload root just
+  as production does. A declared but missing owned command remains unavailable,
+  even if a same-named command from another installation is first on PATH;
 - optional action `shortcut`, used by the generic interaction shell to expose
   the action's keyboard affordance without hard-coding a provider's keys;
 - top-level `worktree_actions`;
