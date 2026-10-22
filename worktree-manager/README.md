@@ -217,6 +217,12 @@ output and stops without waiting for detached descendants to close inherited
 pipes. Its duration includes invocation and output drain, not per-line cost or
 a serving-health verdict. Admission, staging, deadlines and termination remain
 with their original owners; this is not another updater.
+The launcher can be newer than the active Worktrees runtime. Its in-process
+bootstrap checks the optional observer API before using the new mode. If that
+API or telemetry package is unavailable, it records an explicit timing warning
+and replaces itself with the original native command once. It neither prevents
+installation nor retries an installer whose exit was already observed. No
+probe process, implicit runtime update or invented legacy duration is added.
 
 The native maintenance sinks share one physical-line envelope with the
 Python updater: `[HH:mm:ss.fffZ] scope state message [elapsed Ns]` or a

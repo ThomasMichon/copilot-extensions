@@ -678,7 +678,20 @@ for key, value in environment.items():
                         # background install can't collide.
                         setup_status INFO 'A new plugin version was downloaded; installing it in the background (applies on the next launch)...'
                         local _ilog="${APERTURE_SETUP_LOG:-${WORKTREE_SETUP_LOG:-/dev/null}}"
-                        setsid "$PYTHON" -m update_telemetry.shell observe --log "$_ilog" -- \
+                        local _observer_code='
+import os, sys
+try:
+    from update_telemetry import shell
+except ImportError:
+    shell = None
+if shell is None or not callable(getattr(shell, "observe_command", None)):
+    print("WARNING: detached installer timing unavailable (observer-unavailable); running the original native installer.",
+          file=sys.stderr, flush=True)
+    os.execvp(sys.argv[2], sys.argv[2:])
+sys.argv = [sys.argv[0], "observe", "--log", sys.argv[1], "--", *sys.argv[2:]]
+raise SystemExit(shell.main())
+'
+                        setsid "$PYTHON" -c "$_observer_code" "$_ilog" \
                             env ${_stage_env[@]+"${_stage_env[@]}"} \
                             bash "$_installer" "${_inst_args[@]}" \
                             >>"$_ilog" 2>&1 </dev/null &

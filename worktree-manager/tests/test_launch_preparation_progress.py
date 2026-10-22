@@ -409,8 +409,49 @@ def test_detached_installer_recreates_sink_rotated_before_start(tmp_path, exit_c
     )
 
 
+@pytest.mark.parametrize("exit_code", [0, 7])
+def test_detached_bash_installer_retains_execution_with_legacy_formatter(tmp_path, exit_code):
+    _exercise_marketplace_installer(
+        tmp_path, "bash", exit_code, "allowed", False, legacy_observer=True,
+    )
+
+
+@pytest.mark.parametrize("exit_code", [0, 7])
+def test_detached_bash_bootstrap_keeps_native_exit_without_telemetry(tmp_path, exit_code):
+    if os.name != "posix":
+        pytest.skip("POSIX detached bootstrap contract")
+    root = Path(__file__).resolve().parents[1]
+    source = (root / "bin/launch-session.sh").read_text(encoding="utf-8")
+    marker = "local _observer_code='\n"
+    assert source.count(marker) == 1
+    bootstrap = source.split(marker, 1)[1].split("\n'", 1)[0]
+    package = tmp_path / "update_telemetry"
+    package.mkdir()
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    literal = "space ' \" ; $ ` &"
+    producer = (
+        "import sys; "
+        f"assert sys.argv[1] == {literal!r}; print('original native output'); "
+        f"sys.exit({exit_code})"
+    )
+    result = subprocess.run(
+        [
+            sys.executable, "-c", bootstrap, str(tmp_path / "unused-observer.log"),
+            sys.executable, "-I", "-c", producer, literal,
+        ],
+        env=dict(os.environ, PYTHONPATH=str(tmp_path)),
+        capture_output=True, text=True, timeout=10,
+    )
+    assert result.returncode == exit_code, result.stderr
+    assert result.stdout == "original native output\n"
+    assert "detached installer timing unavailable" in result.stderr
+    assert "observer-unavailable" in result.stderr
+    assert not (tmp_path / "unused-observer.log").exists()
+
+
 def _exercise_marketplace_installer(
-    tmp_path, shell, exit_code, admission, blocking, *, rotate_before_start=False,
+    tmp_path, shell, exit_code, admission, blocking, *,
+    rotate_before_start=False, legacy_observer=False,
 ):
     if shell == "bash" and os.name != "posix":
         pytest.skip("POSIX shell contract")
@@ -581,6 +622,19 @@ def _exercise_marketplace_installer(
         env["PYTHONPATH"] = os.pathsep.join([
             str(tmp_path), str(root.parent / "libs/update-telemetry/src"),
         ])
+        if legacy_observer:
+            library = root.parent / "libs/update-telemetry/src/update_telemetry"
+            legacy = tmp_path / "update_telemetry"
+            legacy.mkdir()
+            (legacy / "__init__.py").write_text(
+                f"__path__.append({str(library)!r})\n", encoding="utf-8",
+            )
+            code = (library / "shell.py").read_text(encoding="utf-8")
+            assert code.count("def observe_command(") == 1
+            (legacy / "shell.py").write_text(
+                code.replace("def observe_command(", "def _future_observe_command("),
+                encoding="utf-8",
+            )
         script = "\n".join([
             "set -euo pipefail; _NO_UPDATE=0; _UPDATE_APPLIED=''; _STAGE_PID=''",
             f"LAUNCH_PROJECT={shlex.quote(project)}",
@@ -623,10 +677,11 @@ def _exercise_marketplace_installer(
                     installer_log.read_text(encoding="utf-8-sig")
                     if installer_log.exists() else ""
                 )
-                if "installer-detail [elapsed " in report:
+                if ("installer-detail" if legacy_observer else "installer-detail [elapsed ") in report:
                     break
                 time.sleep(.02)
-            assert "installer-detail [elapsed " in report, "detached progress was not persisted"
+            expected = "installer-detail" if legacy_observer else "installer-detail [elapsed "
+            assert expected in report, "detached progress was not persisted"
             if shell != "bash":
                 assert list(tmp_path.glob("setup.*.installer.log")) == [installer_log]
             assert "Installer update done" not in report and "Installer update failed" not in report
@@ -640,7 +695,7 @@ def _exercise_marketplace_installer(
         deadline = time.monotonic() + 10
         while time.monotonic() < deadline:
             report = installer_log.read_text(encoding="utf-8-sig")
-            if f"(exit {exit_code})" in report:
+            if ("installer-last-line" if legacy_observer else f"(exit {exit_code})") in report:
                 break
             time.sleep(.02)
         # The log observer and its headless console must finish with the child,
@@ -669,6 +724,13 @@ def _exercise_marketplace_installer(
             else "execution admission unavailable"
         ) in report
         assert "Checking bootstrap services" in report
+        return
+    if legacy_observer:
+        assert marker.read_text() == "executed"
+        assert "detached installer timing unavailable" in report
+        assert "installer-last-line" in report
+        assert "Installer update done" not in report and "Installer update failed" not in report
+        assert report.splitlines().count(canonical) == 1
         return
     assert "installer-detail [elapsed " in report
     assert "installer-unicode caf\u00e9 \u03a9 [elapsed " in report

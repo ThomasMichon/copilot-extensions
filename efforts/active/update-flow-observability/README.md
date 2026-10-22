@@ -261,7 +261,17 @@ bounded source delta inspection.
   for detached-descendant EOF. It adds one observer per detached installation,
   not a process per line. Duration includes observed invocation and drain;
   these fixtures do not claim update savings, full package provisioning or
-  promoted installed behavior. Publication and source review remain pending.
+  promoted installed behavior. PR #7697 is open; current-head review and merge
+  remain pending.
+- The first review identified a real newer-launcher/older-runtime compatibility
+  gap despite its generic no-open-issues footer. Two native legacy-formatter
+  fixtures failed before correction. The detached bootstrap now checks the
+  optional API in-process, retaining the new observer when available and
+  explicitly warning before executing the original native command once when
+  unavailable. The focused Linux selection then passed 29 cases with 32
+  Windows-only skips, including old API, missing telemetry, literal arguments,
+  native exits, redaction and direct-child lifetime. No probe process, runtime
+  update or second installer execution was introduced.
 
 ### 2026-10-21 - Detached Windows sink merged; retain the inner output owners
 
