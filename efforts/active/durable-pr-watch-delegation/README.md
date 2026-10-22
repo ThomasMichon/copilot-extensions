@@ -318,6 +318,11 @@ callback an implicit credential store.
   resolves the validated peer before considering any legacy hint. Native
   regressions now cross the final Python call and prove old-host refusal
   before target execution; no installed runtime or fleet capacity was changed.
+- The follow-up review found that an empty pushed-head operand could select
+  the central local-publication path, and option-like body/title text could
+  be reparsed as flags. Native create now rejects blank heads before spawning
+  and attaches all forwarded option values with `=`. Regressions distinguish
+  arrival at Python from reparsing those values at the consumer boundary.
 
 ### 2026-10-22 - Bind admitted PR callers to durable replay operations
 

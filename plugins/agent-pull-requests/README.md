@@ -108,6 +108,10 @@ and retains central publication checks, attribution, idempotent reuse and claim
 journaling. No second claim is written here. `--base` is refused before creation:
 the central CLI does not expose that override. `claimed: false` and its recovery
 warning remain visible if the PR exists but its claim could not be recorded.
+An empty or whitespace-only head refuses before invoking the central command,
+so it cannot select local squash/push by losing the foreign-branch operand.
+Forwarded option values are attached with `=` to preserve titles and bodies
+that themselves begin with dashes.
 
 Merge delegates to `pr-merge --now`; the central role/profile gate may refuse
 it. Native ADO auto-completion, policy evaluation, latest-push evidence and

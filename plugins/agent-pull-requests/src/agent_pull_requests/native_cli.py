@@ -28,13 +28,15 @@ class MergeMethodAction(argparse.Action):
 
 def _mutation(args: argparse.Namespace, prefix: list[str]) -> tuple[int, dict]:
     if args.command == "create":
+        if not args.head.strip():
+            raise ValueError("native create requires a nonempty pushed head branch")
         if args.base is not None:
             raise ValueError(
                 "native create uses the target's configured base; --base is not supported"
             )
         argv = [
-            "pr-create", "--repo", args.repo, "--from-branch", args.head,
-            "--title", args.title, "--body", args.body, "--json",
+            "pr-create", f"--repo={args.repo}", f"--from-branch={args.head}",
+            f"--title={args.title}", f"--body={args.body}", "--json",
         ]
         if args.draft:
             argv.append("--draft")

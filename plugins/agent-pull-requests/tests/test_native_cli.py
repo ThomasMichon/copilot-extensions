@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import subprocess
@@ -82,9 +83,40 @@ def test_native_create_delegates_publication_and_claim_once(command, monkeypatch
     assert cli.main(arguments("create", command, "--draft", "--body", "body")) == 0
     assert json.loads(capsys.readouterr().out) == value
     assert calls == [([
-        command, "pr-create", "--repo", "project/repo", "--from-branch", "feature/x",
-        "--title", "Example", "--body", "body", "--json", "--draft",
+        command, "pr-create", "--repo=project/repo", "--from-branch=feature/x",
+        "--title=Example", "--body=body", "--json", "--draft",
     ], 90.0)]
+
+
+@pytest.mark.parametrize("head", ["", " ", "\t", "\n"])
+def test_native_create_empty_head_never_spawns_central_publication(head, command, monkeypatch, capsys):
+    calls = stub(monkeypatch, {})
+    assert cli.main(arguments("create", command, "--head", head)) == 1
+    assert "nonempty pushed head" in json.loads(capsys.readouterr().out)["error"]
+    assert not calls
+
+
+@pytest.mark.parametrize("title,body", [("--draft", "---\nDetails"), ("--json", "")])
+def test_native_create_option_like_values_survive_reparsing(title, body, command, monkeypatch, capsys):
+    seen = []
+
+    def run(argv, **kwargs):
+        parser = argparse.ArgumentParser()
+        parser.add_argument("verb", choices=["pr-create"])
+        for name in ("repo", "from-branch", "title", "body"):
+            parser.add_argument("--" + name, required=True)
+        parser.add_argument("--json", action="store_true")
+        seen.append(parser.parse_args(argv[1:]))
+        return subprocess.CompletedProcess(argv, 0, json.dumps({
+            "repo": "project/repo", "number": 7, "pr_opened": True,
+            "url": "https://dev.azure.com/example/project/_git/repo/pullrequest/7",
+        }), "")
+
+    monkeypatch.setattr(native_cli, "run_command", run)
+    assert cli.main(arguments("create", command, f"--title={title}", f"--body={body}")) == 0
+    assert json.loads(capsys.readouterr().out)["number"] == 7
+    assert len(seen) == 1
+    assert (seen[0].title, seen[0].body, seen[0].from_branch) == (title, body, "feature/x")
 
 
 def test_native_merge_preserves_pending_completion(command, monkeypatch, capsys):
@@ -264,8 +296,8 @@ def test_native_front_door_crosses_real_worktrees_command_boundary(
     expected = ["pr-watch", "snapshot", "project/repo", "7", "--json"]
     if verb == "create":
         expected = [
-            "pr-create", "--repo", "project/repo", "--from-branch", "feature/x",
-            "--title", "Example", "--body", "", "--json",
+            "pr-create", "--repo=project/repo", "--from-branch=feature/x",
+            "--title=Example", "--body=", "--json",
         ]
         value = {
             "repo": "project/repo", "number": 7, "pr_opened": True, "claimed": True,
