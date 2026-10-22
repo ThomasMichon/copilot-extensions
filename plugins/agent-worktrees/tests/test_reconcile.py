@@ -2526,10 +2526,8 @@ def test_apply_plan_strips_caller_payload_environment(monkeypatch, tmp_path):
 
 @pytest.mark.guard
 def test_launch_adapters_apply_planned_runtime_environment():
-    # The interactive mux launch scripts relocated to Worktree Manager in
-    # Phase 3b Sub-slice 2a Step 2 (efforts/active/worktree-manager-control-
-    # plane/phase-3b-mux-relocation.md); agent-worktrees no longer ships its
-    # own copy.
+    # Environment application belongs to the checked Python executor, not a
+    # second native interpreter of the plan's metadata.
     powershell = (
         REPO / "worktree-manager" / "bin" / "launch-session.ps1"
     ).read_text(encoding="utf-8")
@@ -2537,27 +2535,13 @@ def test_launch_adapters_apply_planned_runtime_environment():
         REPO / "worktree-manager" / "bin" / "launch-session.sh"
     ).read_text(encoding="utf-8")
 
-    environment_helper = powershell.split("function Push-UpdateEnvironment {", 1)[1].split(
-        "\n}\n", 1,
-    )[0]
-    assert "param([object]$Update)" in environment_helper
-    assert "$Update.PSObject.Properties['unset_environment']" in environment_helper
-    assert "$Update.PSObject.Properties['environment'] -and $Update.environment" in environment_helper
-    assert "$Update.unset_environment" in environment_helper
-    assert "$Update.environment.PSObject.Properties" in environment_helper
-    assert "update.get('unset_environment', [])" in posix
-    assert "update.get('environment', {}).items()" in posix
-    assert "status.get('unset_environment', [])" in posix
-    assert '--install-dir "$runtime_root"' in posix
-    assert "Push-UpdateEnvironment $status" in powershell
-    action_helper = powershell.split("function Invoke-SetupAction {", 1)[1].split(
-        "\n}\n", 1,
-    )[0]
-    assert "Push-UpdateEnvironment $Update" in action_helper
-    assert "Pop-UpdateEnvironment $savedEnvironment" in action_helper
-    assert "Invoke-SetupAction -CommandArgv $argv -Update $update" in powershell
-    assert "Invoke-SetupAction -CommandArgv $rargv -Update $u" in powershell
-    assert "'-InstallDir'" in powershell
+    for phase in ("bootstrap", "reconcile", "staged"):
+        assert f"'launch-update', '{phase}'" in powershell
+        assert f"launch-update {phase}" in posix
+    assert "Push-UpdateEnvironment" not in powershell
+    assert "Invoke-SetupAction" not in powershell
+    assert "UPDATE_ARGV" not in posix and "_RARGV" not in posix
+    assert "update.get('environment'" not in posix
 
 
 def test_apply_plan_skips_copilot_when_absent(env, monkeypatch):

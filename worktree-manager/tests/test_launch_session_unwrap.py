@@ -113,6 +113,8 @@ def test_bash_launcher_avoids_bash4_mapfile():
     assert "local _bootstrap_args=(launch-update bootstrap)" in text
     assert "launch-update reconcile" in text
     assert "UPDATE_ARGV" not in text and "_RARGV" not in text
+    assert '${_project_args[@]+"${_project_args[@]}"}' in text
+    assert '${_reconcile_project[@]+"${_reconcile_project[@]}"}' in text
 
 
 def test_powershell_launcher_contains_unwrap():

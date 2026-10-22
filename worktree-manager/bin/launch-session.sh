@@ -570,7 +570,7 @@ for value in [
         # (2) The executor re-derives the bootstrap plan under driver custody.
         setup_status INFO 'Checking bootstrap services for pending updates...'
         _run_launch_request bootstrap 'Bootstrap update' \
-            "$PYTHON" -m agent_worktrees "${_project_args[@]}" "${_bootstrap_args[@]}"
+            "$PYTHON" -m agent_worktrees ${_project_args[@]+"${_project_args[@]}"} "${_bootstrap_args[@]}"
         if _refreshed_python="$(resolve_runtime_python)" && [[ -n "$_refreshed_python" && -x "$_refreshed_python" ]]; then
             PYTHON="$_refreshed_python"
         fi
@@ -585,7 +585,7 @@ for value in [
         local _reconcile_project=()
         [[ -n "$LAUNCH_PROJECT" ]] && _reconcile_project=(--project "$LAUNCH_PROJECT")
         _run_launch_request reconcile 'Plugin reconcile' \
-            "$PYTHON" -m agent_worktrees "${_reconcile_project[@]}" launch-update reconcile
+            "$PYTHON" -m agent_worktrees ${_reconcile_project[@]+"${_reconcile_project[@]}"} launch-update reconcile
         if _refreshed_python="$(resolve_runtime_python)" && [[ -n "$_refreshed_python" && -x "$_refreshed_python" ]]; then
             PYTHON="$_refreshed_python"
         fi
@@ -595,7 +595,7 @@ for value in [
         local _request_args=(launch-update staged --status "$status_file")
         [[ -z "${WORKTREE_BLOCKING_INSTALL:-}" ]] && _request_args+=(--detach)
         _run_launch_request installer 'Staged runtime request (applies on the next launch)' \
-            "$PYTHON" -m agent_worktrees "${_project_args[@]}" "${_request_args[@]}"
+            "$PYTHON" -m agent_worktrees ${_project_args[@]+"${_project_args[@]}"} "${_request_args[@]}"
     fi
     _stop_setup_progress
 }

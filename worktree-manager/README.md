@@ -212,6 +212,11 @@ An older engine without these request surfaces warns through the normal
 failed-command outcome and does not fall back to raw installation.
 Installer staging, watchdogs and per-generation safeguards remain nested
 beneath the shared transaction authority.
+Native phase installers stream both output channels into the durable request
+log while running; completed JSON is published separately. Waiting launchers
+observe those live lines rather than receiving all diagnostics after installer
+exit. Optional project discovery still selects an adopted CWD when no explicit
+project is supplied; neutral-directory maintenance does not require one.
 
 The native maintenance sinks share one physical-line envelope with the
 Python updater: `[HH:mm:ss.fffZ] scope state message [elapsed Ns]` or a

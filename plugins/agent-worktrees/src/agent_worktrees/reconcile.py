@@ -1576,6 +1576,7 @@ def build_uninstall_plan(
 
 def _run_plan_step(
     argv: Sequence[str], update: dict[str, Any], log: Callable[[str], None],
+    *, output_fd: int | None = None,
 ) -> int:
     """Run one plan step under its installer deadline, killing its tree on expiry.
 
@@ -1596,8 +1597,11 @@ def _run_plan_step(
     except (OSError, ValueError) as error:
         log(f"    {error}")
         return 1
-    run = run_installer(argv, cwd=None, env=env, deadline_s=deadline,
-                        log=lambda line: log(f"    {line}"))
+    stream = (
+        {"output_fd": output_fd} if output_fd is not None
+        else {"log": lambda line: log(f"    {line}")}
+    )
+    run = run_installer(argv, cwd=None, env=env, deadline_s=deadline, **stream)
     if run.rc is None:
         log(f"    {run.status}")
         return 124 if run.status.startswith("timed out") else 1
@@ -2024,6 +2028,7 @@ def apply_plan(
     include_payload_refresh: bool = False,
     log: Callable[[str], None] | None = None,
     runner: Callable[[Sequence[str]], int] | None = None,
+    output_fd: int | None = None,
 ) -> dict[str, Any]:
     """Execute the canonical two-pass reconciliation plan under caller custody.
 
@@ -2044,7 +2049,9 @@ def apply_plan(
     _log = log or (lambda _m: None)
 
     def _default_runner(argv: Sequence[str], update: dict[str, Any]) -> int:
-        return _run_plan_step(argv, update, _log)
+        if output_fd is None:
+            return _run_plan_step(argv, update, _log)
+        return _run_plan_step(argv, update, _log, output_fd=output_fd)
 
     def _custom_runner(argv: Sequence[str], update: dict[str, Any]) -> int:
         assert runner is not None

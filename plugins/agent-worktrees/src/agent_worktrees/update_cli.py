@@ -902,6 +902,10 @@ def cmd_reconcile_plugins(args: argparse.Namespace) -> int:
                 machine=machine,
                 include_payload_refresh=with_payload,
                 log=_log,
+                **(
+                    {"output_fd": args.installer_output_fd}
+                    if getattr(args, "installer_output_fd", None) is not None else {}
+                ),
             )
         except Exception as e:
             print(f"provision: error: {e}", file=sys.stderr)

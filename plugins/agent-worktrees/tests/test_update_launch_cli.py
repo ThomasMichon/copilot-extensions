@@ -45,6 +45,34 @@ def test_reconcile_phase_calls_canonical_executor_only_under_request_custody(mon
     assert seen == [True]
 
 
+@pytest.mark.parametrize("phase", ["bootstrap", "reconcile"])
+@pytest.mark.parametrize("adopted", [False, True])
+def test_fixed_cli_discovers_optional_project_from_cwd(tmp_path, monkeypatch, phase, adopted):
+    from agent_worktrees import front_door_cli, project_routing
+
+    directory = tmp_path / ("adopted" if adopted else "neutral")
+    directory.mkdir()
+    monkeypatch.chdir(directory)
+    seen = []
+
+    def resolve(override):
+        assert override is None
+        assert launch.Path.cwd() == directory
+        seen.append("resolved")
+        return ("fixture-project" if adopted else None), None
+
+    launch.update_cli.cfg.set_active_project(None)
+    try:
+        assert front_door_cli.resolve_invocation_project(
+            ["launch-update", phase], None, resolve,
+            lambda path: True, project_routing._is_no_project_invocation,
+        ) is adopted
+        assert seen == ["resolved"]
+        assert launch.update_cli.cfg.active_project() == ("fixture-project" if adopted else None)
+    finally:
+        launch.update_cli.cfg.set_active_project(None)
+
+
 @pytest.mark.parametrize("phase,options", [
     ("bootstrap", {"status": "untrusted.json"}),
     ("staged", {"defer_worktrees": True}),
@@ -123,7 +151,7 @@ def test_staged_executor_reconstructs_argv_and_environment(tmp_path, monkeypatch
     monkeypatch.setattr(launch, "execution_diagnostic", lambda update, **kw: (
         observed.append((update.copy(), kw)) or None
     ))
-    monkeypatch.setattr(launch.reconcile, "_run_plan_step", lambda argv, update, log: 7)
+    monkeypatch.setattr(launch.reconcile, "_run_plan_step", lambda argv, update, log, **kw: 7)
     assert launch._execute(_args(phase="staged", status=str(path), snapshot=digest)) == 1
     update, kwargs = observed[0]
     assert kwargs == {"staged": True}
@@ -148,7 +176,7 @@ def test_bootstrap_replans_and_retains_independent_services(tmp_path, monkeypatc
         if denied and update.get("phase") == "runtime" else None
     ))
     seen = []
-    monkeypatch.setattr(launch.reconcile, "_run_plan_step", lambda argv, update, log: (
+    monkeypatch.setattr(launch.reconcile, "_run_plan_step", lambda argv, update, log, **kw: (
         seen.append(update) or 0
     ))
     assert launch._execute(_args()) == (1 if denied else 0)
@@ -297,6 +325,7 @@ def test_actual_staged_install_survives_submitter_job_and_preserves_two_results(
         receipt = json.loads(result.stdout)
         assert receipt["action"] == "accepted"
         request_ids.append(receipt["request_id"])
+        request = driver.status(receipt["request_id"], root=root)
         try:
             deadline = time.monotonic() + 15
             while not started.exists() and time.monotonic() < deadline:
@@ -311,6 +340,13 @@ def test_actual_staged_install_survives_submitter_job_and_preserves_two_results(
                 (root / "worker.log").read_text(),
                 request.log_path.read_text() if request.log_path.exists() else "no product log",
             )
+            deadline = time.monotonic() + 10
+            while (
+                (not request.log_path.exists() or "staged-progress" not in request.log_path.read_text())
+                and time.monotonic() < deadline
+            ):
+                time.sleep(.02)
+            assert "staged-progress" in request.log_path.read_text(), "live progress was buffered"
             assert not output.exists(), "detached caller waited for installation"
         finally:
             gate.write_text(str(code))
@@ -321,3 +357,57 @@ def test_actual_staged_install_survives_submitter_job_and_preserves_two_results(
         assert output.read_text() == str(code)
         assert f"staged-result {code}" in request.log_path.read_text()
     assert len(set(request_ids)) == 2
+
+
+@pytest.mark.parametrize("phase", ["bootstrap", "reconcile"])
+def test_native_phase_streams_real_installer_before_completion(tmp_path, monkeypatch, capfd, phase):
+    import threading
+    import time
+
+    gate = tmp_path / "continue"
+    producer = tmp_path / "producer.py"
+    producer.write_text(
+        "import sys,time\nfrom pathlib import Path\n"
+        "print('live-installer-line',flush=True)\n"
+        "deadline=time.monotonic()+10\n"
+        f"while not Path({str(gate)!r}).exists() and time.monotonic()<deadline: time.sleep(.02)\n"
+        f"assert Path({str(gate)!r}).exists(), 'progress was not observed before release'\n",
+    )
+    update = dict(
+        service="fixture-service", argv=[sys.executable, str(producer)],
+        environment={}, unset_environment=[],
+    )
+    if phase == "bootstrap":
+        plans = iter([dict(action="self-update", updates=[update]), dict(action="continue")])
+        monkeypatch.setattr(launch.update_cli, "_core_helper", lambda *a: lambda: next(plans))
+    else:
+        plans = iter([dict(action="reconcile", updates=[update]), dict(action="continue")])
+        monkeypatch.setattr(launch.reconcile, "build_plan", lambda *a, **kw: next(plans))
+        monkeypatch.setattr(launch.update_cli.worktree_identity, "_find_repo_dir", lambda: tmp_path)
+    monkeypatch.setattr(launch, "execution_diagnostic", lambda *a, **kw: None)
+    monkeypatch.setattr(launch.reconcile, "execution_diagnostic", lambda *a, **kw: None)
+    results, failures = [], []
+
+    def execute():
+        try:
+            results.append(launch._execute(_args(phase=phase)))
+        except BaseException as error:
+            failures.append(error)
+
+    worker = threading.Thread(target=execute)
+    worker.start()
+    output = ""
+    try:
+        deadline = time.monotonic() + 10
+        while "live-installer-line" not in output and time.monotonic() < deadline:
+            captured = capfd.readouterr()
+            output += captured.err
+            assert captured.out == "", "protocol completion preceded installer completion"
+            time.sleep(.02)
+        assert "live-installer-line" in output
+        assert worker.is_alive() and results == [], "progress arrived only after completion"
+    finally:
+        gate.write_text("continue")
+        worker.join(timeout=15)
+    assert not worker.is_alive() and failures == []
+    assert results == [0]

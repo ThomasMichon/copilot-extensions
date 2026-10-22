@@ -49,7 +49,7 @@ def resolve_invocation_project(
         return bool(cfg.active_project())
     needs_project = not is_no_project(args_list)
     optional_project = (
-        bool(args_list) and args_list[0] == "config-root"
+        bool(args_list) and args_list[0] in {"config-root", "launch-update"}
         and is_no_project(args_list)
     )
     if explicit:

@@ -84,7 +84,7 @@ def _apply(update: dict, *, staged: bool = False) -> dict:
         _log(f"launch: {service} [{diagnostic['reason']}] {diagnostic['message']}")
         return {"service": service, "ok": False, "returncode": 3, "diagnostic": diagnostic}
     _log(f"launch: {service} starting")
-    code = reconcile._run_plan_step(update["argv"], update, _log)
+    code = reconcile._run_plan_step(update["argv"], update, _log, output_fd=2)
     _log(f"launch: {service} {'done' if code == 0 else 'failed'} (exit {code})")
     return {"service": service, "ok": code == 0, "returncode": code}
 
@@ -101,6 +101,7 @@ def _execute(args: argparse.Namespace) -> int:
 def _execute_phase(args: argparse.Namespace) -> int:
     if args.phase == "reconcile":
         args.apply = True
+        args.installer_output_fd = 2
         return update_cli.cmd_reconcile_plugins(args)
     executed = []
     if args.phase == "bootstrap":

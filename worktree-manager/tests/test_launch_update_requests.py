@@ -14,7 +14,9 @@ import pytest
 
 
 @pytest.mark.parametrize("shell", ["pwsh", "powershell", "bash"])
-@pytest.mark.parametrize("mode", ["detach", "wait", "no-update", "no-reconcile", "failed", "old-engine"])
+@pytest.mark.parametrize("mode", [
+    "detach", "wait", "no-update", "no-reconcile", "failed", "old-engine", "no-project",
+])
 def test_native_launch_submits_fixed_phases_and_preserves_progress(tmp_path, shell, mode):
     if shell == "bash" and os.name != "posix":
         pytest.skip("POSIX native launcher")
@@ -29,8 +31,9 @@ def test_native_launch_submits_fixed_phases_and_preserves_progress(tmp_path, she
         "import json,sys\nfrom pathlib import Path\n"
         f"path=Path({str(calls)!r})\n"
         "with path.open('a') as stream: stream.write(json.dumps(sys.argv[1:])+'\\n')\n"
-        "assert sys.argv[1:3]==['--project','fixture-project']\n"
-        "args=sys.argv[3:]\n"
+        "args=sys.argv[1:]\n"
+        f"if {mode!r}!='no-project':\n"
+        " assert args[:2]==['--project','fixture-project']; args=args[2:]\n"
         "assert args[:2] in [['launch-update','bootstrap'],['launch-update','staged'],['launch-update','reconcile']]\n"
         f"if {mode!r}=='old-engine':\n"
         " print('unrecognized command: launch-update',file=sys.stderr); sys.exit(2)\n"
@@ -62,7 +65,7 @@ def test_native_launch_submits_fixed_phases_and_preserves_progress(tmp_path, she
             f"$VenvPython='{python}'",
             "$script:LaunchTimer=[Diagnostics.Stopwatch]::StartNew()",
             f"$script:SetupLog='{log}'; $script:ShowLaunchStatus=$false",
-            "$script:UpdateApplied=$false; $script:LaunchProject='fixture-project'",
+            f"$script:UpdateApplied=$false; $script:LaunchProject='{'' if mode == 'no-project' else 'fixture-project'}'",
             f"$noUpdate=${'true' if mode == 'no-update' else 'false'}",
             *(function(name) for name in (
                 "Format-SetupLine", "Write-SetupLog", "Write-SetupStatus",
@@ -87,7 +90,7 @@ def test_native_launch_submits_fixed_phases_and_preserves_progress(tmp_path, she
         env["PYTHONPATH"] += os.pathsep + str(root.parent / "libs" / "update-telemetry" / "src")
         script = "\n".join([
             "set -euo pipefail",
-            f"PYTHON={shlex.quote(python)}; LAUNCH_PROJECT=fixture-project",
+            f"PYTHON={shlex.quote(python)}; LAUNCH_PROJECT={shlex.quote('' if mode == 'no-project' else 'fixture-project')}",
             f"_NO_UPDATE={'1' if mode == 'no-update' else '0'}; _UPDATE_APPLIED=''; _STAGE_PID=''",
             f"SETUP_LOG={shlex.quote(str(log))}; _SETUP_LOG_DIR={shlex.quote(str(tmp_path))}",
             functions, function("_run_launch_request"), function("invoke_update_apply"),
@@ -103,7 +106,10 @@ def test_native_launch_submits_fixed_phases_and_preserves_progress(tmp_path, she
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert result.stdout == "" and result.stderr == ""
-    observed = [json.loads(line)[2:] for line in calls.read_text().splitlines()]
+    observed = [
+        json.loads(line)[0 if mode == "no-project" else 2:]
+        for line in calls.read_text().splitlines()
+    ]
     if mode == "no-update":
         assert observed == [["launch-update", "reconcile"]]
     else:
