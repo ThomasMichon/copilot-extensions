@@ -672,11 +672,23 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
         acsub = rest[0] if rest else "list"
         acrest = rest[1:] if rest else []
         if acsub == "list":
-            registry = repos.read_registry()
             json_out = "--json" in acrest
             if json_out:
-                output._json_output({"account_map": dict(registry.account_map)})
+                from .repo_accounts import resolution_snapshot
+
+                if "--with-resolutions" in acrest:
+                    try:
+                        payload = resolution_snapshot()
+                    except repos.RepositoryResolutionError as exc:
+                        return output._json_error(
+                            f"Account resolution metadata could not be read: {exc}",
+                            exit_code=2,
+                        )
+                else:
+                    payload = {"account_map": dict(repos.read_registry().account_map)}
+                output._json_output(payload)
                 return 0
+            registry = repos.read_registry()
             if not registry.account_map:
                 print("No account_map entries.")
                 print("Add one with: repos account set <owner> <login>")

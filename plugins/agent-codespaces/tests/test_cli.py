@@ -806,6 +806,18 @@ class TestNamespaceSeams:
         assert rc == 0
         assert _json.loads(capsys.readouterr().out) == []
 
+    def test_namespace_list_retains_unknown_account_inventory(self, capsys):
+        from agent_codespaces.gh_account import AccountInventoryError
+
+        async def unavailable(self):
+            raise AccountInventoryError("account snapshot unavailable")
+
+        with patch("agent_codespaces.resolver.CodespaceResolver.list_specs", unavailable):
+            assert main(["namespace-list"]) == 1
+        output = capsys.readouterr()
+        assert output.out == ""
+        assert "account snapshot unavailable" in output.err
+
     def test_namespace_resolve_json_and_argv(self, capsys):
         import json as _json
         seen = {}

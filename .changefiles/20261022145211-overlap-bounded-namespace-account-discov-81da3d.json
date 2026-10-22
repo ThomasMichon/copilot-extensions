@@ -1,0 +1,13 @@
+{
+  "comment": "Overlap bounded namespace account discovery and reuse strict bulk account resolution metadata",
+  "changes": [
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

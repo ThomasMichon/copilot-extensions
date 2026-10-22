@@ -17,6 +17,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
+from threading import RLock
 from typing import TYPE_CHECKING, TypeVar
 
 if TYPE_CHECKING:
@@ -26,10 +27,24 @@ K = TypeVar("K")
 V = TypeVar("V")
 
 
+class _ConcurrentCache(dict[K, V]):
+    def __init__(self) -> None:
+        super().__init__()
+        self._lock = RLock()
+
+    def get_or_load(self, key: K, loader: Callable[[], V]) -> V:
+        with self._lock:
+            if key not in self:
+                self[key] = loader()
+            return self[key]
+
+
 def memo_get(cache: dict[K, V] | None, key: K, loader: Callable[[], V]) -> V:
     """``loader()``, memoized in ``cache`` by ``key``. ``cache=None`` is a
     pure passthrough (always calls ``loader()``) -- the no-caching default
     every other/test caller gets."""
+    if isinstance(cache, _ConcurrentCache):
+        return cache.get_or_load(key, loader)
     if cache is not None and key in cache:
         return cache[key]
     value = loader()
@@ -47,3 +62,8 @@ class MarketplaceMemo:
         default_factory=dict
     )
     marketplaces: dict[Path, Marketplace | None] = field(default_factory=dict)
+
+    @classmethod
+    def concurrent(cls) -> MarketplaceMemo:
+        """Keep each shared marketplace read single-flight within one scan."""
+        return cls(manifests=_ConcurrentCache(), marketplaces=_ConcurrentCache())

@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from agent_codespaces import lifecycle
+from agent_codespaces import gh_account, lifecycle
 from agent_codespaces.lifecycle import (
     CodespaceInfo,
     cleanup_stale,
@@ -24,6 +24,7 @@ from agent_codespaces.config import CodespacesConfig, RepoConfig
 @pytest.fixture(autouse=True)
 def _isolate_account_binding(monkeypatch):
     """Keep lifecycle tests off real account maps/binding state by default."""
+    monkeypatch.setattr(gh_account, "account_inventory", gh_account.AccountInventory)
     monkeypatch.setattr("agent_codespaces.gh_account.account_for_repo", lambda repo: None)
     monkeypatch.setattr(
         "agent_codespaces.account_binding.bound_account", lambda name: None,
@@ -74,14 +75,15 @@ class TestListCodespaces:
             seen.append(login)
             return []
 
-        monkeypatch.setattr("agent_codespaces.gh_account.mapped_accounts", lambda: ())
+        monkeypatch.setattr("agent_codespaces.gh_account.account_inventory", lambda: gh_account.AccountInventory(()))
         monkeypatch.setattr(
             "agent_codespaces.account_binding.bound_accounts_or_raise", lambda: ("acct-x",),
         )
         monkeypatch.setattr(lifecycle, "_list_codespaces_under", fake_under)
 
         assert lifecycle.list_codespaces() == []
-        assert seen == ["acct-x", None]
+        assert set(seen) == {"acct-x", None}
+        assert len(seen) == 2
 
 
 class TestCreateCodespace:
@@ -352,7 +354,7 @@ class TestGetCodespaceStatus:
         tried (the exact gap `account_for_codespace`'s own single
         best-effort guess has)."""
         monkeypatch.setattr(
-            "agent_codespaces.gh_account.mapped_accounts", lambda: ("acct-a", "acct-b"))
+            "agent_codespaces.gh_account.account_inventory", lambda: gh_account.AccountInventory(("acct-a", "acct-b")))
         monkeypatch.setattr(
             "agent_codespaces.account_binding.bound_accounts_or_raise", lambda: ())
 
@@ -367,7 +369,7 @@ class TestGetCodespaceStatus:
 
     def test_default_account_confirms_absence_only_when_every_candidate_404s(self, monkeypatch):
         monkeypatch.setattr(
-            "agent_codespaces.gh_account.mapped_accounts", lambda: ("acct-a",))
+            "agent_codespaces.gh_account.account_inventory", lambda: gh_account.AccountInventory(("acct-a",)))
         monkeypatch.setattr(
             "agent_codespaces.account_binding.bound_accounts_or_raise", lambda: ())
         monkeypatch.setattr(
@@ -386,7 +388,7 @@ class TestGetCodespaceStatus:
         finding: "Resolve exact CodeSpace binding before scanning
         candidate accounts")."""
         monkeypatch.setattr(
-            "agent_codespaces.gh_account.mapped_accounts", lambda: ("acct-wrong",))
+            "agent_codespaces.gh_account.account_inventory", lambda: gh_account.AccountInventory(("acct-wrong",)))
         monkeypatch.setattr(
             "agent_codespaces.account_binding.bound_accounts_or_raise", lambda: ())
         monkeypatch.setattr(
@@ -413,7 +415,7 @@ class TestGetCodespaceStatus:
         pattern effort review finding: "Do not scan other accounts after a
         bound lookup returns 404")."""
         monkeypatch.setattr(
-            "agent_codespaces.gh_account.mapped_accounts", lambda: ("acct-other",))
+            "agent_codespaces.gh_account.account_inventory", lambda: gh_account.AccountInventory(("acct-other",)))
         monkeypatch.setattr(
             "agent_codespaces.account_binding.bound_accounts_or_raise", lambda: ())
         monkeypatch.setattr(
@@ -441,7 +443,7 @@ class TestGetCodespaceStatus:
         instead (claim-provider-pattern effort review finding: "Binding
         lookup errors incorrectly fall through to other accounts")."""
         monkeypatch.setattr(
-            "agent_codespaces.gh_account.mapped_accounts", lambda: ("acct-other",))
+            "agent_codespaces.gh_account.account_inventory", lambda: gh_account.AccountInventory(("acct-other",)))
         monkeypatch.setattr(
             "agent_codespaces.account_binding.bound_accounts_or_raise", lambda: ())
         monkeypatch.setattr(
@@ -469,7 +471,7 @@ class TestGetCodespaceStatus:
         (claim-provider-pattern effort review finding: "Fail closed when
         account binding cannot be read")."""
         monkeypatch.setattr(
-            "agent_codespaces.gh_account.mapped_accounts", lambda: ("acct-other",))
+            "agent_codespaces.gh_account.account_inventory", lambda: gh_account.AccountInventory(("acct-other",)))
         monkeypatch.setattr(
             "agent_codespaces.account_binding.bound_accounts_or_raise", lambda: ())
 
@@ -496,7 +498,7 @@ class TestGetCodespaceStatus:
         finding: "Propagate binding read failures instead of scanning
         accounts")."""
         monkeypatch.setattr(
-            "agent_codespaces.gh_account.mapped_accounts", lambda: ("acct-other",))
+            "agent_codespaces.gh_account.account_inventory", lambda: gh_account.AccountInventory(("acct-other",)))
         monkeypatch.setattr(
             "agent_codespaces.account_binding.bound_account_or_raise", lambda name: None)
 
@@ -518,7 +520,7 @@ class TestGetCodespaceStatus:
         reason (not a 404) must never be reported absent just because
         every OTHER candidate happened to 404."""
         monkeypatch.setattr(
-            "agent_codespaces.gh_account.mapped_accounts", lambda: ("acct-a", "acct-b"))
+            "agent_codespaces.gh_account.account_inventory", lambda: gh_account.AccountInventory(("acct-a", "acct-b")))
         monkeypatch.setattr(
             "agent_codespaces.account_binding.bound_accounts_or_raise", lambda: ())
 
@@ -539,7 +541,7 @@ class TestGetCodespaceStatus:
         account's CodeSpace (claim-provider-pattern effort review
         finding: "Reject later candidates after earlier lookup errors")."""
         monkeypatch.setattr(
-            "agent_codespaces.gh_account.mapped_accounts", lambda: ("acct-a", "acct-b"))
+            "agent_codespaces.gh_account.account_inventory", lambda: gh_account.AccountInventory(("acct-a", "acct-b")))
         monkeypatch.setattr(
             "agent_codespaces.account_binding.bound_accounts_or_raise", lambda: ())
 

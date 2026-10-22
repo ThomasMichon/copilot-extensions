@@ -131,7 +131,7 @@ def test_active_plugin_manifest_config_needs_no_pointer_or_adopted_repo(
     source, root, target = _declared_plugin(tmp_path)
     d = tmp_path / "config.d"
     monkeypatch.setattr(cfg, "config_d_dir", lambda: d)
-    monkeypatch.setattr(cfg, "resolve_active_plugins", lambda: _active_report(source, root))
+    monkeypatch.setattr(cfg, "resolve_active_plugins", lambda **_: _active_report(source, root))
     monkeypatch.setattr(cfg, "load_adopted_repos", lambda: [])
     monkeypatch.setattr(cfg, "_PLUGIN_CONFIG_LAST_KNOWN", {})
 
@@ -175,7 +175,7 @@ def test_active_plugin_manifest_prefers_live_local_root_over_stale_installed_cop
         authority=ScanAuthority.COMPLETE,
         decisions={source: EntryDecision.active(active)},
     )
-    monkeypatch.setattr(cfg, "resolve_active_plugins", lambda: report)
+    monkeypatch.setattr(cfg, "resolve_active_plugins", lambda **_: report)
     monkeypatch.setattr(cfg, "_PLUGIN_CONFIG_LAST_KNOWN", {})
 
     scanned = cfg.scan_active_plugin_config_registry()
@@ -202,7 +202,7 @@ def test_adopted_and_cwd_configs_override_active_plugin_default(
         "utf-8",
     )
     monkeypatch.setattr(cfg, "config_d_dir", lambda: tmp_path / "config.d")
-    monkeypatch.setattr(cfg, "resolve_active_plugins", lambda: _active_report(source, root))
+    monkeypatch.setattr(cfg, "resolve_active_plugins", lambda **_: _active_report(source, root))
     monkeypatch.setattr(cfg, "load_adopted_repos", lambda: [AdoptedRepo(path=adopted)])
     monkeypatch.setattr(cfg, "cwd_repo_root", lambda: cwd)
     monkeypatch.setattr(cfg, "_PLUGIN_CONFIG_LAST_KNOWN", {})
@@ -226,7 +226,7 @@ def test_stale_config_d_pointer_cannot_suppress_active_declaration(
         root=root,
         target=tmp_path / "missing" / "config.yaml",
     )
-    monkeypatch.setattr(cfg, "resolve_active_plugins", lambda: _active_report(source, root))
+    monkeypatch.setattr(cfg, "resolve_active_plugins", lambda **_: _active_report(source, root))
     monkeypatch.setattr(cfg, "load_adopted_repos", lambda: [])
     monkeypatch.setattr(cfg, "_PLUGIN_CONFIG_LAST_KNOWN", {})
 
@@ -245,7 +245,7 @@ def test_valid_compatibility_pointer_is_reported_but_not_merged_twice(
     source, root, target = _declared_plugin(tmp_path)
     d = _config_d(tmp_path, monkeypatch)
     pointer = _managed_entry(d, source=source, root=root, target=target)
-    monkeypatch.setattr(cfg, "resolve_active_plugins", lambda: _active_report(source, root))
+    monkeypatch.setattr(cfg, "resolve_active_plugins", lambda **_: _active_report(source, root))
     monkeypatch.setattr(cfg, "_PLUGIN_CONFIG_LAST_KNOWN", {})
 
     reports = cfg.scan_config_providers()
@@ -266,7 +266,7 @@ def test_combined_provider_scan_resolves_activation_once_and_refreshes_next_scan
     activation = _active_report(source, root)
     calls = []
 
-    def resolve():
+    def resolve(**kwargs):
         calls.append(activation)
         return activation
 
@@ -337,8 +337,8 @@ def test_merged_config_reloads_real_activation_settings_once_per_scan(
     _managed_entry(d, source=source, root=root, target=target)
     reports = []
 
-    def resolve():
-        report = resolve_active_plugins(home=home, include_projects=False)
+    def resolve(**kwargs):
+        report = resolve_active_plugins(home=home, include_projects=False, **kwargs)
         reports.append(report)
         return report
 
@@ -365,7 +365,7 @@ def test_disabled_plugin_manifest_declaration_is_ignored(tmp_path, monkeypatch):
     monkeypatch.setattr(
         cfg,
         "resolve_active_plugins",
-        lambda: ActivationReport(ScanAuthority.COMPLETE, {}),
+        lambda **_: ActivationReport(ScanAuthority.COMPLETE, {}),
     )
     monkeypatch.setattr(cfg, "_PLUGIN_CONFIG_LAST_KNOWN", {})
 
@@ -403,7 +403,7 @@ def test_invalid_active_plugin_declarations_are_diagnosed(
         and config_body is not None
     ):
         (root.parent / "outside.yaml").write_text(config_body, "utf-8")
-    monkeypatch.setattr(cfg, "resolve_active_plugins", lambda: _active_report(source, root))
+    monkeypatch.setattr(cfg, "resolve_active_plugins", lambda **_: _active_report(source, root))
     monkeypatch.setattr(cfg, "_PLUGIN_CONFIG_LAST_KNOWN", {})
 
     report = cfg.scan_active_plugin_config_registry()
@@ -435,7 +435,7 @@ def test_invalid_active_declaration_does_not_suppress_valid_peer(
             good_source: _active_report(good_source, good_root).decisions[good_source],
         },
     )
-    monkeypatch.setattr(cfg, "resolve_active_plugins", lambda: report)
+    monkeypatch.setattr(cfg, "resolve_active_plugins", lambda **_: report)
     monkeypatch.setattr(cfg, "_PLUGIN_CONFIG_LAST_KNOWN", {})
 
     providers = cfg.scan_active_plugin_config_registry()
@@ -451,13 +451,13 @@ def test_indeterminate_plugin_activation_retains_last_known_declaration(
     tmp_path, monkeypatch
 ):
     source, root, target = _declared_plugin(tmp_path)
-    monkeypatch.setattr(cfg, "resolve_active_plugins", lambda: _active_report(source, root))
+    monkeypatch.setattr(cfg, "resolve_active_plugins", lambda **_: _active_report(source, root))
     first = cfg.scan_active_plugin_config_registry(previous={})
 
     monkeypatch.setattr(
         cfg,
         "resolve_active_plugins",
-        lambda: ActivationReport(ScanAuthority.INDETERMINATE, {}),
+        lambda **_: ActivationReport(ScanAuthority.INDETERMINATE, {}),
     )
     retained = cfg.scan_active_plugin_config_registry(
         previous=dict(first.active_entries)
@@ -1069,7 +1069,7 @@ def test_implicit_retained_state_is_scoped_to_config_d_root(tmp_path, monkeypatc
     monkeypatch.setattr(cfg, "_CONFIG_D_LAST_KNOWN", {})
     monkeypatch.setattr(cfg, "_CONFIG_D_LAST_KNOWN_ROOT", None)
     monkeypatch.setattr(
-        cfg, "resolve_active_plugins", lambda: _active_report(source, root)
+        cfg, "resolve_active_plugins", lambda **_: _active_report(source, root)
     )
     monkeypatch.setattr(cfg, "config_d_dir", lambda: first_root)
     first = cfg.scan_config_dropin_registry()
@@ -1135,7 +1135,7 @@ def test_unselected_indeterminate_duplicate_remains_cached_after_winner_withdraw
     activation = _active_report(source, root)
     monkeypatch.setattr(cfg, "_CONFIG_D_LAST_KNOWN", {})
     monkeypatch.setattr(cfg, "_CONFIG_D_LAST_KNOWN_ROOT", None)
-    monkeypatch.setattr(cfg, "resolve_active_plugins", lambda: activation)
+    monkeypatch.setattr(cfg, "resolve_active_plugins", lambda **_: activation)
 
     first = cfg.scan_config_dropin_registry()
     assert [item.entry for item in first.active_configs] == [retained]
@@ -1287,7 +1287,7 @@ def test_doctor_exposes_active_plugin_declaration_identity_path_and_reason(
     from agent_codespaces import __main__ as main
 
     source, root, _target = _declared_plugin(tmp_path, config_body=None)
-    monkeypatch.setattr(cfg, "resolve_active_plugins", lambda: _active_report(source, root))
+    monkeypatch.setattr(cfg, "resolve_active_plugins", lambda **_: _active_report(source, root))
     monkeypatch.setattr(cfg, "config_d_dir", lambda: tmp_path / "config.d")
     monkeypatch.setattr(cfg, "_PLUGIN_CONFIG_LAST_KNOWN", {})
     reports = cfg.scan_config_providers()

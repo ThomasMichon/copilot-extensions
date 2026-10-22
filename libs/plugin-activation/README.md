@@ -96,6 +96,13 @@ live. It retains prior values when registry or source evidence is indeterminate
 and returns structured findings for missing, mismatched, or ambiguous evidence.
 Consumers decide how often to refresh and how to render findings.
 
+`resolve_active_plugins(concurrent_roots=True)` optionally overlaps up to four
+independent local-root reads within each activation scope. The default remains
+serial. Results and findings are merged in the original source order; excluded
+sources are not scheduled. Each shared marketplace is still read once per call
+under a synchronized memo, with no cache across scans or processes. Failure
+cancels queued reads and joins every started read before returning.
+
 For a local marketplace, an explicit `source.manifestName` selects the expected
 catalog name through `plugin_resolve.settings.marketplace_manifest_name`.
 Both manifest checks use that exact expected name; the registered

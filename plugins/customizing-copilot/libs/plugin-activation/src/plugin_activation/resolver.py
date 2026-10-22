@@ -26,7 +26,8 @@ import os
 import shutil
 import subprocess
 from collections import defaultdict
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -39,10 +40,10 @@ from dropin_registry import (
 )
 from plugin_resolve import SETTINGS_RELS, split_source
 
-from ._config_io import _read_settings, _user_settings
+from ._config_io import _SettingsLoad, _read_settings, _user_settings
 from ._findings import REGISTRY_NAME, _combine_authority, _finding
 from ._fs_candidates import _valid_source_part
-from ._installed_root import _installed_root
+from ._installed_root import _Candidate, _installed_root
 from ._marketplace_root import _local_root
 from ._memo import MarketplaceMemo
 from ._project_roots import _verified_project_roots
@@ -173,18 +174,42 @@ def _decision_findings(
     return tuple(source_findings.get(source, ()))
 
 
+def _local_candidates(
+    sources: list[str], settings: _SettingsLoad, base: Path,
+    memo: MarketplaceMemo, concurrent: bool,
+) -> Iterable[tuple[str, _Candidate]]:
+    def resolve(source: str) -> _Candidate:
+        return _local_root(source, settings, base=base, _memo=memo)
+
+    if not concurrent:
+        return ((source, resolve(source)) for source in sources)
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        pending = [executor.submit(resolve, source) for source in sources]
+        try:
+            return tuple(
+                (source, future.result()) for source, future in zip(sources, pending)
+            )
+        except BaseException:
+            for future in pending:
+                future.cancel()
+            raise
+
+
 def resolve_active_plugins(
     *,
     home: str | Path | None = None,
     include_projects: bool = True,
     plugin_names: tuple[str, ...] | None = None,
     project_root: Path | None = None,
+    concurrent_roots: bool = False,
 ) -> ActivationReport:
     """Resolve sources with tri-state authority; optionally restrict to global.
 
     Global-only callers do not inspect registered projects or their overrides.
     Named callers resolve only those plugins, retaining marketplace ambiguity checks.
     An explicit project root resolves that checkout instead of scanning the registry.
+    Opt-in root overlap joins at most four independent reads before merging results
+    in source order, retaining the same per-call marketplace snapshot.
     """
     user_home = Path(home).expanduser() if home is not None else Path.home()
     copilot_home = user_home / ".copilot"
@@ -195,17 +220,20 @@ def resolve_active_plugins(
     scope_local_roots: dict[str, dict[str, Path]] = defaultdict(dict)
     source_findings: dict[str, list[Finding]] = defaultdict(list)
     source_indeterminate: set[str] = set()
-    memo = MarketplaceMemo()
+    memo = MarketplaceMemo.concurrent() if concurrent_roots else MarketplaceMemo()
     selected_names = frozenset(plugin_names) if plugin_names is not None else None
 
     global_settings = _user_settings(copilot_home, plugin_names=plugin_names)
     registry_findings.extend(global_settings.findings)
-    for source in global_settings.settings.enabled_sources():
-        if selected_names is not None and split_source(source)[0] not in selected_names:
-            continue
+    global_sources = [
+        source for source in global_settings.settings.enabled_sources()
+        if selected_names is None or split_source(source)[0] in selected_names
+    ]
+    for source, candidate in _local_candidates(
+        global_sources, global_settings, copilot_home, memo, concurrent_roots,
+    ):
         scope = "global"
         scopes[source].add(scope)
-        candidate = _local_root(source, global_settings, base=copilot_home, _memo=memo)
         source_findings[source].extend(candidate.findings)
         if candidate.root is not None:
             local_roots[source].add(candidate.root)
@@ -232,12 +260,15 @@ def resolve_active_plugins(
                 for source, enabled in project_settings.settings.enabled.items():
                     if enabled is False:
                         scopes.pop(source, None)
-            for source in project_settings.settings.enabled_sources():
-                if selected_names is not None and split_source(source)[0] not in selected_names:
-                    continue
+            project_sources = [
+                source for source in project_settings.settings.enabled_sources()
+                if selected_names is None or split_source(source)[0] in selected_names
+            ]
+            for source, candidate in _local_candidates(
+                project_sources, project_settings, root, memo, concurrent_roots,
+            ):
                 scope = f"project:{project}"
                 scopes[source].add(scope)
-                candidate = _local_root(source, project_settings, base=root, _memo=memo)
                 source_findings[source].extend(candidate.findings)
                 if candidate.root is not None:
                     local_roots[source].add(candidate.root)

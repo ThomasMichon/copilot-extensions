@@ -11,6 +11,7 @@ import logging
 import os
 import subprocess
 import time
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from enum import Enum
 
@@ -94,16 +95,31 @@ def list_codespaces() -> list[CodespaceInfo]:
 
     merged: dict[str, CodespaceInfo] = {}
     errors: list[str] = []
-    # Each candidate account, then the ambient active account (which may own
-    # CodeSpaces under an owner that isn't in the map).
-    for login in candidates():
+    # Start known accounts while slower configuration/peer metadata resolves.
+    # Join in canonical candidate order so completion timing cannot change owners.
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        pending: dict[str | None, Future[list[CodespaceInfo]]] = {}
+
+        def start(login: str | None) -> None:
+            key = login.casefold() if login else None
+            if key not in pending:
+                pending[key] = executor.submit(_list_codespaces_under, login)
+
         try:
-            for cs in _list_codespaces_under(login):
-                merged.setdefault(cs.name, cs)
-        except ContextRefused:
+            for login in candidates(on_account=start):
+                key = login.casefold() if login else None
+                try:
+                    for cs in pending[key].result():
+                        cs.account = login or ""
+                        merged.setdefault(cs.name, cs)
+                except ContextRefused:
+                    raise
+                except RuntimeError as exc:
+                    errors.append(str(exc))
+        except BaseException:
+            for future in pending.values():
+                future.cancel()
             raise
-        except RuntimeError as exc:
-            errors.append(str(exc))
     if not merged and errors:
         raise RuntimeError("; ".join(dict.fromkeys(errors)))
     return list(merged.values())

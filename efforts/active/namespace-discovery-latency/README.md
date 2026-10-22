@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** Independent, sequential plan and implementation PRs against `dev`
 - **Created:** 2026-10-22
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** [agent-bridge](../../../visions/plugins/agent-bridge/README.md), ownership clarity and honest cross-provider discovery
 - **Umbrella issue:** #5761 (bounded latency slice; broader diagnostic acceptance retained)
 
@@ -60,36 +60,46 @@ normal source/review flow first. The confirmed effort slug is
 `namespace-discovery-latency`. This does not authorize a foreground deadline
 waiver or an ad hoc installed-payload fix.
 
+Subsequent operator selection, captured verbatim:
+
+> complete-within-eight
+
+**Selection summary:** Continue optimizing startup and metadata reads; retain
+complete cold discovery within eight seconds rather than substituting later
+background completion.
+
 ## Plan
 
 ### Phase 1 - Review the bounded repair plan
 
-- [ ] Land this proposal through the repository's automated review and required
+- [x] Land this proposal through the repository's automated review and required
   CI gates before implementation.
-- [ ] Bind the repair owner to the canonical effort and retain the #5761 claim.
+- [x] Bind the repair owner to the canonical effort and retain the #5761 claim.
 
 ### Phase 2 - Profile and repair the measured bottleneck
 
-- [ ] Profile the real registered command boundary on Windows, separating shim,
+- [x] Profile the real registered command boundary on Windows, separating shim,
   interpreter/import, account enumeration and native backend time; compare cold
   and warm runs without printing credentials or private roster data.
-- [ ] Inspect existing provider caches and refresh contracts. Select the
+- [x] Inspect existing provider caches and refresh contracts. Select the
   smallest source-owned repair supported by the profile; do not introduce a
   second registry, a new resident service or a competing refresh owner.
-- [ ] Implement the repair with focused regression coverage. Preserve the
+- [x] Implement the repair with focused regression coverage. Preserve the
   eight-second default foreground deadline, native execution/CPU accounting,
   actual-holder lifetime, coalescing, cancellation isolation, shutdown/provider
   replacement tracking and admission/circuit protections.
-- [ ] If a cache is involved, keep its provenance, freshness and completeness
+- [x] If a cache is involved, keep its provenance, freshness and completeness
   explicit. Never turn a stale, failed, incomplete or unavailable enumeration
   into confirmed target absence or a success-shaped empty roster.
-- [ ] Update directly affected provider/Bridge documentation and add changefiles
+  No persistent cache was introduced; existing per-process account memoization
+  and per-call marketplace reads retain their scope.
+- [x] Update directly affected provider/Bridge documentation and add changefiles
   for each changed plugin. Keep the remaining typed-outcome acceptance on #5761
   explicit instead of declaring the entire issue resolved.
 
 ### Phase 3 - Qualify, publish and return to the consumer
 
-- [ ] Exercise real command and Bridge discovery boundaries on Windows with
+- [x] Exercise real command and Bridge discovery boundaries on Windows with
   cross-account enumeration, cold and warm paths, and representative failure
   cases, within unchanged caller budgets.
 - [ ] Land the implementation through review and required CI; confirm qualified
@@ -106,17 +116,17 @@ waiver or an ad hoc installed-payload fix.
 
 All items are agent-recommended means of proving the requested repair.
 
-- [ ] Unit/regression tests cover the measured cause, complete and incomplete
+- [x] Unit/regression tests cover the measured cause, complete and incomplete
   rosters, provider failure/timeout, cancellation/coalescing, retained native
   holders and admission/circuit behavior without weakening existing coverage.
-- [ ] A real shim/subprocess check measures at least five cold-process and five
+- [x] A real shim/subprocess check measures at least five cold-process and five
   warm runs; each successful registered provider enumeration completes within
   the unchanged eight-second budget. Report per-run wall time and completeness,
   not just an average or a mocked function's speed.
-- [ ] A fresh-state check exercises the no-cache/first-touch path. If remote
+- [x] A fresh-state check exercises the no-cache/first-touch path. If remote
   backend latency cannot satisfy the contract, expose that limitation explicitly
   and amend the reviewed design rather than silently increasing the deadline.
-- [ ] Bridge-level integration proves the intended registered target is
+- [x] Bridge-level integration proves the intended registered target is
   discoverable, healthy peer providers remain usable, and failed/incomplete
   namespaces never become confirmed removals. Include downstream total-budget
   compatibility, not only direct CLI success.
@@ -124,7 +134,7 @@ All items are agent-recommended means of proving the requested repair.
   source without changing shared installed payloads; Linux compatibility runs
   through the existing isolated runner. Record explicit reasons for any
   genuinely unavailable lane and retain its unresolved gate.
-- [ ] Required source tests, lint and install-contract checks pass for the final
+- [x] Required source tests, lint and install-contract checks pass for the final
   diff. Documentation-impact review distinguishes plan-only changes from later
   runtime changes.
 - [ ] Promotion and authorized running-state proof are distinct receipts; an
@@ -138,6 +148,68 @@ closes a bounded reliability delta within the existing Bridge vision and
 namespace-provider pattern, without changing architectural ownership.
 
 ## Journal
+
+### 2026-10-22 - Windows source qualification
+
+- Final five real payload-command cold processes completed in 5.8888, 5.8586,
+  6.3526, 5.6877 and 5.6699 seconds under an actual eight-second process bound.
+  Each returned the known target. Earlier failed attempts remain failures,
+  not qualification.
+- A fresh-process, state-reset control removed prior account bindings and had
+  no roster cache: declared sources alone discovered the target in 7.424 seconds.
+  The isolated runtimes were preprovisioned through their canonical developer
+  installers; this is not a virgin-machine or unprovisioned-install latency claim.
+- The actual Bridge CLI resolver/CPU observer completed a native scan in
+  6.0 seconds, then five warm cache reads. A refused strict account snapshot
+  remained an incomplete namespace while an unrelated static agent survived;
+  restoring the fixture restored complete discovery. Native and sampling
+  holders settled.
+- Focused source runs passed: activation 88; Worktrees account compatibility
+  152; Bridge timeout/cancellation/native ownership 58; CodeSpaces/config
+  coverage 276 with seven repository skips, followed by 83 focused cases after
+  final casing/precedence corrections.
+- Windows is qualified locally; a focused Linux threaded/I/O lane has not run
+  from this Windows owner. Ordinary Ubuntu source CI uses the unit-only packet
+  and is not a substitute for that lane. Its validation item remains open.
+- No shared installed runtime or service changed. Code publication, required CI,
+  qualified release and authorized current-host readiness remain pending.
+
+### 2026-10-22 - First profiling and overlap candidate
+
+- Profiling the released provider measured about 10.3 seconds inside Python,
+  including about 6.9 seconds of serialized account-source discovery and
+  2.5 seconds of serialized account listings. The real payload launcher adds
+  roughly two seconds before Python.
+- A source candidate overlaps three independent metadata reads and at most four
+  native account listings, preserving deterministic final merge precedence.
+  The contained focused run passed 135 tests with one existing skip.
+- The latest real-backend candidate process still takes about six seconds
+  before launcher overhead. This is improvement, not proof of the eight-second
+  complete-discovery requirement. No shared runtime was updated and the
+  foreground deadline remains unchanged.
+- Qualification is still open. Do not publish this candidate as a completed
+  repair or treat a sum of separately measured timings as an end-to-end pass.
+
+### 2026-10-22 - Retained deadline and additional startup headroom
+
+- The operator explicitly retained complete discovery within eight seconds.
+  A five-process native check passed its first four runs but timed out on the
+  fifth; the candidate is not qualified.
+- Remaining profiling identified serialized activation-root metadata reads.
+  An in-memory bounded-overlap experiment reduced activation resolution from
+  roughly three seconds to roughly 1.6 seconds while retaining the roster.
+- The source repair therefore adds an opt-in, bounded local-root overlap mode
+  to `plugin-activation`, with synchronized per-call marketplace reads and
+  deterministic result merging. CodeSpaces opts in; other consumers remain
+  serial by default. All vendored consumers must receive changefiles.
+- No deadline, native policy, shared runtime or daemon has been changed.
+
+### 2026-10-22 - Reviewed plan
+
+- #7930 merged after Copilot approval with no findings and successful required
+  CI. The implementation worktree was pulled forward onto the reviewed plan.
+- Phase 1 is complete. Phase 2 starts with profiling the registered command
+  boundary; no timeout, runtime or installed-payload change has been made.
 
 ### 2026-10-22 - Kickoff
 

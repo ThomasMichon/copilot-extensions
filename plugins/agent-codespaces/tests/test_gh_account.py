@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
+import json
+import subprocess
 
 import pytest
 
@@ -87,6 +89,80 @@ def test_mapped_accounts_empty_without_map():
         assert gh_account.mapped_accounts() == ()
 
 
+def test_bulk_account_inventory_preserves_exact_precedence_without_another_peer_read(monkeypatch):
+    payload = {
+        "account_map": {"Example": "mapped"},
+        "resolution_version": 1,
+        "repository_accounts": {"EXAMPLE/one": "one-user", "other": None},
+        "owner_accounts": {"EXAMPLE": "sibling-user"},
+    }
+    lookup = MagicMock(return_value=subprocess.CompletedProcess([], 0, json.dumps(payload), ""))
+    monkeypatch.setattr(gh_account, "_lookup", lookup)
+    inventory = gh_account.account_inventory()
+    assert inventory.accounts == ("mapped",)
+    assert inventory.account_for("EXAMPLE/one") == "one-user"
+    assert inventory.account_for("example/unregistered") == "sibling-user"
+    assert inventory.account_for("other") is None
+    assert lookup.call_count == 1
+
+
+def test_bulk_inventory_retains_alias_case_and_explicit_owner_fallback(monkeypatch):
+    inventory = gh_account.AccountInventory(
+        repositories={"Alias": "pinned"}, owners={"example": "owner-user"},
+        unmapped_owner_fallback=True,
+    )
+    fallback = MagicMock(side_effect=AssertionError("redundant peer invocation"))
+    monkeypatch.setattr(gh_account, "account_for_repo", fallback)
+    assert inventory.account_for("Alias") == "pinned"
+    assert inventory.account_for("alias") == "alias"
+    assert inventory.account_for("Example/unregistered") == "owner-user"
+    assert inventory.account_for("Unknown/repo") == "Unknown"
+    fallback.assert_not_called()
+
+
+def test_bulk_inventory_falls_back_for_an_old_peer_or_unknown_owner(monkeypatch):
+    monkeypatch.setattr(
+        gh_account, "_lookup",
+        lambda *args: subprocess.CompletedProcess([], 0, '{"account_map": {}}', ""),
+    )
+    fallback = MagicMock(return_value="resolved")
+    monkeypatch.setattr(gh_account, "account_for_repo", fallback)
+    assert gh_account.account_inventory().account_for("example/repo") == "resolved"
+    fallback.assert_called_once_with("example/repo")
+
+
+def test_malformed_bulk_resolution_is_not_an_empty_success(monkeypatch):
+    payload = '{"account_map": {}, "resolution_version": 1, "repository_accounts": []}'
+    monkeypatch.setattr(
+        gh_account, "_lookup",
+        lambda *args: subprocess.CompletedProcess([], 0, payload, ""),
+    )
+    with pytest.raises(RuntimeError, match="malformed account resolution"):
+        gh_account.account_inventory()
+
+
+def test_strict_snapshot_failure_is_not_confirmed_empty(monkeypatch):
+    monkeypatch.setattr(
+        gh_account, "_lookup",
+        lambda *args: subprocess.CompletedProcess([], 2, '{"error":"unreadable"}', ""),
+    )
+    with pytest.raises(gh_account.AccountInventoryError, match="could not read"):
+        gh_account.account_inventory()
+
+
+def test_conflicting_case_insensitive_resolution_is_not_arbitrarily_selected(monkeypatch):
+    payload = {
+        "account_map": {}, "resolution_version": 1, "repository_accounts": {},
+        "owner_accounts": {"Example": "one", "example": "two"},
+    }
+    monkeypatch.setattr(
+        gh_account, "_lookup",
+        lambda *args: subprocess.CompletedProcess([], 0, json.dumps(payload), ""),
+    )
+    with pytest.raises(gh_account.AccountInventoryError, match="conflicting account resolution"):
+        gh_account.account_inventory()
+
+
 # --- cross-account list merge ----------------------------------------------
 
 
@@ -106,8 +182,8 @@ def test_list_codespaces_merges_across_accounts():
         return []  # ambient (None)
 
     with patch.object(lifecycle, "_list_codespaces_under", side_effect=fake_under), \
-         patch("agent_codespaces.gh_account.mapped_accounts",
-               return_value=("ThomasMichon", "example-operator")):
+         patch("agent_codespaces.gh_account.account_inventory",
+               return_value=gh_account.AccountInventory(("ThomasMichon", "example-operator"))):
         names = {c.name: c.account for c in lifecycle.list_codespaces()}
     assert names == {"cs-a": "ThomasMichon", "cs-b": "example-operator"}
 
@@ -115,7 +191,8 @@ def test_list_codespaces_merges_across_accounts():
 def test_list_codespaces_ambient_only_without_map():
     with patch.object(lifecycle, "_list_codespaces_under",
                       return_value=[_cs("cs-x", "")]) as under, \
-         patch("agent_codespaces.gh_account.mapped_accounts", return_value=()):
+         patch("agent_codespaces.gh_account.account_inventory",
+               return_value=gh_account.AccountInventory()):
         result = lifecycle.list_codespaces()
     assert [c.name for c in result] == ["cs-x"]
     under.assert_called_once_with(None)

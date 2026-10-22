@@ -1163,6 +1163,18 @@ to the effort after release.
 | `reconcile-plugins` | Reconcile repo-adopted plugin payloads + gated runtimes (JSON output, for launch wrappers) |
 | `uninstall-plugins` | Sweep every deployed core plugin runtime via each plugin's own uninstall action (JSON; dry-run by default) |
 
+### Bulk account resolution (`repos account list --json --with-resolutions`)
+
+This optional read-only form adds versioned `repository_accounts`,
+`owner_accounts` and `unmapped_owner_fallback` metadata to `account_map`.
+It uses one strict registry snapshot and the canonical `account-for` policy.
+Exact registered targets take precedence over owner policy; bare registry names
+remain case-sensitive, while GitHub slugs and owners match case-insensitively.
+The explicit fallback flag means an otherwise unknown owner resolves to its
+literal name. Unreadable or malformed registry storage fails rather than
+certifying missing targets. Without the flag, the legacy JSON shape is unchanged.
+Consumers of older peers must retain their individual `account-for` fallback.
+
 ### Strict repository inventory (`repos list --strict --json`)
 
 Machine consumers that need a complete inventory use `repos list --strict

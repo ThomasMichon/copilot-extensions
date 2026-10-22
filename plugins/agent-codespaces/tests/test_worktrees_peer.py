@@ -52,7 +52,7 @@ def test_every_adapter_uses_same_cell_worktrees(monkeypatch, tmp_path):
             ("get", "worktree-dir"): str(tmp_path),
             ("list", "--json"): json.dumps([{"path": str(tmp_path), "status": "active"}]),
             ("repos", "account-for", "owner/repo"): "login",
-            ("repos", "account", "list", "--json"): '{"account_map":{"owner":"login"}}',
+            ("repos", "account", "list", "--json", "--with-resolutions"): '{"account_map":{"owner":"login"}}',
             ("--project", "project", "coordination-readiness"): (
                 '{"version":1,"ready":true,"code":"ready"}'
             ),
@@ -133,7 +133,11 @@ def test_namespaced_account_cache_never_reuses_other_cell(monkeypatch):
     def run(*args, **kwargs):
         cell = os.environ["COPILOT_EXTENSIONS_CONTEXT"]
         return _result(
-            json.dumps({"account_map": {"owner": cell}}) if args[-1] == "--json" else cell
+            json.dumps({
+                "account_map": {"owner": cell}, "resolution_version": 1,
+                "repository_accounts": {"owner/repo": cell}, "owner_accounts": {"owner": cell},
+                "unmapped_owner_fallback": True,
+            }) if "--json" in args else cell
         )
 
     monkeypatch.setattr(worktrees, "run", run)
@@ -141,6 +145,7 @@ def test_namespaced_account_cache_never_reuses_other_cell(monkeypatch):
         monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", cell)
         assert gh_account.account_for_repo("owner/repo") == cell
         assert gh_account.mapped_accounts() == (cell,)
+        assert gh_account.account_inventory().account_for("owner/repo") == cell
 
 
 def test_rejected_peer_preflight_cannot_authorize_l1_claim(monkeypatch):

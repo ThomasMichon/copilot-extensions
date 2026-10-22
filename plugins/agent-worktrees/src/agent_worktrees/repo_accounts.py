@@ -7,6 +7,34 @@ from dataclasses import replace
 from urllib.parse import urlsplit
 
 
+def resolution_snapshot() -> dict:
+    """Resolve registered targets and known owners in one peer invocation."""
+    from . import repos
+
+    registry = repos.read_registry(strict=True)
+    targets = set(registry.repos)
+    owners = set(registry.account_map)
+    for entry in registry.repos.values():
+        if slug := repos.github_slug(entry.remote):
+            targets.add(slug)
+            owners.add(slug.split("/", 1)[0])
+    return {
+        "account_map": dict(registry.account_map),
+        "resolution_version": 1,
+        "unmapped_owner_fallback": True,
+        "repository_accounts": {
+            (target.casefold() if "/" in target else target): repos.account_for_github_slug(
+                target, registry=registry,
+            )
+            for target in sorted(targets)
+        },
+        "owner_accounts": {
+            owner.casefold(): repos.account_for_github_owner(owner, registry=registry)
+            for owner in sorted(owners)
+        },
+    }
+
+
 def remote_host(value: str, scheme: str = "https") -> str:
     """Canonical host authority, retaining only non-default network ports."""
     parsed = urlsplit(scheme + "://" + value)

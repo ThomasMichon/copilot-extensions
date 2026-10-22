@@ -40,7 +40,7 @@ def test_relevant_accounts_ignore_unrelated_stored_failure(monkeypatch):
     monkeypatch.setattr(config, "load_merged_config", lambda **_: SimpleNamespace(repos={"example/repo": {}}))
     monkeypatch.setattr(gh_account, "account_for_repo", lambda _: "example-user")
     monkeypatch.setattr(gh_account, "active_account", lambda: "example-user")
-    monkeypatch.setattr(gh_account, "mapped_accounts", lambda: ())
+    monkeypatch.setattr(gh_account, "account_inventory", lambda: gh_account.AccountInventory(()))
     monkeypatch.setattr(picker_auth, "authorized_configs", lambda: {})
     monkeypatch.setattr(picker_auth, "status", lambda *_: (
         1, status_text(scope="codespace") + "Failed to log in to github.com account other-user",
@@ -145,7 +145,7 @@ def test_vendor_result_verified_before_adoption(tmp_path, monkeypatch, actual, s
         assert not (tmp_path / "auth/example-user/hosts.yml").exists()
         from agent_codespaces import account_binding, config
 
-        monkeypatch.setattr(gh_account, "mapped_accounts", lambda: ())
+        monkeypatch.setattr(gh_account, "account_inventory", lambda: gh_account.AccountInventory(()))
         monkeypatch.setattr(gh_account, "active_account", lambda: None)
         monkeypatch.setattr(account_binding, "bound_accounts_or_raise", lambda: ())
         monkeypatch.setattr(config, "load_merged_config", lambda **_: SimpleNamespace(repos={}))
@@ -179,7 +179,7 @@ def test_verified_provider_discovery_does_not_retry_unauthenticated_ambient(
     from agent_codespaces import account_binding, config, lifecycle
 
     monkeypatch.setattr(picker_auth, "authorized_configs", lambda: {"example-user": picker_auth.Path("vendor")})
-    monkeypatch.setattr(gh_account, "mapped_accounts", lambda: ())
+    monkeypatch.setattr(gh_account, "account_inventory", lambda: gh_account.AccountInventory(()))
     monkeypatch.setattr(account_binding, "bound_accounts_or_raise", lambda: ())
     monkeypatch.setattr(config, "load_merged_config", lambda **_: SimpleNamespace(repos={}))
     monkeypatch.setattr(gh_account, "active_account", lambda: active)
@@ -247,7 +247,7 @@ def test_inventory_timeout_publishes_error_then_recovers_empty_subscription(monk
 def test_mapped_only_account_scope_blocks_before_inventory(monkeypatch, active_rows):
     from agent_codespaces import account_binding, config
 
-    monkeypatch.setattr(gh_account, "mapped_accounts", lambda: ("mapped-user",))
+    monkeypatch.setattr(gh_account, "account_inventory", lambda: gh_account.AccountInventory(("mapped-user",)))
     monkeypatch.setattr(gh_account, "active_account", lambda: "example-user")
     monkeypatch.setattr(account_binding, "bound_accounts_or_raise", lambda: ())
     monkeypatch.setattr(config, "load_merged_config", lambda **_: SimpleNamespace(repos={}))
@@ -291,7 +291,7 @@ def test_missing_owned_keyring_credential_never_uses_global_keyring(tmp_path, mo
 def test_unknown_ambient_identity_is_selection_error_not_missing_auth(monkeypatch):
     from agent_codespaces import account_binding, config
 
-    monkeypatch.setattr(gh_account, "mapped_accounts", lambda: ())
+    monkeypatch.setattr(gh_account, "account_inventory", lambda: gh_account.AccountInventory(()))
     monkeypatch.setattr(gh_account, "active_account", lambda: None)
     monkeypatch.setattr(account_binding, "bound_accounts_or_raise", lambda: ())
     monkeypatch.setattr(config, "load_merged_config", lambda **_: SimpleNamespace(repos={}))

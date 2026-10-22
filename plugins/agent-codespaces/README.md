@@ -421,6 +421,17 @@ default would hide or `403`/`404` the other org's CodeSpaces entirely.
   mapped account plus the ambient one and merge, tagging each CodeSpace with its
   owning account. Per-CodeSpace ops (stop/delete/ssh) then pin `gh` to that
   account.
+- **Bounded discovery overlap:** independent account-source reads run together,
+  and known accounts begin listing before slower configuration reads finish.
+  At most four native account listings run concurrently; all are joined before
+  the command returns. The final merge retains source/account precedence rather
+  than depending on completion order. A compatible Worktrees peer supplies
+  strict bulk account-resolution metadata in the existing account-list call,
+  avoiding a second process for each configured repo. Older peers retain the
+  individual lookup path. No persistent roster cache or larger Bridge
+  foreground deadline is introduced. A refused or malformed account snapshot
+  produces a non-zero `namespace-list` result so Bridge can retain that
+  namespace as incomplete instead of confirming an empty roster.
 - **Auth preflight** verifies only the accounts that serve a CodeSpace -- bound
   to a live CodeSpace, owning one, or configured for a repo -- plus the active
   account when a CodeSpace uses ambient ownership. Each must be logged in with

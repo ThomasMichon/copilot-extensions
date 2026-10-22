@@ -1280,7 +1280,7 @@ def _shadow_config_d_with_active_plugins(
 
 def scan_config_providers() -> ConfigProviderReports:
     """Scan active plugin declarations and compatibility config.d entries."""
-    activation = resolve_active_plugins()
+    activation = resolve_active_plugins(concurrent_roots=True)
     active_plugins = scan_active_plugin_config_registry(activation=activation)
     config_d = _shadow_config_d_with_active_plugins(
         scan_config_dropin_registry(activation=activation),

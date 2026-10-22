@@ -31,12 +31,36 @@ import os
 import shutil
 import subprocess
 import time
+from dataclasses import dataclass, field
 
 from agent_procutil import no_window_flags
 
 from . import worktrees
 
 log = logging.getLogger("agent-codespaces")
+
+
+class AccountInventoryError(RuntimeError):
+    """A requested account snapshot is unavailable, not confirmed empty."""
+
+
+@dataclass(frozen=True)
+class AccountInventory:
+    accounts: tuple[str, ...] = ()
+    repositories: dict[str, str | None] = field(default_factory=dict)
+    owners: dict[str, str | None] = field(default_factory=dict)
+    unmapped_owner_fallback: bool = False
+
+    def account_for(self, target: str) -> str | None:
+        key = target.casefold() if "/" in target else target
+        if key in self.repositories:
+            return self.repositories[key]
+        owner = target.split("/", 1)[0]
+        if owner.casefold() in self.owners:
+            return self.owners[owner.casefold()]
+        if self.unmapped_owner_fallback:
+            return owner or None
+        return account_for_repo(target)
 
 
 def _creation_flags() -> int:
@@ -270,6 +294,14 @@ def mapped_accounts() -> tuple[str, ...]:
     return _mapped_accounts()
 
 
+def account_inventory() -> AccountInventory:
+    """Keep bulk resolution scoped to the same validated installation read."""
+    if worktrees.explicit_context():
+        worktrees.validate_context()
+        return _account_inventory.__wrapped__()
+    return _account_inventory()
+
+
 def _lookup(*args: str) -> subprocess.CompletedProcess[str] | None:
     if worktrees.explicit_context():
         return worktrees.run(*args, timeout=10)
@@ -295,22 +327,59 @@ def _mapped_accounts() -> tuple[str, ...]:
     exists (caller then lists under the ambient account only -- today's
     behavior).
     """
-    result = _lookup("repos", "account", "list", "--json")
+    return account_inventory().accounts
+
+
+@functools.lru_cache(maxsize=1)
+def _account_inventory() -> AccountInventory:
+    result = _lookup("repos", "account", "list", "--json", "--with-resolutions")
     if result is None:
-        return ()
+        return AccountInventory()
+    if result.returncode == 2:
+        raise AccountInventoryError("agent-worktrees could not read its account resolution snapshot")
     if result.returncode != 0:
-        return ()
+        return AccountInventory()
     try:
         data = json.loads(result.stdout)
-    except Exception:
-        return ()
-    raw = data.get("account_map", {}) if isinstance(data, dict) else {}
+    except (ValueError, TypeError) as exc:
+        raise AccountInventoryError("agent-worktrees returned malformed account inventory") from exc
+    if not isinstance(data, dict):
+        raise AccountInventoryError("agent-worktrees returned a non-object account inventory")
+    raw = data.get("account_map", {})
     seen: list[str] = []
     if isinstance(raw, dict):
         for login in raw.values():
             if login and login not in seen:
                 seen.append(str(login))
-    return tuple(seen)
+    repositories: dict[str, str | None] = {}
+    owners: dict[str, str | None] = {}
+    supported = (
+        isinstance(data, dict) and type(data.get("resolution_version")) is int
+        and data["resolution_version"] == 1
+    )
+    if supported:
+        for name, destination in (
+            ("repository_accounts", repositories), ("owner_accounts", owners),
+        ):
+            values = data.get(name)
+            if not isinstance(values, dict) or not all(
+                isinstance(key, str) and (value is None or isinstance(value, str))
+                for key, value in values.items()
+            ):
+                raise AccountInventoryError(
+                    "agent-worktrees returned malformed account resolution metadata",
+                )
+            for key, value in values.items():
+                normalized = key.casefold() if name == "owner_accounts" or "/" in key else key
+                if normalized in destination and destination[normalized] != value:
+                    raise AccountInventoryError(
+                        "agent-worktrees returned conflicting account resolution metadata",
+                    )
+                destination[normalized] = value
+    return AccountInventory(
+        tuple(seen), repositories, owners,
+        supported and data.get("unmapped_owner_fallback") is True,
+    )
 
 
 def clear_caches() -> None:
@@ -318,3 +387,4 @@ def clear_caches() -> None:
     _account_for_repo.cache_clear()
     _token_for_account.cache_clear()
     _mapped_accounts.cache_clear()
+    _account_inventory.cache_clear()
