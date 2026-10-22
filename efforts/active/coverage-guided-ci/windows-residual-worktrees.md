@@ -87,7 +87,40 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Admitted fixture-semantic batches
 
+### B-CLI-USAGE current pr-watch command family
+
+Baseline: the actual #7730 merge. The no-argument `pr-watch`
+module-invocation regression now expects the actual current
+`wait|cursor|snapshot|status|threads` usage family instead of the
+obsolete `wait|cursor` spelling. The complete module matches pinned
+preserved source. Both tests and the real `python -m agent_worktrees`
+subprocess remain, including explicit project selection to reach PR
+dispatch and every circular-import/traceback-negative assertion.
+
+Complete native Windows module-invocation module: two passed,
+zero skips, 4.63 seconds pytest / 15.14 preparation-cleanup inclusive.
+Exactly two work-stealing workers retain the original 30-second item
+watchdog, subprocess deadline, all marks/resource ceilings and the
+240-second diagnostic group. Functional integration only, not quiet-host,
+whole-suite or repeated same-head qualification.
+
+This below-altitude expectation correction changes no production,
+command, configuration, installation or architecture contract.
+Documentation impact is this ledger; current usage already describes
+the real command family. Clean-room provisioning and external-venue
+lanes are inapplicable to this native test-only change. Other B/N
+and production S/F/G/P/R/A contracts and parent qualification stay open.
+
 ### B-REGISTRY-ASSERT refusal before registration persistence
+
+Actual disposition: #7730 merged as
+`91dffadbdffc3efafcf663ef33e6fd586e2f14b5`; full Copilot review
+`5608620441` approved exact head
+`9d5c38ba25de90b3c8a83ea76181507e1be6083a`.
+Overview, inline/general channels and threads had no findings;
+required CI was green and the child worktree is finalized.
+The reviewed standalone-test removal-delta retirement below is
+accepted; every original test identity remains.
 
 Baseline: the actual #7725 merge. Before real `register_project`,
 the namespaced registration case now requires the exact
@@ -99,7 +132,7 @@ matches pinned preserved source.
 All 31 original tests, fixture dependencies, decorators and assertions
 remain. The standalone
 `test_namespaced_project_state_requires_identity_receipt` is unchanged.
-Its historical removal delta is proposed for retirement from future
+Its historical removal delta is retired from future
 extraction, not retirement of the refusal test or identity contract.
 Keeping it preserves original selection while adding the combined
 refusal/registration transition.

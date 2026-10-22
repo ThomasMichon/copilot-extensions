@@ -1,0 +1,9 @@
+{
+  "comment": "Match the module invocation regression to the current pr-watch usage family.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

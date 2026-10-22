@@ -54,4 +54,4 @@ def test_pr_watch_usage_does_not_crash_on_circular_import():
     assert "partially initialized module" not in result.stderr
     assert "circular import" not in result.stderr
     assert "Traceback" not in result.stderr
-    assert "pr-watch <wait|cursor>" in result.stdout + result.stderr
+    assert "pr-watch <wait|cursor|snapshot|status|threads>" in result.stdout + result.stderr
