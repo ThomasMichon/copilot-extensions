@@ -84,6 +84,11 @@ The following code mechanisms are **agent-recommended**.
   input evidence is unchanged. Preserve current index/path/link checks,
   namespace-only cleanup and protection of tracked/staged removals.
   A concurrent newer source selection must never be replaced by an older one.
+- [ ] Preserve per-source independence: an unavailable enabled payload reports
+  partial readiness while safe independent sources remain deliverable. Incomplete
+  discovery never authorizes stale cleanup for unresolved sources or a reusable
+  complete-readiness receipt. Allocation may succeed with an honest degraded
+  diagnostic; it must not imply all guidance was delivered or repair payloads.
 - [ ] Reuse the receipt only while source, destination and Git-protection
   evidence still matches. Missing/corrupt evidence, changed outputs, settings,
   payload identity or paired composition forces safe preparation, not optimistic
@@ -123,6 +128,8 @@ All checks below are **agent-recommended** mechanisms for #7943 acceptance.
 - [ ] Settings enable/disable, payload bytes/root/identity, pairing transition,
   missing/corrupt receipts, modified output and tracked/staged deletion changes
   invalidate correctly; unsafe publication preserves user and reviewed files.
+- [ ] Missing enabled payloads retain unresolved outputs and reviewed fallback,
+  deliver safe independent sources, and expose partial rather than ready state.
 - [ ] Real independent-process contention proves current-generation selection
   wins, including a delayed old preparation and failed/incomplete composition.
 - [ ] Real consumer-order fixture records registration, publication, spawn and
@@ -159,3 +166,5 @@ coordinate the smallest additive owner API before changing another slice.
 - Captured the requested readiness, invalidation, fallback and no-rollout
   boundaries; implementation choices and validation mechanisms are explicitly
   agent-recommended.
+- Clarified the missing-payload control: preserve per-source independence and
+  partial-readiness diagnostics without repairing operator marketplace state.
