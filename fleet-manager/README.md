@@ -134,6 +134,14 @@ foreign replacements, all candidate/rollback bytes, historical proofs and the
 admitted floor. It does not delete runtimes, stop running clients or retire an
 installation.
 
+The explicit `remove-runtime --candidate <exact-candidate>` transition
+[deletes one owned completed candidate](docs/client-runtime-activation.md#completed-candidate-removal)
+only after command and selector withdrawal. Canonical cleanup custody protects
+retained/in-use candidates. External physical tree evidence supports bounded
+partial-delete retries without adopting new or replaced objects. Other runtimes,
+configuration, admission floors and historical receipts remain; installation
+retirement and a complete managed installer are separate obligations.
+
 The [current-observation storage API](docs/current-observations.md) provides
 separate explicit SQLite current slots, origin-generation comparison, atomic
 accepted-update positions and bounded scoped replay/queries. It is a trusted

@@ -18,7 +18,7 @@ Physically proved registered/pending command withdrawal, with durable owned
 retry and no runtime rollback, merged in #7882. Torn-producer-journal recovery,
 completed-runtime removal and the complete managed lifecycle remain
 serial obligations, not delivered behavior or permission for live activation.
-The next serial selector-withdrawal candidate is documented in
+Owned selector withdrawal merged in #7891 and is documented in
 [runtime activation](../../../fleet-manager/docs/client-runtime-activation.md#owned-selector-withdrawal).
 It requires settled command unregistration, withdraws only proved selectors,
 and retains all runtime/rollback bytes, admission and historical evidence.
@@ -139,6 +139,19 @@ retained rollback data unless a separate explicit policy authorizes their
 removal. Do not erase accepted rollback state while retained candidates or
 registrations can still be replayed. Whole-install identity retirement and
 possible reinstall require their own tested generation/fencing contract.
+
+The exact completed-candidate removal slice retains its physical tree proof
+outside the candidate before deletion and uses canonical exclusive cleanup
+custody. Pending deletion blocks construction and re-publication until the
+same installation/candidate settles. A remaining partial tree may contain only
+original captured objects or their absences; it is never recaptured as new
+authority. Native deletion does not traverse link targets, completion evidence
+is removed last, and historical outcomes precede marker acknowledgement.
+The [runtime removal contract](../../../fleet-manager/docs/client-runtime-activation.md#completed-candidate-removal)
+defines the API/CLI, refusal and preserved-state guarantees. Ordinary
+reconstruction after settled removal still owes current policy, compatibility,
+bytes and health; it does not erase or lower the admitted floor. This does not
+settle whole-install retirement or retained-good rollback policy.
 
 ## Validation and review order
 

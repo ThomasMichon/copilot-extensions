@@ -258,6 +258,19 @@ lifetime and skip dependency writes on exact completed reuse. Existing
 installation-cell adapters retain receipt/governance validation in addition to
 kernel ownership; a copied helper alone never grants receipt authority.
 
+`remove_owned_candidate(root, version, *, remove, link_name="current")` supplies
+the same canonical cleanup custody for an installation owner's explicit
+completed-candidate removal. It refuses busy construction/retention,
+current/last-good/dev references and live-process protection before calling
+`remove(candidate_path)`. The mandatory callback owns first-delete completion
+and installation validation, durable physical ownership outside the candidate,
+partial-delete retry and exact object deletion. It must preserve changed/new
+objects and raise on incomplete removal; the primitive checks root absence
+afterward. Even absence reaches the callback for owned outcome validation.
+There is no raw recursive-delete fallback, completion-marker downgrade, CLI
+uninstaller or installation-retirement authority. Do not hold a shared
+retention lease when entering this operation.
+
 ## Created-file publication custody (Python API)
 
 The publication companion's `CopyBinding(source, target, digest,

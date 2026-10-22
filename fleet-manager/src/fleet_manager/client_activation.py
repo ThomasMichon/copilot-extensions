@@ -69,6 +69,7 @@ def _active(namespace, identity, publication):
 
 
 def _not_removing(namespace):
+    construction._not_removing(namespace)
     if os.path.lexists(namespace / REMOVING):
         raise PlanError("client selector removal is unsettled; owned deactivate retry is required")
 
@@ -199,6 +200,7 @@ def activate_client_runtime(root, identity, selection, staged, *,
             namespace = path / construction.NAMESPACE
             artifact_staging._directory(namespace)
             construction._namespace(path, identity)
+            construction._not_removing(namespace)
             version = f"client-{selection['sequence']}-{selection['release_digest']}"
             with primitive.construction_lease(namespace, version) as descriptor:
                 completion = construction._completion(primitive, namespace, version, binding)

@@ -21,7 +21,7 @@ def _ordinary(info):
 
 
 @contextmanager
-def _windows_handle(path, *, delete=False):
+def _windows_entry(path, *, delete=False):
     import ctypes
     from ctypes import wintypes
     import msvcrt
@@ -55,12 +55,18 @@ def _windows_handle(path, *, delete=False):
         descriptor = msvcrt.open_osfhandle(handle, os.O_RDONLY)
         info = os.fstat(descriptor)
         _ordinary(info)
-        yield kernel, handle, info
+        yield kernel, handle, descriptor, info
     finally:
         if descriptor is None:
             kernel.CloseHandle(handle)
         else:
             os.close(descriptor)
+
+
+@contextmanager
+def _windows_handle(path, *, delete=False):
+    with _windows_entry(path, delete=delete) as (kernel, handle, _descriptor, info):
+        yield kernel, handle, info
 
 
 def _windows_delete(kernel, handle):

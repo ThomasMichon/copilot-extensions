@@ -23,6 +23,12 @@ NAMESPACE = "client-runtime"
 OWNER = "client-owner.json"
 COMPLETION = "client-constructed.json"
 BOOTSTRAP = "runtime-bootstrap"
+REMOVING = "client-runtime-removing.json"
+
+
+def _not_removing(namespace):
+    if os.path.lexists(namespace / REMOVING):
+        raise PlanError("client runtime removal is unsettled; exact owned removal retry is required")
 
 
 def _write(path, value):
@@ -400,6 +406,7 @@ def construct_client_release(root, identity, selection, staged, *,
             policy, _, _ = checkpoint()
             filename, content = _wheel(staged, staged.read_artifacts(policy, clock=clock))
             namespace = _namespace(path, identity)
+            _not_removing(namespace)
             version = f"client-{selection['sequence']}-{selection['release_digest']}"
             with artifact_staging._primitive() as primitive, ExitStack() as retained:
                 previous = {primitive.current_version(namespace)}

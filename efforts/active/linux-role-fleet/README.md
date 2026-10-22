@@ -172,8 +172,8 @@ Implementation sequencing below is **agent-recommended**:
   activation and bounded forward retry are merged in #7847; explicit physically
   attributed client command registration is merged in #7866; physically proved
   registered/pending command withdrawal with durable retry is merged in #7882.
-  The next serial candidate adds owned selector withdrawal after settled command
-  unregistration; it preserves every runtime and the admission floor.
+  Owned selector withdrawal after settled command unregistration is merged in
+  #7891; it preserves every runtime and the admission floor.
   Torn-producer-journal recovery, completed-runtime removal, retained-good recovery
   and a managed installer remain open. None of these local prerequisites
   authorizes a live rollout.
@@ -1044,3 +1044,70 @@ These bounded Windows selections are not a new full Windows-suite claim.
   retirement/reinstall fencing, full installer, useful services and all broader
   unresolved Plan/Validation items remain open. Merge, promotion and authorized
   rollout remain distinct.
+
+### 2026-10-22 - Owned selector withdrawal merged
+- #7891 merged into `dev` at `2026-10-22T14:34:47Z`, commit
+  `490d9f3ef20a13c55de4989e0428ec8c8b2ade86`. Current-head Copilot review
+  `5615729290` approved `030ece9d581fa204a23ceecba94a0657d02bf0d8`
+  with no open issues or inline findings. Required checks and the actual CI
+  unit/coverage and guard jobs passed. The repository-authorized managed
+  Maintainer completion path was used; no CI bypass was used.
+- Some PR check summaries still reported pending after the Actions run had
+  completed. The exact head's REST check-run records and the Actions jobs
+  confirmed success before merging; the separate nonrequired reviewer check
+  did not replace the already-delivered current-head approval.
+- Re-read the canonical Plan and Validation Plan after merging. This closes
+  only owned selector withdrawal/retry, not completed-runtime removal,
+  retained-good rollback policy, installation retirement/reinstall fencing or
+  the complete managed installer. The campaign and all broader unresolved
+  fleet gates remain Active. Promotion and authorized rollout remain
+  unobserved; no live machine, service, enrollment or updater was changed.
+- Confirmed the merged PR through `pr-status` before the supported pull-forward;
+  retained recovery refs and synchronized the owning worktree onto the merged
+  `dev` commit. Continue with completed-runtime removal under canonical cleanup
+  ownership, preserving external construction/admission and recovery evidence
+  through partial deletion rather than mislabeling completed bytes as failed.
+
+### 2026-10-22 - Exact completed-runtime removal qualified for review
+- The next serial client slice supplies `remove-runtime --candidate` after
+  settled command/selector withdrawal. The shared runtime owns exclusive
+  construction/retention/publication cleanup custody and reference/liveness
+  fencing; the installation owner supplies original completion/input validation,
+  durable external physical tree evidence and exact native deletion. There is
+  no raw root GC, completion downgrade, forced lease release or second installer.
+- A retained intent precedes deletion. Whole-tree preflight and per-object
+  checks preserve new/changed/same-byte replacement objects; partial retry
+  tolerates only missing captured objects. Windows reuses pinned native handles
+  for hashing and disposition; POSIX uses no-follow descriptor-relative
+  traversal and deletes proved links without following them. Completion files
+  are removed last. Outcomes precede acknowledgement; other runtime slots,
+  configuration, admission floors and historical receipts remain.
+- Windows qualification passed 39 removal tests (one POSIX-only skip), the real
+  installed Unicode-path lifecycle, two wheel/RECORD and repository-removed
+  sdist controls, 21 activation and 26 construction tests (one platform skip).
+  Shared staging cleanup passed 55 tests (six platform skips). Linux passed
+  40 removal tests, the real installed lifecycle, both packaging controls,
+  21 activation tests and 40 closed-source runner tests. Real native lifecycle
+  checks refuse deletion while a candidate process runs, then remove, no-op,
+  reconstruct through current admission/health and remove the new generation.
+- Separate installed owners prove abrupt-death retry and dependency-free
+  removal. Partial deletion, corrupt intent, foreign root/directory/file
+  replacements, registration/selector state, retained custody and interrupted
+  outcome/acknowledgement are exercised. A real Linux venv exposed excessive
+  nesting in the first tree receipt; shallow bounded pages fixed the actual
+  consumer contract without relaxing JSON bounds. A stale archive caused by a
+  rejected staging command was rebuilt from the checked current index before
+  qualifying the Linux candidate; stale-source results are not evidence.
+- Validation tiers: native unit/fault tests and actual installed consumers on
+  Windows/Linux; fresh isolated Linux source/SDK/HOME and independent no-deps
+  installed owners. No full fresh OS, full hosting extras or live fleet venue:
+  the slice is local removal, and no live enrollment/deployment/retirement is
+  authorized. Lint, canonical consumer synchronization and all 13 plugin
+  install contracts pass; production dependency/timeout policies are unchanged.
+- Documentation impact: standalone README and lifecycle contract, shared
+  cleanup API documentation and this reviewed plan are updated. This closes a
+  prerequisite of the existing lifecycle intent, not a vision extension.
+  Retained-good recovery, identity retirement/reinstall fencing, the managed
+  installer, controller/node assembly, useful services and all broader
+  unresolved fleet Plan/Validation items remain open. The effort stays Active;
+  review/merge, release promotion and authorized rollout remain separate.

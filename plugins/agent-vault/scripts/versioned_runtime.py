@@ -970,6 +970,32 @@ def _remove_slot(d: Path, *, label: str) -> bool:
     return _rmtree_deferrable(d, label=label)
 
 
+def remove_owned_candidate(root: Path, version: str, *, remove,
+                           link_name: str = CURRENT_LINK) -> None:
+    """Run one installation owner's exact-candidate removal under cleanup custody.
+
+    The mandatory callback validates completion and installation authority before
+    first deletion, and retains physical ownership outside the candidate for
+    partial-delete retries. It must refuse changed/new objects, remove only this
+    candidate and raise on incomplete deletion. No raw recursive-delete fallback
+    or completion-marker downgrade is provided here. Absence still reaches the
+    callback so only its durable receipt can authorize a completed retry.
+    """
+    if not callable(remove):
+        raise ValueError("owned candidate removal requires its installation owner")
+    with _cleanup_lease(root, version) as admitted:
+        if not admitted:
+            raise RuntimeError(f"owned candidate removal is busy: {version}")
+        if version.lower() in _gc_protected_versions(root, None, True, link_name):
+            raise RuntimeError(f"owned candidate is selected or in use: {version}")
+        candidate = version_dir(root, version)
+        if os.path.lexists(candidate) and (_is_link(candidate) or not candidate.is_dir()):
+            raise RuntimeError("owned candidate removal requires an ordinary directory")
+        remove(candidate)
+        if os.path.lexists(candidate):
+            raise RuntimeError("owned candidate removal did not settle")
+
+
 def gc(root: Path, keep: list[str] | None = None,
        protect_pids: bool = False, link_name: str = CURRENT_LINK,
        min_age_days: float = DEFAULT_GC_MIN_AGE_DAYS) -> list[str]:

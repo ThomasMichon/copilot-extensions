@@ -87,7 +87,8 @@ target digest, actual runtime fingerprint, local health, `reused` and
 remain `false`; this report is not a retained lease or authorization token.
 
 [Attributable frontdoor registration](client-frontdoor.md) is a separate explicit
-transition; activation does not register or update commands. Runtime deletion, retained-good rollback policy,
+transition; activation does not register or update commands. Exact owned
+candidate deletion is a [separate transition](#completed-candidate-removal). Retained-good rollback policy,
 identity retirement/reinstall fencing and the complete managed installer remain
 separate obligations. In particular, do not delete admission or publication
 evidence while a retained candidate or registration could be replayed.
@@ -146,3 +147,59 @@ user data, admission state and historical proofs remain intact. This does not
 stop an already-running client or release its retention custody. An explicit
 reactivation still owes fresh admission, policy, compatibility, bytes and health
 checks; deactivation is not a rollback authorization or whole-install uninstall.
+
+## Completed-candidate removal
+
+After both command and selector withdrawal have settled, an independently
+installed owner can explicitly delete one exact completed client:
+
+```text
+fleet-manager client-state remove-runtime --root <private-installation> --identity identity.json --candidate <exact-client-candidate>
+```
+
+The Python entry point is
+`fleet_manager.client_runtime_removal.remove_client_runtime(root, identity, *, candidate)`.
+The candidate is the exact `client-<sequence>-<release-digest>` returned by
+construction. There is no root-wide GC, wildcard, guessed candidate, service
+stop, forced retention release or identity retirement. Like withdrawal,
+removal requires no optional dependency, artifact source, current signing policy
+or runtime execution. Expired/revoked releases do not authorize new execution
+and do not prevent deleting already-owned bytes.
+
+Installation ownership and a SQLite transaction enclose the canonical
+`remove_owned_candidate` cleanup guard: exclusive construction and retention,
+selector-publication custody, and current/last-good/dev/live-process protection.
+Every selector and active/pending/removing command or activation record must be
+absent. A busy or running candidate refuses before a removal intent is created.
+The owner's initial check verifies the original external construction input,
+both completion records and the complete runtime fingerprint.
+
+Before deletion, `client-runtime-removing.json` and a retained
+`client-runtime-removals/<id>/intent.json` record the exact installation,
+candidate, completion and physical tree. Files retain identity, mode, size,
+mtime and SHA-256; directories retain identity/mode and exact child names.
+POSIX links retain their own identity and target, never target traversal.
+Windows refuses reparse entries and pins ordinary objects with native
+no-share-delete handles; POSIX traversal is descriptor-relative and no-follow.
+The whole remaining tree is preflighted before effects and each object is
+rechecked at deletion. Completion files are deleted last. New, modified or
+same-byte replacement objects refuse, rather than becoming cleanup authority.
+
+While the marker exists, construction, activation and command registration
+refuse. Repeat the exact removal after interruption, including owner death:
+only already-missing captured objects are tolerated. A partial tree is never
+resnapshotted or relabelled as a failed build. Once the exact root is absent,
+the owner persists its historical outcome and per-candidate outcome pointer
+before clearing the marker. Interrupted outcome writes and acknowledgement
+are retryable. A completed repeat checks retained evidence and reports a no-op;
+unexplained absence is not success.
+
+The version `1` `fleet-manager.client-runtime-removal` report returns the exact
+identity/candidate, `runtime_removed: true`, `reused` and
+`mutations_performed`. `active`, `frontdoor_registered`, `installation_retired`,
+`path_modified` and `live_readiness_verified` remain `false`. Other runtime and
+rollback slots, configuration/data, admission floors, construction inputs and
+publication/removal history are preserved. After settlement, explicit
+construction can rebuild the same selection only through its ordinary current
+policy, compatibility, byte and local-health checks; a later removal captures
+that new physical generation rather than reusing old deletion authority.

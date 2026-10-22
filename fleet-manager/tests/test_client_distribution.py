@@ -110,7 +110,10 @@ def test_wheel_contains_record_bound_exact_primitive_and_no_runtime_dependencies
         assert data == (library / "versioned_runtime.py").read_bytes()
         name = next(name for name in archive.namelist() if name.endswith(".dist-info/RECORD"))
         rows = list(csv.reader(io.StringIO(archive.read(name).decode())))
-        for member_source in ("fleet_manager/client_command_removal.py", "fleet_manager/client_deactivation.py"):
+        for member_source in (
+            "fleet_manager/client_command_removal.py", "fleet_manager/client_deactivation.py",
+            "fleet_manager/client_runtime_removal.py",
+        ):
             removal_source = (Path(__file__).parents[1] / "src" / member_source).read_bytes()
             assert archive.read(member_source) == removal_source
             removal_digest = "sha256=" + base64.urlsafe_b64encode(
@@ -211,6 +214,7 @@ def test_sdist_rebuild_is_self_contained_after_repository_removal(tmp_path):
         assert archive.read("fleet_manager/_versioned_runtime.py") == expected
         assert "fleet_manager/client_command_removal.py" in archive.namelist()
         assert "fleet_manager/client_deactivation.py" in archive.namelist()
+        assert "fleet_manager/client_runtime_removal.py" in archive.namelist()
         for name, content in companions.items():
             assert archive.read(f"fleet_manager/{name}") == content
 

@@ -48,11 +48,13 @@ def main(argv=None):
     state_commands = admission.add_subparsers(dest="state_command", required=True)
     for operation in (
         "initialize", "inspect", "admit", "construct", "activate-runtime",
-        "register-commands", "unregister-commands", "deactivate-runtime",
+        "register-commands", "unregister-commands", "deactivate-runtime", "remove-runtime",
     ):
         state = state_commands.add_parser(operation)
         state.add_argument("--root", type=Path, required=True)
         state.add_argument("--identity", type=Path, required=True)
+        if operation == "remove-runtime":
+            state.add_argument("--candidate", required=True)
         if operation in ("admit", "construct", "activate-runtime", "register-commands"):
             state.add_argument("--selection", type=Path, required=True)
             state.add_argument("--release", type=Path, required=True)
@@ -114,6 +116,10 @@ def main(argv=None):
                 from .client_deactivation import deactivate_client_runtime
 
                 result = deactivate_client_runtime(args.root, identity)
+            elif args.state_command == "remove-runtime":
+                from .client_runtime_removal import remove_client_runtime
+
+                result = remove_client_runtime(args.root, identity, candidate=args.candidate)
             else:
                 recover_client_admission(args.root, identity)
                 if (
