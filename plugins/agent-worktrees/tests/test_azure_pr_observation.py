@@ -729,11 +729,54 @@ def test_native_transport_absolute_deadline_bounds_slow_stream(
                 assert time.monotonic() - started < .75
             else:
                 assert reader.json(reader.base) == ({"value": []}, "next")
-            assert received.is_set() is not bool(preconnect_delay)
         finally:
             stop.set()
             worker.join(timeout=2)
             assert not worker.is_alive()
+        assert received.is_set() is not bool(preconnect_delay), "unexpected request-arrival state"
+
+
+def test_native_deadline_checks_request_arrival_after_worker_join(monkeypatch):
+    import threading
+
+    event = threading.Event
+    events = []
+
+    def fixture_event():
+        value = event()
+        events.append(value)
+        return value
+
+    class DeferredWorker:
+        def __init__(self, *, target):
+            pass
+
+        def start(self):
+            pass
+
+        def join(self, *, timeout):
+            assert timeout == 2
+            events[0].set()
+
+        def is_alive(self):
+            return False
+
+    class ExpiredReader:
+        base = "https://fixture"
+
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def json(self, url):
+            raise ProviderError("budget exhausted")
+
+    monkeypatch.setattr(threading, "Event", fixture_event)
+    monkeypatch.setattr(threading, "Thread", DeferredWorker)
+    monkeypatch.setitem(globals(), "AdoReader", ExpiredReader)
+    with pytest.raises(AssertionError, match="request-arrival"):
+        test_native_transport_absolute_deadline_bounds_slow_stream(
+            monkeypatch, "length", True, .2,
+        )
 
 
 def test_native_policy_skip_paging_and_repeated_page_refusal():

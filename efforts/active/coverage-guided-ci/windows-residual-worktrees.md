@@ -91,8 +91,11 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 Baseline: the actual #7799 merge. Only
 `test_native_transport_absolute_deadline_bounds_slow_stream` changes in
-`test_azure_pr_observation.py`; its complete function and decorators match
-pinned preserved source. Every other original test/function/class is
+`test_azure_pr_observation.py`; its implementation starts from pinned
+preserved source, with the request-arrival assertion moved after completed
+worker cleanup to avoid observing an unsettled event. A focused regression
+sets the arrival event during worker join and proves the fixture rejects
+that late arrival. Every other original test/function/class is
 AST-identical. No production transport, authentication or deadline changes.
 
 The real urllib opener/HTTP parser continues to read a plaintext loopback
@@ -110,8 +113,8 @@ accept now has a two-second timeout and the original two-second worker
 join/liveness assertion remains. No connection retry, skip or deadline
 increase is introduced.
 
-Complete native Windows observation module: 74 passed, zero skips,
-10.40 seconds pytest / 22.70 preparation-cleanup inclusive. Exactly two
+Complete native Windows observation module: 75 passed, zero skips,
+8.69 seconds pytest / 12.94 preparation-cleanup inclusive. Exactly two
 work-stealing workers retain the original 30-second item watchdog,
 240-second diagnostic group and all native/process/memory bounds and
 marks. Ruff and thirteen install contracts pass. No reduced selection,
