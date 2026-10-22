@@ -94,7 +94,7 @@ grants.
       existing managed producers; coordinator enrollment is retained, while
       supervisor enrollment and final launch gates remain open.
       Internal reservation-send custody also serializes first admission
-      with closure and retains pending/ambiguous transport outcomes; it is not
+      with closure and retains pending/ambiguous transport outcomes; it is
       wired to coordinator-owned CI repair launch and task delivery in already
       qualified scopes; other senders remain open. An empty inventory is never an
       acknowledgement.
