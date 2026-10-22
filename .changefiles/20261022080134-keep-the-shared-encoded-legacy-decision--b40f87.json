@@ -1,0 +1,9 @@
+{
+  "comment": "Keep the shared encoded legacy decision probe free of module-preparation progress while retaining diagnostics and refusal status.",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}

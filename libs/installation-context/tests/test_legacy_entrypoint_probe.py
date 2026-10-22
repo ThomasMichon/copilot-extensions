@@ -3,8 +3,10 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -226,12 +228,60 @@ def _run(
         cwd=payload,
         env=env,
         text=True,
+        encoding="utf-8",
         capture_output=True,
         check=False,
+        timeout=20,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
 
 
 RUNNERS = (["posix"] if BASH else []) + (["powershell"] if POWERSHELL else [])
+
+
+@pytest.mark.parametrize(
+    "host",
+    [pytest.param(shutil.which(name), id=name)
+     for name in ("pwsh", "powershell.exe") if name == "pwsh" or os.name == "nt"],
+)
+@pytest.mark.parametrize("native_status", [0, 23])
+@pytest.mark.parametrize("adopter", ["agent-machines", "agent-index"])
+def test_encoded_decision_child_suppresses_progress_but_keeps_diagnostics(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, host: str | None, native_status: int,
+    adopter: str,
+) -> None:
+    if host is None:
+        pytest.skip("PowerShell host unavailable")
+    monkeypatch.setitem(globals(), "POWERSHELL", host)
+    payload, profile = _payload(tmp_path)
+    probe = REPO / "plugins" / adopter / "scripts" / "installation-context" / "legacy-entrypoint-probe.ps1"
+    assert probe.read_bytes() == (LIB / "legacy-entrypoint-probe.ps1").read_bytes()
+    shutil.copyfile(probe, payload / "scripts" / "installation-context" / probe.name)
+    (profile / ".agent-example").mkdir()
+    resolver = payload / "scripts" / "installation-context" / "installation-context.ps1"
+    body = resolver.read_text(encoding="utf-8")
+    boundary = "if ($Action -eq 'validate') {"
+    assert body.count(boundary) == 1
+    resolver.write_text(
+        body.replace(
+            boundary,
+            "Write-Progress -Activity 'fixture module preparation' -Status 'preparing'\n"
+            "[Console]::Error.WriteLine('resolver diagnostic retained')\n" + boundary,
+            1,
+        ),
+        encoding="utf-8",
+    )
+    result = _run(
+        "powershell", payload, profile,
+        extra_env={"FAKE_RESOLVER_STATUS": str(native_status)},
+    )
+    assert result.returncode == (0 if native_status == 0 else 1)
+    assert result.stdout == ""
+    assert "resolver diagnostic retained" in result.stderr
+    assert "#< CLIXML" not in result.stderr
+    assert "fixture module preparation" not in result.stderr
+    if native_status:
+        assert "legacy mutation probe failed" in result.stderr
 
 
 @pytest.mark.parametrize("runner", RUNNERS)
@@ -324,6 +374,8 @@ def test_loaded_systemd_user_service_counts_as_present(
     tmp_path: Path,
     runner: str,
 ) -> None:
+    if os.name == "nt":
+        pytest.skip("systemd service evidence requires a POSIX process environment")
     payload, profile = _payload(
         tmp_path,
         paths=[".agent-example"],
@@ -464,10 +516,23 @@ def test_agent_index_status_does_not_create_legacy_stage(
     scripts.mkdir(parents=True)
     suffix = "sh" if runner == "posix" else "ps1"
     source = REPO / "plugins" / "agent-index" / "scripts" / f"install.{suffix}"
-    shutil.copy2(source, scripts / source.name)
-    gate = REPO / "plugins" / "agent-index" / "scripts" / f"runtime-gate.{suffix}"
-    shutil.copy2(gate, scripts / gate.name)
-    shutil.copy2(REPO / "plugins" / "agent-index" / "pyproject.toml", payload)
+    shutil.copytree(
+        source.parent, scripts, dirs_exist_ok=True,
+        ignore=shutil.ignore_patterns("__pycache__"),
+    )
+    for name in ("pyproject.toml", "plugin.json", "payload-invocation.json"):
+        shutil.copy2(source.parent.parent / name, payload / name)
+    previous = sys.path.copy()
+    sys.path.insert(0, str(REPO / "tools"))
+    try:
+        import materialize_main
+    finally:
+        sys.path[:] = previous
+    changes = materialize_main.materialize_installer_engine_ref_into(
+        source_consumer_dir=source.parent.parent,
+        dest_consumer_dir=payload, canonical_root=REPO,
+    )
+    assert not any(change.startswith("SKIP ") for change in changes), changes
     if runner == "posix":
         command = ["bash", str(scripts / "install.sh"), "status"]
     else:
@@ -483,14 +548,18 @@ def test_agent_index_status_does_not_create_legacy_stage(
         ]
     env = os.environ.copy()
     env.update({"HOME": str(profile), "USERPROFILE": str(profile)})
+    env.pop("COPILOT_EXTENSIONS_CONTEXT", None)
 
     result = subprocess.run(
         command,
         cwd=payload,
         env=env,
         text=True,
+        encoding="utf-8",
         capture_output=True,
         check=False,
+        timeout=20,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
 
     assert result.returncode == 0, result.stderr
@@ -569,9 +638,15 @@ def test_exemplar_footprints_and_mutation_boundaries_are_complete() -> None:
     index_installers = direct_installers[2:]
     for path in index_installers:
         text = path.read_text(encoding="utf-8")
-        assert text.index("read-only-status") < text.index(
-            "# === install-contract:v4 self-stage"
-        )
+        before_stage = text.split("# === install-contract:v4 self-stage", 1)[0]
+        if path.suffix == ".ps1":
+            assert re.search(r"\$skipSelfStage\s*=\s*\$Action\s+-in\s+@\([^)]*'status'", before_stage)
+            assert "if (-not $skipSelfStage)" in before_stage
+        else:
+            assert 'case "$__legacy_action" in' in before_stage
+            assert "status|cell-provision" in before_stage
+            assert "__skip_self_stage=1" in before_stage
+            assert 'if [[ "$__skip_self_stage" -eq 0 ]]' in before_stage
 
     bootstrap_mutators = (
         REPO / "plugins" / "agent-machines" / "scripts" / "bootstrap-check.sh",
@@ -586,68 +661,49 @@ def test_exemplar_footprints_and_mutation_boundaries_are_complete() -> None:
         if path.parents[1].name == "agent-index":
             code = [line.strip() for line in text.splitlines() if line.strip() and not line.lstrip().startswith("#")]
             if "bootstrap-check" in path.name:
-                # agent-index's bootstrap-check is a compatibility entry
-                # point, not a currently-wired hooks.json session-start hook
-                # (see the hooks.json assertions below) -- but its no-op
-                # still owes a valid JSON reply ("{}") in case anything still
-                # invokes it directly, unlike ensure-service.
                 emit = (
                     "[Console]::Out.Write('{}')"
                     if path.suffix == ".ps1"
                     else "printf '{}'"
                 )
-                assert code == [emit, "exit 0"]
+                assert emit in text
+                assert "runtime-gate" in text and "__session-stamp" in text
+                assert "bootstrap-killswitch-guard" in text
+                assert "install.ps1" not in text and "install.sh" not in text
+                assert "ensure-service" not in text
             else:
                 assert code == ["exit 0"]
             continue
-        assert "legacy-entrypoint-probe" in text
+        assert "plugin-publication-probe" in text
+        admission = (LIB / f"plugin-publication-probe{path.suffix}").read_text(encoding="utf-8")
+        assert "probe-plugin-publication" in admission
+        assert "probe-legacy" in admission
         if "bootstrap-check" in path.name:
             gate = (
-                "Test-LegacyMutationAllowed"
+                "Assert-BootstrapPublication"
                 if path.suffix == ".ps1"
-                else "legacy_mutation_allowed ||"
+                else "assert_bootstrap_publication"
             )
             assert text.rindex(gate) < text.rindex("reconciling in background")
             assert text.index("namespaced-active") < text.index("reconciling in background")
         if path.suffix == ".ps1":
-            assert "$global:LASTEXITCODE = 1" in text
+            assert "$global:LASTEXITCODE = 3" in text
             assert "| Out-Null" in text
-            if path.name == "ensure-service.ps1":
-                assert text.index("$global:LASTEXITCODE = 1") < text.index(
-                    "Start-Process"
-                )
 
-    for path, atomic in (
-        (REPO / "plugins" / "agent-machines" / "scripts" / "init.ps1", True),
-        (REPO / "plugins" / "agent-index" / "scripts" / "install.ps1", False),
+    for path, origin, destination in (
+        (REPO / "plugins" / "agent-machines" / "scripts" / "init.ps1",
+         "Publish-FileAtomically -Path $payloadOriginMarker",
+         "Publish-FileAtomically -Path $payloadDirMarker"),
+        (REPO / "plugins" / "agent-index" / "scripts" / "install.ps1",
+         "Publish-FileAtomically -Path (Join-Path $InstallDir 'payload-origin')",
+         "Publish-FileAtomically -Path (Join-Path $InstallDir 'payload-dir')"),
     ):
         text = path.read_text(encoding="utf-8")
         assert "payload-origin" in text
         assert "COPILOT_PLUGIN_STAGED_FROM" in text
         assert "Threading.Mutex" in text
-        if atomic:
-            # agent-machines deliberately never pre-clears the markers --
-            # Publish-FileAtomically replaces each one in place only once
-            # its fresh snapshot is ready, so a reader never observes a
-            # missing marker during the stamp window. Pre-clearing (as
-            # agent-index below still does) would reopen that same window:
-            # a reader could see a missing marker, not merely a stale one,
-            # for the whole copy duration.
-            assert "Remove-Item $payloadDirMarker, $payloadOriginMarker" not in text
-            assert text.rindex("Publish-FileAtomically -Path $payloadOriginMarker") < text.rindex(
-                "Publish-FileAtomically -Path $payloadDirMarker"
-            )
-        else:
-            # agent-index has not been backported to the atomic-publish
-            # pattern above (tracked separately) -- it still pre-clears both
-            # markers ahead of a non-atomic WriteAllText.
-            assert text.index("WaitOne([TimeSpan]::FromSeconds(20))") < text.index(
-                "Remove-Item $payloadDirMarker, $payloadOriginMarker"
-            )
-            assert "Remove-Item $payloadDirMarker, $payloadOriginMarker" in text
-            assert text.rindex("WriteAllText($payloadOriginMarker") < text.rindex(
-                "WriteAllText($payloadDirMarker"
-            )
+        assert "Remove-Item $payloadDirMarker, $payloadOriginMarker" not in text
+        assert text.rindex(origin) < text.rindex(destination)
 
     machines_sh = (
         REPO / "plugins" / "agent-machines" / "scripts" / "init.sh"
@@ -685,12 +741,11 @@ def test_exemplar_footprints_and_mutation_boundaries_are_complete() -> None:
             hook["timeoutSec"] for hook in hooks["hooks"]["sessionStart"]
         ] == timeouts
         if plugin == "agent-index":
-            assert "bootstrap-check" not in json.dumps(hooks)
+            assert "bootstrap-check" in json.dumps(hooks)
             assert "ensure-service" not in json.dumps(hooks)
-            # agent-index's sessionStart wiring is exactly these two scripts.
             assert "write-session-guidance" in json.dumps(hooks)
-            assert "install.ps1" in json.dumps(hooks)
-            assert "install.sh" in json.dumps(hooks)
+            assert "install.ps1" not in json.dumps(hooks)
+            assert "install.sh" not in json.dumps(hooks)
 
 
 def _uid_absent_from_passwd() -> str:

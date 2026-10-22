@@ -338,7 +338,9 @@ def test_legacy_native_bytes_and_file_arguments_pass_through(shell, tmp_path):
 
 
 @pytest.mark.parametrize("shell", ["powershell", "pwsh"])
-@pytest.mark.parametrize("plugin", ["agent-worktrees", "agent-containers", "agent-mcp", "budget-guidance"])
+@pytest.mark.parametrize(
+    "plugin", ["agent-worktrees", "agent-containers", "agent-mcp", "budget-guidance", "agent-machines"],
+)
 def test_real_unrequested_entrypoint_smoke_needs_no_output_helper(shell, plugin, tmp_path):
     from agent_worktrees.installer_capabilities import HUMAN_UTF8_ENV
 
@@ -357,6 +359,12 @@ def test_real_unrequested_entrypoint_smoke_needs_no_output_helper(shell, plugin,
         assets.append("source-runtime.ps1")
     for name in assets:
         shutil.copyfile(source / "scripts" / name, scripts / name)
+    if plugin == "agent-machines":
+        context = scripts / "installation-context"
+        context.mkdir()
+        for name in ("legacy-entrypoint-probe.ps1", "installation-context.ps1", "guest-environment.ps1"):
+            shutil.copyfile(source / "scripts" / "installation-context" / name, context / name)
+        shutil.copyfile(source / "payload-invocation.json", payload / "payload-invocation.json")
     shutil.copyfile(source / "plugin.json", payload / "plugin.json")
     home = tmp_path / "home"
     home.mkdir()
@@ -394,7 +402,7 @@ def test_real_unrequested_entrypoint_smoke_needs_no_output_helper(shell, plugin,
 
 
 @pytest.mark.parametrize("shell", ["powershell", "pwsh"])
-@pytest.mark.parametrize("plugin", ["agent-containers", "agent-mcp", "budget-guidance"])
+@pytest.mark.parametrize("plugin", ["agent-containers", "agent-mcp", "budget-guidance", "agent-machines"])
 @pytest.mark.real_installer_processes
 def test_real_standalone_first_stamp_uses_declared_human_adapter(shell, plugin, tmp_path, capsys):
     from agent_worktrees.installer_capabilities import powershell_human_utf8_supported
@@ -406,11 +414,11 @@ def test_real_standalone_first_stamp_uses_declared_human_adapter(shell, plugin, 
     if host is None:
         pytest.skip(f"{shell} is not installed")
     source = Path(__file__).resolve().parents[2] / plugin
-    home = tmp_path / "home"
+    home = tmp_path / ("home caf\u00e9" if plugin == "agent-machines" else "home")
     home.mkdir()
     payload = (
         home / ".copilot" / "installed-plugins" / "fixture" / plugin
-        if plugin == "budget-guidance" else tmp_path / "payload"
+        if plugin in {"budget-guidance", "agent-machines"} else tmp_path / "payload"
     )
     scripts = payload / "scripts"
     scripts.mkdir(parents=True)
@@ -424,6 +432,13 @@ def test_real_standalone_first_stamp_uses_declared_human_adapter(shell, plugin, 
         assets.append("source-runtime.ps1")
     for name in assets:
         shutil.copyfile(source / "scripts" / name, scripts / name)
+    if plugin == "agent-machines":
+        context = scripts / "installation-context"
+        context.mkdir()
+        for name in ("legacy-entrypoint-probe.ps1", "installation-context.ps1", "guest-environment.ps1"):
+            shutil.copyfile(source / "scripts" / "installation-context" / name, context / name)
+        shutil.copyfile(source / "plugin.json", payload / "plugin.json")
+        shutil.copyfile(source / "payload-invocation.json", payload / "payload-invocation.json")
     if plugin == "budget-guidance":
         shutil.copyfile(source / "plugin.json", payload / "plugin.json")
         dependency = payload / "libs" / "agent-procutil"
@@ -432,13 +447,13 @@ def test_real_standalone_first_stamp_uses_declared_human_adapter(shell, plugin, 
             '[project]\nname = "agent-procutil"\nversion = "1.0.0"\n', encoding="ascii",
         )
     (payload / "pyproject.toml").write_text('version = "1.0.0"\n', encoding="ascii")
-    root = tmp_path / "runtime caf\u00e9"
+    root = home / ".agent-machines" if plugin == "agent-machines" else tmp_path / "runtime caf\u00e9"
     script = scripts / entrypoint
     assert powershell_human_utf8_supported(script)
     environment = {
         key: value for key, value in os.environ.items()
         if not key.startswith(("COPILOT_PLUGIN_", "AGENT_CONTAINERS_", "AGENT_MCP_",
-                               "BUDGET_GUIDANCE_"))
+                               "BUDGET_GUIDANCE_", "AGENT_MACHINES_"))
         and key not in {"COPILOT_EXTENSIONS_CONTEXT", "COPILOT_EXTENSIONS_HUMAN_UTF8"}
     }
     environment.update(
@@ -458,6 +473,7 @@ def test_real_standalone_first_stamp_uses_declared_human_adapter(shell, plugin, 
     captured = capsys.readouterr()
     assert captured.out == ""
     assert "retaining inherited installer streams" not in captured.err
+    assert "#< CLIXML" not in captured.err
     assert all(line.startswith("[") for line in captured.err.splitlines())
     assert f"Stamped: {plugin} binstub on PATH" in captured.err
     assert "[elapsed " in captured.err

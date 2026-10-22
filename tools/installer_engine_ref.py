@@ -69,6 +69,7 @@ HUMAN_STANDALONE_ENTRYPOINTS = {
     "agent-worktrees": "install.ps1",
     "agent-containers": "init.ps1",
     "agent-mcp": "init.ps1",
+    "agent-machines": "init.ps1",
     "budget-guidance": "install.ps1",
 }
 

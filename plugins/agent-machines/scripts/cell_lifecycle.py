@@ -15,6 +15,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+if os.environ.get("COPILOT_EXTENSIONS_HUMAN_UTF8") == "1":
+    if sys.stdout.isatty() or sys.stderr.isatty():
+        raise RuntimeError("Human UTF-8 output requires redirected stdout and stderr.")
+    sys.stdout.reconfigure(encoding="utf-8", errors=sys.stdout.errors)
+    sys.stderr.reconfigure(encoding="utf-8", errors=sys.stderr.errors)
+
 sys.dont_write_bytecode = True
 SCRIPT_ROOT = Path(__file__).resolve().parent
 PAYLOAD_MANIFEST = SCRIPT_ROOT.parent / "payload-invocation.json"

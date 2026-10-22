@@ -211,6 +211,7 @@ function Quote-ChildArgument([string]$Value) {
     return "'" + $Value.Replace("'", "''") + "'"
 }
 $childCommand = @(
+    '$ProgressPreference = ''SilentlyContinue'';'
     '&'
     (Quote-ChildArgument $Resolver)
     'probe-legacy'

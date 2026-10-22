@@ -142,8 +142,11 @@ matrix below are _(agent-recommended)_ implementation details.
 - [x] Qualify MCP's actual PowerShell `init.ps1` producer and its remaining
   visible native diagnostic boundaries without formatting MCP protocol output
   (#7879).
-- [ ] Qualify Budget Guidance's actual self-staged PowerShell installer and
-  its construction-shell diagnostics before declaring captured UTF-8 output.
+- [x] Qualify Budget Guidance's actual self-staged PowerShell installer and
+  its construction-shell diagnostics before declaring captured UTF-8 output
+  (#7888).
+- [ ] Qualify Machines' actual nested PowerShell/Python producers, including
+  legacy decision progress and undecorated lifecycle JSON.
 - [ ] Prefix every human-readable install/update line with a wall-clock time;
   suffix it with honestly labeled monotonic elapsed time or completed-step
   duration. Do not represent arbitrary child-line arrival as execution cost.
@@ -260,8 +263,66 @@ bounded source delta inspection.
 
 ## Journal
 
+### 2026-10-22 - Machines nested producers qualified before publication
+
+- Real native fixtures reproduced legacy-encoded construction stderr at
+  success and failure on PS5 and PowerShell 7, plus the actual finite Python
+  lifecycle refusal's legacy-encoded non-ASCII diagnostic. The constructor
+  now uses its existing dual-stream helper and producer writer. The Python
+  lifecycle producer initializes only explicitly requested redirected UTF-8
+  text writers, retaining its original encoding-error policies.
+- The actual legacy-probe/staged-stamp route exposed PowerShell 5.1
+  module-preparation progress serialized as CLIXML on stderr. The shared
+  decision child's own command now suppresses progress before module loading.
+  Its ordinary diagnostics, including successful warnings, and refusal
+  outcomes remain intact. Canonical controls exercise both actual projected
+  callers, Machines and Index, at success and nonzero native status.
+- Machines' actual `init.ps1` now carries the canonical guarded initializer
+  and source-bound declaration. The native helper implementation, original
+  child arguments, source checks, constructor callback, staging/watchdog,
+  receipt and lifecycle authority are unchanged. Long-running delegates were
+  not replaced by buffered capture wrappers.
+- First-touch fixtures use the original installer, real legacy gate and
+  source snapshot under an empty profile, including quoted/non-ASCII paths.
+  The format fixture copies its actual script/governance closure rather than
+  claiming to qualify a complete runtime assembly. An initial cold copy of
+  the full materialized payload exceeded its original 20-second fixture
+  bound; the bound was not raised and no production copy-speed improvement
+  is claimed. Fixture children now use the existing strict kill-on-close Job
+  primitive so timeout cleanup cannot leave descendants holding pipes.
+- The updater/materialization/probe Windows cohort passed 249 cases with
+  seven platform skips. All native/lifecycle runtime cases passed in their
+  bounded qualification cohort; final compact JSON and maintenance controls
+  also passed, including PS5 and PowerShell 7 at both output-request modes.
+  The native Linux five-module cohort passed 238 cases with 56 platform
+  skips. Materialization covers all thirteen producers; actual standalone
+  entrypoint controls retain optional-helper absence and requested-missing-helper
+  refusal.
+- The broad qualification exposed stale tests, not a license to ignore
+  failures: the Index status fixture now includes its real packaged scripts
+  and materialized engine; boundary assertions follow the current
+  publication guard, metadata-only startup and atomic publication owners.
+  A POSIX-only systemd case is classified explicitly on Windows while its
+  Windows task counterpart remains covered. A synthetic maintenance-profile
+  test no longer accidentally consumes the runner's real WSL kernel identity.
+  No guest registration or production policy was changed.
+- Unit and simple end-to-end tiers include real native diagnostics,
+  admitting-parent capture, unchanged unrequested bytes, compact lifecycle
+  JSON and first-stamp refusal/absence controls. Full clean-room runtime
+  construction is unchanged and was not repeated; no host or external-venue
+  update is authorized for this candidate. No dependency was installed.
+- Documentation impact is limited to the plugin's output boundary, the
+  shared install contract and the canonical legacy-probe reference. This is
+  a qualified source candidate, not a merged or installed release. Both
+  parent objectives, remaining presentation work and equivalent no-op
+  measurements remain open.
+
 ### 2026-10-22 - Budget staged output and native diagnostics qualified
 
+- #7888 merged after current-head approval, empty review threads and all
+  required checks passed. The authorized exception covered only the
+  additional CODEOWNER vote, not CI. Both parent objectives remain open;
+  this source merge does not establish promotion or installed rollout.
 - Real PS5 and PowerShell 7 fixtures reproduced legacy-encoded construction
   stderr and first-stamp output before enrollment. The construction probe
   retained isolated Python flags, literal argv, successful warnings and
@@ -296,9 +357,13 @@ bounded source delta inspection.
 - Documentation impact is confined to Budget's installer section and the
   shared captured-output contract. Runtime JSON, output-free hooks, public
   CLI arguments and configuration remain unchanged.
-- This is a qualified source candidate, not a merged, promoted or installed
-  release. Machines' remaining output boundary, equivalent no-op counts and
+- This qualifies merged source, not a promoted or installed release.
+  Machines' remaining output boundary, equivalent no-op counts and
   costs, serving-state proof and parent launch/trust obligations remain open.
+- Next: qualify Machines' actual `init.ps1` output owner. Its construction
+  helper has the same raw stderr boundary, while legacy/cell routing adds
+  nested PowerShell and Python producers that require explicit stream and
+  protocol checks before enrollment.
 
 ### 2026-10-22 - MCP native diagnostics qualified before output enrollment
 

@@ -2687,6 +2687,14 @@ requested UTF-8 output and literal forwarded arguments; the staging/watchdog
 authority and runtime CLI JSON are unchanged. POSIX has no corresponding
 PowerShell text-writer boundary.
 
+Machines' actual PowerShell producer also admits requested UTF-8 output. Its
+construction-shell diagnostics use the existing native helper, while its
+finite Python lifecycle producer initializes only its own requested text
+writers, preserving JSON and the original encoding-error policies. The
+shared legacy decision child used by Machines and Index suppresses automatic
+PowerShell module-preparation progress, not diagnostics or refusal status.
+Staging, receipt validation and lifecycle authority are unchanged.
+
 This declaration admits the existing Python updater's human-stream adapter;
 it does not replace signature/provenance checks or change `-File` arguments,
 script identity, exit handling, runtime construction or activation. Missing,

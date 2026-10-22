@@ -51,7 +51,9 @@ its whole working set rolled back.
 - `legacy-entrypoint-probe.sh` and `legacy-entrypoint-probe.ps1` derive
   conservative legacy-footprint evidence from `payload-invocation.json` and
   gate installer/bootstrap mutation through the read-only `probe-legacy`
-  decision.
+  decision. The PowerShell encoded decision child suppresses module-preparation
+  progress so a programmatic probe does not emit CLIXML progress records.
+  Ordinary diagnostics and nonzero refusal decisions are retained.
 - `plugin-publication-probe.sh` and `plugin-publication-probe.ps1` compose the
   existing read-only `probe-plugin-publication` and `probe-legacy` decisions.
   Both publication and installation-mode admission must allow mutation of the

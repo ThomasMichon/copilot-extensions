@@ -87,9 +87,9 @@ def legacy_state(profile: Path) -> tuple[Path, Path]:
     return root, command
 
 
-def adapter(style, args, *, omit=(), env=None):
+def adapter(style, args, *, omit=(), env=None, powershell_host=None):
     command = (
-        [shutil.which("pwsh") or shutil.which("powershell"), "-NoProfile", "-File", str(SCRIPT.with_name("init.ps1")), "-Action", args.action]
+        [powershell_host or shutil.which("pwsh") or shutil.which("powershell"), "-NoProfile", "-File", str(SCRIPT.with_name("init.ps1")), "-Action", args.action]
         if style == "powershell" else ["bash", str(SCRIPT.with_name("init.sh")), args.action]
     )
     for key, value in vars(args).items():
@@ -99,12 +99,40 @@ def adapter(style, args, *, omit=(), env=None):
         command.append(name)
         if value is not True:
             command.append(str(value))
-    return subprocess.run(command, text=True, encoding="utf-8", capture_output=True, timeout=30, env=env)
+    return subprocess.run(
+        command, text=True, encoding="utf-8", capture_output=True, timeout=30, env=env,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
 
 
 STYLES = (["bash"] if os.name != "nt" and shutil.which("bash") else []) + (
     ["powershell"] if shutil.which("pwsh") or shutil.which("powershell") else []
 )
+
+
+OUTPUT_STYLES = ([pytest.param("bash", None, id="bash")] if "bash" in STYLES else []) + [
+    pytest.param("powershell", host, id=name)
+    for name in ("pwsh", "powershell.exe")
+    if (name == "pwsh" or os.name == "nt") and (host := shutil.which(name))
+]
+
+
+@pytest.mark.parametrize(("style", "host"), OUTPUT_STYLES)
+@pytest.mark.parametrize("requested", [False, True])
+def test_native_adapter_retains_plain_json_with_requested_output(tmp_path, style, host, requested):
+    root, args = fixture(tmp_path / "context caf\u00e9")
+    env = dict(os.environ)
+    env.pop("COPILOT_EXTENSIONS_HUMAN_UTF8", None)
+    if requested:
+        env["COPILOT_EXTENSIONS_HUMAN_UTF8"] = "1"
+    result = adapter(style, args, env=env, powershell_host=host)
+    assert result.returncode == 0, result.stderr
+    report = json.loads(result.stdout)
+    assert report["schema"] == "copilot-extensions.agent-machines-lifecycle"
+    assert report["reason"] == "cell-repaired"
+    assert report["context"] == str(root / "install.json")
+    assert result.stdout == json.dumps(report, separators=(",", ":")) + "\n"
+    assert result.stderr == ""
 
 
 @pytest.mark.parametrize("style", STYLES)
@@ -162,10 +190,12 @@ def test_ambient_context_cannot_authorize_lifecycle(tmp_path, monkeypatch, style
 
 
 @pytest.mark.parametrize("style", STYLES)
-def test_lifecycle_requires_matching_plugin_maintenance_token(tmp_path, style):
+def test_lifecycle_requires_matching_plugin_maintenance_token(tmp_path, style, monkeypatch):
     root, args = fixture(tmp_path)
     profile = tmp_path / "profile"
     profile.mkdir()
+    # This receipt fixture represents a native profile, not the runner's guest identity.
+    monkeypatch.setattr(engine.ic, "_is_wsl_guest", lambda: False)
     entered = engine.ic.enter_maintenance(
         scope="plugin",
         owner="test-owner",

@@ -9,6 +9,14 @@ The engine is generic and public. Sensitive modules (install SSH, change power
 settings, bootstrap WSL, install package managers, and similar machine-specific
 actions) and per-machine data stay in the consuming repo.
 
+The PowerShell installer's declared, captured human output initializes UTF-8
+only when requested by its admitting parent. Construction diagnostics use
+the existing dual-stream helper; the finite Python lifecycle producer honors
+the same output request without decorating JSON or changing its error policy.
+The legacy decision child suppresses PowerShell module-preparation progress,
+not diagnostics or refusal status. Ordinary invocation, native command decoding,
+runtime construction and publication authority remain unchanged.
+
 ## What works today
 
 - **Runtime is standalone.** With absent or false installation-mode policy, the
