@@ -292,12 +292,11 @@ def test_posix_deadline_unwinds_actual_containment_owner_and_reaps_grandchild(la
         "    else:\n        raise AssertionError('deadline did not interrupt owner')\n"
         f"pids=json.loads(Path({str(receipt)!r}).read_text())\n"
         "if sys.platform=='linux':\n"
-        "    reaped=set()\n"
+        # The controller may already have reaped the body during TERM grace.
+        # Reap any adopted descendants, then require actual PID absence below.
         "    while True:\n"
-        "        try:\n            pid,_status=os.waitpid(-1,0)\n"
+        "        try:\n            os.waitpid(-1,0)\n"
         "        except ChildProcessError:\n            break\n"
-        "        reaped.add(pid)\n"
-        "    assert pids['parent'] in reaped, 'synthetic body was not adopted and reaped'\n"
         "for pid in (pids['parent'],pids['child']):\n"
         "    try:\n        os.kill(pid,0)\n"
         "    except ProcessLookupError:\n        continue\n"

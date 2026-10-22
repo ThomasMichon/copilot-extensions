@@ -605,6 +605,11 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
         return spawn_snapshot(task, reservation, worktree, prepared, ownership, replaced)
 
     def _reservation_has_live_process(self, reservation: dict, task: dict) -> bool:
+        if reservation.get("state") in {SpawnState.SPAWNED, SpawnState.COLD} and (
+            reservation.get("startup_complete") is not True or reservation.get("cooling_token")
+        ):
+            self._retain_terminal_startup(reservation, task, "startup or cooling unresolved")
+            return True
         if reservation.get("state") == SpawnState.COLD:
             return self._cold_reservation_has_live_process(reservation, task)
         terminal_spawn = (
@@ -664,9 +669,6 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                 return True
         if task.get("status") != Status.SUSPENDED:
             return True
-        key = str(reservation.get("key") or "")
-        if key in self._cooled_reservations:
-            return False
         fleet = _parse_fleet_body_handle(reservation.get("session_handle"))
         if fleet is not None:
             try:
@@ -690,80 +692,8 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
         return False
 
     def cool_dormant_bodies(self) -> int:
-        """Stop headless processes for suspended/blocked tasks.
-
-        The durable spawned reservation remains as the cold-session handle.
-        Steering a suspended headless task settles that reservation and queues a
-        fresh embodiment, so dormant tasks consume no live-process capacity.
-
-        A task suspended specifically on ``awaiting_steer`` additionally
-        releases its ``exclusive_key`` while cold: nothing is actually using
-        the exclusive resource (e.g. a headed browser) while purely waiting on
-        an operator answer, so a sibling task sharing the same key may claim a
-        fresh reservation and proceed instead of sitting queued behind it.
-        Resuming always reacquires the key (:meth:`Supervisor
-        .release_resumed_cold_tasks`), deferring if a sibling is using it.
-        """
-        cooled = 0
-        attempted = 0
-        now = time.time()
-        for res in self._pool_reservations(state=SpawnState.SPAWNED):
-            if attempted >= 10:
-                break
-            key = str(res.get("key") or "")
-            if not key or key in self._cooled_reservations:
-                continue
-            if now < self._cold_retry_after.get(key, 0.0):
-                continue
-            try:
-                task = self.client.get(res["task_id"])
-            except DispatchError:
-                continue
-            if not self._matches_pool(task):
-                continue
-            if task.get("status") != Status.SUSPENDED:
-                continue
-            if not self._cooling_snapshot_current(res):
-                continue
-            fleet = _parse_fleet_body_handle(res.get("session_handle"))
-            local_sid = _parse_local_body_handle(res.get("session_handle"))
-            if fleet is None and local_sid is None:
-                continue
-            attempted += 1
-            stopped = False
-            try:
-                if fleet is not None:
-                    stopped = self.fleet_verdict_fn(
-                        *fleet
-                    ) == _tracking().GONE or self.fleet_cold_fn(*fleet)
-                elif local_sid is not None:
-                    stopped = self.local_body_verdict_fn(
-                        local_sid
-                    ) == _tracking().GONE or self.local_cold_fn(local_sid)
-            except Exception:
-                log.exception("failed to cool dormant reservation %s", key)
-            if stopped:
-                release_exclusive = bool(task.get("awaiting_steer"))
-                try:
-                    self.client.record_cold(key, release_exclusive=release_exclusive,
-                        startup_revision=res.get("startup_revision"),
-                    )
-                except DispatchError:
-                    log.exception("failed to record cold reservation %s", key)
-                    self._cold_retry_after[key] = now + 60.0
-                    continue
-                self._cooled_reservations.add(key)
-                self._cold_retry_after.pop(key, None)
-                cooled += 1
-                log.info(
-                    "cooled dormant worker for task %s (%s)%s",
-                    task.get("id"),
-                    key,
-                    " (released exclusive_key: awaiting_steer)" if release_exclusive else "",
-                )
-            else:
-                self._cold_retry_after[key] = now + 60.0
-        return cooled
+        """Cool dormant bodies through the coordinator-held operation guard."""
+        return self._cool_dormant_bodies()
 
     def nudge_idle_headless_tasks(self, *, now: float | None = None) -> int:
         """Idle is not done. Ask the worker to confirm, then keep going."""

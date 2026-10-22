@@ -70,6 +70,11 @@ class FenceSpawnStartupBody(BaseModel):
     startup_revision: int = Field(ge=1, strict=True)
 
 
+class ClaimSpawnCoolingBody(FenceSpawnStartupBody):
+    session_handle: str = Field(min_length=1)
+    state: str
+
+
 class RecordSpawnWorktreeBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -101,11 +106,14 @@ class FailSpawnBody(ReservationDetailBody):
 
 class DeferSpawnBody(ReservationDetailBody):
     expected_generation: int | None = Field(default=None, ge=0, le=2**63 - 1, strict=True)
+    startup_revision: int | None = Field(default=None, ge=1, strict=True)
+    cooling_token: str | None = Field(default=None, min_length=1)
 
 
 class RecordColdBody(BaseModel):
     release_exclusive: bool = False
     startup_revision: int | None = Field(default=None, ge=1, strict=True)
+    cooling_token: str | None = Field(default=None, min_length=1)
 
 
 class RequestSpawnReleaseBody(BaseModel):
@@ -418,6 +426,15 @@ def register_spawn_routes(
         bus.publish({"type": "spawn.startup_fenced", "reservation": result})
         return result
 
+    @app.post("/spawn-reservations/{key}/claim-cooling")
+    def claim_spawn_cooling(key: str, body: ClaimSpawnCoolingBody) -> dict:
+        result = _reservation_guard(lambda: queue.claim_spawn_cooling(
+            key, startup_revision=body.startup_revision,
+            session_handle=body.session_handle, state=body.state,
+        ))
+        bus.publish({"type": "spawn.cooling_claimed", "reservation": result})
+        return result
+
     from .ordinary_bridge import register_routes
     register_routes(app, queue, bus)
     from .restricted_delivery import register_routes as register_restricted_routes
@@ -491,6 +508,7 @@ def register_spawn_routes(
             key, detail=body.detail,
             **({"expected_generation": body.expected_generation}
                if body.expected_generation is not None else {}),
+            startup_revision=body.startup_revision, cooling_token=body.cooling_token,
         ))
         bus.publish({"type": "spawn.deferred", "reservation": result})
         return result
@@ -501,6 +519,7 @@ def register_spawn_routes(
             lambda: queue.record_cold(
                 key, release_exclusive=body.release_exclusive,
                 startup_revision=body.startup_revision,
+                cooling_token=body.cooling_token,
             )
         )
         bus.publish({"type": "spawn.cold", "reservation": result})

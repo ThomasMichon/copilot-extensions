@@ -154,6 +154,24 @@ handoff support.
 
 ## Journal
 
+### 2026-10-22 - Serialize physical cooling with resume admission
+- Further review of #7836 found that a fresh snapshot cannot exclude a later
+  resume before the actual stop. A coordinator-held, revision/handle-bound
+  cooling operation now spans probing, physical stop and cold/deferral
+  publication. Ambiguous outcomes retain the durable guard without expiry.
+- Suspended incomplete startups retain capacity before abandonment, including
+  stale cooled-cache observations. Stranded queued historical cold rows cannot
+  be stopped or deferred without completion and guarded generation checks.
+- The final bounded queue/ordinary/restricted/supervisor family passed 1,375
+  cases with 34 explicit skips. The focused cooling/clean-room selection
+  passed 46. An encountered containment test incorrectly required a particular
+  ancestor to reap the synthetic body; it now checks actual descendant absence
+  after reaping any adopted children, retaining owner-unwind and marker checks.
+- Source review remains a separate pending gate.
+- The additive schema and mixed-version quiescence requirements are documented
+  in the plugin's startup-fencing reference. No migration, release, installed
+  adoption or Phase 2 completion is claimed.
+
 ### 2026-10-22 - Preserve predecessor startup across recovery reentry
 - The pending startup-capacity source correction in #7836 now rejects a second
   resume or redelivery while the original launch remains unresolved. Recovery

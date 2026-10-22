@@ -71,6 +71,8 @@ def record(queue, key: str, info: dict) -> SpawnReservation:
             or row["worktree"] or row["allocation_project"]
         ):
             raise TaskError("restricted delivery reservation or task incarnation changed")
+        from .queue_spawn_cooling import require_no_cooling
+        require_no_cooling(row)
         if any(info.get(field) != value for field, value in previous.items()):
             raise TaskError("restricted delivery identity cannot be replaced")
         if info.get("delivered"):

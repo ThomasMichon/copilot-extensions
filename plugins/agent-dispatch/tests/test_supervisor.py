@@ -161,8 +161,17 @@ class QueueBackedClient:
             )
         )
 
-    def defer_spawn(self, key, *, detail=None):
-        return asdict(self._q.defer_spawn(key, detail=detail))
+    def defer_spawn(self, key, *, detail=None, **kwargs):
+        try:
+            return asdict(self._q.defer_spawn(key, detail=detail, **kwargs))
+        except TaskError as exc:
+            raise DispatchError(409, str(exc)) from exc
+
+    def claim_spawn_cooling(self, key, **kwargs):
+        try:
+            return asdict(self._q.claim_spawn_cooling(key, **kwargs))
+        except TaskError as exc:
+            raise DispatchError(409, str(exc)) from exc
 
     def request_spawn_release(
         self,
@@ -202,10 +211,11 @@ class QueueBackedClient:
             )
         )
 
-    def record_cold(self, key, *, release_exclusive=False, startup_revision=None):
+    def record_cold(self, key, *, release_exclusive=False, startup_revision=None, cooling_token=None):
         try:
             return asdict(self._q.record_cold(
                 key, release_exclusive=release_exclusive, startup_revision=startup_revision,
+                cooling_token=cooling_token,
             ))
         except TaskError as exc:
             raise DispatchError(409, str(exc)) from exc

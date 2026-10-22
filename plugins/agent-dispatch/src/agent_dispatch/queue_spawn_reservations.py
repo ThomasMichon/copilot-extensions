@@ -47,6 +47,7 @@ from .queue_allocation_revisions import revision_disposed
 from .queue_records import ExclusiveKeyBusyError, SpawnReservation, SpawnState, Status, TaskError
 from .queue_spawn_deferral import SpawnDeferralMixin
 from .queue_spawn_completion import SpawnCompletionMixin
+from .queue_spawn_cooling import require_no_cooling, validate_cooling_publication
 from .queue_execution_handoff import require_execution_admission
 from .queue_execution_custody import require_execution_send_reconciliation
 
@@ -447,6 +448,7 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin):
         session_handle: str | None = None,
         startup_complete: bool | None = None,
         expected_startup_revision: int | None = None,
+        cooling_token: str | None = None,
         worktree: str | None = None,
         detail: str | None = None,
         conclusion_state: str | None = None,
@@ -463,6 +465,7 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin):
             if row is None:
                 conn.execute("COMMIT")
                 raise TaskError(f"no such reservation: {key}")
+            validate_cooling_publication(row, cooling_token, expected_startup_revision)
             if row["state"] not in allowed_from:
                 conn.execute("COMMIT")
                 raise TaskError(
@@ -558,6 +561,7 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin):
                     "UPDATE spawn_reservations SET state = ?, updated_at = ?, "
                     "session_handle = CASE WHEN ? IS NOT NULL THEN ? ELSE session_handle END, "
                     "startup_complete = ?, startup_revision = ?, "
+                    "cooling_token = CASE WHEN ? IS NOT NULL THEN NULL ELSE cooling_token END, "
                     "worktree = CASE WHEN ? IS NOT NULL THEN ? ELSE worktree END, "
                     "inherited_worktree = CASE "
                     "WHEN inherited_worktree IS NOT NULL THEN inherited_worktree "
@@ -576,6 +580,7 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin):
                     (
                         to_state, ts, session_handle, session_handle,
                         completion, revision,
+                        cooling_token,
                         worktree, worktree,
                         detail, conclusion_state, conclusion_state, conclusion_detail,
                         conclusion_detail, claim_token, 1 if release_requested else 0,
@@ -714,28 +719,6 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin):
             conn.execute("COMMIT")
         return SpawnReservation._from_row(updated)
 
-    def record_cold(
-        self, key: str, *, release_exclusive: bool = False,
-        startup_revision: int | None = None, now: float | None = None,
-    ) -> SpawnReservation:
-        """Mark a spawned headless body intentionally stopped and dormant.
-
-        ``release_exclusive`` drops this reservation's ``exclusive_key`` hold
-        while cold, so a sibling may spawn; ``record_spawn`` reacquires it.
-        """
-        if startup_revision is not None and (
-            type(startup_revision) is not int or startup_revision < 1
-        ):
-            raise TaskError("cold transition requires the current startup revision")
-        return self._update_reservation(
-            key,
-            to_state=SpawnState.COLD,
-            allowed_from=frozenset({SpawnState.SPAWNED, SpawnState.COLD}),
-            expected_startup_revision=startup_revision,
-            exclusive_released=release_exclusive or None,
-            now=now,
-        )
-
     def fail_spawn(
         self,
         key: str,
@@ -842,6 +825,7 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin):
             if row["state"] != SpawnState.RELEASING:
                 conn.execute("COMMIT")
                 raise TaskError(f"reservation {key} is {row['state']!r}, not releasing")
+            require_no_cooling(row)
             to_state = (
                 SpawnState.SETTLED
                 if row["release_disposition"] == "settled"
@@ -902,6 +886,7 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin):
             if row is None:
                 conn.execute("ROLLBACK")
                 raise TaskError(f"no such reservation: {key}")
+            require_no_cooling(row)
             if row["state"] not in SpawnState.ACTIVE:
                 conn.execute("ROLLBACK")
                 raise TaskError(

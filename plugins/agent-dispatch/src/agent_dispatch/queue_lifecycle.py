@@ -805,6 +805,11 @@ class QueueLifecycleMixin(QueueProgressMixin):
             if expected_updated_at is not None and task.updated_at != expected_updated_at:
                 conn.execute("COMMIT")
                 raise TaskError(f"task {task_id!r} changed while the transition was in flight")
+            if release_spawn and conn.execute(
+                "SELECT 1 FROM spawn_reservations WHERE task_id=? AND cooling_token IS NOT NULL",
+                (task_id,),
+            ).fetchone():
+                raise TaskError("spawn cooling remains unresolved")
             retire_waiters = getattr(self, "_retire_waiters_for_transition", None)
             if callable(retire_waiters):
                 wake_enqueued = retire_waiters(

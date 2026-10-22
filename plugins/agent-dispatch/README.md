@@ -525,8 +525,9 @@ started -> suspended -> started
   without a captured interactive inbox instead releases to **queued** and
   settles its reservation for safe re-embodiment. `release <id>`
   explicitly clears ownership and moves **suspended → queued**. Suspended tasks
-  do not participate in liveness GC, supervisor capacity/claiming, or retry
-  accounting.
+  do not participate in liveness GC, claiming or retry accounting. Their
+  reservations retain process capacity while startup or cooling is unresolved;
+  see [startup and cooling fencing](docs/spawn-startup-fencing.md).
 - A bare `suspend` always attaches a **cooldown monitor** (default
   `DEFAULT_SUSPEND_COOLDOWN_SECONDS`, override with `--cooldown-seconds`, or
   suppress with `--no-cooldown` for a caller that has arranged its own, more
@@ -2651,10 +2652,13 @@ agent-dispatch reservations fail <key>                # release a confirmed-dead
 
 `--max-active-processes` (legacy alias `--max-concurrent`) is a **pool-local**
 cap on live or launching worker processes, not on durable tasks. Queued tasks
-are unlimited. Suspended tasks and tasks blocked on a card are cold: their
-headless bridge process is stopped while the task, owner, progress, card, and
-spawn handle remain durable. Submitting a steer releases the cold reservation
-and queues a fresh embodiment that consumes the saved guidance. Because the cap
+are unlimited. Suspended tasks and tasks blocked on a card can become cold:
+their headless bridge process is stopped while the task, owner, progress, card
+and spawn handle remain durable. Unresolved startup or cooling still occupies
+capacity. Steering requests the preserved body's resume where supported;
+replacement paths consume the saved guidance. The coordinator-held
+[startup/cooling fence](docs/spawn-startup-fencing.md) excludes stale physical
+stops from later resumes. Because the cap
 is evaluated only over tasks matching this supervisor's repo/label filter,
 unrelated pools do not consume one another's process capacity.
 

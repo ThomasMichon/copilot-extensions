@@ -811,7 +811,7 @@ class DispatchClient(CleanupRecoveryClientMixin, CategoryClientMixin, ScheduleCl
 
     def record_cold(
         self, key: str, *, release_exclusive: bool = False,
-        startup_revision: int | None = None,
+        startup_revision: int | None = None, cooling_token: str | None = None,
     ) -> dict:
         return self._unwrap(
             self._http.post(
@@ -819,6 +819,7 @@ class DispatchClient(CleanupRecoveryClientMixin, CategoryClientMixin, ScheduleCl
                 json={
                     "release_exclusive": release_exclusive,
                     **({"startup_revision": startup_revision} if startup_revision is not None else {}),
+                    **({"cooling_token": cooling_token} if cooling_token is not None else {}),
                 },
             )
         )

@@ -395,6 +395,7 @@ def run_queue_schema_migrations(conn: sqlite3.Connection, *, now_fn) -> None:
         "  startup_complete INTEGER NOT NULL DEFAULT 0,"
         "  startup_revision INTEGER NOT NULL DEFAULT 1,"
         "  startup_fenced INTEGER NOT NULL DEFAULT 0,"
+        "  cooling_token TEXT,"
         "  worktree TEXT,"
         "  inherited_worktree TEXT,"
         "  worktree_ownership TEXT,"
@@ -542,6 +543,7 @@ def run_queue_schema_migrations(conn: sqlite3.Connection, *, now_fn) -> None:
         ("startup_complete", "INTEGER NOT NULL DEFAULT 0"),
         ("startup_revision", "INTEGER NOT NULL DEFAULT 1"),
         ("startup_fenced", "INTEGER NOT NULL DEFAULT 0"),
+        ("cooling_token", "TEXT"),
         ("allocation_revision", "INTEGER NOT NULL DEFAULT 1"),
         ("creation_key", "TEXT"),
         ("allocation_reservation_key", "TEXT"),

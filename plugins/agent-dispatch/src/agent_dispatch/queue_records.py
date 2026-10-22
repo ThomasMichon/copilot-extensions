@@ -231,6 +231,7 @@ class SpawnReservation:
     startup_complete: bool = False
     startup_revision: int = 1
     startup_fenced: bool = False
+    cooling_token: str | None = None
     worktree: str | None = None
     inherited_worktree: str | None = None
     worktree_ownership: str | None = None
@@ -268,6 +269,7 @@ class SpawnReservation:
             if "startup_complete" in row.keys() else False,
             startup_revision=row["startup_revision"] if "startup_revision" in row.keys() else 1,
             startup_fenced=bool(row["startup_fenced"]) if "startup_fenced" in row.keys() else False,
+            cooling_token=row["cooling_token"] if "cooling_token" in row.keys() else None,
             worktree=row["worktree"],
             inherited_worktree=row["inherited_worktree"],
             worktree_ownership=row["worktree_ownership"],

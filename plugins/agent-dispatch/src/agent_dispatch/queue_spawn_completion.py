@@ -5,9 +5,10 @@ from __future__ import annotations
 import sqlite3
 
 from .queue_records import SpawnReservation, SpawnState, Status, TaskError
+from .queue_spawn_cooling import SpawnCoolingMixin, require_no_cooling
 
 
-class SpawnCompletionMixin:
+class SpawnCompletionMixin(SpawnCoolingMixin):
     def fence_spawn_startup(
         self, key: str, *, startup_revision: int, now: float | None = None,
     ) -> SpawnReservation:
@@ -27,6 +28,7 @@ class SpawnCompletionMixin:
                 or not row["startup_complete"]
             ):
                 raise TaskError("terminal startup changed or remains incomplete")
+            require_no_cooling(row)
             if not row["startup_fenced"]:
                 conn.execute(
                     "UPDATE spawn_reservations SET startup_fenced=1, updated_at=? WHERE key=?",

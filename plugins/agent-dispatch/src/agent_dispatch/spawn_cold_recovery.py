@@ -96,8 +96,16 @@ def recover_stranded_cold_reservations(supervisor: Any) -> int:
             continue  # settled by reconcile()/dead-lettering, not here
         if status != Status.QUEUED or task.get("owner"):
             continue  # still genuinely dormant or owned -- not this gap
+        if res.get("startup_complete") is not True:
+            supervisor._retain_terminal_startup(res, task)
+            continue
         fleet = _parse_fleet_body_handle(res.get("session_handle"))
         local_sid = _parse_local_body_handle(res.get("session_handle"))
+        if fleet is None and local_sid is None:
+            continue
+        cooling_token = supervisor._claim_cooling(res, task)
+        if cooling_token is None:
+            continue
         confirmed_gone = False
         try:
             if fleet is not None:
@@ -113,8 +121,10 @@ def recover_stranded_cold_reservations(supervisor: Any) -> int:
             else:
                 continue  # no recognizable handle -- never guess
         except Exception:
-            continue  # liveness is best-effort -- never fatal, never act
+            log.exception("stranded cold stop outcome unproven for %s; guard retained", key)
+            continue
         if not confirmed_gone:
+            supervisor._retain_terminal_startup(res, task, "cold recovery outcome unproven")
             continue
         try:
             # `defer_spawn`, not `fail_spawn`: this reservation didn't fail --
@@ -130,6 +140,8 @@ def recover_stranded_cold_reservations(supervisor: Any) -> int:
             # for (see its own docstring).
             supervisor.client.defer_spawn(
                 key,
+                startup_revision=res.get("startup_revision"), cooling_token=cooling_token,
+                expected_generation=task.get("generation"),
                 detail=(
                     "stranded cold reservation: task reclaimed to "
                     "queued/unowned before a resume-triggering steer "

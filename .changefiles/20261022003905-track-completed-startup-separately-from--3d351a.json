@@ -1,5 +1,5 @@
 {
-  "comment": "Track completed startup separately from retained process and resource custody; close per-operation queue connections deterministically",
+  "comment": "Fence completed startup and physical cooling/resume with durable coordinator guards; retain unresolved capacity and close per-operation queue connections deterministically",
   "changes": [
     {
       "plugin": "agent-dispatch",

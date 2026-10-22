@@ -17,12 +17,28 @@ class SpawnTerminalClientMixin:
     def defer_spawn(
         self, key: str, *, detail: str | None = None,
         expected_generation: int | None = None,
+        startup_revision: int | None = None, cooling_token: str | None = None,
     ) -> dict:
         """Defer startup; generation fencing is for unclaimed restricted attempts only."""
         payload: dict[str, object] = {"detail": detail}
         if expected_generation is not None:
             payload["expected_generation"] = expected_generation
+        if startup_revision is not None:
+            payload["startup_revision"] = startup_revision
+        if cooling_token is not None:
+            payload["cooling_token"] = cooling_token
         return self._unwrap(self._http.post(f"/spawn-reservations/{key}/defer", json=payload))
+
+    def claim_spawn_cooling(
+        self, key: str, *, startup_revision: int, session_handle: str, state: str,
+    ) -> dict:
+        return self._unwrap(self._http.post(
+            f"/spawn-reservations/{key}/claim-cooling",
+            json={
+                "startup_revision": startup_revision,
+                "session_handle": session_handle, "state": state,
+            },
+        ))
 
     def fail_spawn(
         self,
