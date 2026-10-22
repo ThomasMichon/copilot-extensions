@@ -126,6 +126,7 @@ def decode_snapshot(data: object, repo: str, number: int) -> PRSnapshot:
 def fetch_snapshot(
     repo: str, number: int, command: str, *, prefix: list[str] | None = None,
     runner: Callable[[list[str]], subprocess.CompletedProcess] | None = None,
+    credential_command: list[str] | None = None,
 ) -> PRSnapshot:
     """Perform exactly one native configured read; never start another waiter."""
     if prefix is None:
@@ -137,9 +138,22 @@ def fetch_snapshot(
         launch = list(prefix)
     if not repo or any(character in repo for character in "\0\r\n&|<>^%!"):
         raise ValueError("invalid native repository target")
+    credential_arguments = []
+    if credential_command is not None:
+        if (
+            not isinstance(credential_command, list) or not 1 <= len(credential_command) <= 64
+            or any(not isinstance(argument, str) or not argument or "\0" in argument
+                   for argument in credential_command)
+        ):
+            raise ValueError("invalid credential command argv")
+        command_path(credential_command[0])
+        serialized = json.dumps(credential_command)
+        if len(serialized.encode("utf-8")) > 16384:
+            raise ValueError("credential command argv exceeds its budget")
+        credential_arguments = ["--credential-command", serialized]
     try:
         result = (runner or _run_native)(
-            [*launch, "pr-watch", "snapshot", repo, str(number), "--json"],
+            [*launch, "pr-watch", "snapshot", repo, str(number), "--json", *credential_arguments],
         )
         if result.returncode or len(result.stdout.encode("utf-8")) > _MAX_SNAPSHOT_BYTES:
             raise ValueError("native snapshot command failed or exceeded its budget")

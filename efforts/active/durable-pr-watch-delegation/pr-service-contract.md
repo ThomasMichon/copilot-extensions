@@ -196,9 +196,20 @@ resource/permission/expiry/revocation validation; target labels alone cannot
 downscope a token. The string-only index consumer refuses that typed binding.
 The opt-in generic service profile does not itself acquire forge credentials.
 A PR worker must not masquerade as `index-worker`, invent corpus/source values
-or forward ambient credentials. Wiring the typed exchange into the actual
-native provider HTTP/CLI boundary and validating production provider results
-remain open before production consumption. Existing provider custody, expiry,
+or forward ambient credentials. The native configured observation library now
+accepts a typed `credential_source`, validating its exact forge binding and
+expiry and acquiring fresh material at each GitHub command or ADO HTTP request,
+including pagination (#7954). Selected-source GitHub requests pin absolute
+HTTPS routing; ADO preserves the exchange's `basic` (PAT) versus `bearer`
+authentication. Source/authorization loss aborts without ambient fallback.
+The explicit native-command process bridge now accepts a trusted
+`credential_command` prefix. Worktrees captures the bounded versioned material
+from Fleet's public `credential` command for each acquisition, reusing the typed
+worker's exact config/policy selection and recipient verification/ACK. No SDK
+object, token argument, index identity or second issuer crosses that boundary.
+Synthetic native-child/TLS tests cover renewal and loss; actual service
+configuration/activation and validation of production provider results remain
+open before production consumption. Existing provider custody, expiry,
 revocation and provider/OS session longevity remain authoritative.
 
 No secret enters registration state, replay records, images, manifests, argv

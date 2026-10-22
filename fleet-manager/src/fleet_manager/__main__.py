@@ -42,6 +42,14 @@ def main(argv=None):
     profile.add_argument("--config", type=Path)
     profile.add_argument("--service-policy", type=Path)
     hosting.add_argument("--tls-config", type=Path)
+    credential = commands.add_parser(
+        "credential", help="Acquire one typed forge credential; secret JSON is for a captured pipe only",
+    )
+    credential.add_argument("--config", type=Path, required=True)
+    credential.add_argument("--source", required=True)
+    credential.add_argument("--account", required=True)
+    credential.add_argument("--forge", required=True, help="Exact non-secret ForgeScope JSON")
+    credential.add_argument("--timeout", type=float, default=15)
     admission = commands.add_parser(
         "client-state", help="Explicit client admission, construction, runtime selectors and commands",
     )
@@ -70,6 +78,35 @@ def main(argv=None):
         args = parser.parse_args(argv)
     except SystemExit as exc:
         return 0 if exc.code == 0 else 1
+    if args.command == "credential":
+        from .gateway_contract import ForgeScope, GatewayError, encode, parse, require
+
+        try:
+            from .gateway_worker import credential_provider
+
+            require(not sys.stdout.isatty(), "captured-output-required")
+            require(0 < args.timeout <= 60, "invalid-deadline")
+            scope = ForgeScope.load(parse(args.forge.encode("utf-8")))
+            material = credential_provider(
+                args.config, source=args.source, account=args.account, forge=scope,
+                timeout=args.timeout,
+            )()
+            require(material.forge == scope, "credential-scope-mismatch")
+            print(encode({
+                "schema": "fleet-manager.forge-credential", "version": 1,
+                "token": material.token, "expires_at": material.expires_at,
+                "forge": scope.to_dict(),
+            }).decode("utf-8"))
+        except ImportError:
+            print("fleet-manager: credential requires the auth extra", file=sys.stderr)
+            return 1
+        except GatewayError as exc:
+            print(f"fleet-manager: {exc}", file=sys.stderr)
+            return 1
+        except UnicodeError:
+            print("fleet-manager: invalid-credential-reference-encoding", file=sys.stderr)
+            return 1
+        return 0
     if args.command == "serve":
         if args.service_policy is not None:
             if args.tls_config is None:

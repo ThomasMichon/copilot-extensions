@@ -6,6 +6,8 @@ import asyncio
 import copy
 import hashlib
 import json
+import subprocess
+import sys
 import threading
 import time
 from contextlib import contextmanager
@@ -17,7 +19,7 @@ from fleet_manager.gateway_client import CredentialMaterial
 from fleet_manager.gateway_contract import ForgeScope, GatewayConfig, GatewayError, credential, encode, parse
 from fleet_manager.gateway_controller import Controller, RelayCredentialProvider, RelayPolicy
 from fleet_manager.gateway_server import build_server
-from fleet_manager.gateway_worker import CredentialWorker, token_provider
+from fleet_manager.gateway_worker import CredentialWorker, credential_provider, token_provider
 from gateway_fixtures import Fixtures, public, query
 from jwcrypto import jwe
 from test_gateway_runtime import running
@@ -88,7 +90,7 @@ def responding(fixture, gateway, provider):
         try:
             while not stop.is_set():
                 responder.step()
-                stop.wait(0.05)
+                stop.wait(0.15)
         except Exception as exc:
             failures.append(exc)
 
@@ -348,3 +350,116 @@ def test_string_only_loader_refuses_pr_binding_before_key_or_token_consumption(t
     }), encoding="utf-8")
     with pytest.raises(GatewayError, match="typed-forge-consumer-required"):
         token_provider(path, source="source-a", account="account-a")
+
+
+def worker_policy(fixture, parameters, port=1):
+    root = fixture.root
+    recipient = root / "typed-recipient.pem"
+    recipient.write_bytes(fixture.recipient.export_to_pem(private_key=True, **{"password": None}))
+    access = root / "typed-access.jwt"
+    access.write_text(fixture.access("worker"), encoding="utf-8")
+    discovery = root / "typed-discovery.json"
+    discovery.write_bytes(encode({
+        "schema": "fleet-manager.gateway-endpoint", "version": 1,
+        "endpoint": f"https://127.0.0.1:{port}", "ca": str(root / "tls.pem"),
+        "issuer": "fixture-issuer", "audience": "gateway-a", "gateway": "gateway-install",
+        "jwks": fixture.gateway_keys, "remote": False,
+    }))
+    policy = root / "typed-worker.json"
+    policy.write_bytes(encode({
+        "schema": "fleet-manager.credential-worker", "version": 1,
+        "discovery": str(discovery), "principal": "worker", "service": "pr-observation",
+        "installation": "pr-install", "generation": 1,
+        "proof_key": str(root / "identity-worker.pem"), "access_token_file": str(access),
+        "recipient_key": str(recipient), "controller": "controller", "controller_generation": 1,
+        "controller_keys": {"keys": [public(fixture.proofs["controller"], "proof")]},
+        "bindings": [parameters],
+    }))
+    return policy
+
+
+@pytest.mark.parametrize("provider,authentication", [
+    ("github", "bearer"), ("azure-devops", "bearer"), ("azure-devops", "basic"),
+])
+def test_typed_policy_and_real_credential_cli_renew_through_tls(tmp_path, provider, authentication):
+    scope = forge(provider, authentication)
+    fixture, parameters = configured(tmp_path, scope)
+    source = ScopedProvider()
+    with running(build_server(fixture.config, fixture.signer)) as gateway:
+        policy = worker_policy(fixture, parameters, gateway.server_port)
+        argv = [
+            sys.executable, "-m", "fleet_manager", "credential", "--config", str(policy),
+            "--source", parameters["source"], "--account", parameters["account"],
+            "--forge", json.dumps(scope.to_dict()), "--timeout", "5",
+        ]
+
+        def invoke():
+            return subprocess.run(
+                argv, capture_output=True, text=True, encoding="utf-8", timeout=10,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+
+        with responding(fixture, gateway, source):
+            acquire = credential_provider(
+                policy, source=parameters["source"], account=parameters["account"], forge=scope,
+            )
+            assert acquire().forge == scope
+            first, second = invoke(), invoke()
+            assert first.returncode == second.returncode == 0
+            for index, result in enumerate((first, second), 2):
+                assert result.stderr == ""
+                assert parse(result.stdout.encode()) == {
+                    "schema": "fleet-manager.forge-credential", "version": 1,
+                    "forge": scope.to_dict(), "expires_at": parse(result.stdout.encode())["expires_at"],
+                    "token": f"synthetic-forge-secret-{index}",
+                }
+            assert source.calls == [parameters] * 3
+            assert all(item.state == "ACKED" and item.delivery is None
+                       for item in gateway.gateway.broker._items.values())
+        refused = invoke()
+        assert refused.returncode == 1 and refused.stdout == ""
+        assert refused.stderr.strip() == "fleet-manager: controller-unavailable"
+        assert len(source.calls) == 3
+    assert not any("synthetic-forge-secret" in part for part in argv)
+
+
+@pytest.mark.parametrize("change,code", [
+    ("account", "provider-policy-denied"),
+    ("forge", "provider-policy-denied"),
+    ("duplicate", "ambiguous-provider-policy"),
+    ("legacy", "typed-forge-policy-required"),
+])
+def test_typed_loader_refuses_before_secret_reference_reads(tmp_path, change, code):
+    fixture, parameters = configured(tmp_path)
+    policy = worker_policy(fixture, parameters)
+    value = parse(policy.read_bytes())
+    value["proof_key"] = str(tmp_path / "absent-proof.pem")
+    if change == "duplicate":
+        value["bindings"].append(copy.deepcopy(value["bindings"][0]))
+    if change == "legacy":
+        del value["bindings"][0]["forge"]
+    policy.write_bytes(encode(value))
+    scope = replace(forge(), repository="other/repository") if change == "forge" else forge()
+    with pytest.raises(GatewayError, match=code):
+        credential_provider(
+            policy, source="source-a", account="other" if change == "account" else "account-a",
+            forge=scope,
+        )
+
+
+def test_credential_cli_refuses_terminal_output_and_nonfinite_deadlines(tmp_path, monkeypatch, capsys):
+    from fleet_manager import __main__ as cli
+
+    argv = [
+        "credential", "--config", str(tmp_path / "absent.json"),
+        "--source", "source-a", "--account", "account-a", "--forge", json.dumps(forge().to_dict()),
+    ]
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+    assert cli.main(argv) == 1
+    assert capsys.readouterr().out == ""
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: False)
+    for deadline in ("nan", "inf", "0", "-1", "61"):
+        assert cli.main([*argv, "--timeout", deadline]) == 1
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert captured.err.strip() == "fleet-manager: invalid-deadline"

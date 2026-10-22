@@ -238,13 +238,18 @@ _Operator-required scope; agent-recommended implementation and validation._
   (source confirmed by #7915; provider and deployed acceptance remain open).
 - [x] Bind a distinct PR observation worker to exact typed forge scopes in the
   existing credential exchange, preserving provider validation and recipient
-  verification before ACK (#7926). Native per-request renewal and production
+  verification before ACK (#7926). Native service integration and production
   provider/deployment acceptance remain below.
-- [ ] Land the additive native read-only per-request credential consumer seam,
+- [x] Land the additive native read-only per-request credential consumer seam,
   including GitHub review/check pages and ADO HTTP continuation, typed
-  endpoint/repository/authentication/expiry checks and no ambient fallback.
+  endpoint/repository/authentication/expiry checks and no ambient fallback (#7954).
   This source item does not close the process-boundary service adapter,
   production-provider validation or installed/fleet acceptance.
+- [ ] Land the explicit native-command credential adapter, reusing the typed
+  worker's public configuration/command and bounded captured output rather
+  than importing Fleet into Worktrees. Preserve per-request renewal,
+  scope/expiry/refusal and the ordinary unselected CLI paths; service
+  activation and production-provider validation remain separate.
 - [ ] Define and deliver the [PR-service consumer contract](pr-service-contract.md)
   through normal reviewed source changes, including missing shared seams and
   real serving/consumer proof. Consult related campaigns without a separate
@@ -490,6 +495,61 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-10-22 - Connect typed credentials across the native command boundary
+
+- Implemented an explicit typed `credential_provider` over the existing worker
+  policy and a machine-only Fleet `credential` command. It retains exact
+  source/account/forge selection, recipient verification and ACK before
+  returning scoped material; the string-only index loader still refuses
+  forge policies.
+- Worktrees' snapshot-only `--credential-command` adapter captures a versioned
+  material envelope at each native acquisition, with the canonical finite
+  caller-owned process/stream budgets and no Fleet import, token argument,
+  cache or ambient fallback. PR's existing native bridge forwards an explicit
+  trusted command; no registration can supply it and no runtime is activated.
+- Added real native snapshot-child and full PR/native/Fleet-CLI/TLS credential
+  exchange tests. They exercise fresh material on every command, exact
+  scope/expiry validation, loss before a later forge request, sealed delivery
+  ACK and ordinary bridge compatibility. A full-chain run exposed the
+  synthetic controller fixture polling above its own principal rate budget;
+  pacing that fixture at 150 ms preserves real admission rather than waiving
+  throttling.
+- Initial native tests needed short parameter IDs for Windows' environment
+  size limit and an explicit configuration anchor. Fleet's prepared test
+  package was stale and was restored through its contained preparation path.
+  An overly broad `test_cli` selector included unrelated native client
+  construction and reached the 240-second aggregate limit; the exact
+  credential/base-CLI module selection passes without relaxing deadlines.
+- Final focused validation passes 252 cases: 99 Worktrees credential/configuration,
+  63 Fleet typed/legacy worker and base CLI, and 90 PR native/transport cases.
+  Ten existing POSIX process controls skip on Windows. The real complete
+  process/TLS path is included, not just an injected credential callback.
+  Python lint and the 13-plugin install contract pass.
+- This closes no production or deployment gate. The credential account/action
+  contract, actual provider verification, service observation/consumer/lifecycle,
+  installed acceptance and real fleet acceptance remain Active. Final focused
+  review and source merge for this adapter are still pending.
+
+### 2026-10-22 - Merge the native request boundary and retain process integration
+
+- #7954 merged as `3b870884d307bd86e4d6b027eb5b199ca13a3d13` at
+  `2026-10-22T21:50:48Z`, from published head
+  `310da9cb00237534c390c24ce29a3ad899c7fd5a`. Current-head Copilot review
+  `5621280923` approved with no open issues. All four review threads were
+  resolved, the full review-body default-port finding was fixed, and required
+  CI passed. Managed completion used only the documented missing-additional-
+  CODEOWNER review exception, not a CI or feedback bypass.
+- Re-read the full current parent Plan and Validation after merge, preserving
+  every retained client/matrix, lifecycle, installation and fleet gate. Closed
+  only the additive native library source child. The parent credential and
+  consumer-contract items remain open; provider labels and isolated TLS/CLI
+  controls are not production downscoping or deployed acceptance.
+- Next: connect the PR service's existing native-command process boundary to
+  the existing typed credential worker without a second forge client, secret
+  persistence or ambient fallback. Then complete the shared dispatch consumer
+  and independently installable lifecycle. This merge authorizes no runtime
+  update, production credential use, remote activation or new capacity.
 
 ### 2026-10-22 - Prepare native per-request observation credential consumption
 

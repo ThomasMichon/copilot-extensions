@@ -295,9 +295,10 @@ Credential expiry is checked again after acknowledgement before material is
 returned. Consumers acquire/refresh at their HTTP/Git boundaries through the explicit
 worker policy below. No ambient, anonymous or stale-token fallback.
 The PR worker's typed SDK exchange is available through
-`CredentialWorker.acquire()`. This alone does not connect the native PR forge
-driver or an observation daemon: per-request renewal at that consumer's actual
-HTTP/CLI boundary and production provider verification remain separate work.
+`CredentialWorker.acquire()` and the explicit configured consumer below.
+Native Worktrees reads can renew this material at each HTTP/CLI boundary;
+production provider verification and observation-service activation remain
+separate work.
 
 State: `PENDING -> DISPATCHED -> READY -> DELIVERED -> ACKED`, or explicit
 `UNSUPPORTED/UNAVAILABLE/UNKNOWN`. Dispatch and delivery are each one-shot;
@@ -359,8 +360,39 @@ JSON with `schema: fleet-manager.credential-worker`, `version: 1` and:
 
 This string-only loader remains an index consumer. It refuses `forge`
 bindings with `typed-forge-consumer-required` rather than discarding their
-target/authentication metadata. PR callers retain the typed material from
-`CredentialWorker.acquire()`; there is no implicit index-worker identity.
+target/authentication metadata.
+`gateway_worker.credential_provider(Path(...), source=..., account=...,
+forge=ForgeScope(...), timeout=30)` selects an exact typed binding from the
+same configuration format and returns fresh `CredentialMaterial` on each call.
+Every binding in that configuration must be typed; source/account/forge
+duplicates are refused. Selection is checked before reading key/access-token
+references. There is no implicit index-worker identity.
+
+For a separately installed native consumer, the public process adapter is:
+
+```text
+fleet-manager credential --config <absolute-worker-policy.json> --source <source> --account <account> --forge <ForgeScope-JSON>
+```
+
+This acquires once through the same `CredentialWorker`, verifies and ACKs the
+recipient delivery, and emits one bounded UTF-8 JSON object on **captured
+stdout only**. Interactive terminal output is refused. The exact version-1
+envelope is `{schema: "fleet-manager.forge-credential", version: 1, token,
+expires_at, forge}`; `forge` is the complete scope above, not an auth-scheme
+guess. Stdout contains a secret: consume it directly from the pipe, never
+persist, print, forward to a logger or include it in diagnostics. Arguments
+contain only trusted labels, scope and configuration path references, never
+tokens or private keys. `--timeout` defaults to 15 seconds and must be finite
+and positive, at most 60 seconds; the invoking native consumer may impose a
+shorter absolute process deadline. Failure emits no credential and a static
+stderr diagnostic, with no retry or ambient-auth fallback.
+
+Worktrees' [snapshot command adapter](../../plugins/agent-worktrees/docs/pr-observation.md)
+executes an explicit attributable command prefix for each native request and
+independently verifies scope/expiry before using its result. No Fleet SDK is
+imported into Worktrees, and no worker/controller/service is started by loading
+this configuration. The deployment owner supplies an already-enrolled worker,
+provider verifier, active controller, endpoint/trust and credential references.
 
 The issuer/custodian renews the external access-token reference independently;
 the SDK reads it before every signed request. Neither this file loader nor the

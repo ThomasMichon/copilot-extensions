@@ -142,6 +142,36 @@ def test_native_fetch_crosses_real_cli_process_boundary(tmp_path):
     assert fetch_snapshot("project/repo", 7, str(command)).provider == "azure-devops"
 
 
+def test_native_fetch_forwards_only_explicit_credential_command(tmp_path):
+    command = tmp_path / "worktrees"
+    command.touch()
+    credential_command = [sys.executable, "-m", "fleet_manager", "credential", "--config", "worker.json"]
+    seen = []
+
+    def run(argv):
+        seen.append(argv)
+        return subprocess.CompletedProcess(argv, 0, json.dumps(report()), "")
+
+    assert fetch_snapshot(
+        "project/repo", 7, str(command), runner=run, credential_command=credential_command,
+    ).observation
+    assert seen == [[
+        str(command), "pr-watch", "snapshot", "project/repo", "7", "--json",
+        "--credential-command", json.dumps(credential_command),
+    ]]
+
+
+@pytest.mark.parametrize("credential_command", [[], ["relative"], [sys.executable, None]])
+def test_native_fetch_refuses_invalid_credential_command_before_launch(tmp_path, credential_command):
+    command = tmp_path / "worktrees"
+    command.touch()
+    with pytest.raises(ValueError):
+        fetch_snapshot(
+            "project/repo", 7, str(command), credential_command=credential_command,
+            runner=lambda *_: pytest.fail("invalid credential command reached native child"),
+        )
+
+
 def test_governed_native_read_uses_owned_peer_prefix_not_command_hint(monkeypatch):
     prefix = [sys.executable, "-B", "-I", "immutable-peer-bootstrap"]
     launched = []

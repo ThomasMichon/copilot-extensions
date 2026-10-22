@@ -131,7 +131,35 @@ atomic write, then exercise both policy withdrawal and channel loss. Publication
 does not wait for the held write. The same original request reconciles after
 reauthorization/reconnection, without replacement or loss of transaction custody.
 
-These synthetic checks are not installed-service, forge-credential, Dispatch,
+## Explicit native observation credential command
+
+The existing `watch_provider.fetch_snapshot(repo, number, command, ...)` bridge
+accepts an optional `credential_command` JSON-serializable argv list supplied
+by the embedding service's **trusted configuration**. It forwards that exact
+non-secret command to Worktrees' snapshot-only
+[`--credential-command`](../../agent-worktrees/docs/pr-observation.md) option.
+The native driver, not this bridge, renews and validates typed forge material
+before each provider command/HTTP request. A missing or failed selected command
+does not select the default GitHub path, ambient login or a process waiter.
+Omitting the keyword preserves the existing bridge behavior.
+
+The embedding owner supplies an absolute attributable executable/interpreter
+prefix, enrolled worker policy, account/source/forge binding and an available
+credential controller. Fleet's public credential command reuses the existing
+typed exchange; there is no Fleet import or new issuer in the native process.
+Never accept argv, keys, credential references or provider endpoint selection
+from a remote watch registration. None is added to the Gateway wire contract,
+subscription/replay state or emitted snapshot. This source-level adapter does
+not configure or activate an observation daemon, production provider or fleet
+placement.
+
+Synthetic process/TLS tests exercise the PR bridge, native Worktrees driver,
+real Fleet credential CLI and recipient-sealed exchange together, including
+per-command renewal and refusal before another forge command after provider
+loss. Separate native CLI tests exercise snapshot configuration and scope
+mismatch refusal.
+
+These synthetic checks are not installed-service, production forge-credential, Dispatch,
 container placement, first-provision installer, live-edge or fleet acceptance.
 Those remain separate activation requirements; no such production capability
 is advertised by this adapter.

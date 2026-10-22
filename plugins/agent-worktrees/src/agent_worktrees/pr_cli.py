@@ -485,6 +485,11 @@ def cmd_pr_watch_dispatch(argv: list[str]) -> int:
     )
     p.add_argument("--token", default=None, help="Provider token override (else the binding)")
     p.add_argument("--config", default=None)
+    if verb == "snapshot":
+        p.add_argument(
+            "--credential-command", default=None,
+            help="Trusted non-secret JSON argv acquiring typed credentials per native request",
+        )
     if verb in ("snapshot", "status", "threads"):
         p.add_argument("--json", action="store_true")
     if verb == "wait":
@@ -525,6 +530,13 @@ def cmd_pr_watch_dispatch(argv: list[str]) -> int:
             return 2
 
     try:
+        credential_source = None
+        if verb == "snapshot" and args.credential_command is not None:
+            if args.token is not None:
+                raise ValueError("--credential-command cannot be combined with --token")
+            from .pr_credential_command import command_source
+
+            credential_source = command_source(args.credential_command)
         if read_only:
             from .pr_read_context import load_read_config
             if args.repo is None and not cfg.active_project():
@@ -614,6 +626,7 @@ def cmd_pr_watch_dispatch(argv: list[str]) -> int:
             args.pr,
             api_base=args.host,
             token=resolved_token,
+            **({"credential_source": credential_source} if credential_source is not None else {}),
         )
         if verb == "cursor":
             snap = fetch()

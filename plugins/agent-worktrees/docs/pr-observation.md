@@ -164,8 +164,41 @@ Disabled native ADO observation cannot fall back to the legacy `az` path.
 Without this keyword, explicit string tokens, command-backed configuration and
 ordinary ambient CLI authentication retain their existing behavior. Publication
 and mutation interfaces do not accept renewable observation sources. This is
-a native library seam, not a CLI credential-loader option or an activated PR
-service/Fleet adapter; that process-boundary integration remains separate.
+not an activated observation service.
+
+An embedding service can cross the native process boundary explicitly:
+
+```text
+pr-watch snapshot Project/repository 7 --json --credential-command <JSON-argv>
+```
+
+`JSON-argv` is trusted, non-secret configuration: a nonempty array beginning
+with an absolute existing executable/interpreter, followed by its exact
+arguments. It is limited to 64 entries and 16 KiB. Use the attributable
+interpreter/command prefix, never a PATH lookup or shell expression; implicit
+`.cmd`/`.bat` executables are refused. Do not
+put tokens/private keys in those arguments or accept the command from a remote
+registration. This snapshot-only option conflicts with `--token`; it is not a
+mutation or durable-wait credential override.
+
+For example, the prefix may invoke the separately installed
+[Fleet credential command](../../../fleet-manager/docs/gateway-runtime.md)
+with its explicit worker policy, source/account and exact `ForgeScope`.
+Worktrees imports no Fleet package or provider issuer. Each acquisition runs
+that command in the existing caller-owned process scope with a 15-second
+deadline, 64 KiB stdout and 8 KiB stderr budgets; the enclosing snapshot
+caller's shorter deadline still applies. Normal return confirms helper cleanup;
+an unconfirmed cleanup preserves the canonical process-custody exception rather
+than disguising it as a retryable credential failure.
+The command must emit exactly one version-1
+`fleet-manager.forge-credential` object with `token`, `expires_at` and the
+complete `forge` binding. Unknown/duplicate fields, malformed output,
+failure/timeout and expired or mismatched material refuse the read without
+replaying captured stderr or falling back to ambient credentials. Tokens
+travel only through captured stdout into the existing native transport, never
+into snapshot state or process arguments. There is no command-result cache.
+The unchanged native driver checks every acquired binding immediately before
+the provider request, including pagination.
 
 Policy selectors are conjunctive and case-insensitive: `name`, `policy_id`,
 `context_name` and `context_genre`. Each rule needs a selector; conflicting

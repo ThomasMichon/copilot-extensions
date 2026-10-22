@@ -10,7 +10,7 @@ from typing import Any
 
 from .gateway_client import CredentialMaterial, Discovery, GatewayClient, consume_credential
 from .gateway_contract import (
-    MAX_WIRE, GatewayError, credential, fields, number, parse, require, text, validate_jwks,
+    MAX_WIRE, ForgeScope, GatewayError, credential, fields, number, parse, require, text, validate_jwks,
 )
 from .planning import digest
 
@@ -79,8 +79,10 @@ def _file(path: Any) -> bytes:
     return raw
 
 
-def token_provider(path: Path, *, source: str, account: str) -> Callable[[], str]:
-    """Explicit file references only; issuer/custodian owns their rotation and lifetime."""
+def _configured_provider(
+    path: Path, *, source: str, account: str, forge: ForgeScope | None = None,
+    timeout: float = 30,
+) -> Callable[[], CredentialMaterial]:
     from jwcrypto import jwk
     from cryptography.hazmat.primitives import serialization
     from cryptography.hazmat.primitives.asymmetric.ec import EllipticCurvePrivateKey, SECP256R1
@@ -99,12 +101,17 @@ def token_provider(path: Path, *, source: str, account: str) -> Callable[[], str
     identities = set()
     for binding in bindings:
         credential(binding)
-        require("forge" not in binding, "typed-forge-consumer-required")
-        identity = (binding["source"], binding["account"])
+        if forge is None:
+            require("forge" not in binding, "typed-forge-consumer-required")
+            target = None
+        else:
+            require("forge" in binding, "typed-forge-policy-required")
+            target = ForgeScope.load(binding["forge"])
+        identity = (binding["source"], binding["account"], target)
         require(identity not in identities, "ambiguous-provider-policy")
         identities.add(identity)
         require(binding["recipient"] == value["principal"], "recipient-denied")
-        if identity == (source, account):
+        if identity == (source, account, forge):
             matches.append(binding)
     require(len(matches) == 1, "provider-policy-denied")
     parameters = matches[0]
@@ -134,7 +141,21 @@ def token_provider(path: Path, *, source: str, account: str) -> Callable[[], str
         controller_generation=value["controller_generation"], controller_keys=value["controller_keys"],
     )
 
-    def acquire() -> str:
-        return worker.acquire(parameters).token
+    def acquire() -> CredentialMaterial:
+        return worker.acquire(parameters, timeout=timeout)
 
     return acquire
+
+
+def token_provider(path: Path, *, source: str, account: str) -> Callable[[], str]:
+    """Legacy index consumption; never discard a forge credential's typed binding."""
+    acquire = _configured_provider(path, source=source, account=account)
+    return lambda: acquire().token
+
+
+def credential_provider(
+    path: Path, *, source: str, account: str, forge: ForgeScope, timeout: float = 30,
+) -> Callable[[], CredentialMaterial]:
+    """Load an exact typed forge binding; retain scope, auth type and expiry on renewal."""
+    require(isinstance(forge, ForgeScope), "typed-forge-policy-required")
+    return _configured_provider(path, source=source, account=account, forge=forge, timeout=timeout)
