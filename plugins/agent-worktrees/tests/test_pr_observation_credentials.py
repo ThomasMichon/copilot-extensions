@@ -147,6 +147,7 @@ def test_github_renews_metadata_checks_and_each_review_and_check_page(monkeypatc
     assert source.calls == len(calls) == 6
     for index, (argv, env) in enumerate(calls, 1):
         assert argv[argv.index("--hostname") + 1] == "github.com"
+        assert argv[-1].startswith("https://api.github.com/repos/owner/repository/")
         assert set(env.values()) == {"synthetic-" + str(index)}
         assert "synthetic-" not in " ".join(argv)
     assert "synthetic-" not in repr(result)
@@ -162,13 +163,33 @@ def test_github_source_loss_stops_before_the_next_cli_call(monkeypatch, failure)
     assert len(calls) == failure - 1
 
 
-def test_github_enterprise_uses_actual_api_endpoint(monkeypatch):
+@pytest.mark.parametrize("host,api_base", [
+    ("github.com", "https://api.github.com"),
+    ("tenant.ghe.com", "https://api.tenant.ghe.com"),
+    ("forge.example", "https://forge.example/api/v3"),
+    ("garage.github.com", "https://garage.github.com/api/v3"),
+])
+def test_github_uses_supported_https_api_endpoint(monkeypatch, host, api_base):
     calls = github_transport(monkeypatch)
-    source = Source(replace(Binding(), api_base="https://forge.example/api/v3"))
+    source = Source(replace(Binding(), api_base=api_base))
     github.GitHubProvider().get_snapshot(
-        "owner/repository", 7, api_base="https://forge.example", credential_source=source,
+        "owner/repository", 7, api_base="https://" + host, credential_source=source,
     )
-    assert all(argv[argv.index("--hostname") + 1] == "forge.example" for argv, _ in calls)
+    assert all(argv[argv.index("--hostname") + 1] == host for argv, _ in calls)
+    assert all(argv[-1].startswith(api_base + "/repos/owner/repository/") for argv, _ in calls)
+
+
+@pytest.mark.parametrize("api_base", [
+    "github.localhost", "https://github.localhost", "https://github.localhost:443",
+])
+def test_github_http_only_host_is_refused_before_acquiring_or_emitting(monkeypatch, api_base):
+    calls = github_transport(monkeypatch)
+    source = Source()
+    with pytest.raises(ObservationCredentialError, match="HTTPS API endpoint"):
+        github.GitHubProvider().get_snapshot(
+            "owner/repository", 7, api_base=api_base, credential_source=source,
+        )
+    assert source.calls == 0 and not calls
 
 
 def test_selected_github_auth_loss_is_retryable_and_never_echoes_provider_secret(monkeypatch):

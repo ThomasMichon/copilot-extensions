@@ -519,6 +519,13 @@ callback an implicit credential store.
   the noncanonical label, and moved TLS-only imports behind a per-fixture
   optional dependency check. All 44 focused cases passed, including a real
   child process that blocks cryptography imports while collecting the module.
+- The next review identified inherited GitHub CLI `api_host` routing and its
+  tenant/development-host endpoint rules. Pinned every selected-source request
+  to its validated absolute HTTPS API endpoint, added tenancy routing, and
+  refused the HTTP-only development host before acquisition. All 51 focused
+  controls passed. A real CLI with an isolated non-forwarding proxy proved a
+  relative positive control used the configured alternate destination while
+  the scoped request used only its validated endpoint; no forge was contacted.
 - The source child remains open pending normal review/merge. The native
   process-boundary credential loader/PR-service adapter is still unimplemented;
   do not mark the parent credential, consumer-contract or fleet acceptance

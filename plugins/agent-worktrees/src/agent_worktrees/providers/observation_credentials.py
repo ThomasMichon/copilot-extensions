@@ -7,6 +7,7 @@ import math
 import time
 from collections.abc import Callable
 from typing import Protocol
+from urllib.parse import urlsplit
 
 from .base import ProviderError
 
@@ -94,5 +95,14 @@ class ObservationCredentials:
 
 
 def github_api_base(host: str) -> str:
-    """The endpoint actually used by ``gh api --hostname``."""
-    return "https://api.github.com" if host == "github.com" else f"https://{host}/api/v3"
+    """Pin gh's supported HTTPS REST routes; its development host is HTTP-only."""
+    if urlsplit("https://" + host).hostname == "github.localhost":
+        raise ObservationCredentialError("Scoped GitHub observation requires an HTTPS API endpoint")
+    if host == "github.com" or host.endswith(".ghe.com"):
+        return f"https://api.{host}"
+    return f"https://{host}/api/v3"
+
+
+def github_request(argv: list[str], api_base: str) -> list[str]:
+    """Absolute URLs bypass gh's inherited ``api_host`` routing override."""
+    return [*argv[:-1], api_base + argv[-1]] if api_base else argv

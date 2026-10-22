@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ipaddress
 import json
+import shutil
 import ssl
 import sys
 import threading
@@ -17,9 +18,67 @@ import pytest
 from agent_worktrees.providers import github
 from agent_worktrees.providers.azure_devops import AzureDevOpsProvider
 from agent_worktrees.providers.azure_observation_reads import AdoReader, NoRedirect
-from agent_worktrees.providers.base import run_cli
+from agent_worktrees.providers.base import ProviderError, run_cli
 from agent_worktrees.providers.observation_credentials import ObservationCredentialError
 from test_pr_observation_credentials import Binding, Source
+
+
+def test_actual_gh_api_host_override_cannot_redirect_a_scoped_request(tmp_path, monkeypatch):
+    executable = shutil.which("gh")
+    if executable is None:
+        pytest.skip("native GitHub CLI is unavailable")
+    config = tmp_path / "gh-config"
+    config.mkdir()
+    (config / "hosts.yml").write_text(
+        "github.com:\n    user: fixture\n    api_host: alternate.invalid\n", encoding="utf-8",
+    )
+    destinations = []
+
+    class Proxy(BaseHTTPRequestHandler):
+        def log_message(self, *_):
+            pass
+
+        def do_CONNECT(self):
+            destinations.append(self.path)
+            self.send_error(502, "isolated routing fixture does not forward")
+
+    with HTTPServer(("127.0.0.1", 0), Proxy) as server:
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        proxy = f"http://127.0.0.1:{server.server_port}"
+        environment = {
+            "GH_CONFIG_DIR": str(config), "GH_PROMPT_DISABLED": "1",
+            "GH_TOKEN": "synthetic-control", "GITHUB_TOKEN": "synthetic-control",
+            "GH_ENTERPRISE_TOKEN": "synthetic-control", "GITHUB_ENTERPRISE_TOKEN": "synthetic-control",
+            "HTTPS_PROXY": proxy, "https_proxy": proxy, "HTTP_PROXY": proxy, "http_proxy": proxy,
+            "NO_PROXY": "", "no_proxy": "", "GH_DEBUG": "",
+        }
+        try:
+            # A real relative request proves the inherited override is active.
+            control = run_cli(
+                [executable, "api", "--hostname", "github.com",
+                 "/repos/owner/repository/pulls/7"], env=environment,
+            )
+            assert control.returncode != 0
+            if destinations == ["api.github.com:443"]:
+                pytest.skip("installed GitHub CLI has no api_host routing override")
+            assert destinations == ["alternate.invalid:443"], control.stderr
+            destinations.clear()
+            monkeypatch.setattr(
+                github, "run_cli",
+                lambda argv, *, env: run_cli(
+                    [executable, *argv[1:]], env={**environment, **env},
+                ),
+            )
+            source = Source()
+            with pytest.raises(ProviderError):
+                github.GitHubProvider().get_snapshot("owner/repository", 7, credential_source=source)
+            assert destinations == ["api.github.com:443"]
+            assert source.calls == 1
+        finally:
+            server.shutdown()
+            thread.join(timeout=5)
+            assert not thread.is_alive()
 
 
 def test_actual_native_subprocess_receives_each_renewal_without_token_argv(tmp_path, monkeypatch):

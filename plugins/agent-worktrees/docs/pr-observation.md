@@ -138,9 +138,14 @@ proof of those operations.
 Selected-source mode supports GitHub and native ADO observation only. It
 requires exact provider, effective API endpoint, repository and `observe`
 permission, a nonempty unexpired token, and compatible authentication.
-GitHub uses `bearer`, with `https://api.github.com` for the public host or
-`https://<host>/api/v3` for an Enterprise host. The selected source ignores
-ambient `GH_HOST` when no host is configured. ADO matches the configured
+GitHub uses `bearer`, with `https://api.github.com` for the public host,
+`https://api.<tenant>.ghe.com` for a tenancy host, or
+`https://<host>/api/v3` for an Enterprise Server host. The HTTP-only
+`github.localhost` development host is refused before acquisition.
+Every selected-source GitHub request carries the validated absolute HTTPS
+endpoint, bypassing an inherited CLI `api_host` routing override.
+The selected source ignores ambient `GH_HOST` when no host is configured.
+ADO matches the configured
 organization endpoint without a trailing slash and preserves `basic` (PAT)
 versus `bearer`; bearer material is never encoded as a PAT.
 

@@ -20,7 +20,8 @@ from ..pr_checks import ChecksReport
 from .base import ProviderError, PRScope, PullResult, reject_copilot_mention, run_cli
 from .pr_source import github_source, pull_payload, source_text
 from .observation_credentials import (
-    CredentialSource, ObservationCredentialError, ObservationCredentials, github_api_base,
+    CredentialSource, ObservationCredentialError, ObservationCredentials,
+    github_api_base, github_request,
 )
 
 
@@ -323,7 +324,7 @@ class GitHubProvider:
         proc = run_cli(
             [
                 "gh", "api", "--hostname", host,
-                f"/repos/{repo}/pulls/{number}",
+                f"{credentials.api_base if credentials is not None else ''}/repos/{repo}/pulls/{number}",
             ],
             env=read_env(),
         )
@@ -373,6 +374,7 @@ class GitHubProvider:
         checks = self._checks_report(
             repo, head_sha, token, host=host,
             credential_env=read_env if credentials is not None else None,
+            api_base=credentials.api_base if credentials is not None else "",
         )
         # REST ``state`` is only open|closed; ``merged`` is a separate bool (a
         # merged PR is closed+merged).
@@ -385,6 +387,7 @@ class GitHubProvider:
             reviews=self._all_review_objs(
                 repo, number, token, host=host,
                 credential_env=read_env if credentials is not None else None,
+                api_base=credentials.api_base if credentials is not None else "",
             ),
             author=str((pr.get("user") or {}).get("login", "")),
             mergeable=mergeable_raw if isinstance(mergeable_raw, bool) else None,
@@ -401,13 +404,15 @@ class GitHubProvider:
         self, repo: str, number: int, token: str | None, *,
         host: str = "github.com",
         credential_env: Callable[[], dict[str, str]] | None = None,
+        api_base: str = "",
     ) -> tuple[Review, ...]:
         from .github_review_pages import read_reviews
         return read_reviews(
             repo, number, host=host, is_transient=_gh_detail_is_transient,
             sanitized_errors=credential_env is not None,
             invoke=lambda argv: run_cli(
-                argv, env=credential_env() if credential_env is not None else self._env(token),
+                github_request(argv, api_base),
+                env=credential_env() if credential_env is not None else self._env(token),
             ),
         )
 
@@ -421,12 +426,14 @@ class GitHubProvider:
     def _checks_report(
         self, repo: str, sha: str, token: str | None, *, host: str = "github.com",
         credential_env: Callable[[], dict[str, str]] | None = None,
+        api_base: str = "",
     ) -> ChecksReport:
         from .github_checks import read_checks
 
         def read(argv):
             proc = run_cli(
-                argv, env=credential_env() if credential_env is not None else self._env(token),
+                github_request(argv, api_base),
+                env=credential_env() if credential_env is not None else self._env(token),
             )
             if (
                 credential_env is not None and proc.returncode
