@@ -783,7 +783,7 @@
     "plugins/agent-worktrees/scripts/registry_root.py": "380691bd9191b695b7590e90322a258ee83f3007d3f27e5bd432a7d59a6e21e3",
     "plugins/agent-worktrees/src/agent_worktrees/manager_launcher_ownership.py": "21cb3c0054c7037c4682d035c58ea7bf3f36f0f20dc998a6de4fad5ee6aad38d",
     "plugins/agent-worktrees/src/agent_worktrees/mux_list_result.py": "d6f123741dd943db6bfc38c2f9d736f1cf6e0ad28bcc63644420443c17d7efa2",
-    "plugins/agent-worktrees/src/agent_worktrees/project_routing.py": "6a3e4e42e095f097200a4f36a2fb419060a4442b7f5cd1864e13e71592b066c3",
+    "plugins/agent-worktrees/src/agent_worktrees/project_routing.py": "f8dbd1c584b9e396f121d32bfbce365848ee225bb13ccb7d0615fdb1a807e05a",
     "tools/candidate_qualification_inventory.py": "b15a636d17b5ded62cca42f54098a197835ddff509eb4104fee5b1e865e282cf",
     "tools/candidate_qualification_receipt.py": "1eb99c36c568f59ccbb9f9fc79165e2184ee15bceac7d5f9d2240edcd2500c81",
     "tools/check-trusted-ci.py": "473c00923d3b22a8cb03da895dd4c1589f8e80b10250072cbac225e5709ca077",

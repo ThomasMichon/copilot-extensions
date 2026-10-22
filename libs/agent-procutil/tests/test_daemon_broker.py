@@ -20,6 +20,41 @@ def _denied():
     return error
 
 
+@pytest.fixture(autouse=True)
+def no_native_caller_job(monkeypatch):
+    monkeypatch.setattr(broker, "caller_in_job", lambda: False)
+
+
+def test_nested_caller_job_uses_verified_broker_without_starting_a_direct_child(monkeypatch, tmp_path):
+    monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
+    monkeypatch.setattr(pu, "_is_windows", lambda: True)
+    monkeypatch.setattr(broker, "caller_in_job", lambda: True)
+    popen = Mock()
+    monkeypatch.setattr(subprocess, "Popen", popen)
+    process = Mock(pid=1234)
+    launch = Mock(return_value=process)
+    monkeypatch.setattr(daemon, "spawn_brokered_daemon", launch)
+    assert pu.spawn_daemon(
+        ["py"], cwd=tmp_path, log_path=tmp_path / "out.log", console_children=True,
+    ) is process
+    popen.assert_not_called()
+    assert launch.call_args.kwargs["creationflags"] == pu._CREATE_NO_WINDOW
+    assert "requires verified outside-Job" in (tmp_path / "out.log").read_text()
+
+
+def test_caller_job_query_failure_never_launches(monkeypatch, tmp_path):
+    monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
+    monkeypatch.setattr(pu, "_is_windows", lambda: True)
+    monkeypatch.setattr(broker, "caller_in_job", Mock(side_effect=OSError("query refused")))
+    popen, launch = Mock(), Mock()
+    monkeypatch.setattr(subprocess, "Popen", popen)
+    monkeypatch.setattr(daemon, "spawn_brokered_daemon", launch)
+    with pytest.raises(OSError, match="query refused"):
+        pu.spawn_daemon(["py"], cwd=tmp_path, log_path=tmp_path / "out.log")
+    popen.assert_not_called()
+    launch.assert_not_called()
+
+
 def test_denied_breakaway_uses_shared_broker_with_actual_child_contract(monkeypatch, tmp_path):
     monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
     monkeypatch.setattr(pu, "_is_windows", lambda: True)

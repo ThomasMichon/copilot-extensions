@@ -35,9 +35,10 @@ class _Popen:
 
 @pytest.fixture()
 def fake_popen(monkeypatch):
-    from agent_procutil import daemon
+    from agent_procutil import daemon, daemon_broker
 
     fake = _Popen()
+    monkeypatch.setattr(daemon_broker, "caller_in_job", lambda: False)
     monkeypatch.setattr(pu.subprocess, "Popen", fake)
     monkeypatch.setattr(
         daemon, "spawn_brokered_daemon", Mock(side_effect=pu.DaemonSpawnError("fixture")),

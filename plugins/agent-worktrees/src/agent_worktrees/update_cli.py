@@ -61,6 +61,9 @@ def _resolve_environment(*args, **kwargs):
 
 
 def add_parsers(sub) -> None:
+    from .update_launch_cli import add_parsers as add_launch_parsers
+
+    add_launch_parsers(sub)
     p = sub.add_parser("update", help="Re-deploy from repo")
     mode = p.add_mutually_exclusive_group()
     mode.add_argument("--detach", action="store_true", help="Submit a durable update request without waiting")

@@ -697,8 +697,9 @@ def _access_denied() -> OSError:
 
 @pytest.fixture()
 def fake_popen(monkeypatch):
-    from agent_procutil import daemon
+    from agent_procutil import daemon, daemon_broker
 
+    monkeypatch.setattr(daemon_broker, "caller_in_job", lambda: False)
     calls: list = []
     fake = _FakePopen(calls)
     monkeypatch.setattr(pu.subprocess, "Popen", fake)

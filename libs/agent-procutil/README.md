@@ -251,7 +251,12 @@ It composes the helpers above, so its flags never drift from them:
 - **Escapes the caller.** `breakaway=True` (default) adds
   `CREATE_BREAKAWAY_FROM_JOB` on Windows so a kill-on-close Job around the
   caller (an installer or updater) does not kill the new daemon; POSIX gets a
-  new session. When the caller's Job forbids breakaway (`ERROR_ACCESS_DENIED`),
+  new session. A Windows caller already in a Job uses the broker before
+  starting the daemon: nested Jobs, including a venv redirector's Job, can
+  accept the breakaway flag while retaining a caller-owned ancestor lifetime.
+  A successful `CreateProcess` is not escape proof. A failed Job-membership
+  query refuses the launch rather than assuming an uncontained caller.
+  When direct creation denies breakaway (`ERROR_ACCESS_DENIED`),
   the shared launcher uses a bounded, windowless WMI bootstrap outside that
   Job. Its bootstrap uses the actual base interpreter with WMI's supported
   detached-process flag, not a venv redirector or a console window. It passes
@@ -441,9 +446,11 @@ Neither field is a cleanup verdict or permission to kill a process.
 At most 128 identities are retained for the sampler's lifetime, and each sample
 performs at most 128 child-discovery attempts. Completed samples are reused for
 one second; concurrent callers
-join one shielded native future. Cancelling a caller leaves
+join one cancellation-protected native future. Cancelling a caller leaves
 `pending_sample_future` tracked until its sampling operation actually completes;
 that running future cannot be cancelled by an asyncio wrapper or loop shutdown.
+The wait does not leave a shield wrapper to report a second, unhandled error
+if the native operation fails after its caller was cancelled.
 The caller can boundedly await `asyncio.wrap_future(holder)` at shutdown without
 claiming native completion from a cancelled coroutine. The sampling thread is
 daemon-scoped to its owning process and cannot outlive that process.

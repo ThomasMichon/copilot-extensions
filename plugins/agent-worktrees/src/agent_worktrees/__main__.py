@@ -5402,6 +5402,7 @@ _LAZY_DISPATCH_TABLE: dict[str, tuple[str, str]] = {
     'pr-ready': ('pr_state_cli', 'cmd_pr_ready'),
     'pr-status': ('pr_state_cli', 'cmd_pr_status'),
     'pre-launch': ('update_cli', 'cmd_pre_launch'),
+    'launch-update': ('update_launch_cli', 'cmd_launch_update'),
     'push-changes': ('finalize_cli', 'cmd_push_changes'),
     'reap-sessions': ('reap_cli', 'cmd_reap_sessions'),
     'reap-shells': ('reap_cli', 'cmd_reap_shells'), 'sweep-finished-sessions': ('cleanup_gc_cli', 'cmd_sweep_finished_sessions'), 'sweep-managed': ('cleanup_gc_cli', 'cmd_sweep_managed'),
@@ -6024,6 +6025,8 @@ def _load_full_command_surface() -> None:
         )
     from .record_cli import cmd_record
 
+    from . import update_launch_cli
+
     COMMAND_MAP = {
         "resolve": cmd_resolve,
         "execution-leg": cmd_execution_leg,
@@ -6103,6 +6106,7 @@ def _load_full_command_surface() -> None:
         "picker-paths": cmd_picker_paths,
         "picker-reconcile-local": cmd_picker_reconcile_local,
         "pre-launch": cmd_pre_launch,
+        "launch-update": update_launch_cli.cmd_launch_update,
         "repair-stale-anchor": cmd_repair_stale_anchor,
         "stage-update": update_cli.cmd_stage_request,
         "reconcile-marketplaces": cmd_reconcile_marketplaces,

@@ -182,36 +182,6 @@ setup_status() {
     _setup_progress_unavailable "$level" "$msg" 1
 }
 
-check_update_admission() {
-    local update="$1" reply code messages allowed=0
-    [[ -n "$update" ]] || return 0
-    if reply=$("$PYTHON" -m agent_worktrees reconcile-plugins --check-update <<< "$update" 2>&1); then
-        code=0
-    else
-        code=$?
-    fi
-    if messages=$("$PYTHON" -c '
-import json, sys
-try:
-    decision = json.load(sys.stdin)
-    code = int(sys.argv[1])
-    if code == 0 and decision.get("allowed") is True:
-        raise SystemExit(0)
-    if code != 3 or decision.get("allowed") is not False or not decision.get("diagnostics"):
-        raise ValueError("unexpected admission response")
-    for diagnostic in decision["diagnostics"]:
-        print("Runtime execution: [{}] {}".format(diagnostic.get("reason"), diagnostic.get("message")))
-except (ValueError, KeyError, TypeError, AttributeError):
-    print("Runtime execution admission unavailable; skipping runtime action. Update the engine explicitly before retrying.")
-raise SystemExit(1)
-' "$code" <<< "$reply"); then
-        allowed=1
-    fi
-    while IFS= read -r message; do
-        [[ -n "$message" ]] && setup_log WARN "$message"
-    done <<< "$messages"
-    [[ "$allowed" == 1 ]]
-}
 
 # Write header
 {
@@ -591,213 +561,18 @@ for value in [
             setup_log WARN "Plugin runtime apply blocked: $runtime_apply_blocked"
         fi
 
-        # (1) Marketplace installer, iff the download changed the payload.
-        #     NO re-exec: a launcher-script change applies on the next launch.
-        if [[ "$plugin_changed" == "True" ]]; then
-            local _stage_update
-            if ! _stage_update=$("$PYTHON" -c '
-import json, sys
-status = json.load(sys.stdin)
-print(json.dumps(dict(
-    phase="runtime", service="agent-worktrees", trigger="stage-update",
-    payload_root=status.get("plugin_dir"),
-    runtime_root=status.get("runtime_root"), environment=status.get("environment", {}),
-)))
-' <<< "$stage_snapshot") || ! check_update_admission "$_stage_update"; then
-                setup_log WARN 'Staged runtime execution refused; continuing with the existing runtime'
-                plugin_changed="False"
-            fi
-            local _stage_env_text=""
-            local _stage_env=()
-            if ! _stage_env_text=$("$PYTHON" -c "
-import sys, json
-status = json.load(sys.stdin)
-unset = status.get('unset_environment', [])
-environment = status.get('environment', {})
-if (
-    not isinstance(unset, list)
-    or not all(isinstance(key, str) and key for key in unset)
-    or not isinstance(environment, dict)
-    or not all(
-        isinstance(key, str) and key and isinstance(value, str)
-        for key, value in environment.items()
-    )
-):
-    raise SystemExit(2)
-for key in unset:
-    print('-u')
-    print(key)
-for key, value in environment.items():
-    print(f'{key}={value}')
-" <<< "$stage_snapshot" 2>/dev/null); then
-                setup_log WARN 'Plugin installer environment metadata is invalid -- skipping'
-                plugin_changed="False"
-            fi
-            while IFS= read -r _stage_env_entry; do
-                [[ -n "$_stage_env_entry" ]] && _stage_env+=("$_stage_env_entry")
-            done <<< "$_stage_env_text"
+        # (1) Defer self-installation until foreground maintenance is finished.
+        local _project_args=()
+        [[ -n "$LAUNCH_PROJECT" ]] && _project_args=(--project "$LAUNCH_PROJECT")
+        local _bootstrap_args=(launch-update bootstrap)
+        [[ "$plugin_changed" == "True" && -z "$runtime_apply_blocked" ]] && _bootstrap_args+=(--defer-worktrees)
 
-            if [[ "$plugin_changed" == "True" ]]; then
-                local _installer="$plugin_dir/scripts/install.sh"
-                if [[ -n "$plugin_dir" && -f "$_installer" ]]; then
-                    local _inst_args=(
-                        update
-                        --install-dir "$runtime_root"
-                    )
-                    if [[ -n "$LAUNCH_PROJECT" ]]; then
-                        _inst_args+=(--project-name "$LAUNCH_PROJECT")
-                    fi
-                    if [[ -n "${WORKTREE_BLOCKING_INSTALL:-}" ]]; then
-                        # Escape hatch (recovery/debug): apply synchronously.
-                        setup_status INFO 'A new plugin version was downloaded; installing the updated runtime...'
-                        _setup_progress_begin installer
-                        local _installer_status=() _installer_exit
-                        if env ${_stage_env[@]+"${_stage_env[@]}"} \
-                            bash "$_installer" "${_inst_args[@]}" 2>&1 | while IFS= read -r _line || [[ -n "$_line" ]]; do
-                            setup_log INFO "$_line"
-                        done; then
-                            _installer_status=("${PIPESTATUS[@]}")
-                        else
-                            _installer_status=("${PIPESTATUS[@]}")
-                        fi
-                        _installer_exit=${_installer_status[0]}
-                        if [[ "$_installer_exit" == 0 ]]; then
-                            _setup_progress_end done 'Installer update done (exit 0); launcher changes apply on the next launch'
-                        else
-                            _setup_progress_end failed "Installer update failed (exit $_installer_exit); continuing with existing version"
-                        fi
-                    else
-                        # Default: DETACH the install so the launch never blocks on the
-                        # (slow) venv rebuild. Immutable versioned slots make this safe
-                        # -- the installer builds a NEW versions/<v> slot and flips the
-                        # current-version marker atomically, never touching the slot
-                        # THIS session execs from. So launch on the active slot now; the
-                        # new version applies on the next launch (stage-next), the same
-                        # way the runtime reconcile already runs detached. The installer
-                        # carries its own single-instance lock, so a concurrent launch's
-                        # background install can't collide.
-                        setup_status INFO 'A new plugin version was downloaded; installing it in the background (applies on the next launch)...'
-                        local _ilog="${APERTURE_SETUP_LOG:-${WORKTREE_SETUP_LOG:-/dev/null}}"
-                        local _observer_code='
-import os, sys
-try:
-    from update_telemetry import shell
-except ImportError:
-    shell = None
-if shell is None or not callable(getattr(shell, "observe_command", None)):
-    print("WARNING: detached installer timing unavailable (observer-unavailable); running the original native installer.",
-          file=sys.stderr, flush=True)
-    os.execvp(sys.argv[2], sys.argv[2:])
-sys.argv = [sys.argv[0], "observe", "--log", sys.argv[1], "--", *sys.argv[2:]]
-raise SystemExit(shell.main())
-'
-                        setsid "$PYTHON" -c "$_observer_code" "$_ilog" \
-                            env ${_stage_env[@]+"${_stage_env[@]}"} \
-                            bash "$_installer" "${_inst_args[@]}" \
-                            >>"$_ilog" 2>&1 </dev/null &
-                        disown 2>/dev/null || true
-                        setup_log INFO 'Background install started (new version applies on the next launch)'
-                    fi
-                else
-                    setup_log WARN "Plugin installer not found ($_installer) -- skipping"
-                fi
-            fi
-        fi
-
-        # (2) Pre-launch self-update (bootstrap-service staleness; two-pass).
+        # (2) The executor re-derives the bootstrap plan under driver custody.
         setup_status INFO 'Checking bootstrap services for pending updates...'
-        _log_prelaunch_diagnostics() {
-            local _plan_json="$1"
-            while IFS= read -r _pdiag; do
-                [[ -n "$_pdiag" ]] || continue
-                setup_log WARN "Pre-launch: $_pdiag"
-            done < <(printf '%s' "$_plan_json" | "$PYTHON" -c '
-import sys, json
-for d in json.load(sys.stdin).get("diagnostics", []):
-    print(f"{d.get('"'"'service'"'"', '"'"'?'"'"')} [{d.get('"'"'reason'"'"', '"'"'diagnostic'"'"')}] {d.get('"'"'message'"'"', '"'"''"'"')}")
-' 2>/dev/null)
-        }
-        PRE_JSON=$("$PYTHON" -m agent_worktrees pre-launch 2>/dev/null) || PRE_JSON='{"action":"continue","reason":"error"}'
-        _log_prelaunch_diagnostics "$PRE_JSON"
-        PRE_ACTION=$(echo "$PRE_JSON" | "$PYTHON" -c "import sys,json; print(json.load(sys.stdin).get('action','continue'))" 2>/dev/null) || PRE_ACTION="continue"
-        if [[ "$PRE_ACTION" == "self-update" ]]; then
-            setup_status INFO 'Bootstrap services are stale; updating them...'
-            UPDATE_COUNT=$("$PYTHON" -c "import sys,json; print(len(json.load(sys.stdin).get('updates',[])))" <<< "$PRE_JSON" 2>/dev/null) || UPDATE_COUNT=0
-            for (( i=0; i<UPDATE_COUNT; i++ )); do
-                SVC_NAME=$("$PYTHON" -c "import sys,json; print(json.load(sys.stdin)['updates'][$i]['service'])" <<< "$PRE_JSON" 2>/dev/null) || SVC_NAME="unknown"
-                UPDATE_ARGV=()
-                while IFS= read -r _update_arg; do
-                    UPDATE_ARGV+=("$_update_arg")
-                done < <("$PYTHON" -c "
-import sys, json
-for a in json.load(sys.stdin)['updates'][$i].get('argv', []):
-    print(a)
-" <<< "$PRE_JSON" 2>/dev/null)
-                if [[ ${#UPDATE_ARGV[@]} -gt 0 ]]; then
-                    _UPDATE_JSON=$("$PYTHON" -c "
-import sys, json
-update = json.load(sys.stdin)['updates'][$i]
-if not update.get('phase') and update.get('service') == 'agent-worktrees': update['phase'] = 'runtime'
-if update.get('phase') == 'runtime': print(json.dumps(update))
-" <<< "$PRE_JSON") || { setup_log WARN "Invalid action for $SVC_NAME; skipping"; continue; }
-                    check_update_admission "$_UPDATE_JSON" || continue
-                    _UPDATE_ENV=()
-                    _UPDATE_ENV_TEXT=$("$PYTHON" -c "
-import sys, json
-update = json.load(sys.stdin)['updates'][$i]
-unset = update.get('unset_environment', [])
-environment = update.get('environment', {})
-if (
-    not isinstance(unset, list)
-    or not all(isinstance(key, str) and key for key in unset)
-    or not isinstance(environment, dict)
-    or not all(
-        isinstance(key, str) and key and isinstance(value, str)
-        for key, value in environment.items()
-    )
-):
-    raise SystemExit(2)
-for key in unset:
-    print('-u')
-    print(key)
-for key, value in environment.items():
-    print(f'{key}={value}')
-" <<< "$PRE_JSON" 2>/dev/null) || {
-                        setup_log WARN "Update environment invalid for $SVC_NAME; skipping"
-                        continue
-                    }
-                    while IFS= read -r _update_env; do
-                        [[ -n "$_update_env" ]] && _UPDATE_ENV+=("$_update_env")
-                    done <<< "$_UPDATE_ENV_TEXT"
-                    _setup_progress_begin "bootstrap/$SVC_NAME"
-                    if env ${_UPDATE_ENV[@]+"${_UPDATE_ENV[@]}"} \
-                        "${UPDATE_ARGV[@]}" 2>&1 | while IFS= read -r _ul || [[ -n "$_ul" ]]; do setup_log INFO "$_ul"; done; then
-                        _update_status=("${PIPESTATUS[@]}")
-                    else
-                        _update_status=("${PIPESTATUS[@]}")
-                    fi
-                    _update_exit=${_update_status[0]}
-                    if [[ "$_update_exit" == 0 ]]; then
-                        _setup_progress_end done "Bootstrap update: $SVC_NAME done (exit 0)"
-                    else
-                        _setup_progress_end failed "Bootstrap update: $SVC_NAME failed (exit $_update_exit); continuing"
-                    fi
-                fi
-            done
-            # Re-resolve before the re-check: one of the updates just applied
-            # above (e.g. agent-worktrees) may have swapped the runtime venv
-            # slot out from under the cached $PYTHON, leaving it pointing at a
-            # now-deleted interpreter (#stale-venv).
-            if _refreshed_python="$(resolve_runtime_python)" && [[ -n "$_refreshed_python" && -x "$_refreshed_python" ]]; then
-                PYTHON="$_refreshed_python"
-            fi
-            setup_log INFO 'Re-checking staleness after update'
-            PRE_JSON=$("$PYTHON" -m agent_worktrees pre-launch 2>/dev/null) || PRE_JSON='{"action":"continue"}'
-            _log_prelaunch_diagnostics "$PRE_JSON"
-            PRE_ACTION=$(echo "$PRE_JSON" | "$PYTHON" -c "import sys,json; print(json.load(sys.stdin).get('action','continue'))" 2>/dev/null) || PRE_ACTION="continue"
-            if [[ "$PRE_ACTION" == "self-update" ]]; then
-                setup_log WARN 'Still stale after update -- proceeding anyway'
-            fi
+        _run_launch_request bootstrap 'Bootstrap update' \
+            "$PYTHON" -m agent_worktrees "${_project_args[@]}" "${_bootstrap_args[@]}"
+        if _refreshed_python="$(resolve_runtime_python)" && [[ -n "$_refreshed_python" && -x "$_refreshed_python" ]]; then
+            PYTHON="$_refreshed_python"
         fi
     else
         setup_status INFO 'Skipping plugin update check (--no-update).'
@@ -805,91 +580,41 @@ for key, value in environment.items():
 
     # (3) Plugin reconciliation (repo-configured payloads + gated runtimes).
     #     Independent of WORKTREE_NO_UPDATE; opt out with WORKTREE_NO_RECONCILE=1.
-    #     Two passes: payload first, then runtime (readable only next pass).
+    #     The canonical executor retains the payload/runtime two-pass plan.
     if [[ "$with_reconcile" == "1" && "${WORKTREE_NO_RECONCILE:-}" != "1" ]]; then
-        for _rpass in 1 2; do
-            REC_JSON=$("$PYTHON" -m agent_worktrees reconcile-plugins 2>/dev/null) \
-                || REC_JSON='{"action":"continue"}'
-            REC_ACTION=$(printf '%s' "$REC_JSON" \
-                | "$PYTHON" -c "import sys,json; print(json.load(sys.stdin).get('action','continue'))" 2>/dev/null) \
-                || REC_ACTION="continue"
-            while IFS= read -r _rdiag; do
-                [[ -n "$_rdiag" ]] || continue
-                setup_log WARN "Plugin reconcile: $_rdiag"
-            done < <(printf '%s' "$REC_JSON" | "$PYTHON" -c '
-import sys, json
-for d in json.load(sys.stdin).get("diagnostics", []):
-    print(f"{d.get('"'"'service'"'"', '"'"'?'"'"')} [{d.get('"'"'reason'"'"', '"'"'diagnostic'"'"')}] {d.get('"'"'message'"'"', '"'"''"'"')}")
-' 2>/dev/null)
-            if [[ "$REC_ACTION" != "reconcile" ]]; then
-                if [[ "$_rpass" == "1" ]]; then
-                    setup_log INFO 'Plugin reconcile: no executable actions'
-                fi
-                break
-            fi
-            REC_COUNT=$("$PYTHON" -c "import sys,json; print(len(json.load(sys.stdin).get('updates',[])))" <<< "$REC_JSON" 2>/dev/null) || REC_COUNT=0
-            setup_status INFO "Reconciling plugins (pass $_rpass): $REC_COUNT action(s)..."
-            for (( _ri=0; _ri<REC_COUNT; _ri++ )); do
-                _RSVC=$("$PYTHON" -c "import sys,json; print(json.load(sys.stdin)['updates'][$_ri].get('service','?'))" <<< "$REC_JSON" 2>/dev/null) || _RSVC="?"
-                _RARGV=()
-                while IFS= read -r _reconcile_arg; do
-                    _RARGV+=("$_reconcile_arg")
-                done < <("$PYTHON" -c "
-import sys, json
-for a in json.load(sys.stdin)['updates'][$_ri].get('argv', []):
-    print(a)
-" <<< "$REC_JSON" 2>/dev/null)
-                [[ ${#_RARGV[@]} -gt 0 ]] || continue
-                _RUPDATE=$("$PYTHON" -c "
-import sys, json
-update = json.load(sys.stdin)['updates'][$_ri]
-if not update.get('phase') and update.get('service') == 'agent-worktrees': update['phase'] = 'runtime'
-if update.get('phase') == 'runtime': print(json.dumps(update))
-" <<< "$REC_JSON") || { setup_log WARN "Invalid action for $_RSVC; skipping"; continue; }
-                check_update_admission "$_RUPDATE" || continue
-                if [[ "${_RARGV[0]}" == "copilot" ]] && ! command -v copilot &>/dev/null; then
-                    setup_log WARN "Plugin reconcile: skipping $_RSVC (copilot not on PATH)"
-                    continue
-                fi
-                _RENV=()
-                _RENV_TEXT=$("$PYTHON" -c "
-import sys, json
-update = json.load(sys.stdin)['updates'][$_ri]
-for key in update.get('unset_environment', []):
-    print('-u')
-    print(key)
-for key, value in update.get('environment', {}).items():
-    print(f'{key}={value}')
-" <<< "$REC_JSON" 2>/dev/null) || {
-                    setup_log WARN "Plugin reconcile: invalid environment metadata for $_RSVC; skipping"
-                    continue
-                }
-                while IFS= read -r _reconcile_env; do
-                    [[ -n "$_reconcile_env" ]] && _RENV+=("$_reconcile_env")
-                done <<< "$_RENV_TEXT"
-                _setup_progress_begin "reconcile/pass-$_rpass/$_RSVC"
-                if env ${_RENV[@]+"${_RENV[@]}"} "${_RARGV[@]}" 2>&1 | while IFS= read -r _rl || [[ -n "$_rl" ]]; do setup_log INFO "$_rl"; done; then
-                    _raction_status=("${PIPESTATUS[@]}")
-                else
-                    _raction_status=("${PIPESTATUS[@]}")
-                fi
-                _raction_exit=${_raction_status[0]}
-                if [[ "$_raction_exit" == "0" ]]; then
-                    _setup_progress_end done "Plugin reconcile: $_RSVC done (exit 0)"
-                else
-                    _setup_progress_end failed "Plugin reconcile: $_RSVC failed (exit $_raction_exit); continuing"
-                fi
-            done
-            # Re-resolve before the next pass: this pass's reconcile actions
-            # (the runtime-gated pass in particular) may have swapped the
-            # runtime venv slot out from under the cached $PYTHON, leaving it
-            # pointing at a now-deleted interpreter (#stale-venv).
-            if _refreshed_python="$(resolve_runtime_python)" && [[ -n "$_refreshed_python" && -x "$_refreshed_python" ]]; then
-                PYTHON="$_refreshed_python"
-            fi
-        done
+        local _reconcile_project=()
+        [[ -n "$LAUNCH_PROJECT" ]] && _reconcile_project=(--project "$LAUNCH_PROJECT")
+        _run_launch_request reconcile 'Plugin reconcile' \
+            "$PYTHON" -m agent_worktrees "${_reconcile_project[@]}" reconcile-plugins --apply
+        if _refreshed_python="$(resolve_runtime_python)" && [[ -n "$_refreshed_python" && -x "$_refreshed_python" ]]; then
+            PYTHON="$_refreshed_python"
+        fi
+    fi
+    # Submit last so foreground maintenance never joins our detached install.
+    if [[ "$_NO_UPDATE" != "1" && "$plugin_changed" == "True" && -z "$runtime_apply_blocked" ]]; then
+        local _request_args=(launch-update staged --status "$status_file")
+        [[ -z "${WORKTREE_BLOCKING_INSTALL:-}" ]] && _request_args+=(--detach)
+        _run_launch_request installer 'Staged runtime request (applies on the next launch)' \
+            "$PYTHON" -m agent_worktrees "${_project_args[@]}" "${_request_args[@]}"
     fi
     _stop_setup_progress
+}
+
+_run_launch_request() {
+    local scope="$1" label="$2"
+    shift 2
+    _setup_progress_begin "$scope"
+    local result=()
+    if "$@" 2>&1 | while IFS= read -r line || [[ -n "$line" ]]; do setup_log INFO "$line"; done; then
+        result=("${PIPESTATUS[@]}")
+    else
+        result=("${PIPESTATUS[@]}")
+    fi
+    if [[ "${result[0]}" == "0" ]]; then
+        _setup_progress_end done "$label done (exit 0)"
+    else
+        _setup_progress_end failed "$label failed (exit ${result[0]}); continuing"
+    fi
 }
 
 # ── Pre-launch self-update + reconcile now run via invoke_update_apply ────
@@ -900,7 +625,7 @@ for key, value in update.get('environment', {}).items():
 # Subcommands that agent_worktrees's main() handles directly — these
 # must NOT fall through to the resolve→picker flow.  Keep in sync with
 # COMMAND_MAP in __main__.py, plus "services" and "agent-worktrees".
-_DIRECT_COMMANDS="services repos knowledge worktree agent-worktrees resolve execution-leg post-exit finalize push-changes mark-complete status list create cleanup validate install register unregister uninstall update install-status deploy-instructions get pre-launch stage-update reconcile-plugins dev handoff-cutover register-session deregister-session backfill-sessions anchor-check activity activity-log"
+_DIRECT_COMMANDS="services repos knowledge worktree agent-worktrees resolve execution-leg post-exit finalize push-changes mark-complete status list create cleanup validate install register unregister uninstall update install-status deploy-instructions get pre-launch launch-update stage-update reconcile-plugins dev handoff-cutover register-session deregister-session backfill-sessions anchor-check activity activity-log"
 _IS_DIRECT=""
 if [[ $# -gt 0 ]]; then
     for _dc in $_DIRECT_COMMANDS; do

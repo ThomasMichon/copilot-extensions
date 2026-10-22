@@ -105,6 +105,13 @@ def _run_request(
             **os.environ, **environment, "GIT_TERMINAL_PROMPT": "0",
             "GH_PROMPT_DISABLED": "1", "GCM_INTERACTIVE": "never",
         })
+        if getattr(args, "detach", False):
+            if emit_json:
+                print(json.dumps({
+                    "action": "accepted", "request_id": request.id,
+                    "log": str(request.log_path),
+                }))
+            return 0
         result = driver.wait(request.id, output=sys.stderr, worker=worker_process)
         if result.state != "completed" or result.exit_code is None:
             raise driver.StateError(result.error or "update request did not complete")

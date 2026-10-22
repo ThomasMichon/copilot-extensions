@@ -551,79 +551,8 @@ function Start-UpdateStage {
     }
 }
 
-function Push-UpdateEnvironment {
-    param([object]$Update)
-    $saved = @{}
-    if ($Update -and $Update.PSObject.Properties['unset_environment']) {
-        foreach ($key in @($Update.unset_environment | Where-Object { $_ })) {
-            $saved[$key] = [Environment]::GetEnvironmentVariable($key, 'Process')
-            Remove-Item -LiteralPath "Env:$key" -ErrorAction SilentlyContinue
-        }
-    }
-    if ($Update -and $Update.PSObject.Properties['environment'] -and $Update.environment) {
-        foreach ($property in @($Update.environment.PSObject.Properties)) {
-            if (-not $saved.ContainsKey($property.Name)) {
-                $saved[$property.Name] = [Environment]::GetEnvironmentVariable(
-                    $property.Name, 'Process'
-                )
-            }
-            [Environment]::SetEnvironmentVariable(
-                $property.Name, [string]$property.Value, 'Process'
-            )
-        }
-    }
-    return $saved
-}
 
-function Pop-UpdateEnvironment {
-    param([hashtable]$Saved)
-    foreach ($entry in $Saved.GetEnumerator()) {
-        if ($null -eq $entry.Value) {
-            Remove-Item -LiteralPath "Env:$($entry.Key)" -ErrorAction SilentlyContinue
-            continue
-        }
-        [Environment]::SetEnvironmentVariable(
-            $entry.Key, $entry.Value, 'Process'
-        )
-    }
-}
 
-function Test-UpdateAdmission {
-    param([object]$Update)
-    if ($Update -and -not $Update.phase -and $Update.service -eq 'agent-worktrees') {
-        $Update | Add-Member -NotePropertyName phase -NotePropertyValue runtime -Force
-    }
-    if (-not $Update -or $Update.phase -ne 'runtime') { return $true }
-    $savedErrorPreference = $ErrorActionPreference
-    $savedNativePreference = $PSNativeCommandUseErrorActionPreference
-    $savedOutputEncoding = $OutputEncoding
-    $savedConsoleEncoding = [Console]::OutputEncoding
-    try {
-        $ErrorActionPreference = 'Continue'
-        $PSNativeCommandUseErrorActionPreference = $false
-        $OutputEncoding = [Text.UTF8Encoding]::new($false)
-        [Console]::OutputEncoding = $OutputEncoding
-        $reply = ($Update | ConvertTo-Json -Depth 20 -Compress) |
-            & $VenvPython -X utf8 -m agent_worktrees reconcile-plugins --check-update 2>&1
-        $code = $LASTEXITCODE
-        $decision = ($reply -join "`n") | ConvertFrom-Json -ErrorAction Stop
-        foreach ($diagnostic in @($decision.diagnostics)) {
-            Write-SetupLog "Runtime execution: [$($diagnostic.reason)] $($diagnostic.message)" 'WARN'
-        }
-        if ($decision.allowed -isnot [bool]) { throw 'Missing boolean execution admission.' }
-        if ($code -eq 0 -and $decision.allowed) { return $true }
-        if ($code -eq 3 -and -not $decision.allowed -and @($decision.diagnostics).Count -gt 0) { return $false }
-        throw "Unexpected execution admission response (exit $code)."
-    } catch {
-        Write-SetupLog "Runtime execution admission unavailable; skipping runtime action. Update the engine explicitly before retrying: $_" 'WARN'
-        return $false
-    } finally {
-        $ErrorActionPreference = $savedErrorPreference
-        $PSNativeCommandUseErrorActionPreference = $savedNativePreference
-        $OutputEncoding = $savedOutputEncoding
-        [Console]::OutputEncoding = $savedConsoleEncoding
-    }
-}
 
 function Invoke-SetupCommand {
     param(
@@ -668,73 +597,7 @@ function Invoke-SetupCommand {
     return $actionExitCode
 }
 
-function Invoke-SetupAction {
-    param(
-        [string[]]$CommandArgv, [object]$Update,
-        [string]$Scope, [string]$Label
-    )
-    if (-not (Test-UpdateAdmission $Update)) { return }
-    $savedEnvironment = Push-UpdateEnvironment $Update
-    try {
-        $null = Invoke-SetupCommand -CommandArgv $CommandArgv -Scope $Scope -Label $Label
-    } finally {
-        Pop-UpdateEnvironment $savedEnvironment
-    }
-}
 
-function Start-DetachedSetupInstaller {
-    param([string[]]$CommandArgv)
-    # Detached output outlives launch maintenance. A separate, linked sink also
-    # avoids two PowerShell processes racing to append to the launch log.
-    $installerLog = [IO.Path]::ChangeExtension(
-        $script:SetupLog, "$([guid]::NewGuid().ToString('N')).installer.log"
-    )
-    $sink = [IO.File]::Open(
-        $installerLog, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::Read
-    )
-    $sink.Dispose()
-    # Snapshot only the observer and its data, never the launcher's dispatch or
-    # admission machinery. The original -File command still owns installation.
-    $data = @{
-        argv = $CommandArgv
-        log = $installerLog
-    } | ConvertTo-Json -Compress
-    $encodedData = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($data))
-    $functions = foreach ($name in @(
-        'Format-SetupLine', 'Write-SetupLog', 'Write-SetupStatus', 'Invoke-SetupCommand'
-    )) {
-        "function $name {`n$((Get-Item -LiteralPath "Function:$name").Definition)`n}"
-    }
-    $observer = @'
-$ErrorActionPreference = 'Stop'
-$PSNativeCommandUseErrorActionPreference = $false
-[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
-$OutputEncoding = [Console]::OutputEncoding
-$script:LaunchTimer = [Diagnostics.Stopwatch]::StartNew()
-$script:ShowLaunchStatus = $false
-'@ + "`n" + (
-        "`$data = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('$encodedData')) | ConvertFrom-Json`n" +
-        "`$script:SetupLog = `$data.log`n" +
-        ($functions -join "`n") + "`n" +
-        # Rotation can remove the empty preparation file before observer start.
-        # Recreate it atomically, then deny deletion while permitting appends.
-        "`$sink = [IO.File]::Open(`$script:SetupLog, [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)`n" +
-        "try { `$code = Invoke-SetupCommand -CommandArgv @(`$data.argv) -Scope 'launch/installer' -Label 'Installer update' }`n" +
-        "finally { `$sink.Dispose() }`n" +
-        "exit `$code"
-    )
-    $encodedObserver = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($observer))
-    # conhost owns the detached, hidden console; the observer owns the durable
-    # sink. Redirecting conhost itself does not capture its console children.
-    $observerArguments = @(
-        '--headless', 'pwsh.exe', '-NoProfile', '-EncodedCommand', $encodedObserver
-    )
-    if (("conhost.exe " + ($observerArguments -join ' ')).Length -ge 32767) {
-        throw 'Detached installer observer exceeds the Windows command-line limit.'
-    }
-    Start-Process -FilePath 'conhost.exe' -ArgumentList $observerArguments -WindowStyle Hidden | Out-Null
-    return $installerLog
-}
 
 function Invoke-UpdateApply {
     # Join the background stage and apply any pending update. Idempotent: runs
@@ -778,107 +641,19 @@ function Invoke-UpdateApply {
             ) 'WARN'
         }
 
-        # (1) Marketplace installer, iff the download changed the payload.
-        #     NO re-exec: a launcher-script change applies on the next launch.
-        $stageUpdate = if ($status) {
-            [PSCustomObject]@{
-                phase = 'runtime'; service = 'agent-worktrees'; trigger = 'stage-update'
-                payload_root = $status.plugin_dir; runtime_root = $status.runtime_root
-                environment = if ($status.environment) { $status.environment } else { [PSCustomObject]@{} }
-            }
-        } else { $null }
-        if ($status -and $status.plugin_changed -and (Test-UpdateAdmission $stageUpdate)) {
-            $pdir = $status.plugin_dir
-            $pluginInstaller = if ($pdir) { Join-Path $pdir 'scripts\install.ps1' } else { $null }
-            if ($pluginInstaller -and (Test-Path $pluginInstaller)) {
-                $savedEnvironment = Push-UpdateEnvironment $status
-                if ($env:WORKTREE_BLOCKING_INSTALL) {
-                    # Escape hatch (recovery/debug): apply synchronously.
-                    Write-SetupStatus 'A new plugin version was downloaded; installing the updated runtime...'
-                    $installerArgs = @(
-                        'update',
-                        '-InstallDir',
-                        [string]$status.runtime_root
-                    )
-                    if ($script:LaunchProject) { $installerArgs += @('-ProjectName', $script:LaunchProject) }
-                    try {
-                        Invoke-SetupAction -CommandArgv (@('pwsh.exe', '-NoProfile', '-File', $pluginInstaller) + $installerArgs) `
-                            -Scope 'launch/installer' -Label 'Installer update'
-                        Write-SetupLog 'Launcher changes, if any, apply on the next launch'
-                    } finally {
-                        Pop-UpdateEnvironment $savedEnvironment
-                    }
-                } else {
-                    # Default: DETACH the install so the launch never blocks on the
-                    # (slow) venv rebuild. Immutable versioned slots make this safe --
-                    # the installer builds a NEW versions\<v> slot and flips the
-                    # current-version marker atomically, never touching the slot THIS
-                    # session runs from. Launch on the active slot now; the new version
-                    # applies on the next launch (stage-next), the same way the runtime
-                    # reconcile already runs detached. The installer carries its own
-                    # single-instance lock, so a concurrent background install can't
-                    # collide.
-                    Write-SetupStatus 'A new plugin version was downloaded; installing it in the background (applies on the next launch)...'
-                    $bgCommand = @(
-                        'pwsh.exe', '-NoProfile', '-File', $pluginInstaller,
-                        'update',
-                        '-InstallDir',
-                        [string]$status.runtime_root
-                    )
-                    if ($script:LaunchProject) { $bgCommand += @('-ProjectName', $script:LaunchProject) }
-                    try {
-                        $installerLog = Start-DetachedSetupInstaller -CommandArgv $bgCommand
-                        Write-SetupLog "Background install started (new version applies on the next launch); output: $installerLog"
-                    } catch {
-                        Write-SetupStatus "Background install failed to start ($($_.Exception.Message)) — continuing" 'WARN'
-                    } finally {
-                        Pop-UpdateEnvironment $savedEnvironment
-                    }
-                }
-            } else {
-                Write-SetupLog "Plugin installer not found ($pluginInstaller) — skipping" 'WARN'
-            }
-        }
+        $applyStaged = $status -and $status.plugin_changed -and -not $status.runtime_apply_blocked
 
-        # (2) Pre-launch self-update (bootstrap-service staleness; two-pass).
+        # (2) Re-derive and execute the bootstrap plan under driver custody.
         Write-SetupStatus 'Checking bootstrap services for pending updates...'
-        $preJson = & $VenvPython -m agent_worktrees pre-launch 2>$null
-        if ($LASTEXITCODE -eq 0 -and $preJson) {
-            $prePlan = ($preJson -join "`n") | ConvertFrom-Json -ErrorAction SilentlyContinue
-            if (-not $prePlan) {
-                Write-SetupLog 'pre-launch returned invalid JSON — proceeding' 'WARN'
-            } else {
-                Write-PlanDiagnostics $prePlan 'Pre-launch'
-            }
-            if ($prePlan -and $prePlan.action -eq 'self-update') {
-                Write-SetupStatus 'Bootstrap services are stale; updating them...'
-                foreach ($update in $prePlan.updates) {
-                    $argv = @($update.argv)
-                    if ($argv.Count -gt 0) {
-                        Invoke-SetupAction -CommandArgv $argv -Update $update `
-                            -Scope "launch/bootstrap/$($update.service)" -Label "Bootstrap update: $($update.service)"
-                    }
-                }
-                # Re-resolve before the re-check: one of the updates just
-                # applied above (e.g. agent-worktrees) may have swapped the
-                # runtime venv slot out from under the cached $VenvPython,
-                # leaving it pointing at a now-deleted python.exe (#stale-venv).
-                $reresolvedPython = Resolve-RuntimePython
-                if ($reresolvedPython -and (Test-Path -LiteralPath $reresolvedPython)) {
-                    $script:VenvPython = $reresolvedPython
-                }
-                Write-SetupLog 'Re-checking staleness after update'
-                $preJson = & $VenvPython -m agent_worktrees pre-launch 2>$null
-                if ($LASTEXITCODE -eq 0 -and $preJson) {
-                    $prePlan = ($preJson -join "`n") | ConvertFrom-Json -ErrorAction SilentlyContinue
-                    Write-PlanDiagnostics $prePlan 'Pre-launch'
-                    if ($prePlan -and $prePlan.action -eq 'self-update') {
-                        Write-SetupLog 'Still stale after update — proceeding anyway' 'WARN'
-                    }
-                }
-            }
-        } else {
-            Write-SetupLog 'pre-launch check failed or produced no output — proceeding'
+        $bootstrapArgs = @('-m', 'agent_worktrees')
+        if ($script:LaunchProject) { $bootstrapArgs += @('--project', $script:LaunchProject) }
+        $bootstrapArgs += @('launch-update', 'bootstrap')
+        if ($applyStaged) { $bootstrapArgs += '--defer-worktrees' }
+        $null = Invoke-SetupCommand -CommandArgv (@($VenvPython) + $bootstrapArgs) `
+            -Scope 'launch/bootstrap' -Label 'Bootstrap update'
+        $reresolvedPython = Resolve-RuntimePython
+        if ($reresolvedPython -and (Test-Path -LiteralPath $reresolvedPython)) {
+            $script:VenvPython = $reresolvedPython
         }
     } else {
         Write-SetupStatus 'Skipping plugin update check (--no-update).'
@@ -887,40 +662,26 @@ function Invoke-UpdateApply {
 
     # (3) Plugin reconciliation (repo-configured payloads + gated runtimes).
     #     Independent of WORKTREE_NO_UPDATE; opt out with WORKTREE_NO_RECONCILE=1.
-    #     Two passes: payload first, then runtime (readable only next pass).
+    #     The canonical executor retains the payload/runtime two-pass plan.
     if ($WithReconcile -and $env:WORKTREE_NO_RECONCILE -ne '1') {
-        foreach ($rpass in 1, 2) {
-            $recJson = & $VenvPython -m agent_worktrees reconcile-plugins 2>$null
-            if (-not $recJson) { break }
-            try { $recPlan = ($recJson | ConvertFrom-Json) } catch { break }
-            Write-PlanDiagnostics $recPlan 'Plugin reconcile'
-            if ($recPlan.action -ne 'reconcile') {
-                if ($rpass -eq 1) {
-                    Write-SetupLog 'Plugin reconcile: no executable actions'
-                }
-                break
-            }
-            $recUpdates = @($recPlan.updates)
-            Write-SetupStatus "Reconciling plugins (pass ${rpass}): $($recUpdates.Count) action(s)..."
-            foreach ($u in $recUpdates) {
-                $rargv = @($u.argv)
-                if ($rargv.Count -eq 0) { continue }
-                if ($rargv[0] -eq 'copilot' -and -not (Get-Command copilot -ErrorAction SilentlyContinue)) {
-                    Write-SetupLog "Plugin reconcile: skipping $($u.service) (copilot not on PATH)" 'WARN'
-                    continue
-                }
-                Invoke-SetupAction -CommandArgv $rargv -Update $u `
-                    -Scope "launch/reconcile/pass-$rpass/$($u.service)" -Label "Plugin reconcile: $($u.service)"
-            }
-            # Re-resolve before the next pass: this pass's reconcile actions
-            # (the runtime-gated pass in particular) may have swapped the
-            # runtime venv slot out from under the cached $VenvPython, leaving
-            # it pointing at a now-deleted python.exe (#stale-venv).
-            $reresolvedPython = Resolve-RuntimePython
-            if ($reresolvedPython -and (Test-Path -LiteralPath $reresolvedPython)) {
-                $script:VenvPython = $reresolvedPython
-            }
+        $reconcileArgs = @('-m', 'agent_worktrees')
+        if ($script:LaunchProject) { $reconcileArgs += @('--project', $script:LaunchProject) }
+        $reconcileArgs += @('reconcile-plugins', '--apply')
+        $null = Invoke-SetupCommand -CommandArgv (@($VenvPython) + $reconcileArgs) `
+            -Scope 'launch/reconcile' -Label 'Plugin reconcile'
+        $reresolvedPython = Resolve-RuntimePython
+        if ($reresolvedPython -and (Test-Path -LiteralPath $reresolvedPython)) {
+            $script:VenvPython = $reresolvedPython
         }
+    }
+    # Submit last so foreground maintenance never joins our detached install.
+    if (-not $noUpdate -and $applyStaged) {
+        $requestArgs = @('-m', 'agent_worktrees')
+        if ($script:LaunchProject) { $requestArgs += @('--project', $script:LaunchProject) }
+        $requestArgs += @('launch-update', 'staged', '--status', $statusFile)
+        if (-not $env:WORKTREE_BLOCKING_INSTALL) { $requestArgs += '--detach' }
+        $null = Invoke-SetupCommand -CommandArgv (@($VenvPython) + $requestArgs) `
+            -Scope 'launch/installer' -Label 'Staged runtime request (applies on the next launch)'
     }
 }
 
@@ -934,7 +695,7 @@ $DirectCommands = @(
     'execution-leg',
     'status', 'list', 'create', 'cleanup', 'validate', 'install',
     'register', 'unregister', 'uninstall', 'update', 'install-status',
-    'deploy-instructions', 'get', 'pre-launch', 'stage-update', 'reconcile-plugins', 'dev', 'handoff-cutover',
+    'deploy-instructions', 'get', 'pre-launch', 'launch-update', 'stage-update', 'reconcile-plugins', 'dev', 'handoff-cutover',
     'register-session', 'deregister-session', 'backfill-sessions',
     'anchor-check'
 )

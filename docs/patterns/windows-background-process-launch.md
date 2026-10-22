@@ -84,8 +84,10 @@ home, never the caller's cwd or a plugin payload) and appends the daemon's
 output to a `log_path` (stderr optionally to its own `stderr_log_path`) instead
 of discarding it.
 Do not remove the caller's Job or make every child break away to repair one
-daemon. If Windows refuses its explicit breakaway request, `spawn_daemon`
-uses the shared, bounded WMI lifetime broker. Its windowless, stdlib-only
+daemon. A caller already in a Job uses the shared, bounded WMI lifetime broker
+before launching: Windows can accept breakaway while retaining an ancestor Job
+under a venv redirector. A caller Job query failure refuses the launch. A
+direct launch's breakaway denial uses the same broker. Its windowless, stdlib-only
 bootstrap uses the actual base interpreter with WMI's supported detached-process
 flag, so a venv redirector cannot change the identity being adopted. It receives
 launch data through an authenticated one-use channel,

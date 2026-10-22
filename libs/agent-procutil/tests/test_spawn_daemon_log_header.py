@@ -67,6 +67,9 @@ def test_daemon_log_header_keeps_ordinary_fields_verbatim():
 def test_spawn_daemon_launches_with_undecodable_or_multiline_executable(
     tmp_path, monkeypatch
 ):
+    from agent_procutil import daemon_broker
+
+    monkeypatch.setattr(daemon_broker, "caller_in_job", lambda: False)
     calls = []
 
     def fake_popen(argv, **kwargs):

@@ -180,11 +180,10 @@ vocabulary: leading `[OK]`, `[SKIP]`, `[WARN]`, `[FAIL]` and `...` become
 diagnostics, not completed-step durations or changes to a child's actual exit
 outcome. Explicit owner states, completion messages, unknown/embedded markers
 and canonical records are preserved on both native paths.
-PowerShell restores the action's environment and
-native-error preferences even when spawning fails. Bash obtains the installer's
+PowerShell restores its
+native-error preferences even when spawning fails. Bash obtains the request's
 exit code from the command, not its output consumer, and decodes staged metadata
-with NUL-delimited fields so an empty optional value cannot shift the installer
-path or runtime root.
+with NUL-delimited fields so an empty optional value cannot shift the fields.
 
 Launcher-owned diagnostics record passthrough and Windows pane/direct-handoff
 argument counts, not argument values. Bootstrap and reconciliation actions retain
@@ -192,56 +191,27 @@ their service labels, timed outcomes and child diagnostics without a duplicate r
 echo. Execution arguments are unchanged; this does not redact arbitrary output
 emitted by a child command.
 
-Before executing a runtime action, the native wrappers ask the engine's
-read-only [`reconcile-plugins --check-update`](../plugins/agent-worktrees/docs/cli-reference.md#repo-adopted-plugin-reconciliation-reconcile-plugins)
-seam to revalidate the cached installation and publication permission.
-The staged marketplace installer is checked before either synchronous execution
-or detached spawn. A refusal retains its diagnostic; an older engine without
-the capability or a malformed decision warns and skips runtime publication.
-Independent bootstrap and non-publication actions still run. This does not
-replace installer-side ownership checks or grant explicit management authority.
-Admission preserves non-ASCII installation identity through a scoped UTF-8 pipe
-on PowerShell, restoring the caller's encoding afterward. Bash uses one decoded
-staged-status snapshot for the check, installer root and child environment;
-a peer replacing the status file cannot mix two staged actions.
+Native wrappers submit fixed `launch-update bootstrap`, `reconcile-plugins
+--apply` and `launch-update staged` requests instead of executing JSON plan
+arguments. The execution owner re-derives the bootstrap/reconcile plans and
+revalidates each runtime's selected installation and publication permission.
+Staged requests bind both the acquisition result and discovered payload
+fingerprint, then reconstruct installer arguments and environment canonically.
+A replaced status, payload or installation fails visibly rather than mixing
+two acquisitions. No arbitrary command-execution protocol is exposed.
 
-The default detached Windows installer writes to a unique UTF-8
-`setup-<pid>.<id>.installer.log` beside the launch log; the main log links its
-exact path. A launch-owned observer records start, stdout/stderr progress and
-the original installer's exit outcome using the same formatter. The separate
-sink avoids competing appenders after launch maintenance continues. It retains
-already-framed output and does not echo into quiet or protocol streams. The
-active sink permits readers and appends but is held against log rotation until
-the observer exits. The observer atomically opens or recreates the prepared
-file before starting the installer, so rotation during observer startup cannot
-prevent the installation. The observer ends with the original invocation, not
-with the launching shell, and
-keeps the existing headless `conhost` and containment behavior. Literal argument
-data is carried separately from observer code; the installer still executes
-through its original `pwsh -NoProfile -File` command and inherited staged
-environment, without changing execution policy or installation authority.
-The measured duration covers the observed invocation and stream drain, not
-the execution cost of individual child lines. Sink preparation and observer
-spawn failures warn and retain the launch's existing continuation policy.
-This adds one observer per detached installation, not a process per line or
-evidence of an update-speed improvement.
-
-The detached Bash installer uses one `update_telemetry.shell observe` process
-inside its existing `setsid` boundary. It appends framed, redacted stdout/stderr
-and the native exit outcome to the existing setup-log destination, without
-echoing into the launcher's terminal or protocol streams. The original `env`
-and Bash argument vector still applies staged environment changes only to the
-installer. The observer waits for that invocation, drains already-written
-output and stops without waiting for detached descendants to close inherited
-pipes. Its duration includes invocation and output drain, not per-line cost or
-a serving-health verdict. Admission, staging, deadlines and termination remain
-with their original owners; this is not another updater.
-The launcher can be newer than the active Worktrees runtime. Its in-process
-bootstrap checks the optional observer API before using the new mode. If that
-API or telemetry package is unavailable, it records an explicit timing warning
-and replaces itself with the original native command once. It neither prevents
-installation nor retries an installer whose exit was already observed. No
-probe process, implicit runtime update or invented legacy duration is added.
+Foreground bootstrap and reconciliation finish before staged self-installation
+is submitted, so their waiters do not accidentally join that detached install.
+When a staged self-install is pending, bootstrap leaves Worktrees to that
+request but still updates independent repository bootstrap services.
+The staged default is `--detach`: its acceptance receipt links the durable
+request/log, and the installed version applies on the next launch.
+`WORKTREE_BLOCKING_INSTALL` waits on that same owner; it never executes an
+installer inline. Reconciliation remains independent of `--no-update`.
+An older engine without these request surfaces warns through the normal
+failed-command outcome and does not fall back to raw installation.
+Installer staging, watchdogs and per-generation safeguards remain nested
+beneath the shared transaction authority.
 
 The native maintenance sinks share one physical-line envelope with the
 Python updater: `[HH:mm:ss.fffZ] scope state message [elapsed Ns]` or a
@@ -596,8 +566,8 @@ update calls explicitly hand off checked custody rather than queue recursively.
 The witness is consumed at entry, so unrelated service/daemon children do not
 inherit transaction authority.
 
-Standalone first provisioning, individual plugin installers and native launch
-wrappers that execute validated plan actions directly retain their existing
+Native launch bootstrap, reconciliation and staged self-installs now use this
+same authority. Standalone first provisioning and individual plugin installers retain their existing
 ownership contracts; their remaining convergence is tracked
 under [#7758](https://github.com/ThomasMichon/copilot-extensions/issues/7758),
 not inferred complete from these migrated entry points.

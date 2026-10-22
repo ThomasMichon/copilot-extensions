@@ -1153,6 +1153,7 @@ to the effort after release.
 | `accounts` | gh account identity catalog (`accounts.yaml`) -- list/show/set/remove logins, scopes, login flows |
 | `validate` | Validate core infrastructure files |
 | `pre-launch` | Check bootstrap staleness (JSON output, for launch wrappers) |
+| `launch-update bootstrap\|staged` | Submit a fixed native maintenance phase to the shared installation driver (JSON result) |
 | `reconcile-plugins` | Reconcile repo-adopted plugin payloads + gated runtimes (JSON output, for launch wrappers) |
 | `uninstall-plugins` | Sweep every deployed core plugin runtime via each plugin's own uninstall action (JSON; dry-run by default) |
 
@@ -1251,8 +1252,8 @@ This catches a policy added after planning. Healthy runtimes need no
 publication permission to remain selected. Uninstall is a separate action,
 not runtime publication.
 
-Native launch wrappers use `reconcile-plugins --check-update` with one runtime
-action on JSON stdin immediately before execution. It returns
+`reconcile-plugins --check-update` remains a read-only compatibility probe with one runtime
+action on JSON stdin. It returns
 `{"allowed": true, "diagnostics": []}` with exit 0, or `allowed: false`
 and recovery diagnostics with exit 3. It bypasses project resolution and never
 discovers a repository,
@@ -1264,11 +1265,21 @@ action repeats the stager's owning payload discovery, preserving its supported
 deployment policy. The marker cannot select another plugin or an arbitrary
 payload path, and ordinary marketplace reconciliation is unchanged.
 An older standalone payload without policy needs no new policy helper.
-An older engine without this check is different: wrappers skip runtime
-publication with an explicit readiness warning rather than treating absent
-capability as permission. Independent bootstrap/payload/uninstall actions
-continue under their existing contracts. Direct native installer admission
-remains that installer's responsibility.
+Native wrappers now submit `reconcile-plugins --apply`, `launch-update bootstrap`
+and `launch-update staged --status <path>` rather than running cached argv.
+Bootstrap derives a fresh plan under custody and rechecks staleness after
+execution. `--defer-worktrees` leaves only self-installation to the staged phase;
+independent repository bootstrap actions remain eligible. Staged submission
+binds the status bytes and discovered payload fingerprint, revalidates the
+selected runtime root and publication permission, and reconstructs canonical
+installer arguments/environment. A changed acquisition or source fails rather
+than executing a different result. Status-provided argv/environment is not an
+execution protocol. `--detach` returns an acceptance receipt with request/log
+identity; the default waits for the durable phase result. Both fixed phases
+can run from a neutral directory; bootstrap without repository/configuration
+returns its existing empty plan. An older engine without these request surfaces
+fails visibly; launchers never fall back to raw installation.
+Direct native installer admission remains that installer's responsibility.
 
 ### Teardown sweep (`uninstall-plugins`)
 

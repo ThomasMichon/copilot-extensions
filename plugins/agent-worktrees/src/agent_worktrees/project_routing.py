@@ -22,6 +22,7 @@ _NO_PROJECT_COMMANDS = {
     "resource-producer",
     "resource-relationship",
     "reconcile-marketplaces",
+    "launch-update",
     "picker",
     "doctor",
     "hygiene",

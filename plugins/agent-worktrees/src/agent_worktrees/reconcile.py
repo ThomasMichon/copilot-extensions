@@ -2025,13 +2025,11 @@ def apply_plan(
     log: Callable[[str], None] | None = None,
     runner: Callable[[Sequence[str]], int] | None = None,
 ) -> dict[str, Any]:
-    """Execute the reconciliation plan **in-process** (the launcher's 2-pass loop).
+    """Execute the canonical two-pass reconciliation plan under caller custody.
 
-    The worktree launchers run ``reconcile-plugins`` and execute the emitted
-    ``argv`` vectors themselves, re-invoking for a second pass so a freshly
-    installed payload's runtime is picked up. This function is that same loop in
-    Python, so a session that does **not** go through the worktree launcher can
-    still self-provision an enabled plugin's runtime (dotfiles #693). The
+    Native launchers and session hooks submit ``reconcile-plugins --apply``
+    through the durable execution driver. The second pass picks up a freshly
+    acquired payload's runtime without a second native command executor. The
     ``provision-check`` sessionStart shim spawns ``reconcile-plugins --apply``
     (which calls this) **detached**, so a slow first-run venv build never blocks
     session start.

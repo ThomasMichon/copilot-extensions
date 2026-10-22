@@ -45,7 +45,7 @@ def spawn_daemon(
     header. ``env_overrides`` layers over ``env`` (the current environment by
     default). Extra creation flags may add only priority/error-mode policy.
 
-    On Windows, breakaway denial triggers a bounded WMI bootstrap outside the
+    On Windows, a caller already in a Job or breakaway denial triggers a bounded WMI bootstrap outside the
     caller's Job; the returned handle controls the actual daemon. If that also
     fails, raise ``DaemonSpawnError`` unless ``contained_fallback`` explicitly
     accepts the caller's shorter lifetime. ``breakaway=False`` and contained
@@ -92,36 +92,45 @@ def spawn_daemon(
             "stderr": subprocess.STDOUT if err_fh is None else err_fh,
             "close_fds": True,
         }
-        try:
-            return subprocess.Popen(command, **popen_kwargs, **kwargs)  # noqa: S603
-        except OSError as exc:
-            if not pu._breakaway_denied(exc, kwargs):
-                raise
-            flags = kwargs["creationflags"] & ~pu._CREATE_BREAKAWAY_FROM_JOB
-            note = "spawn_daemon: the caller's Job object forbids breakaway"
-            write_logs(f"{stamp} {note}; trying Windows lifetime broker\n".encode())
+        flags = kwargs.get("creationflags", 0)
+        needs_broker = False
+        if flags & pu._CREATE_BREAKAWAY_FROM_JOB:
+            from .daemon_broker import caller_in_job
+
+            needs_broker = caller_in_job()
+        if needs_broker:
+            note = "spawn_daemon: caller Job lifetime requires verified outside-Job launch"
+        else:
             try:
-                return spawn_brokered_daemon(
-                    command, cwd=cwd_path, env=child_env, creationflags=flags,
-                    log_path=log_file, stderr_log_path=err_file,
+                return subprocess.Popen(command, **popen_kwargs, **kwargs)  # noqa: S603
+            except OSError as exc:
+                if not pu._breakaway_denied(exc, kwargs):
+                    raise
+                note = "spawn_daemon: the caller's Job object forbids breakaway"
+        flags &= ~pu._CREATE_BREAKAWAY_FROM_JOB
+        write_logs(f"{stamp} {note}; trying Windows lifetime broker\n".encode())
+        try:
+            return spawn_brokered_daemon(
+                command, cwd=cwd_path, env=child_env, creationflags=flags,
+                log_path=log_file, stderr_log_path=err_file,
+            )
+        except pu.DaemonSpawnError as broker_error:
+            if not contained_fallback or not broker_error.cleanup_confirmed:
+                outcome = (
+                    "daemon not started" if broker_error.cleanup_confirmed
+                    else "partial launch cleanup unconfirmed"
                 )
-            except pu.DaemonSpawnError as broker_error:
-                if not contained_fallback or not broker_error.cleanup_confirmed:
-                    outcome = (
-                        "daemon not started" if broker_error.cleanup_confirmed
-                        else "partial launch cleanup unconfirmed"
+                write_logs(f"{stamp} {note}; broker failed; {outcome}\n".encode())
+                if not broker_error.cleanup_confirmed:
+                    write_logs(
+                        f"{stamp} spawn_daemon: cleanup uncertain; contained retry refused\n".encode()
                     )
-                    write_logs(f"{stamp} {note}; broker failed; {outcome}\n".encode())
-                    if not broker_error.cleanup_confirmed:
-                        write_logs(
-                            f"{stamp} spawn_daemon: cleanup uncertain; contained retry refused\n".encode()
-                        )
-                    raise pu.DaemonSpawnError(
-                        f"{note}; Windows lifetime broker failed; {outcome}",
-                        cleanup_confirmed=broker_error.cleanup_confirmed,
-                    ) from broker_error
-            note += "; broker failed; starting the daemon inside it (contained_fallback)"
-            pu.log.warning("%s (%s)", note, command[0])
-            write_logs(f"{stamp} {note}\n".encode())
-            kwargs["creationflags"] = flags
-            return subprocess.Popen(command, **popen_kwargs, **kwargs)  # noqa: S603
+                raise pu.DaemonSpawnError(
+                    f"{note}; Windows lifetime broker failed; {outcome}",
+                    cleanup_confirmed=broker_error.cleanup_confirmed,
+                ) from broker_error
+        note += "; broker failed; starting the daemon inside it (contained_fallback)"
+        pu.log.warning("%s (%s)", note, command[0])
+        write_logs(f"{stamp} {note}\n".encode())
+        kwargs["creationflags"] = flags
+        return subprocess.Popen(command, **popen_kwargs, **kwargs)  # noqa: S603

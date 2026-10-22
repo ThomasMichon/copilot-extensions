@@ -170,7 +170,9 @@ class OwnedProcessCpuSampler:
         wrapped.add_done_callback(
             lambda future: None if future.cancelled() else future.exception(),
         )
-        return await asyncio.shield(wrapped)
+        # Cancellation must neither cancel native work nor orphan a shield error.
+        await asyncio.wait((wrapped,))
+        return wrapped.result()
 
     def _run_sample(
         self, pending: Future[CpuObservation], accounting: Future[SampleAccounting],

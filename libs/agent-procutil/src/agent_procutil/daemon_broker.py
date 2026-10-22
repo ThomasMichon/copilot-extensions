@@ -176,6 +176,15 @@ def _outside_job(process: WindowsDaemonProcess) -> bool:
     return not in_job.value
 
 
+def caller_in_job() -> bool:
+    """A successful breakaway flag alone cannot prove escape from nested Jobs."""
+    process = WindowsDaemonProcess(os.getpid(), ["current-daemon-caller"])
+    try:
+        return not _outside_job(process)
+    finally:
+        process.close()
+
+
 def _resume(process: WindowsDaemonProcess) -> None:
     from ctypes import wintypes
 
