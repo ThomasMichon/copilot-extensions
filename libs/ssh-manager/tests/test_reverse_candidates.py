@@ -490,6 +490,38 @@ async def test_failed_late_spawn_cleanup_keeps_process_for_explicit_retry(monkey
     assert retired == spawned and relay._proc is None
     assert relay.reverse_status.state == "unknown"
 
+
+@pytest.mark.parametrize("conditional", [False, True])
+async def test_concurrent_stops_join_shutdown_without_cancelling_the_first_caller(
+    monkeypatch, conditional,
+):
+    relay, spawned, retired, _ = fixture_owner(monkeypatch, ["ready", "ready"])
+    await relay.establish()
+    attempt_id = relay.reverse_status.attempt.attempt_id
+    entered, release = asyncio.Event(), asyncio.Event()
+    async def retire(self, proc):
+        entered.set()
+        await release.wait()
+        proc.returncode = -9
+        retired.append(proc)
+    monkeypatch.setattr(FiniteReverseForward, "_terminate", retire)
+    first = asyncio.create_task(
+        relay.stop_attempt(attempt_id) if conditional else relay.stop(),
+    )
+    await entered.wait()
+    second = asyncio.create_task(relay.stop())
+    await asyncio.sleep(0)
+    relay.stop_nowait()  # cooperates with the same in-flight shutdown
+    assert not first.done() and relay.reverse_status.state != "unknown"
+    release.set()
+    result, other = await asyncio.gather(first, second)
+    assert result is None or result.state == "stopped"
+    assert other is None and retired == spawned
+    assert relay.reverse_status.state == "stopped"
+    await relay.start()
+    assert len(spawned) == 2 and relay.is_alive
+    await relay.stop()
+
 @pytest.mark.parametrize("host,port", [
     ("0.0.0.0", 1234), ("example.com", 1234), ("127.0.0.1", 0),
     ("localhost", True), ("::1", 65536),

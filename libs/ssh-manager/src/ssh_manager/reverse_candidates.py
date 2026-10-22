@@ -129,6 +129,7 @@ class FiniteReverseForward(SupervisedRelayForward):
         self._selection_lock = asyncio.Lock()
         self._lifecycle_task: asyncio.Task | None = None
         self._stop_requests = 0
+        self._shutdown_future: asyncio.Future | None = None
         self._retiring_process = None
         self._retirement_task: asyncio.Task | None = None
         self._status = ReverseStatus(request_id, None, "unavailable", "not-started")
@@ -370,6 +371,15 @@ class FiniteReverseForward(SupervisedRelayForward):
         return True
 
     async def stop(self) -> None:
+        previous = self._shutdown_future
+        if previous is not None and not previous.done():
+            await asyncio.shield(previous)
+            return
+        completed = asyncio.get_running_loop().create_future()
+        completed.add_done_callback(
+            lambda future: None if future.cancelled() else future.exception(),
+        )
+        self._shutdown_future = completed
         self._stop_requests += 1
         try:
             self._stopped = True
@@ -381,6 +391,11 @@ class FiniteReverseForward(SupervisedRelayForward):
                 await super().stop()
                 if self._status.state != "unknown":
                     self._status = replace(self._status, state="stopped", reason="owner-stopped")
+        except BaseException as exc:
+            completed.set_exception(exc)
+            raise
+        else:
+            completed.set_result(None)
         finally:
             self._stop_requests -= 1
 
@@ -398,6 +413,9 @@ class FiniteReverseForward(SupervisedRelayForward):
             return self.reverse_status
 
     def stop_nowait(self) -> None:
+        if self._shutdown_future is not None and not self._shutdown_future.done():
+            self._stopped = True
+            return
         if self._status.state == "ready":
             self._status = replace(self._status, state="stopped", reason="owner-stopped")
         self._stopped = True
