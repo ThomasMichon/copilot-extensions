@@ -124,20 +124,16 @@ def reconcile_pr_state(
 ) -> bool:
     """Full out-of-band PR-state reconcile for one worktree record.
 
-    Heals a number-less active PR first (#2146), then reconciles a numbered
-    active PR against the provider (the same check ``pr-status``/
-    ``pr-ready``/``create_pr`` already run at render time) -- but callable
-    directly for a worktree with **no live session** driving those paths,
-    e.g. a ``finalized`` worktree (#2102's render-time-reconcile gap). Returns
-    True when the record's active-PR number or state changed as a result, so
-    a caller (the ``reconcile`` verb) can report what it actually fixed.
+    Heals a number-less active PR first, then reconciles all tracked PRs and
+    lingering terminal PR claims. Returns True for a changed PR number/state
+    or claim disposition, including a claim-only repair of a cached closure.
     """
     if record is None:
         return False
-    before_pr = record.active_pr()
-    before = (before_pr.number, before_pr.state) if before_pr else None
+    before = ([(p.number, p.state) for p in record.prs],
+              [(c.kind, c.ref, c.state) for c in record.resources])
     healed = heal_numberless_active_pr(record, config)
     _reconcile_active_pr(record, config)
-    after_pr = record.active_pr()
-    after = (after_pr.number, after_pr.state) if after_pr else None
+    after = ([(p.number, p.state) for p in record.prs],
+             [(c.kind, c.ref, c.state) for c in record.resources])
     return healed or before != after

@@ -824,66 +824,12 @@ def content_exceeds_merged_head_any(
 def reconcile_every_live_pr(
     record: tracking.WorktreeRecord, config: Config,
 ) -> None:
-    """Live-reconcile every non-terminal tracked PR, not just the "active" one.
-
-    ``pr_reconcile.reconcile_pr_state`` (heal-numberless + ``_reconcile_active_pr``)
-    only ever touches ``record.active_pr()`` -- exactly one entry. A worktree
-    can carry more than one non-terminal :class:`~agent_worktrees.tracking.PRRecord`
-    at once (parallel PRs, per ``WorktreeRecord.prs``'s own docstring); this
-    reconciles each of THOSE against the provider too, so :func:`assert_no_live_pr`
-    never trusts a stale local ``open`` on an entry the active-only helper
-    skipped. Best-effort throughout: any provider/network failure for one entry
-    leaves that entry's local state untouched and moves on -- never raises.
-    """
-    # The entry the active-only reconcile reads, taken BEFORE it runs: healing it
-    # makes ``active_pr()`` name the next non-terminal entry, which must not then
-    # be skipped as "already reconciled".
-    active = record.active_pr()
+    """Use ordinary reconciliation for every tracked PR and lingering claim."""
     try:
         from . import pr_reconcile
         pr_reconcile.reconcile_pr_state(record, config)
     except Exception:
         pass
-    others = [
-        p for p in record.prs
-        if p is not active and not tracking._pr_is_terminal(p) and p.number
-    ]
-    if not others:
-        return
-    prcfg = config.default_repo.pr
-    changed = False
-    for entry in others:
-        from .finalize_open_pr_gate import trusted_target
-        target = trusted_target(entry, prcfg, record.repo or "")
-        if not target:
-            continue  # unresolvable or untrusted: keep the local state
-        provider, target_repo = target
-        try:
-            from . import providers
-            token = providers.account_token_for_slug(target_repo, prcfg)
-            pull = provider.get_pull(
-                target_repo, entry.number,
-                api_base=getattr(prcfg, "api_base", "") or "", token=token,
-            )
-        except Exception:
-            continue
-        state = (pull.state or "").strip().lower()
-        if pull.merged:
-            resolved = "merged"
-        elif state and state not in tracking._PR_NON_TERMINAL:
-            resolved = state
-        else:
-            resolved = ""
-        if resolved:
-            entry.state = resolved
-            if not entry.closed_at:
-                entry.closed_at = tracking._now_iso()
-            changed = True
-    if changed:
-        try:
-            tracking.save_record(record)
-        except Exception:
-            pass
 
 
 def assert_no_live_pr(

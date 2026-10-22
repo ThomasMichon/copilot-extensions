@@ -1079,14 +1079,10 @@ def _ensure_pr_claim(
 
 
 def _release_pr_claim(record: tracking.WorktreeRecord | None, pr: PRRecord | None) -> str | None:
-    """Settle a ``pr``-kind claim to ``released`` once its PR is confirmed MERGED.
+    """Release a PR claim after the caller confirms its merge or closure.
 
-    Only ``merged`` releases the claim -- a PR ``closed`` *without* merging
-    is abandoned work, not a clean hand-back (mirrors ``sweep.py``'s
-    ``_github_pr_merged``/``_ado_pr_merged`` "never silently reclaimed"
-    contract for an unmerged close); its claim is left ``active`` so
-    finalize keeps blocking until an operator explicitly abandons it or the
-    PR is reopened and actually merged.
+    Settling the provider resource does not certify unmerged branch content
+    safe to prune; finalization's independent content checks still apply.
 
     Returns the released ``ref`` only when a real, live claim was actually
     settled (never for a missing or already-released claim) -- same
@@ -1099,7 +1095,7 @@ def _release_pr_claim(record: tracking.WorktreeRecord | None, pr: PRRecord | Non
     ref = _pr_claim_ref(pr)
     if not ref:
         return None
-    match = next((c for c in record.resources if c.ref == ref), None)
+    match = next((c for c in record.resources if c.kind == "pr" and c.ref == ref), None)
     if match is None or not match.is_live:
         return None
     settled = tracking.settle_resource_claim(record, ref, obligations.RELEASED, save=False)
@@ -1588,40 +1584,29 @@ def _reconcile_active_pr(
     *,
     best_effort: bool = False,
 ) -> None:
-    """Refresh the active PR's state from the provider (best-effort).
+    """Reconcile tracked PRs and their claims against the configured provider.
 
-    A PR merged or closed *externally* (e.g. via the Gitea API + the
-    ``auto-merge`` label, bypassing ``finalize``/``pr-watch``) leaves the local
-    record stale at ``open``.  Branch selection in :func:`create_pr` would then
-    reuse and force-push that already-merged branch and open no new PR (#1163).
-    Querying the provider and writing back a terminal state makes the active PR
-    correctly *terminal* so the append-a-fresh-PR path is taken instead.
-
-    Also self-heals a **zombie open PR** (#1375/#1703): when the provider still
-    reports the PR open but its head is already *contained in the base branch*
-    (its content merged, but the PR object was never flipped -- a Gitea
-    non-atomic merge under load, or an AI-reviewer squash that didn't close the
-    object), reconcile it to ``merged`` so the Picker stops showing a phantom
-    open PR. Only a *definite* containment (0 commits ahead) heals; an unknown
-    result leaves the state untouched.
-
-    ``best_effort`` (set by the Picker's background reconcile sweep) persists the
-    write under a NON-blocking record lock and **skips** on contention -- so an
-    inconsequential sweep never blocks, nor is blocked by, a critical updater
-    (#4547). The state transition is monotonic (open -> terminal), so a skipped
-    persist is simply re-applied on the next sweep. Foreground callers use the
-    default blocking persist.
-
-    No-op (falls back to the local state) when there is no active PR, it has no
-    number yet, it is already terminal, or the provider is unconfigured/
-    unreachable.
+    Includes terminal records with lingering live PR claims. Unavailable or
+    untrusted observations retain the claim; closed claims never imply landed
+    source content. ``best_effort`` skips a contended record lock.
     """
     if record is None:
         return
-    active = record.active_pr()
+    for pr in list(record.prs):
+        _reconcile_pr(record, pr, config, best_effort=best_effort)
+
+
+def _reconcile_pr(
+    record: tracking.WorktreeRecord, active: PRRecord | None, config: Config,
+    *, best_effort: bool = False,
+) -> None:
+    """Persist one authority-matched provider observation and claim transition."""
     if active is None or active.number is None:
         return
-    if tracking._pr_is_terminal(active):
+    if tracking._pr_is_terminal(active) and not any(
+        c.kind == "pr" and c.ref == _pr_claim_ref(active) and c.is_live
+        for c in record.resources
+    ):
         return
     prcfg = config.default_repo.pr
     api_base = getattr(prcfg, "api_base", "") or ""
@@ -1669,6 +1654,10 @@ def _reconcile_active_pr(
         if contained is True:
             resolved = "merged"
 
+    if active.state == "merged" and resolved != "merged":
+        return
+    if tracking._pr_is_terminal(active) and resolved not in ("merged", "closed"):
+        return
     if resolved:
         # Provider I/O may overlap an attribution-only stamp. Apply the terminal
         # transition to a fresh record, but never to a reassigned publication.
@@ -1677,7 +1666,7 @@ def _reconcile_active_pr(
                 return
             fresh = tracking.load_record(record.yaml_path)
             current = pr_publish._publication_pr(fresh, active)
-            if not pr_publication_state.matches(current, active):
+            if current is None or pr_publication_state.authority(current) != pr_publication_state.authority(active):
                 return
             claim_ref = _pr_claim_ref(active)
             if not any(claim.ref == claim_ref for claim in fresh.resources):
@@ -1687,14 +1676,14 @@ def _reconcile_active_pr(
                     tracking.add_resource_claim(fresh, pending_claim, save=False)
             current.state = resolved
             current.closed_at = current.closed_at or tracking._now_iso()
-            released_ref = _release_pr_claim(fresh, current) if resolved == "merged" else None
+            released_ref = _release_pr_claim(fresh, current) if resolved in ("merged", "closed") else None
             tracking.save_record(fresh)
             pr_publication_state.copy_pr(active, current)
             record.resources = fresh.resources
         if released_ref:
             claim_history.record_pr_event(
                 released_ref, worktree_id=record.worktree_id, machine=record.execution_machine,
-                event="released", note="merged", project=record.repo)
+                event="released", note=resolved, project=record.repo)
         return
     else:
         # Provider confirms the PR is still genuinely open (a real read

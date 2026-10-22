@@ -1,0 +1,9 @@
+{
+  "comment": "Release provider-confirmed closed PR claims while preserving unmerged source and child obligations.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

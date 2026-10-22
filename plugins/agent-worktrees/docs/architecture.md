@@ -960,6 +960,14 @@ containers, bridge sessions) so finalizing never orphans unfinished work. (Effor
   and flips the claim its **parent** holds on it to `at-rest` (same-machine parent
   via `owner_claim_ref` → `project_dir(project)/worktrees/…`), so the parent's
   gate trusts the recorded verdict instead of recursing.
+- **Terminal PR settlement.** PR status, ordinary reconciliation and finalization
+  share the same provider/authority-checked observation path for all tracked
+  PRs. A confirmed merge or closure releases that PR's resource claim after
+  persistence, recording the actual terminal state in claim history. Cached
+  terminal entries with lingering live claims are rechecked; unavailable,
+  foreign or unknown provider evidence cannot release them. A closed PR is
+  never represented as merged, and this settlement neither certifies its
+  source content as landed nor releases a parent claim on its child worktree.
 - **Ledger CRUD + reclaim.** `agent-worktrees claims {show,add,settle,release}`.
   `claims add --owner-ref <machine/project/worktree_id>` journals onto a
   **cross-project** owner resolved by qualified ref (not the caller's cwd) — for a

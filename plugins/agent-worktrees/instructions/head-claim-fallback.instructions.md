@@ -62,8 +62,8 @@ persists? Escalate to a human or `agent-worktrees doctor --fix`.
 it's genuinely open (`pr-merge-obligation-gate` defense 2) -- a live
 obligation like a child worktree/CodeSpace/bridge session, **regardless of
 `pr.strategy`**: `finalize`'s gate reads the local claim ledger only.
-Merging clears it on its own; anything else needs explicit operator action
-(see below).
+A provider-confirmed merge or closure releases that PR claim; unmerged source
+content remains subject to the separate finalization checks.
 
 - Drive every PR you (or a delegate) opened through a real merge -- opening
   and stopping, or reporting "landed" pre-merge, isn't the end state. See
@@ -71,8 +71,9 @@ Merging clears it on its own; anything else needs explicit operator action
   the per-flow waiting policy.
 - The claim auto-releases the instant any PR command (`create-pr`,
   `pr-ready`, `pr-status`, `pr-merge`, `finalize`, Picker's sweep) observes
-  the PR **merged**.
-- **Only the operator** may direct releasing the claim, resetting HEAD off
-  the PR's unmerged commits, or abandoning it -- never your own judgment:
+  the PR **merged or closed**, including a cached terminal record with a
+  lingering claim. Unknown provider state never releases it.
+- **Only the operator** may direct closing an unmerged PR, resetting HEAD off
+  its unmerged commits, or abandoning it -- never your own judgment:
   `finalize --abandon --handoff-to <recipient>`, on explicit instruction
   only, never inferred from "stuck" or "CI's red".

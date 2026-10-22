@@ -12,6 +12,12 @@ force-release a claim.
   shared lease**, so the settle is visible cross-machine), or run
   `<agent-codespaces catalog argv[0]> finalize <name>`.
 - **A bridge session** -- drive its worktree to final.
+- **A tracked pull request** -- ordinary PR reconciliation releases its claim
+  after the configured provider confirms it merged or closed, including a
+  previously cached terminal record with a lingering claim. A closed PR stays
+  closed, not merged: its unmerged branch content and any child worktree still
+  need their own safe closeout. Provider failure or unknown state retains the
+  claim. Closing or abandoning an unmerged PR still requires operator direction.
 - **A crashed/gone holder that never settled** --
   `<agent-worktrees catalog argv[0]> claims sweep`
   (dry-run) then `--apply` explicitly reclaims provably-gone-and-safe

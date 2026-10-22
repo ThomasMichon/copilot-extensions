@@ -74,9 +74,8 @@ def abandon_pr(
     local ``pr.state`` alone -- the same contract
     :func:`pr_ops._reconcile_active_pr` enforces), closes it via the provider
     (``close_pull``, posting ``reason`` as a PR comment, best-effort),
-    settles the worktree's ``pr`` claim to ``abandoned`` (never ``released``
-    -- mirrors :func:`pr_ops._release_pr_claim`'s own "an unmerged close is
-    abandoned work, not a clean hand-back" contract), and records a durable
+    settles the worktree's ``pr`` claim to ``abandoned`` (distinct from an
+    ordinary provider-observed terminal release), and records a durable
     ``claim_history`` event so the action is traceable after the fact. The
     provider call happens BEFORE the record lock is taken (matches
     :func:`pr_ops._set_pr_locked`'s own "no network/git I/O inside the lock"
