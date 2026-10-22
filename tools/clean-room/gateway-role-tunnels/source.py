@@ -21,7 +21,7 @@ gateway_identity_provider gateway_index gateway_manifest gateway_reconcile gatew
 gateway_service_channel gateway_service_connector gateway_service_context gateway_service_handler
 gateway_service_listener gateway_service_policy gateway_service_server
 gateway_ssh_policy gateway_ssh_runtime gateway_transport gateway_worker komodo_roles ledger
-node_journal observation_store observations operations planning release release_auth
+node_journal observation_store observations operations planning release release_assembly release_auth
 release_selection reverse_listener_reservations role_bindings role_deployment role_plan runtime_admission runtime_identity staging_cleanup
 """.split())
 RESOURCES = frozenset("""

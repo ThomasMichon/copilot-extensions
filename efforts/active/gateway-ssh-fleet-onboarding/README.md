@@ -601,6 +601,10 @@ takeover or implementation completion is asserted.
   no existing node, target, observation or timeout check was removed.
 - Source review and merge remain pending. Local unit evidence is not Main
   qualification, artifact publication or installed fleet adoption.
+- The existing committed-SDK roster guard caught the producer missing from the
+  Gateway witness's closed-world source materializer. Included only this module
+  in that existing roster; the same guard checks the exact committed closure,
+  without changing Docker, execution privileges or witness grants.
 - Existing release/authentication/staging/admission, default CLI, publisher
   workflow, credentials and SSH registry/profile owners remain untouched.
   Hosted-attestation versus pinned-key verification interoperability is still

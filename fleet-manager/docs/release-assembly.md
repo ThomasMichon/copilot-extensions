@@ -37,6 +37,9 @@ remain explicit declarations, not ambient binaries discovered from a host or
 proof that a named capability works. The `fleet-manager` SDK already
 participates in the ordinary first-party wheel build/release path; adding this
 producer changes neither that publisher nor default client dependencies.
+The existing Gateway clean-room source materializer explicitly includes this
+SDK module in its closed-world package roster. That packaging declaration
+does not make assembly part of Gateway startup or qualify a live service.
 
 ## Validation and byte boundary
 
