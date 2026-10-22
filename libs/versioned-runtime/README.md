@@ -175,7 +175,10 @@ repair only the exact administrator-owned private lease ACL previously generated
 by `mkdir(0700)`. It validates ordinary, single-link lock entries, retains an
 original security-descriptor/identity audit before changing permissions, and
 changes ACLs in place without replacing files or releasing their kernel locks.
-Already repaired files permit a caught partial repair to resume. Foreign,
+Already repaired files permit a caught partial repair to resume. Overlapping
+repairs also accept the exact completed target descriptor after confirming the
+same filesystem identity, rather than mistaking a valid winner for corruption.
+Other descriptor or identity changes still refuse. Foreign,
 public, linked or unknown entries are not migration authority. A caller lacking
 the rights to repair the old administrator-owned state receives the real access
 error; the library never elevates itself.

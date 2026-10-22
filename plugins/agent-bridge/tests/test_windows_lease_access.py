@@ -251,3 +251,58 @@ def test_caught_partial_permission_repair_resumes_without_replacing_files(tmp_pa
     with non_administrator():
         with leases._kernel_lease(root, "1.0", kind="retention", shared=True):
             assert path.read_bytes() == b"retained"
+
+
+@pytest.mark.skipif(not elevated_windows(), reason="requires native elevated Windows token")
+def test_overlapping_permission_repairs_admit_the_exact_completed_winner(tmp_path, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    import ctypes as c
+    from ctypes import wintypes as w
+    import hashlib
+    import threading
+
+    root = tmp_path / "user-root"
+    os.close(leases._windows_private_lease_file(tmp_path, root, "root-fixture"))
+    directory = root / ".retention-leases"
+    directory.mkdir()
+    legacy_permissions(directory, directory=True)
+    path = directory / (hashlib.sha256(b"1.0").hexdigest() + ".lock")
+    legacy_file(path, b"retained")
+    before = path.stat().st_ino
+    original, local = c.WinDLL, threading.local()
+    both_snapshotted, first_done = threading.Barrier(2), threading.Event()
+
+    def library(name, **kwargs):
+        native = original(name, **kwargs)
+        if name != "advapi32":
+            return native
+        setter = native.SetFileSecurityW
+        setter.argtypes, setter.restype = [w.LPCWSTR, w.DWORD, w.LPVOID], w.BOOL
+
+        def overlap(target, *args):
+            if str(target) == str(path):
+                both_snapshotted.wait(timeout=5)
+                if local.second:
+                    assert first_done.wait(timeout=5)
+            result = setter(target, *args)
+            if str(target) == str(directory) and not local.second:
+                first_done.set()
+            return result
+
+        native.SetFileSecurityW = overlap
+        return native
+
+    def acquire(second):
+        local.second = second
+        with leases._kernel_lease(root, "1.0", kind="retention", shared=True):
+            assert path.stat().st_ino == before
+
+    with monkeypatch.context() as race:
+        race.setattr(c, "WinDLL", library)
+        with ThreadPoolExecutor(max_workers=2) as callers:
+            first, second = callers.submit(acquire, False), callers.submit(acquire, True)
+            first.result(timeout=10)
+            second.result(timeout=10)
+    with non_administrator():
+        with leases._kernel_lease(root, "1.0", kind="retention", shared=True):
+            assert path.read_bytes() == b"retained"

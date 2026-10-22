@@ -174,10 +174,12 @@ def _windows_private_lease_file(root: Path, directory: Path, name: str) -> int:
                     os.fsync(stream.fileno())
                 for path, item, old in repairs:
                     current = path.lstat()
-                    if (
-                        (current.st_dev, current.st_ino) != (item.st_dev, item.st_ino)
-                        or descriptor_text(path) != old
-                    ):
+                    if (current.st_dev, current.st_ino) != (item.st_dev, item.st_ino):
+                        raise OSError("Runtime lease identity changed before repair")
+                    observed = descriptor_text(path)
+                    if observed == sddl:
+                        continue
+                    if observed != old:
                         raise OSError("Runtime lease permissions changed before repair")
                     if not security.SetFileSecurityW(str(path), 0x80000005, descriptor):
                         raise c.WinError(c.get_last_error())

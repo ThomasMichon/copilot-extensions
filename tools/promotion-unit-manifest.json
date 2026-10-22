@@ -439,7 +439,7 @@
   "sources": {
     "libs/lazy-cli-dispatch/src/lazy_cli_dispatch/__init__.py": "3730c088eec04121051bdc6780ad833f5ca32d8142e1593d25e78f4028bf76d6",
     "libs/lazy-cli-dispatch/tests/test_dispatch.py": "d8e724cd6ff798e1c4b47b02e94953eb2e21480e1308c9fa63e7321f066d5416",
-    "libs/versioned-runtime/versioned_runtime_leases.py": "eacf22e8ab14f9fb1d6ec14164e14a57f324d037d9933fdd91c164012cb4156a",
+    "libs/versioned-runtime/versioned_runtime_leases.py": "dc87f848db8be461e87d884de407d3f2669510941bdd325008b722427ad573b1",
     "tools/promotion_unit_tests/test_windows_lease_acl.py": "492028d8627d012268682cdcfe90b451bd110e74bc996707a3b7889466970e89",
     "plugins/agent-bridge/src/agent_bridge/live_turn_state.py": "7cc256ae9df554f76101c4519c38da6f000408e507ef1edfa6fc971a5b5d013f",
     "plugins/agent-worktrees/scripts/anchor_shell_parser.py": "c6a423ba34a9b4922dc57d2394f7708510cb31c290e41e18172e2c3187939c16",
