@@ -174,6 +174,7 @@ def test_shared_actual_stamp_first_use_admission(
     if state == "healthy-unicode" and os.name == "nt":
         assert wrapper.with_suffix(".ps1").read_bytes().startswith(b"\xef\xbb\xbf")
     forwarded = (
+        ["--help"] if plugin != "agent-codespaces" else
         [] if state == "healthy-empty" else ["version"] if state == "healthy-single" else
         ["ssh", "--remote-cmd", 'echo "spaces & pipes | semicolons ; bangs !"']
     )
@@ -347,13 +348,14 @@ def test_actual_restamp_failure_preserves_previous_selection(
 
 
 @pytest.mark.portfolio_tier("T3")
-@pytest.mark.parametrize(("plugin", "healthy"), [
-    ("agent-vault", False), ("agent-codespaces", False), ("agent-codespaces", True),
+@pytest.mark.parametrize(("plugin", "invocation"), [
+    ("agent-vault", "cold"), ("agent-codespaces", "cold"),
+    ("agent-codespaces", "healthy"), ("agent-codespaces", "healthy-numeric"),
 ])
 @pytest.mark.parametrize("namespaced", [False, True])
 @pytest.mark.parametrize("managed", [False, True])
 def test_payload_uses_selected_publication_policy(
-    binding_fixture: dict, plugin: str, healthy: bool, namespaced: bool, managed: bool,
+    binding_fixture: dict, plugin: str, invocation: str, namespaced: bool, managed: bool,
 ) -> None:
     environment = _adopter(binding_fixture, plugin)
     root = binding_fixture["legacy"]
@@ -388,7 +390,7 @@ def test_payload_uses_selected_publication_policy(
         prefix + "_PAYLOAD_ROOT": str(binding_fixture["payload"]),
     })
     shell = "powershell" if os.name == "nt" else "bash"
-    if healthy:
+    if invocation.startswith("healthy"):
         python = _completed_slot({**binding_fixture, "legacy": root})
         site = python.parent.parent / (
             "Lib/site-packages" if os.name == "nt" else
@@ -397,13 +399,24 @@ def test_payload_uses_selected_publication_policy(
         (site / "agent_codespaces.py").write_text(
             'import json, os, sys\n'
             f'assert os.environ["AGENT_CODESPACES_HOME"] == {str(root)!r}\n'
+            'assert all(isinstance(value, str) for value in sys.argv)\n'
             'print(json.dumps(sys.argv[1:]))\n', encoding="utf-8",
         )
         forwarded = ["ssh", "--remote-cmd", 'echo "spaces & pipes | semicolons ; bangs !"']
+        command = [*_command(binding_fixture, shell, "runtime-gate"), *forwarded]
+        if invocation == "healthy-numeric":
+            forwarded = ["prune", "--max", "5"]
+            if os.name == "nt":
+                script = str(binding_fixture["payload"] / "scripts/runtime-gate.ps1").replace("'", "''")
+                command = [
+                    POWERSHELL, "-NoLogo", "-NoProfile", "-Command",
+                    f"$limit = 5; & '{script}' prune --max $limit; exit $LASTEXITCODE",
+                ]
+            else:
+                command = [*_command(binding_fixture, shell, "runtime-gate"), *forwarded]
         legacy_before = _snapshot(binding_fixture["legacy"])
         result = _run(
-            binding_fixture, environment,
-            [*_command(binding_fixture, shell, "runtime-gate"), *forwarded],
+            binding_fixture, environment, command,
         )
         assert result.returncode == 0, result.stdout + result.stderr
         assert json.loads(result.stdout.splitlines()[-1]) == forwarded

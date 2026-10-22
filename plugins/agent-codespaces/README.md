@@ -143,9 +143,10 @@ intact. Resolver destinations must be files, not directories.
 The global command binds configuration and provisioning to its installed root.
 The generated PowerShell command uses UTF-8 with a BOM so Windows PowerShell
 5.1 preserves non-ASCII installation paths.
-PowerShell's legacy native argument mode encodes forwarded arguments before
-module execution to preserve embedded quotes; newer native argument passing
-retains direct module invocation.
+PowerShell's legacy native argument mode stringifies and encodes forwarded
+arguments before module execution to preserve embedded quotes and native
+argument conversion; newer native argument passing retains direct module
+invocation.
 
 ## Configuration
 

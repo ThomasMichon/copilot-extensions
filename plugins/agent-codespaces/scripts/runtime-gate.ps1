@@ -4,7 +4,7 @@ Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue
 Remove-Item Env:PYTHONHOME -ErrorAction SilentlyContinue
 $OutputEncoding = [Console]::OutputEncoding = New-Object Text.UTF8Encoding($false)
 
-$forwardArgs = @($args)
+$forwardArgs = [string[]]@($args)
 $payloadRoot = [Environment]::GetEnvironmentVariable('AGENT_CODESPACES_PAYLOAD_ROOT', 'Process')
 if (-not $payloadRoot -or -not (Test-Path -LiteralPath $payloadRoot -PathType Container)) {
     [Console]::Error.WriteLine('[agent-codespaces] owning payload root is unavailable.')
