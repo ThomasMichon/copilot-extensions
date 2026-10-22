@@ -141,16 +141,13 @@ development-venue lanes are inapplicable. Complete same-head Windows
 qualification and normal-group performance remain open.
 
 Prior F disposition: #7842 actually merged as
-`b921cd03708bb5aa38453ab5e8d16aaee32168ff`, after full exact-head
-review `5612689693` approved `8f0d39463602b836924e1c187db9be58d4f3461f`.
-Both High findings were reproduced and fixed; all overview/inline/general
-channels were read and all threads resolved. All 62 consumer/helper and
+`b921cd03708bb5aa38453ab5e8d16aaee32168ff`. All 62 consumer/helper and
 59 landing nodes passed without skips in exhaustive bounded functional
 groups, with every original guard retained. One earlier run failed the
 host-state guard on an unattributed machine-PATH change and receives no
 pass credit; an unchanged-head recheck passed the intact guard. The
-source effort was reread/journaled, F's child finalized and its parent
-claim settled. Neither F nor G completes #5694/#5682.
+normal-group and complete-suite performance obligations remain open.
+Neither F nor G completes #5694/#5682.
 
 ### F batched upstream blob comparison
 
