@@ -8,6 +8,35 @@ The names below identify logical operations, not published routes, wire schemas
 or new `OperationIntent` commands. Review of this document does not transfer
 Gateway, authentication, credential-provider or deployment ownership.
 
+## Available transport and retained gaps
+
+The current [opt-in service Gateway](../../../fleet-manager/docs/gateway-service-profile.md)
+supplies authenticated TLS HTTP routing through outbound service channels,
+explicit caller/slot/method grants and bounded response streaming. It is not
+the older [static index/credential Gateway](../../../fleet-manager/docs/gateway-runtime.md);
+ordinary Gateway invocation retains that older profile unchanged. Neither
+profile already implements the PR operations proposed below.
+
+The service profile currently bounds request bodies to 32 KiB, requests to
+60 seconds and pending requests to 32 globally / 8 per channel. PR batches
+and polling must fit those limits; a Gateway request is not a durable wait.
+It strips caller credentials, cookies and client identity headers before
+forwarding to the backend. Its caller admission therefore does not, by itself,
+give a PR backend trusted consumer/account context or supply forge credentials
+to its worker. The owners must agree that context and its verification point
+before remote registrations can be attributed to a consumer.
+
+The [adoption readiness record](../../../fleet-manager/docs/gateway-adoption-readiness.md)
+separates generic source and isolated native amd64/ARM64 qualification from
+actual provider/live-edge interoperability, durable accepted-revision custody,
+install/update/drain and managed placement. The initial generic campaign
+#7257 is archived via #7343, with native qualification in #7393/#7436;
+its provider/live-edge follow-ons and #5789/#6804, #6240/#6424 and #6030
+remain retained gates. Those proofs are not PR-service acceptance or deployment
+approval. The [runtime admission library](../../../fleet-manager/docs/runtime-admission.md)
+and its isolated authority snapshot/serialized permit are not a substitute
+for the actual serving, backend delegation and external-effect boundary.
+
 ## First vertical slice
 
 One operator's clients register PR watches with one explicitly selected PR
@@ -111,12 +140,14 @@ through its operator's configured provider binding, renewing at the actual
 HTTP/Git boundary. Watch access is not permission to mutate a PR or administer
 the fleet. A token label cannot downscope a provider's broader credential.
 
-The current Gateway enrollment/credential path is index-specific. A PR worker
-must not masquerade as `index-worker`, invent corpus/source values, or forward
-ambient credentials to bypass that gap. The retained owners must agree the
-PR-worker binding, permitted action/resource/account and provider-result
-validation before production consumption. Existing provider custody, expiry,
-revocation and provider/OS session longevity remain authoritative.
+The older Gateway enrollment/credential path is index-specific; the opt-in
+generic service profile does not add a PR-worker forge credential binding.
+A PR worker must not masquerade as `index-worker`, invent corpus/source
+values, or forward ambient credentials to bypass that gap. The retained
+owners must agree the PR-worker binding, permitted action/resource/account
+and provider-result validation before production consumption. Existing
+provider custody, expiry, revocation and provider/OS session longevity remain
+authoritative.
 
 No secret enters registration state, replay records, images, manifests, argv
 or diagnostics. Actual provider challenges are visible; no periodic human

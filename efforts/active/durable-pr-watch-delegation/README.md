@@ -211,7 +211,7 @@ _Operator-required scope; agent-recommended implementation and validation._
 
 ### Phase 4 - Deploy and close _(agent-recommended)_
 
-- [ ] Confirm promotion of the changed source to the release branch by content, then deploy through the unified update surface. Prerequisite promotion and content are confirmed in #7291. An operator-authorized local unified update installs the PR-owner runtime but exits nonzero on independent construction/profile failures. The dispatch integration source landed in #7714; its release content, authorized rollout and complete isolated installed-contract proof remain to be confirmed. No new deployed-runtime changes are authorized by the source merge.
+- [ ] Confirm promotion of the changed source to the release branch by content, then deploy through the unified update surface. Prerequisite promotion and content are confirmed in #7291. An operator-authorized local unified update installs the PR-owner runtime but exits nonzero on independent construction/profile failures. The dispatch integration source landed in #7714 and is content-confirmed in release #7751 (Dispatch `0.18.41-dev1`, PR-owner `0.3.36-dev1`); authorized rollout and complete isolated installed-contract proof remain open. No new deployed-runtime changes are authorized by the source merge or release.
 - [ ] Exercise the deployed contract in isolated state without interrupting shared coordinators, watch subscriptions, or peer sessions.
 - [ ] Complete the fleet service acceptance in the linked plan on explicitly
   approved capacity, including persistent registration/delivery and the actual
@@ -255,6 +255,37 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-10-21 - Record release and reconcile the available Gateway contract
+
+- #7752 merged the post-delegation effort reconciliation. The canonical effort
+  remains Active; that documentation merge does not complete another runtime
+  or fleet requirement.
+- #7751 promoted the delegation in successful Main-owned run `39718096362`.
+  Release content pinned at `e247cd4429d8dd760eafdc488633b8ec680a8c7b`
+  matches all 27 changed production files from #7714 after only canonical
+  installer-engine vendoring rewrites and the verified human-output digest.
+  Dispatch `0.18.41-dev1` and PR-owner `0.3.36-dev1` are released, pending
+  authorized rollout; no installed or running-state proof follows from this.
+- Reconciled the [consumer contract](pr-service-contract.md) to the available
+  opt-in generic service Gateway rather than describing all Gateway access as
+  index-specific. Its authenticated bounded transport is reusable, but stripped
+  caller identity/credentials do not establish PR backend consumer/account
+  authority or a PR worker's forge credential binding.
+- Sent retained-owner requests on [#7188](https://github.com/ThomasMichon/copilot-extensions/issues/7188#issuecomment-6332334124)
+  and [#6443](https://github.com/ThomasMichon/copilot-extensions/issues/6443#issuecomment-6332334793)
+  for the trusted backend context, actual serving/admission/delegation/effect
+  boundary, PR-worker account/repository/action and provider-result validation,
+  renewal/revocation, and persistent namespace/single-writer lifecycle.
+  No subsequent agreement was present at this reconciliation. All five
+  consumer-contract agreement items remain open; a posted request is not an
+  owner receipt or a reservation of another campaign's files.
+- Next source gate is that retained-owner agreement, including the declared
+  offer and request/response bounds plus request reconciliation and bounded
+  replay/ACK semantics. Do not wire unsupported routes, impersonate an index
+  role, treat an isolated permit as backend authority, or start a second
+  controller. Installed credentials/adoption/governed lifecycle, explicitly
+  authorized rollout and actual fleet/Gateway acceptance remain unresolved.
 
 ### 2026-10-21 - Merge fenced delegation and retain the parent completion gate
 
