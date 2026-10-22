@@ -296,8 +296,43 @@ first, then separately apply the existing queue recovery when required.
 Deleting control files or rotating roots is not recovery.
 
 This is the producer/core contract and its qualification, not an enabled cold
-bootstrap. No ordinary entry point writes these records yet; standalone bundle
-construction, publication and first-use adapters remain separate work.
+bootstrap. No ordinary entry point writes these records yet; native cold
+construction admission and first-use adapters remain separate work.
+
+### Fixed foundation construction participant
+
+`scripts/foundation-build.py` constructs only this library plus the canonical
+`agent-procutil` and `single-instance-lease` sibling packages. The fixed
+manifests, local references and complete non-generated source inventory must
+match admission. This raw-source closure is identical in shape on development
+and materialized payloads. Existing installer-engine/versioned-runtime sync
+owners supply its byte-identical construction helpers; Manager and plugin
+runtimes are not dependencies.
+
+The internal participant requires a live borrowed execution witness and
+matching running foundation progress **before staging**. It consumes the
+witness before package children, freezes the admitted source, and uses canonical
+`numbered_candidate` construction, non-editable dependency governance, installed
+health and process retention. It reasserts custody and source identity before
+link-free activation. Native admission remains the sole progress completer.
+There is no arbitrary command/package recipe or unlocked construction mode.
+Invoke its interpreter with `-I -B -X utf8`; the entrypoint supplies only its
+fixed package/helper import paths.
+
+The canonical runtime root is `<execution-root>/foundation`. Slots are named
+`foundation-<full-input-sha256>`; that is a content-addressed foundation name,
+not a Git commit or a rewritten distribution version. Ordinary canonical
+completion and current/last-known-good selectors own publication. Exact input
+hashes distinguish same-package-version changes, and failed/unhealthy
+construction never selects an incomplete slot. Foundation discovery must bind
+the expected complete slot and protocol, never choose another source by age or
+lexicographic fallback. Existing retained workers and queue state remain under
+the same execution root; bootstrap interpreter files must outlive any dependent
+venv and are not removed by this participant.
+
+This is the bounded construction participant, not yet a Python-free native
+producer or first-use integration. It does not acquire a bootstrap interpreter,
+write admission/completion records or modify a plugin publisher.
 
 Worker queue-startup acknowledgement is not an execution/completion claim.
 A worker failing before queue startup records a visible pending launch error;
@@ -351,3 +386,19 @@ Synthetic ABI and dispatch tests cover its construction and refusal paths;
 macOS-only native lifetime tests remain separately runnable. This change's
 recorded production-lifetime execution is Windows, not a Linux/macOS native
 lifetime or real-reboot qualification claim.
+
+Real foundation construction is a separate opt-in lane:
+
+```powershell
+$env:UPDATE_DRIVER_FOUNDATION_BUILD='1'
+python tools\run-plugin-tests.py update-driver --test-file tests/test_foundation_build_process.py --test-timeout 300 --timeout 360
+```
+
+It requires uv and an available seasoned build backend, uses a fresh isolated
+cache/root, constructs twice to check unchanged completion bytes, removes the
+input source and exercises installed health and the retained finite worker.
+It never installs the host foundation or provisions a plugin. A preinstalled
+test interpreter is not Python-free genesis evidence. The manual `foundation`
+portfolio of `installation-context-full.yml` runs this bounded lane on fresh
+Windows and Ubuntu runners without adding native/network work to required
+unit-only PR CI.

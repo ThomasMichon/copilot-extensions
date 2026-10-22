@@ -11,6 +11,13 @@ of — link here rather than restating any of it.
 
 ## Standalone PR job admission
 
+The existing manual `installation-context-full.yml` workflow additionally accepts
+`portfolio: foundation` for bounded Windows/Ubuntu foundation construction and
+custody qualification. Its scheduled/default `context` portfolio is unchanged;
+the two portfolios do not run together. This explicit integration lane has a
+15-minute per-host job deadline and is not a required unit-only PR or promotion
+job. It does not qualify Python-free genesis or authorize a host rollout.
+
 Source CI contains three jobs: operational `checks`, combined impact/execution
 in `unit-tests`, and the fixed-name `PR gate (required check)`. The unit job
 reads the actual PR base/head diff before installing test tooling or executing

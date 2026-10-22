@@ -30,7 +30,7 @@ _NATIVE_BEGIN = "# native-executable:begin"
 _NATIVE_END = "# native-executable:end"
 PYTHON_FILES = ("installer_engine.py", "installer_engine_process.py", "runtime_launcher.py")
 PYTHON_ADOPTERS = ("agent-worktrees",)
-STANDALONE_PYTHON_ADOPTERS = ("worktree-manager",)
+STANDALONE_PYTHON_ADOPTERS = ("worktree-manager", "libs/update-driver")
 
 
 def standalone_python_adopter_dirs(repo: Path) -> tuple[Path, ...]:

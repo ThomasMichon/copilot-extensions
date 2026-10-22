@@ -1,0 +1,13 @@
+{
+  "comment": "Package the fixed standalone installation foundation closure and retained construction participant without enabling first-use publishers",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
