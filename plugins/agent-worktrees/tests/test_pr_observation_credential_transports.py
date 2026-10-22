@@ -9,13 +9,10 @@ import sys
 import threading
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path
 from urllib.request import HTTPSHandler, ProxyHandler, build_opener
 
 import pytest
-from cryptography import x509
-from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import rsa
-from cryptography.x509.oid import NameOID
 
 from agent_worktrees.providers import github
 from agent_worktrees.providers.azure_devops import AzureDevOpsProvider
@@ -61,6 +58,12 @@ def test_actual_native_subprocess_receives_each_renewal_without_token_argv(tmp_p
 
 
 def certificate(tmp_path):
+    pytest.importorskip("cryptography")
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from cryptography.x509.oid import NameOID
+
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "loopback fixture")])
     now = datetime.now(timezone.utc)
@@ -79,6 +82,24 @@ def certificate(tmp_path):
                                          serialization.PrivateFormat.PKCS8,
                                          serialization.NoEncryption()))
     return cert_path, key_path
+
+
+def test_subprocess_controls_remain_collectable_without_cryptography():
+    path = Path(__file__).resolve()
+    code = (
+        "import importlib.abc, runpy, sys\n"
+        "class NoCrypto(importlib.abc.MetaPathFinder):\n"
+        "    def find_spec(self, name, path=None, target=None):\n"
+        "        if name == 'cryptography' or name.startswith('cryptography.'):\n"
+        "            raise ImportError('fixture: unavailable cryptography')\n"
+        "sys.meta_path.insert(0, NoCrypto())\n"
+        "sys.path.insert(0, sys.argv[1])\n"
+        "module = runpy.run_path(sys.argv[2])\n"
+        "assert callable(module['test_actual_native_subprocess_receives_each_renewal_without_token_argv'])\n"
+        "assert not any(name.startswith('cryptography') for name in sys.modules)\n"
+    )
+    result = run_cli([sys.executable, "-c", code, str(path.parent), str(path)])
+    assert result.returncode == 0, result.stderr
 
 
 @pytest.mark.parametrize("fail_at", [None, 2])

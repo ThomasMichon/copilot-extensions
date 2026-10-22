@@ -65,7 +65,7 @@ def credentials(source):
 @pytest.mark.parametrize("field,value", [
     ("provider", "azure-devops"), ("api_base", "https://other.example"),
     ("repository", "other/repository"), ("permission", "write"),
-    ("authentication", "basic-pat"), ("authentication", "unknown"),
+    ("authentication", "basic"), ("authentication", "unknown"),
 ])
 def test_wrong_binding_is_refused(field, value):
     source = Source(replace(Binding(), **{field: value}))
@@ -233,7 +233,7 @@ def ado_reader(source, monkeypatch):
     ), opener
 
 
-@pytest.mark.parametrize("authentication", ["basic-pat", "bearer"])
+@pytest.mark.parametrize("authentication", ["basic", "bearer"])
 def test_ado_renews_each_continuation_page_and_preserves_authentication(monkeypatch, authentication):
     source = Source(ado_binding(authentication))
     reader, opener = ado_reader(source, monkeypatch)
@@ -243,7 +243,7 @@ def test_ado_renews_each_continuation_page_and_preserves_authentication(monkeypa
     assert source.calls == len(opener.calls) == 2
     for index, request in enumerate(opener.calls, 1):
         scheme, value = request.get_header("Authorization").split(" ", 1)
-        if authentication == "basic-pat":
+        if authentication == "basic":
             assert scheme == "Bas" + "ic"
             assert base64.b64decode(value).decode() == ":synthetic-" + str(index)
         else:
@@ -257,6 +257,13 @@ def test_ado_source_loss_aborts_best_effort_collection(monkeypatch):
     with pytest.raises(ObservationCredentialError):
         reader.collection(reader.base, continuation_paging=True)
     assert len(opener.calls) == 1 and source.calls == 2
+
+
+def test_ado_refuses_noncanonical_authentication_before_emitting(monkeypatch):
+    reader, opener = ado_reader(Source(ado_binding("basic-pat")), monkeypatch)
+    with pytest.raises(ObservationCredentialError, match="binding mismatch"):
+        reader.pr()
+    assert not opener.calls
 
 
 def test_ado_refuses_other_endpoint_before_acquiring_or_emitting(monkeypatch):

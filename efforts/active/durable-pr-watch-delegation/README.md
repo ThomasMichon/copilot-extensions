@@ -512,6 +512,13 @@ callback an implicit credential store.
   downscoping or a running Fleet deployment. Fresh-machine installation is
   unchanged; production credentials, remote activation and rollout are outside
   this source-only slice.
+- Review of #7954 caught two concrete integration gaps: the exchange's canonical
+  ADO PAT authentication discriminator is `basic`, not a new consumer-specific
+  label, and Windows ARM64 must collect subprocess controls without the optional
+  cryptography package. Corrected the consumer/fixtures/docs, added refusal of
+  the noncanonical label, and moved TLS-only imports behind a per-fixture
+  optional dependency check. All 44 focused cases passed, including a real
+  child process that blocks cryptography imports while collecting the module.
 - The source child remains open pending normal review/merge. The native
   process-boundary credential loader/PR-service adapter is still unimplemented;
   do not mark the parent credential, consumer-contract or fleet acceptance

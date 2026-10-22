@@ -141,7 +141,7 @@ permission, a nonempty unexpired token, and compatible authentication.
 GitHub uses `bearer`, with `https://api.github.com` for the public host or
 `https://<host>/api/v3` for an Enterprise host. The selected source ignores
 ambient `GH_HOST` when no host is configured. ADO matches the configured
-organization endpoint without a trailing slash and preserves `basic-pat`
+organization endpoint without a trailing slash and preserves `basic` (PAT)
 versus `bearer`; bearer material is never encoded as a PAT.
 
 Acquisition occurs immediately before **each** native command or HTTP request,

@@ -63,7 +63,7 @@ class ObservationCredentials:
             or getattr(binding, "repository", None) != self.repository
             or getattr(binding, "permission", None) != "observe"
             or authentication not in (
-                ("bearer",) if self.provider == "github" else ("basic-pat", "bearer")
+                ("bearer",) if self.provider == "github" else ("basic", "bearer")
             )
         ):
             raise ObservationCredentialError("PR observation credential binding mismatch")
@@ -84,7 +84,7 @@ class ObservationCredentials:
         binding = material.forge
         if binding is None:
             raise ObservationCredentialError("PR observation credential binding mismatch")
-        if binding.authentication == "basic-pat":
+        if binding.authentication == "basic":
             scheme = "Bas" + "ic "
             value = base64.b64encode((":" + material.token).encode()).decode("ascii")
         else:
