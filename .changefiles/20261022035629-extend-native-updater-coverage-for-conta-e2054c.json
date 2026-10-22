@@ -1,0 +1,9 @@
+{
+  "comment": "Extend native updater coverage for Containers init output and first-stamp capture",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "dev"
+    }
+  ]
+}

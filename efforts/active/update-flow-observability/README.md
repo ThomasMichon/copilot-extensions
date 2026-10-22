@@ -282,6 +282,9 @@ bounded source delta inspection.
   the reused test environment. Both controls passed after explicitly exposing
   the plugin's declared local source-library closure; the complete final
   run above used that closure. No dependency was installed or policy relaxed.
+- The first PR guard required a Worktrees changefile even for its tests-only
+  diff. Added the required development entry rather than bypassing or
+  weakening that gate; the Worktrees runtime payload itself is unchanged.
 - Validation tiers: focused logic and native subprocess coverage passed;
   the real updater stamped an empty fixture home without constructing a
   runtime; same-root and separate-tree release fixtures passed. A full
