@@ -56,7 +56,7 @@ Retained means candidate ownership, not reviewed, passing or already landed.
 | C | 3 / committed-config absence probe | `inrepo_config_source.py`, `test_config.py:2`: literal NUL `ls-tree` candidate probe, no unsafe path globbing; absent candidates avoid blob reads; failure retains bounded ordered reads, deadline, precedence and diagnostics. Separate from Y/H. |
 | S | 3 / squash tree object reads | `finalize_ref.py:2`: one ordered two-tree probe; require exactly two complete SHA-1/SHA-256 IDs; empty base/no change/error retain refusal. Focused regression ownership is the existing real-Git no-ref-movement case plus ordered-read unit cases in `test_finalize_landing.py`, detailed below. |
 | F | 3 / upstream blob comparison | `finalize_ref.py:5` and the F-only test functions partitioned below: raw tree diff and exact object maps include deletion/type/path cases, malformed reads fail closed with warning. Reuses the existing `git_tree_diff` consumer API. |
-| G | 3 / creation-point gating | `finalize_open_pr_gate.py`, `finalize_ref.py:3-4`: skip unnecessary creation inference only after fresh zero-ahead proof; malformed counts/unknown creation remain conservative; local source shadowing, remote tips/reflogs and subsequent reset history still constrain publication. Separate from S/F; regression extraction unresolved. |
+| G | 3 / creation-point gating | `finalize_open_pr_gate.py`, `finalize_ref.py:3-4` and `test_finalize_creation_gating.py`: skip unnecessary creation inference only after fresh zero-ahead proof (or identical refs); malformed counts/unknown creation remain conservative; local source shadowing, remote tips/reflogs and subsequent reset history still constrain publication. Separate from S/F. |
 | P | 3 / publication transport evidence | `README.md`, `pr_publish.py`, `pr_rewrite.py`, `test_pr_remote_evidence.py`: one fresh fetch/push snapshot per decision; same slug on another host refused; literal remote-key regex, NUL framing, repeated/multiline/valueless settings and order retained; read errors prevent push; pinning, leases and later mutation checks remain real. |
 | R | 3 / replay tree evidence | `pr_rebase.py`, `test_pr_rebase_trees.py`: pinned complete commits, exact ordered raw trees, notes/signature/color/replacement/foreign Git context cannot substitute evidence; malformed/truncated/duplicate rows and timeout preserve refusal; parent reconstruction and raw author/message comparisons remain independent checks. |
 | A | 3 / atomic recovery retention | `pr_recovery.py`, `test_pr_recovery_batch.py`: fresh NUL-input commit resolution on each call; full SHA-1/SHA-256 IDs, missing/noncommit rejection; create-only transaction retains all refs or none on collision. Excludes remote publication authority and replay authorization. |
@@ -86,6 +86,71 @@ No hunk is assigned to a catch-all wave-6 implementation batch. Wave 6 is
 the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Admitted narrow batches
+
+### G fresh graph evidence before creation-history inference
+
+`_tracked_branch_ahead` omits a tautological identical-ref probe; every
+different tracked ref first supplies a fresh, valid nonnegative ASCII
+count. Zero needs no creation inference; positive counts still require
+the existing creation proof before any exclusion. `_extra_commit_count`
+similarly counts against the actual head and all qualified published
+bases first. Only zero short-circuits; a positive count with no creation
+proof stays positive, and unreadable/malformed counts stay unknown.
+The existing `published_bases` call contract is retained in both phases.
+
+`creation_point` batches the local-source shadow check and current remote
+tips in one full-ID query, then retains ancestry and source/remote-HEAD
+reflog fallbacks when needed. Failed or malformed tip reads return
+unknown. `_later_resets_to_source` avoids tip/reflog reads only when there
+is no reset anywhere after creation. The pinned oldest-move-only shortcut
+is deliberately not copied: current Dev recognizes a qualified reset
+after earlier local work, including resets across qualified published
+bases on the same remote. Existing shadow/remote/qualification checks
+and commits beyond that boundary remain unchanged.
+
+The five G-owned functions from the pinned mixed blob test are extracted
+into `test_finalize_creation_gating.py`, not into F's blob module. The
+real changed-branch case reuses the existing landing `_commit` helper
+instead of F's `_change`; the no-reset case uses the current
+`published_bases` signature. Additional cheap cases reject malformed
+first and second counts, validate both object-ID widths and shadowing,
+and prove a reset after earlier local work still reads qualified tips.
+Existing real-Git landing/precondition regressions retain the stronger
+reset and unpublished-follow-up contract.
+
+Native Windows focused G/F modules: 44 passed, zero skips, 38.75 seconds
+including preparation and cleanup. An unchanged normal landing-module
+group still exceeded its 240-second limit (244.70 seconds inclusive,
+return code 124); it receives no pass or qualification credit.
+All 59 landing and 65 precondition nodes then passed without skips in
+exhaustive disjoint functional groups of 20/20/19 and 25/25/15 nodes.
+Collection-to-group bijections prove no omitted or duplicated case.
+Group wall times were 42.42/172.27/107.58/42.69/30.38/37.26 seconds;
+447.42 seconds includes collection, preparation and cleanup.
+Exactly two workers retain every original item/group/native/process/
+memory bound and mark. Ruff and thirteen install contracts pass.
+These ad hoc functional groups do not alter or qualify normal runner
+grouping; no skip, exclusion, reduced selection or waiver is added.
+
+Documentation impact: this below-altitude internal optimization changes
+no public command/configuration or finalization safety boundary. This
+ledger records the G ownership and reconciliation. Real temporary Git
+histories provide the simple integration lane; no installation or
+first-provision behavior changes, so production clean-room and external
+development-venue lanes are inapplicable. Complete same-head Windows
+qualification and normal-group performance remain open.
+
+Prior F disposition: #7842 actually merged as
+`b921cd03708bb5aa38453ab5e8d16aaee32168ff`, after full exact-head
+review `5612689693` approved `8f0d39463602b836924e1c187db9be58d4f3461f`.
+Both High findings were reproduced and fixed; all overview/inline/general
+channels were read and all threads resolved. All 62 consumer/helper and
+59 landing nodes passed without skips in exhaustive bounded functional
+groups, with every original guard retained. One earlier run failed the
+host-state guard on an unattributed machine-PATH change and receives no
+pass credit; an unchanged-head recheck passed the intact guard. The
+source effort was reread/journaled, F's child finalized and its parent
+claim settled. Neither F nor G completes #5694/#5682.
 
 ### F batched upstream blob comparison
 

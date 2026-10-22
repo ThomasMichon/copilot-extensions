@@ -190,14 +190,23 @@ def _tracked_branch_ahead(
     from . import git_ops
     from .finalize_ref import creation_point
     for tracked in (feature, f"worktree/{worktree_id}"):
-        if not tracked or not git_ops.ref_exists(tracked, cwd=cwd):
+        if not tracked or tracked == current or not git_ops.ref_exists(tracked, cwd=cwd):
+            continue
+        ahead = git_ops.git(
+            "rev-list", "--count", tracked, f"^{current}", cwd=cwd, check=False,
+        )
+        count = ahead.stdout.strip()
+        if ahead.returncode != 0 or not count.isascii() or not count.isdigit():
+            return True
+        if int(count) == 0:
             continue
         created = creation_point(tracked, cwd)
+        if not created:
+            return True
         ahead = git_ops.git(
-            "rev-list", "--count", tracked, f"^{current}",
-            *([f"^{created}"] if created else []), cwd=cwd, check=False,
+            "rev-list", "--count", tracked, f"^{current}", f"^{created}", cwd=cwd, check=False,
         )
-        if ahead.returncode != 0 or ahead.stdout.strip() not in ("", "0"):
+        if ahead.returncode != 0 or ahead.stdout.strip() != "0":
             return True
     return False
 
@@ -710,16 +719,26 @@ def _extra_commit_count(
     if not git_ops.ref_exists(content_ref, cwd=cwd):
         return None
     bases = (upstream,) if isinstance(upstream, str) else upstream
-    created = creation_point(content_ref, cwd, published_bases=bases)
+    excluded = (f"^{head_sha}", *(f"^{u}" for u in bases))
     extra = git_ops.git(
-        "rev-list", "--count", content_ref, f"^{head_sha}",
-        *(f"^{u}" for u in bases),
-        *([f"^{created}"] if created else []), cwd=cwd, check=False,
+        "rev-list", "--count", content_ref, *excluded, cwd=cwd, check=False,
+    )
+    stripped = extra.stdout.strip()
+    if extra.returncode != 0 or not stripped.isascii() or not stripped.isdigit():
+        return None
+    count = int(stripped)
+    if count == 0:
+        return count
+    created = creation_point(content_ref, cwd, published_bases=bases)
+    if not created:
+        return count
+    extra = git_ops.git(
+        "rev-list", "--count", content_ref, *excluded, f"^{created}", cwd=cwd, check=False,
     )
     if extra.returncode != 0:
         return None
     stripped = extra.stdout.strip()
-    return int(stripped) if stripped.isdigit() else None
+    return int(stripped) if stripped.isascii() and stripped.isdigit() else None
 
 
 def content_exceeds_merged_head(

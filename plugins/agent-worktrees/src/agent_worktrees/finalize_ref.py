@@ -118,20 +118,34 @@ def creation_point(ref: str, cwd: str, *, published_bases: tuple[str, ...] = ())
     remotes = git_ops.git("remote", cwd=cwd, check=False).stdout.split()
     if "/" not in source or source.partition("/")[0] not in remotes:
         return ""
-    if git_ops.git("rev-parse", "--verify", "-q", f"refs/heads/{source}", cwd=cwd,
-                   check=False).returncode == 0:
-        return ""  # a local branch with that name: the message can't tell which it was
     remote = source.partition("/")[0]
-    created = ""
-    for logged in (f"refs/remotes/{source}", f"refs/remotes/{remote}/HEAD"):  # HEAD logs a clone
-        tracked = git_ops.git("reflog", "show", "--format=%H", logged, "--", cwd=cwd, check=False)
-        if tracked.returncode == 0 and sha in {ln.strip() for ln in tracked.stdout.splitlines()}:
-            created = sha
-            break
-    if not created:
+    remote_prefix = f"refs/remotes/{remote}/"
+    refs_r = git_ops.git(
+        "for-each-ref", "--format=%(refname)%09%(objectname)",
+        f"refs/heads/{source}", remote_prefix, cwd=cwd, check=False,
+    )
+    if refs_r.returncode != 0:
+        return ""
+    remote_tips = set()
+    for line in refs_r.stdout.splitlines():
+        name, separator, object_id = line.partition("\t")
+        if not separator or not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", object_id):
+            return ""
+        if name == f"refs/heads/{source}":
+            return ""  # a local branch can shadow the source in the creation message
+        if name.startswith(remote_prefix):
+            remote_tips.add(object_id)
+    created = sha if sha in remote_tips else ""
+    if not created and remote_tips:
         held_now = git_ops.git("for-each-ref", "--count=1", "--contains", sha, "--format=%(refname)",
-                               f"refs/remotes/{remote}/", cwd=cwd, check=False)
+                               remote_prefix, cwd=cwd, check=False)
         created = sha if held_now.returncode == 0 and held_now.stdout.strip() else ""
+    if not created:
+        for logged in (f"refs/remotes/{source}", f"refs/remotes/{remote}/HEAD"):  # HEAD logs a clone
+            tracked = git_ops.git("reflog", "show", "--format=%H", logged, "--", cwd=cwd, check=False)
+            if tracked.returncode == 0 and sha in {ln.strip() for ln in tracked.stdout.splitlines()}:
+                created = sha
+                break
     return _later_resets_to_source(entries, created, source, published_bases, cwd) if created else ""
 
 
@@ -144,6 +158,11 @@ def _later_resets_to_source(
     Commits beyond that tip remain outside this boundary, including empty or
     reverted commits; other tracked PR branches are checked separately.
     """
+    if not any(
+        entry.partition("\t")[2].startswith(("branch: Reset to ", "reset: moving to "))
+        for entry in entries[:-1]
+    ):
+        return created
     prefix = f"refs/remotes/{source.partition('/')[0]}/"
     sources = {f"refs/remotes/{source}"} | {b for b in published_bases if b.startswith(prefix)}
     held: set[str] = set()
