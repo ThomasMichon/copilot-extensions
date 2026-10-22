@@ -48,13 +48,42 @@ emit_session_start_json() {
   fi
 }
 trap 'emit_session_start_json' EXIT
-legacy_mutation_allowed() {
-  local probe="$ScriptDir/installation-context/legacy-entrypoint-probe.sh"
-  [ -f "$probe" ] || {
-    echo "[agent-machines] legacy mutation probe is unavailable; skipping reconcile." >&2
-    return 1
-  }
-  bash "$probe" --payload-root "$PluginDir" --legacy-root "$HOME/.agent-machines"
+assert_bootstrap_publication() {
+  if [[ "$ContextSelected" == 1 ]]; then
+    # Context validity selects the root; publication still needs its own decision.
+    local probe="" code=0
+    local publication_args=("${statusArgs[@]}")
+    publication_args[0]=probe-plugin-publication
+    probe="$(bash "$resolver" "${publication_args[@]}")" || code=$?
+    publication_value() {
+      LC_ALL=C awk -f "$query" -v mode="$1" -v query_path="$2" <<<"$probe" 2>/dev/null
+    }
+    if [[ "$code" == 0 &&
+          "$(publication_value type $'deployment\034allowPluginPublication')" == boolean &&
+          "$(publication_value get $'deployment\034allowPluginPublication')" == true &&
+          "$(publication_value get status)" == ready &&
+          "$(publication_value get reason)" == namespaced-active &&
+          "$(publication_value get actualMode)" == namespaced &&
+          "$(publication_value get runtimeRoot)" == "$InstallDir" &&
+          "$(publication_value get context)" == "$ContextPath" &&
+          "$(publication_value get $'deployment\034path')" == "$InstallDir/runtime-deployment.json" ]]; then
+      return 0
+    fi
+    printf '[agent-machines] Runtime publication refused: %s\n' "$probe" >&2
+  else
+    local helper="$ScriptDir/installation-context/plugin-publication-probe.sh"
+    if [[ -f "$helper" ]]; then
+      bash "$helper" "$PluginDir" agent-machines "$InstallDir" && return 0
+    else
+      local policy="$InstallDir/runtime-deployment.json" ancestor="$InstallDir"
+      while [[ ! -e "$ancestor" && ! -L "$ancestor" ]]; do ancestor="$(dirname -- "$ancestor")"; done
+      if [[ -d "$ancestor" && -r "$ancestor" && -x "$ancestor" &&
+            ! -e "$policy" && ! -L "$policy" ]]; then return 0; fi
+      printf '[agent-machines] Runtime publication refused: deployment policy requires a capable installation helper.\n' >&2
+    fi
+  fi
+  printf '[agent-machines] Runtime publication refused: bootstrap admission did not succeed. Use explicit installation management to repair it.\n' >&2
+  exit 3
 }
 ContextSelected=0
 ContextActive=0
@@ -186,6 +215,7 @@ if [ ! -f "$Manifest" ]; then
     if [ "$ContextActive" = 1 ]; then
       init="$PluginDir/scripts/init.sh"
       if [ -f "$init" ]; then
+        assert_bootstrap_publication
         echo "[agent-machines] active cell has no runtime; reconciling in background..." >&2
         cd "$HOME" || { echo "reconcile launch failed: HOME is unavailable" >&2; exit 1; }
         nohup bash "$init" cell-provision \
@@ -197,7 +227,7 @@ if [ ! -f "$Manifest" ]; then
   fi
   _init="$ScriptDir/init.sh"
   if [ -f "$_init" ] && grep -q 'stamp)' "$_init" 2>/dev/null; then
-    legacy_mutation_allowed || exit 0
+    assert_bootstrap_publication
     bash "$_init" stamp >/dev/null 2>&1 || true
   fi
   exit 0
@@ -280,6 +310,7 @@ print("\x1c".join((
   fi
   init="$PluginDir/scripts/init.sh"
   [ -f "$init" ] || exit 0
+  assert_bootstrap_publication
   echo "[agent-machines] active cell payload $deployed -> $current (runtime $activeVersion); reconciling in background..." >&2
   cd "$HOME" || { echo "reconcile launch failed: HOME is unavailable" >&2; exit 1; }
   nohup bash "$init" cell-provision \
@@ -305,7 +336,7 @@ if [ -x "$Binstub" ] && [ "$deployed" = "$current" ]; then exit 0; fi
 init="$pluginDir/scripts/init.sh"
 [ -f "$init" ] || exit 0
 
-legacy_mutation_allowed || exit 0
+assert_bootstrap_publication
 echo "[agent-machines] runtime $deployed -> $current; reconciling in background..." >&2
 cd "$HOME" || { echo "reconcile launch failed: HOME is unavailable" >&2; exit 1; }
 nohup bash "$init" >/dev/null 2>&1 &

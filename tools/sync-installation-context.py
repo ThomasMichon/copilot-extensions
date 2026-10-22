@@ -72,6 +72,7 @@ ADOPTERS = (
     "agent-ssh",
     "agent-vault",
     "agent-worktrees",
+    "budget-guidance",
 )
 LEGACY_ENTRYPOINT_ADOPTERS = ("agent-machines", "agent-index")
 

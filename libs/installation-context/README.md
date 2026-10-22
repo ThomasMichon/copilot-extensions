@@ -26,8 +26,11 @@ cells. Mutation remains explicit and non-automatic:
   Both publication and installation-mode admission must allow mutation of the
   same legacy root. They emit no success output, diagnose refusal on stderr
   and exit 3 without publishing, provisioning or installing an interpreter.
-  The common CodeSpaces/Logger/Pull Requests/Vault bootstrap calls this adapter
+  The CodeSpaces/Logger/Pull Requests/Vault family and the
+  Bridge/Dispatch/Containers/MCP/Budget Guidance bootstraps call this adapter
   before first stamping or drift-reconcile reaping, locking and dispatch.
+  Machines uses it for legacy publication and probes its independently
+  validated selected cell directly; context selection alone is not permission.
   Healthy current runtimes remain a read-only no-op; independent session hooks
   retain their separate invocation. An older helperless bootstrap retains
   standalone behavior only when its deployment policy is absent.

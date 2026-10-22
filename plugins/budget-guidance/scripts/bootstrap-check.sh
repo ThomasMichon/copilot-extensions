@@ -54,6 +54,20 @@ emit_session_start_json() {
 trap 'emit_session_start_json' EXIT
 name="budget-guidance"
 InstallDir="$HOME/.$name"
+assert_bootstrap_publication() {
+  local helper="$ScriptDir/installation-context/plugin-publication-probe.sh"
+  if [[ -f "$helper" ]]; then
+    bash "$helper" "$PluginDir" "$name" "$InstallDir" && return 0
+  else
+    local policy="$InstallDir/runtime-deployment.json" ancestor="$InstallDir"
+    while [[ ! -e "$ancestor" && ! -L "$ancestor" ]]; do ancestor="$(dirname -- "$ancestor")"; done
+    if [[ -d "$ancestor" && -r "$ancestor" && -x "$ancestor" &&
+          ! -e "$policy" && ! -L "$policy" ]]; then return 0; fi
+    printf '[%s] Runtime publication refused: deployment policy requires a capable installation helper.\n' "$name" >&2
+  fi
+  printf '[%s] Runtime publication refused: bootstrap admission did not succeed. Use explicit installation management to repair it.\n' "$name" >&2
+  exit 3
+}
 Manifest="$InstallDir/deploy-manifest.json"
 if [ ! -f "$Manifest" ]; then
   # Not provisioned yet -- do the cheap FIRST install (stamp) so the binstub is
@@ -64,6 +78,7 @@ if [ ! -f "$Manifest" ]; then
     if [ -f "$candidate" ] && grep -qE '^[[:space:]]*([[:alnum:]_-]+\|)*stamp(\|[[:alnum:]_-]+)*\)' "$candidate" 2>/dev/null; then installer="$candidate"; break; fi
   done
   if [ -n "$installer" ]; then
+    assert_bootstrap_publication
     bash "$installer" stamp >/dev/null 2>&1 || true
   fi
   exit 0
@@ -112,6 +127,8 @@ elif [ -f "$PluginDir/scripts/install.sh" ]; then
 else
   exit 0
 fi
+
+assert_bootstrap_publication
 
 # --- Good boot-citizen guard: single-flight + stale-reap ---
 # This hook fires on EVERY new session now that the opt-in gate is gone

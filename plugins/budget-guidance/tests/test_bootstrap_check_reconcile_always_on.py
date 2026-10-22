@@ -31,12 +31,22 @@ _SH = _PLUGIN_ROOT / "scripts" / "bootstrap-check.sh"
 # only to prove a stale leftover key from before this gate's removal is
 # now inert (see test_sh_reconciles_even_with_stale_opt_in_key_present).
 _OPT_IN_KEY = f"background_reconcile_{_PLUGIN_NAME}"
-# Resolve bash to its FULL path rather than invoking the bare command name: on
-# Windows, a Windows App Execution Alias can intercept a bare "bash.exe"
-# process-creation call (routing it to WSL) even when shutil.which() finds
-# Git Bash first on PATH -- the alias interception happens below PATH search,
-# at CreateProcess time, unless the explicit resolved path is used.
-_BASH = shutil.which("bash")
+def _resolve_bash() -> str | None:
+    if os.name != "nt":
+        return shutil.which("bash")
+    git_bash = Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "Git/bin/bash.exe"
+    if git_bash.is_file():
+        return str(git_bash)
+    # WSL launchers cannot consume these native Windows fixture paths.
+    system32 = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32"
+    filtered = os.pathsep.join(
+        part for part in os.environ.get("PATH", "").split(os.pathsep)
+        if "windowsapps" not in part.lower() and Path(part) != system32
+    )
+    return shutil.which("bash", path=filtered)
+
+
+_BASH = _resolve_bash()
 
 
 def test_hook_scripts_exist():

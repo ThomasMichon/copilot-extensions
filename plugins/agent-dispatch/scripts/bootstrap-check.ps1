@@ -51,6 +51,30 @@ function Exit-SessionStart {
     exit 0
 }
 $PluginDir = Split-Path -Parent $PSScriptRoot
+function Assert-BootstrapPublication {
+    $helper = Join-Path $PSScriptRoot 'installation-context\plugin-publication-probe.ps1'
+    if ([IO.File]::Exists($helper)) {
+        try {
+            $global:LASTEXITCODE = 3
+            & $helper -PayloadRoot $PluginDir -PluginId $name -LegacyRoot $InstallDir
+            if ($LASTEXITCODE -eq 0) { return }
+        } catch {
+            [Console]::Error.WriteLine($_.Exception.Message)
+        }
+    } else {
+        try {
+            $null = Get-Item -LiteralPath (Join-Path $InstallDir 'runtime-deployment.json') -Force -ErrorAction Stop
+        } catch [System.Management.Automation.ItemNotFoundException] {
+            return
+        } catch {
+            [Console]::Error.WriteLine($_.Exception.Message)
+        }
+        [Console]::Error.WriteLine("[$name] Runtime publication refused: deployment policy requires a capable installation helper.")
+    }
+    [Console]::Error.WriteLine("[$name] Runtime publication refused: bootstrap admission did not succeed. Use explicit installation management to repair it.")
+    Write-SessionStartJson
+    exit 3
+}
 $reconcileMutex = $null
 $ownsReconcileMutex = $false
 try {
@@ -68,6 +92,7 @@ try {
             Where-Object { (Test-Path $_) -and (Select-String -Path $_ -Pattern "'stamp'" -Quiet) } |
             Select-Object -First 1
         if ($stampInst) {
+            Assert-BootstrapPublication
             $pw = Get-Command pwsh -ErrorAction SilentlyContinue
             $exe = if ($pw) { $pw.Source } else { 'powershell.exe' }
             & $exe -NoProfile -ExecutionPolicy Bypass -File $stampInst stamp *> $null
@@ -107,6 +132,8 @@ try {
         if (-not (Test-Path $inst)) { Exit-SessionStart }
         $reInner = "& '$($inst.Replace("'", "''"))' install"
     }
+
+    Assert-BootstrapPublication
 
     $lockFile = Join-Path $InstallDir 'reconcile.lock'
     $statusFile = Join-Path $InstallDir 'reconcile-status.json'

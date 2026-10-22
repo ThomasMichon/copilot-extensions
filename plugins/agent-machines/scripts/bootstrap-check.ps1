@@ -50,23 +50,57 @@ function Exit-SessionStart {
 }
 
 $PluginDir = Split-Path -Parent $PSScriptRoot
-function Test-LegacyMutationAllowed {
-    $probe = Join-Path $PSScriptRoot 'installation-context\legacy-entrypoint-probe.ps1'
-    if (-not (Test-Path -LiteralPath $probe -PathType Leaf)) {
-        [Console]::Error.WriteLine('[agent-machines] legacy mutation probe is unavailable; skipping reconcile.')
-        return $false
+$BootstrapPayloadRoot = $PluginDir
+function Assert-BootstrapPublication {
+    if ($contextSelected) {
+        # Context validity selects the root; publication still needs its own decision.
+        try {
+            $publicationArgs = $statusArgs.Clone()
+            $publicationArgs.Action = 'probe-plugin-publication'
+            $global:LASTEXITCODE = 3
+            $probe = @(& $resolver @publicationArgs)
+            $code = $LASTEXITCODE
+            $decision = ($probe -join "`n") | ConvertFrom-Json -ErrorAction Stop
+            if ($code -eq 0 -and
+                $decision.deployment.allowPluginPublication -is [bool] -and
+                $decision.deployment.allowPluginPublication -and
+                [string]$decision.status -ceq 'ready' -and
+                [string]$decision.reason -ceq 'namespaced-active' -and
+                [string]$decision.actualMode -ceq 'namespaced' -and
+                [string]$decision.runtimeRoot -ceq $InstallDir -and
+                [string]$decision.context -ceq $contextPath -and
+                [string]$decision.deployment.path -ceq
+                    (Join-Path $InstallDir 'runtime-deployment.json')) {
+                return
+            }
+            [Console]::Error.WriteLine("[agent-machines] Runtime publication refused: $($probe -join ' ')")
+        } catch {
+            [Console]::Error.WriteLine($_.Exception.Message)
+        }
+    } else {
+        $helper = Join-Path $PSScriptRoot 'installation-context\plugin-publication-probe.ps1'
+        if ([IO.File]::Exists($helper)) {
+            try {
+                $global:LASTEXITCODE = 3
+                & $helper -PayloadRoot $BootstrapPayloadRoot -PluginId 'agent-machines' -LegacyRoot $InstallDir
+                if ($LASTEXITCODE -eq 0) { return }
+            } catch {
+                [Console]::Error.WriteLine($_.Exception.Message)
+            }
+        } else {
+            try {
+                $null = Get-Item -LiteralPath (Join-Path $InstallDir 'runtime-deployment.json') -Force -ErrorAction Stop
+            } catch [System.Management.Automation.ItemNotFoundException] {
+                return
+            } catch {
+                [Console]::Error.WriteLine($_.Exception.Message)
+            }
+            [Console]::Error.WriteLine('[agent-machines] Runtime publication refused: deployment policy requires a capable installation helper.')
+        }
     }
-    $hostExe = (Get-Process -Id $PID).Path
-    if (-not $hostExe) { return $false }
-    $global:LASTEXITCODE = 1
-    try {
-        & $hostExe -NoProfile -ExecutionPolicy Bypass -File $probe `
-            -PayloadRoot $PluginDir -LegacyRoot (Join-Path $env:USERPROFILE '.agent-machines') |
-            Out-Null
-    } catch {
-        return $false
-    }
-    return $LASTEXITCODE -eq 0
+    [Console]::Error.WriteLine('[agent-machines] Runtime publication refused: bootstrap admission did not succeed. Use explicit installation management to repair it.')
+    Write-SessionStartJson
+    exit 3
 }
 $contextSelected = $false
 $contextActive = $false
@@ -85,23 +119,21 @@ $policyPresent = (
         [Console]::Error.WriteLine('[agent-machines] installation context is selected but its validator is unavailable; skipping reconcile.')
         Exit-SessionStart
     }
-    $hostExe = (Get-Process -Id $PID).Path
-    $statusArgs = @(
-        '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $resolver,
-        'status',
-        '-PayloadRoot', $PluginDir,
-        '-PluginId', 'agent-machines',
-        '-LegacyRoot', (Join-Path $env:USERPROFILE '.agent-machines') # marketplace-isolation: allow legacy compatibility root
-    )
+    $statusArgs = @{
+        Action = 'status'
+        PayloadRoot = $PluginDir
+        PluginId = 'agent-machines'
+        LegacyRoot = (Join-Path $env:USERPROFILE '.agent-machines') # marketplace-isolation: allow legacy compatibility root
+    }
     if ($env:COPILOT_EXTENSIONS_CONTEXT) {
-        $statusArgs += @('-Context', $env:COPILOT_EXTENSIONS_CONTEXT)
+        $statusArgs.Context = $env:COPILOT_EXTENSIONS_CONTEXT
         $contextDurableHome = $env:COPILOT_EXTENSIONS_CONTEXT
         1..5 | ForEach-Object {
             $contextDurableHome = Split-Path -Parent $contextDurableHome
         }
-        $statusArgs += @('-DurableHome', $contextDurableHome)
+        $statusArgs.DurableHome = $contextDurableHome
     }
-    $statusJson = @(& $hostExe @statusArgs)
+    $statusJson = @(& $resolver @statusArgs)
     if ($LASTEXITCODE -ne 0) {
         [Console]::Error.WriteLine('[agent-machines] installation status is invalid; skipping reconcile without legacy fallback.')
         Exit-SessionStart
@@ -206,6 +238,7 @@ if (-not (Test-Path $Manifest)) {
         if ($contextActive) {
             $payloadInit = Join-Path $PSScriptRoot 'init.ps1'
             if (Test-Path $payloadInit) {
+                Assert-BootstrapPublication
                 $pw = Get-Command pwsh -ErrorAction SilentlyContinue
                 $exe = if ($pw) { $pw.Source } else { 'powershell.exe' }
                 $command = "& `"$payloadInit`" -Action cell-provision -Context `"$contextPath`" -ExpectedMarketplaceId `"$contextMarketplaceId`""
@@ -221,6 +254,7 @@ if (-not (Test-Path $Manifest)) {
     }
     $payloadInit = Join-Path $PSScriptRoot 'init.ps1'
     if ((Test-Path $payloadInit) -and (Select-String -Path $payloadInit -Pattern "'stamp'" -Quiet)) {
+        Assert-BootstrapPublication
         $pw = Get-Command pwsh -ErrorAction SilentlyContinue
         $exe = if ($pw) { $pw.Source } else { 'powershell.exe' }
         # Two-stage stamp (#3303, full-harness-startup-reliability Round 2):
@@ -234,27 +268,8 @@ if (-not (Test-Path $Manifest)) {
         #    background job had created it (command-not-found race).
         # 2. Background the full 'stamp' (unchanged) so the slower snapshot
         #    copy still completes, without blocking the hook on it.
-        # NOTE: no Test-LegacyMutationAllowed pre-check here -- init.ps1's OWN
-        # top-level dispatch (every $Action except the cell-/slot- family)
-        # already re-runs the SAME legacy-entrypoint-probe with equivalent
-        # -PayloadRoot/-LegacyRoot values before 'stamp-binstub' or 'stamp'
-        # ever executes, so a separate pre-check here would only re-validate
-        # what each call already validates on its own; init.ps1 exits
-        # non-zero on its own if the probe disallows the mutation, which this
-        # hook already discards output/exit code for either way.
-        # Review finding (round 4): removing the pre-check does NOT reduce
-        # the probe cost to one spawn per hook invocation the way an earlier
-        # version of this comment claimed -- the two-stage split itself now
-        # makes TWO separate init.ps1 invocations ('stamp-binstub' then
-        # 'stamp'), and EACH one re-runs its own probe subprocess via its own
-        # top-level dispatch. Net probe-process count here is therefore
-        # unchanged from before this split (removing the old single explicit
-        # pre-check saves one spawn; the new second init.ps1 invocation's own
-        # embedded probe adds one back). The synchronous 'stamp-binstub' path
-        # still pays this probe's cost every time. Carrying a validated
-        # result across the two stages to actually cut this would need a
-        # short-lived trust token between the two init.ps1 invocations --
-        # real future work, out of scope for this short-PR-cycle round.
+        # Bootstrap admission also prevents spawning a denied installer; each
+        # installer still owns its independent publication/lifecycle checks.
         & $exe -NoProfile -ExecutionPolicy Bypass -File $payloadInit stamp-binstub *> $null
         # Review finding: the launcher-before-return guarantee this split
         # exists for does not hold if the synchronous stage itself failed
@@ -268,6 +283,7 @@ if (-not (Test-Path $Manifest)) {
             [Console]::Error.WriteLine("[agent-machines] stamp-binstub failed (exit $LASTEXITCODE); skipping background stamp.")
             Exit-SessionStart
         }
+        Assert-BootstrapPublication
         $command = "& `"$payloadInit`" stamp *> `$null"
         $enc = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
         Start-Process -FilePath 'conhost.exe' -WorkingDirectory $env:USERPROFILE `
@@ -375,6 +391,7 @@ try {
         if (($deployed -ceq $current -and $samePayloadPath) -or -not $contextActive) { Exit-SessionStart }
         $init = Join-Path $PluginDir 'scripts\init.ps1'
         if (-not (Test-Path $init)) { Exit-SessionStart }
+        Assert-BootstrapPublication
         [Console]::Error.WriteLine("[agent-machines] active cell payload $deployed -> $current (runtime $activeVersion); reconciling in background...")
         $pw = Get-Command pwsh -ErrorAction SilentlyContinue
         $exe = if ($pw) { $pw.Source } else { 'powershell.exe' }
@@ -407,7 +424,7 @@ try {
     $init = Join-Path $pluginDir 'scripts\init.ps1'
     if (-not (Test-Path $init)) { Exit-SessionStart }
 
-    if (-not (Test-LegacyMutationAllowed)) { Exit-SessionStart }
+    Assert-BootstrapPublication
     [Console]::Error.WriteLine("[agent-machines] runtime $deployed -> $current; reconciling in background...")
     $pw = Get-Command pwsh -ErrorAction SilentlyContinue
     $exe = if ($pw) { $pw.Source } else { 'powershell.exe' }

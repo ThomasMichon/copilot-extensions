@@ -352,13 +352,17 @@ def _catalog_environment(fixture: dict, interpreter: str | None = None) -> dict[
         # Interpreter admission must retain the same isolated OS-profile wrapper.
         f"sys.executable={str(wrapper_dir / 'python3')!r}\n"
         "args=sys.argv[1:]\n"
-        "while args and args[0].startswith('-') and args[0] not in ('-c','-m'):\n"
+        "while args and args[0].startswith('-') and args[0] not in ('-','-c','-m'):\n"
         "    option=args.pop(0)\n"
         "    if option=='-X': args.pop(0)\n"
         "if args and args[0]=='-c':\n"
         "    code=args[1]\n"
         "    sys.argv=['-c',*args[2:]]\n"
         "    exec(compile(code,'<catalog-command>','exec'),{'__name__':'__main__'})\n"
+        "    raise SystemExit(0)\n"
+        "if args and args[0]=='-':\n"
+        "    sys.argv=args\n"
+        "    exec(compile(sys.stdin.read(),'<catalog-stdin>','exec'),{'__name__':'__main__'})\n"
         "    raise SystemExit(0)\n"
         "if args:\n"
         "    sys.argv=args\n"
@@ -372,7 +376,7 @@ def _catalog_environment(fixture: dict, interpreter: str | None = None) -> dict[
             f"#!{interpreter} -I\n"
             "import os,sys\n"
             "args=sys.argv[1:]; flags=[]\n"
-            "while args and args[0].startswith('-') and args[0] not in ('-c','-m'):\n"
+            "while args and args[0].startswith('-') and args[0] not in ('-','-c','-m'):\n"
             "    option=args.pop(0); flags.append(option)\n"
             "    if option=='-X': flags.append(args.pop(0))\n"
             "os.execv(sys.executable,[sys.executable,*flags,'-c',"
@@ -389,6 +393,18 @@ def test_command_binding_catalog_disables_shell_metadata_cache(
 ) -> None:
     monkeypatch.setenv("PSModuleAnalysisCachePath", str(binding_fixture["home"] / "parent-cache"))
     assert _catalog_environment(binding_fixture)["PSModuleAnalysisCachePath"] == os.devnull
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX interpreter isolation")
+def test_command_binding_catalog_preserves_stdin_arguments(binding_fixture: dict) -> None:
+    environment = _catalog_environment(binding_fixture)
+    command = [str(binding_fixture["home"] / "test-bin/python3"), "-", "first", "space two"]
+    result = subprocess.run(
+        command, input="import json,sys; print(json.dumps(sys.argv))",
+        env=environment, capture_output=True, text=True, timeout=10,
+    )
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == ["-", "first", "space two"]
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX catalog interpreter")

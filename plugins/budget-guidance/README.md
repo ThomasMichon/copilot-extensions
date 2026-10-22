@@ -40,6 +40,9 @@ reset, or provider freshness from billing reports.
 
 The `sessionStart` hooks are output-free: runtime bootstrap and a bounded
 [exact-session posture cue](docs/session-guidance.md) each emit only `{}`.
+Bootstrap consults the packaged [canonical publication admission](../../libs/installation-context/README.md)
+before stamping or drift reconciliation, including without Python. A refusal
+does not suppress the separate posture cue; healthy runtime reuse stays read-only.
 The cue reads inert configuration with the same pure posture, never authorizes
 readers or refreshes a provider, and uses a reviewed pointer plus a separate
 static advisory boundary. It requires an available Python 3.10+ interpreter

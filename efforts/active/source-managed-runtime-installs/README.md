@@ -132,7 +132,7 @@ publication and command-ownership boundaries; it does not disable whole hooks.
 - [ ] Gate generated first-use wrappers before boot trace, provision status and orchestration-lock writes, preserving admitted provisioning and healthy runtime invocation.
 - [x] Qualify Logger's generated primary, payload-local and auxiliary first-use commands, selected-cell policy, deferred tracing and explicit helper-skew readiness before closing the broader wrapper item.
 - [x] Qualify the shared Pull Requests/SSH/Vault generated-wrapper owner and Vault payload gates with actual adopter no-write refusal, standalone provisioning, healthy dispatch and failure-safe snapshot selection.
-- [ ] Qualify CodeSpaces' bespoke generated-wrapper and payload gates against the selected installation without treating context validation alone as deployment admission.
+- [x] Qualify CodeSpaces' bespoke generated-wrapper and payload gates against the selected installation without treating context validation alone as deployment admission.
 - [x] Qualify Worktrees' native bootstrap and payload-local early first-use
   publication gates, retaining standalone reconciliation and healthy dispatch.
 - [x] Qualify Worktrees' cell-installer pre-staging and retained-backend
@@ -142,6 +142,8 @@ publication and command-ownership boundaries; it does not disable whole hooks.
 - [x] Gate Worktrees' pre-launch and staged runtime-update planning without suppressing marketplace refreshes, healthy reuse or unrelated repository bootstrap actions.
 - [x] Revalidate cached launcher plans immediately before native execution, including older standalone compatibility and policy changes after planning.
 - [ ] Complete the remaining adopter hook/extension publication map and qualify their retained non-deployment behavior and explicit readiness outcomes.
+- [ ] **Agent-recommended decomposition:** qualify remaining Bridge/Dispatch/Containers/MCP/Machines/Budget Guidance bootstrap first-stamp and drift paths with actual no-write policy refusal, standalone positives and retained independent hooks.
+- [ ] **Agent-recommended decomposition:** qualify remaining payload/global first-use command routes separately from bootstrap, distinguishing selected-context validity from publication permission and preserving healthy dispatch and explicit helper-skew outcomes.
 - [ ] Keep adapters thin and enforce drift-compatible service interaction without implicit runtime replacement.
 
 ### Phase 4 - Integrate Manager-owned runtime source selection
@@ -691,3 +693,25 @@ onto one branch.
 - The successful native fixture also reproduces the already-tracked legacy self-staging boundary in #7612. Its global-command preservation result does not qualify complete native cell isolation; that separate Plan item remains open. Managed cold refusal still requires complete selected/unrelated-root no-write assertions.
 - An incomplete selected POSIX slot exposed inherited `errexit` aborting inside the canonical resolver before publication admission. The payload caller now treats slot misses as resolver control flow while an actual resolver error remains an explicit readiness failure. The existing fake POSIX resolver advertises the required trace contract, preserving its healthy cell-selection test.
 - Windows PowerShell 5.1 passes 36 CodeSpaces/shared-healthy cases, including actual runtime-only provisioning. PowerShell 7 passes all sixteen affected payload cases; Linux passes seventeen payload/error cases after the resolver correction. Complete plugin-owned payload/binstub modules pass thirteen Windows cases with three platform skips and all sixteen Linux cases. Canonical synchronization, installer contracts, documentation, Ruff and whitespace gates pass. Fresh exact-head review and merge remain required.
+
+### 2026-10-21 - CodeSpaces first-use boundary merged; remaining routes next
+
+- PR #7687 merged as `55b2129f5cfc9157849cb21fb981581ce393e0f0` after Copilot approval `5608096090` on exact head `77dc0882464832d65a9e910d43296edd2211fa5a`, no open findings and successful required checks. Managed merge and `pr-complete` succeeded; the source worktree is on the actual merged dev commit.
+- Re-read the Plan and Validation Plan. Only the bounded CodeSpaces generated-wrapper/payload item closes. The shared policy, broader session/command publication map, retained-hook/skew proof and all source-selection, maintenance and native-adoption gates remain open.
+- The next bounded slice qualifies the remaining bootstrap families before classifying source-identity or context checks as deployment admission. Command-side first-use routes remain a separate named goal. Reuse canonical decisions and preserve independent provider/guidance work; do not infer a product defect from an unexecuted map alone.
+- Keep #7612's reproduced successful-installer legacy-staging boundary, #7010's native long-path qualification and #5379's retained-source first-use budget explicit. Global-command preservation and isolated ordinary-depth fixtures do not close those goals or authorize a host change.
+
+### 2026-10-21 - Remaining bootstrap qualification baseline
+
+- Extended actual bootstrap fixtures to the six remaining families rather than classifying an unexecuted source map as enforcement. Managed first-stamp cases reproduce installer dispatch for Bridge, Dispatch, Containers and MCP on both platforms, Budget Guidance on Windows and Machines on POSIX. Several drift paths also reach the recording process seam before any deployment-policy refusal.
+- These are failing baseline results, not completed qualification. Materialized fixtures retain real command metadata; their recording process lookup preserves the actual host process identity. Machines' distinct stamp/probe behavior still needs targeted qualification, and the POSIX Budget Guidance fixture cannot yet provide its missing native admission-helper path. Resolve those differences before treating all failures as the same product defect.
+- Reuse the existing canonical decision before first-stamp and drift reaping/lock/dispatch writes, preserving standalone positives, healthy reuse and independent hooks. Command-side first-use, skew and later source/maintenance/native gates remain separate open items.
+
+### 2026-10-21 - Remaining bootstrap admission implementation
+
+- Bridge, Dispatch, Containers, MCP, Machines and Budget Guidance now compose the canonical publication decision before first-stamp or drift side effects. Machines also probes its selected active cell independently of context validation; its PowerShell adapter invokes the same validator in-process instead of starting another shell merely to read status.
+- Budget Guidance is registered with the existing installation-context vendor owner, so its self-contained payload carries byte-identical native helpers rather than discovering a sibling runtime. Separate no-Python-PATH cases qualify managed refusal, standalone stamping and healthy reuse on both platforms.
+- Actual-adopter qualification passes 117 cases on Windows PowerShell 5.1 and 117 on POSIX, with platform counterparts skipped. The matrix retains standalone stamping/reconciliation, healthy managed and malformed-policy reuse, helperless compatibility, independent hook execution, and selected-cell refusal without touching the unrelated legacy root.
+- The fixture now represents each family's real healthy markers and two-stage/worker-owned launch evidence. It caches only immutable materialized input; every case still owns an independent adopter copy and home. POSIX interpreter isolation preserves stdin arguments, and publication snapshots still compare the entire isolated home. No timeout or containment limit was increased.
+- The retained common-family, canonical-vendoring and stdin-isolation selection passes 74 Windows and 75 POSIX cases. Plugin-owned bootstrap regressions pass across the affected families; Windows also runs both real Machines two-stage bootstrap hosts. Budget's existing shell test now selects native Git Bash rather than sending Windows fixture paths to the WSL launcher.
+- Review and merge remain required before the bounded bootstrap item closes. Command-side first use, broader helper skew, independent source selection, Manager-owned maintenance, the tracked native readiness goals and actual installed adoption remain open. No live source, deployment policy, service role, startup enrollment or cadence changed.
