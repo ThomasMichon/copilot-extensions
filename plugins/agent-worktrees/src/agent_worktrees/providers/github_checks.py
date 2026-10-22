@@ -39,9 +39,46 @@ def _url(value: object) -> str:
         return ""
 
 
+def _read_pages(
+    argv: list[str], invoke: Callable[[list[str]], subprocess.CompletedProcess[str]],
+) -> subprocess.CompletedProcess[str]:
+    """Keep gh from following later pages with an already-acquired credential."""
+    launch = [argument for argument in argv[:-1] if argument != "--paginate"]
+    pages: list[str] = []
+    seen: set[str] = set()
+    records = 0
+    for page in range(1, 202):
+        proc = invoke([*launch, f"{argv[-1]}?per_page=100&page={page}"])
+        pages.append(proc.stdout or "")
+        if proc.returncode:
+            return subprocess.CompletedProcess(argv, proc.returncode, "\n".join(pages), "")
+        try:
+            body = json.loads(proc.stdout)
+        except (ValueError, TypeError):
+            break
+        batch = body.get("check_runs") if isinstance(body, dict) else None
+        total = body.get("total_count") if isinstance(body, dict) else None
+        if (
+            not isinstance(batch, list) or type(total) is not int
+            or not 0 <= total <= 20_000 or len(batch) > 100
+        ):
+            break
+        signature = json.dumps(batch, sort_keys=True)
+        if batch and signature in seen:
+            break
+        seen.add(signature)
+        records += len(batch)
+        if records > 20_000:
+            break
+        if records >= total or len(batch) < 100:
+            return subprocess.CompletedProcess(argv, 0, "\n".join(pages), "")
+    return subprocess.CompletedProcess(argv, 1, "\n".join(pages), "")
+
+
 def read_checks(
     repo: str, sha: str, *, host: str,
     invoke: Callable[[list[str]], subprocess.CompletedProcess[str]],
+    renew_per_page: bool = False,
 ) -> ChecksReport:
     """Read existing status/check-run endpoints once; failure dominates pending.
 
@@ -115,10 +152,11 @@ def read_checks(
                         "combined commit status", raw, "commit-status",
                         description="Provider aggregate failed without an identified failing status.",
                     ))
-    proc = invoke([
+    argv = [
         "gh", "api", "--paginate", "--hostname", host,
         f"/repos/{repo}/commits/{sha}/check-runs",
-    ])
+    ]
+    proc = _read_pages(argv, invoke) if renew_per_page else invoke(argv)
     evidence = check_run_evidence_from_pages(proc.stdout or "")
     runs_readable = evidence.complete and proc.returncode == 0
     any_signal = any_signal or bool(evidence.runs)

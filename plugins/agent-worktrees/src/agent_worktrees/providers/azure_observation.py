@@ -12,6 +12,7 @@ from ..pr_observation_config import ObservationConfig
 from ..pr_snapshot import PRSnapshot, Review
 from .azure_observation_reads import AdoReader, Collection
 from .base import ProviderError
+from .observation_credentials import CredentialSource, ObservationCredentialError
 
 
 # Built-in type IDs from the public Policy Configurations REST examples.
@@ -364,11 +365,17 @@ def validate_target(pr, provider, repo):
     return native_project
 
 
-def get_snapshot(provider, repo, number, *, api_base, token, observation=None, reader_factory=AdoReader):
+def get_snapshot(
+    provider, repo, number, *, api_base, token, observation=None, reader_factory=AdoReader,
+    credential_source: CredentialSource | None = None,
+):
     config = observation or ObservationConfig()
     if not config.enabled:
+        if credential_source is not None:
+            raise ProviderError("Renewable credentials require native ADO observation to be enabled")
         return provider.get_snapshot(repo, number, api_base=api_base, token=token)
-    reader = reader_factory(provider, repo, number, api_base, token)
+    options = {"credential_source": credential_source} if credential_source is not None else {}
+    reader = reader_factory(provider, repo, number, api_base, token, **options)
     pr = reader.pr()
     native_project = validate_target(pr, provider, repo)
     status = str(pr.get("status") or "").casefold()
@@ -438,6 +445,8 @@ def get_snapshot(provider, repo, number, *, api_base, token, observation=None, r
                     policy = replace(policy, stale=True)
                 if policy.state in ("rejected", "broken"):
                     policy = replace(policy, failed_tasks=reader.failed_tasks(policy.build_id))
+            except ObservationCredentialError:
+                raise
             except ProviderError as exc:
                 errors.append("build diagnostics: " + str(exc))
         enriched.append(policy)

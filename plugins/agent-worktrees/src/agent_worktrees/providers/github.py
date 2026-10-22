@@ -10,15 +10,18 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Callable
 from email.utils import parsedate_to_datetime
 from urllib.parse import urlparse
 from urllib.parse import quote
 
 from ..pr_contract import Comment, CommentThread, PRDiff, PRSnapshot, Review, ReviewNudgeResult, ThreadsResult
-from ..pr_review_policy import KNOWN_REVIEW_STATES, normalized_review_time
 from ..pr_checks import ChecksReport
 from .base import ProviderError, PRScope, PullResult, reject_copilot_mention, run_cli
 from .pr_source import github_source, pull_payload, source_text
+from .observation_credentials import (
+    CredentialSource, ObservationCredentialError, ObservationCredentials, github_api_base,
+)
 
 
 # HTTP statuses worth retrying (network / 5xx / 429 / 408); 4xx (auth / not-found
@@ -285,6 +288,7 @@ class GitHubProvider:
     def get_snapshot(
         self, repo: str, number: int, *, api_base: str = "", token: str | None = None,
         strict_safety: bool = False,
+        credential_source: CredentialSource | None = None,
     ) -> PRSnapshot:
         """Fetch the full review/mergeability/lifecycle snapshot for pr-watch.
         Mirrors the gitea provider over GitHub's REST API (near-identical
@@ -297,19 +301,39 @@ class GitHubProvider:
         GitHub Enterprise host; otherwise ambient ``GH_HOST``/``github.com``
         is resolved once and passed explicitly to every read.
         """
-        host = self.authority_endpoint(api_base)
+        host = self.authority_endpoint(
+            (api_base or "https://github.com") if credential_source is not None else api_base,
+        )
+        if credential_source is not None and token is not None:
+            raise ProviderError("Explicit tokens and renewable observation credentials are exclusive")
+        credentials = (
+            ObservationCredentials(credential_source, provider=self.name,
+                                   api_base=github_api_base(host), repository=repo)
+            if credential_source is not None else None
+        )
+
+        def read_env() -> dict[str, str]:
+            if credentials is None:
+                return self._env(token)
+            # Both gh token aliases must override inherited credentials.
+            value = credentials.acquire().token
+            return {"GH_TOKEN": value, "GITHUB_TOKEN": value,
+                    "GH_ENTERPRISE_TOKEN": value, "GITHUB_ENTERPRISE_TOKEN": value}
+
         proc = run_cli(
             [
                 "gh", "api", "--hostname", host,
                 f"/repos/{repo}/pulls/{number}",
             ],
-            env=self._env(token),
+            env=read_env(),
         )
         if proc.returncode != 0:
             detail = (proc.stderr.strip() or proc.stdout.strip())
             raise ProviderError(
-                f"gh PR #{number} snapshot failed for {repo}: {detail}",
-                transient=_gh_detail_is_transient(detail),
+                f"gh PR #{number} snapshot failed for {repo}: "
+                + ("provider read unavailable" if credentials is not None else detail),
+                transient=(_gh_detail_is_transient(detail) or credentials is not None
+                           and any(code in detail.lower() for code in ("http 401", "http 403"))),
             )
         try:
             pr = json.loads(proc.stdout)
@@ -346,7 +370,10 @@ class GitHubProvider:
             if isinstance(lbl, dict) and lbl.get("name")
         )
         head_sha = str((pr.get("head") or {}).get("sha", ""))
-        checks = self._checks_report(repo, head_sha, token, host=host)
+        checks = self._checks_report(
+            repo, head_sha, token, host=host,
+            credential_env=read_env if credentials is not None else None,
+        )
         # REST ``state`` is only open|closed; ``merged`` is a separate bool (a
         # merged PR is closed+merged).
         return PRSnapshot(
@@ -355,7 +382,10 @@ class GitHubProvider:
             head_sha=head_sha,
             base_ref=str((pr.get("base") or {}).get("ref", "")),
             updated_at=str(pr.get("updated_at", "") or ""),
-            reviews=self._all_review_objs(repo, number, token, host=host),
+            reviews=self._all_review_objs(
+                repo, number, token, host=host,
+                credential_env=read_env if credentials is not None else None,
+            ),
             author=str((pr.get("user") or {}).get("login", "")),
             mergeable=mergeable_raw if isinstance(mergeable_raw, bool) else None,
             checks_state=checks.state,
@@ -370,73 +400,16 @@ class GitHubProvider:
     def _all_review_objs(
         self, repo: str, number: int, token: str | None, *,
         host: str = "github.com",
+        credential_env: Callable[[], dict[str, str]] | None = None,
     ) -> tuple[Review, ...]:
-        """Read every ascending review page; incomplete evidence raises explicitly."""
-        reviews: list[Review] = []
-        page = 1
-        page_size = 100
-        while True:
-            proc = run_cli(
-                [
-                    "gh", "api", "--hostname", host,
-                    f"/repos/{repo}/pulls/{number}/reviews"
-                    f"?per_page={page_size}&page={page}",
-                ],
-                env=self._env(token),
-            )
-            if proc.returncode != 0:
-                detail = proc.stderr.strip() or proc.stdout.strip()
-                raise ProviderError(
-                    f"GitHub review page {page} failed: {detail}",
-                    transient=_gh_detail_is_transient(detail),
-                )
-            try:
-                batch = json.loads(proc.stdout or "[]")
-            except json.JSONDecodeError as exc:
-                raise ProviderError(f"Malformed GitHub review page {page}: {exc}", transient=True) from exc
-            if not isinstance(batch, list):
-                raise ProviderError(f"GitHub review page {page} is not a list", transient=True)
-            if not batch:
-                break
-            for r in batch:
-                if not isinstance(r, dict):
-                    raise ProviderError(f"Malformed GitHub review on page {page}", transient=True)
-                rid = r.get("id")
-                if not isinstance(rid, int):
-                    raise ProviderError(f"GitHub review on page {page} has no integer id", transient=True)
-                state = str(r.get("state", "")).upper()
-                user = r.get("user")
-                login = user.get("login") if isinstance(user, dict) else None
-                if not isinstance(login, str) or not login.strip():
-                    raise ProviderError(
-                        f"GitHub review on page {page} has no reviewer identity",
-                        transient=True,
-                    )
-                if state not in KNOWN_REVIEW_STATES:
-                    raise ProviderError(
-                        f"GitHub review on page {page} has unknown state",
-                        transient=True,
-                    )
-                submitted_at = r.get("submitted_at")
-                if state != "PENDING" and normalized_review_time(submitted_at) is None:
-                    raise ProviderError(
-                        f"GitHub review on page {page} has no valid submission time",
-                        transient=True,
-                    )
-                reviews.append(
-                    Review(
-                        id=rid,
-                        state=state,
-                        user=login,
-                        submitted_at=str(submitted_at or ""),
-                        commit_id=str(r.get("commit_id", "") or ""),
-                        dismissed=(state == "DISMISSED"),
-                    )
-                )
-            if len(batch) < page_size:
-                break
-            page += 1
-        return tuple(reviews)
+        from .github_review_pages import read_reviews
+        return read_reviews(
+            repo, number, host=host, is_transient=_gh_detail_is_transient,
+            sanitized_errors=credential_env is not None,
+            invoke=lambda argv: run_cli(
+                argv, env=credential_env() if credential_env is not None else self._env(token),
+            ),
+        )
 
     def _combined_checks_state(
         self, repo: str, sha: str, token: str | None, *,
@@ -447,11 +420,26 @@ class GitHubProvider:
 
     def _checks_report(
         self, repo: str, sha: str, token: str | None, *, host: str = "github.com",
+        credential_env: Callable[[], dict[str, str]] | None = None,
     ) -> ChecksReport:
         from .github_checks import read_checks
+
+        def read(argv):
+            proc = run_cli(
+                argv, env=credential_env() if credential_env is not None else self._env(token),
+            )
+            if (
+                credential_env is not None and proc.returncode
+                and any(code in (proc.stderr or proc.stdout or "").lower()
+                        for code in ("http 401", "http 403"))
+            ):
+                raise ObservationCredentialError("GitHub observation authorization lost", transient=True)
+            return proc
+
         return read_checks(
             repo, sha, host=host,
-            invoke=lambda argv: run_cli(argv, env=self._env(token)),
+            invoke=read,
+            renew_per_page=credential_env is not None,
         )
 
     def add_label(

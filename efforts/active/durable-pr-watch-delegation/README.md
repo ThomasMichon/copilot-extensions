@@ -236,6 +236,15 @@ _Operator-required scope; agent-recommended implementation and validation._
   lookup/commit/result boundaries. Treat current-policy withdrawal as network
   disconnect, preserving uncertain in-flight commits and original-ID recovery
   (source confirmed by #7915; provider and deployed acceptance remain open).
+- [x] Bind a distinct PR observation worker to exact typed forge scopes in the
+  existing credential exchange, preserving provider validation and recipient
+  verification before ACK (#7926). Native per-request renewal and production
+  provider/deployment acceptance remain below.
+- [ ] Land the additive native read-only per-request credential consumer seam,
+  including GitHub review/check pages and ADO HTTP continuation, typed
+  endpoint/repository/authentication/expiry checks and no ambient fallback.
+  This source item does not close the process-boundary service adapter,
+  production-provider validation or installed/fleet acceptance.
 - [ ] Define and deliver the [PR-service consumer contract](pr-service-contract.md)
   through normal reviewed source changes, including missing shared seams and
   real serving/consumer proof. Consult related campaigns without a separate
@@ -481,6 +490,52 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-10-22 - Prepare native per-request observation credential consumption
+
+- Added a read-only structural credential-source seam at the existing
+  configured observation/fetch boundary. It accepts the typed exchange material
+  without a Fleet import and checks exact provider/API/repository/observe/auth
+  binding and expiry immediately before every native request. GitHub checks
+  and reviews renew on each page; ADO preserves PAT versus bearer and renews
+  on each HTTP request. Source or authorization loss stops later reads without
+  ambient-account fallback. No mutation interface accepts the source.
+- Kept normal string/command-backed/ambient CLI behavior. Extracted the existing
+  GitHub review-page reader to keep its provider within the shrink-only module
+  budget; this is not a parallel forge implementation.
+- Contained focused/legacy validation passed: the earlier 518-case observation/
+  provider packet, then 395 cases after the review-reader extraction and
+  additional auth-loss controls. The latter includes 42 targeted credential
+  cases, with an actual subprocess and isolated TLS continuation/stop controls.
+  Fatal lint, headless launch and the 13-plugin install contract passed.
+  These are synthetic-source/native-boundary proofs, not actual provider
+  downscoping or a running Fleet deployment. Fresh-machine installation is
+  unchanged; production credentials, remote activation and rollout are outside
+  this source-only slice.
+- The source child remains open pending normal review/merge. The native
+  process-boundary credential loader/PR-service adapter is still unimplemented;
+  do not mark the parent credential, consumer-contract or fleet acceptance
+  items complete based on this additive library seam.
+
+### 2026-10-22 - Merge the typed PR-worker exchange and retain native renewal
+
+- #7926 merged as `cb969b1df3cd230d42fc69c07d83e929b4723c0e` at
+  `2026-10-22T19:49:28Z`, from published head
+  `08b5db0449f450c0ac79ffc7fd1b9c8ae5a6bd40`. Current-head Copilot review
+  `5619946737` approved with no open issues; its one test-validity finding
+  was corrected with fresh-client negative and positive controls. Required
+  checks were green. Managed completion used only the documented
+  missing-additional-CODEOWNER review exception, not a CI bypass.
+- Re-read the full current parent Plan and Validation after merge, preserving
+  all retained client/matrix and lifecycle/installation/fleet acceptance.
+  Closed only the typed credential-exchange source item. The parent and the
+  consumer-contract credential item remain Active/open.
+- Next: carry verified typed material into the existing native PR driver's
+  actual HTTP/CLI request boundary, renewing without ambient fallback in
+  explicit service mode and preserving ordinary CLI behavior. Then close
+  the typed service/dispatch consumer and independently installable lifecycle.
+  This source merge proves neither production-provider permissions nor an
+  installed/running deployment and authorizes no rollout.
 
 ### 2026-10-22 - Bind PR observation credentials in the existing exchange
 

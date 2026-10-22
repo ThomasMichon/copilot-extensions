@@ -30,6 +30,7 @@ from .pr_consent import consent_argv, consent_command, consent_update_key
 from .pr_occupancy import occupancy_from_readiness
 from .pr_observation import configured_snapshot
 from .providers import ProviderError, account_token_for_slug, get_provider
+from .providers.observation_credentials import CredentialSource
 
 
 @dataclass
@@ -308,6 +309,7 @@ def build_fetch(
     *,
     api_base: str = "",
     token: str | None = None,
+    credential_source: CredentialSource | None = None,
 ) -> Callable[[], pc.PRSnapshot]:
     """Build a ``() -> PRSnapshot`` fetcher from the repo's PR binding.
 
@@ -316,9 +318,17 @@ def build_fetch(
     ``token`` override else ``resolve_token(prcfg)`` -- the vault/env binding).
     The provider's ``get_snapshot`` does the actual read; an unsupported provider
     raises :class:`ProviderError` here (fail fast), never a hang.
+    A selected ``credential_source`` bypasses legacy token resolution and renews
+    at each native request, not at this fetcher's construction or polling cycle.
     """
     provider = get_provider(getattr(prcfg, "provider", "gitea") or "gitea")
     base = (api_base or getattr(prcfg, "api_base", "") or "").strip()
+    if credential_source is not None:
+        if token is not None or provider.name not in ("github", "azure-devops"):
+            raise ProviderError("Renewable observation credentials require a supported read-only binding")
+        return lambda: configured_snapshot(
+            provider, repo, number, prcfg=prcfg, api_base=base, credential_source=credential_source,
+        )
     refresh_binding = token is None and getattr(prcfg, "provider", "") == "azure-devops"
     tok = token if token is not None or refresh_binding else account_token_for_slug(repo, prcfg)
 

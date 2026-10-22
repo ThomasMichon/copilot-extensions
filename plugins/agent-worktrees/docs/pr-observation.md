@@ -122,6 +122,45 @@ Features control additional reads; disabling a read does not turn an applicable
 requirement into a passed gate. Set requirements deliberately and retain native
 policy evidence. Native required policies are never disabled by this block.
 
+### Renewable observation credentials
+
+The native Python observation boundary (`pr_watch.build_fetch` and
+`pr_observation.configured_snapshot`) accepts an optional `credential_source`.
+It is a zero-argument callable returning typed material with `token`,
+`expires_at` (Unix seconds), and a `forge` binding containing `provider`,
+`api_base`, `repository`, `permission`, and `authentication`. These are
+structural protocols in `providers.observation_credentials`, compatible with
+the existing Fleet credential material without importing Fleet into Worktrees.
+Issuance, actual provider downscoping, recipient verification and exchange ACK
+remain the credential provider's responsibility; matching labels here are not
+proof of those operations.
+
+Selected-source mode supports GitHub and native ADO observation only. It
+requires exact provider, effective API endpoint, repository and `observe`
+permission, a nonempty unexpired token, and compatible authentication.
+GitHub uses `bearer`, with `https://api.github.com` for the public host or
+`https://<host>/api/v3` for an Enterprise host. The selected source ignores
+ambient `GH_HOST` when no host is configured. ADO matches the configured
+organization endpoint without a trailing slash and preserves `basic-pat`
+versus `bearer`; bearer material is never encoded as a PAT.
+
+Acquisition occurs immediately before **each** native command or HTTP request,
+including review/check-run and ADO continuation pages, not once per snapshot
+or polling cycle. GitHub check-run pagination is caller-owned in this mode,
+so `gh --paginate` cannot reuse one credential for later pages. No token enters
+command arguments or snapshot state. Source failures and expired material abort
+the complete observation as retryable loss; binding errors refuse the read.
+Provider authorization loss likewise stops later reads. There is no cached
+credential or fallback to configured account/token commands, inherited tokens
+or an ambient CLI login. An explicit token conflicts with a selected source.
+Disabled native ADO observation cannot fall back to the legacy `az` path.
+
+Without this keyword, explicit string tokens, command-backed configuration and
+ordinary ambient CLI authentication retain their existing behavior. Publication
+and mutation interfaces do not accept renewable observation sources. This is
+a native library seam, not a CLI credential-loader option or an activated PR
+service/Fleet adapter; that process-boundary integration remains separate.
+
 Policy selectors are conjunctive and case-insensitive: `name`, `policy_id`,
 `context_name` and `context_genre`. Each rule needs a selector; conflicting
 classifications are errors. Kinds are `agent`, `human` or `composite`, never

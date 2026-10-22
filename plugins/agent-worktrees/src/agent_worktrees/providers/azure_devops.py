@@ -333,9 +333,14 @@ class AzureDevOpsProvider:
             draft=bool(data.get("isDraft", False)),
         )
 
-    def get_configured_snapshot(self, repo, number, *, api_base="", token=None, observation=None):
+    def get_configured_snapshot(
+        self, repo, number, *, api_base="", token=None, observation=None, credential_source=None,
+    ):
         from .azure_observation import get_snapshot
-        return get_snapshot(self, repo, number, api_base=api_base, token=token, observation=observation)
+        return get_snapshot(
+            self, repo, number, api_base=api_base, token=token, observation=observation,
+            credential_source=credential_source,
+        )
 
     def get_thread_report(self, repo, number, *, api_base="", token=None):
         from .azure_discussions import get_report

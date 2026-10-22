@@ -7,6 +7,8 @@ import json
 from dataclasses import asdict, dataclass, field, replace
 from typing import Literal
 
+from .providers.observation_credentials import CredentialSource
+
 
 GateState = Literal["satisfied", "blocked", "pending", "unknown", "waiting"]
 GateOwner = Literal["agent", "human", "external"]
@@ -130,11 +132,20 @@ class Observation:
         return result
 
 
-def configured_snapshot(provider, repo, number, *, prcfg, api_base="", token=None):
+def configured_snapshot(
+    provider, repo, number, *, prcfg, api_base="", token=None,
+    credential_source: CredentialSource | None = None,
+):
+    credentials = {}
+    if credential_source is not None:
+        from .providers.base import ProviderError
+        if token is not None or provider.name not in ("github", "azure-devops"):
+            raise ProviderError("Renewable observation credentials require a supported read-only binding")
+        credentials["credential_source"] = credential_source
     method = getattr(provider, "get_configured_snapshot", None)
     if method is not None:
         snapshot = method(repo, number, api_base=api_base, token=token,
-                          observation=getattr(prcfg, "observation", None))
+                          observation=getattr(prcfg, "observation", None), **credentials)
         if getattr(snapshot, "observation", None) is not None:
             from .pr_contract import title_is_wip
             holds = {label.casefold() for label in getattr(prcfg, "hold_labels", ())}
@@ -146,4 +157,4 @@ def configured_snapshot(provider, repo, number, *, prcfg, api_base="", token=Non
             snapshot = replace(snapshot, observation=replace(
                 snapshot.observation, gates=(*snapshot.observation.gates, gate)))
         return snapshot
-    return provider.get_snapshot(repo, number, api_base=api_base, token=token)
+    return provider.get_snapshot(repo, number, api_base=api_base, token=token, **credentials)

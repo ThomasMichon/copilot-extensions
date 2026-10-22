@@ -12,6 +12,9 @@ from urllib.parse import quote, urlencode, urlsplit
 from urllib.request import HTTPRedirectHandler, HTTPSHandler, Request, build_opener
 
 from .base import ProviderError
+from .observation_credentials import (
+    CredentialSource, ObservationCredentialError, ObservationCredentials,
+)
 
 
 MAX_RESPONSE_BYTES = 16 * 1024 * 1024
@@ -103,7 +106,7 @@ class Collection:
 
 class AdoReader:
     def __init__(self, provider, repo, number, api_base, token, *, opener=None,
-                 clock=time.monotonic, budget=120):
+                 clock=time.monotonic, budget=120, credential_source: CredentialSource | None = None):
         parsed = urlsplit(api_base)
         if parsed.scheme != "https" or not parsed.netloc or parsed.query or parsed.fragment:
             raise ProviderError("ADO observation requires a configured HTTPS organization endpoint")
@@ -112,13 +115,22 @@ class AdoReader:
                      + "/_apis/git/repositories/" + quote(repository, safe="")
                      + f"/pullRequests/{number}")
         self.project_base = self.base.split("/_apis/git/", 1)[0] + "/_apis"
-        header, error = provider._auth_header(token)
-        if error:
-            raise ProviderError("ADO observation authentication is unavailable")
-        name, separator, value = header.partition(":")
-        if not separator or name.casefold() != "authorization" or not value.strip():
-            raise ProviderError("ADO observation received an invalid authentication binding")
-        self._authorization = value.strip()
+        if credential_source is not None and token is not None:
+            raise ProviderError("Explicit tokens and renewable observation credentials are exclusive")
+        self.credentials = (
+            ObservationCredentials(credential_source, provider="azure-devops",
+                                   api_base=api_base.rstrip("/"), repository=repo)
+            if credential_source is not None else None
+        )
+        self._authorization = ""
+        if self.credentials is None:
+            header, error = provider._auth_header(token)
+            if error:
+                raise ProviderError("ADO observation authentication is unavailable")
+            name, separator, value = header.partition(":")
+            if not separator or name.casefold() != "authorization" or not value.strip():
+                raise ProviderError("ADO observation received an invalid authentication binding")
+            self._authorization = value.strip()
         self.clock = clock
         self.deadline = clock() + budget
         self.opener = opener or build_opener(NoRedirect(), _DeadlineHTTPSHandler(self.deadline, clock))
@@ -129,7 +141,15 @@ class AdoReader:
             raise ProviderError("ADO observation read budget exhausted", transient=True)
         if query:
             url += ("&" if "?" in url else "?") + urlencode(query)
-        request = Request(url, headers={"Authorization": self._authorization, "Accept": "application/json"})
+        authorization = self._authorization
+        if self.credentials is not None:
+            if not url.startswith(self.credentials.api_base + "/"):
+                raise ObservationCredentialError("ADO observation credential target mismatch")
+            authorization = self.credentials.authorization()
+            remaining = self.deadline - self.clock()
+            if remaining <= 0:
+                raise ProviderError("ADO observation read budget exhausted", transient=True)
+        request = Request(url, headers={"Authorization": authorization, "Accept": "application/json"})
         try:
             with self.opener.open(request, timeout=min(20, remaining)) as response:
                 if response.status != 200:
@@ -137,8 +157,12 @@ class AdoReader:
                 data = response.read(MAX_RESPONSE_BYTES + 1)
                 continuation = response.headers.get("x-ms-continuationtoken", "")
         except HTTPError as exc:
+            if self.credentials is not None and exc.code in (401, 403):
+                raise ObservationCredentialError(
+                    "ADO observation authorization lost", transient=True,
+                ) from None
             raise ProviderError(f"ADO observation GET returned HTTP {exc.code}",
-                                transient=exc.code in (408, 429) or exc.code >= 500) from exc
+                                transient=exc.code in (408, 429) or exc.code >= 500) from None
         except (URLError, OSError, TimeoutError) as exc:
             if (isinstance(exc, _ReadDeadlineExpired)
                     or isinstance(getattr(exc, "reason", None), _ReadDeadlineExpired)
@@ -190,6 +214,8 @@ class AdoReader:
                 if continuation_paging or not skip_paging or len(values) < 100:
                     return Collection(tuple(records))
             raise ProviderError("ADO observation pagination limit reached")
+        except ObservationCredentialError:
+            raise
         except ProviderError as exc:
             return Collection(tuple(records), str(exc))
 
