@@ -1220,9 +1220,28 @@ own scratch, while preserving argument boundaries and native exit status.
 The fetched bootstrap uses the supported Manager runtime constructor. Before
 publishing a Manager, fresh installer code checks existing command bytes against
 the published ownership recognizer and validates registration/root identity,
-preserving foreign commands. The fresh Manager repairs the core through its
+preserving foreign commands. Resident Manager activation remains inside the
+constructed candidate's lifetime and selector-publication transaction. It runs
+with the candidate's own interpreter and dependencies; a failed or refused
+cutover restores the prior selectors and stops recovery before engine repair.
+Skipping the redundant Manager fetch never skips daemon activation.
+
+Before executing an incumbent core installer, the fresh Manager validates its
+captured source, installation and local-environment owner using the fresh SDK.
+It rehydrates the exact registered native origin at its stable payload path
+through ordinary Copilot plugin acquisition, even when the old payload or
+installer is missing or corrupt. The complete registration, source fingerprint,
+materialized plugin and native installer are revalidated after acquisition;
+neither an exit-zero message nor an unrelated fresh checkout establishes source
+ownership. Registration choices are never rewritten or relabelled.
+
+The fresh Manager then repairs the core through its
 supported, source-policy/ownership-admitted installer before running its normal
 whole-suite `update` orchestration, without fetching a second Manager source.
+An admitted partial shared installation provisions its missing runtime bin
+before updating. An explicit cell retains its canonical context, actual runtime
+root and publication custody throughout repair; invalid or changed cell
+ownership never falls back to the shared root.
 Project arguments and the original invocation context cross the bootstrap.
 Installing the Manager alone never counts as suite success: repair failures
 and the eventual update's native exit status

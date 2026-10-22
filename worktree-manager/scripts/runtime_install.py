@@ -180,6 +180,33 @@ def activate(root: Path, version: str, *, expected: str | None, after_publish=No
                     raise
 
 
+def _activate_after_bootstrap_update(root: Path, slot: Path) -> None:
+    python = runtime.slot_python(root, slot.name)
+    if python is None:
+        raise RuntimeError("Constructed Manager has no activation interpreter")
+    command = [
+        str(python), "-I", "-S", "-B", "-X", "utf8",
+        str(slot / ".runtime-bootstrap" / "runtime_launcher.py"),
+        "-m", "worktree_manager.bootstrap_activation", "--root", str(root),
+    ]
+    process = subprocess.Popen(
+        command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        text=True, encoding="utf-8",
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    try:
+        stdout, stderr = process.communicate()
+    except BaseException:
+        _settle(process.communicate)
+        raise
+    if stdout:
+        print(stdout, end="", flush=True)
+    if stderr:
+        print(stderr, end="", file=sys.stderr, flush=True)
+    if process.returncode:
+        raise RuntimeError(f"Constructed Manager daemon activation failed ({process.returncode})")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path)
@@ -250,7 +277,14 @@ def main(argv: list[str] | None = None) -> int:
             if process.returncode:
                 return process.returncode
     else:
-        result = self_install(args.payload, root=args.root, dry_run=False)
+        if args.repair_update:
+            result = self_install(
+                args.payload, root=args.root, dry_run=False,
+                _after_activate=lambda slot: _activate_after_bootstrap_update(args.root, slot),
+                _transactional_activation=True,
+            )
+        else:
+            result = self_install(args.payload, root=args.root, dry_run=False)
         if result.action == "error":
             print(result.reason, file=sys.stderr)
             return 1

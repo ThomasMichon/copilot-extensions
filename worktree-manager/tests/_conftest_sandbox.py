@@ -19,6 +19,7 @@ _SELF_INSTALL_TEST_MODULES = {
     "test_self_install",
     "test_update",
     "test_update_bootstrap",
+    "test_update_bootstrap_activation",
     "test_e2e_delivery",
 }
 

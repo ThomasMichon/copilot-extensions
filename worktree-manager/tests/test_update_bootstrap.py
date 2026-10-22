@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import os
-import subprocess
 from pathlib import Path
 
 import pytest
@@ -33,26 +32,29 @@ def test_update_bootstrap_repairs_before_orchestration(monkeypatch, rc):
     assert calls == (["repair"] if rc else ["repair", flags])
 
 
-def test_update_bootstrap_uses_supported_fresh_installer(monkeypatch, tmp_path):
-    root = tmp_path / "manager"
-    script = root / "staging/plugins/agent-worktrees/scripts/install.sh"
-    script.parent.mkdir(parents=True)
-    script.write_text("#!/bin/sh\nexit 19\n")
-    monkeypatch.setattr(core_install, "install_script", lambda path: script)
+def test_update_bootstrap_acquires_source_before_native_repair(monkeypatch, tmp_path):
+    root = tmp_path / "runtime"
+    (root / "bin").mkdir(parents=True)
+    identity = {
+        "installationId": "fixture", "pluginId": "agent-worktrees", "mode": "legacy",
+        "runtimeRoot": str(root), "sourceFingerprint": "fixture", "environment": {},
+    }
+    installation = update_bootstrap._Installation(root, tmp_path / "payload", identity, tmp_path)
     calls = []
-
-    def run(command, **kwargs):
-        calls.append((command, kwargs))
-        return subprocess.CompletedProcess(command, 19)
-
-    monkeypatch.setattr(update_bootstrap.subprocess, "run", run)
-    monkeypatch.setattr(update_bootstrap.os, "name", "posix")
-    assert update_bootstrap.repair_engine(root / "staging") == 19
-    command, options = calls[0]
-    assert command == ["bash", str(script), "update"]
-    assert not options.get("start_new_session", False)
-    assert not options.get("close_fds", False)
-    assert options["env"]["PATH"]
+    monkeypatch.setattr(
+        update_bootstrap, "_refresh_source",
+        lambda source, env: calls.append("acquire") or identity,
+    )
+    monkeypatch.setattr(
+        update_bootstrap, "_incumbent",
+        lambda source, env: calls.append("admit") or installation,
+    )
+    monkeypatch.setattr(
+        update_bootstrap, "_invoke",
+        lambda target, action, env: calls.append(("native", target, action)) or 19,
+    )
+    assert update_bootstrap.repair_engine(tmp_path / "fresh-source") == 19
+    assert calls == ["acquire", "admit", "admit", ("native", installation, "update")]
 
 
 def test_update_bootstrap_missing_installer_is_failure(monkeypatch, capsys):

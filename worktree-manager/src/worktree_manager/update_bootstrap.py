@@ -1,34 +1,295 @@
-"""Repair the engine from fresh bootstrap inputs before Manager orchestration."""
+"""Repair the validated incumbent engine before Manager orchestration."""
 from __future__ import annotations
 
 import os
-from pathlib import Path
+import runpy
+import shutil
 import subprocess
 import sys
+from dataclasses import dataclass
+from pathlib import Path
+from types import ModuleType
+from typing import Any
 
 from agent_procutil import no_window_kwargs
 
 
-def repair_engine(source: Path) -> int:
-    """Run the supported, ownership-admitted installer, never a broken engine."""
-    from .core_install import install_script
-    script = install_script(source)
-    if script is None:
-        print("Fresh bootstrap engine installer is unavailable.", file=sys.stderr)
-        return 1
-    if os.name == "nt":
-        from shutil import which
+@dataclass(frozen=True)
+class _Installation:
+    root: Path
+    payload: Path
+    identity: dict[str, Any]
+    sdk: Path
+    context_arguments: dict[str, Any] | None = None
+    primitive: ModuleType | None = None
 
-        host = which("pwsh") or which("powershell.exe")
-        if host is None:
-            print("PowerShell is required for engine repair.", file=sys.stderr)
-            return 1
-        command = [host, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script), "update"]
+
+def _policy_sdk(source: Path):
+    from .core_install import install_script
+
+    fresh_script = install_script(source)
+    if fresh_script is None:
+        raise RuntimeError("Fresh bootstrap engine installer is unavailable")
+    sdk = fresh_script.parent.parent
+    policy = source / "worktree-manager/scripts/update_entry.py"
+    if policy.is_symlink() or not policy.is_file() or policy.resolve() != policy.absolute():
+        raise RuntimeError("Fresh bootstrap publication reader is unavailable or indirect")
+    helper = runpy.run_path(str(policy))
+    api, primitive = helper["_publication_api"](sdk)
+    return fresh_script, sdk, helper, api, primitive
+
+
+def _refresh_source(source: Path, environment: dict[str, str]) -> dict[str, Any]:
+    """Validate captured ownership before rehydrating missing or damaged source bytes."""
+    from .engine_origin import refresh_registered_origin, select_registered_origin
+
+    _script, _sdk, helper, api, primitive = _policy_sdk(source)
+    current_environment, profile = primitive._current_environment(
+        environment=environment, os_profile=None, platform=None, wsl_distro=None,
+    )
+    home = Path(profile)
+    context = environment.get("COPILOT_EXTENSIONS_CONTEXT", "").strip()
+    marketplace = None
+    if context:
+        path = Path(context)
+        if not path.is_absolute() or len(path.parents) < 5:
+            raise RuntimeError("Engine repair context must name a canonical installation receipt")
+        durable = path.parents[4]
+        receipt = primitive.validate_context_receipt(
+            path, durable, expected_plugin_id="agent-worktrees", environment=environment,
+        )
+        root = Path(receipt["pluginRoot"])
+        activation = primitive._activation_result(
+            plugin_root=root, durable_home=durable, marketplace_id=receipt["marketplaceId"],
+            plugin_id="agent-worktrees", current_environment=current_environment,
+            legacy_root=home / ".agent-worktrees",
+        )
+        if (
+            activation["state"] != "valid" or activation["actualMode"] != "namespaced"
+            or activation["runtimeRoot"] != str(root)
+            or activation["installGeneration"] != receipt["generation"]
+        ):
+            raise RuntimeError("Engine repair context has no current local activation")
+        fingerprint = receipt["sourceFingerprint"]
+        marketplace = receipt["marketplaceId"]
+        hint = Path(receipt["payloadRoot"])
+        expected = {
+            "owner": {
+                "sourceFingerprint": fingerprint, "pluginId": "agent-worktrees",
+                "mode": "namespaced", "runtimeRoot": str(root),
+                "environment": current_environment,
+            },
+            "context": str(path.resolve()),
+            "namespaceGeneration": receipt["namespaceGeneration"],
+            "installGeneration": receipt["generation"],
+            "activationGeneration": activation["activationGeneration"],
+        }
     else:
-        command = ["bash", str(script), "update"]
-    # The fresh Manager's base Python satisfies the installer's bootstrap
-    # admission without consulting an installed Worktrees virtual environment.
+        root = home / ".agent-worktrees"
+        manifest_path = root / "deploy-manifest.json"
+        helper["_ordinary"](manifest_path)
+        manifest = primitive.read_deployment_manifest(manifest_path)
+        if (
+            not isinstance(manifest, dict) or manifest.get("schema_version") != 3
+            or manifest.get("service") != "agent-worktrees"
+            or not isinstance(manifest.get("commandBinding"), dict)
+        ):
+            raise RuntimeError("Engine repair has no captured incumbent ownership")
+        previous = manifest["commandBinding"]
+        fingerprint = previous.get("sourceFingerprint")
+        if not isinstance(fingerprint, str) or not isinstance(previous.get("payloadRoot"), str):
+            raise RuntimeError("Engine repair captured source identity is incomplete")
+        hint = Path(previous["payloadRoot"])
+    copilot_home = Path(environment.get("COPILOT_HOME") or home / ".copilot")
+    installed = copilot_home / "installed-plugins"
+    payload_hint = hint if hint.is_relative_to(installed) else None
+    origin = select_registered_origin(
+        primitive, copilot_home=copilot_home, plugin_id="agent-worktrees",
+        source_fingerprint=fingerprint, marketplace_id=marketplace, payload_hint=payload_hint,
+    )
+    if not context:
+        wanted = api["_legacy_receipt"](
+            origin.provenance, {"runtimeRoot": str(root), "environment": current_environment},
+        )
+        if {key: value for key, value in previous.items() if key != "payloadRoot"} != {
+            key: value for key, value in wanted.items() if key != "payloadRoot"
+        }:
+            raise RuntimeError("Engine repair source, installation or environment identity differs")
+        expected = _identity(_Installation(root, origin.payload, wanted, _sdk))
+    helper["_ordinary"](root / "bin")
+    if (root / "bin").exists() and not (root / "bin").is_dir():
+        raise RuntimeError("Engine runtime bin is not an ordinary directory")
+    refresh_registered_origin(primitive, origin, environment=environment)
+    return expected
+
+
+def _scoped_incumbent(
+    sdk: Path, helper: dict[str, Any], primitive: ModuleType,
+    environment: dict[str, str], context: str, home: Path,
+) -> _Installation:
+    path = Path(context)
+    if not path.is_absolute() or len(path.parents) < 5:
+        raise RuntimeError("Engine repair context must name a canonical installation receipt")
+    durable = path.parents[4]
+    receipt = primitive.validate_context_receipt(
+        path, durable, expected_plugin_id="agent-worktrees", environment=environment,
+    )
+    payload = Path(receipt["payloadRoot"])
+    helper["_ordinary"](payload)
+    query = dict(environment)
+    query.pop("COPILOT_PLUGIN_ROOT", None)
+    arguments = {
+        "payload_root": payload, "plugin_id": "agent-worktrees",
+        "legacy_root": home / ".agent-worktrees", "context": path,
+        "durable_home": durable, "environment": query,
+    }
+    identity, validated = primitive._runtime_publication_identity(arguments)
+    root = Path(validated["pluginRoot"])
+    helper["_ordinary"](root / "bin")
+    if (root / "bin").exists() and not (root / "bin").is_dir():
+        raise RuntimeError("Scoped engine runtime bin is not an ordinary directory")
+    return _Installation(root, payload, identity, sdk, arguments, primitive)
+
+
+def _incumbent(source: Path, environment: dict[str, str]) -> _Installation:
+    """Read existing source/installation ownership with the fresh policy SDK."""
+    fresh_script, sdk, helper, api, primitive = _policy_sdk(source)
+    _, profile = primitive._current_environment(
+        environment=environment, os_profile=None, platform=None, wsl_distro=None,
+    )
+    home = Path(profile)
+    context = environment.get("COPILOT_EXTENSIONS_CONTEXT", "").strip()
+    if context:
+        return _scoped_incumbent(sdk, helper, primitive, environment, context, home)
+    root = home / ".agent-worktrees"
+    helper["_ordinary"](root / "bin")
+    if (root / "bin").exists() and not (root / "bin").is_dir():
+        raise RuntimeError("Engine runtime bin is not an ordinary directory")
+    sources = helper["_published_engine_sources"](home, sdk)
+    if not sources:
+        raise RuntimeError("Engine repair has no revalidated incumbent publication")
+    query = dict(environment)
+    query.pop("COPILOT_PLUGIN_ROOT", None)
+    for payload in sources:
+        script = payload / "scripts" / fresh_script.name
+        helper["_ordinary"](script)
+        if not script.is_file():
+            continue
+        receipt = api["publish_legacy_binding"](
+            primitive, payload_root=payload, plugin_id="agent-worktrees",
+            legacy_root=root, environment=query,
+        )
+        if (
+            receipt["pluginId"] != "agent-worktrees" or receipt["mode"] != "legacy"
+            or Path(receipt["runtimeRoot"]) != root
+        ):
+            raise RuntimeError("Validated engine publication names another installation")
+        return _Installation(root, payload, receipt, sdk)
+    raise RuntimeError("Validated incumbent payload has no supported native installer")
+
+
+def _identity(installation: _Installation) -> dict[str, Any]:
+    if installation.context_arguments is not None:
+        return installation.identity
+    return {
+        key: installation.identity[key]
+        for key in (
+            "installationId", "pluginId", "mode", "runtimeRoot", "sourceFingerprint", "environment",
+        )
+    }
+
+
+def _wait(command: list[str], environment: dict[str, str], cwd: Path) -> int:
+    """Do not kill the admitting lifecycle parent before its native child settles."""
+    with subprocess.Popen(
+        command, env=environment, cwd=cwd, **no_window_kwargs(),
+    ) as process:
+        interrupted = False
+        while True:
+            try:
+                rc = process.wait()
+                break
+            except KeyboardInterrupt:
+                interrupted = True
+        if interrupted:
+            raise KeyboardInterrupt
+        return rc
+
+
+def _invoke(installation: _Installation, action: str, environment: dict[str, str]) -> int:
+    """The supported CLI validates ownership, mints a capability, and holds custody."""
+    if os.name == "nt":
+        host = shutil.which("pwsh") or shutil.which("powershell.exe")
+        if host is None:
+            raise RuntimeError("PowerShell is required for engine repair")
+        native = [
+            host, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+            str(installation.payload / "scripts/install.ps1"), action,
+            "-InstallDir", str(installation.root),
+        ]
+        if installation.context_arguments is not None:
+            native += ["-BootstrapPython", str(Path(
+                getattr(sys, "_base_executable", sys.executable),
+            ).resolve())]
+    else:
+        host = shutil.which("bash")
+        if host is None:
+            raise RuntimeError("Bash is required for engine repair")
+        native = [
+            host, str(installation.payload / "scripts/install.sh"), action,
+            "--install-dir", str(installation.root),
+        ]
+        if installation.context_arguments is not None:
+            native += ["--runtime-publication-python", str(Path(
+                getattr(sys, "_base_executable", sys.executable),
+            ).resolve())]
+    base = str(Path(getattr(sys, "_base_executable", sys.executable)).resolve())
+    command = [
+        base, "-I", "-B", "-X", "utf8",
+        str(installation.sdk / "scripts/command_binding.py"),
+        "--payload-root", str(installation.sdk),
+        "--source-payload-root", str(installation.payload),
+        "--plugin-id", "agent-worktrees", "--legacy-root", str(installation.root),
+        "--run-lifecycle", "--managed-deployment", "--", *native,
+    ]
+    child = dict(environment)
+    # These locators name the actual selected executable/build payload, not the
+    # unrelated Manager checkout. They grant nothing without CLI admission.
+    child["COPILOT_PLUGIN_ROOT"] = str(installation.payload)
+    child["COPILOT_PLUGIN_STAGED_FROM"] = str(installation.payload)
+    child["PATH"] = str(Path(base).parent) + os.pathsep + child.get("PATH", "")
+    if installation.context_arguments is not None:
+        if installation.primitive is None:
+            raise RuntimeError("Scoped repair has no canonical publication SDK")
+        with installation.primitive.runtime_publication_lease(
+            **installation.context_arguments,
+        ) as patch:
+            return _wait(native, {**child, **patch}, installation.payload)
+    return _wait(command, child, installation.payload)
+
+
+def repair_engine(source: Path) -> int:
+    """Restore only the attributable installation, using its owning source."""
     environment = dict(os.environ)
-    base = Path(getattr(sys, "_base_executable", sys.executable)).parent
-    environment["PATH"] = str(base) + os.pathsep + environment.get("PATH", "")
-    return subprocess.run(command, env=environment, **no_window_kwargs()).returncode
+    try:
+        expected = _refresh_source(source, environment)
+        selected = _incumbent(source, environment)
+        if _identity(selected) != expected:
+            raise RuntimeError("Engine installation/source identity changed during acquisition")
+        actions = (
+            ("update",) if selected.context_arguments is not None
+            or (selected.root / "bin").is_dir() else ("provision", "update")
+        )
+        for action in actions:
+            current = _incumbent(source, environment)
+            if _identity(current) != expected:
+                raise RuntimeError("Engine installation/source identity changed during repair")
+            rc = _invoke(current, action, environment)
+            if rc:
+                return rc
+            if action == "provision" and not (current.root / "bin").is_dir():
+                raise RuntimeError("Engine provisioning returned success without its runtime bin")
+        return 0
+    except (OSError, ValueError, RuntimeError, ImportError) as error:
+        print(f"Engine repair refused: {error}", file=sys.stderr)
+        return 1

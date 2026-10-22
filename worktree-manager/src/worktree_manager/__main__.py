@@ -1510,6 +1510,7 @@ def _cmd_update_steps(rest: list[str], run, *, fresh_manager: bool = False) -> i
 
     # 1. Self-update the Manager (best-effort; the new slot takes effect next run).
     with run.self_update_phase():
+        # Fresh bootstrap already activated its candidate transactionally.
         su = (
             SelfUpdateResult(action="already-current", version=__version__)
             if fresh_manager else self_update(dry_run=False)
