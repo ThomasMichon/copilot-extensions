@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from itertools import product
 import os
 from pathlib import Path
 import runpy
@@ -33,9 +34,9 @@ def test_posix_bootstrap_retains_process_replacement(monkeypatch: pytest.MonkeyP
 
 
 @pytest.mark.parametrize("interrupted", [False, True])
-@pytest.mark.parametrize("interactive", [False, True])
+@pytest.mark.parametrize("tty_streams", list(product([False, True], repeat=3)))
 def test_windows_bootstrap_waits_for_observer_and_preserves_exit(
-    monkeypatch: pytest.MonkeyPatch, interrupted: bool, interactive: bool,
+    monkeypatch: pytest.MonkeyPatch, interrupted: bool, tty_streams: tuple[bool, bool, bool],
 ) -> None:
     installer = self_install._runtime_installer()
     seen, waits = [], []
@@ -51,8 +52,8 @@ def test_windows_bootstrap_waits_for_observer_and_preserves_exit(
         return SimpleNamespace(wait=wait)
 
     monkeypatch.setattr(installer, "os", SimpleNamespace(name="nt"))
-    streams = {name: SimpleNamespace(isatty=lambda: interactive)
-               for name in ("stdin", "stdout", "stderr")}
+    streams = {name: SimpleNamespace(isatty=lambda tty=tty: tty)
+               for name, tty in zip(("stdin", "stdout", "stderr"), tty_streams, strict=True)}
     monkeypatch.setattr(installer, "sys", SimpleNamespace(**streams))
     monkeypatch.setattr(
         installer, "subprocess", SimpleNamespace(Popen=launch, CREATE_NO_WINDOW=0x08000000),
@@ -66,7 +67,7 @@ def test_windows_bootstrap_waits_for_observer_and_preserves_exit(
         assert installer._dispatch_manager(command) == 43
         assert len(waits) == 1
     assert seen == [(command, {
-        **streams, "creationflags": 0 if interactive else 0x08000000,
+        **streams, "creationflags": 0 if any(tty_streams) else 0x08000000,
     })]
 
 
