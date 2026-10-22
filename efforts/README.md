@@ -13,7 +13,6 @@ that pattern to this repository.
 | [Coordinated Launch Maintenance](active/coordinated-launch-maintenance/README.md) | Draft; nonblocking healthy handoff with coordinated adopted background maintenance | #7694; preserves #6812/#6820/#7667 owners |
 | [Dynamic Reverse Reservations](active/dynamic-reverse-reservations/README.md) | Active; coordinator/finite-forward source merged, opt-in SSH consumer qualification; production integration retained | #7719; preserves #63/#6681/#5789/#6804/#6240/#6424 owners |
 | [SSH Reverse Candidate Forward](active/ssh-reverse-candidate-forward/README.md) | Active; reviewed intent merged; finite SSH owner candidate and lifecycle review corrections in progress | #7720; complements #7719 publication without a second selector; actual OpenSSH/adoption remain separate |
-| [CodeSpaces Authentication CTA](active/codespaces-authentication-cta/README.md) | Draft; click-only provider authentication and Manager CTA | #7793; no live authorization or deployment |
 | [Backlog Reconciliation](active/backlog-reconciliation/README.md) | Active; oldest-first evidence and requirement-preserving consolidation, no implementation | #7556; 1,458 baseline, 729 guidance checkpoint |
 | [Feed Construction Release Gate](active/feed-construction-release-gate/README.md) | Draft; complete configured-feed construction and installed-launch qualification before CI/promotion activation | #7529; preserves #3336/#6237 control and #7420/#7446/#7514 repair owners |
 | [Acknowledged Execution Handoff](active/acknowledged-execution-handoff/README.md) | Active; source/test scope assigned, optional effect adapter construction first | #7268; coordinator integration and live adoption remain open |
@@ -98,7 +97,7 @@ that pattern to this repository.
 | [CLI-Default Bridging](active/cli-default-bridging/README.md) | Active; Phase 6 research complete, SDK prompt fix merged to dev, arbitration next | #6647, #5930 |
 | [Migration Intake](active/migration-intake/README.md) | Draft | See effort |
 | [Account-Aware Operations](active/account-aware-operations/README.md) | Draft | See effort |
-| [Agent Machines Declarative Control Plane](active/agent-machines-declarative-control-plane/README.md) | Active | #1418 (closed; historical, no live umbrella) |
+| [Agent Machines Declarative Control Plane](active/agent-machines-declarative-control-plane/README.md) | Active | #1418 historical; retained reset/prelaunch use reviewed Plan/Validation/Journal and open per-slice claims |
 | [Review Automation Reliability](active/review-automation-reliability/README.md) | Draft | See effort |
 | [Marketplace-Scoped Installations](active/marketplace-scoped-installations/README.md) | Active | #1096 |
 | [Native-Construct Convergence](active/native-construct-convergence/README.md) | Active | #985 |
