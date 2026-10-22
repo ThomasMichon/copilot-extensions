@@ -350,12 +350,17 @@ or a reason to create a daemon.
   exit without removing another session's forward. Missing or unrelated hold
   metadata is refused rather than guessed.
 - Targeted source validation: SSH 103 passed with three explicit POSIX-only
-  skips; native Worktrees context/query coverage 52 passed; Bridge dispatch
+  skips; native Worktrees context/query and routing coverage 227 passed; Bridge dispatch
   and namespace coverage 98 passed. Lint and both contracts with all 456
   frozen fixtures pass. The configured-remote tests execute the generated
   probe against actual Git and exercise the public repository-discovery entry
   point, but substitute the native owner response; they are not live SSH or
   genuine POSIX acceptance evidence.
+- CI caught the context CLI crossing its module-size cap after the new scalar.
+  Its existing read-only key descriptions/dependencies now live in a separate
+  metadata module, without changing the cap or baseline. Wider routing tests
+  also exposed a stale updater fixture; it now intercepts the current request
+  boundary instead of entering the isolated test updater.
 - Main publication is independently confirmed for privileged source #7899
   and CI repair #7907: the recorded promoted Dev contains both commits and
   its 21 affected source blobs exactly match Main. No updater, native launch,

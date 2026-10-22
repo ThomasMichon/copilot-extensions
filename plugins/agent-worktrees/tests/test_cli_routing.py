@@ -375,8 +375,7 @@ def test_project_flag_preserves_invocation_context_before_chdir(monkeypatch, tmp
     monkeypatch.setattr(m, "_cwd_is_inside_project", lambda _anchor: False)
     contexts = []
     monkeypatch.setattr(
-        m,
-        "_cmd_update_in_plugin",
+        "agent_worktrees.update_driver_cli.cmd_update_request",
         lambda _args: contexts.append(m._invocation_update_context()) or 0,
     )
 
