@@ -582,3 +582,13 @@ key and relay projection; restricted venues never enter that path.
   was installed through its supported bootstrap, and its headless
   `picker screenshot` command rendered the production Picker successfully
   through the documented engine-runtime process boundary.
+
+### 2026-10-21 - Provider-backed read-only Picker delivery receipt
+
+- PR #1405 merged on 2026-08-30 as `3e591051d18d856fb0bdf38be322f80d4f461fea`,
+  delivering provider-backed source discovery, identity-bound reads and Manager parity.
+- The contract permits list, messages, sessions and refresh only;
+  create, launch, lifecycle and other mutations remain unsupported and fail closed.
+- Historical installation evidence records agent-worktrees `1.5.3-dev679`;
+  it does not establish current deployment or end-to-end venue qualification.
+- This receipt closes no open Phase 5, lifecycle, rescue or clean-room gate.
