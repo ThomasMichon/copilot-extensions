@@ -1405,6 +1405,10 @@ whatever changefiles are pending; nothing here is hand-edited directly.
 > change does (`python tools/changefile.py add --plugin worktree-manager
 > --type patch --comment "..."` — the `--plugin` flag name is historical;
 > it accepts any recognized consumer identifier).
+> Registered standalone consumers such as **`fleet-manager`** follow this
+> same release-metadata rule: changes to their shipped content require a
+> pending changefile naming that consumer. Use its registered name with
+> `--plugin`; absence from the marketplace plugin roster is not an exemption.
 >
 > **Before editing a shared lib, find every consumer first — two commands,
 > not one.** `python tools/check-vendored-libs-sync.py --list` enumerates

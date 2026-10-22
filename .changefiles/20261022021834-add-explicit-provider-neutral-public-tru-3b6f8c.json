@@ -1,0 +1,9 @@
+{
+  "comment": "Add explicit provider-neutral public-trust adapters while preserving common request verification and legacy defaults.",
+  "changes": [
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    }
+  ]
+}
