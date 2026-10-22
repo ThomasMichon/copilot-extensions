@@ -87,6 +87,7 @@ def test_ssh_restamp_preserves_selected_snapshot_identity(
     for plugin in ("agent-pull-requests", "agent-vault", "agent-ssh", "agent-codespaces")
 ] + [
     ("agent-codespaces", "healthy-empty"), ("agent-codespaces", "healthy-single"),
+    ("agent-codespaces", "healthy-unicode"),
 ])
 def test_shared_actual_stamp_first_use_admission(
     binding_fixture: dict, tmp_path: Path, plugin: str, state: str,
@@ -94,13 +95,29 @@ def test_shared_actual_stamp_first_use_admission(
     released = _release_payload(tmp_path / "release", plugin)
     environment = _adopter(binding_fixture, plugin, released)
     environment.pop("COPILOT_PLUGIN_INSTALL_SMOKE", None)
+    if state == "healthy-unicode":
+        root = binding_fixture["home"] / "custom-\u00e9\u6d4b\u8bd5"
+        root.mkdir()
+        binding_fixture["legacy"] = root
+        binding_fixture["arguments"]["legacy_root"] = root
     temporary = binding_fixture["home"] / "tmp"
     temporary.mkdir()
     environment.update({key: str(temporary) for key in ("TEMP", "TMP", "TMPDIR")})
     environment[plugin.upper().replace("-", "_") + "_HOME"] = str(binding_fixture["legacy"])
     shell = "powershell" if os.name == "nt" else "bash"
-    stamped = _run(
-        binding_fixture, environment, [*_command(binding_fixture, shell, "install"), "stamp"],
+    stamp_command = [*_command(binding_fixture, shell, "install"), "stamp"]
+    if state == "healthy-unicode":
+        stamp_command += [
+            "-InstallDir" if os.name == "nt" else "--install-dir", str(binding_fixture["legacy"]),
+        ]
+    stamped = (
+        subprocess.run(
+            stamp_command, env=environment, cwd=binding_fixture["home"],
+            capture_output=True, timeout=30,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        if state == "healthy-unicode" else
+        _run(binding_fixture, environment, stamp_command)
     )
     assert stamped.returncode == 0, stamped.stdout + stamped.stderr
     root = binding_fixture["legacy"]
@@ -154,6 +171,8 @@ def test_shared_actual_stamp_first_use_admission(
     ):
         environment.pop(key, None)
     wrapper = binding_fixture["home"] / ".local/bin" / plugin
+    if state == "healthy-unicode" and os.name == "nt":
+        assert wrapper.with_suffix(".ps1").read_bytes().startswith(b"\xef\xbb\xbf")
     forwarded = (
         [] if state == "healthy-empty" else ["version"] if state == "healthy-single" else
         ["ssh", "--remote-cmd", 'echo "spaces & pipes | semicolons ; bangs !"']
@@ -272,7 +291,10 @@ def test_codespaces_actual_first_use_serializes_one_build(
 
 @pytest.mark.portfolio_tier("T3")
 @pytest.mark.parametrize("plugin", ["agent-pull-requests", "agent-vault", "agent-ssh", "agent-codespaces"])
-@pytest.mark.parametrize("failure", ["missing-resolver", "command-directory", "legacy-command-directory"])
+@pytest.mark.parametrize("failure", [
+    "missing-resolver", "command-directory", "legacy-command-directory",
+    "resolver-bin-file", "resolver-directory",
+])
 def test_actual_restamp_failure_preserves_previous_selection(
     binding_fixture: dict, tmp_path: Path, plugin: str, failure: str,
 ) -> None:
@@ -294,6 +316,13 @@ def test_actual_restamp_failure_preserves_previous_selection(
         (selected / "snapshot-provenance.json").unlink()
     if failure == "missing-resolver":
         (binding_fixture["payload"] / "scripts/resolve-runtime.sh").unlink()
+    elif failure == "resolver-bin-file":
+        (root / "bin").rename(root / "previous-bin")
+        (root / "bin").write_text("not a directory\n", encoding="utf-8")
+    elif failure == "resolver-directory":
+        resolver = root / "bin/resolve-runtime.sh"
+        resolver.rename(resolver.with_suffix(".retained"))
+        resolver.mkdir()
     else:
         wrapper = binding_fixture["home"] / ".local/bin" / plugin
         if os.name == "nt":
@@ -306,12 +335,15 @@ def test_actual_restamp_failure_preserves_previous_selection(
             "payload-dir", "stamped-version", "current-version", "last-known-good",
         ) if (root / name).exists()
     }
+    command_root = binding_fixture["home"] / ".local/bin"
+    commands = {path.name: path.read_bytes() for path in command_root.iterdir() if path.is_file()}
     before = _snapshot(selected)
     second = _run(binding_fixture, environment, command)
     assert second.returncode != 0, second.stdout + second.stderr
     assert "Stamped:" not in second.stdout
     assert all((root / name).read_bytes() == value for name, value in markers.items())
     assert _snapshot(selected) == before
+    assert {path.name: path.read_bytes() for path in command_root.iterdir() if path.is_file()} == commands
 
 
 @pytest.mark.portfolio_tier("T3")

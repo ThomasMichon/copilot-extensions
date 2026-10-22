@@ -1001,11 +1001,17 @@ function Deploy-SelfProvisioningBinstub {
         New-Item -ItemType Directory -Path $LocalBin -Force | Out-Null
     }
     $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    $utf8Bom = New-Object System.Text.UTF8Encoding($true)
     $binDir = Join-Path $InstallDir 'bin'
-    New-Item -ItemType Directory -Path $binDir -Force | Out-Null
+    New-Item -ItemType Directory -Path $binDir -Force -ErrorAction Stop | Out-Null
+    foreach ($resolver in @('resolve-runtime.ps1', 'resolve-runtime.sh')) {
+        if (Test-Path -LiteralPath (Join-Path $binDir $resolver) -PathType Container) {
+            throw "Runtime helper destination must be a file: $resolver"
+        }
+    }
     foreach ($resolver in @('resolve-runtime.ps1', 'resolve-runtime.sh')) {
         Copy-Item -LiteralPath (Join-Path $PSScriptRoot $resolver) `
-            -Destination (Join-Path $binDir $resolver) -Force
+            -Destination (Join-Path $binDir $resolver) -Force -ErrorAction Stop
     }
 
     $ps1Path = Join-Path $LocalBin 'agent-codespaces.ps1'
@@ -1098,7 +1104,7 @@ exit 1
     $ps1Content = $ps1Content.Replace('__RUNTIME_ROOT__', $InstallDir.Replace("'", "''"))
     $temporary = "$ps1Path.$([guid]::NewGuid().ToString('N'))"
     try {
-        [IO.File]::WriteAllText($temporary, $ps1Content, $utf8NoBom)
+        [IO.File]::WriteAllText($temporary, $ps1Content, $utf8Bom)
         if ([IO.File]::Exists($ps1Path)) {
             [IO.File]::Replace($temporary, $ps1Path, [NullString]::Value)
         } else {

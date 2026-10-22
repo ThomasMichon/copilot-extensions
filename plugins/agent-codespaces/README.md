@@ -138,8 +138,11 @@ readiness error rather than an alternate installer or completion parser.
 
 Windows stamping captures the private snapshot candidate's canonical source
 before publishing the command and replacing the previous selection. Failed
-command publication leaves that previous snapshot and its selectors intact.
+resolver or command publication leaves that previous snapshot and its selectors
+intact. Resolver destinations must be files, not directories.
 The global command binds configuration and provisioning to its installed root.
+The generated PowerShell command uses UTF-8 with a BOM so Windows PowerShell
+5.1 preserves non-ASCII installation paths.
 PowerShell's legacy native argument mode encodes forwarded arguments before
 module execution to preserve embedded quotes; newer native argument passing
 retains direct module invocation.

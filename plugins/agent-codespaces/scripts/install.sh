@@ -778,11 +778,26 @@ deploy_binstub() {
         _fail "Binstub destination must be a file: $stub_path"
         return 1
     }
-    mkdir -p "$INSTALL_DIR/bin"
+    mkdir -p "$INSTALL_DIR/bin" || return 1
     for resolver in resolve-runtime.sh resolve-runtime.ps1; do
-        cp -f "$SCRIPT_DIR/$resolver" "$INSTALL_DIR/bin/$resolver"
+        [[ ! -d "$INSTALL_DIR/bin/$resolver" ]] || {
+            _fail "Runtime helper destination must be a file: $resolver"
+            return 1
+        }
     done
-    mkdir -p "$LOCAL_BIN"
+    local resolver_tmp resolver_path
+    for resolver in resolve-runtime.sh resolve-runtime.ps1; do
+        resolver_path="$INSTALL_DIR/bin/$resolver"
+        resolver_tmp="$(mktemp "$INSTALL_DIR/bin/.$resolver.XXXXXX")" || return 1
+        if ! cp -f "$SCRIPT_DIR/$resolver" "$resolver_tmp" ||
+           ! { [[ ! -d "$resolver_path" ]] && mv -f "$resolver_tmp" "$resolver_path" &&
+               [[ ! -e "$resolver_tmp" && ! -L "$resolver_tmp" && -f "$resolver_path" ]]; }; then
+            rm -f -- "$resolver_tmp"
+            _fail "Runtime helper publication failed: $resolver_path"
+            return 1
+        fi
+    done
+    mkdir -p "$LOCAL_BIN" || return 1
     local stub_tmp
     stub_tmp="$(mktemp "$LOCAL_BIN/.agent-codespaces.XXXXXX")" || return 1
     # Self-provisioning binstub (install-on-first-use). When the runtime venv is
