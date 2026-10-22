@@ -409,7 +409,9 @@ def test_local_reader_lock_is_shared_and_crash_released(pair, tmp_path):
         "from agent_chat_service.client import reader_lock; from pathlib import Path; "
         "import json,os,sys,time\n"
         "with reader_lock(Path(sys.argv[1])):\n"
-        " Path(sys.argv[2]).write_text(json.dumps({'pid':os.getpid(),'prefix':sys.prefix})); time.sleep(30)\n"
+        " ready=Path(sys.argv[2]); temporary=ready.with_suffix('.tmp')\n"
+        " temporary.write_text(json.dumps({'pid':os.getpid(),'prefix':sys.prefix}))\n"
+        " temporary.replace(ready); time.sleep(30)\n"
     )
     executable, extra_environment = direct_python(sys.executable)
     process, job = spawn_sync_in_kill_on_close_job(
