@@ -84,6 +84,16 @@ Missing publication, malformed data and incompatible capability are explicit
 errors, never fabricated empty rosters. Confirmed successful empty publication
 is distinct and deletes the prior rows.
 
+If rollback elects a previously superseded resident again, it replaces its
+fenced publisher with a new generation before republishing. The obsolete writer
+remains permanently closed; current election authority is checked again during
+the durable ownership transaction. An elected resident retries failed
+publication activation at its existing monitor iteration boundary, not in a
+reader. Cutover health rejects unavailable roster subsystems even when an older
+resident reports broad readiness. A passive, unpublished candidate may report
+an unready roster before promotion, but a published candidate must serve the
+roster capability.
+
 Unreachable, slow, upgrading or incompatible residents permit only an
 independently indexed durable read, labeled `quality: advisory` with an
 availability reason, or an explicit unavailable error. Ordinary readers never

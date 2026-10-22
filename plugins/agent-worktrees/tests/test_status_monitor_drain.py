@@ -259,7 +259,7 @@ def test_successor_promotion_failure_is_logged_before_any_predecessor_rpc(
     assert "private fixture detail" not in (tmp_path / "lifecycle.log").read_text()
 
 
-def test_client_timeout_does_not_cancel_the_daemon_drain_callback(tmp_path):
+def test_client_timeout_does_not_cancel_the_daemon_drain_callback(tmp_path, monkeypatch):
     busy = threading.Event()
     busy.set()
     entered = threading.Event()
@@ -286,6 +286,14 @@ def test_client_timeout_does_not_cancel_the_daemon_drain_callback(tmp_path):
         client = ControlClient(
             f"http://127.0.0.1:{server.port}", config_dir=tmp_path, timeout=0.5,
         )
+        request = client._request
+
+        def short_request(action, payload=None, **kwargs):
+            kwargs["read_timeout"] = client.timeout
+            return request(action, payload, **kwargs)
+
+        # Inject early caller loss; public drain normally allows its full budget.
+        monkeypatch.setattr(client, "_request", short_request)
         with pytest.raises(TimeoutError):
             client.drain(timeout=2, poll=0.05, force=False)
         assert entered.is_set() and not finished.is_set()

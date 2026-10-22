@@ -1,0 +1,9 @@
+{
+  "comment": "Recover elected roster publication after rollback with a fresh fenced generation, reject unavailable cutover health, and flush held-feed transactions efficiently.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

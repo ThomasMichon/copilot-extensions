@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import socket
+import sys
 import time
 
 from .worktrees_client import READ_TIMEOUT, validate_result
@@ -296,7 +297,9 @@ def relay(request: dict) -> int:
         for frame in frames:
             admitted = receiver.receive(frame)
             for output in admitted or ():
-                print(json.dumps(output, separators=(",", ":"), ensure_ascii=False), flush=True)
+                print(json.dumps(output, separators=(",", ":"), ensure_ascii=False))
+            if admitted:
+                sys.stdout.flush()
     finally:
         frames.close()
     return 0

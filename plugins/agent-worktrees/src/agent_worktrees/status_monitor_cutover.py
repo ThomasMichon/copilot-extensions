@@ -444,7 +444,14 @@ def _monitor_lock_is_live() -> bool:
 def _health_check(host: str, port: int) -> bool:
     try:
         status = ControlClient(f"http://{host}:{port}").health()
-        return status.get("status") != "draining"
+        if status.get("status") != "ready":
+            return False
+        roster = status.get("worktrees")
+        if not isinstance(roster, dict):
+            return True
+        return roster.get("status") == "ready" or (
+            status.get("published") is False and roster.get("status") == "unready"
+        )
     except Exception:
         return False
 

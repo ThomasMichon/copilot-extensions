@@ -657,11 +657,15 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     def _handle_control(action: str, payload: dict) -> dict:
         nonlocal admission_closed, published_lock
         if action == "health":
+            roster_health = worktrees_runtime.health()
+            roster_ready = roster_health["worktrees"]["status"] in {"ready", "unready"}
             return {
-                "status": "draining" if admission_closed else "ready",
+                "status": "draining" if admission_closed else (
+                    "ready" if roster_ready else "unavailable"
+                ),
                 "published": published_lock,
                 "pid": os.getpid(),
-                **worktrees_runtime.health(),
+                **roster_health,
                 "runtime_generation": PROCESS_GENERATION,
                 "version": PROCESS_VERSION,
                 "runtime_slot": os.path.basename(my_prefix),
@@ -741,9 +745,10 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
         while True:
             _cleanup_retired_request_surfaces()
             active_generation = status_monitor_cutover.active_generation_for_pid(os.getpid())
-            if active_generation is not None and not published_lock:
+            roster_ready = worktrees_runtime.health()["worktrees"]["status"] == "ready"
+            if active_generation is not None and (not published_lock or not roster_ready):
                 with state_lock:
-                    if not published_lock:
+                    if not admission_closed and (not published_lock or not roster_ready):
                         published_lock = True
                         published_lock = _start_request_surfaces()
                         if published_lock:

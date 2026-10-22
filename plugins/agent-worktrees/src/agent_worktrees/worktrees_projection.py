@@ -217,6 +217,7 @@ class WorktreesProjection:
         self._writer_lock = threading.Lock()
         self._projects: dict[str, _Publication] = {}
         self._closed = False
+        self._superseded = False
         self._writer_id = uuid.uuid4().hex
         self._activated = False
 
@@ -229,6 +230,7 @@ class WorktreesProjection:
         if self._activated:
             with self._publication_lock:
                 self._closed = True
+                self._superseded = True
                 self._projects.clear()
             raise ProjectionUnavailable("projection publisher was superseded")
         previous = None if owner is None else owner[0]
@@ -343,6 +345,11 @@ class WorktreesProjection:
     def published_projects(self) -> set[str]:
         with self._publication_lock:
             return set(self._projects)
+
+    @property
+    def superseded(self) -> bool:
+        with self._publication_lock:
+            return self._superseded
 
     def close(self) -> None:
         with self._writer_lock:

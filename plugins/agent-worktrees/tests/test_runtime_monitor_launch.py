@@ -44,8 +44,8 @@ def test_retained_bootstrap_pins_before_pth_or_application_imports(
     scripts = Path(__file__).resolve().parents[1] / "scripts"
     bootstrap = slot / ".runtime-bootstrap"
     bootstrap.mkdir()
-    for name in ("runtime_launcher.py", "versioned_runtime.py"):
-        shutil.copyfile(scripts / name, bootstrap / name)
+    for source in [scripts / "runtime_launcher.py", *scripts.glob("versioned_runtime*.py")]:
+        shutil.copyfile(source, bootstrap / source.name)
     python = runtime.slot_python(root, slot.name)
     site_packages = Path(subprocess.check_output(
         [str(python), "-I", "-B", "-c", "import sysconfig; print(sysconfig.get_path('purelib'))"],

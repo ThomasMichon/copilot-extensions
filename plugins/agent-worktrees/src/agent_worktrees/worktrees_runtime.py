@@ -95,6 +95,7 @@ class WorktreesRuntime:
         self.store = WorktreesProjection(db_path)
         self._lock = threading.Lock()
         self._activation_lock = threading.Lock()
+        self._terminated = False
         self._admitting = False
         self._reason = "unready"
         self._error: str | None = None
@@ -107,6 +108,8 @@ class WorktreesRuntime:
 
     def activate(self) -> None:
         with self._activation_lock:
+            if self._terminated:
+                raise ProjectionUnavailable("current-roster runtime is closed")
             try:
                 for attempt in range(2):
                     try:
@@ -118,6 +121,17 @@ class WorktreesRuntime:
                     except ProjectionOwnershipChanged:
                         if attempt:
                             raise
+                    except ProjectionUnavailable:
+                        if (
+                            attempt or not self.store.superseded
+                            or self._elected is None or not self._elected()
+                        ):
+                            raise
+                        with self._lock:
+                            self._admitting = False
+                        self.feed.close("superseded")
+                        # Rollback elects the resident again, not its fenced writer.
+                        self.store = WorktreesProjection(self.store.db_path)
             except (ProjectionError, ProjectionUnavailable, sqlite3.Error, OSError) as exc:
                 with self._lock:
                     self._admitting = False
@@ -132,6 +146,8 @@ class WorktreesRuntime:
                 self._reason = "ready"
                 self._error = None
             self.feed.activate()
+            if self._wake is not None:
+                self._wake.set()
 
     def close_admission(self, reason: str = "draining") -> None:
         with self._lock:
@@ -196,10 +212,20 @@ class WorktreesRuntime:
         return projects | self.feed.projects()
 
     def publish(self, project: str, rows, *, observed_at: float) -> None:
-        with self._lock:
-            if not self._admitting:
-                raise ProjectionUnavailable("current-roster publisher is not admitted")
-        self.store.publish(project, rows, observed_at=observed_at)
+        with self._activation_lock:
+            with self._lock:
+                if not self._admitting:
+                    raise ProjectionUnavailable("current-roster publisher is not admitted")
+            try:
+                self.store.publish(project, rows, observed_at=observed_at)
+            except ProjectionUnavailable as exc:
+                if self.store.superseded:
+                    self.close_admission("superseded")
+                    with self._lock:
+                        self._error = str(exc)
+                    if self._wake is not None:
+                        self._wake.set()
+                raise
         with self._lock:
             self._publication_errors.pop(project, None)
         self.feed.changed(project)
@@ -215,5 +241,7 @@ class WorktreesRuntime:
             self.publication_failed(project, error)
 
     def shutdown(self) -> None:
-        self.close_admission("closed")
-        self.store.close()
+        with self._activation_lock:
+            self._terminated = True
+            self.close_admission("closed")
+            self.store.close()
