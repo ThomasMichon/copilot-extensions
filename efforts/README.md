@@ -86,7 +86,7 @@ that pattern to this repository.
 | [Custom Context Aggregator Retirement](active/custom-context-aggregator-retirement/README.md) | Draft | #2173 |
 | [SessionStart Static/Dynamic Content Conformance](active/sessionstart-static-dynamic-conformance/README.md) | Active | #2256 |
 | [agent-logger Aggregate Configuration](active/agent-logger-aggregate-configuration/README.md) | Active | #1817 |
-| [Balanced Profile Assignment](active/balanced-profile-assignment/README.md) | Active | #1564 |
+| [Balanced Profile Assignment](active/balanced-profile-assignment/README.md) | Active; implementation merged, deployment acceptance unverified; default-off semantics retained | #1564; usage/deprecation decision remains #4871 |
 | [Budget-Aware Model Routing](active/budget-aware-model-routing/README.md) | Active; posture, session delivery, routing, and personal provider reports implemented; entitlement/account proof and adoption open | #2137 |
 | [Evidence-Calibrated Model Routing](active/evidence-calibrated-model-routing/README.md) | Active | #2014 |
 | [agent-bridge Contract Evolution](active/agent-bridge-contract-evolution/README.md) | Draft | #1460 |
