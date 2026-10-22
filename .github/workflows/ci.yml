@@ -157,6 +157,7 @@ jobs:
       run: ruff check --select F,E9 --output-format=github .
   unit-tests:
     name: Eligible units with coverage
+    if: github.event_name != 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:

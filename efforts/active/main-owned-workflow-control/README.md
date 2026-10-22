@@ -440,6 +440,12 @@ authorizes critical main-path acceptance or a bounded administrative change.
   actual production-call evidence and the 300-second budget (#7925).
   Actual hosted source CI executes all 840 admitted cases in 15.204 seconds.
   Full-census, native-platform and every-release acceptance remain separate.
+- [x] Map all 29 original activation-preservation cases through eleven exact
+  function objects and unchanged parameterization, retaining the closed source
+  hashes, actual call coverage and 300-second packet budget (#7931).
+  Actual hosted source CI executes all 869 admitted cases in 12.971 seconds.
+  Real process settlement, native Windows, full census and every-release
+  acceptance remain separate.
 - [x] Verify a covering promotion activates the dev-owned baseline producer on
   default main; record authorized runtime adoption separately.
   #6631 and hosted job `115706505844` prove activation of #6438; this

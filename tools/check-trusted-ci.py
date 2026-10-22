@@ -19,6 +19,7 @@ TRUSTED_JOB_CONDITION = (
     "vars.TRUSTED_SELF_HOSTED_CI == 'enabled'"
 )
 UNIT_CONDITION = "steps.impact.outputs.run == 'true'"
+UNIT_JOB_CONDITION = "github.event_name != 'push'"
 SOURCE_AST_CONDITION = "steps.source-ast-impact.outputs.run == 'true'"
 SOURCE_AST_COMMANDS = ("python tools/run-source-ast-guards.py",)
 SOURCE_AST_SCRIPT = """python - <<'PY'
@@ -465,7 +466,8 @@ def _validate_ci(path: Path) -> list[str]:
                 errors.append("report-only inventory must remain on non-PR CI without becoming a strict PR gate")
             units = _mapping(ci_jobs.get("unit-tests"))
             if (
-                units is None or "needs" in units or "if" in units
+                units is None or "needs" in units
+                or units.get("if") != UNIT_JOB_CONDITION
                 or units.get("runs-on") != "ubuntu-latest"
                 or units.get("timeout-minutes") != "5"
                 or "continue-on-error" in units

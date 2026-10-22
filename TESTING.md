@@ -53,8 +53,10 @@ A local packet result alone does not qualify Main or prove candidate reuse.
 
 Source CI resolves impact and, when selected, executes this packet within one
 hosted job, parallel with source guards. Narrative-only PRs do not install test
-tooling or run units. Pushes leave the release-unit execution to promotion;
-manual CI and unknown event types select units conservatively. The required
+tooling or run units. Pushes leave release-unit execution to promotion and
+omit the unit job before runner allocation or checkout; the independent source
+guards still run. Manual CI and unknown event types allocate the unit job and
+select units conservatively. The required
 aggregate checks both job results and the real unit step outcome, so a skipped
 selected step or an absent/invalid selection fails rather than becoming a
 success-shaped result.

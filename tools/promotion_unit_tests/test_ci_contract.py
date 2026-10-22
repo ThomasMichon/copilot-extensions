@@ -44,6 +44,7 @@ def declarations():
                 "run": "python tools/check-marketplace-isolation.py",
             }]},
             "unit-tests": {
+                "if": "github.event_name != 'push'",
                 "runs-on": "ubuntu-latest", "timeout-minutes": 5,
                 "outputs": {
                     "run": "${{ steps.impact.outputs.run }}",
@@ -91,6 +92,25 @@ def validate(tmp_path, routing, ci):
 def test_positive_compact_profile_has_no_self_hosted_pr_test_route(tmp_path):
     routing, ci = declarations()
     assert validate(tmp_path, routing, ci) == []
+
+
+@pytest.mark.parametrize("event,allocated", [
+    ("push", False), ("pull_request", True), ("workflow_dispatch", True),
+    ("future-event", True), ("", True),
+])
+def test_unit_job_omits_only_push_allocation(tmp_path, event, allocated):
+    routing, ci = declarations()
+    assert validate(tmp_path, routing, ci) == []
+    condition = ci["jobs"]["unit-tests"]["if"]
+    assert eval(condition, {"__builtins__": {}}, {
+        "github": SimpleNamespace(event_name=event),
+    }) is allocated
+
+
+def test_push_only_allocation_exclusion_is_required(tmp_path):
+    routing, ci = declarations()
+    del ci["jobs"]["unit-tests"]["if"]
+    assert "unit packet must have the reviewed independent hosted five-minute job" in validate(tmp_path, routing, ci)
 
 
 @pytest.mark.parametrize("change", [
@@ -225,6 +245,8 @@ def test_generic_test_runners_cannot_hide_inside_an_operational_guard(tmp_path, 
 
 @pytest.mark.parametrize("change", [
     {"if": "false"}, {"timeout-minutes": 30}, {"continue-on-error": True},
+    {"if": "github.event_name == 'pull_request'"},
+    {"if": "github.event_name != 'pull_request'"},
 ])
 def test_unit_selection_budget_and_outcome_cannot_be_weakened(tmp_path, change):
     routing, ci = declarations()
