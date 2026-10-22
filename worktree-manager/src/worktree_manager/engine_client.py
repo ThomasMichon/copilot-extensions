@@ -335,10 +335,13 @@ def run_engine_passthrough(project: str | None, args: list[str], *,
     if project:
         cmd += ["--project", project]
     cmd += args
+    from .update_driver_cli import handoff_environment
+
+    environment = {**_engine_environment(), **handoff_environment(args)}
     try:
         return subprocess.run(
             cmd, timeout=timeout, check=False,
-            env=_engine_environment(),
+            env=environment,
         ).returncode
     except subprocess.TimeoutExpired as e:
         raise EngineError(f"{ENGINE_BIN} {' '.join(args)} timed out") from e

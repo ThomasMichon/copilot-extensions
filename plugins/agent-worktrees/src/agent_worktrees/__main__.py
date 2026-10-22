@@ -116,7 +116,7 @@ from . import session_context as session_context_mod  # noqa: F401 -- compatibil
 from . import state_root as state_root_mod
 from .copilot_launch_prefs import resolve_launch_pref_flags
 from .process_launcher import apply_process_launcher
-from .update_stage import cmd_stage_update, discover_plugin_dir as _discover_plugin_dir
+from .update_stage import cmd_stage_update as cmd_stage_update, discover_plugin_dir as _discover_plugin_dir
 # front_door_cli's own names are re-exported eagerly (not deferred to
 # _load_full_command_surface() below) because main() calls several of them
 # -- _extract_project_flag, _guard_project_scope, _resolve_active_project,
@@ -5409,7 +5409,7 @@ _LAZY_DISPATCH_TABLE: dict[str, tuple[str, str]] = {
     'record': ('record_cli', 'cmd_record'),
     'reclaim': ('reclaim_cli', 'cmd_reclaim'),
     'reconcile-binstubs': ('maintenance_cli', 'cmd_reconcile_binstubs'),
-    'reconcile-plugins': ('update_cli', 'cmd_reconcile_plugins'),
+    'reconcile-plugins': ('update_cli', 'cmd_reconcile_request'),
     'reconcile-sessions': ('status_monitor_runtime', 'cmd_reconcile_sessions'),
     'register': ('installation_cli', 'cmd_register'),
     'register-launch': ('launch_registry', 'cmd_register_launch'),
@@ -5443,7 +5443,7 @@ _LAZY_DISPATCH_TABLE: dict[str, tuple[str, str]] = {
     'uninstall': ('installation_cli', 'cmd_uninstall'),
     'uninstall-plugins': ('update_cli', 'cmd_uninstall_plugins'),
     'unregister': ('installation_cli', 'cmd_unregister'),
-    'update': ('update_cli', 'cmd_update'),
+    'update': ('update_cli', 'cmd_update_request'),
     'validate': ('picker_profiles_cli', 'cmd_validate'),
     'worktree-lineage': ('session_tracking_cli', 'cmd_worktree_lineage'),
     'worktree-status-audit': ('worktree_status_audit', 'cmd_worktree_status_audit'),
@@ -6093,7 +6093,7 @@ def _load_full_command_surface() -> None:
         "register": cmd_register,
         "unregister": installation_cli.cmd_unregister,
         "uninstall": cmd_uninstall,
-        "update": cmd_update,
+        "update": update_cli.cmd_update_request,
         "install-status": cmd_install_status,
         "installer-readiness": cmd_installer_readiness,
         "deploy-instructions": cmd_deploy_instructions,
@@ -6104,9 +6104,9 @@ def _load_full_command_surface() -> None:
         "picker-reconcile-local": cmd_picker_reconcile_local,
         "pre-launch": cmd_pre_launch,
         "repair-stale-anchor": cmd_repair_stale_anchor,
-        "stage-update": cmd_stage_update,
+        "stage-update": update_cli.cmd_stage_request,
         "reconcile-marketplaces": cmd_reconcile_marketplaces,
-        "reconcile-plugins": cmd_reconcile_plugins,
+        "reconcile-plugins": update_cli.cmd_reconcile_request,
         "uninstall-plugins": cmd_uninstall_plugins,
         "reconcile-binstubs": cmd_reconcile_binstubs,
         "register-project-entry": cmd_register_project_entry,

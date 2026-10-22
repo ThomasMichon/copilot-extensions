@@ -436,6 +436,10 @@ def _exec_worktree_manager(
         **os.environ,
         _WORKTREE_MANAGER_ENGINE_ARGV_ENV: json.dumps([sys.executable, "-m", "agent_worktrees"]),
     }
+    if subcommand and subcommand[0] == "update":
+        from update_driver import participant_environment
+
+        env.update(participant_environment())
     if platform.system() == "Windows":
         from agent_procutil import spawn_sync_in_kill_on_close_job
 

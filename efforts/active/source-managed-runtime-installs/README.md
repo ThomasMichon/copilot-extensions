@@ -183,11 +183,15 @@ matrix; no schedule or cadence is enabled by this plan.
 The [execution-driver slice](execution-driver.md), tracked by #7758, separates
 transaction execution from the existing recurring-maintenance assignment.
 
-- [ ] Review the execution-owner clarification and bounded implementation plan.
-- [ ] Implement durable requests, compatible pending-request coalescing and attributable read-only status/results.
+- [x] Review the execution-owner clarification and bounded implementation plan.
+- [x] Implement durable requests, compatible pending-request coalescing and attributable read-only status/results.
 - [ ] Route ordinary supported suite-update entry points through one caller-independent execution owner over the complete canonical transaction.
-- [ ] Preserve explicit supervised-debug execution under the same kernel-backed authority, standalone compatibility and existing installer custody.
+- [x] Migrate the public Manager/engine update commands, staged acquisition and hook `reconcile-plugins --apply` without replacing their canonical executors.
+- [ ] Migrate native launchers' direct validated plan-action execution and remaining suite-adopted first-use publishers while preserving standalone defaults.
+- [x] Preserve explicit supervised-debug execution under the same kernel-backed authority, standalone compatibility and existing installer custody.
 - [ ] Qualify real-process concurrency, caller loss, interrupted-worker recovery, exact request identity and native headless operation without waiting on #6990 or #6928.
+- [x] Qualify Windows caller-Job loss, contained controls, two-cycle headless operation, restart-evidence admission and actual queued CLI/JSON consumer contracts.
+- [ ] Complete native Linux qualification when a supported isolated execution lane is available; do not substitute Windows or synthetic boot evidence.
 - [ ] Document the actual migrated entry points and remaining separately owned integrations; no partial slice is blanket installation-driver completion.
 
 ### Phase 5 - Prove assembled use and native Windows readiness
@@ -241,6 +245,20 @@ independent configuration choice rather than forcing the Manager and suite
 onto one branch.
 
 ## Journal
+
+### 2026-10-22 - Execution core and public consumer implementation
+- Implemented the shared durable request journal, kernel-owned finite worker, checked nested handoff, canonical outcome/log observation and explicit restart-confirmed interruption settlement under #7758.
+- Migrated public update, staging and hook-apply entry points; planning/indicator/native-admission reads remain non-installing and the JSON consumers retain their original result shapes. Transaction capability transport is consumed at entry and forwarded only at deliberate update seams, not inherited by service children.
+- Unified Worktrees' process dependency with the driver's canonical reference after UV correctly rejected two URLs for the same distribution. The ten production modules were byte-identical; the removed vendored copy contained older documentation/tests, not a competing process implementation.
+- Windows bounded runs passed: 59 driver cases including the explicit native lifetime lane, 120 Manager update/auth/consumer cases, 332 engine update/stage/reconcile cases with two existing platform-dependent skips, and 46 test-selection tooling cases. Scoped lint, installer contracts, owner-doc consistency, dependency-copy consistency and changed module-size checks passed.
+- Native lifetime qualification closes the submitting kill-on-close Job, proves production worker survival and contained-control retirement, observes two cycles with no window/focus transitions, and settles the canonical result. Boot-identity reads and synthetic prior-boot reconciliation were exercised; the shared host was not rebooted.
+- Linux/clean-room execution is not claimed: the configured Docker endpoint and both registered Desktop engines were unavailable, and the only local WSL distribution was Docker's infrastructure distribution. No shared daemon was repaired or reconfigured to manufacture a lane.
+- Native launch plan-action adapters, remaining first-use convergence and Linux acceptance remain open. This implementation neither enables recurring maintenance nor completes the parent source-managed installation campaign.
+
+### 2026-10-22 - Independent installation execution slice reviewed
+- PR #7760 merged after current-head Copilot approval with no findings and successful required CI.
+- The execution implementer proceeds under #7758 against the canonical updater on `dev`, without waiting on or replacing the staging/watchdog PRs.
+- Phase 4b is implementation work; the broader effort, recurring-maintenance enrollment and source-managed installation gates remain open.
 
 ### 2026-10-16 - Proposal and scope
 - Captured the agreed runtime/plugin boundary and confirmed the effort slug.
@@ -750,3 +768,12 @@ onto one branch.
 - Final canonical policy/identity qualification passes 113 cases; the complete digest and POSIX guest suites pass another 23. The extracted PowerShell fixture now also locates its canonical companion, and guest tests assert returned per-invocation diagnostics rather than an unrelated host stderr stream. All final cohorts retain structured runner results and verified cleanup. Existing BSD-userland path cases pass on both old and modern shells.
 - Extracted PowerShell probes use UTF-8 BOMs for literal non-ASCII paths and launch hidden children on Windows. Their three digest regressions pass on native PowerShell 5.1 with a Unicode temporary root and on POSIX PowerShell, with verified cleanup; this is fixture portability, not a change to the PowerShell admission implementation.
 - The bounded bootstrap item remains open pending review and merge. Broader first-use/skew, source selection, maintenance and native adoption gates are unchanged; no installed runtime or policy changed.
+
+### 2026-10-22 - Durable execution core and public update adapters
+
+- The reviewed #7758 slice now implements a durable pending-only coalescing queue, kernel-backed transaction ownership, a finite caller-independent worker, streamed output and exact canonical outcomes. Manager and engine public update commands, staged acquisition and hook `reconcile-plugins --apply` retain their canonical executors beneath that owner. Supervised debugging uses the same authority, not an inline bypass.
+- Nested update calls borrow a live authenticated participant capability. Entry consumes ambient transport; only explicit update-to-update handoffs export the context-local capability. Ordinary installer/service descendants do not inherit update authority. Interrupted transactions fence later execution; explicit settlement requires a different native kernel boot identity under the same lock and never replays or manufactures success.
+- Native Windows qualification passes 59 core cases, 120 Manager cases, 332 engine cases with two existing platform skips, and 46 test-selection cases. The production-lifetime lane destroys the submitting Job, observes surviving canonical workers and durable nonzero outcomes across two cycles, and observes zero new visible consoles or foreground changes; contained controls still retire. Synthetic executors perform no live installation.
+- Release preview materialization and an isolated non-editable package installation resolve the complete driver/process/lease closure without source imports. The packaged read-only recovery-status command returns its empty JSON result without home-state writes. Deleted vendored process modules were byte-identical to the canonical library; their single canonical dependency removes conflicting local package URLs without changing process implementation.
+- Independent read-only review of the implementation found no high-confidence correctness, concurrency or behavior defects. Installer, documentation, vendored-library, scoped lint and module-size gates pass. Native Linux and full clean-room qualification remain open because no supported isolated Linux engine was available; Windows and synthetic prior-boot evidence are not substitutes. No actual reboot or host rollout was performed.
+- Review and merge of this implementation remain required. Native direct plan-action execution, remaining suite-adopted first-use publishers, Linux qualification and the broader Phase 3/4/source/maintenance/adoption gates remain open. This independently landable milestone does not complete the parent effort or replace the owners of #6990 and #6928.

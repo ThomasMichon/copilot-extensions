@@ -20,7 +20,7 @@ def add_update_options(p: argparse.ArgumentParser) -> None:
     p.add_argument("--auth-cwd", metavar="PATH", help=argparse.SUPPRESS)
     p.add_argument("--auth-non-repository", action="store_true", help=argparse.SUPPRESS)
     p.add_argument("--auth-environment", action="store_true", help=argparse.SUPPRESS)
-    p.add_argument("--json", action="store_true", help="JSON output for --auth-report only")
+    p.add_argument("--json", action="store_true", help="JSON output for authentication, detached receipt or request status")
     p.add_argument(
         "--force-runtime",
         action="append",
@@ -46,10 +46,21 @@ def forwarded_flags(args: argparse.Namespace) -> list[str]:
 
 
 def validate_auth_flags(args: argparse.Namespace) -> None:
+    if getattr(args, "auth_report", False) and any(
+        getattr(args, name, False) for name in (
+            "detach", "supervised_debug", "request_status", "recovery_status", "recover_after_restart",
+        )
+    ):
+        argparse.ArgumentParser(prog="update").error(
+            "--auth-report cannot select an installation execution mode or request status"
+        )
+    driver_json = any(getattr(args, name, False) for name in (
+        "detach", "request_status", "recovery_status", "recover_after_restart",
+    ))
     report_only = [
         "--" + name.replace("_", "-")
         for name in ("auth_source", "auth_cwd", "auth_non_repository", "auth_environment", "json")
-        if getattr(args, name, False)
+        if getattr(args, name, False) and not (name == "json" and driver_json)
     ]
     if not getattr(args, "auth_report", False) and report_only:
         argparse.ArgumentParser(prog="update").error(

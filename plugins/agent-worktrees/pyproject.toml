@@ -32,6 +32,7 @@ dependencies = [
     "agent-machine-transport",
     "agent-worktree-identity",
     "agent-update-telemetry",
+    "agent-update-driver",
 ]
 
 [tool.uv.sources]
@@ -47,9 +48,9 @@ agent-config-migrate = { path = "../../libs/config-migrate", editable = true }
 # Copilot CLI + Claude plugin resolution -- marketplaces, plugins, repo settings
 # (module ``plugin_resolve``). Shared with agent-bridge / agent-codespaces.
 agent-plugin-resolve = { path = "../../libs/plugin-resolve", editable = true }
-# Shared Windows-headless / detached process-spawn kwargs (module
-# ``agent_procutil``). Vendored per plugin; byte-identical src across copies.
-agent-procutil = { path = "libs/agent-procutil" }
+# One canonical process dependency for the engine and its execution driver.
+# Release materialization supplies the self-contained local copy.
+agent-procutil = { path = "../../libs/agent-procutil", editable = true }
 # Resilient scan authority, entry decisions, and bounded warning tracking for
 # filesystem registries (module ``dropin_registry``).
 agent-dropin-registry = { path = "../../libs/dropin-registry", editable = true }
@@ -110,6 +111,7 @@ agent-machine-transport = { path = "../../libs/machine-transport", editable = tr
 # real `main`-branch release (tools/materialize_main.py) ever gets a real
 # local copy.
 agent-update-telemetry = { path = "../../libs/update-telemetry", editable = true }
+agent-update-driver = { path = "../../libs/update-driver", editable = true }
 
 [project.scripts]
 agent-worktrees = "agent_worktrees.__main__:console_entry"

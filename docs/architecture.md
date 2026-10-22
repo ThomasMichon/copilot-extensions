@@ -29,6 +29,15 @@ standalone product, not a marketplace plugin. Its owner page defines current
 planning, release, and deployment scope. Installing a client does not itself
 establish a hosted controller or container manager.
 
+The Manager and Worktrees public suite-update commands, Worktrees staging and
+hook apply share the
+[durable execution driver](../worktree-manager/README.md#durable-update-execution).
+Callers enqueue and observe; a finite background worker holds one kernel-backed
+transaction authority over the existing canonical update chain. This execution
+mechanism does not enroll recurring maintenance or make Manager a dependency of
+standalone plugins. Individual installers and remaining native plan-action adapters keep
+their existing custody until their separately tracked migration.
+
 The standalone [agent-chat-service](../services/chat/README.md) currently
 provides dependency-free conversation state and a callable RPC core, plus an
 explicit optional `service` role for independently installed foreground hosting.

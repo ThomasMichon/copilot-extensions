@@ -524,6 +524,76 @@ Registered project binstubs enter the interactive front door as
 Truly argument-free `worktree-manager` retains the provider-free first-run
 banner and onboarding roadmap.
 
+## Durable update execution
+
+Ordinary `worktree-manager update` and `agent-worktrees update` submit a
+durable request to the shared, per-user execution-space driver and wait for
+its recorded outcome. The calling terminal or agent is an observer, not an
+installer. One kernel-backed transaction owner spans Manager self-update,
+payload acquisition, runtime construction, activation and local integration;
+existing installer publication and per-slot leases remain in force underneath.
+Manager and engine retain their process boundary, including the engine's
+`--no-manager` re-entry, which does not bypass execution ownership.
+
+```text
+worktree-manager update --wait
+worktree-manager update --detach --json
+worktree-manager update --request-status <request-id> --json
+worktree-manager update --recovery-status --json
+worktree-manager update --recover-after-restart --json
+worktree-manager update --supervised-debug
+```
+
+`--wait` is the default. `--detach` returns an acceptance receipt, not a
+successful-installation claim. The status operation is read-only and does not
+create a driver, fetch source or run installers. `--supervised-debug` keeps
+supervision in the foreground but uses the same queue and exclusive authority;
+it cannot bypass an active transaction. The engine exposes the same options.
+Equivalent pending requests can coalesce; a request arriving after execution
+starts remains separate. Explicit options, invocation context, installation
+scope and pinned runner identity are retained rather than collapsed.
+Updater stdout/stderr bytes are retained in the request log; waiting renders
+that combined log as UTF-8 on stderr. Stdout is reserved for requested receipts
+and status JSON. Read the log when original non-UTF-8 bytes matter;
+the read-only authentication-report protocol remains unchanged.
+
+The finite worker uses the shared headless, caller-independent launch primitive
+and exits when its queue drains. It does not enroll recurring maintenance,
+write an Autorun entry, require an open Picker or create another scheduler.
+Unattended credential prompts are disabled; authentication failures remain
+observable. A direct Manager request retains its configured source identity
+and refuses a changed source selection at execution rather than silently
+substituting it. Credential-bearing source URLs are refused before journaling;
+use the existing source credential helper.
+
+The driver keeps requests, logs and results beneath
+`~/.copilot-extensions/update-driver`. Canonical update telemetry below remains
+separate: a queued request is not yet an executing update run. A worker
+interruption is not success and is not automatically replayed; uncertain
+execution fences subsequent installations. Never delete its lock or journal
+to override that fence. `--recovery-status` reports settlement availability
+without changing state. After an independently confirmed kernel restart,
+`--recover-after-restart` can settle old-boot interruptions under the same
+exclusive authority. It refuses same-boot, missing, malformed or unsupported
+boot evidence; age and PID disappearance are not substitutes. Settlement retains
+the interrupted failure and does not replay it or start an update. Submit a new
+ordinary update explicitly after recovery.
+
+The same authority wraps public `stage-update` acquisition and
+`reconcile-plugins --apply`, including the session provisioning hook. They
+retain their canonical JSON result, exit status and status-file behavior;
+stage output remains quiet unless `--json` is requested. Planning, indicator
+reads and `--check-update` do not enqueue installation work. Nested canonical
+update calls explicitly hand off checked custody rather than queue recursively.
+The witness is consumed at entry, so unrelated service/daemon children do not
+inherit transaction authority.
+
+Standalone first provisioning, individual plugin installers and native launch
+wrappers that execute validated plan actions directly retain their existing
+ownership contracts; their remaining convergence is tracked
+under [#7758](https://github.com/ThomasMichon/copilot-extensions/issues/7758),
+not inferred complete from these migrated entry points.
+
 ## Choose the update source (fork / canary branch)
 
 By default the self-updater pulls the Worktree Manager payload from the canonical

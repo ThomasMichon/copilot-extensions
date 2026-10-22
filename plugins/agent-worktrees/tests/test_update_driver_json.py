@@ -1,0 +1,168 @@
+"""Queue hook mutations without changing the canonical JSON/read-only contracts."""
+
+from __future__ import annotations
+
+import argparse
+import json
+from types import SimpleNamespace
+
+import pytest
+
+from agent_worktrees import update_driver_json_cli as boundary
+
+
+def _args(**values):
+    return argparse.Namespace(**{
+        "apply": False, "check_update": False, "peek": False,
+        "with_payload_refresh": False, "repo": None, "status": None,
+        "machine": None, "indicator_state": False, "json": False, **values,
+    })
+
+
+@pytest.mark.parametrize("values", [{}, {"peek": True}, {"apply": True, "check_update": True}])
+def test_read_only_reconcile_never_queues(values, monkeypatch):
+    seen = []
+    monkeypatch.setattr(boundary.update_cli, "cmd_reconcile_plugins", lambda args: seen.append(args) or 19)
+    assert boundary.cmd_reconcile_request(_args(**values)) == 19
+    assert len(seen) == 1
+
+
+def test_indicator_read_retains_its_existing_stdout_contract(monkeypatch):
+    seen = []
+    monkeypatch.setattr(boundary.update_stage, "cmd_stage_update", lambda args: seen.append(args) or 0)
+    assert boundary.cmd_stage_request(_args(indicator_state=True, json=True)) == 0
+    assert seen[0].json
+
+
+def test_stage_records_json_in_worker_but_default_caller_stays_quiet(monkeypatch):
+    seen = {}
+
+    def dispatch(verb, flags, args, execute, **kwargs):
+        seen.update(verb=verb, flags=flags, emit=kwargs["emit_json"])
+        return 0
+
+    monkeypatch.setattr(boundary, "_run_request", dispatch)
+    assert boundary.cmd_stage_request(_args()) == 0
+    assert seen == {"verb": "stage-update", "flags": ["--json"], "emit": False}
+
+
+def test_apply_retains_machine_repo_status_and_payload_intent(tmp_path, monkeypatch):
+    seen = {}
+    monkeypatch.chdir(tmp_path)
+
+    def dispatch(verb, flags, args, execute):
+        seen.update(verb=verb, flags=flags)
+        return 0
+
+    monkeypatch.setattr(boundary, "_run_request", dispatch)
+    assert boundary.cmd_reconcile_request(_args(
+        apply=True, repo="repo", status="status.json", machine="fixture",
+        with_payload_refresh=True,
+    )) == 0
+    assert seen["flags"] == [
+        "--apply", "--repo", str(tmp_path / "repo"), "--status", str(tmp_path / "status.json"),
+        "--machine", "fixture", "--with-payload-refresh",
+    ]
+
+
+def test_result_publication_preserves_json_and_unowned_temporary(tmp_path):
+    request = SimpleNamespace(id="fixture", log_path=tmp_path / "fixture.log")
+    foreign = tmp_path / "fixture.result.result.tmp"
+    foreign.write_text("unrelated", encoding="utf-8")
+    boundary._publish_result(request, '{"executed":[]}\n')
+    assert json.loads(boundary._result_path(request).read_text(encoding="utf-8")) == {"executed": []}
+    assert foreign.read_text(encoding="utf-8") == "unrelated"
+    with pytest.raises(ValueError, match="already exists"):
+        boundary._publish_result(request, '{"ok":true}')
+
+
+def test_protocol_output_limit_fails_without_silent_truncation():
+    buffer = boundary._ProtocolBuffer()
+    with pytest.raises(ValueError, match="output limit"):
+        buffer.write("x" * (boundary._PROTOCOL_LIMIT + 1))
+    assert buffer.getvalue() == ""
+
+
+def test_queued_json_round_trip_returns_original_payload_and_exit(tmp_path, monkeypatch, capsys):
+    import update_driver
+
+    request = SimpleNamespace(
+        id="fixture", state="completed", exit_code=5, error="canonical failure",
+        log_path=tmp_path / "fixture.log",
+    )
+    boundary._publish_result(request, '{"executed":[{"ok":false}]}')
+    seen = {}
+
+    def enqueue(spec, *, runner):
+        seen["spec"] = spec
+        return request
+
+    monkeypatch.setattr(update_driver, "borrowed_custody", lambda: None)
+    monkeypatch.setattr(update_driver, "enqueue", enqueue)
+    monkeypatch.setattr(update_driver, "runtime_command", lambda module, args=(): (
+        (str(tmp_path / "python.exe"), "-m", module, *args), {},
+    ))
+    monkeypatch.setattr(update_driver, "ensure_worker", lambda *args, **kwargs: None)
+    monkeypatch.setattr(update_driver, "wait", lambda *args, **kwargs: request)
+    monkeypatch.setattr(boundary.cfg, "active_project", lambda: None)
+    monkeypatch.setattr(boundary.cfg, "install_dir", lambda: tmp_path)
+    assert boundary.cmd_reconcile_request(_args(apply=True)) == 5
+    assert json.loads(capsys.readouterr().out) == {"executed": [{"ok": False}]}
+    assert seen["spec"].backend == "engine-reconcile-plugins"
+
+
+def test_nested_update_participant_returns_json_without_recursive_enqueue(tmp_path, monkeypatch, capsys):
+    import update_driver
+
+    request = SimpleNamespace(state="running", spec=SimpleNamespace(backend="engine", context=()))
+
+    class Custody:
+        root = tmp_path
+        request_id = "fixture"
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            pass
+
+        def assert_owned(self):
+            pass
+
+    def execute(args):
+        print('{"executed":[]}')
+        return 0
+
+    monkeypatch.setattr(update_driver, "borrowed_custody", Custody)
+    monkeypatch.setattr(update_driver, "status", lambda *args, **kwargs: request)
+    monkeypatch.setattr(boundary.update_cli, "cmd_reconcile_plugins", execute)
+    assert boundary.cmd_reconcile_request(_args(apply=True)) == 0
+    assert json.loads(capsys.readouterr().out) == {"executed": []}
+
+
+def test_actual_empty_inventory_apply_uses_worker_and_retains_json(tmp_path, monkeypatch):
+    import sys
+    from agent_procutil.owned_process import run_owned
+    import update_driver
+
+    home, repo = tmp_path / "home", tmp_path / "repo"
+    home.mkdir()
+    repo.mkdir()
+    for key in ("HOME", "USERPROFILE", "AGENT_HOME"):
+        monkeypatch.setenv(key, str(home))
+    for key in ("COPILOT_EXTENSIONS_CONTEXT", "COPILOT_PLUGIN_ROOT", "AGENT_WORKTREES_PAYLOAD_ROOT"):
+        monkeypatch.delenv(key, raising=False)
+    result = run_owned(
+        [sys.executable, "-m", "agent_worktrees", "reconcile-plugins", "--repo", str(repo), "--apply"],
+        timeout=20,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "Update request " in result.stderr
+    summary = json.loads(result.stdout)
+    assert isinstance(summary, dict) and summary["executed"] == []
+    queue_root = home / ".copilot-extensions" / "update-driver"
+    assert (queue_root / "queue.sqlite3").is_file()
+    requests = update_driver.status(root=queue_root)
+    assert len(requests) == 1
+    assert requests[0].spec.backend == "engine-reconcile-plugins"
+    assert requests[0].state == "completed"

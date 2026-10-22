@@ -75,6 +75,7 @@ dependencies = [
     # update exit-code table (module ``update_telemetry``). Used by
     # ``worktree-manager update``, which owns the run the engine joins.
     "agent-update-telemetry",
+    "agent-update-driver",
     "agent-worktree-identity",
 ]
 
@@ -140,6 +141,7 @@ agent-machine-transport = { path = "../libs/machine-transport", editable = true 
 # manually in sync -- only a real `main`-branch release
 # (tools/materialize_main.py) ever gets a real local copy.
 agent-update-telemetry = { path = "../libs/update-telemetry", editable = true }
+agent-update-driver = { path = "../libs/update-driver", editable = true }
 
 [project.scripts]
 worktree-manager = "worktree_manager.__main__:console_entry"

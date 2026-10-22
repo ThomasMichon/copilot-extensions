@@ -980,6 +980,17 @@ on a cadence at two natural lifecycle boundaries -- **picker launch** and
 
 ### `update` results: exit codes, events, and status
 
+The public command submits a durable request before Manager or standalone
+execution. `--wait` observes it by default; `--detach --json` returns an
+acceptance receipt, and `--request-status <id> --json` is a project-independent
+read-only query. `--no-manager` still uses the same execution authority.
+`--supervised-debug` uses foreground supervision under that authority.
+`--recovery-status` reports restart-confirmed settlement availability;
+`--recover-after-restart` settles only old-boot interrupted work without
+replaying it. Both support `--json` and need no project.
+The [Manager reference](../../../worktree-manager/README.md#durable-update-execution)
+defines the shared lifetime, output, interruption and migration boundary.
+
 Required payload acquisition is a barrier before the engine's runtime work:
 if its own payload refresh or an active/activation-unknown target refresh
 fails, the engine returns that failure without running runtime installers,
@@ -1160,6 +1171,14 @@ Any status other than `refreshed`, `current`, or `none` is printed as a
 warning.
 
 ### Repo-adopted plugin reconciliation (`reconcile-plugins`)
+
+`--apply` submits its canonical work to that same durable execution owner,
+including when invoked by the provisioning hook. It still returns the original
+JSON summary and canonical exit status. Default planning, `--peek` and
+`--check-update` do not enqueue installers. Public `stage-update` acquisition
+also uses the owner while preserving its status file and optional JSON output;
+`--indicator-state` remains read-only. These adapters do not replace the
+stager's own implementation or the installers' existing inner custody.
 
 On an interactive launch, the launcher reconciles the anchor repo's
 `.github/copilot/settings.json` `enabledPlugins`: for each

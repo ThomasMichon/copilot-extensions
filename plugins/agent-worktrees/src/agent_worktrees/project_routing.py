@@ -83,6 +83,11 @@ def _is_no_project_invocation(args_list: list[str]) -> bool:
         for flag in ("--repo", "--pr")
     ):
         return True
+    if command == "update" and any(
+        arg in {"--request-status", "--recovery-status", "--recover-after-restart"}
+        or arg.startswith("--request-status=") for arg in args_list[1:]
+    ):
+        return True
     if command == "update" and "--auth-report" in args_list[1:] and any(
         arg == "--auth-source" or arg.startswith("--auth-source=") for arg in args_list[1:]
     ):

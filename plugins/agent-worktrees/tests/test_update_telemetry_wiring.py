@@ -429,7 +429,8 @@ def test_update_entrypoint_does_not_invent_protocol_flags(flag, monkeypatch, cap
     assert update_events._run is None
 
 
-def test_reconcile_apply_entrypoint_retains_json_stdout(tmp_path, monkeypatch, capsys):
+def test_reconcile_apply_executor_retains_json_stdout(tmp_path, monkeypatch, capsys):
+    from agent_worktrees import update_cli
     from update_telemetry.human import current_operation
 
     summary = {"action": "continue", "executed": []}
@@ -439,8 +440,9 @@ def test_reconcile_apply_entrypoint_retains_json_stdout(tmp_path, monkeypatch, c
         return summary
 
     monkeypatch.setattr(reconcile, "apply_plan", apply)
-    monkeypatch.setattr(m, "_resolve_active_project", lambda _project: ("fixture", None))
-    assert m.main(["reconcile-plugins", "--repo", str(tmp_path), "--apply"]) == 0
+    assert update_cli.cmd_reconcile_plugins(argparse.Namespace(
+        repo=str(tmp_path), apply=True, machine=None, status=None, with_payload_refresh=False,
+    )) == 0
     captured = capsys.readouterr()
     assert json.loads(captured.out) == summary
     assert captured.err == "synthetic reconciliation diagnostic\n"

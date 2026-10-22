@@ -53,6 +53,19 @@ boundaries do not change authentication, acquisition or failure semantics.
 
 ## How It Works
 
+The public `update` command submits to the shared durable execution driver
+before choosing Manager or standalone execution. Default `--wait` observes the
+recorded result; `--detach --json` returns an acceptance receipt, and
+`--request-status <id> --json` is a read-only query that works without a project.
+`--recovery-status` inspects restart-proven settlement availability, and
+`--recover-after-restart` settles only old-boot interruptions without replaying
+them; neither requires a project.
+`--no-manager` selects the standalone updater but still queues it.
+`--supervised-debug` uses the same exclusive authority under foreground
+supervision, never a second installation writer.
+The [Manager's update reference](../../worktree-manager/README.md#durable-update-execution)
+owns the shared request/lifetime contract and its current migration boundary.
+
 On Windows, ordinary and passive status-monitor starts bypass the venv Python
 redirector and use the real base **console** interpreter, preserving the venv
 prefix and imports through the shared `agent-procutil` environment helper.
