@@ -6,6 +6,7 @@ import copy
 import json
 import os
 from pathlib import Path
+import stat
 import subprocess
 import sys
 from types import SimpleNamespace
@@ -272,12 +273,24 @@ def test_permission_denied_layers_keep_readable_peers(monkeypatch, tmp_path, den
     target = {"configuration": canonical.parent, "canonical": canonical, "legacy": legacy, "overlay": overlay}[denied]
     if probe == "stat":
         target.mkdir(parents=True, exist_ok=True)
-    original_stat = Path.stat
+    original_stat = os.stat
 
     def inaccessible(path, *args, **kwargs):
-        if path.is_relative_to(target) and (probe == "all" or kwargs.get("follow_symlinks", True)):
+        candidate = Path(os.fsdecode(path)) if not isinstance(path, int) else None
+        if candidate is not None and candidate.is_relative_to(target) and (
+            probe == "all" or kwargs.get("follow_symlinks", True)
+        ):
             raise PermissionError("fixture layer is unreadable")
         return original_stat(path, *args, **kwargs)
+
+    def inaccessible_lstat(path, *args, **kwargs):
+        return inaccessible(path, *args, follow_symlinks=False, **kwargs)
+
+    def inaccessible_is_dir(path):
+        try:
+            return stat.S_ISDIR(inaccessible(path).st_mode)
+        except OSError:
+            return False
 
     monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", json.dumps({"marketplaceId": "example-cell"}))
     monkeypatch.setattr(wt, "run_agent_worktrees_capture", lambda *args, **kwargs: SimpleNamespace(
@@ -286,7 +299,10 @@ def test_permission_denied_layers_keep_readable_peers(monkeypatch, tmp_path, den
     monkeypatch.setattr(wt.RepositoryResourceSnapshot, "root", lambda self, name: root)
     before = bytes_at(tmp_path)
     with monkeypatch.context() as denied_probe:
-        denied_probe.setattr(Path, "stat", inaccessible)
+        # Windows native directory probes can bypass both Path.stat and os.stat.
+        denied_probe.setattr(os, "stat", inaccessible)
+        denied_probe.setattr(os, "lstat", inaccessible_lstat)
+        denied_probe.setattr(Path, "is_dir", inaccessible_is_dir)
         rows, summary = wt.discover_templates(empty_activation())
     assert len(rows) == 1 and rows[0]["source"]["index"] == str(healthy / "index.json")
     assert summary["state"] == "partial"

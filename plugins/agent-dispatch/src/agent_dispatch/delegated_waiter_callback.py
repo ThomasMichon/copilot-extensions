@@ -51,7 +51,10 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if len(args) != 1:
             raise ValueError("invalid callback arguments")
-        envelope = json.loads(args[0])
+        raw_envelope = args[0]
+        if raw_envelope.startswith("hex:"):
+            raw_envelope = bytes.fromhex(raw_envelope[4:]).decode("utf-8")
+        envelope = json.loads(raw_envelope)
         identity = _validated_envelope(envelope)
         if "installation" in identity:
             from agent_dispatch.delegated_waiter_context import enter

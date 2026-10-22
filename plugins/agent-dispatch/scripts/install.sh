@@ -958,7 +958,8 @@ deploy_binstub() {
         _runtime_publication_commit_file "$INSTALL_DIR/machine" "$MACHINE_STAGE" || return 1
     fi
     # Co-deploy the canonical marker-only resolver (uniform-runtime-resolution, #765).
-    for r in resolve-runtime.sh resolve-runtime.ps1; do
+    for r in resolve-runtime.sh resolve-runtime.ps1 \
+        delegated-waiter-callback.ps1 delegated-waiter-callback.sh; do
         if [[ -f "$SCRIPT_DIR/$r" ]]; then
             _runtime_publication_copy "$SCRIPT_DIR/$r" "$INSTALL_DIR/bin/$r" || return 1
         fi

@@ -47,6 +47,8 @@ needed.
 | Explicit `--token`, `--control-token`, routing override, `--shared`, `--local`, or task-only context | Existing process waiter; effective CLI credentials remain in its environment, not callback argv. Task-only command restrictions still apply. |
 | Explicit task authority (`AGENT_DISPATCH_TASK_AUTHORITY`) or WSL Windows-client routing | Existing process waiter; a resident PR owner cannot attest to the caller's routing environment. |
 | Credential environment variables, including command-backed token configuration | Existing process waiter: this owner protocol cannot attest that a resident daemon inherited the caller's environment. Command-backed auth still uses the existing resolver in the process child. |
+| Explicit `GH_HOST` or `GH_CONFIG_DIR` | Existing process waiter, before probing: a resident owner may use a different forge or account configuration. |
+| Installer-owned stable callback entry unavailable | Existing process waiter, before preparing a delegated generation. |
 | Custom `--message` or credential-bearing command options | Existing process waiter; do not durably copy custom text or credentials into a subscription. |
 | Default local ambient context, or exactly canonical same-cell routing, and both ready protocols | Transactional delegated preparation, acknowledged subscribe, then arm. |
 | Uncertain prepare, subscribe, or arm after preparation | Never launch a second owner. Reconcile the exact preparation/registration where provable; otherwise abort that preparing generation with a durable wake, or leave it to visible recovery. |
@@ -93,6 +95,15 @@ event durably and retries with backoff. A remote commit followed by a lost ACK
 is safe to replay; concurrent duplicates enqueue one wake. A late callback for
 a superseded/cancelled matching generation can ACK without waking a newer one.
 The coordinator identity persists across restore and normal rolling cutover.
+
+The installer publishes a stable callback entry beside the installation's
+canonical runtime resolver. Subscriptions store that entry and a hex-encoded
+nonsecret envelope, not a Python executable or callback file inside a version
+slot. Each delivery resolves the currently installed runtime without provisioning
+or PATH lookup, so ordinary upgrade/garbage collection cannot strand a dormant
+subscription on a deleted slot. The Windows entry uses the system PowerShell
+host's positional-safe slash options; the event still travels unchanged on stdin.
+Same-cell deliveries retain the receipt/governance checks described above.
 
 The existing recovery sweep handles unarmed preparations after its arm grace.
 After its two startup passes, that same coordinator-owned recovery task checks

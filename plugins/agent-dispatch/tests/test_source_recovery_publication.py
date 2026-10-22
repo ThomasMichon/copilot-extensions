@@ -37,6 +37,8 @@ def _published(root: Path, identity) -> None:
     _selected(root, identity)
     assert (root / "stamped-version").read_text().strip() == identity.runtime_version
     assert Path((root / "payload-dir").read_text().strip()) == root / "snapshots" / identity.runtime_version
+    for name in ("delegated-waiter-callback.sh", "delegated-waiter-callback.ps1"):
+        assert (root / "bin" / name).read_bytes() == (fixture.SCRIPTS / name).read_bytes()
 
 
 def _completion(root: Path, sources) -> dict[str, bytes]:

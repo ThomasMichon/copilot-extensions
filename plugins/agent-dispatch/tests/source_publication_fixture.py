@@ -283,6 +283,7 @@ def stage(tmp_path: Path, *, broken_b: bool = False):
             "versioned_runtime_construction.py", "versioned_runtime_source.py",
             "versioned_runtime_publication.py",
             "resolve-runtime.sh", "resolve-runtime.ps1",
+            "delegated-waiter-callback.sh", "delegated-waiter-callback.ps1",
         ):
             shutil.copy2(SCRIPTS / relative, scripts / relative)
         for ext in ("sh", "ps1"):

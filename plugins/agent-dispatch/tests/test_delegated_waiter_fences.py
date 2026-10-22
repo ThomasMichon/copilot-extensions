@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+import sqlite3
+import time
 
 import pytest
 
@@ -12,6 +14,57 @@ from tests._helpers import RepoDefaultingQueue as TaskQueue
 from tests._delegation_helpers import client_factory, event, identity, prepare, task
 
 pytestmark = pytest.mark.contract("agent_dispatch.delegated_waiter.fences")
+
+
+def test_concurrent_initializers_accept_only_duplicate_delegation_columns(tmp_path):
+    from agent_dispatch.queue_schema_migrations import run_queue_schema_migrations
+
+    database = tmp_path / "tasks.db"
+    TaskQueue(database)
+    with sqlite3.connect(database, isolation_level=None) as connection, \
+            sqlite3.connect(database, isolation_level=None) as concurrent:
+        connection.row_factory = sqlite3.Row
+        for name in ("kind", "delegation_json", "event_id"):
+            connection.execute(f"ALTER TABLE run_waiters DROP COLUMN {name}")
+
+        class StaleSnapshot:
+            def execute(self, sql, *args):
+                cursor = connection.execute(sql, *args)
+                if sql == "PRAGMA table_info(run_waiters)":
+                    snapshot = list(cursor)
+                    for name, declaration in (
+                        ("kind", "TEXT NOT NULL DEFAULT 'process'"),
+                        ("delegation_json", "TEXT"), ("event_id", "TEXT"),
+                    ):
+                        concurrent.execute(f"ALTER TABLE run_waiters ADD COLUMN {name} {declaration}")
+                    return snapshot
+                return cursor
+
+        run_queue_schema_migrations(StaleSnapshot(), now_fn=time.time)
+        columns = {row["name"] for row in connection.execute("PRAGMA table_info(run_waiters)")}
+        assert {"kind", "delegation_json", "event_id"} <= columns
+    restored = TaskQueue(database)
+    assert restored.run_waiter_coordinator_id()
+
+
+@pytest.mark.parametrize("column", ["kind", "delegation_json", "event_id"])
+def test_delegation_schema_migration_propagates_other_operational_errors(tmp_path, column):
+    from agent_dispatch.queue_schema_migrations import run_queue_schema_migrations
+
+    database = tmp_path / "tasks.db"
+    TaskQueue(database)
+    with sqlite3.connect(database, isolation_level=None) as connection:
+        connection.row_factory = sqlite3.Row
+        connection.execute(f"ALTER TABLE run_waiters DROP COLUMN {column}")
+
+        class FailingAddition:
+            def execute(self, sql, *args):
+                if sql.startswith(f"ALTER TABLE run_waiters ADD COLUMN {column} "):
+                    raise sqlite3.OperationalError("database is locked")
+                return connection.execute(sql, *args)
+
+        with pytest.raises(sqlite3.OperationalError, match="database is locked"):
+            run_queue_schema_migrations(FailingAddition(), now_fn=time.time)
 
 
 @pytest.mark.parametrize("timeout", [True, False, 0, -1, float("nan"), float("inf"), 2**63, "1"])

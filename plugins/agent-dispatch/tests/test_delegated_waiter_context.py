@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from contextlib import nullcontext
 import json
+from pathlib import Path
+import shutil
 from types import SimpleNamespace
 
 import pytest
@@ -17,6 +19,12 @@ pytestmark = pytest.mark.contract("agent_dispatch.delegated_waiter.context")
 @pytest.fixture
 def cell(tmp_path, monkeypatch, clean_context):
     receipt = _make_namespaced_context(tmp_path / "marketplaces" / FIRST_MARKETPLACE_ID)
+    entries = receipt.parent / "bin"
+    entries.mkdir()
+    scripts = Path(__file__).resolve().parents[1] / "scripts"
+    for suffix in ("ps1", "sh"):
+        for entry in ("resolve-runtime", "delegated-waiter-callback"):
+            shutil.copyfile(scripts / f"{entry}.{suffix}", entries / f"{entry}.{suffix}")
     context = peer_launch.validate_owner("agent-dispatch", receipt.parent, str(receipt))
     for key, value in peer_launch.peer_environment(context, {}).items():
         monkeypatch.setenv(key, value)

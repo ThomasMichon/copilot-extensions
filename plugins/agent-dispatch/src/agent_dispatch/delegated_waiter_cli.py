@@ -6,7 +6,6 @@ import json
 import os
 import subprocess
 import uuid
-from pathlib import Path
 
 import httpx
 from .delegated_waiter_contract import (
@@ -48,7 +47,10 @@ def credentials_reconstructable(
     intrinsic_environment = intrinsic_environment or {}
     return not any(
         (key.startswith("AGENT_DISPATCH_") and value != intrinsic_environment.get(key))
-        or key in {"GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"}
+        or key in {
+            "GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN",
+            "GH_HOST", "GH_CONFIG_DIR",
+        }
         for key, value in os.environ.items()
     )
 
@@ -69,6 +71,10 @@ def negotiate(args, command: tuple[str, ...], client_factory) -> tuple[dict | No
     validate_delegation(identity)
     if not credentials_reconstructable(args, command, intrinsic_environment=intrinsic_environment):
         return None, None, "caller_context_requires_process"
+    try:
+        callback_prefix(installation)
+    except (OSError, ValueError):
+        return None, None, "callback_entry_unavailable"
     prefix = procutil.agent_pull_requests_launch_prefix()
     if prefix is None:
         return None, None, "optional_owner_absent"
@@ -92,13 +98,31 @@ def negotiate(args, command: tuple[str, ...], client_factory) -> tuple[dict | No
     return identity, prefix, "negotiated"
 
 
+def callback_prefix(installation: dict | None) -> list[str]:
+    from pathlib import Path
+    from .install_paths import install_dir
+
+    root = Path(installation["root"]) if installation else install_dir()
+    suffix = "ps1" if os.name == "nt" else "sh"
+    entry = root / "bin" / f"delegated-waiter-callback.{suffix}"
+    resolver = entry.with_name(f"resolve-runtime.{suffix}")
+    if not root.is_absolute() or not entry.is_file() or not resolver.is_file():
+        raise ValueError("stable delegated callback entry unavailable")
+    if os.name == "nt":
+        host = Path(os.environ["SystemRoot"]) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+        # Slash options are accepted by Windows PowerShell and remain
+        # positional to the PR owner's --notify-argv parser.
+        return [str(host), "/NoProfile", "/NonInteractive", "/ExecutionPolicy", "Bypass",
+                "/File", str(entry)]
+    return ["/bin/sh", str(entry)]
+
+
 def callback_argv(task_id: str, generation: int, identity: dict) -> list[str]:
     return [
-        procutil.resolve_own_runtime_python(),
-        str(Path(__file__).with_name("delegated_waiter_callback.py")),
-        json.dumps({
+        *callback_prefix(identity.get("installation")),
+        "hex:" + json.dumps({
             "task_id": task_id, "generation": generation, "delegation": identity,
-        }, separators=(",", ":")),
+        }, separators=(",", ":")).encode("utf-8").hex(),
     ]
 
 
@@ -110,8 +134,8 @@ def activate(args, spec, prepared: dict, prefix: list[str], client_factory) -> d
             "--acknowledged-notifications", "--notify-timeout", "30", "--json"]
     for transition in identity["until"]:
         argv += ["--until", transition]
-    # The positional-only file entry re-enters the canonical peer boundary
-    # itself when a same-cell callback needs the Dispatch runtime.
+    # Resolve the runtime at delivery, not registration: dormant subscriptions
+    # outlive ordinary version-slot garbage collection.
     try:
         callback = callback_argv(spec.task_id, generation, identity)
         result = procutil.run_background_capture(

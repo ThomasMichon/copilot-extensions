@@ -211,7 +211,7 @@ _Operator-required scope; agent-recommended implementation and validation._
 
 ### Phase 4 - Deploy and close _(agent-recommended)_
 
-- [ ] Confirm promotion of the changed source to the release branch by content, then deploy through the unified update surface. Prerequisite promotion and content are confirmed in #7291. An operator-authorized local unified update installs the PR-owner runtime but exits nonzero on independent construction/profile failures. Complete update and isolated installed-contract proof remain pending; the dispatch integration itself has not been published.
+- [ ] Confirm promotion of the changed source to the release branch by content, then deploy through the unified update surface. Prerequisite promotion and content are confirmed in #7291. An operator-authorized local unified update installs the PR-owner runtime but exits nonzero on independent construction/profile failures. Complete update and isolated installed-contract proof remain pending; the dispatch integration is open in #7714, not merged or released.
 - [ ] Exercise the deployed contract in isolated state without interrupting shared coordinators, watch subscriptions, or peer sessions.
 - [ ] Complete the fleet service acceptance in the linked plan on explicitly
   approved capacity, including persistent registration/delivery and the actual
@@ -255,6 +255,46 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-10-21 - Repair the first delegation review findings
+
+- #7714's first review identified three concrete blockers: forge/config
+  overrides were not selecting process fallback, stored callbacks could
+  outlive their Python version slot, and concurrent initialization could race
+  the new waiter-column migrations. All three are corrected in source.
+- `GH_HOST` and `GH_CONFIG_DIR` now select the ordinary process waiter before
+  probing either owner. Schema additions tolerate only duplicate-column races;
+  unrelated operational failures remain errors.
+- The installer publishes a stable callback entry beside its canonical
+  resolver. A subscription stores the entry and a nonsecret encoded envelope;
+  each delivery resolves the current runtime rather than retaining an obsolete
+  interpreter or package file. Missing entries select process fallback before
+  preparation. Same-cell peer governance and exact-generation ACK fencing remain
+  mandatory, and callback resolution never provisions or uses PATH.
+- The Windows callback is a bounded, captured child, not a daemon: the system
+  PowerShell host and its runtime child remain in the owner's process tree.
+  The runtime child uses `CreateNoWindow` with concurrent raw stream copies;
+  event stdin, errors and exit status remain observable. Linux uses the system
+  shell and `exec` through the same canonical resolver.
+- Contained Windows source qualification passes 390 cases with five platform
+  skips, including actual pending subscriptions followed by upgrade, removal of
+  the old slot, transition delivery and replay for legacy mode and both cells.
+  The native installer publication path copies the exact stable entries.
+  Additional supervisor fixtures now supply the reservation read-back contract
+  their mocked Bridge calls require; production refusal guards are unchanged.
+- The remaining 25-module regression tail completes 605 passing cases and
+  exposes four permission-fixture failures on Python 3.14. Those fixtures now
+  inject denial at the actual stat/lstat/native-directory seam rather than
+  assuming `Path.is_dir()` delegates to `Path.stat()`. All intended partial
+  discovery, healthy-peer and no-write assertions remain intact. The focused
+  discovery/installation-context group then passes 61 cases with two platform
+  skips; no discovery implementation changes.
+- Fatal lint, the thirteen installer contracts, headless-launch guard and
+  contribution-scoped module-size check pass. The narrowly selected hosted
+  Linux/Windows lane passed the original PR head; its corrected-head repeat,
+  fresh review and merge remain pending. Complete installed native-account and
+  fleet acceptance remain separate parent obligations. No deployed runtime,
+  shared subscription or service registration is changed by this repair.
 
 ### 2026-10-21 - Qualify fenced callbacks and preserve the process alternative
 

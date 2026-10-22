@@ -255,7 +255,11 @@ def run_queue_schema_migrations(conn: sqlite3.Connection, *, now_fn) -> None:
         ("event_id", "TEXT"),
     ):
         if name not in run_waiter_columns:
-            conn.execute(f"ALTER TABLE run_waiters ADD COLUMN {name} {declaration}")
+            try:
+                conn.execute(f"ALTER TABLE run_waiters ADD COLUMN {name} {declaration}")
+            except sqlite3.OperationalError as exc:
+                if "duplicate column name" not in str(exc).lower():
+                    raise
     conn.execute("CREATE TABLE IF NOT EXISTS run_waiter_identity ("
                  "singleton INTEGER PRIMARY KEY CHECK(singleton = 1), id TEXT NOT NULL)")
     import uuid

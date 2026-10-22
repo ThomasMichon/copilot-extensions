@@ -15,6 +15,11 @@ from tests._delegation_helpers import client_factory, identity, prepare, task
 pytestmark = pytest.mark.contract("agent_dispatch.delegated_waiter.negotiation")
 
 
+@pytest.fixture(autouse=True)
+def stable_callback(monkeypatch):
+    monkeypatch.setattr(delegation, "callback_prefix", lambda _: ["stable-host", "stable-entry"])
+
+
 def args():
     return SimpleNamespace(pr_watch_repo="example/project", pr_watch_number=7,
                            pr_watch_timeout=300.0, pr_watch_until=None, shared=False,
@@ -32,6 +37,7 @@ def clean_context(monkeypatch):
     for key in tuple(os.environ):
         if key.startswith("AGENT_DISPATCH_") or key in {
             "GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN",
+            "GH_HOST", "GH_CONFIG_DIR",
         }:
             monkeypatch.delenv(key)
 
@@ -100,11 +106,23 @@ def test_explicit_context_falls_back_before_owner_probe(clean_context, monkeypat
     "AGENT_DISPATCH_TASK_AUTHORITY", "AGENT_DISPATCH_TASK_URL",
     "AGENT_DISPATCH_TASK_ID", "AGENT_DISPATCH_TASK_WORKER_ID",
     "AGENT_DISPATCH_WSL_WINDOWS_CLIENT",
+    "GH_HOST", "GH_CONFIG_DIR",
 ])
 def test_environment_credentials_select_process_without_copy(clean_context, monkeypatch, name):
     monkeypatch.setenv(name, "sensitive-value")
+    monkeypatch.setattr(procutil, "agent_pull_requests_launch_prefix", lambda: pytest.fail("no probe"))
     assert delegation.negotiate(args(), ("real-wait",), None) == (
         None, None, "caller_context_requires_process",
+    )
+
+
+def test_missing_stable_entry_falls_back_before_probing(clean_context, monkeypatch):
+    def missing(_installation):
+        raise ValueError("stable entry unavailable")
+    monkeypatch.setattr(delegation, "callback_prefix", missing)
+    monkeypatch.setattr(procutil, "agent_pull_requests_launch_prefix", lambda: pytest.fail("no probe"))
+    assert delegation.negotiate(args(), ("real-wait",), None) == (
+        None, None, "callback_entry_unavailable",
     )
 
 
@@ -131,7 +149,7 @@ def test_subscription_uncertainty_never_spawns_second_owner(tmp_path, monkeypatc
         assert "--acknowledged-notifications" in argv and "--notify-timeout" in argv
         callback = argv[argv.index("--notify-argv") + 1:]
         assert len(callback) == 3
-        assert json.loads(callback[-1])["generation"] == 1
+        assert json.loads(bytes.fromhex(callback[-1].removeprefix("hex:")))["generation"] == 1
         assert "sensitive-value" not in json.dumps(argv)
         if failure == "before_mutation":
             raise OSError("redacted")

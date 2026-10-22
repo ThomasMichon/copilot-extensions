@@ -13,6 +13,7 @@ import sys
 import sysconfig
 import threading
 import time
+import venv
 
 import pytest
 import uvicorn
@@ -38,6 +39,35 @@ def wait(predicate, timeout=8):
     assert predicate()
 
 
+def install_callback_entry(root):
+    scripts = Path(__file__).resolve().parents[1] / "scripts"
+    (root / "bin").mkdir(exist_ok=True)
+    for name in (
+        "resolve-runtime.ps1", "resolve-runtime.sh",
+        "delegated-waiter-callback.ps1", "delegated-waiter-callback.sh",
+    ):
+        shutil.copyfile(scripts / name, root / "bin" / name)
+
+
+def install_callback_runtime(root, version):
+    slot = root / "versions" / version
+    venv.EnvBuilder(with_pip=False, symlinks=os.name != "nt").create(slot)
+    site = (slot / "Lib" / "site-packages" if os.name == "nt" else
+            slot / "lib" / f"python{sys.version_info.major}.{sys.version_info.minor}" / "site-packages")
+    shutil.copytree(
+        Path(delegated_waiter_callback.__file__).parent, site / "agent_dispatch",
+        dirs_exist_ok=True, ignore=shutil.ignore_patterns("__pycache__"),
+    )
+    (site / "dependencies.pth").write_text(
+        f"import site; site.addsitedir({sysconfig.get_path('purelib')!r})\n", encoding="utf-8",
+    )
+    (slot / ".install-complete.json").write_text(json.dumps({
+        "version": version, "completed_at": "2026-01-01T00:00:00Z", "pid": 1,
+    }), encoding="utf-8")
+    (root / "current-version").write_text(version, encoding="utf-8")
+    return slot
+
+
 @pytest.fixture
 def isolated_state(tmp_path, monkeypatch):
     root = Path(__file__).resolve().parents[3]
@@ -53,6 +83,11 @@ def isolated_state(tmp_path, monkeypatch):
         if key.startswith("AGENT_DISPATCH_"):
             monkeypatch.delenv(key)
     (tmp_path / "coordinator").mkdir()
+    runtime = tmp_path / "dispatch runtime"
+    runtime.mkdir()
+    install_callback_entry(runtime)
+    install_callback_runtime(runtime, "1.0.0")
+    monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(runtime))
     monkeypatch.setenv("AGENT_DISPATCH_NO_AUTOSTART", "1")
     monkeypatch.setattr(procutil, "resolve_own_runtime_python", lambda: sys.executable)
 
@@ -208,6 +243,7 @@ def test_cell_callback_reconstructs_original_dispatch_route(
     selected, foreign = receipts[marketplace_index], receipts[1 - marketplace_index]
     python = _make_live_peer(cells[marketplace_index], "agent-dispatch", "1.0.0")
     slot = python.parent.parent
+    install_callback_entry(selected.parent)
     site = (slot / "Lib" / "site-packages" if os.name == "nt" else
             slot / "lib" / f"python{sys.version_info.major}.{sys.version_info.minor}" / "site-packages")
     shutil.copytree(
@@ -245,7 +281,7 @@ def test_cell_callback_reconstructs_original_dispatch_route(
     protected_paths = [*receipts, *owners, foreign.parent / "run" / "endpoint.json"]
     protected = {path: path.read_bytes() for path in protected_paths}
     envelope = {"task_id": task_id, "generation": 1, "delegation": spec}
-    callback[-1] = json.dumps(envelope)
+    callback[-1] = "hex:" + json.dumps(envelope).encode("utf-8").hex()
     for _ in range(2):
         result = subprocess.run(
             callback,
@@ -255,6 +291,98 @@ def test_cell_callback_reconstructs_original_dispatch_route(
         assert (result.returncode == 0) == (refusal is None), result.stderr
     assert len(queue.list_run_waiter_wakes(task_id)) == (0 if refusal else 1)
     assert {path: path.read_bytes() for path in protected_paths} == protected
+
+
+@pytest.mark.parametrize("cell_index", [None, 0, 1])
+@pytest.mark.timeout(120)
+def test_pending_callback_survives_slot_upgrade_and_garbage_collection(
+    isolated, tmp_path, monkeypatch, cell_index,
+):
+    from agent_dispatch import peer_launch, rendezvous
+    from agent_pull_requests.watch_contract import PRSnapshot
+    from agent_pull_requests.watch_storage import read_subscriptions_state
+    from tests.test_procutil import (
+        FIRST_MARKETPLACE_ID, SECOND_MARKETPLACE_ID, _make_live_peer, _make_namespaced_context,
+    )
+
+    queue, factory, url = isolated
+    installation = None
+    if cell_index is None:
+        root = Path(os.environ["AGENT_DISPATCH_INSTALL_DIR"])
+    else:
+        cell = tmp_path / "marketplaces" / (FIRST_MARKETPLACE_ID, SECOND_MARKETPLACE_ID)[cell_index]
+        receipt = _make_namespaced_context(cell)
+        owner_receipt = _make_namespaced_context(cell, plugin_id="agent-pull-requests")
+        root = receipt.parent
+        _make_live_peer(cell, "agent-dispatch", "1.0.0")
+        install_callback_runtime(root, "1.0.0")
+        install_callback_entry(root)
+        installation = {"root": str(root), "receipt": str(receipt)}
+        rendezvous.write_endpoint(root / "run", "tcp", url.removeprefix("http://"))
+        # The daemon delivers from the PR installation, not the subscriber's
+        # Dispatch environment; canonical peer reentry must restore the latter.
+        owner_context = peer_launch.validate_owner(
+            "agent-pull-requests", owner_receipt.parent, str(owner_receipt),
+        )
+        environment = peer_launch.peer_environment(owner_context, dict(os.environ))
+        # The subscription CLI is source integration; the callback itself
+        # resolves an isolated installed runtime and ignores PYTHONPATH.
+        environment["PYTHONPATH"] = os.environ["PYTHONPATH"]
+        for key in tuple(os.environ):
+            if key not in environment:
+                monkeypatch.delenv(key)
+        for key, value in environment.items():
+            monkeypatch.setenv(key, value)
+    task_id = task(queue)
+    spec = identity(queue)
+    if installation is not None:
+        spec["installation"] = installation
+    prepared = prepare(queue, task_id, spec)
+    fire = threading.Event()
+    launches = []
+    run_capture = procutil.run_background_capture
+
+    def capture_launch(*args, **kwargs):
+        # The source CLI is not an installed PR runtime. Only its loopback
+        # subscription request uses legacy invocation; delivery below retains
+        # the actual PR cell and must cross canonical peer governance.
+        environment = dict(os.environ)
+        for key in ("COPILOT_EXTENSIONS_CONTEXT", "COPILOT_PLUGIN_ROOT", "AGENT_RT_ROOT"):
+            environment.pop(key, None)
+        kwargs["env"] = environment
+        result = run_capture(*args, **kwargs)
+        launches.append(result)
+        return result
+
+    monkeypatch.setattr(procutil, "run_background_capture", capture_launch)
+    with serving_owner(lambda *_: PRSnapshot(merged=fire.is_set())) as owner:
+        result = delegated_waiter_cli.activate(
+            None, RunSpec(command=("actual-wait",), task_id=task_id), prepared,
+            [sys.executable, "-m", "agent_pull_requests"], factory,
+        )
+        assert result["detached"], (result, launches)
+        pending = read_subscriptions_state()
+        assert len(pending) == 1 and pending[0].get("pending") is None
+        argv = pending[0]["notify"]["argv"]
+        old_slot = root / "versions" / "1.0.0"
+        assert all(str(old_slot) not in argument for argument in argv)
+        install_callback_runtime(root, "2.0.0")
+        shutil.rmtree(old_slot)
+        assert not old_slot.exists()
+        fire.set()
+        wait(lambda: len(queue.list_run_waiter_wakes(task_id)) == 1, timeout=60)
+        wait(lambda: owner.status()["subscribers"] == {})
+        waiter = queue.find_delegated_preparation(task_id, spec["preparation_id"])
+        fired = event(spec)
+        fired["registration_id"] = waiter["delegation"]["registration_id"]
+        fired["event_id"] = waiter["event_id"]
+        replay = subprocess.run(
+            argv, input=json.dumps(fired), text=True, capture_output=True,
+            timeout=30, check=False, **no_window_kwargs(),
+        )
+        assert replay.returncode == 0, replay.stderr
+        assert len(queue.list_run_waiter_wakes(task_id)) == 1
+        assert read_subscriptions_state() == []
 
 
 @pytest.mark.parametrize("timed_out", [False, True])

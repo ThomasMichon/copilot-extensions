@@ -1509,7 +1509,8 @@ function Deploy-SelfProvisioningBinstub {
     # (uniform-runtime-resolution, #765).
     $binDir = Join-Path $InstallDir 'bin'
     if (-not (Test-Path $binDir)) { New-Item -ItemType Directory -Path $binDir -Force | Out-Null }
-    foreach ($r in @('resolve-runtime.ps1', 'resolve-runtime.sh')) {
+    foreach ($r in @('resolve-runtime.ps1', 'resolve-runtime.sh',
+            'delegated-waiter-callback.ps1', 'delegated-waiter-callback.sh')) {
         $rSrc = Join-Path $PSScriptRoot $r
         if (Test-Path $rSrc) { Copy-Item $rSrc (Join-Path $binDir $r) -Force }
     }
