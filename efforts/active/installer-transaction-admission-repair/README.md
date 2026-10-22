@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** one corrective PR against `dev`
 - **Created:** 2026-10-13
-- **Status:** Active
+- **Status:** Done
 - **Vision:** below-altitude correction to the existing exclusive install-transaction contract
 - **Umbrella issue:** #6463
 - **Parent effort:** [CI Reliability & Flakiness Telemetry](../ci-flakiness-telemetry-and-reliability/README.md), Phase 3a
@@ -110,12 +110,12 @@ or host changes are authorized; integration retains final review and publication
 ### Integration and released-source proof
 
 - [x] Independently verify the empty-read correction and exact-path/type-safety residual.
-- [ ] Obtain independent clean current-head review and resolve any blocking findings.
-- [ ] Publish through the repository flow; confirm actual required CI passes for the repair head.
-- [ ] Merge the repair into `dev` and record the merged result.
-- [ ] Confirm promotion/release validation and compare the released four installer bodies
+- [x] Obtain independent clean current-head review and resolve any blocking findings.
+- [x] Publish through the repository flow; confirm actual required CI passes for the repair head.
+- [x] Merge the repair into `dev` and record the merged result.
+- [x] Confirm promotion/release validation and compare the released four installer bodies
   with the reviewed repair, recording the release identity and source fingerprints.
-- [ ] Resolve every Plan/Validation Plan item and mark this bounded effort Done;
+- [x] Resolve every Plan/Validation Plan item and mark this bounded effort Done;
   keep the broad parent Active for its remaining telemetry objectives.
 
 ## Validation Plan
@@ -142,8 +142,8 @@ or host changes are authorized; integration retains final review and publication
   failure are refused with original target bytes/inodes preserved. Malformed
   current-owner legacy links survive EXIT cleanup; digit-only legacy links
   remain compatible within the bound.
-- [ ] Independent coordinator validation and required CI confirm the final reviewed repair head.
-- [ ] Released-source proof confirms every repaired installer, not merely an unrelated green run.
+- [x] Independent coordinator validation and required CI confirm the final reviewed repair head.
+- [x] Released-source proof confirms every repaired installer, not merely an unrelated green run.
 
 ## Proposal
 
@@ -155,6 +155,46 @@ published typed-receipt NUL validation is unchanged. Existing four-plugin patch
 change intent and version metadata remain unchanged.
 
 ## Journal
+
+### 2026-10-21 - Actual review, merge and four-installer release proof reconciled
+
+- Completion-only reconciliation under #7556 credits the actual final #6551,
+  rather than repeating the historical local/unpublished states below.
+  Head `7b619967dc42c0c25825b3d50827b89dc2240e44` received an actual Copilot
+  **Approved** review at `2026-10-18T11:03:47Z`, with no open findings.
+  Actual required PR gate, guards, four repaired plugin jobs and native
+  Windows contracts passed in run `39121148737`. Skipped full-matrix jobs
+  are not represented as executed acceptance.
+- #6551 merged into `dev` as
+  `938fc9aa1abe1883374748e6b274aa7cfcf01f3f`. The earlier independent
+  actual-consumer, raw-byte and stress evidence remains attributed to its
+  recorded revisions; no tests or installer were rerun for this reconciliation.
+- Actual Main release #7780 is
+  `b8fec3dc71f786c6dc92e21630e25c9a43be41e2`, from qualified Dev source
+  `c8c0b3060454d812e7ac42ce7b7c04ea6375f6a1`. Static Git-blob comparison
+  shows all four complete transaction protocols, from the install-transaction
+  start marker through its end marker, equal the reviewed #6551 repair
+  byte-for-byte. Each is 7,586 bytes.
+- MCP, Containers and Vault protocol SHA-256 is
+  `22851fbf7e7de22ff5b544304add11f30f04e85d0462a1438c94995ba194081a`;
+  SSH is
+  `172cef62e099787081a0e97d2f0ff6e95ab72230e56b9891e0e05bb132b6cff1`.
+  Released complete installer blobs, in the same order, are
+  `641d6ddcc6f85807d78b6ba81c95a36ec2b844e2`,
+  `c0c8d478d96bdf65db978e760455a7449d6baafd`,
+  `afbed82563528625ef9d106b0d65eca93bad100e` and
+  `22748b8bcc9357bf4506bcd5e1b53262ef5b2b94`.
+  Later changes outside the compared protocol mean the complete files are
+  not claimed identical to the older repair.
+- Every Plan and Validation item is now resolved for this bounded repair.
+  Status is **Done**, pending ordinary archive maintenance. #6463 also
+  credits its original runtime-scope/native-lock repair #6483 and exact
+  machine-gate guard #7011; it does not absorb machine-wide locking,
+  uninstall/purge or every governed entrypoint.
+- The broad telemetry parent remains **Active**. Native continuity,
+  unavailable platform evidence and adopter rollout remain distinct; no
+  host installer, runtime, service, credential or system effect was authorized
+  or performed. This completion records source release, not deployment.
 
 ### 2026-10-14 - Legacy target raw-byte residual corrected locally
 
