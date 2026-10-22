@@ -98,6 +98,18 @@ exactly three Git calls, independent of their count. An unreadable or
 malformed diff/object map warns and refuses landing; no ref is moved.
 Content comparison retains the existing mode-only behavior.
 
+Full-PR review identified a necessary correction to the pinned after-image:
+the shared text Git capture normalizes CR/LF and replaces invalid UTF-8.
+This consumer now conservatively refuses changed paths containing CR, LF
+or the replacement character before inferring absence from object maps.
+That also refuses a literal LF/replacement-character filename rather than
+mistaking lossy bytes for authoritative missing-path evidence. The shared
+Git wrapper and other consumers are unchanged. Two object-only real-Git
+regressions construct CR and non-UTF-8 filenames without checking them out,
+so both deletion failures run on Windows as well as POSIX. Both reproduced
+false landing before the correction; the warning and unchanged refs are
+part of the regression contract.
+
 The original mixed `test_finalize_blob_comparison.py:1` hunk is partitioned
 by symbol, not copied wholesale. F owns `_change`, its landing-seed
 aliases/`env` fixture, and these four test functions:
@@ -107,6 +119,8 @@ aliases/`env` fixture, and these four test functions:
 `test_landing_compares_object_content_without_turning_modes_into_unpublished_work`.
 The failed-evidence test additionally exercises successful commands with
 malformed output through this consumer, retaining its warning assertion.
+The new `test_lossy_path_evidence_never_certifies_an_unpublished_deletion`
+belongs only to F's review correction, not to the preserved mixed hunk.
 
 G retains the other five original test functions:
 `test_a_tracked_ref_cannot_have_commits_beyond_the_identical_current_ref`,

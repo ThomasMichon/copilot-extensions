@@ -1,10 +1,12 @@
 """Real object evidence for finalize's batched changed-path comparison."""
 
 from pathlib import Path
+import subprocess
 from types import SimpleNamespace
 
 import pytest
 import test_finalize_landing as landing_support
+from agent_procutil import no_window_kwargs
 
 from agent_worktrees import finalize_ref, git_ops
 
@@ -116,3 +118,28 @@ def test_landing_compares_object_content_without_turning_modes_into_unpublished_
     assert finalize_ref._blobs_on_upstream(
         f"worktree/{env.worktree_id}", "origin/main", str(env.clone),
     )
+
+
+@pytest.mark.parametrize("raw_path", [b"kept\rname.txt", b"kept\xffname.txt"])
+def test_lossy_path_evidence_never_certifies_an_unpublished_deletion(env, capsys, raw_path):
+    branch = f"worktree/{env.worktree_id}"
+    original_tree = _git("rev-parse", "HEAD^{tree}", cwd=env.clone)
+    blob = _git("rev-parse", "HEAD:a.txt", cwd=env.clone).encode("ascii")
+    entries = b"100644 blob " + blob + b"\ta.txt\0"
+    entries += b"100644 blob " + blob + b"\t" + raw_path + b"\0"
+    # Object-only trees exercise POSIX-only names on every host, without checkout.
+    tree = subprocess.run(
+        ["git", "mktree", "-z"], input=entries, cwd=env.clone,
+        capture_output=True, check=True, timeout=5, **no_window_kwargs(),
+    ).stdout.decode("ascii").strip()
+    base = _git("commit-tree", tree, "-p", "HEAD", "-m", "unusual path", cwd=env.clone)
+    deleted = _git(
+        "commit-tree", original_tree, "-p", base, "-m", "unpublished deletion", cwd=env.clone,
+    )
+    _git("update-ref", "refs/heads/upstream", base, cwd=env.clone)
+    _git("update-ref", f"refs/heads/{branch}", deleted, cwd=env.clone)
+    refs = _git("show-ref", cwd=env.clone)
+
+    assert not finalize_ref._blobs_on_upstream(branch, "upstream", str(env.clone))
+    assert "Cannot verify changed files on upstream" in capsys.readouterr().out
+    assert _git("show-ref", cwd=env.clone) == refs

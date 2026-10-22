@@ -218,6 +218,10 @@ def _blobs_on_upstream(branch: str, upstream: str, cwd: str) -> bool:
         changed_files = git_tree_diff.read(run_git, merge_base_r.stdout.strip(), branch)
         if not changed_files:
             return True
+        # Text capture normalizes CR/LF and replaces invalid UTF-8. Never infer
+        # an absent entry from a path that may no longer name the original bytes.
+        if any(any(char in path for char in "\r\n\ufffd") for path in changed_files):
+            raise git_tree_diff.TreeDiffError("changed path is not losslessly verifiable")
         branch_objects = {
             file: after for file, (_before, after) in changed_files.items() if after.strip("0")
         }
