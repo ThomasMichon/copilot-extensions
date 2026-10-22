@@ -29,6 +29,34 @@ the [agent-fabric](../../../visions/agent-fabric/README.md) vision's
 a spun-off agent with a shared record) and `recover-not-lose` (an interrupted
 spawn is reconciled, never silently double-run or lost).
 
+## Coordinator, supervisor daemon and worker lanes
+
+These are roles within `agent-dispatch`, not three independent task authorities:
+
+| Role | Current responsibility |
+|------|------------------------|
+| Coordinator (`serve`) | Queue database, API, atomic claims, reservations, durable events and verification |
+| Supervisor daemon (`supervise serve`) | Reconcile registrations and own emitter, schedule and supervised-lane child processes |
+| Worker-lane supervisor (`supervise`) | Reserve eligible tasks, prepare their workspaces and invoke the selected worker backend |
+
+Evaluator registrations are consulted by the coordinator on verification
+triggers; they do not launch an evaluator child in the supervisor daemon.
+Bridge owns session hosting and native resume, while Worktrees owns workspace
+allocation. The lane orchestrates those capabilities rather than replacing them.
+
+The installer manages the coordinator and supervisor daemon as separate local
+services. Coordinator cutover deliberately leaves the supervisor running;
+clients reconnect through endpoint discovery/routing to the retained task store.
+The supervisor has its own singleton and upgrade lifecycle. It is not an
+ordinary child whose lifetime is tied to the current coordinator process.
+
+The [logical-machine vision](../../../visions/plugins/agent-dispatch/README.md#logical-machines-and-local-execution-authority)
+extends that ownership model to self-contained container environments. Existing
+remote-pool and central-authority options are not proof of a container-local
+coordinator or coordinator-to-coordinator federation. Container composition,
+authenticated supervisor execution enrollment and running adoption must be
+qualified separately; this description does not install or activate them.
+
 ## Ordinary ACP startup invocation
 
 The ordinary Bridge backend freezes a versioned startup invocation with ready

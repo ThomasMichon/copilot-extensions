@@ -93,6 +93,11 @@ grants.
       coordinator scope resolution now binds canonical installation receipts and
       existing managed producers; coordinator enrollment is retained, while
       supervisor enrollment and final launch gates remain open.
+      The supervisor cohort follows the
+      [logical-machine boundary](../../../visions/plugins/agent-dispatch/README.md#logical-machines-and-local-execution-authority):
+      local coordinator authority and independently managed local supervision,
+      including self-contained containers. Remote-pool process labels are not
+      local runtime provenance or coordinator federation.
       Internal reservation-send custody also serializes first admission
       with closure and retains pending/ambiguous transport outcomes; it is
       wired to coordinator-owned CI repair launch and task delivery in already
@@ -148,6 +153,29 @@ do not treat a validated adapter response as complete task admission or live
 handoff support.
 
 ## Journal
+
+### 2026-10-21 - Clarify logical-machine and supervisor lifetime boundaries
+- The coordinator, supervisor master and worker-lane supervisor are distinct
+  roles within the same local Dispatch deployment. Retain the separate local
+  supervisor service and its ability to survive coordinator upgrades.
+- Self-contained container environments own local task authority, required
+  session/workspace services and secured remote access. Cross-environment
+  federation is between coordinators, not shared task-database ownership.
+- This clarifies the Phase 2 implementation boundary, not a running capability.
+  Authenticated supervisor enrollment, actual sender mediation, legacy/effect
+  integration, handback and release/running adoption remain unresolved.
+
+### 2026-10-21 - Wake sender cohort merged; supervisor integration next
+- #7761 merged to `dev` as `47560b585bcded133713591042623f56d9c511ce`
+  after current-head Copilot approval, resolution of all five review threads
+  and the required checks. The final focused selection passed 356 cases.
+- Review follow-through closed direct-task logical-lineage, retry-budget,
+  cross-sender final-admission, lock-time lease and unrelated-wake starvation
+  gaps without changing the cleanup-only exceptions or replacing the outboxes.
+- This closes the qualified coordinator wake cohort only. Continue Phase 2
+  through the ordinary supervisor's real runtime/enrollment and final sender
+  boundaries. Other sender/legacy qualification, adopter effects, acknowledgement,
+  handback and separately authorized running adoption remain open.
 
 ### 2026-10-21 - Mediate both coordinator wake outboxes
 - Final owner-prompt admission uses each existing wake row and current delivery
