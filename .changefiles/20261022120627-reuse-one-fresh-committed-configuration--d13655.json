@@ -1,0 +1,9 @@
+{
+  "comment": "Reuse one fresh committed configuration read within each branch-protection decision",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

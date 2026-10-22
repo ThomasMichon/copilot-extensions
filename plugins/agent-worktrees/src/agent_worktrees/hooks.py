@@ -208,7 +208,7 @@ def _registry_default_branch(name: str) -> str | None:
     return None
 
 
-def _default_branch(cwd: str | Path) -> str | None:
+def _default_branch(cwd: str | Path, *, inrepo_config: dict | None = None) -> str | None:
     """Best-effort default branch, in the SAME precedence every other
     consumer (``create``/``push-changes``/``create-pr``, via
     ``cfg.load_config()``) uses: machine-local per-project override >
@@ -228,6 +228,9 @@ def _default_branch(cwd: str | Path) -> str | None:
     in-repo config catching up) would silently NOT be honored by the local
     pre-commit/pre-push guard, even though it already governs every other
     PR-flow entry point.
+
+    ``inrepo_config`` may supply this guard decision's already-read config,
+    including an empty mapping. It is never retained for another decision.
     """
     name: str | None = None
     try:
@@ -242,7 +245,8 @@ def _default_branch(cwd: str | Path) -> str | None:
         if db:
             return db
 
-    db = _inrepo(cwd).get("default_branch")
+    raw = _inrepo(cwd) if inrepo_config is None else inrepo_config
+    db = raw.get("default_branch")
     if db:
         return str(db)
 
@@ -271,10 +275,11 @@ def _protected_branches(cwd: str | Path) -> list[str]:
     back to ``[default_branch]`` when absent, so every other repo is
     unaffected.
     """
-    raw = _inrepo(cwd).get("protected_branches")
-    if isinstance(raw, list) and raw:
-        return [str(b) for b in raw]
-    db = _default_branch(cwd)
+    config = _inrepo(cwd)
+    protected = config.get("protected_branches")
+    if isinstance(protected, list) and protected:
+        return [str(b) for b in protected]
+    db = _default_branch(cwd, inrepo_config=config)
     return [db] if db else []
 
 

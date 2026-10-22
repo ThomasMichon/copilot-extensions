@@ -87,6 +87,42 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Admitted narrow batches
 
+### H one fresh configuration read per protection decision
+
+`hooks._protected_branches` reads the in-repo mapping once and, when no
+explicit protection list applies, passes that exact mapping into
+`_default_branch` for the same decision. An empty mapping is a supplied
+read, not a request to read again. A standalone `_default_branch` call
+still resolves fresh configuration. No value survives into a later
+decision. Machine-local override > committed config > registry fallback >
+`origin/HEAD` precedence, explicit protected lists and existing hook
+allow/refuse behavior remain unchanged.
+
+Two native regressions count the actual committed-config reads and the
+empty-mapping path. A later real commit/push changes the next decision
+while an uncommitted file cannot shadow it. Existing machine-local and
+drop-in cases additionally exercise `_protected_branches`; four test
+doubles accept the new private keyword without altering their assertions.
+The complete unpartitioned hook module passes 37 tests without skips in
+41.69 seconds including preparation and cleanup, with exactly two workers
+and unchanged item/group/native/process/memory bounds.
+
+A simple actual `python -m agent_worktrees hook pre-commit` subprocess
+refuses a protected branch in a new linked worktree, then permits it after
+the remote-tracking policy is changed by a real commit/push. An uncommitted
+contradictory policy cannot shadow the new committed value. This real
+consumer passes in 9.45 seconds including preparation/cleanup, with
+headless bounded subprocesses and no host hooks or configuration touched.
+Ruff F/E9, thirteen install contracts and diff checks pass.
+
+This below-altitude decision-local reuse changes no command, schema,
+precedence or installation lifecycle. Documentation impact is this census
+and the owning effort journal. Fresh temporary repositories cover first
+use of the hook decision, not installer provisioning. No external venue,
+non-Windows, complete-plugin, rollout or repeated same-head qualification
+result is claimed. C's committed-ref absence probe, other residuals and
+parent #5694/#5682 qualification remain open.
+
 ### Y fresh file configuration through an explicitly safe YAML backend
 
 `config._load_yaml_safe` selects PyYAML's `CSafeLoader` when available,
