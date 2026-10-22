@@ -11,6 +11,7 @@ that pattern to this repository.
 | Effort | Status | Coordination |
 |--------|--------|--------------|
 | [Performance Telemetry](active/performance-telemetry/README.md) | Draft; existing-seam interface review before bounded producers, optional OpenTelemetry and native qualification | #7935 / #5900; preserves #7938/#7943 production owners and #5215 readiness |
+| [Picker Pending Binding](active/picker-pending-binding/README.md) | Draft; responsive consumer startup and current-feed plan before implementation | #7938; preserves #7974 engine and #7788 native launch owners |
 | [Native Mux Launch Contract](active/native-mux-launch-contract/README.md) | Draft; reviewed proposal before terminal-custody, connected-status and resumed-directory repairs | #7962; preserves #4564 recovery and #352/#5961/#4496 host owners |
 | [Namespace Discovery Latency](active/namespace-discovery-latency/README.md) | Draft; reviewed plan before bounded provider/startup repair, unchanged foreground deadline | #5761 latency slice; preserves #3963/#5559 owners and broader diagnostics |
 | [Coordinated Launch Maintenance](active/coordinated-launch-maintenance/README.md) | Active; source-only Windows broker amendment precedes implementation; release and rollout remain open | #7694; prerequisite #6859; preserves #6812/#6820/#7667 owners |
