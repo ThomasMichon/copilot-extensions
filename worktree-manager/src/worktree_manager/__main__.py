@@ -1460,16 +1460,9 @@ def _cmd_source(rest: list[str]) -> int:
 
 def _extract_project(rest: list[str]) -> tuple[str | None, list[str]]:
     """Pull a threaded ``--project <name>`` out (returned, not forwarded)."""
-    out: list[str] = []
-    project: str | None = None
-    i = 0
-    while i < len(rest):
-        if rest[i] == "--project" and i + 1 < len(rest):
-            project, i = rest[i + 1], i + 2
-            continue
-        out.append(rest[i])
-        i += 1
-    return project, out
+    from .update_orchestration import extract_project
+
+    return extract_project(rest)
 
 
 def _cmd_update(rest: list[str]) -> int:
@@ -1484,78 +1477,29 @@ def _cmd_update(rest: list[str]) -> int:
     from .update_bootstrap import prepare_update
     from .update_events import UpdateRun
 
-    rest, fresh_manager, rc = prepare_update(rest)
-    if rc:
-        return rc
+    prepared = prepare_update(rest)
+    if prepared.exit_code:
+        return prepared.exit_code
     run = UpdateRun()
     try:
-        if fresh_manager:
-            return run.finish(_cmd_update_steps(rest, run, fresh_manager=True))
-        return run.finish(_cmd_update_steps(rest, run))
+        return run.finish(_cmd_update_steps(
+            prepared.arguments, run, fresh_manager=prepared.fresh_manager,
+            environment=prepared.environment,
+        ))
     except BaseException as exc:
         run.abort(exc)
         raise
 
 
-def _cmd_update_steps(rest: list[str], run, *, fresh_manager: bool = False) -> int:
-    from . import engine_client as ec
-    from .self_install import SelfUpdateResult, self_update
+def _cmd_update_steps(
+    rest: list[str], run, *, fresh_manager: bool = False,
+    environment: dict[str, str] | None = None,
+) -> int:
+    from .update_orchestration import run_update_steps
 
-    # 1. Self-update the Manager (best-effort; the new slot takes effect next run).
-    with run.self_update_phase():
-        # Fresh bootstrap already activated its candidate transactionally.
-        su = (
-            SelfUpdateResult(action="already-current", version=__version__)
-            if fresh_manager else self_update(dry_run=False)
-        )
-        cutover = su.cutover if isinstance(su.cutover, dict) else None
-        cutover_failed = bool(
-            cutover
-            and (
-                cutover.get("action") == "error"
-                or (
-                    isinstance(cutover.get("result"), dict)
-                    and cutover["result"].get("ok") is False
-                )
-            )
-        )
-        if su.action == "updated":
-            run.say(f"updated {su.previous or '(none)'} → {su.version} "
-                    "(active on next run)")
-        elif su.action == "already-current":
-            run.say(f"already current ({su.version})")
-        else:
-            run.say(f"self-update {su.action}: {su.reason} — continuing")
-        if cutover_failed:
-            run.say(f"mux-daemon cutover failed: {cutover}", state="failed")
-        # Inside the phase, so a failed cutover is the phase's own outcome.
-        run.record_self_update(su.action, cutover_failed,
-                               str(cutover) if cutover_failed else su.reason)
-    # The manager_update_check cache is stale after a version change -- drop
-    # it so the next poll re-checks for real instead of serving the
-    # pre-update verdict (#4424).
-    from . import manager_update_check as _muc
-
-    _muc.invalidate()
-
-    # 2. Orchestrate via the engine, bypassing the seam. A threaded --project is
-    #    forwarded through run_engine_passthrough's own project param (placed
-    #    before the verb), not appended to args, so the engine can resolve it
-    #    even when this Manager itself runs outside any adopted repo.
-    project, forwarded = _extract_project(rest)
-    run.say("Updating harness plugins + runtimes via agent-worktrees")
-    try:
-        rc = ec.run_engine_passthrough(project, ["update", "--no-manager", *forwarded])
-    except ec.EngineError as e:
-        run.say(str(e), state="failed")
-        run.record_engine_error(str(e), missing=bool(getattr(e, "install_hint", False)),
-                                cause=e.__cause__)
-        if getattr(e, "install_hint", False):
-            run.say("Run `worktree-manager setup --apply` to install the engine first.")
-        return 1
-    if su.action == "auth_required" and rc in (0, 3, 5):
-        return 4
-    return (1 if cutover_failed else 0) if rc == 0 else rc
+    return run_update_steps(
+        rest, run, version=__version__, fresh_manager=fresh_manager, environment=environment,
+    )
 
 
 def main(argv: list[str] | None = None) -> int:

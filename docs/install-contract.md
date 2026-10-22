@@ -1250,7 +1250,12 @@ root and publication custody throughout repair; invalid or changed cell
 ownership never falls back to the shared root.
 The same applies when current activation selects that cell automatically:
 recovery captures its canonical context before acquisition and carries it
-through repair without changing the caller's environment.
+through repair, installed-engine command resolution and the suite child's
+environment without changing the caller's environment. An attributable native
+payload and its canonical registration can identify a cell-only installation;
+only legacy selection requires a shared deployment manifest. Fresh orchestration
+re-resolves the repaired installation instead of reusing an inherited command
+that still names an older shared slot.
 Project arguments and the original invocation context cross the bootstrap.
 Installing the Manager alone never counts as suite success: repair failures
 and the eventual update's native exit status

@@ -160,18 +160,15 @@ def accept_inherited_engine_command() -> str | None:
     return None
 
 
-def installed_engine_command() -> list[str] | None:
-    """Resolve the exact marker-selected agent-worktrees runtime.
+def installed_engine_command(environment: dict[str, str] | None = None) -> list[str] | None:
+    """Resolve the marker-selected runtime under ordinary or call-scoped ownership.
 
-    Delegates to the generic, plugin-name-parameterized resolver in
-    ``agent_plugin_runtime`` (Phase 3b/4 follow-on) so every agent-* peer is
-    located the same way agent-worktrees is here: the attributable install
-    receipt (legacy ``deploy-manifest.json``, or a namespaced ``install.json``
-    when the shared installation-mode policy has marketplace cells enabled
-    and an explicit context names this exact plugin) selects the immutable
-    runtime slot. A bare command name or PATH lookup is never accepted.
+    The shared receipt resolver never accepts PATH or a bare command name.
+    An explicit recovery environment must not reuse an inherited stale command.
     """
-    return agent_plugin_runtime.resolve_installed_plugin_command(ENGINE_BIN)
+    return agent_plugin_runtime.resolve_installed_plugin_command(
+        ENGINE_BIN, **({"environment": environment} if environment is not None else {}),
+    )
 
 
 #: In-process base-command override (wins over the env). Set by the Picker's
@@ -322,7 +319,8 @@ def run_json(project: str | None, args: list[str], *,
 
 
 def run_engine_passthrough(project: str | None, args: list[str], *,
-                           timeout: int | None = None) -> int:
+                           timeout: int | None = None,
+                           environment: dict[str, str] | None = None) -> int:
     """Run an engine verb with **inherited stdio**, returning its exit code.
 
     Unlike :func:`run_json` (which captures + parses), this streams the engine's
@@ -331,8 +329,10 @@ def run_engine_passthrough(project: str | None, args: list[str], *,
     ``agent-worktrees update --no-manager`` (the seam bypass the Manager re-enters
     through). Raises :class:`EngineError` with ``install_hint`` when the engine
     binstub is absent.
+    A supplied environment is the complete call-scoped selection and child
+    environment; it bypasses stale inherited command handles.
     """
-    base = engine_base_command()
+    base = engine_base_command() if environment is None else installed_engine_command(environment)
     if base is None:
         raise EngineError(
             f"the {ENGINE_BIN} engine is not installed", install_hint=True)
@@ -346,7 +346,7 @@ def run_engine_passthrough(project: str | None, args: list[str], *,
     try:
         return subprocess.run(
             cmd, timeout=timeout, check=False,
-            **handoff_launch_options(_engine_environment(), handoff),
+            **handoff_launch_options(_engine_environment(environment), handoff),
         ).returncode
     except subprocess.TimeoutExpired as e:
         raise EngineError(f"{ENGINE_BIN} {' '.join(args)} timed out") from e

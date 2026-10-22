@@ -6,7 +6,7 @@ import runpy
 import shutil
 import subprocess
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -31,14 +31,29 @@ class _RefreshedSource:
     context: str | None = None
 
 
-def prepare_update(rest: list[str]) -> tuple[list[str], bool, int]:
+@dataclass(frozen=True)
+class RepairResult:
+    exit_code: int
+    environment: dict[str, str] | None = field(default=None, repr=False)
+
+
+@dataclass(frozen=True)
+class PreparedUpdate:
+    arguments: list[str]
+    fresh_manager: bool = False
+    exit_code: int = 0
+    environment: dict[str, str] | None = field(default=None, repr=False)
+
+
+def prepare_update(rest: list[str]) -> PreparedUpdate:
     """Consume only the private bootstrap prefix before ordinary orchestration."""
     if rest[:1] != ["--repair-engine"]:
-        return rest, False, 0
+        return PreparedUpdate(rest)
     if len(rest) < 2:
         print("Update repair requires its fresh source checkout.", file=sys.stderr)
-        return rest, True, 2
-    return rest[2:], True, repair_engine(Path(rest[1]))
+        return PreparedUpdate(rest, True, 2)
+    repaired = _repair_installation(Path(rest[1]))
+    return PreparedUpdate(rest[2:], True, repaired.exit_code, repaired.environment)
 
 
 def _policy_sdk(
@@ -74,6 +89,25 @@ def _scope_identity(
     }
 
 
+def _legacy_binding(helper: dict[str, Any], primitive: ModuleType, root: Path) -> dict[str, Any]:
+    path = root / "deploy-manifest.json"
+    helper["_ordinary"](path)
+    manifest = primitive.read_deployment_manifest(path)
+    if (
+        not isinstance(manifest, dict) or manifest.get("schema_version") != 3
+        or manifest.get("service") != "agent-worktrees"
+        or not isinstance(manifest.get("commandBinding"), dict)
+    ):
+        raise RuntimeError("Engine repair has no captured incumbent ownership")
+    previous = manifest["commandBinding"]
+    if (
+        not isinstance(previous.get("sourceFingerprint"), str)
+        or not isinstance(previous.get("payloadRoot"), str)
+    ):
+        raise RuntimeError("Engine repair captured source identity is incomplete")
+    return previous
+
+
 def _refresh_source(source: Path, environment: dict[str, str]) -> _RefreshedSource:
     """Validate captured ownership before rehydrating missing or damaged source bytes."""
     from .engine_origin import refresh_registered_origin, select_registered_origin
@@ -83,8 +117,11 @@ def _refresh_source(source: Path, environment: dict[str, str]) -> _RefreshedSour
         environment=environment, os_profile=None, platform=None, wsl_distro=None,
     )
     home = Path(profile)
+    copilot_home = Path(environment.get("COPILOT_HOME") or home / ".copilot")
+    installed = copilot_home / "installed-plugins"
     context = environment.get("COPILOT_EXTENSIONS_CONTEXT", "").strip()
     marketplace = None
+    previous = None
     if context:
         path = Path(context)
         if not path.is_absolute() or len(path.parents) < 5:
@@ -111,22 +148,12 @@ def _refresh_source(source: Path, environment: dict[str, str]) -> _RefreshedSour
         expected = _scope_identity(receipt, activation, current_environment)
     else:
         root = home / ".agent-worktrees"
-        manifest_path = root / "deploy-manifest.json"
-        helper["_ordinary"](manifest_path)
-        manifest = primitive.read_deployment_manifest(manifest_path)
-        if (
-            not isinstance(manifest, dict) or manifest.get("schema_version") != 3
-            or manifest.get("service") != "agent-worktrees"
-            or not isinstance(manifest.get("commandBinding"), dict)
-        ):
-            raise RuntimeError("Engine repair has no captured incumbent ownership")
-        previous = manifest["commandBinding"]
-        fingerprint = previous.get("sourceFingerprint")
-        if not isinstance(fingerprint, str) or not isinstance(previous.get("payloadRoot"), str):
-            raise RuntimeError("Engine repair captured source identity is incomplete")
-        hint = Path(previous["payloadRoot"])
-    copilot_home = Path(environment.get("COPILOT_HOME") or home / ".copilot")
-    installed = copilot_home / "installed-plugins"
+        attributable = environment.get("AGENT_WORKTREES_PAYLOAD_ROOT", "")
+        if attributable and Path(attributable).is_relative_to(installed):
+            hint, fingerprint = Path(attributable), None
+        else:
+            previous = _legacy_binding(helper, primitive, root)
+            fingerprint, hint = previous["sourceFingerprint"], Path(previous["payloadRoot"])
     payload_hint = hint if hint.is_relative_to(installed) else None
     origin = select_registered_origin(
         primitive, copilot_home=copilot_home, plugin_id="agent-worktrees",
@@ -150,13 +177,15 @@ def _refresh_source(source: Path, environment: dict[str, str]) -> _RefreshedSour
                 expected_marketplace_id=origin.provenance["marketplaceId"],
                 expected_payload_root=origin.payload, environment=environment,
             )
-            if receipt["sourceFingerprint"] != fingerprint:
+            if receipt["sourceFingerprint"] != origin.provenance["sourceFingerprint"]:
                 raise RuntimeError("Automatic engine context belongs to another source")
             expected = _scope_identity(receipt, activation, current_environment)
             root = Path(receipt["pluginRoot"])
         else:
             if activation["state"] not in {"missing", "valid"}:
                 raise RuntimeError("Engine repair automatic activation is stale, invalid or foreign")
+            if previous is None:
+                previous = _legacy_binding(helper, primitive, root)
             wanted = api["_legacy_receipt"](
                 origin.provenance, {"runtimeRoot": str(root), "environment": current_environment},
             )
@@ -319,7 +348,7 @@ def _invoke(installation: _Installation, action: str, environment: dict[str, str
     return _wait(command, child, installation.payload)
 
 
-def repair_engine(source: Path) -> int:
+def _repair_installation(source: Path) -> RepairResult:
     """Restore only the attributable installation, using its owning source."""
     environment = dict(os.environ)
     try:
@@ -340,10 +369,15 @@ def repair_engine(source: Path) -> int:
                 raise RuntimeError("Engine installation/source identity changed during repair")
             rc = _invoke(current, action, environment)
             if rc:
-                return rc
+                return RepairResult(rc)
             if action == "provision" and not (current.root / "bin").is_dir():
                 raise RuntimeError("Engine provisioning returned success without its runtime bin")
-        return 0
+        return RepairResult(0, environment)
     except (OSError, ValueError, RuntimeError, ImportError) as error:
         print(f"Engine repair refused: {error}", file=sys.stderr)
-        return 1
+        return RepairResult(1)
+
+
+def repair_engine(source: Path) -> int:
+    """The exit-only repair entry for callers that do not continue orchestration."""
+    return _repair_installation(source).exit_code

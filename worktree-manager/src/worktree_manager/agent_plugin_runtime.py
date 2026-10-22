@@ -52,18 +52,21 @@ def _validate_plugin_id(plugin_id: str) -> None:
         raise ValueError(f"Invalid filesystem-safe plugin id: {plugin_id!r}")
 
 
-def _state_home() -> Path:
-    override = os.environ.get("AGENT_HOME")
+def _state_home(environment: dict[str, str] | None = None) -> Path:
+    env = os.environ if environment is None else environment
+    override = env.get("AGENT_HOME")
     if override:
         return Path(override)
     variable = "USERPROFILE" if os.name == "nt" else "HOME"
-    return Path(os.environ.get(variable) or Path.home())
+    return Path(env.get(variable) or Path.home())
 
 
-def legacy_plugin_root(plugin_id: str) -> Path:
+def legacy_plugin_root(
+    plugin_id: str, *, environment: dict[str, str] | None = None,
+) -> Path:
     """The classic, non-cell-scoped install root: ``~/.<plugin-id>``."""
     _validate_plugin_id(plugin_id)
-    return _state_home() / f".{plugin_id}"
+    return _state_home(environment) / f".{plugin_id}"
 
 
 def _version_key(version: str):
@@ -269,7 +272,9 @@ def _paths_equal(left: object, right: object) -> bool:
     )
 
 
-def _namespaced_resolution(plugin_id: str) -> dict | None:
+def _namespaced_resolution(
+    plugin_id: str, *, environment: dict[str, str] | None = None,
+) -> dict | None:
     """The raw ``resolve_installation_mode`` result for an explicit
     ``COPILOT_EXTENSIONS_CONTEXT`` naming ``plugin_id``, after validating the
     receipt via ``validate_context_receipt`` -- or ``None`` when there is no
@@ -279,7 +284,8 @@ def _namespaced_resolution(plugin_id: str) -> dict | None:
     durable home -- never merely "some file whose JSON happens to say the
     right pluginId").
     """
-    context = os.environ.get("COPILOT_EXTENSIONS_CONTEXT", "").strip()
+    env = dict(os.environ if environment is None else environment)
+    context = env.get("COPILOT_EXTENSIONS_CONTEXT", "").strip()
     if not context:
         return None
     pointer = Path(context)
@@ -288,7 +294,6 @@ def _namespaced_resolution(plugin_id: str) -> dict | None:
     ic = _load_installation_context()
     if ic is None:
         return None
-    env = dict(os.environ)
     # COPILOT_PLUGIN_ROOT (when present) is cross-checked against the
     # receipt's own payload root -- a real protection when a plugin resolves
     # its OWN context. Worktree Manager is not that plugin: any
@@ -314,7 +319,7 @@ def _namespaced_resolution(plugin_id: str) -> dict | None:
     profile = _canonical_os_profile(env)
     try:
         resolution = ic.resolve_installation_mode(
-            legacy_root=legacy_plugin_root(plugin_id),
+            legacy_root=legacy_plugin_root(plugin_id, environment=env),
             plugin_id=plugin_id,
             context=str(pointer),
             payload_root=payload_root,
@@ -333,7 +338,9 @@ def _namespaced_resolution(plugin_id: str) -> dict | None:
     return resolution
 
 
-def _namespaced_plugin_root(plugin_id: str) -> Path | None:
+def _namespaced_plugin_root(
+    plugin_id: str, *, environment: dict[str, str] | None = None,
+) -> Path | None:
     """The cell-scoped plugin root named by ``COPILOT_EXTENSIONS_CONTEXT``,
     when the shared installation-mode policy, evaluated for this EXACT
     plugin/marketplace (global -> marketplace -> plugin precedence), reports
@@ -350,7 +357,7 @@ def _namespaced_plugin_root(plugin_id: str) -> Path | None:
     the read-only "which root should I look under" question, not an
     invocation-time governance gate.
     """
-    resolution = _namespaced_resolution(plugin_id)
+    resolution = _namespaced_resolution(plugin_id, environment=environment)
     if resolution is None:
         return None
     plugin_root = resolution.get("_pluginRoot")
@@ -364,7 +371,9 @@ def _namespaced_plugin_root(plugin_id: str) -> Path | None:
     return Path(plugin_root)
 
 
-def _namespaced_transition_blocks_legacy(plugin_id: str) -> bool:
+def _namespaced_transition_blocks_legacy(
+    plugin_id: str, *, environment: dict[str, str] | None = None,
+) -> bool:
     """True when a real, currently-active namespaced runtime exists for
     ``plugin_id`` (``actualMode == "namespaced"``) but was rejected by
     ``_namespaced_plugin_root`` for some OTHER reason (a deactivation in
@@ -375,7 +384,7 @@ def _namespaced_transition_blocks_legacy(plugin_id: str) -> bool:
     select an inert or wrong install rather than correctly reporting
     "unavailable right now".
     """
-    resolution = _namespaced_resolution(plugin_id)
+    resolution = _namespaced_resolution(plugin_id, environment=environment)
     if resolution is None:
         return False
     return resolution.get("actualMode") == "namespaced"
@@ -422,7 +431,7 @@ def _select_complete_slot(root: Path) -> Path | None:
     return None
 
 
-def _policy_is_invalid() -> bool:
+def _policy_is_invalid(environment: dict[str, str] | None = None) -> bool:
     """True when the installation-mode policy FILE EXISTS but is malformed
     or an unsupported version -- as distinct from simply being absent (the
     default, always-legacy case). agent-* runtime gates fail closed on an
@@ -433,11 +442,11 @@ def _policy_is_invalid() -> bool:
     ic = _load_installation_context()
     if ic is None:
         return False
-    env = dict(os.environ)
+    env = dict(os.environ if environment is None else environment)
     profile = _canonical_os_profile(env)
     try:
         resolution = ic.resolve_installation_mode(
-            legacy_root=legacy_plugin_root("worktree-manager"),
+            legacy_root=legacy_plugin_root("worktree-manager", environment=env),
             os_profile=profile,
             environment=env,
         )
@@ -449,7 +458,9 @@ def _policy_is_invalid() -> bool:
     return policy.get("state") in {"invalid", "unsupported"}
 
 
-def resolve_installed_plugin_slot(plugin_id: str) -> Path | None:
+def resolve_installed_plugin_slot(
+    plugin_id: str, *, environment: dict[str, str] | None = None,
+) -> Path | None:
     """The exact marker-selected immutable runtime slot for ``plugin_id``.
 
     Never PATH, never a bare command name: only an attributable slot under a
@@ -471,16 +482,20 @@ def resolve_installed_plugin_slot(plugin_id: str) -> Path | None:
     of root. A malformed (present-but-invalid) policy file blocks
     resolution entirely, fail-closed, rather than silently degrading to
     legacy.
+    An explicitly supplied environment with a context never falls back to a
+    shared slot when that context cannot select a valid cell.
     """
     _validate_plugin_id(plugin_id)
-    if _policy_is_invalid():
+    if _policy_is_invalid(environment):
         return None
-    namespaced_root = _namespaced_plugin_root(plugin_id)
+    namespaced_root = _namespaced_plugin_root(plugin_id, environment=environment)
     if namespaced_root is not None:
         return _select_complete_slot(namespaced_root)
-    if _namespaced_transition_blocks_legacy(plugin_id):
+    if environment is not None and environment.get("COPILOT_EXTENSIONS_CONTEXT"):
         return None
-    legacy_root = legacy_plugin_root(plugin_id)
+    if _namespaced_transition_blocks_legacy(plugin_id, environment=environment):
+        return None
+    legacy_root = legacy_plugin_root(plugin_id, environment=environment)
     if _validated_legacy_root(legacy_root, plugin_id) is not None:
         slot = _select_complete_slot(legacy_root)
         if slot is not None:
@@ -489,11 +504,11 @@ def resolve_installed_plugin_slot(plugin_id: str) -> Path | None:
 
 
 def resolve_installed_plugin_command(
-    plugin_id: str, module: str | None = None,
+    plugin_id: str, module: str | None = None, *, environment: dict[str, str] | None = None,
 ) -> list[str] | None:
     """The exact ``[python, -m, module]`` argv for ``plugin_id``'s installed
     runtime, or ``None`` if no attributable, complete install was found."""
-    slot = resolve_installed_plugin_slot(plugin_id)
+    slot = resolve_installed_plugin_slot(plugin_id, environment=environment)
     if slot is None:
         return None
     python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")

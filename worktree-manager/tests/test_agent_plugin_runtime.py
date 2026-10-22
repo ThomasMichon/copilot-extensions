@@ -16,6 +16,7 @@ schema/canonical-path checks.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -184,6 +185,34 @@ def test_namespaced_root_used_when_policy_enabled_and_context_matches(
     assert apr.resolve_installed_plugin_command("agent-worktrees") == [
         str(python), "-m", "agent_worktrees"
     ]
+
+
+def test_call_scoped_context_is_authoritative_without_changing_process_environment(
+    monkeypatch, tmp_path,
+):
+    home = tmp_path / "home"
+    home.mkdir()
+    install, python = namespaced_fixture(home, windows=apr.os.name == "nt")
+    _write_policy(home, enabled=True)
+    patch_profile(monkeypatch, apr, home)
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    legacy = home / ".agent-worktrees"
+    _write_slot(legacy / "versions/0.1.0")
+    (legacy / "current-version").write_text("0.1.0")
+    (legacy / "deploy-manifest.json").write_text(json.dumps({
+        "service": "agent-worktrees", "source": {"plugin": "agent-worktrees"},
+    }))
+    environment = {
+        **os.environ, "AGENT_HOME": str(home), "COPILOT_EXTENSIONS_CONTEXT": str(install),
+    }
+    assert apr.resolve_installed_plugin_command(
+        "agent-worktrees", environment=environment,
+    ) == [str(python), "-m", "agent_worktrees"]
+    environment["COPILOT_EXTENSIONS_CONTEXT"] = str(home / "missing/install.json")
+    assert apr.resolve_installed_plugin_command(
+        "agent-worktrees", environment=environment,
+    ) is None
+    assert "COPILOT_EXTENSIONS_CONTEXT" not in os.environ
 
 
 @pytest.mark.parametrize("pointer_exists", [False, True])

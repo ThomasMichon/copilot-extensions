@@ -21,7 +21,8 @@ def test_update_bootstrap_delivery_paths_are_sandboxed():
 def test_update_bootstrap_repairs_before_orchestration(monkeypatch, rc):
     calls = []
     monkeypatch.setattr(
-        update_bootstrap, "repair_engine", lambda source: calls.append("repair") or rc,
+        update_bootstrap, "_repair_installation",
+        lambda source: calls.append("repair") or update_bootstrap.RepairResult(rc),
     )
     monkeypatch.setattr(
         manager, "_cmd_update_steps",
@@ -70,16 +71,16 @@ def test_update_bootstrap_missing_installer_is_failure(monkeypatch, capsys):
 
 def test_update_bootstrap_does_not_route_ordinary_update_through_repair(monkeypatch):
     monkeypatch.setattr(
-        update_bootstrap, "repair_engine",
+        update_bootstrap, "_repair_installation",
         lambda source: pytest.fail("ordinary Manager update must not require bootstrap staging"),
     )
-    monkeypatch.setattr(manager, "_cmd_update_steps", lambda rest, run: 5)
+    monkeypatch.setattr(manager, "_cmd_update_steps", lambda rest, run, **kwargs: 5)
     assert manager._cmd_update(["--force"]) == 5
 
 
 def test_update_bootstrap_missing_source_never_repairs_or_orchestrates(monkeypatch, capsys):
     monkeypatch.setattr(
-        update_bootstrap, "repair_engine",
+        update_bootstrap, "_repair_installation",
         lambda source: pytest.fail("missing bootstrap source must not repair"),
     )
     monkeypatch.setattr(
@@ -94,7 +95,8 @@ def test_update_bootstrap_fresh_manager_does_not_reselect_source(monkeypatch):
     from worktree_manager import engine_client, self_install
 
     monkeypatch.setattr(
-        update_bootstrap, "repair_engine", lambda source: 0,
+        update_bootstrap, "_repair_installation",
+        lambda source: update_bootstrap.RepairResult(0),
     )
     monkeypatch.setattr(
         self_install, "self_update",

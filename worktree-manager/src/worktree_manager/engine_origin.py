@@ -148,13 +148,15 @@ def _potential_identity(primitive: Any, home: Path, marketplace: str, definition
 
 
 def select_registered_origin(
-    primitive: Any, *, copilot_home: Path, plugin_id: str, source_fingerprint: str,
+    primitive: Any, *, copilot_home: Path, plugin_id: str, source_fingerprint: str | None,
     marketplace_id: str | None = None, payload_hint: Path | None = None,
 ) -> RegisteredOrigin:
     """Select from actual registered definitions even when payload bytes are absent."""
     home = Path(copilot_home)
     try:
         identity(f"{plugin_id}@validation")
+        if source_fingerprint is None and payload_hint is None:
+            raise ValueError("Origin selection requires a captured identity or attributable payload")
         if payload_hint is not None:
             _plain(Path(payload_hint))
         candidates = []
@@ -182,7 +184,7 @@ def select_registered_origin(
                 if fenced:
                     _provenance(primitive, home, plugin_id, marketplace, definition)
                 continue
-            if potential["fingerprint"] != source_fingerprint:
+            if source_fingerprint is not None and potential["fingerprint"] != source_fingerprint:
                 continue
             if marketplace_id is not None and potential["marketplaceId"] != marketplace_id:
                 continue

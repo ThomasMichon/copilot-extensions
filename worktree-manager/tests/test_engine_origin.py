@@ -147,6 +147,19 @@ def test_select_missing_payload_uses_registration_not_directory_bytes(case):
     assert selected.definition == DEFINITION
 
 
+def test_attributable_native_path_selects_its_registered_identity_without_legacy_owner(case):
+    with pytest.raises(RuntimeError, match="captured identity or attributable payload"):
+        origin_api.select_registered_origin(
+            primitive, copilot_home=case.home, plugin_id=PLUGIN, source_fingerprint=None,
+        )
+    selected = origin_api.select_registered_origin(
+        primitive, copilot_home=case.home, plugin_id=PLUGIN, source_fingerprint=None,
+        payload_hint=case.payload,
+    )
+    assert selected.provenance["sourceFingerprint"] == case.identity["fingerprint"]
+    assert selected.payload == case.payload
+
+
 def test_true_registered_directory_source_is_not_relabelled_github(case, monkeypatch):
     checkout = case.home.parent / "declared-checkout"
     checkout.mkdir()
