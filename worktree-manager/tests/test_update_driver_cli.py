@@ -274,6 +274,41 @@ def test_actual_queued_manager_keeps_consumed_provider(tmp_path, monkeypatch):
     assert records[0]["provider"] != ["synthetic-marker-provider"]
 
 
+def test_actual_queued_manager_isolates_explicit_and_absent_engine_overrides(tmp_path, monkeypatch):
+    import json
+    import sys
+    from pathlib import Path
+    import update_driver
+    from agent_procutil.owned_process import run_owned
+    from worktree_manager import engine_client
+
+    home = tmp_path / "home"
+    home.mkdir()
+    events = tmp_path / "events.jsonl"
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.setenv("UPDATE_DRIVER_TEST_EVENTS", str(events))
+    accepted = ["synthetic-accepted-provider"]
+    monkeypatch.setenv(engine_client.ENGINE_ARGV_ENV, json.dumps(accepted))
+    fixture = Path(__file__).parent / "fixtures" / "update_driver_cli.py"
+    for override in ("synthetic-first-provider", "synthetic-second-provider", None):
+        if override is None:
+            monkeypatch.delenv(engine_client.ENGINE_CMD_ENV)
+        else:
+            monkeypatch.setenv(engine_client.ENGINE_CMD_ENV, override)
+        result = run_owned([sys.executable, str(fixture), "submit-only"], timeout=20)
+        assert result.returncode == 0, result.stderr
+    root = home / ".copilot-extensions" / "update-driver"
+    assert len(update_driver.status(root=root)) == 3
+    monkeypatch.setenv(engine_client.ENGINE_CMD_ENV, "wrong-worker-provider")
+    result = run_owned([sys.executable, "-m", "update_driver", "worker"], timeout=20)
+    assert result.returncode == 0, result.stderr
+    records = [json.loads(line) for line in events.read_text().splitlines()]
+    assert [record["provider"] for record in records if record["phase"] == "start"] == [
+        ["synthetic-first-provider"], ["synthetic-second-provider"], accepted,
+    ]
+
+
 def test_recovery_inspection_and_settlement_never_start_an_updater(queued, monkeypatch, capsys):
     import json
     import update_driver
@@ -329,3 +364,7 @@ def test_engine_handoff_is_explicit_only_for_mutating_update_commands(args, carr
     monkeypatch.setattr(engine_client.subprocess, "run", run)
     assert engine_client.run_engine_passthrough(None, args) == 0
     assert ("UPDATE_DRIVER_WITNESS" in seen["env"]) == carries_witness
+    if carries_witness and engine_client.os.name == "nt":
+        assert seen["creationflags"] & engine_client.subprocess.CREATE_NO_WINDOW
+    elif not carries_witness:
+        assert "creationflags" not in seen

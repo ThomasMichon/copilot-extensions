@@ -15,7 +15,7 @@ from . import update_cli
 _CONTEXT_KEYS = (
     "AGENT_HOME", "AGENT_WORKTREES_UPDATE_CONTEXT", "AGENT_WORKTREES_PAYLOAD_ROOT",
     "COPILOT_EXTENSIONS_CONTEXT", "COPILOT_PLUGIN_ROOT", "WORKTREE_MANAGER_ROOT",
-    "WORKTREE_MANAGER_ENGINE_ARGV", "CE_UPDATE_AUTH",
+    "WORKTREE_MANAGER_ENGINE_ARGV", "WORKTREE_MANAGER_ENGINE_CMD", "CE_UPDATE_AUTH",
 )
 
 
@@ -27,6 +27,14 @@ def _invocation_cwd() -> Path:
     from . import __main__ as core
 
     return (core._INVOCATION_CWD or Path.cwd()).resolve()
+
+
+def _request_context() -> tuple[tuple[str, str], ...]:
+    context = dict(_context())
+    selected = update_cli._invocation_update_context()
+    if selected is not None:
+        context["AGENT_WORKTREES_UPDATE_CONTEXT"] = str(selected)
+    return tuple(context.items())
 
 
 @contextmanager
@@ -130,7 +138,7 @@ def cmd_update_request(args: argparse.Namespace) -> int:
         cwd = _invocation_cwd()
         spec = driver.RequestSpec(
             backend="engine", argv=tuple([*bypass, *flags]), project=project or "", cwd=str(cwd),
-            source=str(cfg.install_dir().resolve()), context=_context(),
+            source=str(cfg.install_dir().resolve()), context=_request_context(),
         )
         project_args = ["--project", project] if project else []
         argv, environment = driver.runtime_command(

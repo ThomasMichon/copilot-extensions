@@ -90,9 +90,14 @@ def test_queued_update_keeps_original_context_after_project_chdir(queued, tmp_pa
     assert seen["runner"].context_keys == boundary._CONTEXT_KEYS
 
 
-def test_actual_queued_engine_keeps_each_scope_and_original_invocation(tmp_path, monkeypatch):
+@pytest.mark.parametrize("with_manager", [False, True])
+def test_actual_queued_engine_keeps_each_scope_and_original_invocation(tmp_path, monkeypatch, with_manager):
     import json
+    import importlib.util
+    import os
+    import subprocess
     import sys
+    from contextlib import nullcontext
     from pathlib import Path
     from agent_procutil.owned_process import run_owned
 
@@ -102,30 +107,65 @@ def test_actual_queued_engine_keeps_each_scope_and_original_invocation(tmp_path,
     monkeypatch.setenv("USERPROFILE", str(home))
     for key in boundary._CONTEXT_KEYS:
         monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("UPDATE_DRIVER_TEST_MANAGER", "1" if with_manager else "0")
     fixture = Path(__file__).parent / "fixtures" / "update_driver_context.py"
-    for name in ("first", "second"):
+    scopes = ("first",) if with_manager else ("first", "second")
+    for name in scopes:
         scope = tmp_path / name
         (scope / "anchor").mkdir(parents=True)
+        anchor_settings = scope / "anchor" / ".github" / "copilot" / "settings.json"
+        anchor_settings.parent.mkdir(parents=True)
+        anchor_settings.write_text("{}")
         invocation = scope / "invocation"
         settings = invocation / ".github" / "copilot" / "settings.json"
         settings.parent.mkdir(parents=True)
         settings.write_text("{}")
-        monkeypatch.setenv("AGENT_HOME", str(scope))
-        monkeypatch.chdir(invocation)
-        result = run_owned(
-            [sys.executable, str(fixture), "submit"], timeout=20,
-        )
-        assert result.returncode == 0, result.stderr
-    monkeypatch.setenv("AGENT_HOME", str(tmp_path / "first"))
-    result = run_owned([sys.executable, "-m", "update_driver", "worker"], timeout=20)
-    assert result.returncode == 0, result.stderr
-    for name in ("first", "second"):
+    observer = nullcontext()
+    if with_manager and os.name == "nt":
+        helper_path = Path(__file__).resolve().parents[3] / "libs/update-driver/tests/test_native_lifetime.py"
+        specification = importlib.util.spec_from_file_location("_queued_engine_window_probe", helper_path)
+        helper = importlib.util.module_from_spec(specification)
+        specification.loader.exec_module(helper)
+        observer = helper.window_observer()
+    with observer as windows:
+        for _cycle in range(2 if with_manager else 1):
+            for name in scopes:
+                scope = tmp_path / name
+                monkeypatch.setenv("AGENT_HOME", str(scope))
+                monkeypatch.chdir(scope / "invocation")
+                result = run_owned([sys.executable, str(fixture), "submit"], timeout=20)
+                assert result.returncode == 0, result.stderr
+            monkeypatch.setenv("AGENT_HOME", str(tmp_path / "first"))
+            try:
+                result = run_owned([sys.executable, "-m", "update_driver", "worker"], timeout=20)
+            except subprocess.TimeoutExpired as error:
+                logs = home / ".copilot-extensions" / "update-driver"
+                pytest.fail(f"worker timeout: {[p.read_text() for p in logs.glob('*.log')]}: {error}")
+            assert result.returncode == 0, result.stderr
+    if windows is not None:
+        assert windows.surfaced == {}, windows.surfaced
+        assert windows.focus_changes == {}, windows.focus_changes
+    for name in scopes:
         scope = tmp_path / name
         assert json.loads((scope / "result.json").read_text()) == {
             "anchor": str(scope / "anchor"),
-            "invocation": str(scope / "invocation"),
+            "invocation": str(scope / ("anchor" if with_manager else "invocation")),
             "update_context": str(scope / "invocation"),
         }
+        if with_manager:
+            assert (scope / "manager-entered").read_text() == str(scope / "invocation")
+
+
+def test_engine_request_identity_keeps_explicit_provider_override(queued, monkeypatch):
+    seen, _request = queued
+    monkeypatch.setenv("WORKTREE_MANAGER_ENGINE_CMD", "synthetic-first-provider")
+    assert boundary.cmd_update_request(_args()) == 4
+    first = seen["spec"].context
+    monkeypatch.setenv("WORKTREE_MANAGER_ENGINE_CMD", "synthetic-second-provider")
+    assert boundary.cmd_update_request(_args()) == 4
+    assert first != seen["spec"].context
+    assert dict(first)["WORKTREE_MANAGER_ENGINE_CMD"] == "synthetic-first-provider"
+    assert "WORKTREE_MANAGER_ENGINE_CMD" in seen["runner"].context_keys
 
 
 def test_detach_receipt_is_not_a_successful_installation(queued, capsys):

@@ -87,7 +87,7 @@ def _run_request(
         project, cwd = cfg.active_project(), update_driver_cli._invocation_cwd()
         spec = driver.RequestSpec(
             backend=backend, argv=tuple(flags), project=project or "", cwd=str(cwd),
-            source=str(cfg.install_dir().resolve()), context=update_driver_cli._context(),
+            source=str(cfg.install_dir().resolve()), context=update_driver_cli._request_context(),
         )
         project_args = ["--project", project] if project else []
         command, environment = driver.runtime_command(

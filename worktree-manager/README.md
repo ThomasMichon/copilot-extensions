@@ -552,6 +552,14 @@ it cannot bypass an active transaction. The engine exposes the same options.
 Equivalent pending requests can coalesce; a request arriving after execution
 starts remains separate. Explicit options, invocation context, installation
 scope and pinned runner identity are retained rather than collapsed.
+The engine resolves the caller's marketplace context before submission, so a
+queued engine-to-Manager-to-engine round trip cannot replace it with anchor
+settings. Accepted provider argv and the explicit
+`WORKTREE_MANAGER_ENGINE_CMD` override retain their existing precedence and
+participate in request identity. Each queued product starts with its own
+approved context; absent overrides are cleared rather than inherited from
+another caller that launched the shared worker. Scoped Windows update
+handoffs remain headless without changing ordinary interactive passthrough.
 Updater stdout/stderr bytes are retained in the request log; waiting renders
 that combined log as UTF-8 on stderr. Stdout is reserved for requested receipts
 and status JSON. Read the log when original non-UTF-8 bytes matter;

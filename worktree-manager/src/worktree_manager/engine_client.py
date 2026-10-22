@@ -342,11 +342,16 @@ def run_engine_passthrough(project: str | None, args: list[str], *,
     cmd += args
     from .update_driver_cli import handoff_environment
 
-    environment = {**_engine_environment(), **handoff_environment(args)}
+    handoff = handoff_environment(args)
+    environment = {**_engine_environment(), **handoff}
+    launch = {}
+    if handoff and os.name == "nt":
+        from agent_procutil import no_window_kwargs
+        launch = no_window_kwargs()
     try:
         return subprocess.run(
             cmd, timeout=timeout, check=False,
-            env=environment,
+            env=environment, **launch,
         ).returncode
     except subprocess.TimeoutExpired as e:
         raise EngineError(f"{ENGINE_BIN} {' '.join(args)} timed out") from e

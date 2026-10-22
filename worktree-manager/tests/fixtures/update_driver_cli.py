@@ -17,7 +17,7 @@ from worktree_manager import update_driver_cli as boundary
 def main() -> int:
     boundary.source_identity = lambda: {"repo": "fixture-source", "ref": "fixed"}
     engine_client.installed_engine_command = lambda: ["synthetic-marker-provider"]
-    if sys.argv[1] == "submit":
+    if sys.argv[1] in {"submit", "submit-only"}:
         original = update_driver.runtime_command
 
         def command(module, args=()):
@@ -26,6 +26,9 @@ def main() -> int:
             return original(module, args)
 
         update_driver.runtime_command = command
+        if sys.argv[1] == "submit-only":
+            update_driver.ensure_worker = lambda *args, **kwargs: None
+            return manager.main(["update", "--detach", *sys.argv[2:]])
         return manager.main(["update", *sys.argv[2:]])
 
     def execute(rest):
