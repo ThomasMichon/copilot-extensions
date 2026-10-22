@@ -89,6 +89,9 @@ creation, not an implicit permission migration or a read-only status side effect
   The receipt is published only after its file is flushed and closed, so a
   Windows observer cannot race an open writer when consuming it.
   Import failure, early worker exit, and startup timeout remain explicit.
+  Default execution also checks native caller-owned process support before
+  claiming a request or acknowledging startup. An unsupported runtime leaves
+  a precise pending admission error, not an interrupted installation fence.
   Failed boot admission records a precise pending error before worker exit
   and never acknowledges startup; the accepted request remains durable.
   Existing global fences also refuse worker launch with `InterruptedError`.

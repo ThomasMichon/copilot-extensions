@@ -192,6 +192,36 @@ def test_unsupported_posix_platform_refuses_before_spawn(monkeypatch, platform):
         _run("pass")
 
 
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="native Linux pidfd observation")
+def test_missing_python_pidfd_wrapper_retains_native_handle_observation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_procutil._linux_pidfd import open_pidfd
+
+    monkeypatch.delattr(os, "pidfd_open", raising=False)
+    descriptor = open_pidfd(os.getpid())
+    try:
+        assert protocol._pidfd_pid(descriptor) == os.getpid()
+        assert not os.get_inheritable(descriptor)
+    finally:
+        os.close(descriptor)
+    ownership.require_caller_owned_support()
+    result = _run("import sys; print('native-handle'); sys.exit(7)")
+    assert result.returncode == 7
+    assert result.stdout == "native-handle\n"
+
+
+def test_missing_native_pidfd_api_is_an_explicit_pre_spawn_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_procutil import _linux_pidfd
+
+    monkeypatch.delattr(_linux_pidfd.os, "pidfd_open", raising=False)
+    monkeypatch.setattr(_linux_pidfd.ctypes, "CDLL", lambda *args, **kwargs: SimpleNamespace())
+    with pytest.raises(RuntimeError, match="libc pidfd acquisition is unavailable"):
+        _linux_pidfd.open_pidfd(1)
+
+
 def test_invalid_utf8_input_refuses_before_spawn(monkeypatch):
     def forbidden(*args, **kwargs):
         raise AssertionError("invalid text reached native spawn")
@@ -335,6 +365,7 @@ def test_group_confirmation_waits_for_exit_without_releasing_root(monkeypatch, e
     monkeypatch.setattr(protocol, "_observe_unreaped", exited)
     monkeypatch.setattr(protocol, "_pidfd_pid", lambda fd: 20)
     monkeypatch.setattr(protocol, "_pidfd_exited", lambda fd: bool(ready()[0]))
+    monkeypatch.setattr(protocol, "open_pidfd", lambda pid: 7)
     monkeypatch.setattr(protocol, "os", SimpleNamespace(
         scandir=lambda path: nullcontext([SimpleNamespace(name="20")]),
         getpgid=lambda pid: 10, pidfd_open=lambda pid: 7, close=closed.append,

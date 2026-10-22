@@ -84,7 +84,7 @@ class PinnedProcess:
                 raise
             self.handle = handle
         else:
-            fd = os.pidfd_open(self.pid)
+            fd = fixture.open_pidfd(self.pid)
             try:
                 if fixture.identity(self.pid)["birth"] != identity["birth"]:
                     raise AssertionError("fixture process birth changed")
@@ -108,7 +108,7 @@ class PinnedProcess:
             if not self.kernel.TerminateProcess(self.handle, 137):
                 raise ctypes.WinError(ctypes.get_last_error())
         else:
-            signal.pidfd_send_signal(self.fd, signal.SIGKILL if signum is None else signum)
+            fixture.signal_pidfd(self.fd, signal.SIGKILL if signum is None else signum)
 
     def close(self):
         if self.handle is not None:
@@ -203,12 +203,12 @@ def test_installed_console_faults_settle_before_observer_cleanup(
         pytest.skip("native SIGTERM case; Windows actual-console termination uses a pinned handle")
     if mode == "fork-keeper" and os.name == "nt":
         pytest.skip("fork inheritance is a native Linux contract")
-    if os.name != "nt" and not all(
-        hasattr(module, name) for module, name in (
-            (os, "pidfd_open"), (signal, "pidfd_send_signal"),
-        )
-    ):
-        pytest.fail("native caller-death qualification requires available Linux pidfds")
+    if os.name != "nt":
+        descriptor = fixture.open_pidfd(os.getpid())
+        try:
+            fixture.signal_pidfd(descriptor, 0)
+        finally:
+            os.close(descriptor)
     python, script, slot = installed_console
     observer = nullcontext()
     windows = nullcontext()
@@ -473,6 +473,8 @@ def test_pinned_observer_refuses_foreign_identity_before_termination(
     monkeypatch.setattr(fixture, "handle_birth", birth)
     monkeypatch.setattr(fixture, "identity", lambda pid: {"pid": pid, "birth": birth()})
     monkeypatch.setattr(fixture, "pidfd_exited", lambda fd: False)
+    monkeypatch.setattr(fixture, "open_pidfd", lambda pid: 7)
+    monkeypatch.setattr(fixture, "signal_pidfd", lambda fd, signum: terminated.append((fd, signum)))
     monkeypatch.setattr(sys.modules[__name__], "os", SimpleNamespace(
         name="nt" if backend == "windows" else "posix",
         pidfd_open=lambda pid: 7, close=lambda fd: closed.append(fd),

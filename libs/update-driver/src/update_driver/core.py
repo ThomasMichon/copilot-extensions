@@ -536,12 +536,18 @@ def drain(
     root = _root(root)
     with _database(root, create=True):
         pass
+    admission_failure = "executor_unavailable"
     try:
+        if executor is None:
+            from agent_procutil.owned_process import require_caller_owned_support
+
+            require_caller_owned_support()
+        admission_failure = "boot_identity_unavailable"
         admission_boot = boot.kernel_boot_identity()
         if not boot.valid_boot_identity(admission_boot):
             raise StateError("native boot identity malformed")
     except Exception as error:
-        reason = "boot_identity_malformed" if isinstance(error, StateError) else "boot_identity_unavailable"
+        reason = "boot_identity_malformed" if isinstance(error, StateError) else admission_failure
         detail = f"worker admission failed: {reason}:{type(error).__name__}"
         with _database(root, writable=True) as db, db:
             db.execute("UPDATE requests SET error=? WHERE state='pending'", (detail,))

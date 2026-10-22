@@ -21,6 +21,7 @@ from agent_procutil.owned_process import (
     _run_owned,
     require_contained_worker,
 )
+from agent_procutil._linux_pidfd import open_pidfd
 
 _MAX_REQUEST = 16 * 1024 * 1024
 _lifetime_lock = threading.Lock()
@@ -64,9 +65,9 @@ def _require_posix_support() -> None:
 
         require_support()
         return
-    if not sys.platform.startswith("linux") or not hasattr(os, "pidfd_open"):
+    if not sys.platform.startswith("linux"):
         raise RuntimeError("caller-owned POSIX execution requires Linux pidfd group observation")
-    fd = os.pidfd_open(os.getpid())
+    fd = open_pidfd(os.getpid())
     try:
         if _pidfd_pid(fd) != os.getpid():
             raise RuntimeError("native pidfd identity is unavailable")
@@ -118,7 +119,7 @@ def _confirm_group(process: subprocess.Popen) -> None:
                     try:
                         if os.getpgid(pid) != process.pid:
                             continue
-                        fd = os.pidfd_open(pid)
+                        fd = open_pidfd(pid)
                         try:
                             # A reaped/reused numeric PID is not proof of this group's exit.
                             if _pidfd_pid(fd) != pid:

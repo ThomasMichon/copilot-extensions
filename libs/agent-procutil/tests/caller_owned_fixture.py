@@ -82,6 +82,27 @@ def pidfd_exited(fd: int) -> bool:
     return any(mask & select.POLLIN for _fd, mask in events)
 
 
+def open_pidfd(pid: int) -> int:
+    from agent_procutil._linux_pidfd import open_pidfd as acquire
+
+    return acquire(pid)
+
+
+def signal_pidfd(fd: int, signum: int) -> None:
+    native = getattr(signal, "pidfd_send_signal", None)
+    if native is not None:
+        native(fd, signum)
+        return
+    import ctypes
+
+    send = ctypes.CDLL(None, use_errno=True).pidfd_send_signal
+    send.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_void_p, ctypes.c_uint]
+    send.restype = ctypes.c_int
+    if send(fd, signum, None, 0) != 0:
+        number = ctypes.get_errno()
+        raise OSError(number, os.strerror(number))
+
+
 def _exited(expected: dict) -> bool:
     pid = expected["pid"]
     if os.name == "nt":
@@ -103,7 +124,7 @@ def _exited(expected: dict) -> bool:
         finally:
             kernel.CloseHandle(handle)
     try:
-        fd = os.pidfd_open(pid)
+        fd = open_pidfd(pid)
     except ProcessLookupError:
         return True
     try:

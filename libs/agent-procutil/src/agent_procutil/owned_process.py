@@ -484,6 +484,14 @@ def run_owned(
     )
 
 
+def require_caller_owned_support() -> None:
+    """Validate native observation before accepting effects into a durable worker."""
+    if os.name != "nt":
+        from agent_procutil._caller_owned import _require_posix_support
+
+        _require_posix_support()
+
+
 def run_caller_owned(
     argv: list[str], *, timeout: float, max_stdout_bytes: int, max_stderr_bytes: int,
     input_text: str | None = None, capture: bool = True,
