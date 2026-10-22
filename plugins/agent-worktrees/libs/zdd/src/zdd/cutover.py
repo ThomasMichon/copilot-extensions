@@ -239,20 +239,9 @@ class CutoverOrchestrator:
             return False
 
     def _await_exit(self, handle: _Handle, timeout: float = 10.0, poll: float = 0.2) -> bool:
-        """True once ``handle`` has provably exited; False on timeout or no ``poll()``."""
-        poll_fn = getattr(handle, "poll", None)
-        if not callable(poll_fn):
-            return False
-        deadline = self.clock() + timeout
-        while True:
-            try:
-                if poll_fn() is not None:
-                    return True
-            except Exception:  # noqa: BLE001 -- an unreadable handle is unconfirmed
-                return False
-            if self.clock() >= deadline:
-                return False
-            self.sleep(poll)
+        from .cutover_rollback import _await_exit
+
+        return _await_exit(self, handle, timeout=timeout, poll=poll)
 
     def _raw_active(self) -> dict | None:
         """The routing table's own ``active`` row -- never healed to ``previous``."""

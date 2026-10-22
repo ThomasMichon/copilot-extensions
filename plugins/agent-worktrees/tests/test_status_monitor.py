@@ -4243,7 +4243,8 @@ def test_status_monitor_shutdown_cannot_recover_or_promote_admission(tmp_path, m
     monkeypatch.setattr(m, "_aw_runtime_home", lambda: tmp_path)
     monkeypatch.setattr(m, "_load_hook_client_module", lambda: None)
     monkeypatch.setattr(m.locks, "write_lock", lambda _path, extra=None: True)
-    monkeypatch.setattr(smc, "active_generation_for_pid", lambda pid: 42)
+    elected = [42]
+    monkeypatch.setattr(smc, "active_generation_for_pid", lambda pid: elected[0])
     monkeypatch.setattr(smc, "clear_route_if_owner", lambda pid: False)
     monkeypatch.setattr(self_retire, "is_superseded", lambda *args: False)
     monkeypatch.setattr(m.status_monitor_cli, "sweep_mux_pane_args", lambda: None)
@@ -4277,12 +4278,24 @@ def test_status_monitor_shutdown_cannot_recover_or_promote_admission(tmp_path, m
             pass
 
     monkeypatch.setattr(smc, "ControlServer", Control)
+
+    class Client:
+        def __init__(self, url):
+            pass
+
+        def health(self):
+            return handles[0]("health", {})
+
+    monkeypatch.setattr(smc, "ControlClient", Client)
     sweeps = []
 
     def sweep(*args, **kwargs):
         sweeps.append(True)
         assert handles[0]("shutdown", {}) == {"shutdown": True}
+        elected[0] = None
+        assert handles[0]("worktrees-read", {"contract_version": 1, "project": "test"})["ok"] is False
         assert handles[0]("health", {})["worktrees"]["status"] == "shutdown"
+        assert smc._predecessor_health_check("127.0.0.1", 12345) is False
         assert handles[0]("promote", {})["adopted"] is False
         assert handles[0]("undrain", {})["draining"] is True
         return 1

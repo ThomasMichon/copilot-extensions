@@ -658,6 +658,8 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
         nonlocal admission_closed, published_lock
         if action == "health":
             roster_health = worktrees_runtime.health()
+            if shutdown_requested.is_set():
+                roster_health["worktrees"]["status"] = "shutdown"
             roster_ready = roster_health["worktrees"]["status"] in {"ready", "unready"}
             return {
                 "status": "draining" if admission_closed else (

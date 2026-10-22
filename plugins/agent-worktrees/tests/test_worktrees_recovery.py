@@ -95,6 +95,56 @@ def test_retiring_feed_notice_keeps_its_committed_generation_after_recovery(tmp_
         new.shutdown()
 
 
+def test_feed_read_overlapping_recovery_retires_instead_of_mixing_generations(tmp_path, monkeypatch):
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    from agent_worktrees.worktrees_feed_client import FeedReceiver
+
+    elected = [0]
+    path = tmp_path / "current.sqlite3"
+    old = WorktreesRuntime(path, elected=lambda: elected[0] == 0)
+    new = WorktreesRuntime(path, elected=lambda: elected[0] == 1)
+    old.activate()
+    old.publish("project", [{"id": "before"}], observed_at=1)
+    receiver = FeedReceiver(_request())
+    stream = old.feed.stream(_request(), lambda: False)
+    entered, resume = threading.Event(), threading.Event()
+    handle = old.handle
+
+    def paused_read(payload):
+        entered.set()
+        assert resume.wait(5)
+        return handle(payload)
+
+    pool = ThreadPoolExecutor(max_workers=1)
+    try:
+        for frame in stream:
+            if receiver.receive(frame):
+                break
+        monkeypatch.setattr(old, "handle", paused_read)
+        old.feed.changed("project")
+        pending = pool.submit(next, stream)
+        assert entered.wait(5)
+        elected[0] = 1
+        new.activate()
+        new.publish("project", [{"id": "replacement"}], observed_at=2)
+        old.close_admission("superseded")
+        elected[0] = 0
+        old.activate()
+        old.publish("project", [{"id": "recovered"}], observed_at=3)
+        resume.set()
+        notice = pending.result(timeout=5)
+        assert notice["type"] == "going-away"
+        assert receiver.receive(notice) == [notice]
+    finally:
+        resume.set()
+        pool.shutdown(wait=True)
+        stream.close()
+        old.shutdown()
+        new.shutdown()
+
+
 def test_relay_flushes_once_per_committed_transaction(tmp_path, monkeypatch):
     from agent_worktrees import worktrees_feed as feed
     from agent_worktrees import worktrees_feed_client as client

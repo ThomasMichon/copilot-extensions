@@ -14,6 +14,25 @@ if TYPE_CHECKING:
 log = logging.getLogger("zdd")
 
 
+def _await_exit(
+    self: CutoverOrchestrator, handle: _Handle, timeout: float = 10.0, poll: float = 0.2,
+) -> bool:
+    """True once ``handle`` has provably exited; False on timeout or no ``poll()``."""
+    poll_fn = getattr(handle, "poll", None)
+    if not callable(poll_fn):
+        return False
+    deadline = self.clock() + timeout
+    while True:
+        try:
+            if poll_fn() is not None:
+                return True
+        except Exception:  # noqa: BLE001 -- an unreadable handle is unconfirmed
+            return False
+        if self.clock() >= deadline:
+            return False
+        self.sleep(poll)
+
+
 def _undrain(self: CutoverOrchestrator, old: Endpoint, result: CutoverResult) -> bool:
     """Best-effort release of the old daemon's drain gate (#1756).
 

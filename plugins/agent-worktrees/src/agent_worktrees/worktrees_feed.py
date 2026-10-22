@@ -125,6 +125,11 @@ class WorktreesFeed:
                     yield self._notice(reason, previous)
                     return
                 result = self._owner.handle(payload)
+                with self._condition:
+                    reason = subscriber["closed"]
+                if reason is not None:
+                    yield self._notice(reason, previous)
+                    return
                 if result.get("ok") is not True:
                     with self._condition:
                         reason = subscriber["closed"]
