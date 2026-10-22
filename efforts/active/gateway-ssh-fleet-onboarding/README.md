@@ -28,7 +28,7 @@ resource acquisition and identity bindings remain external adapters.
 
 | Participant | Role | Reached via |
 |-------------|------|-------------|
-| `ticking-wrench` | Integration proposal and appointed artifact-assembly/publisher-integration source slice | #6681 / #6030 and this effort |
+| `ticking-wrench` | Completed integration proposal, policy/pair prerequisites and bounded artifact-assembly source slice | Merged source; remaining integration backlog is #6681 / #6030 |
 | Existing #6030 / #6240 / #6424 owners | Construction, role lifecycle and installation | Retained owner accepted the exclusive source leaves; ordered shared wiring remains with that owner |
 | Existing #5789 / #6443 / #6804 owners | Routing, authentication, enrollment and Gateway integration | Their existing issue threads |
 | Existing #6241 owner | Operation admission and receipt authority | Existing Fleet Control V2 coordination |
@@ -68,6 +68,10 @@ resource acquisition and identity bindings remain external adapters.
 - Use existing owner contacts for operation reservations. Publishing a contract
   amendment does not transfer the source or effect authority described by those
   reservations.
+- The closing source participant releases its worktree responsibility to the
+  existing tracked objective #6681. Broader publication/proof interoperability,
+  provider/setup/lifecycle and live adoption remain in this active plan and
+  #6030/#6240/#6424/#5861; no replacement writer or runtime authority is inferred.
 
 ## Context
 
@@ -329,7 +333,7 @@ onboarded merely because its source is published.
 
 ### Phase 2 - Driver and directional policy
 
-- [ ] Implement the first bounded artifact-to-release producer in the existing
+- [x] Implement the first bounded artifact-to-release producer in the existing
   SDK and qualify actual source-independent package/role-consumer behavior.
   This does not sign, publish, authenticate or activate a release.
 - [x] Publish the accepted pure per-target policy leaf and focused installed
@@ -610,3 +614,25 @@ takeover or implementation completion is asserted.
   Hosted-attestation versus pinned-key verification interoperability is still
   a separate pre-publication gate, not a reason to create keys or another proof
   method. No setup wiring, live service, enrollment or deployment is claimed.
+
+### 2026-10-22 - Bounded source completed; remaining integration stays tracked
+
+- #7848 merged at `5f13a07986365de28ba912ad912947e435385ccc`,
+  10:32:01Z, from head `725878f823243f558ab154d06bf8e4bcb0f8534b`.
+  Current-head review `5612711282` approved; the sole Low documentation-impact
+  finding was addressed in the description and its thread resolved. Refreshed
+  required checks passed before the normal managed self-merge.
+- Reread this Plan and Validation Plan and resolved only the bounded
+  artifact-to-release producer/package-consumer item. The source includes the
+  unchanged canonical manifest contract, actual byte integrity and installed
+  first-touch coverage, plus the narrowly required Windows unit-bootstrap and
+  closed-world witness-roster corrections.
+- The source worktree's remaining effort responsibility transfers to the
+  existing tracked objective #6681 for the still-open integration items.
+  #6030, #6240/#6424 and #5861 retain their existing deployment, lifecycle and
+  reconciliation scopes. This records backlog custody, not another contributor's
+  acceptance or an invented implementation owner.
+- Keep the shared effort Active. Source completion does not establish release,
+  authentication/proof compatibility, managed setup, live transport, migration
+  or fleet adoption. No keys, credentials, installation, runtime update, service
+  restart or deployment were performed by this source slice.
