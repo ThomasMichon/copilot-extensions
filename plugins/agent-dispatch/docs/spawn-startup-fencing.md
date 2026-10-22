@@ -40,6 +40,17 @@ caller can no longer act and the exact body is stopped, then publish the
 matching guarded outcome through the owning coordinator. Never clear the
 column directly or resume first to test whether it is safe.
 
+Resume keeps startup incomplete through task-state finalization, publishing
+completion only after the same owned task is resumed. Otherwise a cooler could
+observe a completed startup while the task still appears suspended, stop its
+body and leave the subsequent task transition incorrectly marked started.
+An error finalizing that transition is not proof that the request cannot
+still apply. It retains incomplete startup and occupied capacity rather than
+automatically recooling a body under an unproven task-resume outcome.
+Task start/resume transitions also reject a retained cooling guard. Steering
+during a guarded headless stop remains durable and requests a later resume;
+it does not start the task or enqueue an interactive wake through that guard.
+
 ## Compatibility and graceful cutover
 
 The columns are additive. Existing rows receive `startup_complete=false`,

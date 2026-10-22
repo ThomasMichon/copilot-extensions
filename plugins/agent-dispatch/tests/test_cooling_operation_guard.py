@@ -75,6 +75,7 @@ def test_guard_excludes_resume_and_second_cooler_inside_stop_callback(tmp_path):
                 startup_revision=reservation.startup_revision,
             ),
             lambda: queue.record_cold(reservation.key),
+            lambda: queue.resume(task.id, "original-owner", reuse_session=True),
             lambda: queue.fail_spawn(reservation.key),
             lambda: queue.request_spawn_release(reservation.key),
         ):
@@ -98,6 +99,53 @@ def test_guard_excludes_resume_and_second_cooler_inside_stop_callback(tmp_path):
     )
     assert pending.startup_revision == cold.startup_revision + 1
     assert pending.startup_complete is False
+
+
+def test_cooling_cannot_intervene_before_resumed_task_finalization(tmp_path):
+    queue, task, reservation = _body(tmp_path)
+    queue.record_cold(reservation.key)
+    queue.submit_steer(task.id, fields={"decision": "continue"}, sender="operator")
+    client = QueueBackedClient(queue)
+    stops = []
+    concurrent = Supervisor(
+        client, spawn_fn=lambda _: pytest.fail("no replacement"), repo=TEST_REPO,
+        local_body_verdict_fn=lambda _: tracking.LIVE,
+        local_cold_fn=lambda sid: stops.append(sid) or True,
+    )
+    publish = client.record_spawn
+
+    def race(key, **kwargs):
+        result = publish(key, **kwargs)
+        if kwargs.get("startup_complete") is True:
+            concurrent.cool_dormant_bodies()
+        return result
+
+    client.record_spawn = race
+    original = Supervisor(
+        client, spawn_fn=lambda _: pytest.fail("same body must resume"), repo=TEST_REPO,
+        local_body_target_dir_fn=lambda _: None, local_resume_fn=lambda *_: True,
+    )
+    assert original.release_resumed_cold_tasks() == 1
+    assert stops == []
+    assert queue.get(task.id).status == "started"
+    current = queue.get_reservation(reservation.key)
+    assert current.state == SpawnState.SPAWNED
+    assert current.startup_complete is True
+
+
+def test_steer_during_guarded_cooling_is_retained_without_starting_or_waking(tmp_path):
+    queue, task, reservation = _body(tmp_path)
+    guarded = queue.claim_spawn_cooling(
+        reservation.key, startup_revision=reservation.startup_revision,
+        session_handle=reservation.session_handle, state=SpawnState.SPAWNED,
+    )
+    steered = queue.submit_steer(task.id, fields={"decision": "continue"}, sender="operator")
+    assert steered.status == "suspended"
+    assert steered.resume_requested is True
+    with queue._connect() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM task_steer").fetchone()[0] == 1
+        assert conn.execute("SELECT COUNT(*) FROM wake_outbox").fetchone()[0] == 0
+    assert queue.get_reservation(reservation.key) == guarded
 
 
 def test_old_cooled_cache_cannot_hide_or_skip_a_completed_new_resume(tmp_path):

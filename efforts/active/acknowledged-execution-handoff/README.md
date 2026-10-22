@@ -172,6 +172,21 @@ handoff support.
   in the plugin's startup-fencing reference. No migration, release, installed
   adoption or Phase 2 completion is claimed.
 
+### 2026-10-22 - Keep completion behind task-resume finalization
+- Current-head review exposed a final gap: publishing startup completion before
+  the task's resume transition let cooling stop the body while the task still
+  appeared suspended, followed by a misleading started task.
+- Startup now stays incomplete through owned task finalization. Task start
+  transitions reject a retained cooling operation. A finalization error retains
+  unresolved startup rather than automatically recooling under a potentially
+  late task transition; that explicit safety behavior replaces the old test's
+  unsafe recooling expectation.
+- The bounded affected family passed 1,377 cases with 34 explicit skips.
+  New controls exercise the exact completion/finalization gap, task resume
+  during cooling, and durable steering without an interactive wake.
+- Source review, controlled runtime qualification and authorized adoption
+  remain separate. These tests do not establish a running spawn/start outcome.
+
 ### 2026-10-22 - Preserve predecessor startup across recovery reentry
 - The pending startup-capacity source correction in #7836 now rejects a second
   resume or redelivery while the original launch remains unresolved. Recovery

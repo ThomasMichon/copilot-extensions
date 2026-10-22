@@ -805,7 +805,7 @@ class QueueLifecycleMixin(QueueProgressMixin):
             if expected_updated_at is not None and task.updated_at != expected_updated_at:
                 conn.execute("COMMIT")
                 raise TaskError(f"task {task_id!r} changed while the transition was in flight")
-            if release_spawn and conn.execute(
+            if (release_spawn or to == Status.STARTED) and conn.execute(
                 "SELECT 1 FROM spawn_reservations WHERE task_id=? AND cooling_token IS NOT NULL",
                 (task_id,),
             ).fetchone():

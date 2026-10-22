@@ -818,11 +818,6 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                 if not process_resumed:
                     self._resume_retry_after[key] = now + _COLD_RESUME_RETRY_SECONDS
                     continue
-                self.client.record_spawn(
-                    res["key"], session_handle=res.get("session_handle"),
-                    worktree=res.get("worktree"), startup_complete=True,
-                    startup_revision=pending.get("startup_revision"),
-                )
                 self.client.resume(
                     task["id"],
                     owner,
@@ -830,6 +825,11 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                     reuse_session=True,
                     expected_owner_session_id=task.get("owner_session_id"),
                     expected_generation=task.get("generation"),
+                )
+                self.client.record_spawn(
+                    res["key"], session_handle=res.get("session_handle"),
+                    worktree=res.get("worktree"), startup_complete=True,
+                    startup_revision=pending.get("startup_revision"),
                 )
                 self._resume_retry_after.pop(key, None)
                 handled += 1

@@ -1785,7 +1785,7 @@ def test_cold_resume_does_not_start_process_before_reservation_transition(
     assert q.get(blocked.id).status == Status.SUSPENDED
 
 
-def test_cold_resume_task_failure_is_recoolable(q, client, monkeypatch):
+def test_cold_resume_task_failure_retains_unresolved_finalization(q, client, monkeypatch):
     blocked = q.create("needs operator", labels=["review"])
     reservation, _ = q.reserve_spawn(blocked.id)
     q.record_spawn(
@@ -1818,10 +1818,12 @@ def test_cold_resume_task_failure_is_recoolable(q, client, monkeypatch):
 
     assert sup.release_resumed_cold_tasks() == 0
     assert q.get_reservation(reservation.key).state == SpawnState.SPAWNED
+    assert q.get_reservation(reservation.key).startup_complete is False
     assert q.get(blocked.id).status == Status.SUSPENDED
-    assert sup.cool_dormant_bodies() == 1
-    assert stopped == ["blocked-session"]
-    assert q.get_reservation(reservation.key).state == SpawnState.COLD
+    assert sup.cool_dormant_bodies() == 0
+    assert stopped == []
+    assert len(sup._active_reservations()) == 1
+    assert q.get_reservation(reservation.key).state == SpawnState.SPAWNED
 
 
 def test_cold_resume_process_exception_retains_unresolved_startup(q, client):
