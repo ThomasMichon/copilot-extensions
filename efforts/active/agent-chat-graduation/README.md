@@ -159,10 +159,11 @@ requirements.
   real-worktree participant continuity, session-segmented anchor participants,
   and existing local service/bridge-owned inbox/source assignment. Keep friendly
   labels separate and preserve existing membership/cursors without migration.
-  The optional read-only installed workspace resolver now supplies the
-  participant tuple and existing head observation. Authoritative inbox/source
-  assignment and native admission remain unresolved; this compound item stays
-  open.
+  The draft installed resolver returns a candidate participant tuple and head
+  observation, but review found enrolling, resident-activating and cross-project
+  owner calls. A supported non-enrolling, non-activating, project-scoped owner
+  contract is required before this boundary can qualify. Authoritative
+  inbox/source assignment and native admission also remain unresolved.
 - [ ] Coordinate trusted materialized-consumer and CI qualification inventory
   support with the existing release owner under #6237 before promoting the
   expanded standalone roster; source review alone is not Main activation.
@@ -283,7 +284,9 @@ requirements.
   real WSL-to-Windows descendant test for timeout/interruption/caller death.
   POSIX process groups are not claimed as Windows tree ownership.
   Direct native client/host and caller-death cases passed in #7266; the
-  separate cross-OS boundary and future native integration remain open.
+  separately assigned cross-OS process utility merged in #7254 with its own
+  native witnesses. Chat's consumption of that merged utility and future native
+  integration remain open; utility qualification alone does not close this item.
 - [ ] **Portfolio:** keep fast portable contracts in required change-scoped CI;
   isolate real process/native/fresh-environment matrices in their existing
   appropriate lanes. Record why a genuinely unavailable venue was not exercised.
@@ -329,7 +332,7 @@ an independent SDK version or live native qualification.
 
 | Boundary | Available foundation | Exact remaining binding and owner |
 | --- | --- | --- |
-| Trusted initialization and workspace | SDK `joinSession`, `sessionId` and `rpc.metadata.snapshot().workingDirectory`; Worktrees `find_worktree_id_by_cwd`, `head-session` and explicit anchor context | The client/service writer supplies the optional workspace binding: worktree identity across sessions, startup-session segmentation for anchors, and the existing head decision. The plugin forwards trusted initialization once; it does not add an environment-ID check or another registry. Ordinary standalone explicit actors remain independent of Worktrees. |
+| Trusted initialization and workspace | SDK `joinSession`, `sessionId` and `rpc.metadata.snapshot().workingDirectory`; existing Worktrees identity/head metadata, not a qualified read-only CWD contract | The workspace owner must supply a non-enrolling, non-activating CWD lookup with project-scoped asserted-head semantics. The draft client's legacy calls do not provide it. The client/service writer consumes that contract for worktree continuity and startup-session anchor segmentation. The plugin forwards trusted initialization once; no duplicate environment-ID check or registry. Standalone explicit actors remain independent. |
 | Recipient inbox and eligible sources | The client accepts explicit actor/channel controls; Bridge `inspect_live_inbox` projects direct-message receipts | No examined client API supplies authoritative Chat recipient/source assignment. The client/service writer coordinates that versioned assignment and its isolation/rebind errors with the existing local service/Bridge owner. A direct-message receipt projection is not this API. |
 | Shared notification intake | Bounded Chat `scan` v1; Bridge remote-event multiplexing and protocol13 `remote/events` | Remote runtime events do not subscribe to the conversation store. The service writer and existing host/Bridge owner must publish the Chat-feed registration, generation, finite callback, cancellation and quiescence binding. No per-session Python helper or continuous Node polling is an acceptable substitute. |
 | Native admission and completion | SDK `session.send`, primary final-ID semantics and optional `originatingMessageId`; bounded queue/event-log observations | Exact own primary correlation is usable. Unknown or non-primary admission remains held until its native host supplies authoritative reconciliation; queue absence, unrelated idle and expired history do not supply it. |
@@ -352,6 +355,29 @@ qualification; native callbacks still require the actual assignment and
 shared-multiplex contracts above.
 
 ## Journal
+
+### 2026-10-22 - Process utility source complete; consumer integration still open
+
+- The assigned canonical process-utility contribution #7254 merged to `dev`
+  as `f58ab97e973b7749954a574f2bc073daf1b0b2d2` at
+  `2026-10-21T21:38:27Z`, from reviewed head
+  `5ab983a229ce621273f338a49cb40b67e2385724`. The contributor's
+  [completion evidence](https://github.com/ThomasMichon/copilot-extensions/issues/7238#issuecomment-6327209693)
+  records current-head approval, resolved lifetime/setup findings and passing
+  required CI.
+- That source qualification reports 343 admitted units, 37 Linux API/regression
+  cases, and 34 native Windows/WSL passes with nine declared POSIX skips.
+  Fresh source-removed installed-wheel and negative-control evidence belongs to
+  that utility contribution; it is not qualification of the current Chat draft.
+- The proposal editor retains Chat consumer integration and the full
+  Platforms/Portfolio items. Preserve the utility contributor's separate #7020
+  ownership. No utility merge implies a release, runtime update, native Chat
+  adoption or service lifecycle completion.
+- Corrected the current workspace summary and seam table to reflect the
+  confirmed owner-contract defects rather than advertise the draft's observed
+  tuple as a safe read-only boundary. The existing workspace owner retains the
+  required CWD/project-head contract; do not qualify stale snapshots or replace
+  that authority. The effort remains Active.
 
 ### 2026-10-21 - Review exposed missing non-enrolling owner resolution
 
