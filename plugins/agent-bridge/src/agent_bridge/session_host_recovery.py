@@ -123,6 +123,7 @@ class _SessionHostRecoveryMixin:
         # reload cannot discover a session id absent from the stale scan
         # below in the first place.
         self._host_index.refresh()
+        from .privileged_plugins import PrivilegedLaunchRefused
         from .session_host.version_mux import HostDisposition, plan_host
 
         loop = asyncio.get_running_loop()
@@ -270,6 +271,12 @@ class _SessionHostRecoveryMixin:
                         ),
                         timeout=remaining,
                     )
+            except PrivilegedLaunchRefused:
+                log.warning(
+                    "Privileged Session Host reattachment refused for %s; retaining its host",
+                    rec.session_id,
+                )
+                continue
             except asyncio.TimeoutError:
                 self._remote_recovery_inconclusive.add(rec.session_id)
                 log.warning(

@@ -556,6 +556,40 @@ async def test_receiver_restart_recovers_same_surviving_host_without_preparation
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("claim_hosts", [False, True])
+async def test_batch_host_recovery_retains_refused_host_and_continues(
+    session_manager, monkeypatch, caplog, claim_hosts,
+):
+    from agent_bridge.session_manager import Session
+    from agent_bridge.session_host.host_index import HostRecord
+
+    records = [
+        HostRecord(
+            session_id=name, port=1234, host_pid=os.getpid(), child_pid=os.getpid(), nonce="synthetic",
+        )
+        for name in ("refused", "healthy")
+    ]
+    for host in records:
+        session = Session(host.session_id, host.session_id, SpawnTarget(type="local"), "worker")
+        session.status = SessionStatus.STOPPED
+        session.acp_session_id = "native-" + host.session_id
+        session_manager._sessions[host.session_id] = session
+        session_manager._host_index.register(host)
+    monkeypatch.setattr(session_manager, "_recover_remote_host_records", AsyncMock(return_value=0))
+    monkeypatch.setattr(session_manager, "_prune_dead_hosts", MagicMock())
+    monkeypatch.setattr(session_manager, "_claim_host_record", MagicMock(return_value=True))
+    reap = MagicMock(side_effect=AssertionError("refusal must retain the surviving host"))
+    monkeypatch.setattr(session_manager, "_reap_host_record", reap)
+    attach = AsyncMock(side_effect=[module.PrivilegedLaunchRefused("missing witness"), True])
+    monkeypatch.setattr(session_manager, "_reattach_one", attach)
+    assert await session_manager.reattach_session_hosts(claim_hosts=claim_hosts) == 1
+    assert [call.args[0].session_id for call in attach.await_args_list] == ["refused", "healthy"]
+    assert session_manager._host_index.get("refused") is not None
+    assert "refused for refused; retaining its host" in caplog.text
+    reap.assert_not_called()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("mismatch", ["host", "conversation", "digest", "missing"])
 async def test_surviving_host_evidence_never_authorizes_another_launch(
     tmp_path, monkeypatch, receiver, session_manager, mismatch,

@@ -354,6 +354,18 @@ or a reason to create a daemon.
   cases; the combined host/preference/privileged set passes 234 with four
   existing optional skips. Mismatched host, conversation, digest or missing
   evidence refuses explicitly. Review and publication remain pending.
+- A subsequent review isolated terminal refusal to each startup/post-cutover
+  batch record rather than aborting recovery of later healthy hosts. Individual
+  resume remains terminal. Two-host controls cover both claim modes, report
+  the refused record and prove that its host is neither pruned nor replaced;
+  the focused privileged suite passes 51 cases.
+- Required CI exposed an independent commit-association API failure, tracked
+  in #7906. The isolated repair #7907 merged at
+  `56b973ddfeb8f5754f11086cd4fa2ae11994f0fb` after current-head approval and
+  green required checks. Its narrow, reported complete-census fallback retains
+  metadata, membership, duplicate-head and budget/fencing safeguards (37 Node
+  contracts pass). Trusted-Main publication and an actual passing parity gate
+  remain separate obligations; no CI bypass or installed rollout was used.
 - Published source candidate #7899 for review. Its managed rebase includes no
   intervening Bridge or shared-library changes; the qualified implementation
   is unchanged. Required CI, review, merge and subsequent publication remain

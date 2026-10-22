@@ -172,7 +172,9 @@ Following frontend rehydration, authenticated reattachment to that same
 surviving child restores the witness without re-preparing, reloading or
 replacing the running child. Missing or mismatched evidence refuses rather
 than falling through to another launch. The host transport index retains its
-existing addressing-only contract.
+existing addressing-only contract. Startup and post-cutover batch recovery
+report a refused privileged record and retain its host, then continue with
+other healthy records; an individual resume still propagates that refusal.
 
 Source tests exercise SDK metadata and real registration with a simulated
 elevation predicate. They do not prove a live Windows admin token, a second
