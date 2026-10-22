@@ -355,6 +355,40 @@ shared-multiplex contracts above.
 
 ## Journal
 
+### 2026-10-22 - Corrected owner/client boundary qualified on Windows
+
+- Candidate `71862f3961c36e2602e6d980ff2c65afb425be16` passed the unchanged
+  native Windows120-second acceptance packet with291 passes, two declared
+  POSIX skips and33 full-only cases deferred, in106.61 seconds. The complete
+  600-second suite passed324 plus those same two skips in161.11 seconds.
+  Both reports account for all326 nodes with complete execution and digest
+  `a2cb2b3d53c353a4f9bcedff812a39bd2a2b57b231de58ba418f048b3cfecce7`.
+- The expanded Worktrees record/identity/shape compatibility selection passed
+  184 cases. A real-Git isolated integration then exercised the actual prepared
+  owner CLI and noneditable installed Chat client: stable participant identity
+  across startup sessions, the selected project's asserted revision7 rather than
+  a colliding foreign record, explicit untracked/foreign refusal, no fallback,
+  and unchanged fixture repository/registry/tracking bytes. The owner in this
+  integration was prepared editable source, not an independent owner-wheel proof.
+- Preserve the earlier acceptance timeout and five-second installed-reader
+  startup failures. The reader-lock crash witness also exposed a Windows test
+  defect: killing a venv redirector need not kill the lock-holding interpreter.
+  The corrected witnesses use the canonical direct interpreter with preserved
+  venv context; the lock witness asserts its actual PID and prefix. Ordinary
+  installed console operations remain covered, and no threshold or node was
+  removed or relaxed.
+- Linux qualification was attempted in a fresh, non-root, read-only local
+  Docker test container with bounded writable storage and no new agent.
+  Normal dependency preparation failed on public artifact TLS handshakes.
+  Exact authenticated, seasoned offline wheels were obtained, but the normal
+  dependency owner correctly refused flat-index age admission; that guard was
+  not bypassed. System-certificate TLS also failed. No Linux test ran and every
+  owned container was removed. Current Linux qualification and the full parent
+  Platforms/Portfolio items remain open, not silently reported as passing.
+- The source correction grants no installation, service activation, Chat
+  assignment, shared-feed registration, native listening or retained-state
+  migration. Those parent obligations remain with their existing owners.
+
 ### 2026-10-22 - Finish the minimal owner dependency in the retained source
 
 - The operator explicitly authorized the retained writer to finish the narrow
