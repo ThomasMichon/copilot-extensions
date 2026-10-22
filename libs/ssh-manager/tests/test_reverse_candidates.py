@@ -567,6 +567,31 @@ async def test_stop_waits_for_operation_release_not_callers_finally_cleanup(monk
     assert relay.reverse_status.state == "unknown"
 
 
+async def test_fenced_finally_cleanup_joins_external_shutdown_without_taking_its_lifecycle(
+    monkeypatch,
+):
+    relay, spawned, retired, _ = fixture_owner(monkeypatch, ["ready"])
+    entered = asyncio.Event()
+    async def observe(_attempt):
+        entered.set()
+        await asyncio.Event().wait()
+    relay._observe_candidate = observe
+    finished = []
+    async def caller():
+        try:
+            await relay.establish()
+        finally:
+            attempt = relay.reverse_status.attempt
+            finished.append(await relay.stop_attempt(attempt.attempt_id))
+    operation = asyncio.create_task(caller())
+    await entered.wait()
+    await asyncio.wait_for(relay.stop(), 2)
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(operation, 2)
+    assert len(finished) == 1 and finished[0].state == "unknown"
+    assert retired == spawned and relay._proc is None
+
+
 async def test_unconfirmed_termination_keeps_custody_and_blocks_replacement(monkeypatch):
     relay, spawned, retired, _ = fixture_owner(monkeypatch, ["ready", "ready"])
     await relay.establish()

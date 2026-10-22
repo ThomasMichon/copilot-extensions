@@ -419,6 +419,14 @@ class FiniteReverseForward(SupervisedRelayForward):
         This fences local transport cleanup, not publication or enrollment.
         A returned unknown status remains unsettled after owned cleanup.
         """
+        shutdown = self._shutdown_future
+        if shutdown is not None and not shutdown.done():
+            await asyncio.shield(shutdown)
+            async with self._lifecycle():
+                attempt = self._status.attempt
+                if attempt is None or attempt.attempt_id != attempt_id:
+                    return None
+                return self.reverse_status
         async with self._lifecycle():
             attempt = self._status.attempt
             if attempt is None or attempt.attempt_id != attempt_id:

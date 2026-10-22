@@ -140,6 +140,9 @@ For generation-bound consumer cleanup, use `await stop_attempt(attempt_id)`:
 the match and local retirement share that lifecycle boundary. A stale attempt
 returns `None` without stopping a reconnected successor. A matching attempt
 returns its final `ReverseStatus`, including any still-unknown observation.
+If unconditional shutdown is already running, attempt-specific cleanup joins it
+before acquiring lifecycle ownership, then rechecks the attempt. A caller's
+fenced `finally` cleanup cannot block the shutdown it is joining.
 This local fence does not replace the fleet owner's publication/enrollment
 generation checks; unconditional `stop()` remains explicit owner shutdown.
 All detached cleanup stays tracked until it finishes. A `stop_nowait()` followed

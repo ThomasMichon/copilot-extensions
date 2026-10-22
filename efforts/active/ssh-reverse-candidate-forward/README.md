@@ -253,3 +253,10 @@ redacted cause codes rather than raw credential-shaped diagnostics.
   returning without observed exit. Wait for lifecycle ownership release instead
   of whole-caller completion; retain process custody and unknown when its
   return code is still unset. Dedicated regressions cover both boundaries.
+- The concrete attempt-fenced `finally` variant in a later review overview is
+  fixed even though its displayed open-issue count was zero: join an existing
+  shutdown before acquiring lifecycle ownership, then recheck the attempt.
+  The extended native witness also runs two independent owners against one
+  actual child-bound tuple; only one succeeds, and loser cleanup preserves
+  the winner. Focused contained validation passes76 cases with the same one
+  Linux-only skip. This still does not qualify OpenSSH or deployed recovery.
