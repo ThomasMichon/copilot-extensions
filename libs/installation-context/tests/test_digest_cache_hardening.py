@@ -102,7 +102,7 @@ def _run_canonical_shell_digest(
                 f"'{quoted_root}' "
                 f"{max_entries} {max_path_bytes} {max_content_bytes}\n"
             ),
-            encoding="utf-8",
+            encoding="utf-8-sig",
         )
         command = (str(POWERSHELL), "-NoProfile", "-File", str(probe), "probe")
     return subprocess.run(
@@ -111,6 +111,7 @@ def _run_canonical_shell_digest(
         text=True,
         encoding="utf-8",
         check=False,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
 
 
@@ -795,7 +796,7 @@ finally {
 }
 [void](Get-FileSha256 $path -RequireSameIdentity)
 ''',
-        encoding="utf-8",
+        encoding="utf-8-sig",
     )
     target = tmp_path / "target.txt"
     replacement = tmp_path / "replacement.txt"
@@ -813,6 +814,7 @@ finally {
         encoding="utf-8",
         env=environment,
         check=False,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
 
     assert result.returncode != 0
