@@ -38,11 +38,10 @@ def _identity(repo: Path) -> None:
     _git("config", "user.name", "Test", cwd=repo)
 
 
-def _commit(repo: Path, name: str, content: str, message: str = "") -> str:
+def _commit(repo: Path, name: str, content: str, message: str = "") -> None:
     (repo / name).write_text(content)
     _git("add", "-A", cwd=repo)
     _git("commit", "-q", "-m", message or f"edit {name}", cwd=repo)
-    return _git("rev-parse", "HEAD", cwd=repo)
 
 
 @pytest.fixture
@@ -151,7 +150,8 @@ def test_landing_copies_preserve_topology_and_isolate_mutations(tmp_path, reques
 
 def _two_commit_change(clone: Path) -> str:
     _commit(clone, "a.txt", "ONE\ntwo\nthree\nfour\nfive\nsix\nseven\neight\n", "first")
-    return _commit(clone, "a.txt", "ONE\ntwo\nthree\nFOUR\nfive\nsix\nseven\neight\n", "second")
+    _commit(clone, "a.txt", "ONE\ntwo\nthree\nFOUR\nfive\nsix\nseven\neight\n", "second")
+    return _git("rev-parse", "HEAD", cwd=clone)
 
 
 def _squash_onto(seed: Path, branch: str, content: str) -> None:
@@ -384,7 +384,8 @@ def _sync_worktree_branch_to_a_newer_main(env) -> str:
     """origin/main advances; the worktree branch is then reset to that new tip (a
     sync), with no commit of its own. Returns the new tip."""
     _git("checkout", "-q", "main", cwd=env.seed)
-    tip = _commit(env.seed, "c.txt", "a release on main\n", "release: promote dev to main")
+    _commit(env.seed, "c.txt", "a release on main\n", "release: promote dev to main")
+    tip = _git("rev-parse", "HEAD", cwd=env.seed)
     _git("push", "-q", "origin", "main", cwd=env.seed)
     _git("fetch", "-q", "origin", cwd=env.clone)
     _git("branch", "-f", f"worktree/{env.worktree_id}", "origin/main", cwd=env.clone)
@@ -584,8 +585,10 @@ def test_the_pull_forward_advice_runs_cleanly_past_a_squash_that_a_plain_rebase_
     from agent_worktrees import pr_pull_forward
     from agent_worktrees.tracking import PRRecord
 
-    first = _commit(env.clone, "a.txt", SQUASHED.replace("ONE", "one!"), "first")
-    head = _commit(env.clone, "a.txt", SQUASHED.replace("ONE", "ONE!"), "second")
+    _commit(env.clone, "a.txt", SQUASHED.replace("ONE", "one!"), "first")
+    first = _git("rev-parse", "HEAD", cwd=env.clone)
+    _commit(env.clone, "a.txt", SQUASHED.replace("ONE", "ONE!"), "second")
+    head = _git("rev-parse", "HEAD", cwd=env.clone)
     assert first != head
     _squash_onto(env.seed, "dev", SQUASHED.replace("ONE", "ONE!"))
     _commit(env.seed, "a.txt", SQUASHED.replace("ONE", "ONE!!"), "a later dev edit to the same line")
@@ -703,7 +706,8 @@ def test_branches_pulled_forward_onto_different_bases_are_all_published(env, pro
     onto dev; each carries a commit only the other base lacks. Every commit is on some
     published base, so the work is landed."""
     _git("checkout", "-q", "-b", "pr/old", "origin/main", cwd=env.clone)
-    old_head = _commit(env.clone, "old.txt", "the older PR\n", "older PR")
+    _commit(env.clone, "old.txt", "the older PR\n", "older PR")
+    old_head = _git("rev-parse", "HEAD", cwd=env.clone)
     _git("checkout", "-q", "main", cwd=env.seed)
     _commit(env.seed, "old.txt", "the older PR\n", "the older PR, squashed into main")
     _git("push", "-q", "origin", "main", cwd=env.seed)

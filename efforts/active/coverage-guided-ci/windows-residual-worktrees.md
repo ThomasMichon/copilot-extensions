@@ -87,7 +87,47 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Admitted fixture-semantic batches
 
+### B-LANDING unused commit-ID reads
+
+Baseline: the actual #7701 merge. `_commit` now returns `None`,
+avoiding a `rev-parse HEAD` after commits whose callers discard the
+result. All 23 call sites are statement-only. The five formerly
+value-consuming sites in `_two_commit_change`,
+`_sync_worktree_branch_to_a_newer_main`, the conflict-rebase scenario
+(two sites) and the multiple-base scenario explicitly resolve fresh
+`HEAD` immediately after their commits. Their resulting IDs, real Git
+operations and landing assertions are unchanged. All five edited
+functions match the pinned preserved source.
+
+All 33 collected cases remain, with every original test name, fixture
+dependency, decorator and assertion intact. No other module imports
+these private helpers. This completes only the unused-OID helper
+subcontract; other B/N and production S/F/G/P/R/A contracts remain
+separate.
+
+Complete native Windows landing module: 33 passed, zero skips,
+141.11 seconds pytest / 156.53 preparation-cleanup inclusive. Exactly
+two work-stealing workers retain the original 30-second item watchdog,
+all marks/resource ceilings and the 240-second diagnostic group.
+Functional integration only, not quiet-host, whole-suite or repeated
+same-head qualification.
+
+This below-altitude test-helper extraction changes no production,
+command, configuration, installation or architecture contract.
+Documentation impact is this ledger; no adopter guide changes.
+Clean-room provisioning and external-venue lanes are inapplicable
+to the native test-only subprocess reduction.
+
 ### B-LANDING-ASSERT non-mutating probe evidence
+
+Actual disposition: #7701 merged as
+`a912a66b8ec44e8bf2705c59bee17f341fea7a56`; full Copilot review
+`5607940307` approved exact head
+`1f1c488420dd2745d367d151f04771c759007572`.
+Overview, inline/general channels and threads had no findings;
+required CI was green and the child worktree is finalized.
+The reviewed probe-removal/default-base-relocation delta retirement
+below is accepted; every original test identity and location remains.
 
 Baseline: the actual #7698 merge. The multi-commit squash/later-upstream-edit
 case first fetches the actual squash, snapshots every ref, invokes the real
@@ -100,7 +140,7 @@ All 33 existing tests, fixture dependencies, decorators and old assertions
 remain. `test_the_probe_moves_no_ref` is unchanged and separately collected.
 The default-base/provider-call-zero case is also unchanged, including
 its location. The historical probe-case removal and default-base-case
-relocation are proposed for retirement from future extraction, not
+relocation are retired from future extraction, not
 retirement of tests or contracts; neither delta is needed to add the
 non-mutating checks to the combined scenario. Commit-helper OID returns
 and all creation-point, reset, shadowing and private-copy checks remain
