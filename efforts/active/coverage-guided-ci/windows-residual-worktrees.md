@@ -87,7 +87,41 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Admitted fixture-semantic batches
 
+### B-GENERATION align the raced foreign-record fence with generation three
+
+Baseline: the actual #7771 merge. The session register/deregister
+raced-foreign-record regression now documents generation three and
+requires `min_version=3` when dispatching through the actual server.
+The advertised-version assertion was already three on current Dev;
+both production verb registrations are three and remain unchanged.
+This raises the regression's admission floor rather than weakening it.
+
+The complete target function matches pinned preserved source. Its four
+parameterized direct/daemon register/deregister cases retain the raced
+lock, forbidden-save assertion, exact foreign bytes, execution-space
+error and still-live original session. Every other module node is
+unchanged. Complete native Windows execution-space module: 134 passed,
+zero skips, 8.43 seconds pytest / 22.36 preparation-cleanup inclusive.
+Exactly two work-stealing workers retained the original 30-second item
+watchdog, 240-second diagnostic group and every native/process/memory/
+mark bound. Ruff and thirteen install contracts passed. Functional only,
+not quiet-host, whole-suite or repeated same-head qualification.
+
+This below-altitude test correction changes no production, command,
+configuration, installation or architecture contract. Documentation
+impact is this ledger; the real loopback server and direct handlers
+provide integration coverage. Clean-room provisioning and external-venue
+lanes are inapplicable. Other residuals and parent settlement remain open.
+
 ### B-CLONE-IDENTITY retain one explicit clone-local identity
+
+Actual disposition: #7771 merged as
+`d2ca2567809392fd0fec7598b0c8779eb4fdecf6`; fresh full Copilot
+review `5609448370` approved exact head
+`e4d8a8112566750c120d6e6c9cc83f3b483b8e96`.
+All overview/inline/general channels and threads were clear;
+every required check and live authority passed before merge.
+The child is finalized.
 
 Baseline: the actual #7765 merge. `_bare_anchor_from_clone` wrote the
 same local user email/name twice. Remove only the repeated second pair
