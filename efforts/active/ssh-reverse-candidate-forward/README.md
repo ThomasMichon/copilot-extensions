@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** public source `greased-kiln`
 - **Created:** 2026-10-22
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** existing plugin-services and machine-fleet owned connectivity; governing amendment #7726 must merge first
 - **Umbrella issue:** #7720
 - **Sub-issues:** complementary fleet coordination #7719; existing integration #6681
@@ -75,26 +75,26 @@ enrollment nor deployment and does not relax existing source claims.
 
 - [x] Deduplicate public issue/PR work and reserve #7720 with a public-safe
   visible claim; reconcile the disjoint #7719 source boundary.
-- [ ] Merge the governing vision/pattern amendment #7726 under its actual
+- [x] Merge the governing vision/pattern amendment #7726 under its actual
   required checks. Approval without merge is not completion.
-- [ ] Land this narrow transport proposal through normal review/CI.
+- [x] Land this narrow transport proposal through normal review/CI.
 - [ ] Publish the exact optional API and result semantics in #7720 for #7719;
   distinguish admitted candidate, retained transport, readiness and unknown.
 
 ### Phase 2 - Existing forward-owner implementation
 
-- [ ] First capture the fixed-candidate occupied-port failure and actual
+- [x] First capture the fixed-candidate occupied-port failure and actual
   readiness gap with focused existing-owner tests.
-- [ ] Add optional finite positive loopback candidates without changing the
+- [x] Add optional finite positive loopback candidates without changing the
   fixed-port default. Require candidate-specific readiness for dynamic mode.
-- [ ] On a positively classified remote bind collision, retire only that
+- [x] On a positively classified remote bind collision, retire only that
   attempt's owned process, then try the next already-admitted candidate within
   one bounded operation. Authentication, host-pin, permission, transport and
   unknown failures must not masquerade as a collision.
-- [ ] Retain the successful process/listener, return its exact endpoint and
+- [x] Retain the successful process/listener, return its exact endpoint and
   owner correlation, and clear exposed readiness when that process is retired.
   No probe-close-bind reservation or incumbent-listener eviction.
-- [ ] Keep cancellation, monitor/reconnect gate, host-target resolver and
+- [x] Keep cancellation, monitor/reconnect gate, host-target resolver and
   bounded cleanup coherent. Dynamic uncertainty must stop fresh allocation
   until its existing owner reconciles the original correlation.
 
@@ -138,10 +138,19 @@ All items are **agent-recommended** and require exact evidence.
 
 ## Proposal
 
-The exact API is not implemented yet. Prefer optional constructor arguments and
-an immutable candidate/readiness result on `SupervisedRelayForward`, with the
-fixed relay-port path unchanged. Bound the explicit candidate set and share the
-existing process creation, headless proxy and cleanup primitives.
+The source candidate adds `ssh_manager.reverse_candidates.FiniteReverseForward`,
+an opt-in subclass of `SupervisedRelayForward`, with immutable endpoint,
+attempt/evidence and status values. This keeps the established constructor and
+every fixed-port consumer unchanged, reusing the existing process creation,
+monitor, reconnect gate, headless proxy and cleanup primitives. The only base
+hook defaults to the prior retry behavior; dynamic unknown/refused outcomes can
+hold that same monitor instead of automatically allocating again.
+
+The new module is the small necessary implementation leaf for the accepted
+`relay_channel.py` boundary, not another supervisor or registry. Its exact
+constructor/result and external observer obligations are documented in
+[`libs/ssh-manager/README.md`](../../../libs/ssh-manager/README.md#optional-finite-reverse-forward-selection).
+Source candidate is not review, release or production integration.
 
 The policy owner supplies admitted exact positive loopback tuples; this parser
 does not authenticate a caller or grant forwarding. The serving adapter must
@@ -168,3 +177,27 @@ redacted cause codes rather than raw credential-shaped diagnostics.
   implemented before that prerequisite clears.
 - Existing selected tests expose no real sshd/credential fixture. This is a
   validation gap, not permission to create credentials or alter a running sshd.
+
+### 2026-10-22 - Intent merged; bounded source and native resource witness
+
+- #7726 actually merged as `5935a5d0bd81bb371235e7edf75be677cb5e0ae1`;
+  this proposal #7757 merged as `aa27954a9b0818db2eea7e1a01535758a2254087`.
+  Current-head approval and real required checks passed. The initial missing
+  Documentation impact metadata was corrected and its thread resolved;
+  independent effort-index rows were preserved through rebase conflicts.
+- Re-read the merged plan and continued in the same source worktree. Added the
+  opt-in subclass and base retry hook, not changes to existing fixed defaults or
+  the reserved Fleet Manager/authentication/profile/lifecycle files.
+- The native regression reproduces four failed fixed-port attempts while a real
+  fixture socket holds the old tuple. The dynamic candidate retains a different
+  real child-owned socket, validates that child's serving marker, survives an
+  owned interruption through the existing reconnect path and reaps only its
+  children while preserving the original listener.
+- This witness launches an isolated Python socket fixture through canonical
+  SSH process/proxy containment. It is **not an SSH server**, OpenSSH permission
+  test, installed wheel consumer or production recovery. Existing real OpenSSH
+  fixture/credentials remain unavailable; that qualification is still open.
+- Final contained focused validation passed56 cases with one Linux-only
+  owner-sweep skip on native Windows, including bounded diagnostic reasons and
+  cancellation/stop before a delayed spawn returns. F/E9 lint and the existing
+  install-contract gate passed. No runtime was installed.

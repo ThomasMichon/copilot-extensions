@@ -67,6 +67,66 @@ print(result.stdout)
 await manager.disconnect("my-server")
 ```
 
+## Optional finite reverse-forward selection
+
+`ssh_manager.reverse_candidates.FiniteReverseForward` subclasses the existing
+`SupervisedRelayForward` process and monitor owner; it does not start a second
+keeper. Existing fixed-port consumers and their constructor remain unchanged.
+This opt-in boundary is for the constrained reverse-SSH grants described in
+`docs/patterns/service-transport.md`, not ordinary local service allocation.
+
+Supply a unique tuple of one to sixteen `ReverseEndpoint(host, port)` values,
+an explicit printable `request_id`, and async
+`observe(ReverseAttempt) -> ReverseEvidence`. Endpoints are exact `localhost`,
+`127.0.0.1` or `::1` literals and positive TCP ports. Their spelling is
+preserved in SSH arguments, not treated as interchangeable permission grants.
+Both `permitlisten` and any peer `permitopen` must already be authorized by the
+existing enrollment/policy owner. This parser and the observation callback do
+not create that authority.
+
+Each real SSH attempt has a distinct `attempt_id`, the original request
+correlation, endpoint, target port and owned process PID. `process_settled`
+reports only the existing settle check, **not SSH acceptance or authenticated
+readiness**. The trusted observer must independently bind server-side ownership
+and end-to-end serving to that actual attempt. It returns the same attempt ID
+with `ready`, `occupied`, `refused` or `unknown`. A TCP accept, an alive SSH
+process, or a caller-supplied generation alone is insufficient evidence.
+Evidence may additionally carry an allowlisted reason: `collision`,
+`authentication`, `host-key`, `permission`, `transport`, `readiness` or
+`unclassified`. Arbitrary exception/credential text is not accepted as a reason.
+
+Only a positive owner classification of `occupied` **and** SSH's failed-forward
+result advance to the next candidate. Exit255 and OpenSSH's generic failure
+warning cannot distinguish collision from permission refusal, so they do not
+permit rotation by themselves. The successful SSH process/listener remains
+held throughout observation and return. No free-port probe is closed and later
+rebound. The existing target-port resolver, headless proxy owner, process-tree
+cleanup and reconnect gate are reused.
+
+`establish()`/`start()` retain their awaitable shape; inspect immutable
+`reverse_status` afterward. `ready` supplies the exact attempt for the existing
+fleet owner's generation-checked discovery publication. A dead/retired process
+cannot retain a ready status. Exhaustion yields `ReverseForwardError` with
+`status.state == "unavailable"` and `reason == "candidates-exhausted"`.
+Other bounded result states distinguish refusal, stopped ownership and unknown
+outcomes; raw adapter errors are not rendered in their messages.
+
+An observer error, timeout, wrong correlation or interruption latches `unknown`
+under the original request. The existing monitor stops rather than allocating
+another candidate; `stop()` cleans owned transports but does not settle that
+unknown. The caller must reconcile through its original operation/authority
+before any replacement request or instance. Interrupted spawn ownership is
+retained through eventual cleanup, with a separate five-second cleanup wait;
+pending cleanup remains explicitly owned rather than discarded at that wait.
+The operation itself has one finite deadline across all candidates.
+
+This library supplies no authenticated production observer, enrollment
+projection, fleet publication ledger, installer or adoption. Local socket and
+process tests qualify resource retention/cleanup, **not OpenSSH permissions,
+remote authentication or deployed recovery**. Real OpenSSH qualification needs
+an explicitly supplied isolated fixture with existing credentials; no key or
+system sshd configuration is provisioned by this API or its tests.
+
 ## Windows proxy lifecycle
 
 Managed commands, forwards, and probes use

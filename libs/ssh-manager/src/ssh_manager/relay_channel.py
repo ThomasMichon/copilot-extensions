@@ -508,6 +508,9 @@ class SupervisedRelayForward:
                 await self._cancel_process()
                 return self._retire(reason)
             except Exception as exc:
+                if not self._retry_establish_failure(exc):
+                    log.warning("Credential relay reconnect held: %s", exc)
+                    return False
                 failures += 1
                 delay = min(
                     self._backoff_max,
@@ -521,6 +524,10 @@ class SupervisedRelayForward:
                     delay,
                 )
                 await self._sleep(delay)
+
+    def _retry_establish_failure(self, exc: Exception) -> bool:
+        """Fixed-port relays retain their existing reconnect behavior."""
+        return True
 
     async def _wait_settled(
         self, proc: asyncio.subprocess.Process,
