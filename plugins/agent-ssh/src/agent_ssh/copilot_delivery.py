@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 
 from ssh_manager.forward_keeper import KeeperStore
 from venue_copilot.refs import reconcile_owned_delivery, settle_deferred_seed
@@ -123,9 +124,16 @@ def recover(adapter, plan, pending) -> tuple[int, dict]:
     mux = pending.get("mux_session")
     if type(port) is not int or not 0 < port < 65536 or not isinstance(mux, str) or not mux:
         raise RuntimeError("Pending SSH delivery lacks its original forward metadata")
+    hold_id = pending.get("keeper_hold_id")
+    if not isinstance(hold_id, str) or (
+        hold_id != plan["scope_id"] and not re.fullmatch(r"attached:[1-9][0-9]*:[a-f0-9]{32}", hold_id)
+    ):
+        raise RuntimeError("Pending SSH delivery lacks its original keeper hold identity")
     plan["mux_session"] = mux
     plan["venue"]["mux_session_name"] = mux
+    adapter.hold_id = hold_id
     adapter.ensure_keeper(venue_port=port, mux=mux)
+    adapter.keeper_hold_acquired = True
     if not _bridge_path_ok(adapter, port):
         raise RuntimeError("The retained SSH session's bridge forward is unavailable")
     result = reconcile_owned_delivery(pending)

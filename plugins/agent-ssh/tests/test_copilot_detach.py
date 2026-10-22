@@ -222,6 +222,7 @@ def test_unknown_seed_admission_retains_session_keeper_and_journal(seams, monkey
     assert pending["status"] == "unknown"
     assert pending["envelope"]["prompt"] == "do the task"
     assert pending["requested_workspace"] == "/workspaces/repo"
+    assert pending["keeper_hold_id"] == seams.keeper[0][1]["hold_id"]
 
 
 @pytest.mark.parametrize("stopped", [False, True])
@@ -549,6 +550,60 @@ def real_keeper(seams, monkeypatch):
         **state, "pid": 99999, "pid_identity": "synthetic-99999",
     })
     return store
+
+
+@pytest.mark.parametrize("other_hold", [False, True])
+def test_attached_recovery_reuses_and_releases_original_hold(
+    real_keeper, monkeypatch, other_hold,
+):
+    from agent_ssh import copilot_delivery
+    from venue_copilot.refs import owned_result
+
+    monkeypatch.setattr(detach, "_mux_exists", lambda *a: True)
+    monkeypatch.setattr(detach, "build_remote_exec_args", lambda *a, **kw: ["ssh", "synthetic"])
+    monkeypatch.setattr("venue_copilot.refs.deliver_note", lambda *a, **kw: False)
+    monkeypatch.setattr("venue_copilot.release_cli_mode", lambda *a, **kw: 1)
+    monkeypatch.setattr(detach.subprocess, "Popen", lambda *a, **kw: pytest.fail("must not attach"))
+    args = _args(detach=False, copilot_args=[])
+    assert detach.cmd_attached(args) == 75
+    pending = copilot_delivery.read("devbox", "anchor-repo@devbox")
+    original_hold = pending["keeper_hold_id"]
+    assert set(real_keeper.read("devbox")["holds"]) == {original_hold}
+    if other_hold:
+        detach.ensure_keeper(
+            "devbox", venue_port=41234, mux="wt-other", hold_id="other-scope",
+            probe=lambda mux: True,
+        )
+    admitted = [False]
+    def reconcile(entry):
+        assert entry["operation"] == pending["operation"]
+        assert entry["keeper_hold_id"] == original_hold
+        assert set(real_keeper.read("devbox")["holds"]) == (
+            {original_hold, "other-scope"} if other_hold else {original_hold}
+        )
+        envelope = entry["envelope"]
+        return owned_result(
+            admitted[0], session_id=entry["session_id"], operation=entry["operation"],
+            note=envelope["prompt"], context=envelope["plugin_context"],
+        )
+    monkeypatch.setattr(copilot_delivery, "reconcile_owned_delivery", reconcile)
+    assert detach.cmd_attached(args) == 75
+    admitted[0] = True
+    monkeypatch.setattr(copilot_delivery, "settle_deferred_seed", lambda *a: True)
+    class Child:
+        pid = 12345
+        def wait(self):
+            hold = real_keeper.read("devbox")["holds"][original_hold]
+            assert hold["mux"] == detach._attached_hold_mux(self.pid)
+            return 0
+    monkeypatch.setattr(detach.subprocess, "Popen", lambda *a, **kw: Child())
+    assert detach.cmd_attached(args) == 0
+    assert copilot_delivery.read("devbox", "anchor-repo@devbox") is None
+    state = real_keeper.read("devbox")
+    if other_hold:
+        assert set(state["holds"]) == {"other-scope"}
+    else:
+        assert state is None
 
 
 def test_attached_pid_handoff_releases_with_refreshed_timestamp(real_keeper, monkeypatch):

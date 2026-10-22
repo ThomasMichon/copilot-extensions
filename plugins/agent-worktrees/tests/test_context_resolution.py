@@ -813,6 +813,17 @@ def test_get_keys_lists_swapped_keys(adopted_repo, capsys):
     assert "worktrees-root" in out
 
 
+@pytest.mark.parametrize("remote,expected", [("origin", "origin"), ("upstream", "upstream"), ("", "origin")])
+def test_get_git_remote_uses_native_repository_config(
+    adopted_repo, active_myproj, monkeypatch, capsys, remote, expected,
+):
+    _anchor, _wt_root, wt_path, _wt_id, conf = adopted_repo
+    monkeypatch.chdir(wt_path)
+    monkeypatch.setitem(conf.repos, conf.repo_name, dataclasses.replace(conf.default_repo, remote=remote))
+    assert m.cmd_get(types.SimpleNamespace(key="git-remote")) == 0
+    assert capsys.readouterr().out.strip() == expected
+
+
 def test_get_project_scalars_skip_worktree_identity(
     adopted_repo, active_myproj, monkeypatch, capsys,
 ):
@@ -835,6 +846,7 @@ def test_get_project_scalars_skip_worktree_identity(
     monkeypatch.setattr(m, "_cwd_is_inside_project", unexpected_lookup)
     expected = {
         "repo-dir": anchor,
+        "git-remote": conf.default_repo.remote,
         "worktrees-root": wt_root,
         "src-dir": conf.srcroot,
         "config-dir": config_dir,

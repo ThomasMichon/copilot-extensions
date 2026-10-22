@@ -72,6 +72,7 @@ _GET_KEYS: dict[str, str] = {
     "holder identity for resource leases; empty if not in a worktree",
     "repo-remote": "Canonical remote URL of this repo (registry remote; falls "
     "back to git origin) -- the device-independent repo key",
+    "git-remote": "Configured Git remote name for the active repository (defaults to origin)",
     "lease-origin": "Resolved explicit/private Git-ref lease store origin URL "
     "-- the **harness identity** shared by every agent of this "
     "harness (the in-CodeSpace cross-harness fence key); empty "
@@ -409,6 +410,7 @@ def cmd_get(args: argparse.Namespace) -> int:
     repo = config.default_repo
     project_values = {
         "repo-dir": lambda: repo.anchor,
+        "git-remote": lambda: repo.remote or "origin",
         "worktrees-root": lambda: repo.worktree_root,
         "src-dir": lambda: config.srcroot,
         "config-dir": lambda: str(cfg.project_dir()),

@@ -168,6 +168,69 @@ def test_repository_keys_preserve_non_github_path_case_and_port():
     assert copilot_plugins._repository_equal("Example/Project", "example/project")
 
 
+def test_filesystem_repository_keys_cannot_alias_github_or_fold_path_case():
+    key = copilot_plugins.repository_key("example/project")
+    github = copilot_plugins.repository_key("https://github.com/example/project.git")
+    assert key == "filesystem:example/project"
+    assert not copilot_plugins._repository_equal(key, github)
+    assert not copilot_plugins._repository_equal(
+        copilot_plugins.repository_key("Mirror/Repo"),
+        copilot_plugins.repository_key("mirror/repo"),
+    )
+    assert copilot_plugins.repository_key("") == ""
+
+
+@pytest.mark.parametrize("remote", ["origin", "upstream"])
+def test_probe_queries_native_owner_selected_remote(tmp_path, monkeypatch, capsys, remote):
+    child = tmp_path / "child"
+    _checkout(child)
+    url = "https://github.com/example/project.git"
+    subprocess.run(
+        ["git", "-C", str(child), "remote", "add", remote, url],
+        check=True, capture_output=True, timeout=20, creationflags=no_window_flags(),
+    )
+    run = subprocess.run
+    which = copilot_plugins.shutil.which
+    calls = []
+    monkeypatch.setattr(copilot_plugins.shutil, "which", lambda name, **kw: (
+        "native-owner" if name == "agent-worktrees" else which(name, **kw)
+    ))
+    def configured(argv, **kwargs):
+        calls.append(argv)
+        if argv[0] == "native-owner":
+            assert argv == ["native-owner", "get", "git-remote"]
+            assert Path(kwargs["cwd"]) == child
+            return subprocess.CompletedProcess(argv, 0, stdout=remote + "\n", stderr="")
+        return run(argv, **kwargs)
+    monkeypatch.setattr(subprocess, "run", configured)
+    def execute(_adapter, program, **_kwargs):
+        import contextlib
+        import io
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            exec(program, {})
+        proof = json.loads(output.getvalue().removeprefix("__SSH_CHECKOUT__"))
+        assert proof["origin"] == url
+        # The native receiver is POSIX; this test also exercises Git on Windows.
+        proof.update(cwd="/child", root="/child")
+        return 0, "__SSH_CHECKOUT__" + json.dumps(proof), ""
+    monkeypatch.setattr(copilot_plugins, "run_python", execute)
+    before = Path.cwd()
+    try:
+        proof = copilot_plugins.probe_checkout(object(), str(child))
+        monkeypatch.setattr(copilot_detach, "_prepare_ssh_and_workspace", lambda args: object())
+        monkeypatch.setattr(copilot_detach, "plan_for", lambda args: {"workspace": args.workspace})
+        monkeypatch.setattr(copilot_plugins, "resolve_launch", lambda *a: None)
+        assert copilot_plugins.target_repo(SimpleNamespace(target="host", workspace=str(child))) == 0
+        assert capsys.readouterr().out.strip() == "example/project"
+    finally:
+        os.chdir(before)
+    assert proof["repository"] == "example/project"
+    assert any(argv[1:] == ["config", "--get", f"remote.{remote}.url"] for argv in calls)
+    if remote != "origin":
+        assert not any("remote.origin.url" in argv for argv in calls)
+
+
 def test_interrupted_preparation_waits_for_receiver_quiescence(monkeypatch):
     finished = threading.Event()
     class InterruptedWait:
@@ -255,7 +318,15 @@ def test_actual_posix_probe_uses_requested_git_checkout(tmp_path):
     _checkout(child)
     home.mkdir()
     daemon.mkdir()
-    environment = {**os.environ, "HOME": str(home), "GIT_DIR": str(daemon)}
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    owner = bin_dir / "agent-worktrees"
+    owner.write_text('#!/bin/sh\n[ "$*" = "get git-remote" ] || exit 1\nprintf "origin\\n"\n')
+    owner.chmod(0o700)
+    environment = {
+        **os.environ, "HOME": str(home), "GIT_DIR": str(daemon),
+        "PATH": str(bin_dir) + os.pathsep + os.environ.get("PATH", ""),
+    }
     adapter = _Receiver(daemon, environment)
     proof = copilot_plugins.probe_checkout(adapter, str(child))
     assert proof["cwd"] == proof["root"] == str(child)
@@ -269,7 +340,7 @@ def _pending(*, operation="original-operation", note="original seed"):
         **owned_delivery_journal(
             "native-session", note, context, operation=operation, plan=plan,
             reservation_id="original-reservation", creation_receipt=None, daemon_port=41234,
-        ), "requested_workspace": "/configured/child",
+        ), "requested_workspace": "/configured/child", "keeper_hold_id": plan["scope_id"],
     }
 
 
@@ -315,6 +386,25 @@ def test_unknown_delivery_recovers_original_inputs_without_preparation(tmp_path,
     assert not adapter.pending_delivery
     assert copilot_delivery.read("host", "anchor-child@host") is None
     assert calls[-1] == ("release", {"reservation_id": "original-reservation"})
+
+
+@pytest.mark.parametrize("hold", [None, "", "other-scope", "attached:bad", "attached:1:wrong"])
+def test_recovery_refuses_missing_or_unrelated_keeper_hold_identity(tmp_path, monkeypatch, hold):
+    monkeypatch.setattr(copilot_detach, "_STORE", copilot_detach.KeeperStore(tmp_path))
+    pending = {**_pending(), "keeper_hold_id": hold}
+    copilot_delivery.record("host", pending["scope_id"], pending)
+    adapter = SimpleNamespace(
+        target="host", pending_delivery=True,
+        plugin_args=SimpleNamespace(workspace="/configured/child"),
+        ensure_keeper=lambda **kw: pytest.fail("must retain original hold ownership"),
+    )
+    plan = {
+        "scope_id": pending["scope_id"], "workspace": "/canonical/child",
+        "venue": {"kind": "ssh", "target": "host"},
+    }
+    with pytest.raises(RuntimeError, match="original keeper hold identity"):
+        copilot_delivery.recover(adapter, plan, pending)
+    assert copilot_delivery.read("host", pending["scope_id"]) == pending
 
 
 @pytest.mark.parametrize("phase", ["reconcile", "settle"])

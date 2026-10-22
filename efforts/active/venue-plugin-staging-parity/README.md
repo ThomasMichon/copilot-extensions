@@ -225,14 +225,15 @@ match the merged source byte-for-byte. This includes #7841 and supersedes the
 earlier publication observation, not the requirement to verify subsequent
 slices, perform only authorized rollout or prove the effective running version.
 
-The latest observed Main is `fa23f644ef2675d1c3d8da17e786d97e62d558d7`,
-whose unpaused state records Dev `74f4f08eff4a12d8fddad306a9599c10d46605b7`
-promoted at `2026-10-22T16:05:49Z`. Privileged source #7899 and the independent
-CI repair #7907 are merged to Dev, not qualified as published by that snapshot.
-Promotion PR #7905 retains ownership of an earlier ready candidate after its
-merge job was cancelled; subsequent genuine Dev workflow run `39820353625`
-explicitly deferred rather than starting a competing promotion. Publication
-and effective-running proof remain owned here, without a manual gate bypass.
+The latest verified Main is `c02050ae353fee8d36fb37f4531c9037b009e2cd`,
+whose unpaused state records Dev `258a4dd71b4f667bb24f6abb921ea276b633d32f`
+promoted at `2026-10-22T20:49:07Z`. Promotion PR #7957 merged that snapshot;
+the earlier retained promotion #7905 has also merged. Privileged source #7899
+and the independent CI repair #7907 are both ancestors of the recorded Dev
+snapshot, and all 21 changed source paths outside their effort/changefile
+records have identical Git blobs in that Dev snapshot and Main. The released
+agent-bridge version is `0.9.111-dev1`. This proves publication, not authorized
+rollout or the effective running version; those obligations remain open.
 
 - [ ] Verify publication from `dev` to `main`; perform only authorized rollout
   through the unified update path and record the effective running version.
@@ -334,6 +335,33 @@ on malformed configuration. These are reliability details, not new authority
 or a reason to create a daemon.
 
 ## Journal
+
+### 2026-10-22 - Correct configured remote identity and attached recovery
+
+- Full review identified two distinct repository identity defects. The SSH
+  probe now asks the existing native Worktrees owner for `get git-remote`
+  before reading that remote's URL; upstream-only checkouts no longer report
+  an empty repository. Discovery, preparation and launch checks share the same
+  probe. Filesystem origins have case-sensitive, type-qualified keys so a
+  relative path cannot alias a GitHub coordinate.
+- Recovery retains and reacquires the original keeper hold identity from the
+  pending operation. Repeated unknown admission does not accumulate attached
+  holds, and a later successful attachment releases that original hold on
+  exit without removing another session's forward. Missing or unrelated hold
+  metadata is refused rather than guessed.
+- Targeted source validation: SSH 103 passed with three explicit POSIX-only
+  skips; native Worktrees context/query coverage 52 passed; Bridge dispatch
+  and namespace coverage 98 passed. Lint and both contracts with all 456
+  frozen fixtures pass. The configured-remote tests execute the generated
+  probe against actual Git and exercise the public repository-discovery entry
+  point, but substitute the native owner response; they are not live SSH or
+  genuine POSIX acceptance evidence.
+- Main publication is independently confirmed for privileged source #7899
+  and CI repair #7907: the recorded promoted Dev contains both commits and
+  its 21 affected source blobs exactly match Main. No updater, native launch,
+  second account, elevation or productive deployment was invoked. The headed
+  SSH source row remains open until its PR actually merges, and the parent
+  acceptance and effective-running obligations remain open.
 
 ### 2026-10-22 - Qualify the existing headed SSH CLI owner
 

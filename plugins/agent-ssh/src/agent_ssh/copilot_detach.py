@@ -537,7 +537,10 @@ class _SshAdapter:
     def record_pending_delivery(self, plan: dict, pending: dict | None) -> None:
         from .copilot_delivery import record
         if pending is not None:
-            pending = {**pending, "requested_workspace": self.plugin_args.workspace}
+            pending = {
+                **pending, "requested_workspace": self.plugin_args.workspace,
+                "keeper_hold_id": self.hold_id,
+            }
         record(self.target, plan["scope_id"], pending)
         self.pending_delivery = pending is not None
 

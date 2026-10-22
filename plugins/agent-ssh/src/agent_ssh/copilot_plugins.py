@@ -47,7 +47,7 @@ def repository_key(remote: str) -> str:
     if "@" in remote and ":" in remote:
         host, path = remote.split("@", 1)[1].split(":", 1)
         return f"network:{host.lower()}/{path.strip('/').removesuffix('.git')}"
-    return remote
+    return f"filesystem:{remote}" if remote else ""
 
 
 def _repository_equal(left: str, right: str) -> bool:
@@ -119,13 +119,20 @@ def probe_checkout(adapter, workspace: str) -> dict:
         "env={key:value for key,value in os.environ.items() if not key.startswith('GIT_')}\n"
         "git=shutil.which('git',path=env.get('PATH',''))\n"
         "if not git: raise RuntimeError('SSH checkout lookup requires Git')\n"
+        "owner=shutil.which('agent-worktrees',path=env.get('PATH',''))\n"
+        "if not owner: raise RuntimeError('SSH checkout lookup requires the native worktree owner')\n"
         "def query(*args):\n"
         "    return subprocess.run([git,*args],cwd=cwd,env=env,capture_output=True,\n"
         "        text=True,timeout=30)\n"
         "root=query('rev-parse','--show-toplevel')\n"
         "if root.returncode: raise RuntimeError('SSH workspace is not a Git checkout')\n"
-        "origin=query('config','--get','remote.origin.url')\n"
-        "if origin.returncode not in (0,1): raise RuntimeError('SSH origin lookup failed')\n"
+        "selection=subprocess.run([owner,'get','git-remote'],cwd=cwd,env=env,\n"
+        "    capture_output=True,text=True,timeout=30)\n"
+        "remote=selection.stdout.strip()\n"
+        "if selection.returncode or not remote or '\\n' in remote or '\\0' in remote:\n"
+        "    raise RuntimeError('SSH native owner did not resolve its configured Git remote')\n"
+        "origin=query('config','--get',f'remote.{remote}.url')\n"
+        "if origin.returncode not in (0,1): raise RuntimeError('SSH configured remote lookup failed')\n"
         "print('__SSH_CHECKOUT__'+json.dumps({'requested':requested,'cwd':str(cwd),\n"
         "    'root':str(pathlib.Path(root.stdout.strip()).resolve(strict=True)),\n"
         "    'origin':origin.stdout.strip()}))\n"

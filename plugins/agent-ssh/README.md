@@ -113,6 +113,11 @@ The full expected-repository fence runs before recovery as well as preparation.
 The forward stays tied to the live launcher throughout preparation, then
 transfers to mux liveness; an attached client subsequently transfers its hold
 to that client's PID and releases the refreshed hold when attach exits.
+The delivery journal retains that hold's identity: recovery reacquires the
+same hold instead of creating an additional attached hold, including across
+repeated unknown admissions. The eventual attached exit releases the original
+hold while preserving unrelated sessions. A journal without its original hold
+identity is refused rather than guessing which hold to retire.
 An existing, probe-confirmed live mux hold stays mux-backed during rejoin, so
 a failed reservation or preparation cannot leave it tied to an exiting caller.
 If the old mux probe is indeterminate, acquisition may temporarily use the
@@ -134,8 +139,12 @@ the caller is waiting for receiver cleanup. This is not a forced-process-kill
 or lost-host recovery guarantee.
 
 `namespace-target-repo <ssh-target>` is the read-only query Bridge uses to
-select related plugins from the actual remote workspace's Git origin; it does
-not infer a repository from the SSH alias. Bridge forwards that selection and
+select related plugins from the actual remote workspace's configured Git
+remote. The native owner's `get git-remote` query supplies the remote name
+(default `origin`), including upstream-only checkouts; an owner that lacks this
+query fails explicitly rather than silently selecting no related plugins.
+Filesystem origins use distinct, case-sensitive keys, not GitHub slug keys.
+The query does not infer a repository from the SSH alias. Bridge forwards that selection and
 the controller's current checkout before its fallback roots, and fences the
 launch against a changed repository. SSH CLI remains anchor-only:
 `--worktree-id` is not silently redirected to an anchor.
