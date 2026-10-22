@@ -10,7 +10,7 @@ that pattern to this repository.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
-| [Coordinated Launch Maintenance](active/coordinated-launch-maintenance/README.md) | Draft; nonblocking healthy handoff with coordinated adopted background maintenance | #7694; preserves #6812/#6820/#7667 owners |
+| [Coordinated Launch Maintenance](active/coordinated-launch-maintenance/README.md) | Active; source-only Windows broker amendment precedes implementation; release and rollout remain open | #7694; prerequisite #6859; preserves #6812/#6820/#7667 owners |
 | [Dynamic Reverse Reservations](active/dynamic-reverse-reservations/README.md) | Active; coordinator/finite-forward source merged, opt-in SSH consumer qualification; production integration retained | #7719; preserves #63/#6681/#5789/#6804/#6240/#6424 owners |
 | [SSH Reverse Candidate Forward](active/ssh-reverse-candidate-forward/README.md) | Active; reviewed intent merged; finite SSH owner candidate and lifecycle review corrections in progress | #7720; complements #7719 publication without a second selector; actual OpenSSH/adoption remain separate |
 | [Backlog Reconciliation](active/backlog-reconciliation/README.md) | Active; oldest-first evidence and requirement-preserving consolidation, no implementation | #7556; 1,458 baseline, 729 guidance checkpoint |
