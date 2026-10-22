@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, replace
 import math
 import logging
@@ -19,7 +20,7 @@ from typing import Literal
 from .config_sources import SSHConfig
 from .forward import build_forward_ssh_args
 from .proxy import create_ssh_subprocess
-from .relay_channel import SupervisedRelayForward, _OWNER_ENV
+from .relay_channel import SupervisedRelayForward, _OWNER_ENV, _VenueStopped
 
 MAX_CANDIDATES = 16
 log = logging.getLogger("ssh-manager.reverse-candidates")
@@ -122,9 +123,11 @@ class FiniteReverseForward(SupervisedRelayForward):
             reconnect_gate=reconnect_gate,
         )
         self._candidates = candidates
+        self._default_target_port = candidates[0].port
         self._request_id = request_id
         self._observe_candidate = observe
         self._selection_lock = asyncio.Lock()
+        self._lifecycle_task: asyncio.Task | None = None
         self._status = ReverseStatus(request_id, None, "unavailable", "not-started")
 
     @property
@@ -136,6 +139,35 @@ class FiniteReverseForward(SupervisedRelayForward):
     def _fail(self, state, reason, attempt=None) -> ReverseForwardError:
         self._status = ReverseStatus(self._request_id, attempt, state, reason)
         return ReverseForwardError(self._status)
+
+    def _resolve_host_port(self) -> int:
+        if self._host_port_resolver is None:
+            return self._default_target_port
+        try:
+            value = self._host_port_resolver()
+        except Exception:
+            raise ValueError("reverse target-port resolver unavailable") from None
+        if type(value) is not int or not 1 <= value <= 65535:
+            raise ValueError("reverse target-port resolver returned an invalid port")
+        return value
+
+    @asynccontextmanager
+    async def _lifecycle(self):
+        task = asyncio.current_task()
+        if self._lifecycle_task is task:
+            yield
+            return
+        if self._selection_lock.locked():
+            raise ReverseForwardError(ReverseStatus(
+                self._request_id, None, "unavailable", "lifecycle-busy",
+            ))
+        await self._selection_lock.acquire()
+        self._lifecycle_task = task
+        try:
+            yield
+        finally:
+            self._lifecycle_task = None
+            self._selection_lock.release()
 
     async def _spawn_owned(self, args: list[str], remaining: float):
         pending = asyncio.create_task(create_ssh_subprocess(
@@ -173,21 +205,29 @@ class FiniteReverseForward(SupervisedRelayForward):
             log.error("Reverse forward owned spawn cleanup failed")
 
     async def establish(self) -> None:
-        async with self._selection_lock:
+        async with self._lifecycle():
             if self._status.state == "unknown":
                 raise ReverseForwardError(self._status)
             if self._stopped:
                 raise self._fail("stopped", "owner-stopped", self._status.attempt)
             if self.is_alive:
                 return
+            await self._retire_process()
             loop = asyncio.get_running_loop()
             deadline = loop.time() + self._ready_timeout
-            host_port = self._resolve_host_port()
-            if type(host_port) is not int or not 1 <= host_port <= 65535:
-                raise self._fail("refused", "invalid-target-port")
+            try:
+                host_port = self._resolve_host_port()
+            except ValueError:
+                raise self._fail("refused", "target-port-unavailable") from None
             for endpoint in self._candidates:
                 if self._stopped:
                     raise self._fail("stopped", "owner-stopped")
+                if self._gated_establish:
+                    allowed = await self._reconnect_allowed()
+                    if allowed is not True:
+                        if allowed is False:
+                            raise _VenueStopped("reverse reconnect gate stopped")
+                        raise ConnectionError("reverse reconnect gate inconclusive")
                 remaining = deadline - loop.time()
                 if remaining <= 0:
                     raise self._fail("unavailable", "operation-deadline")
@@ -236,7 +276,7 @@ class FiniteReverseForward(SupervisedRelayForward):
                         return
                     if (evidence.state == "occupied" and not settled.ready
                             and settled.remote_forward_failed):
-                        await self._cancel_process()
+                        await self._retire_process()
                         continue
                     state = "refused" if evidence.state == "refused" else "unknown"
                     raise self._fail(state, evidence.reason, attempt)
@@ -244,24 +284,45 @@ class FiniteReverseForward(SupervisedRelayForward):
                     self._status = ReverseStatus(
                         self._request_id, attempt, "unknown", "interrupted-attempt",
                     )
-                    await asyncio.shield(self._cancel_process())
+                    await asyncio.shield(self._retire_process())
                     raise
                 except ReverseForwardError:
-                    await asyncio.shield(self._cancel_process())
+                    await asyncio.shield(self._retire_process())
                     raise
                 except Exception:
                     error = self._fail("unknown", "observer-outcome", attempt)
-                    await asyncio.shield(self._cancel_process())
+                    await asyncio.shield(self._retire_process())
                     raise error from None
             raise self._fail("unavailable", "candidates-exhausted")
 
     def _retry_establish_failure(self, exc: Exception) -> bool:
         return not isinstance(exc, ReverseForwardError)
 
+    async def _restart_with_backoff(self, reason: str) -> bool:
+        async with self._lifecycle():
+            return await super()._restart_with_backoff(reason)
+
     async def _cancel_process(self) -> None:
+        async with self._lifecycle():
+            await self._retire_process()
+
+    async def _retire_process(self) -> None:
         if self._status.state == "ready":
             self._status = replace(self._status, state="unavailable", reason="transport-retired")
-        await super()._cancel_process()
+        try:
+            await super()._cancel_process()
+        except Exception:
+            self._status = replace(self._status, state="unknown", reason="cleanup-failed")
+            log.error("Reverse forward owned process cleanup failed")
+            raise ReverseForwardError(self._status) from None
+
+    async def stop(self) -> None:
+        self._stopped = True
+        active = self._lifecycle_task
+        if active is not None and active is not asyncio.current_task():
+            active.cancel()
+            await asyncio.gather(active, return_exceptions=True)
+        await super().stop()
 
     def stop_nowait(self) -> None:
         if self._status.state == "ready":

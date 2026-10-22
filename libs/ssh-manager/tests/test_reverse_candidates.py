@@ -126,10 +126,14 @@ async def test_wrong_correlation_cannot_publish_success(monkeypatch):
     assert retired == spawned
 
 
-async def test_concurrent_establish_reuses_one_owned_ready_process(monkeypatch):
+async def test_concurrent_establish_reports_busy_without_replacing_the_owned_process(monkeypatch):
     relay, spawned, _, _ = fixture_owner(monkeypatch, ["ready"])
-    await asyncio.gather(relay.establish(), relay.establish(), relay.establish())
+    results = await asyncio.gather(
+        relay.establish(), relay.establish(), relay.establish(), return_exceptions=True,
+    )
     assert len(spawned) == 1
+    assert sum(result is None for result in results) == 1
+    assert all(result is None or result.status.reason == "lifecycle-busy" for result in results)
     spawned[0].returncode = 255
     assert relay.reverse_status.state == "unavailable"
     await relay.stop()
@@ -146,9 +150,9 @@ async def test_stop_during_observation_does_not_resurrect_readiness(monkeypatch)
     await entered.wait()
     await relay.stop()
     finish.set()
-    with pytest.raises(ReverseForwardError, match="owner-stopped"):
+    with pytest.raises(asyncio.CancelledError):
         await task
-    assert not relay.is_alive and relay.reverse_status.state == "stopped"
+    assert not relay.is_alive and relay.reverse_status.state == "unknown"
     assert len(spawned) == 1
 
 
@@ -216,9 +220,11 @@ async def test_stop_during_spawn_prevents_late_observer_effect(monkeypatch):
     monkeypatch.setattr(candidate_mod, "create_ssh_subprocess", slow_spawn)
     task = asyncio.create_task(relay.establish())
     await entered.wait()
-    await relay.stop()
+    stopping = asyncio.create_task(relay.stop())
+    await asyncio.sleep(0)
     release.set()
-    with pytest.raises(ReverseForwardError, match="owner-stopped"):
+    await stopping
+    with pytest.raises(asyncio.CancelledError):
         await task
     assert retired == spawned and not attempts
     assert not relay.is_alive
@@ -234,6 +240,127 @@ async def test_no_rotation_from_generic_ssh_exit_without_owner_collision_evidenc
         await relay.establish()
     assert relay.reverse_status.state == "unknown"
     assert len(spawned) == 1 and retired == spawned
+
+
+async def test_target_port_is_stable_across_changed_reverse_endpoint_and_reconnect(monkeypatch):
+    relay, spawned, _, attempts = fixture_owner(
+        monkeypatch, ["occupied", "ready", "occupied", "ready"],
+    )
+    await relay.establish()
+    assert await relay._restart_reason() is None
+    spawned[-1].returncode = 255
+    assert await relay._restart_with_backoff("interruption")
+    assert relay.reverse_status.attempt.endpoint.port == 41002
+    assert {attempt.target_port for attempt in attempts} == {41001}
+    assert "127.0.0.1:41002:127.0.0.1:41001" in spawned[-1].args
+    await relay.stop()
+
+
+async def test_monitor_retirement_and_public_establish_cannot_lose_replacement(monkeypatch):
+    relay, spawned, retired, _ = fixture_owner(monkeypatch, ["ready", "ready"])
+    await relay.establish()
+    old = spawned[0]
+    old.returncode = 255
+    entered, release = asyncio.Event(), asyncio.Event()
+    async def retire(self, proc):
+        if proc is old:
+            entered.set()
+            await release.wait()
+        retired.append(proc)
+        proc.returncode = -9
+    monkeypatch.setattr(FiniteReverseForward, "_terminate", retire)
+    restart = asyncio.create_task(relay._restart_with_backoff("exited"))
+    await entered.wait()
+    with pytest.raises(ReverseForwardError, match="lifecycle-busy"):
+        await relay.establish()
+    assert spawned == [old]
+    release.set()
+    assert await restart is True
+    assert relay._proc is spawned[1] and spawned[1].returncode is None
+    assert relay.reverse_status.attempt.process_pid == spawned[1].pid
+    assert retired == [old]
+    await relay.stop()
+    assert retired == spawned
+
+
+async def test_new_live_process_never_exposes_the_previous_ready_attempt(monkeypatch):
+    relay, spawned, _, _ = fixture_owner(monkeypatch, ["ready", "ready"])
+    await relay.establish()
+    old_attempt = relay.reverse_status.attempt
+    spawned[0].returncode = 255
+    entered, release = asyncio.Event(), asyncio.Event()
+    async def observe(attempt):
+        entered.set()
+        await release.wait()
+        return ReverseEvidence(attempt.attempt_id, "ready")
+    relay._observe_candidate = observe
+    replacement = asyncio.create_task(relay.establish())
+    await entered.wait()
+    assert relay.is_alive
+    assert relay.reverse_status.state != "ready"
+    release.set()
+    await replacement
+    assert relay.reverse_status.attempt.attempt_id != old_attempt.attempt_id
+    await relay.stop()
+
+
+async def test_monitor_rechecks_gate_after_collision_and_never_restarts_stopped_venue(monkeypatch):
+    relay, spawned, _, _ = fixture_owner(monkeypatch, ["ready", "occupied", "ready"])
+    answers = [True, True, False]
+    async def gate():
+        return answers.pop(0)
+    relay._reconnect_gate = gate
+    await relay.establish()
+    spawned[0].returncode = 255
+    assert await relay._restart_with_backoff("exited") is False
+    assert not answers and len(spawned) == 2
+    assert relay.retired and not relay.is_alive
+    await relay.stop()
+
+
+async def test_inconclusive_candidate_gate_defers_before_any_further_spawn(monkeypatch):
+    relay, spawned, _, _ = fixture_owner(monkeypatch, ["ready", "occupied", "ready"])
+    answers = [True, True, RuntimeError("private gate diagnostic"), True, True]
+    async def gate():
+        answer = answers.pop(0)
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+    backoffs = []
+    async def sleep(self, delay):
+        backoffs.append((len(spawned), delay))
+    relay._reconnect_gate = gate
+    monkeypatch.setattr(FiniteReverseForward, "_sleep", sleep)
+    await relay.establish()
+    spawned[0].returncode = 255
+    assert await relay._restart_with_backoff("exited") is True
+    assert backoffs and backoffs[0][0] == 2
+    assert len(spawned) == 3 and not answers
+    await relay.stop()
+
+
+async def test_failed_target_resolver_never_silently_forwards_to_a_candidate_port(monkeypatch):
+    relay, spawned, _, _ = fixture_owner(monkeypatch, ["ready"])
+    def fail():
+        raise RuntimeError("private resolver diagnostic")
+    relay._host_port_resolver = fail
+    with pytest.raises(ReverseForwardError, match="target-port-unavailable"):
+        await relay.establish()
+    assert not spawned and relay.reverse_status.state == "refused"
+
+
+async def test_cleanup_failure_is_redacted_and_prevents_another_allocation(monkeypatch):
+    relay, spawned, _, _ = fixture_owner(monkeypatch, ["unknown"])
+    async def fail(*_args):
+        raise RuntimeError("private cleanup diagnostic")
+    monkeypatch.setattr(FiniteReverseForward, "_terminate", fail)
+    with pytest.raises(ReverseForwardError, match="cleanup-failed") as error:
+        await relay.establish()
+    assert "private" not in str(error.value)
+    assert relay.reverse_status.state == "unknown"
+    with pytest.raises(ReverseForwardError):
+        await relay.establish()
+    assert len(spawned) == 1
 
 
 @pytest.mark.parametrize("host,port", [

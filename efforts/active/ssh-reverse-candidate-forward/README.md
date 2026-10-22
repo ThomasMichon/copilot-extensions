@@ -78,7 +78,7 @@ enrollment nor deployment and does not relax existing source claims.
 - [x] Merge the governing vision/pattern amendment #7726 under its actual
   required checks. Approval without merge is not completion.
 - [x] Land this narrow transport proposal through normal review/CI.
-- [ ] Publish the exact optional API and result semantics in #7720 for #7719;
+- [x] Publish the exact optional API and result semantics in #7720 for #7719;
   distinguish admitted candidate, retained transport, readiness and unknown.
 
 ### Phase 2 - Existing forward-owner implementation
@@ -201,3 +201,22 @@ redacted cause codes rather than raw credential-shaped diagnostics.
   owner-sweep skip on native Windows, including bounded diagnostic reasons and
   cancellation/stop before a delayed spawn returns. F/E9 lint and the existing
   install-contract gate passed. No runtime was installed.
+
+### 2026-10-22 - Reconnect/lifecycle review corrections
+
+- Initial source review of #7779 identified cleanup/replacement concurrency,
+  per-candidate reconnect gating, stale readiness and default-target drift.
+  These are material source defects, not findings waived by a green check.
+- Serialize retirement, monitor restart and direct establish through one
+  task-owned lifecycle boundary. Concurrent callers report busy without
+  overwriting active state. Explicit stop cancels the active owner operation
+  and preserves interrupted uncertainty. No descendant sweep can race a
+  replacement owned by another transition.
+- Invalidate the stored ready attempt before replacement, retain the initial
+  local target across remote endpoint changes, refuse failed target resolution,
+  and recheck stop/unknown venue gates before each monitor-driven candidate.
+- Focused contained validation now passes63 cases with the same one
+  Linux-only pidfd skip, including delayed retirement versus direct establish,
+  old readiness during a delayed new observer, gate changes after a collision,
+  stable local target and redacted cleanup failure. Current source review and
+  actual merge are still pending; no release or adoption is claimed.

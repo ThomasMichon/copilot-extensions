@@ -102,6 +102,11 @@ permit rotation by themselves. The successful SSH process/listener remains
 held throughout observation and return. No free-port probe is closed and later
 rebound. The existing target-port resolver, headless proxy owner, process-tree
 cleanup and reconnect gate are reused.
+The default local target remains the initially supplied target port when the
+remote listener changes; a failing/invalid explicit resolver is refused rather
+than silently forwarding to another candidate port. Every monitor-driven
+candidate rechecks the reconnect gate. A stopped venue retires the owner;
+an inconclusive gate defers connection through the existing backoff.
 
 `establish()`/`start()` retain their awaitable shape; inspect immutable
 `reverse_status` afterward. `ready` supplies the exact attempt for the existing
@@ -119,6 +124,13 @@ before any replacement request or instance. Interrupted spawn ownership is
 retained through eventual cleanup, with a separate five-second cleanup wait;
 pending cleanup remains explicitly owned rather than discarded at that wait.
 The operation itself has one finite deadline across all candidates.
+Retirement, candidate establishment and monitor-driven replacement share one
+task-owned lifecycle boundary. A concurrent caller receives an explicit
+`unavailable/lifecycle-busy` error without altering the active operation's
+status; it does not install a replacement during another attempt's cleanup.
+Stored readiness is invalidated before an exited transport is replaced.
+`stop()` cancels an in-flight owner operation and waits for its owned cleanup;
+an interrupted attempt remains unknown, not a fabricated successful release.
 
 This library supplies no authenticated production observer, enrollment
 projection, fleet publication ledger, installer or adoption. Local socket and

@@ -118,6 +118,7 @@ async def test_real_retained_process_recovers_without_retiring_foreign_listener(
         assert dynamic.reverse_status.state == "ready"
         assert dynamic.reverse_status.attempt.attempt_id != previous_attempt
         assert dynamic.reverse_status.attempt.request_id == "native-operation-a"
+        assert dynamic.reverse_status.attempt.target_port == occupied
         await dynamic.stop()
         assert all(proc.returncode is not None for proc in processes)
         assert dynamic.reverse_status.state != "ready"
