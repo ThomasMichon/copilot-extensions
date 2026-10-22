@@ -3001,7 +3001,7 @@ class TestCreatePRAutoOpen:
         assert rec_after.active_pr().attribution_head == ""
 
     def test_codename_mode_skips_marker_for_a_non_string_codename(
-        self, pr_repo, monkeypatch,
+        self,
     ):
         """A tracking record whose `codename` field somehow isn't even a
         string (dataclass fields aren't runtime-type-checked) must not

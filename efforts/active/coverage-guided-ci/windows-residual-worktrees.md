@@ -87,7 +87,46 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Admitted fixture-semantic batches
 
+### B-PROVIDER-RECORD non-string guard fixture signature
+
+Baseline: the actual #7704 merge. The non-string-codename guard case
+directly exercises `is_valid_handle` and its short-circuit guard; it
+does not read `pr_repo` or use `monkeypatch`. Remove only those unused
+parameters so this pure guard case does not construct unrelated Git
+repositories. The entire resulting function matches pinned preserved
+source; its body, exception assertion and short-circuit assertion are
+unchanged. All original test identities and decorators remain.
+
+The MX-PROVIDER hunk-15 signature subspan belongs to
+`TestCreatePRAutoOpen.test_codename_mode_skips_marker_for_a_non_string_codename`,
+not `test_attribution_keys_are_consistent`. The latter symbol is absent
+from both immutable inputs and current Dev. This corrects the ownership
+description, not the immutable hunk hash or its B-PROVIDER-RECORD owner.
+The hunk's separate test-removal subspans retain their reviewed
+B-PROVIDER-ASSERT delta retirement; their tests still execute.
+
+Complete native Windows provider module: 246 passed, zero skips,
+123.61 seconds pytest / 137.33 preparation-cleanup inclusive. Exactly
+two work-stealing workers retain the original 30-second item watchdog,
+all marks/resource ceilings and the 240-second diagnostic group.
+Functional integration only, not quiet-host, whole-suite or repeated
+same-head qualification.
+
+This below-altitude test-fixture extraction changes no production,
+command, configuration, installation or architecture contract.
+Documentation impact is this ledger; no adopter guide changes.
+Clean-room provisioning and external-venue lanes are inapplicable
+to this native test-only fixture reduction. Other B/N and production
+S/F/G/P/R/A contracts and parent qualification remain open.
+
 ### B-LANDING unused commit-ID reads
+
+Actual disposition: #7704 merged as
+`554c185201ed633686ee2783f0dbce609ccd100c`; full Copilot review
+`5608120552` approved exact head
+`4cda40926163034d83bf02ed45a6d8a86d876bed`.
+Overview, inline/general channels and threads had no findings;
+required CI was green and the child worktree is finalized.
 
 Baseline: the actual #7701 merge. `_commit` now returns `None`,
 avoiding a `rev-parse HEAD` after commits whose callers discard the
@@ -2966,7 +3005,10 @@ not create a behavioral dependency between otherwise independent batches.
   `test_codename_mode_skip_does_not_record_attribution_head`, and
   `test_no_attribution_omits_marker` maps to the strengthened equivalent
   assertions above -> B-PROVIDER-ASSERT. Removing unused fixture parameters
-  from `test_attribution_keys_are_consistent` -> B-PROVIDER-RECORD.
+  from `TestCreatePRAutoOpen.test_codename_mode_skips_marker_for_a_non_string_codename`
+  -> B-PROVIDER-RECORD. The earlier `test_attribution_keys_are_consistent`
+  label was an ownership-description error, not a symbol in either
+  immutable input; hunk 15 and its hash are unchanged.
 
 No MX item is a new unresolved ownership question. Implementation must first
 split the identified statements/functions and retain their prerequisite
