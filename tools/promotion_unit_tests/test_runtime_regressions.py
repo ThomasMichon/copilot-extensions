@@ -88,6 +88,14 @@ def test_native_execution_check_is_project_independent():
         (["update", "--auth-report"], False),
         (["update", "--auth-report", "--auth-source=example/project"], True),
         (["claims", "ownership", "--json"], True),
+        (["update", "--request-status", "synthetic-request"], True),
+        (["update", "--request-status=synthetic-request", "--json"], True),
+        (["update", "--recovery-status", "--json"], True),
+        (["update", "--recover-after-restart"], True),
+        (["update"], False),
+        (["update", "--detach"], False),
+        (["update", "--supervised-debug"], False),
+        (["update", "--not-recovery-status"], False),
     ],
 )
 def test_other_project_routing_contracts_are_preserved(argv, allowed):
