@@ -10,6 +10,7 @@ that pattern to this repository.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
+| [Coordinated Launch Maintenance](active/coordinated-launch-maintenance/README.md) | Draft; nonblocking healthy handoff with coordinated adopted background maintenance | #7694; preserves #6812/#6820/#7667 owners |
 | [Backlog Reconciliation](active/backlog-reconciliation/README.md) | Active; oldest-first evidence and requirement-preserving consolidation, no implementation | #7556; 1,458 baseline, 729 guidance checkpoint |
 | [Feed Construction Release Gate](active/feed-construction-release-gate/README.md) | Draft; complete configured-feed construction and installed-launch qualification before CI/promotion activation | #7529; preserves #3336/#6237 control and #7420/#7446/#7514 repair owners |
 | [Acknowledged Execution Handoff](active/acknowledged-execution-handoff/README.md) | Active; source/test scope assigned, optional effect adapter construction first | #7268; coordinator integration and live adoption remain open |
