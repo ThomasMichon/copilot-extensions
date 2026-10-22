@@ -55,7 +55,7 @@ Retained means candidate ownership, not reviewed, passing or already landed.
 | H | 3 / one hook protection decision | `hooks.py` and `test_hooks.py`: one in-repo read per decision including empty mappings; retain machine-local > committed > registry priority; later calls re-read. No persistent authority cache. |
 | C | 3 / committed-config absence probe | `inrepo_config_source.py`, `test_config.py:2`: literal NUL `ls-tree` candidate probe, no unsafe path globbing; absent candidates avoid blob reads; failure retains bounded ordered reads, deadline, precedence and diagnostics. Separate from Y/H. |
 | S | 3 / squash tree object reads | `finalize_ref.py:2`: one ordered two-tree probe; require exactly two complete SHA-1/SHA-256 IDs; empty base/no change/error retain refusal. Focused regression ownership is the existing real-Git no-ref-movement case plus ordered-read unit cases in `test_finalize_landing.py`, detailed below. |
-| F | 3 / upstream blob comparison | `finalize_ref.py:5`, `test_finalize_blob_comparison.py`: raw tree diff and exact object maps include deletion/type/path cases, malformed reads fail closed with warning. Requires actual `git_tree_diff` consumer availability, not an inferred filename match. |
+| F | 3 / upstream blob comparison | `finalize_ref.py:5` and the F-only test functions partitioned below: raw tree diff and exact object maps include deletion/type/path cases, malformed reads fail closed with warning. Reuses the existing `git_tree_diff` consumer API. |
 | G | 3 / creation-point gating | `finalize_open_pr_gate.py`, `finalize_ref.py:3-4`: skip unnecessary creation inference only after fresh zero-ahead proof; malformed counts/unknown creation remain conservative; local source shadowing, remote tips/reflogs and subsequent reset history still constrain publication. Separate from S/F; regression extraction unresolved. |
 | P | 3 / publication transport evidence | `README.md`, `pr_publish.py`, `pr_rewrite.py`, `test_pr_remote_evidence.py`: one fresh fetch/push snapshot per decision; same slug on another host refused; literal remote-key regex, NUL framing, repeated/multiline/valueless settings and order retained; read errors prevent push; pinning, leases and later mutation checks remain real. |
 | R | 3 / replay tree evidence | `pr_rebase.py`, `test_pr_rebase_trees.py`: pinned complete commits, exact ordered raw trees, notes/signature/color/replacement/foreign Git context cannot substitute evidence; malformed/truncated/duplicate rows and timeout preserve refusal; parent reconstruction and raw author/message comparisons remain independent checks. |
@@ -86,6 +86,58 @@ No hunk is assigned to a catch-all wave-6 implementation batch. Wave 6 is
 the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Admitted narrow batches
+
+### F batched upstream blob comparison
+
+Only `finalize_ref.py::_blobs_on_upstream` and its `git_tree_diff` import
+are extracted from the pinned production residual. The existing raw tree
+diff helper supplies complete changed-path object IDs. Existing exact
+object-map reads resolve deleted branch paths (including replacement by
+a directory) and all upstream paths. Ordinary nondeleted paths require
+exactly three Git calls, independent of their count. An unreadable or
+malformed diff/object map warns and refuses landing; no ref is moved.
+Content comparison retains the existing mode-only behavior.
+
+The original mixed `test_finalize_blob_comparison.py:1` hunk is partitioned
+by symbol, not copied wholesale. F owns `_change`, its landing-seed
+aliases/`env` fixture, and these four test functions:
+`test_changed_objects_cover_files_deletions_and_directory_replacements`,
+`test_many_literal_changed_paths_use_a_bounded_number_of_real_git_calls`,
+`test_failed_object_evidence_is_not_reported_as_landed`, and
+`test_landing_compares_object_content_without_turning_modes_into_unpublished_work`.
+The failed-evidence test additionally exercises successful commands with
+malformed output through this consumer, retaining its warning assertion.
+
+G retains the other five original test functions:
+`test_a_tracked_ref_cannot_have_commits_beyond_the_identical_current_ref`,
+`test_a_different_tracked_branch_still_blocks_unpublished_work`,
+`test_zero_extra_commits_use_real_graph_evidence_without_creation_history`,
+`test_unreadable_extra_commit_counts_never_authorize_finalization`, and
+`test_creation_point_without_a_later_reset_needs_no_source_tip_reread`.
+Its imports and later-reset signature must reconcile to current Dev's
+stronger published-base contract. No G behavior, whitespace retirement,
+publication, replay or recovery change is included in F.
+
+Native Windows blob-consumer and helper modules: 56 passed, zero skips,
+26.47 seconds pytest / 30.16 preparation-cleanup inclusive, including the
+helper's existing explicitly admitted native T3 cases. All 59 landing
+nodes passed in exhaustive disjoint functional groups of 20/20/19:
+54.45, 174.09 and 115.75 seconds; collection, preparation and cleanup
+totaled 353.89 seconds. The collected-node bijection proves no omitted or
+duplicated case. Exactly two work-stealing workers retain the original
+30-second item watchdog, 240-second diagnostic group and all native,
+process and memory bounds. Ruff and thirteen install contracts pass.
+No normal runner grouping, skip, mark, deadline or resource limit changes.
+The previously observed single-file landing-group timeout remains open.
+
+Documentation impact: this below-altitude internal optimization preserves
+the landing API and no-ref-mutation guarantee. This ledger records the
+read contract and mixed-test ownership; no operator command/configuration
+changes. Actual temporary Git repositories provide the simple integration
+lane. No installer or first-provision behavior changes, so production
+clean-room and external-development-venue lanes are inapplicable.
+Functional evidence does not qualify normal whole-suite grouping,
+quiet-host execution or repeated same-head performance.
 
 ### S ordered squash-probe tree reads
 

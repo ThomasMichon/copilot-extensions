@@ -1,0 +1,9 @@
+{
+  "comment": "Batch finalize upstream object comparison with literal changed-path evidence and fail-closed diagnostics.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

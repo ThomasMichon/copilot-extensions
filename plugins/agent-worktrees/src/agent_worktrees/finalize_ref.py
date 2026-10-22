@@ -8,7 +8,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from . import git_ops, output
+from . import git_ops, git_tree_diff, output
 
 #: The identity of the probe commit :func:`squash_landed` builds (never a ref's).
 _PROBE_IDENTITY = ("-c", "user.name=agent-worktrees", "-c", "user.email=agent-worktrees@localhost")
@@ -211,25 +211,27 @@ def _blobs_on_upstream(branch: str, upstream: str, cwd: str) -> bool:
     if merge_base_r.returncode != 0:
         return False
 
-    diff_r = git_ops.git(
-        "diff", "--name-only", merge_base_r.stdout.strip(), branch,
-        cwd=cwd, check=False,
+    def run_git(*args: str):
+        return git_ops.git(*args, cwd=cwd, check=False)
+
+    try:
+        changed_files = git_tree_diff.read(run_git, merge_base_r.stdout.strip(), branch)
+        if not changed_files:
+            return True
+        branch_objects = {
+            file: after for file, (_before, after) in changed_files.items() if after.strip("0")
+        }
+        deleted_paths = changed_files.keys() - branch_objects.keys()
+        branch_objects.update(git_tree_diff.read_objects(run_git, branch, deleted_paths))
+        upstream_objects = git_tree_diff.read_objects(run_git, upstream, changed_files)
+    except git_tree_diff.TreeDiffError as exc:
+        output.warn(f"Cannot verify changed files on upstream: {exc}")
+        return False
+
+    return all(
+        branch_objects.get(file) == upstream_objects.get(file)
+        for file in changed_files
     )
-    changed_files = [f for f in diff_r.stdout.splitlines() if f.strip()]
-    if not changed_files:
-        return True
-
-    for file in changed_files:
-        b_blob = git_ops.git(
-            "rev-parse", f"{branch}:{file}", cwd=cwd, check=False
-        )
-        m_blob = git_ops.git(
-            "rev-parse", f"{upstream}:{file}", cwd=cwd, check=False
-        )
-        if b_blob.stdout.strip() != m_blob.stdout.strip():
-            return False
-
-    return True
 
 
 def resolve_finalize_ref(
