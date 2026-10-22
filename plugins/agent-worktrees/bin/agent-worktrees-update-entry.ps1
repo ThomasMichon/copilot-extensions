@@ -258,7 +258,8 @@ try {
     try {
         foreach ($_name in $_updateGitRouting) {
             $_savedUpdateGit[$_name] = [Environment]::GetEnvironmentVariable($_name)
-            [Environment]::SetEnvironmentVariable($_name, $null)
+            [Environment]::SetEnvironmentVariable(
+                $_name, [System.Management.Automation.Language.NullString]::Value)
         }
         $env:WORKTREE_MANAGER_ROOT = $_updateRoot
         if (-not $env:AGENT_WORKTREES_UPDATE_CONTEXT) {
@@ -274,7 +275,12 @@ try {
             Remove-Item Env:AGENT_WORKTREES_UPDATE_CONTEXT -ErrorAction SilentlyContinue
         } else { $env:AGENT_WORKTREES_UPDATE_CONTEXT = $_savedUpdateContext }
         foreach ($_name in $_savedUpdateGit.Keys) {
-            [Environment]::SetEnvironmentVariable($_name, $_savedUpdateGit[$_name])
+            if ($null -eq $_savedUpdateGit[$_name]) {
+                [Environment]::SetEnvironmentVariable(
+                    $_name, [System.Management.Automation.Language.NullString]::Value)
+            } else {
+                [Environment]::SetEnvironmentVariable($_name, $_savedUpdateGit[$_name])
+            }
         }
     }
 } finally {

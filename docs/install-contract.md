@@ -1186,6 +1186,9 @@ The existing Windows Git-sh front door selects that same native PowerShell
 early entry before parsing registrations, preserving native `C:\...` roots
 instead of interpreting them as POSIX paths. Only the helper filename is
 converted with `cygpath`; source/root authority is not changed.
+The PowerShell entry removes inherited Git repository selectors for the fresh
+bootstrap rather than assigning empty values, and restores both their original
+values and absence afterward. A present empty `GIT_DIR` still redirects Git.
 
 The registered Manager root (or the existing explicit root/default when no
 provider is registered) is preserved. Its durable `config.toml` `[source]`

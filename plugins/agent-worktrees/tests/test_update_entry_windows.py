@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 
 import pytest
@@ -13,6 +14,70 @@ from test_update_entry import update_entry_case as shared_update_entry_case
 update_entry_case = shared_update_entry_case
 
 pytestmark = pytest.mark.skipif(os.name != "nt", reason="native Windows security/process contract")
+
+
+@pytest.mark.parametrize("original", ["absent", "empty", "selected"])
+@pytest.mark.parametrize("edition", ["configured", "core"])
+def test_update_entry_windows_scrubs_and_restores_git_selector_presence(
+    update_entry_case, native_powershell, original, edition,
+):
+    tmp, _home, _resolver = update_entry_case
+    if edition == "core":
+        native_powershell = shutil.which("pwsh")
+        if native_powershell is None:
+            pytest.skip("PowerShell Core is unavailable")
+    harness = tmp / "git-environment.ps1"
+    entry = str(PLUGIN / "bin/agent-worktrees.ps1").replace("'", "''")
+    proof = str(tmp / "git-environment.json").replace("'", "''")
+    harness.write_text(
+        "$ErrorActionPreference = 'Stop'\n"
+        "$names = @('GIT_DIR','GIT_WORK_TREE','GIT_COMMON_DIR','GIT_INDEX_FILE',"
+        "'GIT_PREFIX','GIT_OBJECT_DIRECTORY','GIT_ALTERNATE_OBJECT_DIRECTORIES')\n"
+        f"$original = '{original}'\n"
+        "foreach ($name in $names) {\n"
+        "  if ($original -eq 'absent') {\n"
+        "    [Environment]::SetEnvironmentVariable($name, "
+        "[System.Management.Automation.Language.NullString]::Value)\n"
+        "  } else {\n"
+        "    $value = if ($original -eq 'empty') { '' } else { 'synthetic-routing' }\n"
+        "    [Environment]::SetEnvironmentVariable($name, $value)\n"
+        "  }\n"
+        "}\n"
+        "$before = @{}\n"
+        "foreach ($name in $names) { $before[$name] = "
+        "[Environment]::GetEnvironmentVariable($name) }\n"
+        "function Invoke-WebRequest {\n"
+        "  param($Uri, $OutFile, [switch]$UseBasicParsing)\n"
+        "  [IO.File]::WriteAllText($OutFile, @'\n"
+        "$names = @('GIT_DIR','GIT_WORK_TREE','GIT_COMMON_DIR','GIT_INDEX_FILE',"
+        "'GIT_PREFIX','GIT_OBJECT_DIRECTORY','GIT_ALTERNATE_OBJECT_DIRECTORIES')\n"
+        "foreach ($name in $names) {\n"
+        "  if ($null -ne [Environment]::GetEnvironmentVariable($name)) {\n"
+        "    throw \"Bootstrap inherited Git selector: $name\"\n"
+        "  }\n"
+        "}\n"
+        "exit 23\n"
+        "'@)\n"
+        "}\n"
+        f"& '{entry}' update\n"
+        "$code = $LASTEXITCODE\n"
+        "$after = @{}\n"
+        "foreach ($name in $names) { $after[$name] = "
+        "[Environment]::GetEnvironmentVariable($name) }\n"
+        f"[IO.File]::WriteAllText('{proof}', "
+        "(@{before=$before;after=$after} | ConvertTo-Json))\n"
+        "exit $code\n",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [native_powershell, "-NoProfile", "-File", str(harness)],
+        capture_output=True, timeout=45, **no_window_kwargs(),
+    )
+    assert result.returncode == 23, result.stdout + result.stderr
+    state = json.loads((tmp / "git-environment.json").read_text())
+    if original == "absent":
+        assert all(value is None for value in state["before"].values())
+    assert state["after"] == state["before"]
 
 
 def test_update_entry_windows_scratch_token_user_acl(

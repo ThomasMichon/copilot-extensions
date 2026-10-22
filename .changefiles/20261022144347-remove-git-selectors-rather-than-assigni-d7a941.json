@@ -1,0 +1,9 @@
+{
+  "comment": "Remove Git selectors rather than assigning empty strings during fresh PowerShell bootstrap; restore original presence and values",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

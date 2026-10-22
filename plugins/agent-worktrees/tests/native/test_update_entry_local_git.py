@@ -26,11 +26,15 @@ pytestmark = pytest.mark.skipif(
 )
 
 BOOTSTRAP_SH = b"""#!/bin/sh
+git -C "$NATIVE_BOOTSTRAP_GIT_REPO" rev-parse --is-bare-repository > "$NATIVE_BOOTSTRAP_GIT_PROOF" || exit $?
 printf '%s\\0' "$@" > "$NATIVE_BOOTSTRAP_ARGS"
 printf '%s' "$0" > "$NATIVE_BOOTSTRAP_PATH"
 exit 73
 """
 BOOTSTRAP_PS1 = b"""$ErrorActionPreference = 'Stop'
+$proof = & git -C $env:NATIVE_BOOTSTRAP_GIT_REPO rev-parse --is-bare-repository
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+[IO.File]::WriteAllText($env:NATIVE_BOOTSTRAP_GIT_PROOF, $proof.Trim())
 $json = ConvertTo-Json -Compress -InputObject @($args)
 [IO.File]::WriteAllText($env:NATIVE_BOOTSTRAP_ARGS, $json)
 [IO.File]::WriteAllText($env:NATIVE_BOOTSTRAP_PATH, $PSCommandPath)
@@ -237,6 +241,8 @@ def test_update_entry_native_local_git(
         "AGENT_WORKTREES_NO_SELFPROVISION": "1",
         "NATIVE_BOOTSTRAP_ARGS": str(root / "fresh.args"),
         "NATIVE_BOOTSTRAP_PATH": str(root / "fresh.path"),
+        "NATIVE_BOOTSTRAP_GIT_REPO": str(repo),
+        "NATIVE_BOOTSTRAP_GIT_PROOF": str(root / "fresh.git"),
         "NATIVE_OLD_INTERPRETER": str(root / "old-interpreter"),
         "NATIVE_OLD_RESOLVER": str(root / "old-resolver"),
         "NATIVE_OLD_MANAGER": str(root / "old-manager"),
@@ -290,6 +296,7 @@ def test_update_entry_native_local_git(
         command = [shell, str(local_bin / "native-fixture"), *flags]
     result = _run(command, env=env, cwd=root)
     assert result.returncode == EXIT, result.stderr.decode(errors="replace")
+    assert (root / "fresh.git").read_text(encoding="utf-8").strip() == "true"
     if windows:
         args = json.loads((root / "fresh.args").read_text(encoding="utf-8"))
     else:
