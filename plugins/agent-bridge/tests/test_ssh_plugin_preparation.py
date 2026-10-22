@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import os
 import random
 import shutil
 import subprocess
+import sys
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -164,6 +166,33 @@ async def test_streamed_receiver_preserves_native_authority_and_global_preferenc
     assert all(len(command) < 8192 for _host, command, _stdin in manager.calls)
     assert len(manager.calls[-1][2]) > 32_768
     assert target.env == {"UNCHANGED": "request-value"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("matching", [False, True])
+async def test_ssh_planner_verifies_session_qualified_controller_owner(receiver, monkeypatch, matching):
+    from agent_bridge.spawn_target import REQUEST_OVERRIDES_KEY
+
+    target, manager, controller, _child, _home = receiver
+    session = "11111111-2222-3333-4444-555555555555"
+    target.caller_owner_ref = f"local/control/controller#{session}"
+    target.venue = {REQUEST_OVERRIDES_KEY: {
+        "controller_worktree_origin": "explicit",
+        "controller_session_id": session if matching else "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+    }}
+    owner = AsyncMock(return_value={"worktrees": [{
+        "id": "controller", "repo": "control", "machine": "local",
+        "path": str(controller), "status": "active",
+    }]})
+    monkeypatch.setattr("agent_bridge.acquisition_authority.worktree_command", owner)
+    if matching:
+        assert await ssh_plugin_preparation.prepare_ssh_plugins(target, manager, environment={})
+        assert target.prepared_plugins["plugins"][0]["projected_source"] == "sample@local"
+        owner.assert_awaited_once()
+    else:
+        with pytest.raises(RuntimeError, match="controller context could not be verified"):
+            await ssh_plugin_preparation.prepare_ssh_plugins(target, manager, environment={})
+        assert target.prepared_plugins is None and len(manager.calls) == 1
 
 
 @pytest.mark.asyncio
@@ -345,7 +374,7 @@ async def test_live_ssh_profile_streams_shared_engine_without_an_installed_bridg
     assert target.prepared_plugins["plugins"][0]["projected_source"] == "sample@local"
 
 
-def _mutating_receiver(heartbeat, started):
+def _mutating_receiver(heartbeat, started, *, early_exit=None, exit_delay=0):
     child = (
         "import pathlib,time\n"
         f"path=pathlib.Path({str(heartbeat)!r})\n"
@@ -360,8 +389,77 @@ def _mutating_receiver(heartbeat, started):
         "    stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,\n"
         "    creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))\n"
         f"pathlib.Path({str(started)!r}).write_text(str(child.pid))\n"
-        "child.wait(timeout=10)\n"
+        + (
+            "child.wait(timeout=10)\n" if early_exit is None else
+            "deadline=time.monotonic()+3\n"
+            f"while not pathlib.Path({str(heartbeat)!r}).is_file() and time.monotonic()<deadline:\n"
+            "    time.sleep(.02)\n"
+            f"time.sleep({exit_delay})\n"
+            f"raise SystemExit({early_exit})\n"
+        )
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("exit_code", [0, 3])
+async def test_receiver_early_exit_reaps_mutating_descendants(receiver, tmp_path, exit_code):
+    target, manager, _controller, _child, _home = receiver
+    heartbeat, started = tmp_path / "heartbeat", tmp_path / "started"
+    before = time.monotonic()
+    try:
+        operation = ssh_plugin_preparation._run_python(
+            manager, target, _mutating_receiver(heartbeat, started, early_exit=exit_code), timeout=3,
+        )
+        if exit_code:
+            with pytest.raises(RuntimeError, match="exit 3"):
+                await operation
+        else:
+            assert await operation == ""
+        assert started.is_file() and heartbeat.is_file()
+        settled = heartbeat.read_bytes()
+        await asyncio.sleep(.3)
+        assert heartbeat.read_bytes() == settled
+    finally:
+        await asyncio.sleep(max(0, 7 - (time.monotonic() - before)))
+
+
+@pytest.mark.asyncio
+async def test_lost_supervisor_does_not_orphan_early_exit_descendants(tmp_path):
+    from agent_bridge import ssh_plugin_receiver
+
+    heartbeat, started = tmp_path / "heartbeat", tmp_path / "started"
+    encoded = base64.b64encode(_mutating_receiver(
+        heartbeat, started, early_exit=0, exit_delay=.5,
+    ).encode()).decode()
+    script = tmp_path / "supervisor.py"
+    script.write_text(
+        Path(ssh_plugin_receiver.__file__).read_text(encoding="utf-8")
+        + f"\nsupervise({encoded!r},3)\n",
+        encoding="utf-8",
+    )
+    before = time.monotonic()
+    process = subprocess.Popen(
+        [sys.executable, "-I", "-S", "-X", "utf8", str(script)],
+        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        creationflags=no_window_flags(),
+    )
+    try:
+        deadline = before + 5
+        while not heartbeat.exists():
+            assert process.poll() is None, "Receiver exited before its child started"
+            assert time.monotonic() < deadline, "Receiver child did not start"
+            await asyncio.sleep(.02)
+        process.kill()
+        await asyncio.to_thread(process.communicate, timeout=10)
+        await asyncio.sleep(1)
+        settled = heartbeat.read_bytes()
+        await asyncio.sleep(.3)
+        assert heartbeat.read_bytes() == settled
+    finally:
+        if process.poll() is None:
+            process.kill()
+            await asyncio.to_thread(process.communicate, timeout=10)
+        await asyncio.sleep(max(0, 7 - (time.monotonic() - before)))
 
 
 @pytest.mark.asyncio

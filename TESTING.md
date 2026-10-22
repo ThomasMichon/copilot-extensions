@@ -14,7 +14,9 @@ receiver against isolated synthetic checkouts, without installing Bridge or
 starting Copilot. It covers target-native marketplace authority, disablement and
 missing-payload refusal; a payload larger than Windows argv limits; UTF-8/spaced
 paths; hidden Windows Python with concurrent stdout/stderr drains; and bounded
-installer-descendant cleanup.
+installer-descendant cleanup, including early worker success/error and loss of
+the supervisor. The session-qualified controller-owner controls verify both a
+matching session and refusal of a mismatched one.
 
 Two live SSH controls additionally require
 `AGENT_BRIDGE_TEST_SAME_FILESYSTEM_SSH=<configured-profile>`. Select an existing

@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import base64
+import json
 import os
+import select
 import signal
 import subprocess
 import sys
+import threading
 
 # The worker owns the kill-on-close Job before it can execute preparation or
 # spawn installers. It inherits containment; no breakaway or durable process.
@@ -49,27 +52,96 @@ exec(compile(sys.stdin.buffer.read().decode('utf-8'),'<ssh-plugin-preparation>',
 """
 
 
+_POSIX_KEEPER = r"""
+import base64,json,os,signal,subprocess,sys,time
+try:
+    request=json.loads(sys.stdin.buffer.read())
+    worker=subprocess.Popen(
+        [sys.executable,'-I','-S','-X','utf8','-u','-c',request['bootstrap']],
+        stdin=subprocess.PIPE)
+    try:
+        worker.communicate(base64.b64decode(request['program']),timeout=request['timeout'])
+        code=worker.returncode
+    except subprocess.TimeoutExpired:
+        code=124
+    os.write(int(sys.argv[1]),str(code).encode('ascii'))
+    # Keep group ownership until the supervisor reaps the whole group.
+    time.sleep(15)
+finally:
+    # A lost supervisor (including a broken report pipe) cannot orphan writers.
+    os.killpg(os.getpgrp(),signal.SIGKILL)
+"""
+
+
+def _posix_run(encoded: str, timeout: float) -> tuple[bytes, bytes, int]:
+    completion, report = os.pipe()
+    try:
+        keeper = subprocess.Popen(  # headless-guard: allow streamed POSIX-only stdlib receiver
+            [sys.executable, "-I", "-S", "-X", "utf8", "-u", "-c", _POSIX_KEEPER, str(report)],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            pass_fds=(report,), start_new_session=True,
+        )
+    except BaseException:
+        os.close(completion)
+        raise
+    finally:
+        os.close(report)
+    results = []
+    failures = []
+
+    def communicate():
+        try:
+            results.append(keeper.communicate(json.dumps({
+                "program": encoded, "bootstrap": _WORKER, "timeout": timeout,
+            }).encode("utf-8")))
+        except BaseException as exc:
+            failures.append(exc)
+
+    drain = threading.Thread(target=communicate, daemon=True)
+    drain.start()
+    try:
+        ready, _, _ = select.select([completion], [], [], timeout)
+        if ready:
+            status = os.read(completion, 32)
+            if not status:
+                raise RuntimeError("SSH plugin receiver keeper exited without an outcome")
+            code = int(status.decode("ascii"))
+        else:
+            code = 124
+    finally:
+        os.close(completion)
+        # The keeper remains alive after the actual worker's success or error,
+        # so its PID/group cannot be recycled before this cleanup boundary.
+        if keeper.poll() is None:
+            os.killpg(keeper.pid, signal.SIGKILL)
+        drain.join(timeout=15)
+    if drain.is_alive():
+        raise RuntimeError("SSH plugin receiver pipes did not quiesce after cleanup")
+    if failures:
+        raise failures[0]
+    stdout, stderr = results[0]
+    return stdout, stderr, code
+
+
 def supervise(encoded: str, timeout: float) -> None:
     """Exit only after the receiver and its captured streams have settled."""
-    worker = subprocess.Popen(
-        [sys.executable, "-I", "-S", "-X", "utf8", "-u", "-c", _WORKER],
-        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),  # headless-guard: allow streamed stdlib receiver has no host agent_procutil
-        start_new_session=os.name != "nt",
-    )
-    timed_out = False
-    try:
-        stdout, stderr = worker.communicate(base64.b64decode(encoded), timeout=timeout)
-    except subprocess.TimeoutExpired:
-        timed_out = True
-        if os.name == "nt":
+    if os.name != "nt":
+        stdout, stderr, code = _posix_run(encoded, timeout)
+    else:
+        worker = subprocess.Popen(
+            [sys.executable, "-I", "-S", "-X", "utf8", "-u", "-c", _WORKER],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),  # headless-guard: allow streamed stdlib receiver has no host agent_procutil
+        )
+        try:
+            stdout, stderr = worker.communicate(base64.b64decode(encoded), timeout=timeout)
+            code = worker.returncode
+        except subprocess.TimeoutExpired:
             worker.kill()  # Closing its Job kills installer descendants too.
-        else:
-            os.killpg(worker.pid, signal.SIGKILL)
-        stdout, stderr = worker.communicate(timeout=15)
+            stdout, stderr = worker.communicate(timeout=15)
+            code = 124
     sys.stdout.buffer.write(stdout)
     sys.stderr.buffer.write(stderr)
-    if timed_out:
+    if code == 124:
         sys.stderr.write("\nSSH plugin receiver preparation timed out\n")
-        raise SystemExit(124)
-    raise SystemExit(worker.returncode)
+    raise SystemExit(code)

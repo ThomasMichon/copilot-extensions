@@ -429,7 +429,9 @@ Preparation payloads travel on stdin, not SSH argv. POSIX uses `python3`;
 Windows uses a short encoded PowerShell command and a hidden Python process
 with both output pipes drained concurrently. The streamed receiver bounds its
 worker to 540 seconds and contains installer descendants in a POSIX process
-group or a Windows kill-on-close Job. Cancellation waits for the bounded
+group or a Windows kill-on-close Job. A POSIX keeper retains group ownership
+until cleanup on success, error or timeout; its own bounded fallback also
+handles a lost supervisor. Cancellation waits for the bounded
 channel to settle before propagating: killing a local SSH client alone does not
 prove that the remote writer stopped. A failed or cancelled preparation never
 opens productive ACP stdio. This is ACP preparation integration, not proof of

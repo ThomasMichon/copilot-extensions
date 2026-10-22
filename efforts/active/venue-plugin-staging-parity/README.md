@@ -322,6 +322,27 @@ or a reason to create a daemon.
 
 ## Journal
 
+### 2026-10-22 - Correct session-qualified controller and early-exit cleanup
+
+- #7856's first review identified two real gaps. The shared venue planner now
+  forwards the controller session identity recorded by the existing launch
+  owner, preserving matching session-qualified owner references while still
+  refusing a mismatched session.
+- A real POSIX control reproduced the published candidate's descendant leak:
+  success (exit 0) and error (exit 3) returned while a redirected child still
+  wrote; only the deadline control quiesced. The corrected receiver retains an
+  owned POSIX group keeper until complete-group cleanup on every outcome.
+  A broken report pipe or lost supervisor also reaches the keeper's cleanup.
+- Current native POSIX controls confirm quiescence for success, error, deadline
+  and supervisor loss. Windows/selection coverage passes 149 cases, including
+  actual SSH controls and the matching/mismatched controller regressions.
+  The existing retained test venue was used only for bounded stdlib probes,
+  with no agent, provisioning, credential relay or runtime update, then stopped
+  and preserved. Temporary remote probes were removed.
+- These are corrections to the current source PR, not parent completion or
+  running-release proof. Privileged, headed CLI, native combined-capability and
+  authorized-rollout gates remain open.
+
 ### 2026-10-22 - Integrate the existing static SSH ACP preparation boundary
 
 - Exposed the shared stdlib Python bootstrap separately from its unchanged

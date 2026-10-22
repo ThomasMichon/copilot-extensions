@@ -267,7 +267,13 @@ async def venue_plugin_plan(
     if target.get("security_profile") == "restricted":
         raise RuntimeError("Restricted venues cannot receive host plugin projection")
     if controller_cwd is None:
-        controller_cwd = await resolve_controller_cwd(caller)
+        from .spawn_target import REQUEST_OVERRIDES_KEY
+
+        provenance = (getattr(caller, "venue", None) or {}).get(REQUEST_OVERRIDES_KEY, {})
+        session_id = provenance.get("controller_session_id")
+        controller_cwd = await resolve_controller_cwd(
+            caller, **({"caller_session_id": session_id} if session_id is not None else {}),
+        )
     plan = {"plugins": []}
     provider = target.get("provider_command")
     codespace = target.get("plugin_plan") or codespace
