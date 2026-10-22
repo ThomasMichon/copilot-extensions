@@ -641,7 +641,8 @@ automatically restore a potentially submitted prompt.
 | `<project> get <key>` | Scalar project value (e.g. `machine`, paths). | Plain value on stdout, **not** JSON — a deliberate exception for single-scalar reads. |
 
 `picker-bootstrap` also returns `workspace`, the tracked invocation worktree's
-absolute root or `null`. The anchor does not enumerate worktrees; a linked
+absolute root or `null`. The anchor and its ordinary subdirectories do not
+enumerate worktrees; a linked
 checkout first validates its Git worktree identity against one tracking record
 and the invocation path. Unconfirmed identities retain the legacy tracked-path
 fallback. Bootstrap does not adopt a checkout or rewrite tracking state.

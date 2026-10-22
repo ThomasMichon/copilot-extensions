@@ -21,8 +21,11 @@ def _bootstrap(monkeypatch, tmp_path, cwd):
     return anchor
 
 
-def test_anchor_bootstrap_does_not_enumerate_worktrees(monkeypatch, tmp_path, capfd):
-    _bootstrap(monkeypatch, tmp_path, tmp_path / "anchor")
+@pytest.mark.parametrize("nested", [False, True])
+def test_anchor_bootstrap_does_not_enumerate_worktrees(monkeypatch, tmp_path, capfd, nested):
+    cwd = tmp_path / "anchor"
+    _bootstrap(monkeypatch, tmp_path, cwd / "src" if nested else cwd)
+    monkeypatch.setattr(worktree_identity, "_worktree_id_from_git", lambda cwd: None)
     monkeypatch.setattr(
         tracking, "find_worktree_id_by_cwd",
         lambda *a, **k: pytest.fail("anchor bootstrap enumerated the roster"),
@@ -31,8 +34,9 @@ def test_anchor_bootstrap_does_not_enumerate_worktrees(monkeypatch, tmp_path, ca
     assert json.loads(capfd.readouterr().out)["workspace"] is None
 
 
-def test_linked_bootstrap_reads_one_validated_record(monkeypatch, tmp_path, capfd):
-    root = tmp_path / "workspace"
+@pytest.mark.parametrize("nested", [False, True])
+def test_linked_bootstrap_reads_one_validated_record(monkeypatch, tmp_path, capfd, nested):
+    root = tmp_path / "anchor" / "workspace" if nested else tmp_path / "workspace"
     _bootstrap(monkeypatch, tmp_path, root / "nested")
     monkeypatch.setattr(worktree_identity, "_worktree_id_from_git", lambda cwd: "exact-id")
     reads = []

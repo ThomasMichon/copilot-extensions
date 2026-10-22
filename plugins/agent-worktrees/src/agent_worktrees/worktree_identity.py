@@ -68,6 +68,8 @@ def tracked_invocation_record(
         return None
     tracking_path = cfg.project_dir(project) / "worktrees"
     worktree_id = _worktree_id_from_git(cwd)
+    if worktree_id is None and anchor is not None and cwd.is_relative_to(anchor.resolve()):
+        return None
     record = (
         tracking.load_record_by_id(worktree_id, tracking_path=tracking_path)
         if worktree_id else None
