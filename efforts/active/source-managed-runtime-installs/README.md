@@ -7,7 +7,7 @@
 - **Status:** Active
 - **Vision:** [Plugin Service Model](../../../visions/plugin-services/README.md#managed-runtime-deployment), [Runtime Assembly](../../../visions/plugin-services/runtime-assembly/README.md#selected-development-source-assembly), [Installer](../../../visions/installer/README.md#independent-runtime-source-selection), [Clean-room Validation](../../../visions/clean-room-validation/README.md#independent-source-installation)
 - **Umbrella issue:** #7028
-- **Sub-issues:** #3905 (existing source-materialization gap), #7029 (source selection and immutable generations), #7030 (deployment boundary and adapters)
+- **Sub-issues:** #3905 (existing source-materialization gap), #7029 (source selection and immutable generations), #7030 (deployment boundary and adapters), #7758 (durable installation execution driver)
 - **Future objective:** #7031 (exclusive local plugin-content sourcing; outside this runtime-only campaign)
 
 ## Guiding Intent
@@ -31,6 +31,7 @@ another product or a change to service-supervision ownership.
 |-------------|---------------------|-------------|
 | Implementation coordinator | Owns the plan, integration, public PRs and completion gate | Managed source worktree |
 | Manager maintenance implementer | Owns the bounded background-maintenance enrollment, lifecycle and ownership-handover slice | Managed source worktree; public coordination on #7028 |
+| Installation execution implementer | Owns durable suite-update requests and exclusive transaction execution, separately from recurring enrollment | Managed source worktree; public coordination on #7758 |
 | Linux clean-room runner | Reproduces and verifies actual source installation and activation | Existing Docker clean-room rig; WSL is a supported host |
 | Windows validation runner | Verifies native installer, resolver and non-deployment hook behavior | Isolated Windows fixtures, then an explicitly authorized runtime-only pilot |
 | Independent reviewer | Reviews each coherent proposal or implementation change | Repository PR review |
@@ -100,6 +101,16 @@ The [inception record](inception-transcript.md) retains the operator's words,
 with private host identifiers redacted. Implementation choices below marked
 **agent-recommended** are not additional operator requirements.
 
+**Execution-owner clarification (2026-10-22):** the operator requires one
+background installation driver, not merely independent per-installer locks.
+Ordinary callers submit durable requests; waiting observes the operation and
+does not become its installer. Direct execution is reserved for supervised
+debugging under the same exclusive authority. The operator directed:
+"Do what you need to do to get unblocked that doesn't involve waiting on
+someone else's PR". The [execution-driver slice](execution-driver.md) therefore
+proceeds against the existing canonical updater, independently of open staging,
+watchdog and recurring-maintenance changes, without superseding their owners.
+
 ## Plan
 
 ### Phase 0 - Review the intent and plan
@@ -166,6 +177,17 @@ matrix; no schedule or cadence is enabled by this plan.
 - [ ] Preserve independent Manager/service/plugin-content selections, configured roles and exact per-run source identity across scheduled operation and retries.
 - [ ] Prove unchanged-source reuse, a merged-source advance and explicit dirty/unavailable/overlapping/failed-candidate outcomes on Linux and Windows.
 
+### Phase 4b - Durable installation execution driver
+The [execution-driver slice](execution-driver.md), tracked by #7758, separates
+transaction execution from the existing recurring-maintenance assignment.
+
+- [ ] Review the execution-owner clarification and bounded implementation plan.
+- [ ] Implement durable requests, compatible pending-request coalescing and attributable read-only status/results.
+- [ ] Route ordinary supported suite-update entry points through one caller-independent execution owner over the complete canonical transaction.
+- [ ] Preserve explicit supervised-debug execution under the same kernel-backed authority, standalone compatibility and existing installer custody.
+- [ ] Qualify real-process concurrency, caller loss, interrupted-worker recovery, exact request identity and native headless operation without waiting on #6990 or #6928.
+- [ ] Document the actual migrated entry points and remaining separately owned integrations; no partial slice is blanket installation-driver completion.
+
 ### Phase 5 - Prove assembled use and native Windows readiness
 - [ ] Run the assembled runtime path in a fresh WSL-hosted clean-room container from a clean merged dev commit.
 - [x] Qualify every declared installer adopter against that exact merged commit with frozen scenario inputs, successful runner exit and source-independent installed command evidence; retain each adopter's separate report.
@@ -195,6 +217,7 @@ matrix; no schedule or cadence is enabled by this plan.
 - [ ] **Maintenance:** the existing owner runs bounded, observable source health/sync/install cycles at the selected cadence; unchanged input is reused and source/candidate/overlap failures preserve healthy runtimes and edits.
 - [ ] **Background ownership:** default-off enrollment accepts explicit user or trusted-setup consent, current-user Windows Autorun requires no UAC registration, the worker survives its setup caller without visible consoles, and only the selected owner performs suite updates.
 - [ ] **Worker upgrade:** native old-to-new worker replacement preserves an in-flight update, prevents concurrent scheduling and retains healthy operation or an explicit recovery outcome when the successor fails.
+- [ ] **Execution driver:** concurrent ordinary callers observe one durable operation, caller exit preserves it, distinct explicit selections stay distinct, interrupted execution remains explicit, and supervised debugging cannot overlap the same transaction authority.
 - [ ] **Setup adoption:** approved consuming-harness setup finishes with verified enrollment or a precise activation/readiness blocker; unrelated repository discovery cannot enroll maintenance and external-controller ownership cannot overlap Manager.
 - [ ] **Management continuity:** Manager and the selected service runtimes can use distinct clean merged-source selections; the management tools remain usable for update and supported recovery.
 - [x] **Clean-room:** a structured Tier-P report proves fresh Linux installation and real service use; report the exact source and serving identities.

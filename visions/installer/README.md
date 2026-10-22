@@ -9,7 +9,7 @@
   all three of its roles.
 - **Scope:** branch (application intent; configuration detail lives in its child)
 - **Status:** Active
-- **Last revised:** 2026-10-20
+- **Last revised:** 2026-10-22
 - **Reality docs:** [`docs/install-contract.md`](../../docs/install-contract.md) ·
   [`docs/architecture.md`](../../docs/architecture.md)
 
@@ -271,6 +271,27 @@ One owner maintains the suite. An explicitly selected external controller is
 an alternative to Manager-owned maintenance, not a concurrent updater.
 Ownership changes preserve the existing installation and update authorities;
 general machine/dependency convergence remains independent.
+
+### single-installation-execution-owner
+An installation has one background execution owner for its complete update
+transaction: acquisition, runtime construction, activation and integration.
+Ordinary CLI, agent, hook and maintenance callers submit durable requests rather
+than becoming independent installers. Waiting observes that same operation;
+closing a caller does not abandon its execution or result.
+
+Equivalent pending requests can coalesce without erasing an explicit target,
+source selection or installation boundary. Pending, running, interrupted,
+blocked and completed outcomes remain attributable and observable. Recovery
+does not mistake an uncertain prior execution for success or silently replay it.
+Existing per-slot construction and publication custody remains in force beneath
+the transaction owner.
+
+Explicitly supervised debugging can execute directly only while holding the
+same exclusive authority. Recurring scheduling is a separate, consented
+responsibility: a maintenance trigger submits to the execution owner rather
+than introducing another installation driver. Standalone plugins retain their
+independent installation and recovery paths; adopting this suite-level owner
+does not make Manager a mandatory plugin dependency.
 
 ### source-backed-maintenance
 An opted-in installation stays healthy and current through regular,
