@@ -526,6 +526,15 @@ callback an implicit credential store.
   controls passed. A real CLI with an isolated non-forwarding proxy proved a
   relative positive control used the configured alternate destination while
   the scoped request used only its validated endpoint; no forge was contacted.
+- The full third-round review body also identified explicit default HTTPS
+  ports, despite reporting no open threads. Normalized API routing by parsed
+  hostname, omitted `:443`, and retained nondefault API ports. Actual CLI
+  controls additionally exposed that `--hostname` rejects a port-qualified
+  hostname; the source now passes its canonical hostname separately from the
+  absolute API authority. The resulting 83-case focused/ordinary snapshot
+  selection passed, including real public/tenant `:443` proxy controls.
+  With added Enterprise Server default/nondefault-port controls, the final
+  selection passed all 85 cases (57 focused credential cases).
 - The source child remains open pending normal review/merge. The native
   process-boundary credential loader/PR-service adapter is still unimplemented;
   do not mark the parent credential, consumer-contract or fleet acceptance

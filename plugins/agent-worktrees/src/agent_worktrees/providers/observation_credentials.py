@@ -94,13 +94,20 @@ class ObservationCredentials:
         return scheme + value
 
 
-def github_api_base(host: str) -> str:
+def github_endpoint(host: str) -> tuple[str, str]:
     """Pin gh's supported HTTPS REST routes; its development host is HTTP-only."""
-    if urlsplit("https://" + host).hostname == "github.localhost":
+    parsed = urlsplit("https://" + host)
+    hostname = parsed.hostname
+    if not hostname:
+        raise ObservationCredentialError("GitHub observation API hostname is unavailable")
+    if hostname == "github.localhost":
         raise ObservationCredentialError("Scoped GitHub observation requires an HTTPS API endpoint")
-    if host == "github.com" or host.endswith(".ghe.com"):
-        return f"https://api.{host}"
-    return f"https://{host}/api/v3"
+    authority = f"[{hostname}]" if ":" in hostname else hostname
+    if parsed.port not in (None, 443):
+        authority += f":{parsed.port}"
+    if hostname == "github.com" or hostname.endswith(".ghe.com"):
+        return hostname, f"https://api.{authority}"
+    return hostname, f"https://{authority}/api/v3"
 
 
 def github_request(argv: list[str], api_base: str) -> list[str]:

@@ -21,7 +21,7 @@ from .base import ProviderError, PRScope, PullResult, reject_copilot_mention, ru
 from .pr_source import github_source, pull_payload, source_text
 from .observation_credentials import (
     CredentialSource, ObservationCredentialError, ObservationCredentials,
-    github_api_base, github_request,
+    github_endpoint, github_request,
 )
 
 
@@ -307,11 +307,12 @@ class GitHubProvider:
         )
         if credential_source is not None and token is not None:
             raise ProviderError("Explicit tokens and renewable observation credentials are exclusive")
-        credentials = (
-            ObservationCredentials(credential_source, provider=self.name,
-                                   api_base=github_api_base(host), repository=repo)
-            if credential_source is not None else None
-        )
+        credentials = None
+        if credential_source is not None:
+            host, endpoint = github_endpoint(host)
+            credentials = ObservationCredentials(
+                credential_source, provider=self.name, api_base=endpoint, repository=repo,
+            )
 
         def read_env() -> dict[str, str]:
             if credentials is None:

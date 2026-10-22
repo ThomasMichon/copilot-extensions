@@ -23,7 +23,14 @@ from agent_worktrees.providers.observation_credentials import ObservationCredent
 from test_pr_observation_credentials import Binding, Source
 
 
-def test_actual_gh_api_host_override_cannot_redirect_a_scoped_request(tmp_path, monkeypatch):
+@pytest.mark.parametrize("host,api_base,destination", [
+    ("github.com", "https://api.github.com", "api.github.com:443"),
+    ("github.com:443", "https://api.github.com", "api.github.com:443"),
+    ("tenant.ghe.com:443", "https://api.tenant.ghe.com", "api.tenant.ghe.com:443"),
+])
+def test_actual_gh_api_host_override_cannot_redirect_a_scoped_request(
+    tmp_path, monkeypatch, host, api_base, destination,
+):
     executable = shutil.which("gh")
     if executable is None:
         pytest.skip("native GitHub CLI is unavailable")
@@ -70,10 +77,12 @@ def test_actual_gh_api_host_override_cannot_redirect_a_scoped_request(tmp_path, 
                     [executable, *argv[1:]], env={**environment, **env},
                 ),
             )
-            source = Source()
+            source = Source(Binding(api_base=api_base))
             with pytest.raises(ProviderError):
-                github.GitHubProvider().get_snapshot("owner/repository", 7, credential_source=source)
-            assert destinations == ["api.github.com:443"]
+                github.GitHubProvider().get_snapshot(
+                    "owner/repository", 7, api_base="https://" + host, credential_source=source,
+                )
+            assert destinations == [destination]
             assert source.calls == 1
         finally:
             server.shutdown()

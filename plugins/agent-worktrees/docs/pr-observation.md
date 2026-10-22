@@ -140,7 +140,8 @@ requires exact provider, effective API endpoint, repository and `observe`
 permission, a nonempty unexpired token, and compatible authentication.
 GitHub uses `bearer`, with `https://api.github.com` for the public host,
 `https://api.<tenant>.ghe.com` for a tenancy host, or
-`https://<host>/api/v3` for an Enterprise Server host. The HTTP-only
+`https://<host>/api/v3` for an Enterprise Server host. The default HTTPS
+port `:443` is omitted from the effective API authority. The HTTP-only
 `github.localhost` development host is refused before acquisition.
 Every selected-source GitHub request carries the validated absolute HTTPS
 endpoint, bypassing an inherited CLI `api_host` routing override.

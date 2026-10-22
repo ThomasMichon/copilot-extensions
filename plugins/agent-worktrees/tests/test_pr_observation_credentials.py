@@ -165,8 +165,12 @@ def test_github_source_loss_stops_before_the_next_cli_call(monkeypatch, failure)
 
 @pytest.mark.parametrize("host,api_base", [
     ("github.com", "https://api.github.com"),
+    ("github.com:443", "https://api.github.com"),
     ("tenant.ghe.com", "https://api.tenant.ghe.com"),
+    ("tenant.ghe.com:443", "https://api.tenant.ghe.com"),
     ("forge.example", "https://forge.example/api/v3"),
+    ("forge.example:443", "https://forge.example/api/v3"),
+    ("forge.example:8443", "https://forge.example:8443/api/v3"),
     ("garage.github.com", "https://garage.github.com/api/v3"),
 ])
 def test_github_uses_supported_https_api_endpoint(monkeypatch, host, api_base):
@@ -175,7 +179,7 @@ def test_github_uses_supported_https_api_endpoint(monkeypatch, host, api_base):
     github.GitHubProvider().get_snapshot(
         "owner/repository", 7, api_base="https://" + host, credential_source=source,
     )
-    assert all(argv[argv.index("--hostname") + 1] == host for argv, _ in calls)
+    assert all(argv[argv.index("--hostname") + 1] == host.split(":")[0] for argv, _ in calls)
     assert all(argv[-1].startswith(api_base + "/repos/owner/repository/") for argv, _ in calls)
 
 
