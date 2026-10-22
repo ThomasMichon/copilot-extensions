@@ -1,0 +1,9 @@
+{
+  "comment": "Cache complete deadline-bound cross-repository guard discovery and skip topology for shells excluded by the existing write classifier.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

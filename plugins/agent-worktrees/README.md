@@ -580,6 +580,14 @@ standalone-behavior changes.
 | `sessionStart` | Every session | Emits worktree/account/machine context, reload guidance, runtime bootstrap hints, repo-plugin provisioning, project hooks, session registration, anchor hygiene, and provision checks. When cwd/env identity is absent, registration recovers the exact binding from the session lock PID -> process ancestry -> owning `wt-<id>` mux pane/session |
 | `sessionEnd` | Session end | Uses original source evidence to close the matching activation, not a replacement; legacy unqualified records retain their prior behavior. Ending an interval does not conclude the resumable session |
 
+The cross-repo guard reuses complete topology discovery for up to five minutes,
+scoped to the source checkout and home directory, including when discovery has a
+deadline. Failed, malformed or deadline-exhausted discovery is not cached;
+confirmed roots from a partial result still protect the current tool call.
+Shell commands excluded by the guard's existing write-verb classifier skip
+topology discovery. Cold discovery can still exceed its budget; this cache
+does not change the guard's fail-open policy or guarantee cold-call latency.
+
 Session registration defaults to the hook's 1.5-second request budget with
 zero daemon boot-wait. Explicit `bind-session` selects the existing normal
 tracking-write request budget of 8 seconds instead; deregistration is unchanged.

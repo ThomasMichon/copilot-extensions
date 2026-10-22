@@ -50,6 +50,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import math
 import os
 import re
 import shutil
@@ -57,6 +58,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import NamedTuple
 
 # --- Tool classification (mirrors statelessness_guard) ------------------------
 WRITE_TOOLS = frozenset({
@@ -91,6 +93,7 @@ _WRITE_VERBS = re.compile(
 )
 
 _CACHE_TTL_S = 300.0
+_CACHE_VERSION = 1
 _IS_WIN = os.name == "nt"
 
 # --- Shell write-into-repo detection (segment + command-position based) --------
@@ -293,7 +296,13 @@ def _read_cache(path: Path) -> list[dict] | None:
         return None
     if not isinstance(data, dict):
         return None
-    if time.time() - float(data.get("computed_at", 0)) > _CACHE_TTL_S:
+    if data.get("version") != _CACHE_VERSION:
+        return None  # older snapshots did not attest complete discovery
+    try:
+        age = time.time() - float(data.get("computed_at", 0))
+    except (ValueError, TypeError):
+        return None
+    if not math.isfinite(age) or not 0 <= age <= _CACHE_TTL_S:
         return None
     roots = data.get("roots")
     return roots if isinstance(roots, list) else None
@@ -303,7 +312,8 @@ def _write_cache(path: Path, roots: list[dict]) -> None:
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_suffix(".tmp")
-        tmp.write_text(json.dumps({"computed_at": time.time(), "roots": roots}),
+        tmp.write_text(json.dumps({"version": _CACHE_VERSION,
+                                   "computed_at": time.time(), "roots": roots}),
                        encoding="utf-8")
         os.replace(tmp, path)
     except OSError:
@@ -420,9 +430,14 @@ def _run_related(
     return proc.stdout
 
 
+class _DiscoveryResult(NamedTuple):
+    roots: list[dict]
+    complete: bool
+
+
 def _discover_guarded_roots(
     root: str, deadline: float | None = None
-) -> list[dict]:
+) -> _DiscoveryResult:
     """Guarded related repos with a local checkout path, via the related CLI.
 
     Guarded == ``delegate`` not in (none/empty) AND a local ``registry.path``
@@ -431,43 +446,67 @@ def _discover_guarded_roots(
     knowledge-repo config overlay + resolves paths.
     """
     def _run(args: list[str]) -> str | None:
+        if deadline is not None and time.monotonic() >= deadline:
+            return None
         if deadline is None:
             return _run_related(args, root)
         return _run_related(args, root, deadline)
 
     list_out = _run(["list", "--json", "--repo", root])
     if not list_out:
-        return []
+        return _DiscoveryResult([], False)
     try:
-        related = (json.loads(list_out) or {}).get("related") or []
+        listing = json.loads(list_out)
     except ValueError:
-        return []
+        return _DiscoveryResult([], False)
+    if not isinstance(listing, dict) or not isinstance(listing.get("related"), list):
+        return _DiscoveryResult([], False)
+    related = listing["related"]
     guarded: list[dict] = []
+    complete = True
     for r in related:
         if deadline is not None and time.monotonic() >= deadline:
+            complete = False
             break
-        if not isinstance(r, dict):
+        if (not isinstance(r, dict) or "delegate" not in r
+                or not isinstance(r.get("name"), str) or not r["name"]):
+            complete = False
             continue
         delegate = r.get("delegate")
-        if not delegate or delegate == "none":
+        if delegate is None or delegate == "" or delegate == "none":
             continue
         name = r.get("name")
-        if not name:
+        if not isinstance(delegate, str) or not isinstance(name, str) or not name:
+            complete = False
             continue
         show_out = _run(["show", name, "--json", "--repo", root])
-        path = ""
-        locus = r.get("locus")
-        if show_out:
-            try:
-                show = json.loads(show_out) or {}
-                path = (show.get("registry") or {}).get("path") or ""
-                locus = show.get("locus") or locus
-            except ValueError:
-                path = ""
+        try:
+            show = json.loads(show_out) if show_out else None
+        except ValueError:
+            show = None
+        if not isinstance(show, dict) or "registry" not in show:
+            complete = False
+            continue
+        registry = show["registry"]
+        if registry is not None and (
+            not isinstance(registry, dict) or "path" not in registry
+        ):
+            complete = False
+            continue
+        path = (registry or {}).get("path")
+        locus = show.get("locus")
+        if locus is None:
+            locus = r.get("locus")
+        if ((path is not None and not isinstance(path, str))
+                or (locus is not None and not isinstance(locus, dict))):
+            complete = False
+            continue
         if path:
             guarded.append({"name": name, "delegate": delegate,
                             "path": path, "locus": locus})
-    return guarded
+    if deadline is not None and time.monotonic() >= deadline:
+        complete = False
+    return _DiscoveryResult(guarded, complete)
 
 
 def load_guarded_roots(
@@ -478,11 +517,10 @@ def load_guarded_roots(
     cached = _read_cache(cache)
     if cached is not None:
         return cached
-    if deadline is not None:
-        return _discover_guarded_roots(root, deadline)
-    roots = _discover_guarded_roots(root)
-    _write_cache(cache, roots)
-    return roots
+    result = _discover_guarded_roots(root, deadline)
+    if result.complete:
+        _write_cache(cache, result.roots)
+    return result.roots
 
 
 # --- Core evaluation ----------------------------------------------------------
@@ -586,6 +624,13 @@ def decide(payload: dict, *, env=None, home=None,
     if tool not in WRITE_TOOLS and tool not in SHELL_TOOLS:
         return None  # reads / everything else: fast allow
 
+    args = _as_args(payload.get("toolArgs") if "toolArgs" in payload
+                    else payload.get("tool_input"))
+    if tool in SHELL_TOOLS:
+        cmd = _pick(args, CMD_ARG_KEYS)
+        if not cmd or not _WRITE_VERBS.search(cmd):
+            return None  # identical to _shell_hit's topology-independent allow
+
     cwd = str(payload.get("cwd") or "")
     if guarded_roots is None:
         root = find_repo_root(cwd)
@@ -597,8 +642,6 @@ def decide(payload: dict, *, env=None, home=None,
     if not guarded:
         return None
 
-    args = _as_args(payload.get("toolArgs") if "toolArgs" in payload
-                    else payload.get("tool_input"))
     hit = evaluate(tool, args, cwd, guarded)
     if hit is None:
         return None

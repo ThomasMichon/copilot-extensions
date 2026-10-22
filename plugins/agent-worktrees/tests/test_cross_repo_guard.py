@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import sys
 import time
 from pathlib import Path
 
@@ -329,7 +330,8 @@ def test_discover_filters_non_delegated_and_pathless(monkeypatch, tmp_path):
         return None
 
     monkeypatch.setattr(guard, "_run_related", fake_related)
-    roots = guard._discover_guarded_roots(str(tmp_path))
+    roots, complete = guard._discover_guarded_roots(str(tmp_path))
+    assert complete
     names = {g["name"] for g in roots}
     assert names == {"GuardedRepo"}  # plain (none) + pathless (RemoteOnly) dropped
     assert roots[0]["path"] == str(real)
@@ -339,9 +341,12 @@ def test_load_guarded_roots_cache_roundtrip(monkeypatch, tmp_path):
     home = tmp_path / "home"
     calls = {"n": 0}
 
-    def fake_discover(root):
+    def fake_discover(root, deadline=None):
         calls["n"] += 1
-        return [{"name": "X", "delegate": "agent-bridge", "path": str(tmp_path)}]
+        return guard._DiscoveryResult(
+            [{"name": "X", "delegate": "agent-bridge", "path": str(tmp_path)}],
+            True,
+        )
 
     monkeypatch.setattr(guard, "_discover_guarded_roots", fake_discover)
     r1 = guard.load_guarded_roots(str(tmp_path), home)
@@ -354,9 +359,212 @@ def test_deadline_discovery_does_not_publish_partial_cache(monkeypatch, tmp_path
     monkeypatch.setattr(
         guard,
         "_discover_guarded_roots",
-        lambda root, deadline: [],
+        lambda root, deadline: guard._DiscoveryResult([], False),
     )
     assert guard.load_guarded_roots(
         str(tmp_path), home, deadline=guard.time.monotonic() + 1
     ) == []
     assert not guard._cache_path(str(tmp_path), home).exists()
+
+
+@pytest.mark.parametrize("bounded", [False, True])
+@pytest.mark.parametrize("empty", [False, True])
+def test_complete_discovery_caches_cold_and_warm_decisions(
+    monkeypatch, tmp_path, bounded, empty
+):
+    root = tmp_path / "consumer"
+    root.mkdir()
+    (root / ".git").mkdir()
+    target = tmp_path / "delegated"
+    calls = []
+
+    def related(args, cwd, deadline=None):
+        calls.append(args[0])
+        assert cwd == str(root)
+        if args[0] == "list":
+            return json.dumps({"related": [] if empty else [
+                {"name": "delegated", "delegate": "agent-bridge"}
+            ]})
+        return json.dumps({"registry": {"path": str(target)}})
+
+    monkeypatch.setattr(guard, "_run_related", related)
+    deadline = time.monotonic() + 23 if bounded else None
+    for _ in range(2):
+        decision = guard.decide(
+            _write("create", target / "example.txt", root),
+            env={}, home=tmp_path, deadline=deadline,
+        )
+        if empty:
+            assert decision is None
+        else:
+            assert decision["permissionDecision"] == "deny"
+    assert calls == (["list"] if empty else ["list", "show"])
+    assert guard._cache_path(str(root), tmp_path).exists()
+
+
+@pytest.mark.parametrize("deadline", [None, float("inf")])
+@pytest.mark.parametrize("bad_response", [
+    None, "", "{", "null", "[]", "{}", '{"related": null}',
+    '{"related": {}}', '{"related": [null]}',
+    '{"related": [{}]}', '{"related": [{"name": "missing-delegate"}]}',
+    '{"related": [{"name": "bad", "delegate": []}]}',
+    '{"related": [{"delegate": "agent-bridge"}]}',
+])
+def test_failed_or_malformed_listing_is_not_cached(
+    monkeypatch, tmp_path, deadline, bad_response
+):
+    monkeypatch.setattr(guard, "_run_related", lambda *args: bad_response)
+    assert guard.load_guarded_roots(str(tmp_path), tmp_path, deadline) == []
+    assert not guard._cache_path(str(tmp_path), tmp_path).exists()
+
+
+@pytest.mark.parametrize("bounded", [False, True])
+@pytest.mark.parametrize("bad_response", [
+    None, "", "{", "null", "[]", "{}",
+    '{"registry": []}', '{"registry": {}}', '{"registry": {"path": 123}}',
+    '{"registry": {"path": "/delegated"}, "locus": []}',
+])
+def test_partial_discovery_keeps_known_roots_but_is_not_cached(
+    monkeypatch, tmp_path, bounded, bad_response
+):
+    def related(args, cwd, deadline=None):
+        if args[0] == "list":
+            return json.dumps({"related": [
+                {"name": "known", "delegate": "agent-bridge"},
+                {"name": "failed", "delegate": "agent-bridge"},
+            ]})
+        if args[1] == "known":
+            return json.dumps({"registry": {"path": str(tmp_path / "known")}})
+        return bad_response
+
+    monkeypatch.setattr(guard, "_run_related", related)
+    deadline = time.monotonic() + 23 if bounded else None
+    roots = guard.load_guarded_roots(str(tmp_path), tmp_path, deadline)
+    assert [r["name"] for r in roots] == ["known"]
+    assert not guard._cache_path(str(tmp_path), tmp_path).exists()
+    decision = guard.decide(
+        _write("edit", tmp_path / "known" / "x", tmp_path),
+        env={}, home=tmp_path, guarded_roots=roots,
+    )
+    assert decision["permissionDecision"] == "deny"
+
+
+@pytest.mark.parametrize("expire_at", ["before-list", "after-first", "after-last"])
+def test_deadline_expiry_never_publishes_snapshot(monkeypatch, tmp_path, expire_at):
+    clock = [2.0 if expire_at == "before-list" else 0.0]
+    calls = []
+
+    def related(args, cwd, deadline=None):
+        calls.append(args[0])
+        if args[0] == "list":
+            return json.dumps({"related": [
+                {"name": name, "delegate": "agent-bridge"}
+                for name in ("first", "last")
+            ]})
+        if (args[1] == "first" and expire_at == "after-first") or args[1] == "last":
+            clock[0] = 2.0
+        return json.dumps({"registry": {"path": str(tmp_path / args[1])}})
+
+    monkeypatch.setattr(guard.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(guard, "_run_related", related)
+    roots = guard.load_guarded_roots(str(tmp_path), tmp_path, deadline=1.0)
+    assert len(roots) == {"before-list": 0, "after-first": 1, "after-last": 2}[expire_at]
+    assert not guard._cache_path(str(tmp_path), tmp_path).exists()
+    if expire_at == "before-list":
+        assert calls == []
+
+
+@pytest.mark.parametrize("age", [301, -10, float("nan"), "invalid", None])
+def test_invalid_or_expired_cache_is_not_reused(monkeypatch, tmp_path, age):
+    cache = guard._cache_path(str(tmp_path), tmp_path)
+    cache.parent.mkdir(parents=True)
+    computed_at = time.time() - age if isinstance(age, (int, float)) else age
+    cache.write_text(json.dumps({
+        "version": guard._CACHE_VERSION, "computed_at": computed_at, "roots": [],
+    }), encoding="utf-8")
+    monkeypatch.setattr(
+        guard, "_discover_guarded_roots",
+        lambda *args: guard._DiscoveryResult([{"name": "fresh"}], True),
+    )
+    assert guard.load_guarded_roots(str(tmp_path), tmp_path) == [{"name": "fresh"}]
+
+
+def test_cache_scope_and_legacy_snapshot(monkeypatch, tmp_path):
+    root = str(tmp_path / "one")
+    home = tmp_path / "home"
+    cache = guard._cache_path(root, home)
+    cache.parent.mkdir(parents=True)
+    cache.write_text(json.dumps({
+        "computed_at": time.time(), "roots": [],
+    }), encoding="utf-8")
+    calls = []
+
+    def discover(root, deadline=None):
+        calls.append(root)
+        return guard._DiscoveryResult([{"name": root}], True)
+
+    monkeypatch.setattr(guard, "_discover_guarded_roots", discover)
+    for scoped_root, scoped_home in [
+        (root, home), (root, home),
+        (str(tmp_path / "two"), home), (root, tmp_path / "other-home"),
+    ]:
+        assert guard.load_guarded_roots(scoped_root, scoped_home) == [{"name": scoped_root}]
+    assert calls == [root, str(tmp_path / "two"), root]
+
+
+@pytest.mark.parametrize("command", [
+    "Get-Item README.md", "Get-Date", "git log --oneline", "",
+])
+def test_readonly_shell_skips_topology(monkeypatch, tmp_path, command):
+    def unexpected(*args):
+        pytest.fail("read-only shell must not discover topology")
+
+    monkeypatch.setattr(guard, "load_guarded_roots", unexpected)
+    assert guard.decide(
+        _shell(command, tmp_path), env={}, home=tmp_path,
+        deadline=time.monotonic() + 23,
+    ) is None
+
+
+def test_fallback_pre_reuses_cache_across_real_topology_subprocesses(
+    monkeypatch, tmp_path
+):
+    spec = importlib.util.spec_from_file_location(
+        "cache_test_hook_client", _GUARD_PATH.with_name("hook_client.py")
+    )
+    client = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, client)
+    spec.loader.exec_module(client)
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.delenv("CROSS_REPO_GUARD", raising=False)
+    monkeypatch.delenv("CROSS_REPO_GUARD_MODE", raising=False)
+    monkeypatch.setattr(
+        client, "_load_sibling",
+        lambda name: guard if name == "cross_repo_guard.py" else None,
+    )
+    consumer = tmp_path / "consumer"
+    consumer.mkdir()
+    (consumer / ".git").mkdir()
+    target = tmp_path / "delegated"
+    counter = tmp_path / "calls.jsonl"
+    cli = tmp_path / "topology.py"
+    cli.write_text(
+        "import json, sys\n"
+        "from pathlib import Path\n"
+        f"with Path({str(counter)!r}).open('a') as log:\n"
+        "    log.write(json.dumps(sys.argv[1:]) + '\\n')\n"
+        "if sys.argv[2] == 'list':\n"
+        "    print(json.dumps({'related': ["
+        "{'name': 'delegated', 'delegate': 'agent-bridge'}]}))\n"
+        "else:\n"
+        f"    print(json.dumps({{'registry': {{'path': {str(target)!r}}}}}))\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(guard, "_runtime_argv", lambda: [sys.executable, str(cli)])
+    for _ in range(2):
+        decision = client._fallback_pre(
+            _write("create", target / "never-written.txt", consumer), tmp_path
+        )
+        assert decision["permissionDecision"] == "deny"
+    assert len(counter.read_text().splitlines()) == 2
+    assert not (target / "never-written.txt").exists()
