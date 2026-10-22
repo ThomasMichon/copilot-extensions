@@ -320,7 +320,11 @@ does not mistake an old generated projection for current inventory authority.
 
 `prepare(..., environment=child_env)` passes that environment to Git and the
 isolated native installer after removing Git selectors. Omission retains the
-ambient-environment contract. `check_cancelled` may stop preparation between
+ambient-environment contract; a supplied mapping is the complete child
+environment, not an overlay onto the daemon. Git queries and ownership
+discovery resolve the Git executable through that execution environment too,
+including Windows quotes, `PATHEXT` and relative entries, rather than borrowing
+the daemon's executable search path. `check_cancelled` may stop preparation between
 bounded operations and before publication; callers using a worker thread must
 await its quiescence rather than abandon it.
 

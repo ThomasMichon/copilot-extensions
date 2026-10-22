@@ -444,6 +444,10 @@ execution directory. Registration and its raw compiled context belong to that
 root; the launch retains the resolved execution cwd, including nested
 directories. Prepared launch metadata carries both identities rather than
 requiring an execution subdirectory to equal the repository root.
+The probe removes the same inherited Git selectors as the shared engine and
+uses its canonical execution lookup. Git queries and target-ownership discovery
+resolve the native binary through the execution environment, including Windows
+quoted/relative PATH entries, rather than falling back to a daemon's toolchain.
 
 Remaining exclusions are command wrappers, privileged
 configurations (including POSIX `requires_admin`), sub-daemon relays and

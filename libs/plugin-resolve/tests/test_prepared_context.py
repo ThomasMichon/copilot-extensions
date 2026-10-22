@@ -119,7 +119,8 @@ def test_legacy_installed_only_availability_is_not_native_cli_origin_proof(tmp_p
     context = {}
     plan = build_plan([{"source": "helper@legacy"}], [])
     result = prepare(
-        {"repo": str(target), **plan, "local_mode": "reference"}, environment={"COPILOT_HOME": str(home)},
+        {"repo": str(target), **plan, "local_mode": "reference"},
+        environment={**os.environ, "COPILOT_HOME": str(home)},
         prepared_context=context,
     )
     assert result == {"helper@legacy": str(payload)}

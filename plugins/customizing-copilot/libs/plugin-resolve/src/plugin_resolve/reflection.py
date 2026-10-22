@@ -13,6 +13,7 @@ import tarfile
 from collections.abc import Mapping
 from pathlib import Path
 
+from .execution import execution_environment
 from .marketplace import load_marketplace, plugin_dir
 from .payload import dependencies, plugin_manifest, publication_metadata, report_diagnostic
 from .settings import local_marketplace_path, marketplace_manifest_name, read_repo_settings, split_source
@@ -205,6 +206,9 @@ def build_plan(
     owners = {}
     bound_roots = list(target_source_roots)
     if target_checkout is not None:
+        environment = execution_environment(
+            os.environ if environment is None else environment, target_checkout,
+        )
         target_info = repository_info(Path(target_checkout), environment)
         if target_info is None:
             raise ValueError("Target checkout has no Git repository identity")

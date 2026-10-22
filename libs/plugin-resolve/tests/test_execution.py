@@ -3,6 +3,7 @@
 import json
 import os
 import shlex
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -12,10 +13,11 @@ import pytest
 from plugin_resolve.execution import (
     BATCH_EXECUTABLE_ENV, execution_environment, execution_executable, windows_batch_command,
 )
-from plugin_resolve.preparation import prepare
-from plugin_resolve.reflection import build_prepare_script, parse_prepared
+from plugin_resolve.preparation import _git, prepare
+from plugin_resolve.reflection import build_plan, build_prepare_script, parse_prepared
 from plugin_resolve.registration import atomic_json
-from test_plugin_preparation import init_checkout
+from plugin_resolve.target import repository_info
+from test_plugin_preparation import init_checkout, local_plan
 
 
 def test_preparation_path_is_anchored_without_mutating_the_productive_environment(tmp_path):
@@ -26,6 +28,69 @@ def test_preparation_path_is_anchored_without_mutating_the_productive_environmen
     prepared = execution_environment(environment, cwd)
     assert prepared["PATH"].split(os.pathsep) == [str(cwd / "bin"), str(cwd), str(other), str(cwd)]
     assert prepared["HOME"] == "unchanged" and environment == original
+
+
+@pytest.mark.parametrize("relative", [False, True])
+@pytest.mark.parametrize("quoted", [
+    False, pytest.param(True, marks=pytest.mark.skipif(os.name != "nt", reason="Windows PATH quotes")),
+])
+def test_git_queries_resolve_the_execution_binary_not_the_daemon_path(
+    tmp_path, monkeypatch, relative, quoted,
+):
+    checkout, daemon = tmp_path / "checkout", tmp_path / "daemon"
+    init_checkout(checkout)
+    daemon.mkdir()
+    git = Path(shutil.which("git")).resolve()
+    if relative and os.path.splitdrive(str(git))[0].casefold() != os.path.splitdrive(str(checkout))[0].casefold():
+        pytest.skip("A relative Git PATH requires the fixture and Git on the same drive")
+    directory = os.path.relpath(git.parent, checkout) if relative else str(git.parent)
+    environment = {**os.environ, "PATH": '"' + directory + '"' if quoted else directory}
+    if os.name == "nt":
+        environment["PATHEXT"] = ".EXE"
+    monkeypatch.chdir(daemon)
+    monkeypatch.setenv("PATH", str(daemon / "missing-tools"))
+    assert Path(_git(checkout, "rev-parse", "--show-toplevel", environment=environment)).resolve() == checkout
+    assert repository_info(checkout, environment=environment)[0] == checkout
+    assert os.environ["PATH"] == str(daemon / "missing-tools") and Path.cwd() == daemon
+
+
+def test_missing_execution_git_does_not_borrow_the_daemon_binary(tmp_path):
+    checkout = tmp_path / "checkout"
+    init_checkout(checkout)
+    environment = {
+        **os.environ, "PATH": str(tmp_path / "missing-tools"),
+        "NoDefaultCurrentDirectoryInExePath": "1",
+    }
+    with pytest.raises(FileNotFoundError, match="execution checkout"):
+        _git(checkout, "rev-parse", "--show-toplevel", environment=environment)
+    with pytest.raises(FileNotFoundError, match="execution checkout"):
+        repository_info(checkout, environment=environment)
+
+
+def test_target_binding_retains_execution_git_when_querying_a_deeper_source_checkout(tmp_path):
+    target, anchor, controller = (
+        tmp_path / "execution", tmp_path / "source" / "deeper" / "anchor", tmp_path / "controller",
+    )
+    init_checkout(target)
+    init_checkout(anchor)
+    local_plan(anchor)
+    settings = controller / ".github" / "copilot" / "settings.json"
+    settings.parent.mkdir(parents=True)
+    atomic_json(settings, {"extraKnownMarketplaces": {
+        "local": {"source": {"source": "directory", "path": str(anchor / ".ai")}},
+    }})
+    git = Path(shutil.which("git")).resolve()
+    if os.path.splitdrive(str(git))[0].casefold() != os.path.splitdrive(str(target))[0].casefold():
+        pytest.skip("A relative Git PATH requires the fixture and Git on the same drive")
+    environment = {**os.environ, "PATH": os.path.relpath(git.parent, target)}
+    if os.name == "nt":
+        environment["PATHEXT"] = ".EXE"
+    plan = build_plan(
+        [{"source": "sample@local"}], [controller], target_checkout=target,
+        target_source_roots=[anchor], environment=environment,
+    )
+    assert plan["plugins"][0]["target_relative"]["marketplace_relative"] == ".ai"
+    assert "archive" not in plan["plugins"][0]
 
 
 def test_missing_optional_command_never_falls_back_to_the_daemon_directory(tmp_path, monkeypatch):

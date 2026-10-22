@@ -54,9 +54,11 @@ def _failure(operation: str, source: str, result) -> RuntimeError:
 
 
 def _git(repo: Path, *args: str, environment=None) -> str:
+    env = execution_environment(_environment(environment), repo)
+    git = execution_executable("git", env, repo)
     return subprocess.run(
-        ["git", "-C", str(repo), *args], capture_output=True, text=True, check=True,
-        timeout=30, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0), env=_environment(environment),
+        [git, "-C", str(repo), *args], capture_output=True, text=True, check=True,
+        timeout=30, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0), env=env,
     ).stdout.strip()
 
 

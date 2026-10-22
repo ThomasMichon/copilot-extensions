@@ -3,6 +3,7 @@
 import asyncio
 import json
 import io
+import os
 import sys
 from pathlib import Path
 
@@ -135,7 +136,7 @@ async def test_default_cli_compiles_actual_selection_and_holds_task_through_retr
         context = {}
         prepare(
             {**envelope["plan"], "repo": envelope["cwd"]},
-            environment={"COPILOT_HOME": str(tmp_path / "selected-native-profile")},
+            environment={**os.environ, "COPILOT_HOME": str(tmp_path / "selected-native-profile")},
             prepared_context=context,
         )
         context["producer_plan_digest"] = plan_digest(envelope["plan"])

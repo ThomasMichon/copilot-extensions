@@ -345,6 +345,33 @@ async def test_applicable_receiver_requires_a_verified_repository_root(receiver)
     assert target.prepared_plugins is None
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows quoted execution PATH")
+@pytest.mark.parametrize("relative", [False, True])
+@pytest.mark.asyncio
+async def test_receiver_git_lookup_uses_the_shared_execution_path_contract(receiver, relative):
+    target, manager, _controller, child, _home = receiver
+    git = Path(shutil.which("git")).resolve()
+    if relative and os.path.splitdrive(str(git))[0].casefold() != os.path.splitdrive(str(child))[0].casefold():
+        pytest.skip("A relative Git PATH requires the fixture and Git on the same drive")
+    directory = os.path.relpath(git.parent, child) if relative else str(git.parent)
+    environment = {"PATH": '"' + directory + '"', "PATHEXT": ".EXE"}
+    result = await ssh_plugin_preparation.prepare_ssh_plugins(target, manager, environment=environment)
+    assert result and target.prepared_plugins["repository_root"] == str(child)
+    assert environment == {"PATH": '"' + directory + '"', "PATHEXT": ".EXE"}
+
+
+@pytest.mark.asyncio
+async def test_receiver_repository_probe_ignores_foreign_git_selectors(receiver):
+    target, manager, controller, child, _home = receiver
+    environment = {
+        "GIT_DIR": str(controller / ".git"), "GIT_WORK_TREE": str(controller),
+    }
+    assert await ssh_plugin_preparation.prepare_ssh_plugins(target, manager, environment=environment)
+    assert target.prepared_plugins["repository_root"] == str(child)
+    assert (child / ".github" / "copilot" / "settings.local.json").is_file()
+    assert not (controller / ".github" / "copilot" / "settings.local.json").exists()
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("failure", ["exit", "timeout", "cancel"])
 async def test_preparation_failure_never_opens_productive_stdio(receiver, monkeypatch, failure):

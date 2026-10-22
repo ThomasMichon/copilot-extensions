@@ -9,6 +9,7 @@ import subprocess
 from pathlib import Path, PurePosixPath
 
 from .conventions import LOCAL_MARKETPLACE_SOURCE_KINDS
+from .execution import execution_environment, execution_executable
 from .settings import RepoPluginSettings, read_repo_settings, split_source
 
 
@@ -47,8 +48,10 @@ def _repository_lines(path: Path, arguments, environment=None) -> list[str] | No
     for key in tuple(env):
         if key.startswith("GIT_"):
             env.pop(key)
+    env = execution_environment(env, path)
+    git = execution_executable("git", env, path)
     result = subprocess.run(
-        ["git", "-C", str(path), "rev-parse", "--path-format=absolute", *arguments],
+        [git, "-C", str(path), "rev-parse", "--path-format=absolute", *arguments],
         capture_output=True, text=True, timeout=30, env=env,
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )

@@ -322,6 +322,35 @@ or a reason to create a daemon.
 
 ## Journal
 
+### 2026-10-22 - Keep probe and engine Git authority consistent
+
+- The next #7856 review identified inherited Git selectors redirecting the
+  checkout probe, while the shared engine correctly removed them. The probe
+  now removes that same selector set before querying the verified root; the
+  regression supplies another checkout's Git directory and work tree and
+  confirms only the actual child receives registration.
+- Self-review also reproduced a coupled executable-lookup failure: quoted
+  absolute and relative Windows Git PATH entries failed in the probe, then
+  exposed bare-Git lookup in the shared preparation and ownership readers.
+  Those readers now use the existing canonical execution lookup. Producer
+  plans bind relative entries once to the actual execution checkout before
+  inspecting a different, deeper source checkout.
+- Native controls select the declared Git with an unavailable daemon PATH and
+  refuse a missing execution Git rather than borrowing the daemon binary.
+  The sole physical vendored copy remains byte-identical; the existing
+  nine-consumer changefile covers this shared correction. Two synthetic
+  owner/inventory fixtures now supply complete child environments, matching
+  the existing contract instead of relying on accidental Windows lookup.
+- Validation passes 302 shared-engine cases with one platform skip, 335
+  contained ACP/CLI/sibling-worktree consumer cases with two live opt-in skips,
+  351 full Bridge guards with eight explicit skips, and both actual SSH
+  controls through the bounded host-state runner. The changed adapter now has
+  35 cases. Packaging, vendored-source, headless and touched-Python gates pass;
+  no frozen fixtures were rewritten.
+- No new API, launcher, environment overlay, credential flow or installed
+  runtime change was introduced. The parent remains **Active**, and this
+  correction still awaits the current source PR's review and merge.
+
 ### 2026-10-22 - Keep Windows deadlines independent and distinguish execution cwd
 
 - #7856's next review found that a Windows worker surviving its supervisor

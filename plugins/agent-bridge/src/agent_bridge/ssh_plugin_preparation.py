@@ -7,6 +7,8 @@ import base64
 import json
 from pathlib import Path
 
+from plugin_resolve import execution
+from plugin_resolve.preparation import _GIT_SELECTORS
 from plugin_resolve.reflection import build_prepare_python, parse_prepared, parse_prepared_context
 
 from .venue_plugins import venue_plugin_plan
@@ -110,10 +112,11 @@ async def prepare_ssh_plugins(target, manager, *, environment: dict[str, str]) -
     target.prepared_plugins = None
     prefix = _environment_program(environment)
     checkout = base64.b64encode(target.cwd.encode()).decode("ascii")
+    execution_source = Path(execution.__file__).read_text(encoding="utf-8")
     probe = await _run_python(
         manager, target,
         prefix
-        + "import pathlib,shutil,subprocess\n"
+        + "import pathlib,subprocess\n"
         + f"requested=base64.b64decode({checkout!r}).decode('utf-8')\n"
         + "checkout=pathlib.Path(requested).resolve(strict=True)\n"
         + "if not checkout.is_dir():\n"
@@ -121,11 +124,14 @@ async def prepare_ssh_plugins(target, manager, *, environment: dict[str, str]) -
         + "applicable=any((parent/'.git').exists() for parent in (checkout,*checkout.parents))\n"
         + "repository_root=None\n"
         + "if applicable:\n"
-        + "    os.chdir(checkout)\n"
-        + "    git=shutil.which('git')\n"
-        + "    if git is None: raise FileNotFoundError('SSH plugin preparation requires Git')\n"
+        + "    lookup={'__name__':'venue_execution'}\n"
+        + f"    exec({execution_source!r},lookup)\n"
+        + "    environment={key:value for key,value in os.environ.items()\n"
+        + f"        if key not in {tuple(sorted(_GIT_SELECTORS))!r}}}\n"
+        + "    environment=lookup['execution_environment'](environment,checkout)\n"
+        + "    git=lookup['execution_executable']('git',environment,checkout)\n"
         + "    result=subprocess.run([git,'rev-parse','--show-toplevel'],\n"
-        + "        capture_output=True,text=True,timeout=30,\n"
+        + "        capture_output=True,text=True,timeout=30,cwd=checkout,env=environment,\n"
         + "        creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))\n"
         + "    if result.returncode:\n"
         + "        raise RuntimeError('SSH repository lookup failed: '+result.stderr.strip())\n"

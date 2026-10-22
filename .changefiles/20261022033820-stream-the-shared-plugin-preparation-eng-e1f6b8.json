@@ -1,5 +1,5 @@
 {
-  "comment": "Stream the shared plugin preparation engine independently of the receiver shell; prepare ordinary static SSH ACP targets after allocation with bounded receiver supervision and native target precedence.",
+  "comment": "Stream the shared plugin preparation engine independently of the receiver shell; prepare ordinary static SSH ACP targets after allocation with bounded receiver supervision, native target precedence and execution-scoped Git lookup.",
   "changes": [
     {
       "plugin": "agent-bridge",
