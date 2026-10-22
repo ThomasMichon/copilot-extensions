@@ -395,8 +395,9 @@ python tools\run-plugin-tests.py update-driver --test-file tests/test_foundation
 ```
 
 It requires uv and an available seasoned build backend, uses a fresh isolated
-cache/root, constructs twice to check unchanged completion bytes, removes the
-input source and exercises installed health and the retained finite worker.
+cache/root, constructs twice to check unchanged completion bytes, rejects an
+unhealthy changed-source candidate without selecting it, removes the input
+source and exercises installed health and the retained finite worker.
 It never installs the host foundation or provisions a plugin. A preinstalled
 test interpreter is not Python-free genesis evidence. The manual `foundation`
 portfolio of `installation-context-full.yml` runs this bounded lane on fresh

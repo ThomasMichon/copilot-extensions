@@ -38,15 +38,38 @@ jobs:
         run: >-
           python -m pytest -q --durations=50
           libs/installation-context/tests
-  foundation:
+  foundation-linux:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'foundation'
-    name: foundation construction (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
+    name: foundation construction (Ubuntu)
+    runs-on: ubuntu-latest
     timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest]
+    env:
+      UPDATE_DRIVER_FOUNDATION_BUILD: "1"
+      UV_PYTHON: "3.12"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install tooling
+        uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Qualify actual immutable foundation construction and custody
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_foundation_inputs.py
+          --test-file tests/test_foundation_state.py
+          --test-file tests/test_foundation_native_process.py
+          --test-file tests/test_foundation_build_process.py
+          --test-timeout 300 --timeout 600
+  foundation-windows:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'foundation'
+    name: foundation construction (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 15
     env:
       UPDATE_DRIVER_FOUNDATION_BUILD: "1"
       UV_PYTHON: "3.12"

@@ -42,14 +42,20 @@ def test_real_foundation_reuses_completion_and_survives_source_removal(area, mon
     monkeypatch.setenv("UV_PYTHON_DOWNLOADS", "never")
     monkeypatch.setenv("UV_NO_PROGRESS", "1")
     marker = None
-    for iteration in range(2):
+    version = "foundation-" + selected.digest
+    for iteration in range(3):
+        if iteration == 2:
+            health_source = plugin / "src" / "update_driver" / "foundation_inputs.py"
+            with health_source.open("a", encoding="utf-8") as stream:
+                stream.write('\ndef check_health():\n    raise RuntimeError("fixture candidate health failure")\n')
+        admitted_hash = inspect(plugin).digest
         enqueue(
             RequestSpec("foundation-process-fixture", argv=(str(iteration),)), root=root,
             runner=TrustedRunner((sys.executable, "-c", "pass"), str(area)),
         )
 
         def executor(transaction):
-            operation = fs.begin(root, selected.digest, transaction._lock)
+            operation = fs.begin(root, admitted_hash, transaction._lock)
             witness = transaction.participant_env()["UPDATE_DRIVER_WITNESS"]
             old = os.environ.get("UPDATE_DRIVER_WITNESS")
             os.environ["UPDATE_DRIVER_WITNESS"] = witness
@@ -57,7 +63,7 @@ def test_real_foundation_reuses_completion_and_survives_source_removal(area, mon
                 result = run_caller_owned(
                     [sys.executable, "-I", "-B", "-X", "utf8",
                      str(plugin / "scripts" / "foundation-build.py"),
-                     "--root", str(root), "--source-hash", selected.digest,
+                     "--root", str(root), "--source-hash", admitted_hash,
                      "--uv", uv, "--base-python", sys.executable],
                     timeout=240, max_stdout_bytes=65536, max_stderr_bytes=65536,
                 )
@@ -66,14 +72,16 @@ def test_real_foundation_reuses_completion_and_survives_source_removal(area, mon
                     os.environ.pop("UPDATE_DRIVER_WITNESS", None)
                 else:
                     os.environ["UPDATE_DRIVER_WITNESS"] = old
-            if result.returncode != 0:
+            if iteration < 2 and result.returncode != 0:
                 pytest.fail(f"canonical foundation construction failed:\n{result.stdout}\n{result.stderr}")
-            fs.finish(root, operation, transaction._lock, exit_code=0)
-            return 0
+            if iteration == 2:
+                assert result.returncode != 0 and "fixture candidate health failure" in result.stderr
+            fs.finish(root, operation, transaction._lock, exit_code=result.returncode,
+                      error=None if result.returncode == 0 else "builder_failed")
+            return result.returncode
 
         drain(root=root, executor=executor)
         target = root / "foundation"
-        version = "foundation-" + selected.digest
         assert (target / "current-version").read_text().strip() == version
         slot = target / "versions" / version
         current_marker = (slot / ".install-complete.json").read_bytes()
@@ -81,6 +89,11 @@ def test_real_foundation_reuses_completion_and_survives_source_removal(area, mon
             assert current_marker == marker
         marker = current_marker
         assert json.loads(marker)["payload_hash"]
+        if iteration == 2:
+            assert not (
+                target / "versions" / ("foundation-" + admitted_hash) / ".install-complete.json"
+            ).exists()
+            assert fs.read(root).state == "failed"
     inputs.rename(area / "removed-source")
     python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     health = subprocess.run(
