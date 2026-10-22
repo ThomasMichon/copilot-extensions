@@ -86,8 +86,8 @@ that pattern to this repository.
 | [SessionStart Static/Dynamic Content Conformance](active/sessionstart-static-dynamic-conformance/README.md) | Active | #2256 |
 | [agent-logger Aggregate Configuration](active/agent-logger-aggregate-configuration/README.md) | Active; complete aggregate authorization and adoption acceptance retained | Plan/Validation/Journal plus open bounded source issues; #1817 is historical after complete reviewed intake |
 | [Balanced Profile Assignment](active/balanced-profile-assignment/README.md) | Active; implementation merged, deployment acceptance unverified; default-off semantics retained | #1564; usage/deprecation decision remains #4871 |
-| [Budget-Aware Model Routing](active/budget-aware-model-routing/README.md) | Active; posture, session delivery, routing, and personal provider reports implemented; entitlement/account proof and adoption open | #2137 |
-| [Evidence-Calibrated Model Routing](active/evidence-calibrated-model-routing/README.md) | Active | #2014 |
+| [Budget-Aware Model Routing](active/budget-aware-model-routing/README.md) | Active; posture, session delivery, routing, and personal provider reports implemented; entitlement/account proof and adoption open | Plan/Validation/Journal plus open bounded source issues; historical #2137 after reviewed intake |
+| [Evidence-Calibrated Model Routing](active/evidence-calibrated-model-routing/README.md) | Active | Plan/Validation/Journal plus open bounded source issues; historical #2014 after reviewed intake |
 | [agent-bridge Contract Evolution](active/agent-bridge-contract-evolution/README.md) | Draft | #1460 |
 | [agent-bridge AHP Convergence](active/agent-bridge-ahp-convergence/README.md) | Draft | #1266, #1308 |
 | [agent-bridge Delegation Convergence](active/agent-bridge-delegation-convergence/README.md) | Active | #1448 original; reviewed Plan/Validation/Journal with independent source claims and assigned #1266 preserved |

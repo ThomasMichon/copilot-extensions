@@ -140,6 +140,15 @@ Bind selected fleet/service identity, admitted installation namespace and scoped
 account separately. Preserve the reviewed cell-isolation and exact-instance
 upgrade contracts where those runtimes are used.
 
+## Retained PR-asset/client convergence
+
+The canonical effort's [direct #2400 Plan and Validation lane](README.md#direct-pr-asset-and-staged-client-convergence-acceptance)
+retains the full asset/status view, explicit claimant/target addressing and
+legacy-parity/documentation/deprecation sequence. Keep existing #7188/#7051
+and Worktrees publication/resource ownership unchanged. The checklist remains
+unfinished; neither native command availability nor fleet deployment
+substitutes for its separately scored client and presentation acceptance.
+
 ## Implementation sequence (agent-recommended)
 
 1. Land this vision/effort amendment. The driver defines service-role, transport,

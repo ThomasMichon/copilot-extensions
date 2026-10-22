@@ -15,7 +15,8 @@
   [#1478](https://github.com/ThomasMichon/copilot-extensions/issues/1478)
   (manual mux restoration for unreachable active sessions),
   [#2062](https://github.com/ThomasMichon/copilot-extensions/issues/2062)
-  (relocate Mux + AHP execution mechanics out of agent-worktrees),
+  (historical completed Mux/AHP relocation; unfinished #2053 architecture
+  acceptance remains directly in the Plan below after reviewed intake),
   [#3359](https://github.com/ThomasMichon/copilot-extensions/issues/3359)
   (vendor worktree-manager's own agent-procutil/dropin-registry/plugin-activation
   copies instead of borrowing agent-worktrees' live — fixed, PR
@@ -391,8 +392,10 @@ bindings still resolve correctly through the compatibility view.
 This is not a claim of complete provider-neutral hosting or production AHP/mux
 parity. `#5898` retains the separately excluded presentation follow-up; direct
 handoff choreography and the intentional standalone remux/restore lane require
-their own ownership reconciliation under `#2062`, not removal or an inferred
-reopening of this relocation slice.
+their own ownership reconciliation in the direct retained #2062/#2053 section
+below, not removal or an inferred reopening of this relocation slice. Normal
+reviewed intake and full live readback precede source-tracker retirement;
+the same effort Journal/open bounded-source process preserves current owners.
 
 ### Phase 3c — Picker non-blocking I/O (Done — Steps 1-5 landed; optional progress-envelope follow-up tracked in #4274)
 - [x] Make every I/O-touching Picker surface — pivot loads (built-in and
@@ -1288,7 +1291,71 @@ _Correlated via a facility-driven sweep of open `bug`-labeled issues against act
   - Fixed via [PR #5413](https://github.com/ThomasMichon/copilot-extensions/pull/5413)
     (see Journal, 2026-10-05); closes the issue.
 
+### Agency-versus-hosting realization retained from #2062/#2053
+
+<!-- backlog-reconciliation:7556:transfer:2062:to:efforts/active/worktree-manager-control-plane/README.md -->
+
+Add this direct unchecked remainder under the EXISTING reviewed Active Manager/provider
+effort, with corresponding Validation rows, before administrative closure of #2062.
+Obtain the actual reviewed merge and independently read back the current LIVE full
+section. Update live references that currently send remaining agency/provider
+reconciliation to #2062 to this accepted section and existing Journal/open-slice
+claiming process; keep #2062 as immutable historical proof, not a closed live token. If
+full scope or ownership cannot be accepted, retain it.
+
+Credit completed Phase3b physical AHP/Mux relocation, backend/presentation selection
+independence, legacy binding compatibility and the original bounded native
+relocated-launcher/AHP lifecycle witnesses. Do NOT reopen that completed slice,
+resurrect deleted copies or infer all-provider realization from it. Keep #5898
+production AHP/mux presentation, #5936 provider-observed recovery, current
+handoff/transparent-Windows/native/standalone implementers and all
+agency/source/resource/activation owners unchanged. This does not absorb their
+independent acceptance or create a new host owner.
+
+- [ ] Keep durable repository/worktree identity, current head, succession, claims,
+  obligations, disposition and source-control completion with the agency/ground
+  lifecycle authority. The selected owning host/provider controls the exact physical
+  process/session/pane lifetime and verifies the identity it acts on; neither side gains
+  a rival head/claims ledger.
+- [ ] Reconcile GENERIC orchestration with explicit provider-resolution/dispatch OR
+  legitimately co-packaged OWNING adapters on actual launch, observation, handoff and
+  retirement paths. File/directory location alone proves neither conformance nor
+  arbitrary foreign control; do not mandate deletion of every agency-side helper merely
+  to satisfy a layering label.
+- [ ] Preserve intentional no-Manager/no-provider standalone remux/restore and manual
+  recovery, accepted handoff/acknowledgement fences, exact identity/ownership/liveness
+  checks and fail-safe uncertainty. A stale/missing binding, failed lookup or unfamiliar
+  leg cannot authorize guessing another host or retiring an arbitrary process/pane.
+- [ ] Preserve backend versus terminal-presentation independence and legacy
+  session_backend/execution-leg binding compatibility. Actual injected capability
+  selection tests and historical relocated-launcher proof are bounded credits, not
+  current production four-way AHP/mux or whole-provider acceptance.
+- [ ] Leave #5898's exact attach-plan-preserving production presentation capability,
+  one-worktree identity and supported native-combination proof with its owner; do not
+  clobber an already-owned AHP plan by blindly re-resolving through a different
+  launcher. Preserve direct no-mux and standalone/non-AHP paths.
+- [ ] Leave #5936's attributable host-instance-ended observation and explicitly
+  confirmed current-head recovery batch with its provider/Manager owners. Do not infer
+  host death from stale rows or turn ordinary terminal closes into bulk recovery; its
+  original supported-host native proof remains separate.
+- [ ] For this remaining architecture row, identify actual owning adapters/authority and
+  test real source-to-host consumers, rejection/partial outcomes, legacy/standalone
+  behavior and applicable provider/native gates. Do not equate process receipt, file
+  move, injected capability, source merge or old live slice with complete cross-provider
+  conformance or authorized rollout.
+- [ ] Resolve every directly retained #2053 agency/hosting clause and name any
+  legitimate separately accepted residual before declaring this architecture realized.
+  Preserve exact source/claim/lease ownership and physical/durable authority boundaries
+  throughout; do not require unrelated entire Manager phases as a new gate on finite
+  components.
+
+No provider, AHP, mux, terminal, handoff, process census, claim/head write, remux,
+retirement, native test, deployment or new control-plane dependency is authorized or
+performed by this tracker consolidation.
+
 ## Validation Plan
+
+- [ ] Complete every directly retained #2062 Plan/Validation clause above at its original evidence tier and bounds; preserve current owners, holds and accepted deferrals. Administrative supersession is not completion.
 
 - [ ] Complete every Phase 4a transaction/progress/recovery and inherited
       standalone/platform acceptance row; UI/source milestones alone do not
@@ -1370,6 +1437,13 @@ overlapping work before it diverges, rather than relying on issue-comment
 claiming discipline alone.
 
 ## Journal
+
+### 2026-10-22 - Complete retained acceptance from #2062
+
+- Retained the full #2062 remainder directly in the Plan and Validation,
+  preserving delivered partials, existing source/resource custodians and gates.
+  Reviewed actual merge and current full readback precede administrative
+  supersession; no capability, native trial or adoption is declared complete.
 
 - **2026-10-22** - Materialized full #1548 New-worktree transaction/progress
   acceptance in Phase 4a and unresolved #1238 command/update ownership in

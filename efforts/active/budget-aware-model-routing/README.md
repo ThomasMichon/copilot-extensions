@@ -12,9 +12,11 @@
   - `budget-refines-but-never-qualifies`
   - `unavailable-is-not-zero`
   - `one-posture-many-surfaces`
-- **Umbrella issue:** [#2137](https://github.com/ThomasMichon/copilot-extensions/issues/2137)
-- **Foundation:** [#2014](https://github.com/ThomasMichon/copilot-extensions/issues/2014)
-  (evidence-calibrated eligibility, routing, and outcome provenance)
+- **Continuing coordination:** This Active Plan, Validation Plan and Journal;
+  [#2137](https://github.com/ThomasMichon/copilot-extensions/issues/2137) is
+  historical tracking only after complete reviewed intake and readback.
+- **Foundation:** [Evidence-Calibrated Model Routing](../evidence-calibrated-model-routing/README.md)
+  (independent eligibility, trial and outcome authority; historical #2014 origin).
 
 ## Guiding Intent
 
@@ -41,6 +43,12 @@ model, lowers a product gate, or overrides an explicit operator choice.
 
 - **Topology:** serial per-slice PRs; one open implementation PR at a time.
 - **Host (owns PRs):** public effort host.
+- **Continuing intake:** Keep remaining quota/account/reset, applicable native,
+  release and adoption acceptance with the same effort host and bounded quota
+  owners. Use this Plan/Validation/Journal plus eligible open bounded source
+  issues for overlap and reviewed contributions; retain every original claim,
+  accepted deferral and operational permission. Closed historical tracking is
+  not current entitlement, completed acceptance or model-selection authority.
 - **Delegates:** implementation and review scopes remain disjoint; no delegate
   owns publication, promotion, or completion.
 - **Handoff:** every merged slice records its result and next boundary here
@@ -217,9 +225,90 @@ timestamp is not proof that the provider metadata was refreshed.
 ### Phase 7 - Completion
 
 - [ ] Resolve every Plan and Validation Plan item, including quota-helper and
-  pacing validation; record evidence, close #2137, and archive this effort.
+  pacing validation, or transfer it to an accepted named objective; record
+  evidence and only then archive this effort. Administrative supersession of
+  #2137 does not complete the quota, native, release or adoption gates.
+
+### Direct continuing acceptance from the budget-posture tracker
+
+<!-- backlog-reconciliation:7556:transfer:2137:to:efforts/active/budget-aware-model-routing/README.md -->
+
+Append to the live Plan and Validation without rewriting historical comments or Journal.
+This is administrative tracking consolidation into the already Active budget owner, not
+feature completion. Delivered baseline remains credited: versioned posture/manual
+arithmetic/status, explicit unavailable states and optional expiring routing advice; the
+historical credential-free Linux install receipt and isolated regression reconciliation
+are not new executions or live/native adoption. Preserve every existing unchecked
+Plan/Validation item and accepted attributed deferral.
+
+#### Plan
+
+- [ ] Keep one portable resolved posture for allowance, consumption, reset,
+  capture/source/freshness, optional trailing rates and explicit availability/error.
+  Preserve deterministic remaining/overspend, partial-day/zero-time/reset,
+  sustainable-rate, projection and warning semantics without rebuilding delivered
+  arithmetic.
+- [ ] Preserve manual/static OR provider/account/external adapter use without a
+  mandatory private service. Missing, stale, unauthorized, contradictory, empty, expired
+  and failed readings remain explicit, never zero/full-allowance success; unknown
+  rates/projections remain unknown.
+- [ ] Maintain concise attributable session guidance and machine-readable status from
+  the same owner-calculated result, with bounded current/cache data. Keep longitudinal
+  ledgers, billing history and dashboards external; no real account, model, provider,
+  organization, allowance or host is hardcoded.
+- [ ] Finish the existing on-demand requesting-session/account quota qualification and
+  trustworthy raw next-reset acquisition. Keep observed identity distinct from atomic
+  quota binding; distinguish acquisition time from provider observation freshness,
+  quantity/unit kinds and raw versus normalized reset. Reject missing, zero-epoch, past,
+  stale or contradictory reset evidence for current forecasting rather than inventing a
+  period.
+- [ ] Preserve fresh per-period entitlement and attributable same-period pacing; label
+  inferred starts/cycle averages instead of manufacturing measured rates from one
+  observation. Advice may caution about worker/fleet concurrency but cannot mutate
+  workers, block operator-directed work, automatically sleep/suspend, qualify a model,
+  clear a hold or override explicit model/profile choice. Independent
+  eligibility/trial/provenance/promotion ownership and every product gate remain
+  unchanged.
+- [ ] Resolve only the still-applicable native Windows/external-reader/session-cue,
+  cross-platform/fresh-install, version/release/source-runtime and authorized-adoption
+  items already accepted by this Plan/Validation. Preserve existing accepted native
+  deferrals and source-specific receipts; do not duplicate their work, reopen a stopped
+  investigation or infer desktop/live-account qualification from Linux fixtures.
+- [ ] Continue through this effort's existing host and bounded quota/routing owners. The
+  prior documentation-only reconciliation remains documentation-only and is not
+  authority for implementation, live account use or umbrella completion. Preserve every
+  current bounded claim and resource/rollout permission; update active coordination
+  pointers to this direct section before administrative closure without inventing
+  another owner-ACK source gate.
+- [ ] Amend the active Phase7 tracker reference so administrative supersession of the
+  source issue cannot be mistaken for feature completion. The effort stays Active until
+  every own Plan/Validation item is resolved or transferred to an accepted named
+  objective. Preserve historical statements that the tracker remained open as historical
+  facts, and journal any actual reviewed consolidation separately.
+
+#### Validation
+
+- [ ] Preserve original arithmetic partial-day/reset/overspend/zero-time, source
+  precedence, explicit adapter failure, offline/manual, concise attribution and
+  same-result interoperability coverage; credit existing receipts rather than requiring
+  unrelated exhaustive/native portfolios.
+- [ ] Establish the remaining real requesting-account/raw-reset/freshness evidence
+  through the existing supported on-demand owner, with unit/account/reset mismatch and
+  unavailable outcomes explicit. Fixture coverage and a supported helper declaration are
+  not live requesting-account proof.
+- [ ] Resolve the current applicable platform/install/release/runtime/adoption lanes or
+  preserve their accepted named disposition and exact missing evidence. No account
+  query, authentication, runtime update, model/settings change, worker control or
+  deployment is authorized by this intake.
+- [ ] Before closing the administrative source, obtain the actual normally reviewed
+  merge containing this entire direct section plus the active completion-reference
+  correction, read back the complete live Plan/Validation and continuing Coordination,
+  and verify no original clause/claim/deferred gate was dropped. A proposed patch or
+  earlier creation/installation PR is not this receipt.
 
 ## Validation Plan
+
+- [ ] Complete every directly retained #2137 Plan/Validation clause above at its original evidence tier and bounds; preserve current owners, holds and accepted deferrals. Administrative supersession is not completion.
 
 - [x] Native Windows external-reader lifecycle validation observes a real
   windowless parent, two console-descendant cycles, no visible windows/focus or
@@ -286,6 +375,13 @@ resilience. It does not become a historical billing ledger, model benchmark,
 promotion authority, task queue, or dashboard.
 
 ## Journal
+
+### 2026-10-22 - Complete retained acceptance from #2137
+
+- Retained the full #2137 remainder directly in the Plan and Validation,
+  preserving delivered partials, existing source/resource custodians and gates.
+  Reviewed actual merge and current full readback precede administrative
+  supersession; no capability, native trial or adoption is declared complete.
 
 ### 2026-10-20 - Reconcile merged installation proof and isolated regressions
 

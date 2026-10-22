@@ -48,6 +48,13 @@ waiters and supported native PR operation remain working alternatives.
   The later operator disposition accepts reader residual #7208 and stops its
   investigation; it does not relax canonical installation validation, current
   checks or review.
+- **PR-asset/client migration intake:** The direct #2400 Plan/Validation lane
+  below accepts presentation, addressing and staged compatibility work under
+  the same effort host. It does not expand #7188's existing bounded source
+  claim or take #7051 conformance/Worktrees resource and publication custody.
+  Coordinate through this Plan/Journal and eligible open bounded source
+  issues, resolving actual overlaps through normal review, not a new sign-off
+  rendezvous. Native client work remains useful before fleet deployment.
 - **Handoff:** Continue from this README, its next unchecked item, and the current PR state. Do not replay the preserved branch wholesale.
 
 ## Context
@@ -246,7 +253,96 @@ _Operator-required scope; agent-recommended implementation and validation._
 - [ ] Synchronize consumer guidance when changed payload provenance requires it, through the consumer's own PR flow.
 - [ ] Record outcomes, resolve every validation item or transfer it to a named tracked objective, archive this effort, release its binding, and finalize owned worktrees.
 
+### Direct PR-asset and staged client-convergence acceptance
+
+<!-- backlog-reconciliation:7556:transfer:2400:to:efforts/active/durable-pr-watch-delegation/README.md -->
+
+This is additive live Plan/Validation intake into the existing Active PR-domain effort,
+not completion of a view, migration, service or fleet. Preserve the entire existing
+plan, governed lifecycle/installation/native/credential acceptance and its accepted
+deferrals. The already delivered dedicated runtime, named-target foreign create/caller
+claim and explicit native four-verb adapter are baseline, not blanket legacy parity.
+Worktrees retains generic resource/status, source publication and repository policy; PR
+conformance retains its current owner. The existing service-planning/consumer claim is
+not silently enlarged into presentation or migration custody.
+
+#### Plan
+
+- [ ] Deliver durable PR claim/association/follow state for worktree-created
+  cross-repository changes. Surface PR identity and actual status prominently as primary
+  work state, not only free text, while preserving caller attribution, ambiguous
+  post-create claim recovery and unresolved merge/resource obligations.
+- [ ] Deliver the PR-centered view for active cross-repository work through the
+  PR-domain client and existing Worktrees presentation contracts. Preserve the original
+  durable-major-asset status-driver intent through existing generic resource/status
+  ownership; do not discard similar-asset integration merely because the remote
+  registrar owns only PRs, and do not create a second generic resource ledger or claim
+  unrelated UI frameworks.
+- [ ] Keep the dedicated agent-pull-requests noun/verb surface and explicit --repo
+  addressing reusable across repositories without checking out the target. Resolve the
+  remaining from-any-CWD usability through an explicit supported claimant/target
+  selection contract while preserving admitted mutation custody. Current managed-caller
+  guards are useful safety baseline, not proof of arbitrary-CWD completion or permission
+  to remove ownership checks.
+- [ ] Reuse the existing account/credential, provider, publication and policy contracts.
+  Native/local operation remains useful without fleet adoption; explicit native
+  selection retains actual provider-native votes, approval events, human/policy gates,
+  uncertainty and unsupported-flag refusals rather than collapsing them into a GitHub
+  verdict or silently switching provider.
+- [ ] Inventory every legacy *-pr/pr-* and create-pr behavior and deliver the dedicated
+  surface's superset through shared owner contracts or supported compatibility adapters
+  before deprecation. Include source attribution, labels/body policy, foreign
+  already-pushed creation, claiming, review/wait/watch, merge/consent and
+  completion/resource effects wherever supported. Four verbs, a healthy daemon or
+  the7850 bridge alone do not certify all-current parity; central
+  source-control/publication authority does not move into a remote service.
+- [ ] After parity, sweep all consuming documentation and supported
+  examples/entrypoints, preserve compatible legacy paths while any dependency remains,
+  then deprecate/remove old Worktrees verbs only after the dependency inventory supports
+  it. Do not treat a plan, partial docs edit or service rollout as the completed
+  migration.
+- [ ] Keep owning/observing a foreign PR separate from semantic source import: never
+  import its commits into the caller checkout or waive its unresolved merge/claim
+  obligation merely because it is tracked or merged. Preserve existing target-policy and
+  caller-resource authority.
+- [ ] Record presentation/migration intake and continuing coordination explicitly under
+  the existing effort host before retiring the source tracker. Existing7188
+  service/consumer,7051 conformance and Worktrees publication/resource claims keep their
+  scopes and owners; use bounded normal reviewed changes for missing integration,
+  nonblocking consultation and concrete conflict resolution, not a new generic signoff
+  ceremony or implied takeover of an active PR.
+
+#### Validation
+
+- [ ] Verify actual durable association, prominent identity/status, PR-centered
+  cross-repository view and existing generic asset-status integration through supported
+  client/presentation consumers, not solely a provider result or plan link.
+- [ ] Qualify named-target/no-target-checkout and remaining CWD-independent addressing
+  with explicit correct caller custody, account/provider separation and actionable
+  refusal. Preserve current direct/native defaults, supported platform argument
+  boundaries and uncertainty without weakening central gates.
+- [ ] Establish an operation-by-operation legacy parity/compatibility matrix and actual
+  consumer documentation/dependency inventory before staged deprecation. Keep finite
+  client acceptance separate from already-existing installed/service/fleet acceptance;
+  no unrelated whole-parent gate is added to a finite delivered leaf.
+- [ ] Verify no foreign source import, lost PR/resource obligation, duplicate
+  forge/credential/watch authority or silent owner reassignment. Existing service
+  credentials, writer lifecycle, installation and approved deployment gates remain
+  exactly as accepted elsewhere in this plan.
+- [ ] Close the administrative source only after an actual normally reviewed merge
+  accepts every row directly in the live receiving Plan/Validation, continuing effort
+  coordination explicitly covers presentation/migration without changing existing
+  claims, and a full current section readback confirms no original clause or accepted
+  refinement was lost. If that intake is not accepted, retain the source. This proposal,
+  a topic link, the old7189 creation receipt or source7850 alone is not acceptance
+  delivery.
+
+No implementation, account/credential use, tests, native/model/host probe, install,
+runtime update, shared-resource operation or deployment is authorized by this checklist.
+
 ## Validation Plan
+
+- [ ] Complete every directly retained #2400 Plan/Validation clause above at its original evidence tier and bounds; preserve current owners, holds and accepted deferrals. Administrative supersession is not completion.
 
 All items below are **agent-recommended** acceptance checks.
 
@@ -282,6 +378,13 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-10-22 - Complete retained acceptance from #2400
+
+- Retained the full #2400 remainder directly in the Plan and Validation,
+  preserving delivered partials, existing source/resource custodians and gates.
+  Reviewed actual merge and current full readback precede administrative
+  supersession; no capability, native trial or adoption is declared complete.
 
 ### 2026-10-22 - Reuse central native PR operations without a second provider
 
