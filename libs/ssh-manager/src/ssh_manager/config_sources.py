@@ -15,7 +15,7 @@ import subprocess
 import sys
 import threading
 from dataclasses import dataclass, field
-from typing import Protocol, runtime_checkable
+from typing import Mapping, Protocol, runtime_checkable
 
 
 @dataclass(frozen=True)
@@ -33,6 +33,14 @@ class SSHConfig:
     effective_config: tuple[tuple[str, str], ...] = field(
         default_factory=tuple,
         repr=False,
+    )
+    # Environment pinned by the config source (e.g. a CodeSpace's owning gh
+    # account via GH_TOKEN). Every SSH subprocess for this target must use it:
+    # on Windows the ProxyCommand child (``gh cs ssh --stdio``) inherits it, and
+    # falling back to the ambient account 404s when that account doesn't own
+    # the CodeSpace. Never part of identity, equality or repr (it may hold a token).
+    process_env: Mapping[str, str] | None = field(
+        default=None, compare=False, repr=False, hash=False,
     )
 
     @property

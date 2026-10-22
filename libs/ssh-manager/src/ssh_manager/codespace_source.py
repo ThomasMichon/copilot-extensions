@@ -95,6 +95,7 @@ class CodespaceConfigSource:
             proxy_command=parsed.get("proxy_command"),
             config_file=str(config_path),
             extra_options=parsed.get("extra_options", {}),
+            process_env=self._gh_env,
         )
         return self._config
 

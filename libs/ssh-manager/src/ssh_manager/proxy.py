@@ -13,7 +13,7 @@ import re
 import secrets
 import subprocess
 import sys
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from functools import lru_cache
 from pathlib import Path
 import shlex
@@ -363,10 +363,29 @@ def _track_owner_job(
     watcher.add_done_callback(_job_watcher_done)
 
 
+def ssh_process_env(
+    config: Any, extra: Mapping[str, str] | None = None,
+) -> dict[str, str] | None:
+    """The environment an SSH subprocess for ``config`` must run with.
+
+    Starts from the config source's pinned ``process_env`` (for example a
+    CodeSpace's owning gh account) instead of the ambient environment, then
+    applies ``extra``. ``None`` means "inherit the ambient environment"."""
+    base = getattr(config, "process_env", None)
+    if base is None and not extra:
+        return None
+    env = dict(base if base is not None else os.environ)
+    env.update(extra or {})
+    return env
+
+
 async def create_ssh_subprocess(
     *args: str, config: SSHConfig, **kwargs: Any,
 ) -> asyncio.subprocess.Process:
     """Launch SSH, owning any Windows native proxy outside OpenSSH's child spawn."""
+    if kwargs.get("env") is None:
+        # A caller that names no environment still gets the target's pinned one.
+        kwargs["env"] = ssh_process_env(config)
     if _is_windows():
         # OpenSSH's inherited descriptor metadata describes an ancestor's handles,
         # not the newly redirected stdio owned by this subprocess.

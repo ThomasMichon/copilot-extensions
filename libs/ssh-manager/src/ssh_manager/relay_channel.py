@@ -30,7 +30,7 @@ from .config_sources import SSHConfig
 from .forward import build_forward_ssh_args
 from .locks import process_identity
 from .process import run_process_cleanup, terminate_ssh_process_tree
-from .proxy import create_ssh_subprocess
+from .proxy import create_ssh_subprocess, ssh_process_env
 
 log = logging.getLogger("ssh-manager.relay")
 
@@ -223,7 +223,7 @@ class SupervisedRelayForward:
             proc = await create_ssh_subprocess(
                 *args,
                 config=self._config,
-                env={**os.environ, _OWNER_ENV: self._owner_token},
+                env=ssh_process_env(self._config, {_OWNER_ENV: self._owner_token}),
                 stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.PIPE,

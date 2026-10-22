@@ -13,13 +13,12 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass, replace
 import math
 import logging
-import os
 import uuid
 from typing import Literal
 
 from .config_sources import SSHConfig
 from .forward import build_forward_ssh_args
-from .proxy import create_ssh_subprocess
+from .proxy import create_ssh_subprocess, ssh_process_env
 from .relay_channel import (
     SupervisedRelayForward, _FORWARD_DIAGNOSTIC_TAIL, _OWNER_ENV, _VenueStopped,
 )
@@ -210,7 +209,7 @@ class FiniteReverseForward(SupervisedRelayForward):
     async def _spawn_owned(self, args: list[str], remaining: float):
         pending = asyncio.create_task(create_ssh_subprocess(
             *args, config=self._config,
-            env={**os.environ, _OWNER_ENV: self._owner_token},
+            env=ssh_process_env(self._config, {_OWNER_ENV: self._owner_token}),
             stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.PIPE,

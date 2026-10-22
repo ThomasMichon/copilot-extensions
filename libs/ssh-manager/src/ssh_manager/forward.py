@@ -30,7 +30,7 @@ import socket
 
 from .config_sources import SSHConfig
 from .process import terminate_ssh_process_tree
-from .proxy import create_ssh_subprocess
+from .proxy import create_ssh_subprocess, ssh_process_env
 
 log = logging.getLogger("ssh-manager.forward")
 
@@ -252,6 +252,7 @@ class LocalForward:
             proc = await create_ssh_subprocess(
                 *args,
                 config=self._config,
+                env=ssh_process_env(self._config),
                 stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
