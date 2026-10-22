@@ -264,6 +264,31 @@ skipped unless explicitly selected by its environment variable; its budget and
 observer unit tests run normally. No required-PR job, matrix or release gate is
 added for this periodic/manual benchmark.
 
+## Retained installer guardian: native Windows opt-in
+
+The retained-child desktop regression requires a quiescent interactive Windows
+desktop and an installed real `pythonw.exe`. It is outside the fast required lane:
+
+```powershell
+$env:COPILOT_EXTENSIONS_NATIVE_WINDOWS = '1'
+try {
+    python tools\run-plugin-tests.py agent-worktrees --allow-explicit-tiers --test-file tests\test_installer_guardian_windowless.py
+} finally {
+    Remove-Item Env:COPILOT_EXTENSIONS_NATIVE_WINDOWS
+}
+```
+
+It observes the actual windowless parent image, two console-child/descendant
+cycles, visible and Default Terminal windows, and foreground transitions. Its
+timeout and owner-cancellation cases require pinned process handles to signal
+exit and canonical cleanup custody to become available. Breakaway remains
+refused; no resident service is installed or escaped from test containment.
+
+The existing `test_python_installer_engine.py` teardown-fault regression injects
+its first accounting failure inside the guardian, not through parent-only
+monkeypatches. It checks frozen inputs, construction/retention exclusion,
+descendant settlement and refusal to publish after the recovered teardown.
+
 ## The turn-key runner
 
 The dependency-free worktree identity codec has the explicit

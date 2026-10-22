@@ -941,46 +941,43 @@ def test_reused_health_does_not_classify_cleanup_or_ownership_failure_as_repair(
 def test_unsettled_job_teardown_keeps_frozen_inputs_and_construction_custody(
     engine, procutil, tmp_path, build_inputs, monkeypatch,
 ):
+    from types import SimpleNamespace
+    from native_installer_guardian_teardown import write_procutil
+
     plugin, uv = build_inputs
     root = tmp_path / "runtime"
-    attempts = 0
-    original = procutil.JobHandle.terminate_and_wait
-    original_spawn = procutil.spawn_sync_in_kill_on_close_job
-    failure = OSError("Job accounting temporarily unavailable")
     marker = tmp_path / "writers"
+    observations = tmp_path / "teardown.json"
+    injected = tmp_path / "guardian_procutil.py"
     observed_inputs = []
+    original = engine._procutil
 
-    def spawn(argv, **kwargs):
-        return original_spawn([sys.executable, "-c", _writer_tree(marker)], **kwargs)
+    def instrument(inputs):
+        observed_inputs.append(inputs)
+        owned = original(inputs)
+        write_procutil(
+            injected, procutil=Path(owned.__file__), runtime=Path(engine.runtime.__file__),
+            root=root, frozen=inputs.plugin, marker=marker, observations=observations,
+            writer=_writer_tree(marker),
+        )
+        return SimpleNamespace(__file__=injected, no_window_kwargs=owned.no_window_kwargs)
 
-    def terminate_and_wait(job, timeout):
-        nonlocal attempts
-        attempts += 1
-        assert observed_inputs and (observed_inputs[0].plugin / "pyproject.toml").is_file()
-        with pytest.raises(engine.runtime.ConstructionTimeout):
-            with engine.runtime.construction_lease(root, "1.0.0", timeout=0):
-                pytest.fail("unsettled child must retain construction custody")
-        assert not engine.runtime.marker_path(root, "1.0.0").exists()
-        if attempts == 1:
-            assert all(engine.runtime._pid_alive(pid) for pid in _wait_for_writer(marker))
-            raise failure
-        original(job, timeout)
-        assert job.handle is None
-
-    monkeypatch.setattr(procutil.JobHandle, "terminate_and_wait", terminate_and_wait)
-    monkeypatch.setattr(procutil, "spawn_sync_in_kill_on_close_job", spawn)
-    monkeypatch.setattr(
-        engine, "_procutil", lambda inputs: (observed_inputs.append(inputs) or procutil),
-    )
-    with pytest.raises(OSError) as raised:
+    monkeypatch.setattr(engine, "_procutil", instrument)
+    with pytest.raises(RuntimeError, match="guardian did not confirm settlement"):
         with engine.numbered_candidate(
             root, "1.0.0", plugin=plugin, uv=uv, base_python=Path(sys.executable),
             health_module="example_module", child_timeout=2,
         ):
             pytest.fail("a teardown failure cannot publish a candidate")
-    assert raised.value is failure and attempts == 2
-    _assert_writers_dead(engine, _wait_for_writer(marker))
+    entries = json.loads(observations.read_text())
+    assert len(entries) == 2 and entries[0]["writers_live"] and entries[1]["writers_settled"]
+    assert all(entry["frozen"] and entry["construction_blocked"]
+               and entry["retention_blocked"] and entry["cleanup_blocked"]
+               and not entry["complete"] for entry in entries)
+    _assert_writers_dead(engine, entries[1]["pids"])
+    assert not engine.runtime.marker_path(root, "1.0.0").exists()
     assert not list((root / ".installer-inputs").iterdir())
     assert not observed_inputs[0].plugin.exists()
     with engine.runtime.construction_lease(root, "1.0.0", timeout=0):
-        pass
+        with engine.runtime._cleanup_lease(root, "1.0.0", allow_construction_owner=True) as admitted:
+            assert admitted

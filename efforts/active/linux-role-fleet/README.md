@@ -774,3 +774,14 @@ These bounded Windows selections are not a new full Windows-suite claim.
   Current-head review/CI, actual merge, release and authorized installed
   adoption remain separate. Activation/removal and the broader campaign's
   useful-service, persistence and continuity obligations remain open.
+- Review exposed a parent-only teardown injection that no longer crossed the
+  new guardian boundary. The regression now injects inside the actual Job
+  owner and records frozen inputs, construction/retention exclusion, live
+  writers before the first accounting failure and settled descendants before
+  release. The recovered teardown still refuses publication. Complete shared
+  engine membership passed 43 cases with one POSIX-only skip in bounded groups.
+- The opt-in native desktop regression passed timeout and owner-cancellation
+  cases from the real windowless Python image, with two console/descendant
+  cycles each. Native window/focus observation found no visible or Default
+  Terminal windows and no foreground transitions; process handles and cleanup
+  custody prove settlement. This remains outside the fast required lane.
