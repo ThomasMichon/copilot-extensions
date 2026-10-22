@@ -678,7 +678,8 @@ for key, value in environment.items():
                         # background install can't collide.
                         setup_status INFO 'A new plugin version was downloaded; installing it in the background (applies on the next launch)...'
                         local _ilog="${APERTURE_SETUP_LOG:-${WORKTREE_SETUP_LOG:-/dev/null}}"
-                        setsid env ${_stage_env[@]+"${_stage_env[@]}"} \
+                        setsid "$PYTHON" -m update_telemetry.shell observe --log "$_ilog" -- \
+                            env ${_stage_env[@]+"${_stage_env[@]}"} \
                             bash "$_installer" "${_inst_args[@]}" \
                             >>"$_ilog" 2>&1 </dev/null &
                         disown 2>/dev/null || true

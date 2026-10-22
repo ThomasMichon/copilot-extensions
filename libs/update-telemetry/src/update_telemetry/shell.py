@@ -3,6 +3,8 @@
 The shell retains command execution and writes NUL-delimited record triples
 to a private temporary spool. One renderer owns the phase's UTC/monotonic
 clocks, log and gated terminal sink; it is stopped before session handoff.
+The separate ``observe`` mode follows one detached native invocation instead;
+its installer retains deadline, staging and installation ownership.
 """
 
 from __future__ import annotations
@@ -15,7 +17,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TextIO
 
-from .human import HumanLineBuffer, HumanOperation
+from .human import HumanLineBuffer, HumanOperation, native_output
 from .redact import redact
 
 
@@ -190,7 +192,52 @@ def render(
         sampler.join()
 
 
+def observe_command(log: TextIO, argv: list[str]) -> int:
+    """Observe one native invocation without acquiring installation ownership."""
+    import subprocess
+
+    with HumanOperation("launch/installer", stream=log) as progress:
+        try:
+            with native_output() as output:
+                result = subprocess.run(
+                    argv, stdin=subprocess.DEVNULL, stdout=output,
+                    stderr=subprocess.STDOUT, check=False,
+                    **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+                )
+        except OSError as exc:
+            progress.complete("failed", f"Installer observation failed: {exc}")
+            return 1
+        code = 128 - result.returncode if result.returncode < 0 else result.returncode
+        state = "failed" if code else "done"
+        outcome = (
+            "continuing with existing version" if code
+            else "launcher changes apply on the next launch"
+        )
+        progress.complete(
+            state, f"Installer update {state} (exit {code}); {outcome}",
+        )
+        return code
+
+
+def _observe_main(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(description="Persist one detached installer's human output.")
+    parser.add_argument("--log", type=Path, required=True)
+    parser.add_argument("command", nargs=argparse.REMAINDER)
+    args = parser.parse_args(argv)
+    command = args.command[1:] if args.command[:1] == ["--"] else args.command
+    if not command:
+        parser.error("an installer command is required")
+    try:
+        with args.log.open("a", encoding="utf-8") as log:
+            return observe_command(log, command)
+    except (OSError, RuntimeError, ValueError) as exc:
+        print(f"Installer output observer failed: {redact(str(exc))}", file=sys.stderr, flush=True)
+        return 1
+
+
 def main() -> int:
+    if sys.argv[1:2] == ["observe"]:
+        return _observe_main(sys.argv[2:])
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--events", type=Path, required=True)
     parser.add_argument("--ready", type=Path, required=True)

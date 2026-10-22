@@ -150,6 +150,83 @@ def test_shell_progress_cli_uses_one_process_and_rejects_parent_loss(tmp_path):
     assert ready.with_name(ready.name + ".failure").read_text() == "parent-exited\n"
 
 
+@pytest.mark.parametrize("code", [0, 7, 143])
+def test_shell_observer_cli_keeps_native_exit_frames_and_redaction(tmp_path, code):
+    log = tmp_path / "setup.log"
+    canonical = "[01:02:03.004Z] child done ready [duration 1.0s]"
+    secret = "-".join(("synthetic", "observer", "credential"))
+    producer = (
+        "import sys; "
+        f"print({canonical!r}); print(''.join(('Bea','rer'))); print({secret!r}); "
+        "print('diagnostic',file=sys.stderr); sys.stdout.write('partial-tail'); "
+        f"sys.exit({code})"
+    )
+    result = subprocess.run(
+        [
+            getattr(sys, "_base_executable", sys.executable), "-m", "update_telemetry.shell",
+            "observe", "--log", str(log), "--", sys.executable, "-I", "-c", producer,
+        ],
+        env=dict(os.environ, PYTHONPATH=str(LIB / "src")),
+        capture_output=True, timeout=10,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    assert result.returncode == code, result.stderr
+    assert result.stdout == result.stderr == b""
+    report = log.read_text(encoding="utf-8")
+    assert secret not in report
+    assert report.splitlines().count(canonical) == 1
+    assert "diagnostic [elapsed " in report
+    assert "partial-tail [elapsed " in report
+    state = "failed" if code else "done"
+    assert f"launch/installer {state} Installer update {state} (exit {code})" in report
+    assert (
+        "continuing with existing version" if code else "launcher changes apply on the next launch"
+    ) in report
+    assert report.count("[duration ") == 2  # Canonical child plus the observer's completion.
+
+
+@pytest.mark.parametrize("failure", ["missing-command", "spawn", "sink"])
+def test_shell_observer_cli_reports_startup_failures(tmp_path, failure):
+    log = tmp_path / "setup.log"
+    if failure == "sink":
+        log = tmp_path / "missing-directory" / "setup.log"
+    command = [] if failure == "missing-command" else [str(tmp_path / "missing-executable")]
+    result = subprocess.run(
+        [
+            getattr(sys, "_base_executable", sys.executable), "-m", "update_telemetry.shell",
+            "observe", "--log", str(log), "--", *command,
+        ],
+        env=dict(os.environ, PYTHONPATH=str(LIB / "src")),
+        capture_output=True, timeout=10,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    assert result.returncode == (2 if failure == "missing-command" else 1)
+    assert result.stdout == b""
+    if failure == "spawn":
+        report = log.read_text(encoding="utf-8")
+        assert "failed Installer observation failed" in report
+        assert "Installer update done" not in report
+    else:
+        assert result.stderr
+        assert not log.exists()
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX signal exit contract")
+def test_shell_observer_keeps_native_signal_exit(tmp_path):
+    import io
+    import signal
+
+    from update_telemetry.shell import observe_command
+
+    log = io.StringIO()
+    code = observe_command(log, [
+        sys.executable, "-I", "-c",
+        "import os,signal; os.kill(os.getpid(),signal.SIGTERM)",
+    ])
+    assert code == 128 + signal.SIGTERM
+    assert f"Installer update failed (exit {code})" in log.getvalue()
+
+
 def test_shell_action_clock_excludes_queued_output_drain(tmp_path, monkeypatch):
     import io
     import threading
@@ -555,7 +632,8 @@ def test_human_broken_sink_and_thread_start_restore_context_and_close_pipes(monk
             os.fstat(fd)
 
 
-def test_human_relay_finishes_before_detached_descendant_eof(tmp_path):
+@pytest.mark.parametrize("owner", ["human", "shell-observer"])
+def test_human_relay_finishes_before_detached_descendant_eof(tmp_path, owner):
     import io
 
     from update_telemetry.human import HumanOperation, native_output
@@ -578,13 +656,19 @@ def test_human_relay_finishes_before_detached_descendant_eof(tmp_path):
     )
     stream = io.StringIO()
     try:
-        with HumanOperation("update", stream=stream):
-            with native_output() as fd:
-                result = subprocess.run(
-                    [sys.executable, "-I", "-c", producer], stdout=fd, stderr=fd,
-                    timeout=10, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-                )
-        assert result.returncode == 0
+        if owner == "shell-observer":
+            from update_telemetry.shell import observe_command
+
+            code = observe_command(stream, [sys.executable, "-I", "-c", producer])
+        else:
+            with HumanOperation("update", stream=stream):
+                with native_output() as fd:
+                    result = subprocess.run(
+                        [sys.executable, "-I", "-c", producer], stdout=fd, stderr=fd,
+                        timeout=10, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                    )
+            code = result.returncode
+        assert code == 0
         assert "direct child finished" in stream.getvalue()
         assert not done.exists(), "relay waited for descendant EOF, not direct-child completion"
     finally:

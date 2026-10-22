@@ -207,6 +207,17 @@ spawn failures warn and retain the launch's existing continuation policy.
 This adds one observer per detached installation, not a process per line or
 evidence of an update-speed improvement.
 
+The detached Bash installer uses one `update_telemetry.shell observe` process
+inside its existing `setsid` boundary. It appends framed, redacted stdout/stderr
+and the native exit outcome to the existing setup-log destination, without
+echoing into the launcher's terminal or protocol streams. The original `env`
+and Bash argument vector still applies staged environment changes only to the
+installer. The observer waits for that invocation, drains already-written
+output and stops without waiting for detached descendants to close inherited
+pipes. Its duration includes invocation and output drain, not per-line cost or
+a serving-health verdict. Admission, staging, deadlines and termination remain
+with their original owners; this is not another updater.
+
 The native maintenance sinks share one physical-line envelope with the
 Python updater: `[HH:mm:ss.fffZ] scope state message [elapsed Ns]` or a
 completed action's `[duration Ns]`. Canonical nested envelopes are retained,
@@ -231,8 +242,8 @@ three attempts, native argument vectors, captured stdout, optional stderr
 passthrough and the existing final continuation warning are unchanged.
 Successful preflights do not gain terminal summaries or contaminate protocol
 stdout. No renderer is kept alive across the Picker or interactive session.
-Other early/late Bash diagnostics outside these bounded scopes and Bash detached
-installer streams retain their existing behavior. Legacy standalone Worktrees
+Other early/late Bash diagnostics outside these bounded scopes retain their
+existing behavior. Legacy standalone Worktrees
 install/update presentation is owned by its existing admission parent, not
 this launcher renderer. Structured-context installers retain their own native
 validation and staging owner, including its existing internal output buffering;

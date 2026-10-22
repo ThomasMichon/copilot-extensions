@@ -124,8 +124,11 @@ matrix below are _(agent-recommended)_ implementation details.
 - [x] Frame finite post-maintenance Bash preflight log scopes without
   extending renderer lifetime across the Picker or interactive session
   (#7672).
-- [ ] Persist detached Windows marketplace-installer output through a
-  launch-owned observer without changing the installer's native authority.
+- [x] Persist detached Windows marketplace-installer output through a
+  launch-owned observer without changing the installer's native authority
+  (#7683).
+- [ ] Frame detached Bash marketplace-installer output through its launch-owned
+  observer, retaining the native invocation and existing log destination.
 - [ ] Finish the remaining detached/standalone installer and early/late Bash
   output boundaries through their actual output owners.
 - [ ] Prefix every human-readable install/update line with a wall-clock time;
@@ -233,6 +236,56 @@ Bridge serving-version gap and supervisor framing defect survived that
 bounded source delta inspection.
 
 ## Journal
+
+### 2026-10-21 - Detached Bash output owner and context-watchdog coordination
+
+- The remaining PowerShell structured-context output is buffered by its native
+  staging parent. Open contributor PR #6928 replaces that exact wait boundary.
+  Read its current canonical watchdog and Worktrees caller, then coordinated on
+  the original PR rather than opening a competing adapter. Deadline, identity
+  and stage-retention ownership remain with that change; no context installer
+  was edited here.
+- The independent Bash detached branch already redirected native output, but
+  bypassed framing and recorded no native completion. Its existing `setsid`
+  launch now uses the shared formatter's explicit single-command observer.
+  Literal arguments, installer-only staged environment, native admission,
+  termination and the existing setup-log destination remain unchanged.
+- Two real detached success/failure fixtures first failed against the old
+  source because live progress was unframed. Both then passed, together with
+  their blocking counterparts. The native Linux selection passed 57 cases;
+  the separate finite-preflight selection passed six. Windows observer CLI
+  and shared marketplace fixtures passed 21, with five unavailable-platform
+  cases skipped. Original containment and item/group limits were retained.
+- The observer preserves native exits, redaction, nested frames, UTF-8 and a
+  partial final line, and stops at direct-child completion rather than waiting
+  for detached-descendant EOF. It adds one observer per detached installation,
+  not a process per line. Duration includes observed invocation and drain;
+  these fixtures do not claim update savings, full package provisioning or
+  promoted installed behavior. Publication and source review remain pending.
+
+### 2026-10-21 - Detached Windows sink merged; retain the inner output owners
+
+- #7683 merged as `9b85465884d18fe14d40bdf2d52d7547016dd1d5` after
+  Copilot approved exact head `314883097265f075e529f0eeff909a0e38e4ff9d`,
+  no unresolved review threads and green current-head CI, including the
+  required PR gate. The earlier review's startup-rotation concern was
+  reproduced and fixed rather than ignored because its footer said
+  "No open issues."
+- Re-read this effort's Plan and Validation Plan after the actual merge.
+  Marked only the finite detached Windows sink complete. The current source
+  tip was retained on a backup, then only confirmed merged history was
+  advanced; no unpublished work, runtime state or ownership record was
+  discarded or repaired.
+- Next output-owner trace: the structured-context installer's retained
+  native self-staging parent. Compare the Bash inherited-output route with
+  Windows' buffered captured child before choosing a progress adapter.
+  Preserve their validation, staging, watchdog and publication ownership,
+  and coordinate any overlap with existing native-installer work.
+- Other standalone and early/late streams, banner convergence, equivalent
+  whole-flow cost measurements, promoted installed qualification and
+  authorized rollout remain open. This source merge does not change any
+  deployment hold or authorize an installed update. The effort and source
+  worktree remain active.
 
 ### 2026-10-21 - Close the detached sink's startup rotation gap
 
