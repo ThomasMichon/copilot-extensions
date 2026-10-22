@@ -259,13 +259,21 @@ capacity. Local pytest commands remain wrapped by the bounded test supervisor.
 
 ## Trusted metadata event partition
 
-The existing required metadata entrypoint covers actual source routing for
+The focused metadata entrypoint covers actual source routing for
 Dev synchronize, closed/retarget-away, body/label edits and unrelated bases:
 
 ```text
 python -m pytest -q tools/test_required_source_attribution_workflow.py
 node --test .github/actions/required-pr-attribution.test.cjs tools/test_copilot_review_gate.cjs
 ```
+
+The metadata wiring test checks the current unit-only CI profile through the
+canonical trusted-CI validator, including its ungated policy check, admitted
+unit execution and required aggregate. It does not require the retired
+dispatched-snapshot or exhaustive metadata-test steps to return to source CI.
+The Python/Git and JavaScript metadata suites above remain outside the admitted
+release-unit packet; their periodic enrollment is still an open portfolio
+obligation, not evidence supplied by a passing required PR check.
 
 The 72 event/base cases, job-boundary checks and real-Git admission shapes reuse
 the existing bounded fixtures, with no extra CI job. Source declarations come

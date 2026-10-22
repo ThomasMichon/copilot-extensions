@@ -1,10 +1,11 @@
 """Trusted metadata wiring, event repair, and automation origin contracts."""
+import importlib.util
 import json
 from pathlib import Path
 
 import yaml
 
-# Collect the partition and admission cases through this existing required-CI entrypoint.
+# Collect the partition and admission cases through the existing metadata entrypoint.
 from test_metadata_consolidation_preflight import (
     baseline_fixture as baseline_fixture,
     metadata_snapshot as metadata_snapshot,
@@ -120,20 +121,17 @@ def test_contract_tests_are_wired_and_dev_cleanup_has_a_workflow_origin():
     assert set(workflow["on"]) == {"pull_request", "push", "workflow_dispatch"}
     assert workflow["on"]["push"]["branches"] == ["main", "dev"]
     assert workflow["permissions"] == {"contents": "read"}
+    assert workflow["env"]["PROMOTION_UNIT_PROFILE"] == "copilot-extensions.promotion-units/v1"
     steps = workflow["jobs"]["checks"]["steps"]
-    assert steps[0]["name"] == "Verify the dispatched promotion snapshot before checkout"
-    assert '[ "$RUN_SHA" = "$EXPECTED_SHA" ]' in steps[0]["run"]
-    assert '[ "$WORKFLOW_SHA" = "$EXPECTED_SHA" ]' in steps[0]["run"]
-    assert steps[1]["uses"] == "actions/checkout@v4"
-    assert steps[1]["with"] == {"fetch-depth": "0"}
-    assert any("required-pr-attribution.test.cjs" in step.get("run", "") for step in steps)
-    install = next(step for step in steps if step.get("name") == "Required source metadata contract tests")
-    assert install.get("working-directory", ".") == "."
-    assert install["run"].splitlines()[0] == (
-        "python worktree-manager/scripts/picker-snapshot/install.py --directory .github/actions "
-        "--health-module commonmark --health-module parse5"
+    assert steps[0]["uses"] == "actions/checkout@v4"
+    assert steps[0]["with"] == {"fetch-depth": "0"}
+    spec = importlib.util.spec_from_file_location(
+        "metadata_trusted_ci_contract", ROOT / "tools" / "check-trusted-ci.py",
     )
-    assert any("test_required_source_attribution_workflow.py" in step.get("run", "") for step in steps)
+    assert spec is not None and spec.loader is not None
+    guard = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(guard)
+    assert guard.validate_workflow() == []
     purge = (ROOT / ".github" / "workflows" / "purge-consumed-changefiles.yml").read_text(encoding="utf-8")
     assert "agent-worktrees:source workflow=purge-consumed-changefiles run=$GITHUB_RUN_ID" in purge
     assert '"$origin"' in purge
