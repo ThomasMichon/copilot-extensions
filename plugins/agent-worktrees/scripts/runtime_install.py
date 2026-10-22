@@ -117,17 +117,12 @@ class Governance:
 
     def recheck(self) -> None:
         state, receipt = self.read()
-        previous, previous_receipt = self.initial
-        keys = (
-            "actualMode", "desiredMode", "status", "reason", "runtimeRoot",
-            "context", "activationGeneration", "installGeneration", "allowMutation",
-        )
-        if any(state.get(key) != previous.get(key) for key in keys):
+        expected = self.signature()
+        if {key: state.get(key) for key in expected["state"]} != expected["state"]:
             raise InstallationRefused("Installation governance changed during construction")
-        if receipt is not None and any(
-            receipt[key] != previous_receipt[key]
-            for key in ("marketplaceId", "namespaceGeneration", "generation", "pluginRoot")
-        ):
+        if receipt is not None and {
+            key: receipt[key] for key in expected["receipt"]
+        } != expected["receipt"]:
             raise InstallationRefused("Installation receipt changed during construction")
 
     def signature(self) -> dict:

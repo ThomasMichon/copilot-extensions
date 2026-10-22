@@ -33,6 +33,35 @@ def driver(monkeypatch):
     return module
 
 
+@pytest.mark.parametrize(("section", "field"), [
+    ("state", key) for key in (
+        "actualMode", "desiredMode", "status", "reason", "runtimeRoot",
+        "context", "activationGeneration", "installGeneration", "allowMutation",
+    )
+] + [
+    ("receipt", key) for key in (
+        "marketplaceId", "namespaceGeneration", "generation", "pluginRoot",
+    )
+])
+def test_governance_recheck_uses_signed_fields(driver, monkeypatch, section, field):
+    governance = driver.Governance.__new__(driver.Governance)
+    governance.initial = ({}, {
+        key: "original" for key in (
+            "marketplaceId", "namespaceGeneration", "generation", "pluginRoot",
+        )
+    })
+    state, receipt = (dict(value) for value in governance.initial)
+    monkeypatch.setattr(governance, "read", lambda: (state, receipt))
+    governance.recheck()
+    observed = state if section == "state" else receipt
+    observed["untracked"] = "ignored"
+    governance.recheck()
+    observed[field] = "changed"
+    diagnostic = "governance" if section == "state" else "receipt"
+    with pytest.raises(driver.InstallationRefused, match=f"Installation {diagnostic} changed"):
+        governance.recheck()
+
+
 @pytest.fixture(scope="module")
 def native_runtime_source(tmp_path_factory: pytest.TempPathFactory) -> Iterator[tuple[Path, str]]:
     repository = Path(__file__).resolve().parents[3]
