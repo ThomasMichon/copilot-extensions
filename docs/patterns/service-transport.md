@@ -84,12 +84,43 @@ surface:
 - **A userspace tunnel (Chisel-style)** — a TCP/HTTP-tunnel binary — when native
   SSH port-forwarding isn't available but an SSH/HTTPS channel is.
 
-The forwarded local port on each end is **OS-assigned and discovered**, not
-fixed. The result: the only listener a machine ever exposes beyond a service's
+By default, the forwarded local port on each end is **OS-assigned and
+discovered**, not fixed. The constrained reverse-listener exception below is
+not a fallback for ordinary local service endpoints. The result: the only
+listener a machine ever exposes beyond a service's
 own namespace is **SSH** — and for the truly locked-down, even SSH can sit behind
 a tunnel. This rung is always an **opt-in** boundary-crossing mechanism; per the
 vision's standing non-goal, **no plugin ever *requires* a tunnel or a broker** to
 be installed or reached on its own host.
+
+#### Constrained reverse-SSH listener grants
+
+Prefer actual server/OS-assigned allocation wherever it can be authorized
+narrowly. Some SSH servers require exact positive listener and peer-connect
+tuples: requesting reverse port zero does not make `permitlisten=localhost:0`
+a valid narrow permission. A provider must not solve that constraint by
+widening a grant or substituting a wildcard.
+
+Only for that constrained reverse-listener boundary, an existing transport
+owner may select from a **finite, already authorized positive loopback set**.
+Both listen and peer-connect directions remain subject to their existing
+policy owner. Selection must retain the **actual successful server bind and
+its owned transport**, not probe an address, close it and later rebind.
+Authentication, permission or uncertain transport failures are not address
+conflicts and cannot authorize trying another tuple under a fresh operation.
+
+Advertise a selected endpoint only after candidate-specific authenticated
+readiness and the existing owner's generation-checked publication. Preserve
+the predecessor until that transaction permits replacement; fence stale
+renewal, release and cleanup against successors. Reconcile unknown results
+under their original correlation. No second registry, keeper or port table
+supplies authority.
+
+This exception does not guarantee free capacity: when every permitted
+candidate is occupied, return explicit unavailability and leave unknown
+holders untouched. An actual target still requires its own permission,
+implementation and platform qualification; the pattern grants no live
+configuration, migration or rollout authority.
 
 **Reusable client primitive — `core-delegation`.** A plugin that ships a thin
 **host adapter** and delegates its heavy **core** (a remote engine, or a

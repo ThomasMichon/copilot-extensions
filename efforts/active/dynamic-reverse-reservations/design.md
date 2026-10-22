@@ -50,6 +50,24 @@ A different permission mechanism requires its own accepted owner contract.
 This is source-backed analysis, not proof about an installed OpenSSH build or
 native Windows multiplex support.
 
+### Required pattern reconciliation before implementation
+
+The existing governing transport pattern required OS-assigned forwarded ports
+on both ends. Selecting a positive tuple from an authorized finite set is a
+departure, even when an actual retained bind prevents duplicate ownership.
+The permission constraint alone does not authorize that departure.
+
+Phase 1 therefore includes a reviewed, narrow
+[transport-pattern amendment](../../../docs/patterns/service-transport.md#constrained-reverse-ssh-listener-grants)
+and its [pattern-index qualification](../../../docs/patterns/README.md).
+**Do not implement the finite-positive strategy until that amendment is
+reviewed and merged, or a conforming alternative is selected.**
+The amendment retains OS-assigned local/ordinary-forward defaults, applies only
+where reverse-SSH allocation cannot be narrowly authorized otherwise, requires
+existing finite permissions on both directions and actual retained bind/
+authenticated readiness/generation custody, and preserves honest exhaustion.
+It grants neither wildcard forwarding nor a target policy change.
+
 ## Source and integration boundary
 
 Proposed new source:
