@@ -177,8 +177,17 @@ class ServiceConnector:
                 response = respond(ws, exchange, self.handler, admitted)
             else:
                 response = self._response(ws, session, exchange, method, path, selected, body)
-            await asyncio.wait_for(
-                response, timeout)
+            response_task = asyncio.create_task(response)
+            try:
+                done, _ = await asyncio.wait({response_task}, timeout=timeout)
+                if not done:
+                    raise asyncio.TimeoutError
+                await response_task
+            finally:
+                exchange.disconnect()
+                if not response_task.done():
+                    response_task.cancel()
+                await asyncio.gather(response_task, return_exceptions=True)
         except asyncio.TimeoutError:
             exchange.disconnect()
             await send(ws, {"type": "error", "id": exchange.id, "code": "backend-timeout"})

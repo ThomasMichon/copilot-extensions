@@ -513,6 +513,12 @@ callback an implicit credential store.
   writer. They prove publication proceeds while the write is held and original-ID
   reconciliation after reauthorization/reconnect. Review/current publication
   gates remain pending; no production acceptance is claimed.
+- Review found that `wait_for()` joins a handler's cancellation cleanup before
+  raising its timeout. The connector now closes request lifetime before
+  cancelling and joining its separately owned response task. Deadline and
+  external-cancellation regressions inspect lifetime from inside held cleanup
+  and prove that the connector still joins it. The affected portfolio passes
+  402 cases after this correction.
 
 ### 2026-10-22 - Merge the native client slice and continue the service contract
 

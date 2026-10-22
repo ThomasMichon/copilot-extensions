@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from dataclasses import FrozenInstanceError
 from types import SimpleNamespace
 
@@ -191,6 +192,61 @@ def test_lifetimes_are_independent_and_never_reopen():
     with pytest.raises(RequestDisconnected):
         first.check()
     second.check()
+
+
+@pytest.mark.parametrize("loss", ["deadline", "cancellation"])
+def test_lifetime_closes_before_response_cancellation_cleanup_and_cleanup_is_joined(loss):
+    async def scenario():
+        started, cleanup, release = asyncio.Event(), asyncio.Event(), asyncio.Event()
+        frames = []
+
+        async def handle(request):
+            started.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                with pytest.raises(RequestDisconnected):
+                    request.lifetime.check()
+                cleanup.set()
+                await release.wait()
+                raise
+
+        class Socket:
+            async def send_str(self, raw):
+                frames.append(json.loads(raw))
+
+        connector = ServiceConnector(
+            slot="service-a", gateway_origin="https://gateway.example",
+            access_token_callback=lambda: None, proof_key=None,
+            handler=HandlerBinding("fleet-a", "gateway-a", handle),
+        )
+        request = ServiceRequest(
+            CallerContext("fleet-a", "gateway-a", "service-a", "caller-a", 2**52),
+            "POST", "/register", (), b"",
+        )
+        exchange = Exchange("1" * 48, request=request)
+        pending = asyncio.create_task(connector._exchange(
+            Socket(), None, exchange,
+            ("POST", "/register", {}, b"", 0.01 if loss == "deadline" else 60, request),
+        ))
+        try:
+            await asyncio.wait_for(started.wait(), 3)
+            if loss == "cancellation":
+                pending.cancel()
+            await asyncio.wait_for(cleanup.wait(), 3)
+            assert not pending.done() and not frames
+            release.set()
+            if loss == "cancellation":
+                with pytest.raises(asyncio.CancelledError):
+                    await pending
+                assert frames == []
+            else:
+                await pending
+                assert frames == [{"type": "error", "id": exchange.id, "code": "backend-timeout"}]
+        finally:
+            release.set()
+            await asyncio.gather(pending, return_exceptions=True)
+    asyncio.run(scenario())
 
 
 @pytest.mark.parametrize("stage", ["before-handler", "before-headers", "before-end"])
