@@ -106,9 +106,10 @@ jobs:
             output.write("run=" + str(needed).lower() + "\n")
         print(json.dumps({"run_source_ast_guards": needed}))
         PY
-    - name: No sibling plugin writes tracking YAML directly
+    - name: Full source AST guards (three bounded workers)
       if: steps.source-ast-impact.outputs.run == 'true'
-      run: python tools/check-no-sibling-tracking-writes.py
+      timeout-minutes: 6
+      run: python tools/run-source-ast-guards.py
     - name: Install contract
       run: python tools/check-install-contract.py
     - name: Runtime resolution (marker-only, uniform)
@@ -131,9 +132,6 @@ jobs:
       run: python tools/sync-peer-launch.py --check
     - name: Vendored library synchronization
       run: python tools/check-vendored-libs-sync.py
-    - name: Windows headless launch invariants
-      if: steps.source-ast-impact.outputs.run == 'true'
-      run: python tools/check-headless-launch.py
     - name: Picker inbox discipline
       run: python tools/check-picker-inbox-discipline.py
     - name: Hook process hygiene
@@ -155,9 +153,6 @@ jobs:
       run: python tools/check-gh-aw-compiler-version.py
     - name: Feed neutrality (no hardcoded public package-feed pins)
       run: python tools/check-feed-neutrality.py
-    - name: Asyncio timeout handlers (Python 3.10 daemon)
-      if: steps.source-ast-impact.outputs.run == 'true'
-      run: python tools/check-asyncio-timeout-handlers.py
     - name: Ruff (F, E9)
       run: ruff check --select F,E9 --output-format=github .
   unit-tests:

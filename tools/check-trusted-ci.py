@@ -20,11 +20,7 @@ TRUSTED_JOB_CONDITION = (
 )
 UNIT_CONDITION = "steps.impact.outputs.run == 'true'"
 SOURCE_AST_CONDITION = "steps.source-ast-impact.outputs.run == 'true'"
-SOURCE_AST_COMMANDS = (
-    "python tools/check-no-sibling-tracking-writes.py",
-    "python tools/check-headless-launch.py",
-    "python tools/check-asyncio-timeout-handlers.py",
-)
+SOURCE_AST_COMMANDS = ("python tools/run-source-ast-guards.py",)
 SOURCE_AST_SCRIPT = """python - <<'PY'
 import json
 import os
@@ -451,6 +447,7 @@ def _validate_ci(path: Path) -> list[str]:
                 ]
                 if len(scans) != 1 or len(ast_impact) != 1 or (
                     scans[0].get("if") != SOURCE_AST_CONDITION
+                    or scans[0].get("timeout-minutes") != "6"
                     or "continue-on-error" in scans[0]
                     or check_steps.index(ast_impact[0]) >= check_steps.index(scans[0])
                 ):

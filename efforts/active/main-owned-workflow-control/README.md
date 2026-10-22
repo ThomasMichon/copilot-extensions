@@ -296,6 +296,10 @@ authorizes critical main-path acceptance or a bounded administrative change.
   identities, consumer authority, deadlines and joined failures. Existing
   control selection and comparable live publication timing remain open;
   this source reduction does not update the trusted helper pin.
+- [ ] Land and observe fixed three-worker execution of the unchanged full
+  source AST scanners, preserving pinned narrative admission, joined failure
+  diagnostics and bounded step/child execution. Local paired timing qualifies
+  the candidate, not hosted whole-flow acceptance or a CPU-work reduction.
 - [ ] Remove redundant release-shaped PR and main-push validation only where
   existing trusted gates and exact-SHA release evidence cover the removed work;
   first prove no generated-output coverage or required context is lost.
@@ -369,6 +373,11 @@ authorizes critical main-path acceptance or a bounded administrative change.
   fixture family, preserving real disk-refusal coverage in a complementary
   non-tmpfs run. Other failure families and a subsequent complete scheduled
   execution remain open; this is not whole-portfolio acceptance.
+- [x] Map the fourteen original shared lazy-dispatch unit bodies into the
+  unchanged release packet without copying assertions (#7749). All 408
+  previous identities remain, yielding 422 source-qualified nodes with
+  actual call coverage. This bounded mapping does not close the complete
+  historical census or establish a subsequent Main release's execution.
 - [x] Land the dev implementation of reviewed, widen-only module-size baseline
   maintenance and remove its obsolete main exception from source (#6438).
 - [x] Verify a covering promotion activates the dev-owned baseline producer on

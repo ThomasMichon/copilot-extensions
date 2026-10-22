@@ -42,6 +42,16 @@ push, manual and other events always run them. Diff/encoding/admission errors
 fail the checks job rather than emitting a skipped-success selection. All other
 guards, including the ungated workflow-policy guard, remain unchanged.
 
+Selected AST work runs through `tools/run-source-ast-guards.py`: three fixed
+workers invoke the original full tracking-write, headless-launch and
+asyncio-timeout scanners, each with a 300-second deadline. The runner joins
+every scanner and emits its complete labelled output in fixed order; a failed
+exit, missing interpreter or timeout fails the step. The six-minute step and
+ten-minute job budgets remain bounded, with no additional runner job or cache.
+Native subprocess regressions live in `tools/test_source_ast_guards.py`; they
+prove real three-process overlap and joined failure diagnostics rather than
+admitting process effects into the unit-only release packet.
+
 `tools/run-promotion-unit-tests.py` executes only the exact nodes declared by
 `tools/promotion-unit-manifest.json`, in one Python process with coverage.
 The packet lives in `tools/promotion_unit_tests/`, independent of mixed

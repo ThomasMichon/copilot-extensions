@@ -205,8 +205,10 @@ library call coverage. Removing the original test from the admitted closure
 fails during collection; changing original library bytes fails source
 verification. Neither negative emits a success proof.
 
-These results qualify only this source candidate and its explicit mapping.
-Ordinary review/source CI and actual qualified release remain separate gates.
+These results qualify only this source and its explicit mapping. #7749 merged
+after current-head Copilot approval and complete configured source CI; exact
+hosted run `39717216680` executed all 422 cases successfully in a 10.495-second
+packet. Actual qualified release remains a separate gate.
 The historical census above stays pinned evidence, not a current packet count.
 The complete historical-unit bijection, other library families, Windows
 first-touch and periodic/native acceptance remain open with their existing
