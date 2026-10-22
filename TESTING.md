@@ -224,6 +224,19 @@ against synthetic temporary trees. No Markdown parser, count regex, original
 test body or platform rule changes. This Linux mapping does not qualify the
 whole historical census, native Windows or the separate metadata/Git portfolio.
 
+`tools/promotion_unit_tests/test_activation_preservation.py` re-exports all
+original functions and unchanged parameterization from
+`libs/plugin-activation/tests/test_preservation.py`, mapping its 29 cases by
+replacing only the file prefix. The adapter loads the canonical activation,
+single-instance lease, drop-in registry and resolution packages directly,
+without running path-only conftests. The exact imported source closure and
+original test remain hash-bound; each case must contribute actual production
+call coverage under the unchanged observer, root and budget. Synthetic original
+snapshots, refused transactions, restoration, injected contention and real
+symlink assertions execute on Linux without changing production or test bodies.
+This qualifies no command/descendant process settlement, native Windows,
+other activation test module or complete historical census.
+
 ## Tracking-write source guard
 
 The source tracking-write guard still parses every sibling-plugin Python file,
