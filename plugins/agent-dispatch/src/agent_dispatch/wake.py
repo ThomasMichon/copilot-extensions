@@ -7,6 +7,7 @@ import logging
 from collections.abc import Callable
 
 from .events import EventBus
+from .coordinator_execution_wakes import deliver_execution_wake
 from .queue import (
     DEFAULT_WAKE_DELIVERY_LEASE_SECONDS,
     TaskError,
@@ -54,6 +55,8 @@ def _event(wake: WakeOperation) -> dict:
         "attempts": wake.attempts,
         "not_before": wake.not_before,
         "last_error": wake.last_error,
+        "execution_send_state": wake.execution_send_state,
+        "execution_send_detail": wake.execution_send_detail,
     }
 
 
@@ -69,6 +72,7 @@ async def drain_wake_outbox(
     delivery_lease: float = DEFAULT_WAKE_DELIVERY_LEASE_SECONDS,
     idle_interval: float | None = None,
     wake_signal: asyncio.Queue[None] | None = None,
+    execution_incarnation: str | None = None,
 ) -> None:
     """Drain durable wake operations until cancelled.
 
@@ -116,12 +120,10 @@ async def drain_wake_outbox(
             continue
         try:
             delivered = await asyncio.to_thread(
-                deliver,
-                wake.owner,
-                wake.owner_session_id or "",
-                wake.task_id,
-                wake.message,
-                wake.id,
+                deliver_execution_wake, queue, wake, execution_incarnation,
+                lambda: deliver(
+                    wake.owner, wake.owner_session_id or "", wake.task_id, wake.message, wake.id
+                ),
             )
             delivery_error = None if delivered else "bridge delivery unavailable"
         except Exception as exc:

@@ -96,7 +96,9 @@ grants.
       Internal reservation-send custody also serializes first admission
       with closure and retains pending/ambiguous transport outcomes; it is
       wired to coordinator-owned CI repair launch and task delivery in already
-      qualified scopes; other senders remain open. An empty inventory is never an
+      qualified scopes. Both coordinator wake drains use their existing outbox
+      identities and delivery tokens for final-send custody; other senders and
+      legacy qualification remain open. An empty inventory is never an
       acknowledgement.
 - [ ] Define the adopter effect-fence adapter and implement generation-bound
       mutation admission without conflating effect authority with task ownership.
@@ -146,6 +148,33 @@ do not treat a validated adapter response as complete task admission or live
 handoff support.
 
 ## Journal
+
+### 2026-10-21 - Mediate both coordinator wake outboxes
+- Final owner-prompt admission uses each existing wake row and current delivery
+  token, with canonical coordinator enrollment in already qualified scopes.
+  Pending and unknown transport outcomes survive lease expiry, queue reopening
+  and newer wakes without granting another send.
+- Accepted owner delivery is not repeated when finishing or detached claim
+  release needs a retry. Cleanup-only claim releases remain outside owner
+  execution custody, including after closure.
+- This advances Phase 2 only. Supervisor enrollment and other senders, legacy
+  qualification, adopter effects, acknowledgement and handback remain open.
+  Source/test work does not establish release, installation or running adoption.
+
+### 2026-10-21 - Coordinator sender cohort merged; wake mediation next
+- #7744 merged to `dev` as `bb5a997270e77a6bccaef794643b4d026da79799`
+  after current-head Copilot approval and the required checks. The final
+  runtime regression selection passed 199 cases.
+- Review exposed and closed a concrete cleanup gap: a known launched session
+  must survive custody-settlement failure. The factory now preserves its handle,
+  the route requests release without delivering the task turn, and pending
+  custody remains unresolved.
+- This closes only the coordinator-owned CI repair sender cohort. Continue
+  Phase 2 with final-send accounting for both wake outboxes, preserving their
+  existing delivery identity, retry ownership and claim-release-only exception.
+  Supervisor enrollment/senders, legacy qualification, adopter effects,
+  acknowledgement and handback remain open. No installation or running
+  adoption is claimed.
 
 ### 2026-10-21 - Mediate the coordinator-owned CI repair sender cohort
 - The existing CI route now uses canonical process/installation enrollment and

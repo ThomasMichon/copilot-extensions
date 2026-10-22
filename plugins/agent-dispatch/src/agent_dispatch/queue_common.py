@@ -353,6 +353,8 @@ class WakeOperation:
     last_error: str | None = None
     delivery_token: str | None = None
     delivery_expires_at: float | None = None
+    execution_send_state: str | None = None
+    execution_send_detail: str | None = None
 
     @classmethod
     def _from_row(cls, row: sqlite3.Row) -> WakeOperation:
@@ -382,6 +384,8 @@ class RunWaiterWakeOperation:
     last_error: str | None = None
     delivery_token: str | None = None
     delivery_expires_at: float | None = None
+    execution_send_state: str | None = None
+    execution_send_detail: str | None = None
 
     @classmethod
     def _from_row(cls, row: sqlite3.Row) -> RunWaiterWakeOperation:

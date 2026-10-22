@@ -51,7 +51,7 @@ from .coordinator_loops import (
 )
 from .coordinator_registries import register_registry_routes
 from .coordinator_execution_scopes import register_execution_scope_routes
-from .coordinator_execution_runtime import register_execution_runtime_routes
+from .coordinator_execution_runtime import coordinator_incarnation, register_execution_runtime_routes
 from .coordinator_spawn import register_spawn_routes
 from .coordinator_status import _slot_descriptor, register_status_routes
 from .coordinator_tasks import register_task_routes
@@ -271,6 +271,7 @@ def create_app(
             "retry_base": wake_retry_base,
             "idle_interval": max(wake_interval, 5.0),
             "wake_signal": wake_signal,
+            "execution_incarnation": coordinator_incarnation(app),
         }
         if wake_deliver is not None:
             wake_options["deliver"] = wake_deliver
@@ -307,6 +308,7 @@ def create_app(
                     interval=wake_interval,
                     is_active=wake_is_active,
                     release_claim=hibernation_claims.release_hibernation_claim_for_host_worktree,
+                    execution_incarnation=coordinator_incarnation(app),
                 )
             )
             if wake_interval > 0

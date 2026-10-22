@@ -47,6 +47,20 @@ class ExecutionSend:
     replayed: bool
 
 
+def execution_scope_qualified(conn: sqlite3.Connection, repo: str, source: str) -> bool:
+    return conn.execute(
+        "SELECT 1 FROM execution_scope_bindings WHERE repo = ? AND source = ?"
+        " UNION ALL SELECT 1 FROM execution_runtime_enrollments WHERE repo = ? AND source = ?"
+        " UNION ALL SELECT 1 FROM execution_send_custody WHERE repo = ? AND source = ?"
+        " UNION ALL SELECT 1 FROM execution_admission_closures WHERE repo = ? AND source = ?"
+        " UNION ALL SELECT 1 FROM wake_outbox w JOIN tasks t ON t.id = w.task_id"
+        " WHERE t.repo = ? AND t.source = ? AND w.execution_scope_key IS NOT NULL"
+        " UNION ALL SELECT 1 FROM run_waiter_wakes w JOIN tasks t ON t.id = w.task_id"
+        " WHERE t.repo = ? AND t.source = ? AND w.execution_scope_key IS NOT NULL LIMIT 1",
+        (repo, source) * 6,
+    ).fetchone() is not None
+
+
 def require_custody_scope(conn: sqlite3.Connection, key: str, repo: str, source: str) -> None:
     rows = conn.execute(
         "SELECT scope_key, repo, source"
@@ -60,8 +74,16 @@ def require_custody_scope(conn: sqlite3.Connection, key: str, repo: str, source:
         " WHERE scope_key = ? OR (repo = ? AND source = ?)"
         " UNION SELECT scope_key, repo, source"
         " FROM execution_scope_bindings"
-        " WHERE scope_key = ? OR (repo = ? AND source = ?)",
-        (key, repo, source, key, repo, source, key, repo, source, key, repo, source),
+        " WHERE scope_key = ? OR (repo = ? AND source = ?)"
+        " UNION SELECT w.execution_scope_key AS scope_key, t.repo, t.source"
+        " FROM wake_outbox w JOIN tasks t ON t.id = w.task_id"
+        " WHERE w.execution_scope_key IS NOT NULL"
+        " AND (w.execution_scope_key = ? OR (t.repo = ? AND t.source = ?))"
+        " UNION SELECT w.execution_scope_key AS scope_key, t.repo, t.source"
+        " FROM run_waiter_wakes w JOIN tasks t ON t.id = w.task_id"
+        " WHERE w.execution_scope_key IS NOT NULL"
+        " AND (w.execution_scope_key = ? OR (t.repo = ? AND t.source = ?))",
+        (key, repo, source) * 6,
     ).fetchall()
     if any((row["scope_key"], row["repo"], row["source"]) != (key, repo, source) for row in rows):
         raise TaskError("execution custody conflicts with the qualified producer scope")
@@ -75,6 +97,16 @@ def require_execution_send_reconciliation(
     creation_prefix: str | None = None,
 ) -> None:
     """Do not turn terminal reservation bookkeeping into transport absence."""
+    from .queue_execution_wakes import unresolved_wake_send
+
+    wake = unresolved_wake_send(
+        conn, task_id, exclusive_key=exclusive_key, creation_prefix=creation_prefix
+    )
+    if wake is not None:
+        raise TaskError(
+            f"unresolved execution wake send {wake['id']!r} has unresolved transport custody;"
+            " reconcile its transport outcome"
+        )
     row = conn.execute(
         "SELECT c.send_id, c.state, c.reservation_key"
         " FROM execution_send_custody c"

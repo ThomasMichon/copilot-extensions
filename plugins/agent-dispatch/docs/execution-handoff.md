@@ -7,6 +7,8 @@ from the reviewed [execution handoff contract](../../../efforts/active/acknowled
 This is a construction-stage library API with a bounded coordinator sender
 integration, not an operator switch or a live handoff command. Execution outside
 the explicitly qualified sender cohort is unchanged.
+Both coordinator wake drains extend that cohort through
+[same-row wake custody](execution-wake-custody.md).
 
 ## Ownership
 
@@ -155,7 +157,7 @@ The [coordinator-owned CI repair path](#coordinator-owned-ci-repair-sends)
 uses this accounting for launch and task-turn delivery in already qualified
 scopes. Complete runtime enrollment, other authenticated sender integration,
 fresh and already admitted launches,
-strict resumes, ordinary/restricted transports, redrives and both wake outboxes
+strict resumes, ordinary/restricted transports, redrives and legacy wake qualification
 remain gates. Runtime callers must enforce the new-versus-replayed distinction
 at their actual send boundary and reconcile ambiguous responses through the
 existing transport authority. No HTTP/CLI control, acknowledgement, destination
@@ -192,7 +194,7 @@ This endpoint resolves provenance only. It neither enrolls a runtime nor
 admits a send, closes execution, acknowledges a transition, transfers a task
 or activates a destination. Responses explicitly report `runtime_enrolled:
 false` and `acknowledged: false`. Runtime enrollment and integration of every
-actual sender and both wake outboxes remain required before any supported
+remaining sender and legacy wake cohort remain required before any supported
 handoff control or universal-fencing claim.
 
 ## Coordinator runtime enrollment construction
@@ -218,8 +220,8 @@ rather than deleting a possibly relevant participant.
 `runtime_enrolled: true` covers only that recorded coordinator. It does not
 assert the process has exited, that other runtimes are enrolled or that a
 sender uses custody. `send_admission` and `acknowledged` remain false. Supervisor
-enrollment, all actual launch/resume/delivery/redrive boundaries, both wake
-paths, legacy qualification, effect settlement and handback remain open.
+enrollment, other actual launch/resume/delivery/redrive boundaries,
+legacy qualification, effect settlement and handback remain open.
 Execution outside the bounded sender cohort is unchanged and no live transition
 command is exposed.
 
@@ -256,7 +258,7 @@ A missing binding cannot erase historical qualification retained in runtime,
 send or closure records. Such history still requires canonical provenance rather
 than falling back to the legacy transport path. This cohort is not complete
 legacy reconciliation or universal execution fencing. Supervisor senders,
-strict resumes, redrives, both wake paths, adopter effects and handback remain
+strict resumes, redrives, legacy wake qualification, adopter effects and handback remain
 open, and no closure/acknowledgement control is exposed.
 
 `tests/test_coordinator_execution_sender.py` exercises the actual route and

@@ -11,7 +11,8 @@ from . import coordinator_execution_runtime as runtime
 from .execution_scope_binding import resolve_execution_installation
 from .loop_governance import LoopGovernance
 from .queue import SpawnReservation, Task, TaskQueue
-from .queue_execution_custody import ExecutionSendIdentity, SendKind
+from .queue_execution_custody import ExecutionSendIdentity, SendKind, execution_scope_qualified
+from .queue_execution_scopes import ExecutionScopeBinding
 from .queue_records import TaskError
 
 
@@ -23,34 +24,24 @@ class ExecutionSendAttempt:
         self.accepted = True
 
 
-class CoordinatorExecutionSender:
+class CoordinatorExecutionProvenance:
     def __init__(
-        self, queue: TaskQueue, task: Task, reservation: SpawnReservation, incarnation: str
+        self, queue: TaskQueue, task: Task, incarnation: str
     ) -> None:
         self.queue = queue
         self.task = task
-        self.reservation = reservation
         self.incarnation = incarnation
         self.governance = LoopGovernance()
         self.producer_generation: int | None = None
 
-    @contextmanager
-    def attempt(self, kind: SendKind) -> Iterator[ExecutionSendAttempt]:
+    def prepare(self) -> tuple[ExecutionScopeBinding, str] | None:
         # Historical qualification cannot disappear with a missing binding row.
         with self.queue._connect() as conn:
-            qualified = conn.execute(
-                "SELECT 1 FROM execution_scope_bindings WHERE repo = ? AND source = ?"
-                " UNION ALL SELECT 1 FROM execution_runtime_enrollments"
-                " WHERE repo = ? AND source = ?"
-                " UNION ALL SELECT 1 FROM execution_send_custody WHERE repo = ? AND source = ?"
-                " UNION ALL SELECT 1 FROM execution_admission_closures"
-                " WHERE repo = ? AND source = ? LIMIT 1",
-                (self.task.repo, self.task.source) * 4,
-            ).fetchone()
-        attempt = ExecutionSendAttempt()
-        if qualified is None:
-            yield attempt
-            return
+            qualified = execution_scope_qualified(conn, self.task.repo, self.task.source)
+        if not qualified:
+            return None
+        if not self.incarnation:
+            raise TaskError("qualified sender requires its coordinator application incarnation")
         installation = resolve_execution_installation(self.governance)
         process = runtime._own_process(self.incarnation)
         producer = self.queue.producer_scope_status(self.task.repo, self.task.source)
@@ -73,6 +64,24 @@ class CoordinatorExecutionSender:
             or runtime._own_process(self.incarnation) != process
         ):
             raise TaskError("coordinator sender provenance changed before send admission")
+        return binding, runtime_id
+
+
+class CoordinatorExecutionSender(CoordinatorExecutionProvenance):
+    def __init__(
+        self, queue: TaskQueue, task: Task, reservation: SpawnReservation, incarnation: str
+    ) -> None:
+        super().__init__(queue, task, incarnation)
+        self.reservation = reservation
+
+    @contextmanager
+    def attempt(self, kind: SendKind) -> Iterator[ExecutionSendAttempt]:
+        attempt = ExecutionSendAttempt()
+        prepared = self.prepare()
+        if prepared is None:
+            yield attempt
+            return
+        binding, runtime_id = prepared
         identity = ExecutionSendIdentity(
             binding.scope,
             "send:" + uuid.uuid4().hex,
