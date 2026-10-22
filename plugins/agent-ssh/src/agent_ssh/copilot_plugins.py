@@ -8,6 +8,7 @@ import os
 import shutil
 import subprocess
 import shlex
+import signal
 import threading
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -75,13 +76,27 @@ def run_python(adapter, program: str, *, timeout: float):
         finally:
             done.set()
 
-    threading.Thread(target=execute, daemon=True).start()
     interrupted = False
-    while not done.is_set():
-        try:
-            done.wait()
-        except KeyboardInterrupt:
-            interrupted = True
+    def defer_interrupt(_signum, _frame):
+        nonlocal interrupted
+        interrupted = True
+    main_thread = threading.current_thread() is threading.main_thread()
+    previous = signal.getsignal(signal.SIGINT) if main_thread else None
+    installed = main_thread and previous != signal.SIG_IGN
+    if installed:
+        signal.signal(signal.SIGINT, defer_interrupt)
+    try:
+        threading.Thread(target=execute, daemon=True).start()
+        while True:
+            try:
+                if done.is_set():
+                    break
+                done.wait()
+            except KeyboardInterrupt:
+                interrupted = True
+    finally:
+        if installed:
+            signal.signal(signal.SIGINT, previous)
     if interrupted:
         raise KeyboardInterrupt
     if failures:

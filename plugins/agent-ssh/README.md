@@ -126,6 +126,12 @@ for the resolved native scope. A competing operation fails promptly without
 changing holds or reservations, including while attached preparation is active.
 The lock covers final cleanup and journal retirement but not the interactive
 attach lifetime; unrelated scopes and the keeper's monitoring lock stay independent.
+Graceful Ctrl+C is deferred from before receiver-thread startup until the
+bounded receiver returns, then the previous signal handler is restored and
+the interruption propagates. POSIX preparation transports start in a separate
+session so the terminal's signal group cannot independently kill SSH while
+the caller is waiting for receiver cleanup. This is not a forced-process-kill
+or lost-host recovery guarantee.
 
 `namespace-target-repo <ssh-target>` is the read-only query Bridge uses to
 select related plugins from the actual remote workspace's Git origin; it does

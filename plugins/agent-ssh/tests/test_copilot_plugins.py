@@ -184,6 +184,7 @@ def test_interrupted_preparation_waits_for_receiver_quiescence(monkeypatch):
             return self.event.wait()
     monkeypatch.setattr(copilot_plugins, "threading", SimpleNamespace(
         Event=InterruptedWait, Thread=threading.Thread,
+        current_thread=threading.current_thread, main_thread=threading.main_thread,
     ))
     def remote(*a, **kw):
         time.sleep(0.05)
@@ -192,6 +193,32 @@ def test_interrupted_preparation_waits_for_receiver_quiescence(monkeypatch):
     with pytest.raises(KeyboardInterrupt):
         copilot_plugins.run_python(SimpleNamespace(run_input=remote), "pass", timeout=1)
     assert finished.is_set()
+
+
+def test_terminal_interrupt_at_worker_start_waits_for_receiver_and_restores_handler(monkeypatch):
+    import signal
+
+    finished = threading.Event()
+    previous = signal.getsignal(signal.SIGINT)
+    class InterruptedStart(threading.Thread):
+        def start(self):
+            super().start()
+            signal.raise_signal(signal.SIGINT)
+    monkeypatch.setattr(copilot_plugins, "threading", SimpleNamespace(
+        Event=threading.Event, Thread=InterruptedStart,
+        current_thread=threading.current_thread, main_thread=threading.main_thread,
+    ))
+    def remote(*a, **kw):
+        time.sleep(0.1)
+        finished.set()
+        return 0, "", ""
+    try:
+        with pytest.raises(KeyboardInterrupt):
+            copilot_plugins.run_python(SimpleNamespace(run_input=remote), "pass", timeout=1)
+        assert finished.is_set()
+        assert signal.getsignal(signal.SIGINT) == previous
+    finally:
+        assert finished.wait(2)
 
 
 @pytest.mark.parametrize("inventory", [None, {}, {"inventory_authority": "partial", "repos": []}])

@@ -151,6 +151,19 @@ def test_detach_success_reserves_ssh_venue_and_reports_handle(seams, capsys):
     assert seams.release == [("anchor-repo@devbox", "r1")]
 
 
+def test_streamed_receiver_transport_is_isolated_from_terminal_signals(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(detach, "build_remote_exec_args", lambda *a, **kw: ["ssh", "synthetic"])
+    def run(argv, **kwargs):
+        seen.update(kwargs)
+        return types.SimpleNamespace(returncode=0, stdout=b"ready", stderr=b"")
+    monkeypatch.setattr(detach.subprocess, "run", run)
+    assert detach._remote_input(object(), "prepare", b"program", timeout=30) == (0, "ready", "")
+    assert seen["start_new_session"] is (os.name != "nt")
+    assert seen["creationflags"] == no_window_flags()
+    assert seen["input"] == b"program"
+
+
 @pytest.mark.parametrize("attached", [False, True])
 def test_preparation_failure_prevents_native_launch_and_attach(seams, monkeypatch, attached):
     def refuse(*a):

@@ -242,6 +242,7 @@ def _remote_input(ssh_config: Any, command: str, stdin: bytes, *, timeout: float
         input=stdin,
         capture_output=True,
         timeout=timeout,
+        start_new_session=os.name != "nt",
         creationflags=no_window_flags(),
     )
     return (

@@ -458,6 +458,15 @@ or a reason to create a daemon.
   handoff does not roll back. Both reservation and preparation failures now
   exercise unknown probes, caller exit and 400-second pruning; the focused
   suite passes 87 with the same three explicit POSIX-only skips.
+- The next exact-head review's graceful-interruption warning reproduced with
+  a real SIGINT delivered immediately after worker startup: the old wait-only
+  handler returned before the receiver finished. SIGINT is now deferred across
+  startup and completion, the prior handler is restored, and POSIX streamed
+  transports use a separate terminal session. The real signal/handler-restore
+  regression and transport-isolation contract pass with all 89 focused cases
+  (three POSIX-only skips). This closes graceful Ctrl+C ownership release, not
+  forced termination, a dead host or unknown remote transport failure; those
+  native lifecycle acceptance boundaries remain explicit.
 
 ### 2026-10-22 - Land privileged receiver source and continue the parent
 
