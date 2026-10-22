@@ -275,7 +275,7 @@ def verify() -> list[str]:
         for plugin in ier.human_output_adopters(REPO, ADOPTERS):
             scripts = REPO / "plugins" / plugin / "scripts"
             helper = scripts / ier.HUMAN_HELPER
-            script = scripts / "install.ps1"
+            script = ier.human_output_entrypoint(scripts.parent)
             declaration = script.with_suffix(".human-output.json")
             try:
                 for path in (source, helper, script, declaration):
@@ -357,7 +357,7 @@ def sync() -> list[str]:
         for plugin in ier.human_output_adopters(REPO, ADOPTERS):
             scripts = REPO / "plugins" / plugin / "scripts"
             helper = scripts / ier.HUMAN_HELPER
-            script = scripts / "install.ps1"
+            script = ier.human_output_entrypoint(scripts.parent)
             declaration = script.with_suffix(".human-output.json")
             for path in (source, helper, script, declaration):
                 linked = uer._find_symlinked_ancestor(path, REPO.resolve())

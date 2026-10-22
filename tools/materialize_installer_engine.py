@@ -141,6 +141,7 @@ def materialize_ref_into(
     if source_consumer_dir.resolve() in human_sources:
         log.extend(_materialize_human_output_into(
             dest_consumer_dir=dest_consumer_dir,
+            entrypoint=ier.human_output_entrypoint(source_consumer_dir).name,
             canonical_root=canonical_root, dest_root=dest_root_r,
         ))
     return log
@@ -157,7 +158,7 @@ def validate_human_output_sources(
         )
     declared = set()
     for consumer in consumers:
-        script = consumer / "scripts" / "install.ps1"
+        script = ier.human_output_entrypoint(consumer)
         declaration = script.with_suffix(".human-output.json")
         if not declaration.exists() and not declaration.is_symlink():
             continue
@@ -174,9 +175,9 @@ def validate_human_output_sources(
 
 
 def _materialize_human_output_into(
-    *, dest_consumer_dir: Path, canonical_root: Path, dest_root: Path,
+    *, dest_consumer_dir: Path, entrypoint: str, canonical_root: Path, dest_root: Path,
 ) -> list[str]:
-    script = dest_consumer_dir / "scripts" / "install.ps1"
+    script = dest_consumer_dir / "scripts" / entrypoint
     declaration = script.with_suffix(".human-output.json")
     helper = script.parent / ier.HUMAN_HELPER
     canonical_helper = canonical_root / "libs" / "installer-engine" / ier.HUMAN_HELPER
@@ -204,7 +205,11 @@ def materialize_human_output_declarations(
         if (destination.is_dir()
                 and (canonical_root / "plugins" / plugin).resolve() in human_sources):
             log.extend(_materialize_human_output_into(
-                dest_consumer_dir=destination, canonical_root=canonical_root,
+                dest_consumer_dir=destination,
+                entrypoint=ier.human_output_entrypoint(
+                    canonical_root / "plugins" / plugin,
+                ).name,
+                canonical_root=canonical_root,
                 dest_root=dest,
             ))
     return log

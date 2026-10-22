@@ -57,7 +57,7 @@ def test_human_output_declarations_bind_real_packaged_entrypoints():
     source = REPO / "libs" / "installer-engine" / contract.HUMAN_HELPER
     supports = _human_admission()
     for name in contract.human_output_adopters(REPO, contract.ADOPTERS):
-        script = REPO / "plugins" / name / "scripts" / "install.ps1"
+        script = contract.human_output_entrypoint(REPO / "plugins" / name)
         assert (script.parent / contract.HUMAN_HELPER).read_bytes() == source.read_bytes()
         assert supports(script), name
         declaration = json.loads(script.with_suffix(".human-output.json").read_text("utf-8"))
@@ -188,13 +188,14 @@ def _real_human_consumer(root: Path, name: str, layout: str) -> Path:
     contract = sync_installer_engine.ier
     consumer = root / "plugins" / name
     scripts = _mk_plugin_scripts(root, name)
-    for asset in ("install.ps1", "install.sh", contract.HUMAN_HELPER):
+    entrypoint = contract.human_output_entrypoint(consumer)
+    for asset in (entrypoint.name, entrypoint.with_suffix(".sh").name, contract.HUMAN_HELPER):
         shutil.copyfile(REPO / "plugins" / name / "scripts" / asset, scripts / asset)
     for ext in ("ps1", "sh"):
-        script = scripts / f"install.{ext}"
+        script = entrypoint.with_suffix(f".{ext}")
         ref = contract.find_engine_ref(script, ext)
         if ref is None:
-            assert name == "agent-worktrees"
+            assert name in contract.HUMAN_STANDALONE_ENTRYPOINTS
             continue
         old_line = (
             contract.local_line(ext) if contract.is_local_ref(ref, consumer)
@@ -211,7 +212,7 @@ def _real_human_consumer(root: Path, name: str, layout: str) -> Path:
         assert contract.is_canonical_ref(
             contract.find_engine_ref(script, ext), consumer, repo_root=root,
         )
-    script = scripts / "install.ps1"
+    script = entrypoint
     script.with_suffix(".human-output.json").write_text(
         contract.human_output_json(script), encoding="utf-8",
     )
@@ -323,31 +324,40 @@ def test_whole_payload_human_contract(
         report = materialize_main.build(destination, source_root=source_root)
     assert not [line for line in report if line.startswith("SKIP")], report
     supports = _human_admission()
-    assert len(names) == 9
+    assert len(names) == 10
     for name in names:
-        script = destination / "plugins" / name / "scripts" / "install.ps1"
+        script = contract.human_output_entrypoint(destination / "plugins" / name)
         assert supports(script), name
         assert (script.parent / contract.HUMAN_HELPER).read_bytes() == (
             REPO / "libs" / "installer-engine" / contract.HUMAN_HELPER
         ).read_bytes()
 
 
-@pytest.mark.parametrize("asset", [
-    "install.ps1", "install.human-output.json", "installer-human-output.ps1",
-])
-def test_same_root_invalid_human_source_fails_before_any_rewrite(tmp_path, monkeypatch, asset):
+@pytest.mark.parametrize(
+    ("plugin", "entrypoint"),
+    [("agent-bridge", "install.ps1"), ("agent-containers", "init.ps1")],
+)
+@pytest.mark.parametrize("asset", ["entrypoint", "declaration", "initializer"])
+def test_same_root_invalid_human_source_fails_before_any_rewrite(
+    tmp_path, monkeypatch, plugin, entrypoint, asset,
+):
     import materialize_main
 
     root = tmp_path / "source"
-    source = REPO / "plugins" / "agent-bridge" / "scripts"
-    scripts = root / "plugins" / "agent-bridge" / "scripts"
+    source = REPO / "plugins" / plugin / "scripts"
+    scripts = root / "plugins" / plugin / "scripts"
     scripts.mkdir(parents=True)
-    for name in ("install.ps1", "install.human-output.json", "installer-human-output.ps1"):
+    assets = {
+        "entrypoint": entrypoint,
+        "declaration": Path(entrypoint).with_suffix(".human-output.json").name,
+        "initializer": "installer-human-output.ps1",
+    }
+    for name in assets.values():
         shutil.copyfile(source / name, scripts / name)
     canonical = root / "libs" / "installer-engine"
     canonical.mkdir(parents=True)
     shutil.copyfile(source / "installer-human-output.ps1", canonical / "installer-human-output.ps1")
-    with (scripts / asset).open("a", encoding="ascii") as stream:
+    with (scripts / assets[asset]).open("a", encoding="ascii") as stream:
         stream.write("\n# invalid original source\n")
     before = {path: path.read_bytes() for path in root.rglob("*") if path.is_file()}
     monkeypatch.setattr(

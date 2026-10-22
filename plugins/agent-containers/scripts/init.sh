@@ -640,7 +640,13 @@ fi
 _ok "Python: $PYTHON_CMD"
 
 if command -v docker >/dev/null 2>&1; then
-    _ok "Docker: $(docker --version 2>/dev/null)"
+    if docker_ver="$(docker --version)"; then
+        _ok "Docker: $docker_ver"
+    else
+        docker_exit=$?
+        if [[ -n "$docker_ver" ]]; then _warn "Docker: $docker_ver"; fi
+        _warn "docker --version failed (exit $docker_exit) -- agent-containers fleet operations unavailable on this machine (non-fatal)"
+    fi
 else
     _step 'docker CLI not found -- agent-containers requires Docker for fleet operations'
 fi

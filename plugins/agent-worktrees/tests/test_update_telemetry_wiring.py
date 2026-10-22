@@ -338,7 +338,8 @@ def test_legacy_native_bytes_and_file_arguments_pass_through(shell, tmp_path):
 
 
 @pytest.mark.parametrize("shell", ["powershell", "pwsh"])
-def test_real_unrequested_entrypoint_smoke_needs_no_output_helper(shell, tmp_path):
+@pytest.mark.parametrize("plugin", ["agent-worktrees", "agent-containers"])
+def test_real_unrequested_entrypoint_smoke_needs_no_output_helper(shell, plugin, tmp_path):
     from agent_worktrees.installer_capabilities import HUMAN_UTF8_ENV
 
     if os.name != "nt":
@@ -346,11 +347,15 @@ def test_real_unrequested_entrypoint_smoke_needs_no_output_helper(shell, tmp_pat
     host = shutil.which(shell)
     if host is None:
         pytest.skip(f"{shell} is not installed")
-    source = Path(__file__).resolve().parents[1]
+    source = Path(__file__).resolve().parents[2] / plugin
     payload = tmp_path / "payload"
     scripts = payload / "scripts"
     scripts.mkdir(parents=True)
-    for name in ("install.ps1", "versioned_runtime_native.ps1", "source-runtime.ps1"):
+    entrypoint = "init.ps1" if plugin == "agent-containers" else "install.ps1"
+    assets = [entrypoint, "versioned_runtime_native.ps1"]
+    if plugin == "agent-worktrees":
+        assets.append("source-runtime.ps1")
+    for name in assets:
         shutil.copyfile(source / "scripts" / name, scripts / name)
     shutil.copyfile(source / "plugin.json", payload / "plugin.json")
     home = tmp_path / "home"
@@ -364,19 +369,20 @@ def test_real_unrequested_entrypoint_smoke_needs_no_output_helper(shell, tmp_pat
         environment.pop(key, None)
     result = subprocess.run(
         [host, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
-         str(scripts / "install.ps1"), "status"],
+         str(scripts / entrypoint), "stamp" if plugin == "agent-containers" else "status"],
         env=environment, cwd=tmp_path, capture_output=True, timeout=10,
         creationflags=subprocess.CREATE_NO_WINDOW,
     )
     assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
-    receipt = json.loads((home / ".agent-worktrees" / "smoke.json").read_text("utf-8-sig"))
+    smoke = home / f".{plugin}" / "smoke.json"
+    receipt = json.loads(smoke.read_text("utf-8-sig"))
     assert receipt["ran_from"] == str(scripts)
     assert not (scripts / "installer-human-output.ps1").exists()
-    (home / ".agent-worktrees" / "smoke.json").unlink()
+    smoke.unlink()
     environment[HUMAN_UTF8_ENV] = "1"
     requested = subprocess.run(
         [host, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
-         str(scripts / "install.ps1"), "status"],
+         str(scripts / entrypoint), "stamp" if plugin == "agent-containers" else "status"],
         env=environment, cwd=tmp_path, capture_output=True, timeout=10,
         creationflags=subprocess.CREATE_NO_WINDOW,
     )
@@ -384,7 +390,61 @@ def test_real_unrequested_entrypoint_smoke_needs_no_output_helper(shell, tmp_pat
     assert "Required installer human-output initializer is unavailable." in (
         requested.stderr.decode("utf-8", errors="replace")
     )
-    assert not (home / ".agent-worktrees" / "smoke.json").exists()
+    assert not smoke.exists()
+
+
+@pytest.mark.parametrize("shell", ["powershell", "pwsh"])
+@pytest.mark.real_installer_processes
+def test_real_containers_first_stamp_uses_declared_human_adapter(shell, tmp_path, capsys):
+    from agent_worktrees.installer_capabilities import powershell_human_utf8_supported
+    from update_telemetry.human import HumanOperation
+
+    if os.name != "nt":
+        pytest.skip("Windows native entrypoint")
+    host = shutil.which(shell)
+    if host is None:
+        pytest.skip(f"{shell} is not installed")
+    source = Path(__file__).resolve().parents[2] / "agent-containers"
+    payload = tmp_path / "payload"
+    scripts = payload / "scripts"
+    scripts.mkdir(parents=True)
+    for name in (
+        "init.ps1", "init.human-output.json", "installer-human-output.ps1",
+        "versioned_runtime_native.ps1",
+    ):
+        shutil.copyfile(source / "scripts" / name, scripts / name)
+    (payload / "pyproject.toml").write_text('version = "1.0.0"\n', encoding="ascii")
+    home = tmp_path / "home"
+    home.mkdir()
+    root = tmp_path / "runtime"
+    script = scripts / "init.ps1"
+    assert powershell_human_utf8_supported(script)
+    environment = {
+        key: value for key, value in os.environ.items()
+        if not key.startswith(("COPILOT_PLUGIN_", "AGENT_CONTAINERS_"))
+        and key not in {"COPILOT_EXTENSIONS_CONTEXT", "COPILOT_EXTENSIONS_HUMAN_UTF8"}
+    }
+    environment.update(
+        USERPROFILE=str(home), HOME=str(home), COPILOT_EXTENSIONS_TEST_CONTAINED="1",
+    )
+    with HumanOperation("update/engine") as flow:
+        result = runtime._run_human_installer(
+            [host, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script),
+             "-Action", "stamp", "-InstallDir", str(root)],
+            label="containers", env=environment, timeout=20,
+        )
+        flow.complete("done" if result.returncode == 0 else "failed")
+    assert result.returncode == 0
+    assert (root / "stamped-version").read_text(encoding="utf-8") == "1.0.0"
+    assert powershell_human_utf8_supported(root / "snapshots" / "1.0.0" / "scripts" / "init.ps1")
+    assert not (root / "versions").exists()
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "retaining inherited installer streams" not in captured.err
+    assert all(line.startswith("[") for line in captured.err.splitlines())
+    assert "Stamped: agent-containers binstub on PATH" in captured.err
+    assert "[elapsed " in captured.err
+    assert "containers done exit 0 [duration " in captured.err
 
 
 @pytest.mark.parametrize("telemetry", ["no-run", "missing-library", "broken-store"])

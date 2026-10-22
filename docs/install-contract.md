@@ -2654,7 +2654,10 @@ existing output encoding. Requested missing helpers fail closed. The initializer
 changes only the producer's stdout/stderr text writers, preserving native
 command decoding and pipeline stdin encoding.
 `tools/sync-installer-engine.py` vendors this helper and generates
-`install.human-output.json`, binding the declaration to both source files.
+`<entrypoint-stem>.human-output.json`, binding the declaration to both source files
+(for example, `install.human-output.json` or Containers'
+`init.human-output.json`). Standalone adopters declare their actual entrypoint;
+using the output initializer does not adopt the shared installer engine.
 Regenerate after changing either file. Release materialization validates all
 original declarations before any owner rewrites the tree, including when the
 source and destination are the same promotion scratch tree. It refreshes the
@@ -2662,6 +2665,14 @@ entrypoint digests after all owning materializers finish (including the engine's
 own installer, which has no engine reference) and refuses conflicting helper
 assets. The helper is packaged with the installer, under the same
 native execution-policy and payload-ownership requirements.
+
+Containers' PowerShell Docker-version preflight uses its existing asynchronous
+dual-stream native helper. It retains native decoding and `--version` arguments,
+then writes diagnostics through the producer's stderr text writer instead of
+letting raw child bytes bypass the declared encoding. A failed Docker probe
+reports its exit code as a non-fatal warning, not a successful version check;
+Docker remains optional for installing the CLI. The POSIX preflight likewise
+preserves stderr and reports nonzero status without aborting installation.
 
 This declaration admits the existing Python updater's human-stream adapter;
 it does not replace signature/provenance checks or change `-File` arguments,

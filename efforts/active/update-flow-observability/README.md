@@ -136,6 +136,8 @@ matrix below are _(agent-recommended)_ implementation details.
   about unavailable elapsed timing outside finite renderer scopes (#7727).
 - [ ] Finish the remaining standalone installer output boundaries through
   their actual output owners.
+- [ ] Admit Containers' actual PowerShell `init.ps1` producer and preserve its
+  optional Docker preflight diagnostics and failure status on both platforms.
 - [ ] Prefix every human-readable install/update line with a wall-clock time;
   suffix it with honestly labeled monotonic elapsed time or completed-step
   duration. Do not represent arbitrary child-line arrival as execution cost.
@@ -144,6 +146,8 @@ matrix below are _(agent-recommended)_ implementation details.
   (#7736).
 - [x] Restore the registered payload-refresh phase after marketplace
   authorization without changing auth, acquisition or outcome semantics (#7801).
+- [x] Retain numeric payload failure classes before shortening diagnostics,
+  including advisory attempts and final contention/I/O outcomes (#7828).
 - [ ] Consolidate banners, status names, nesting and error presentation;
   preserve useful detail without duplicate timestamps, repeated status
   prefixes or contradictory aggregate success.
@@ -249,6 +253,107 @@ Bridge serving-version gap and supervisor framing defect survived that
 bounded source delta inspection.
 
 ## Journal
+
+### 2026-10-22 - Containers' declared producer retains native diagnostics
+
+- A real native preflight fixture reproduced two defects before enrollment:
+  inherited Windows stderr bypassed the requested UTF-8 text writer, and a
+  nonzero Docker version probe still printed success. The POSIX counterpart
+  suppressed stderr and likewise printed success on failure.
+- PowerShell now reuses the installer's existing asynchronous dual-stream
+  helper, retains native decoding and arguments, and forwards diagnostics
+  through its stderr text writer. Both platforms retain captured stdout
+  details and report the native exit code as a warning; Docker remains
+  optional and installation continues.
+- The output-only standalone registry identifies Containers' `init.ps1`,
+  rather than assuming every producer is `install.ps1`. Existing
+  synchronization and release materialization package the unchanged shared
+  initializer and bind the declaration to the actual entrypoint. This does
+  not adopt the construction engine or change policy, lock or runtime owners.
+- Windows qualified 268 cases with nine platform skips; the same frozen
+  candidate qualified 225 cases with 52 platform skips on native Linux.
+  Coverage includes PS5 and PowerShell 7 legacy/requested encoding controls,
+  real child exit codes and diagnostics larger than a pipe buffer, unchanged
+  native decoding/stdin, the updater's actual first-stamp adapter, legacy
+  helper absence, fail-closed requested initialization, and canonical plus
+  materialized release declarations. The original per-test and group
+  containment limits were unchanged.
+- The first broad Windows run exposed two missing-source import failures in
+  the reused test environment. Both controls passed after explicitly exposing
+  the plugin's declared local source-library closure; the complete final
+  run above used that closure. No dependency was installed or policy relaxed.
+- Validation tiers: focused logic and native subprocess coverage passed;
+  the real updater stamped an empty fixture home without constructing a
+  runtime; same-root and separate-tree release fixtures passed. A full
+  fresh-machine provision was not repeated because construction did not
+  change. No further external-venue update is authorized for this slice, so
+  installed promotion and rollout remain unproved, under the existing owner.
+- This is one source boundary, not completion of the remaining standalone,
+  equivalent no-op cost, rollout or parent launch obligations.
+
+### 2026-10-22 - Second authorized capture changed releases again
+
+- The separately authorized ordinary current-state capture completed with
+  exit zero in 2,056.7 seconds. Another release arrived before acquisition:
+  Manager and all thirteen runtime payload generations changed. This is
+  another changed-version update, not an equivalent unchanged-flow benchmark.
+  No further update or repair is implied.
+- Runtime execution accounted for 1,646.1 seconds: Worktrees 203.2, Bridge
+  221.1 and remaining runtime reconciliation 1,221.8. The registered payload
+  phase was 209.1 seconds and runtime preflight 23.6 seconds. These are
+  measured phase durations, not exclusive attribution to individual
+  package, network or probe commands.
+- The running engine now correctly framed registered payload acquisition
+  under `payload_refresh`, independently confirming the previously installed
+  #7801 behavior. Read-only post-command checks found matching selected and
+  deploy identities for the investigated runtimes; the new Bridge/Index
+  services remained healthy after the captured management channel closed,
+  and both recorded predecessor processes were absent.
+- Installed payload and selected runtime bytes for the #7828 acquisition
+  fix now exactly match the merged source, as do the earlier #7801 and
+  #7818 modules. No sharing failure occurred during this run, so this is
+  installed-source and ordinary-operation evidence, not live execution of
+  the failure-classification branch.
+- The Worktrees monitor seam again reported the explicit `no-live-monitor`
+  outcome. The retained unpublished monitor observation is not repaired or
+  reclassified by these service checks. Required-role applicability and
+  existing serving-convergence ownership remain separate.
+- Credit the independent shared-lock recovery implementation in #7814,
+  actually merged, rather than the earlier still-open proposal observation.
+  Its native/standalone source work does not itself prove live repair or
+  original-operation completion; #7117 and its existing owner retain those
+  acceptance obligations.
+
+### 2026-10-22 - Payload reporting fix merged; changed-version update proof bounded
+
+- #7828 merged as `2d42fad24d9724d677bc3eaea3497bf6b4ab6497` after
+  Copilot approved exact head `84d3c6994bc5bf98bb5daef1c77885d8ae30755e`,
+  its actual review reported no unresolved findings, discussion threads were
+  empty and every current-head required check passed.
+- The publication rebase retained the qualified acquisition, event adapter,
+  three covering test files and results reference byte-for-byte. Backed up
+  the approved tip and advanced only provider-confirmed merged history.
+  Re-read the Plan and Validation Plan; only the narrow diagnostic item is
+  closed, not serving convergence or the complete observability campaign.
+- A separately authorized ordinary x64 update completed with exit zero in
+  2,144.9 seconds. It changed runtime generations and did not reproduce the
+  historical sharing failure; it is not an equivalent no-op benchmark.
+  Read-only checks established selected/deploy agreement for the three
+  investigated runtimes and healthy newly selected Bridge/Index services.
+- The installed payload and selected Worktrees runtime contain the exact
+  merged #7801 phase-restoration and #7818 no-site-probe source bytes.
+  That does not mean the old updater process used those bytes earlier in
+  the same command, nor that #7828 is deployed.
+- Do not infer monitor readiness from update success: its installer reported
+  `no-live-monitor`, while read-only inspection found a retained older,
+  unpublished process responding with an unavailable projection publisher
+  and stale owner/route metadata. Process existence alone does not establish
+  a live owner, a required active role or permission to restart it. Preserve
+  this as a separate serving-state observation under #6389 and the existing
+  #5453/#5512 owners, not a cause of the unreproduced sharing failure.
+- No additional update, service repair, process termination or other-host
+  rollout was performed. The next equivalent cost measurement and any
+  live recovery retain their explicit authorization gates.
 
 ### 2026-10-22 - Retain native payload failure classifications before truncation
 

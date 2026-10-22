@@ -1,0 +1,9 @@
+{
+  "comment": "Declare captured native installer output and preserve optional Docker probe diagnostics and failure status",
+  "changes": [
+    {
+      "plugin": "agent-containers",
+      "type": "patch"
+    }
+  ]
+}

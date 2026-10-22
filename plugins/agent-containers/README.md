@@ -34,6 +34,14 @@ in. It does not enable a repair worker or supply inference/repository authority.
    missing binstub/payload makes only that namespace inactive and is diagnosed
    by `agent-bridge doctor`.
 
+The Windows installer declares its `init.ps1` human-output boundary for the
+existing updater's timed capture. Direct invocation retains its original
+encoding; requested capture uses the packaged UTF-8 text-writer initializer
+without changing native-command decoding or pipeline stdin. Docker-version
+diagnostics are drained on both streams and preserved on stderr; POSIX no
+longer suppresses those diagnostics. On both platforms a failing Docker probe
+warns with its exit code but does not prevent CLI installation.
+
 ## Dispatch-only restricted workers
 
 An image-backed restricted fleet can opt into `dispatch_only: true`. This is a

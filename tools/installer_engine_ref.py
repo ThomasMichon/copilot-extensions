@@ -65,6 +65,10 @@ HUMAN_PROLOGUE = (
     f"    {HUMAN_SOURCE_LINE}\n"
     "}"
 )
+HUMAN_STANDALONE_ENTRYPOINTS = {
+    "agent-worktrees": "install.ps1",
+    "agent-containers": "init.ps1",
+}
 
 
 def human_output_enabled(canonical_dir: Path) -> bool:
@@ -76,11 +80,18 @@ def human_output_enabled(canonical_dir: Path) -> bool:
 
 
 def human_output_adopters(repo: Path, adopters) -> tuple[str, ...]:
-    # The engine's own installer does not consume installer-engine functions,
-    # but shares this small, independently packaged native output initializer.
-    return (*adopters, "agent-worktrees") if (
-        repo / "plugins" / "agent-worktrees" / "scripts" / "install.ps1"
-    ).is_file() else tuple(adopters)
+    # Standalone installers share only the output initializer, not the engine.
+    return (
+        *adopters,
+        *(name for name, entrypoint in HUMAN_STANDALONE_ENTRYPOINTS.items()
+          if (repo / "plugins" / name / "scripts" / entrypoint).is_file()),
+    )
+
+
+def human_output_entrypoint(consumer: Path) -> Path:
+    return consumer / "scripts" / HUMAN_STANDALONE_ENTRYPOINTS.get(
+        consumer.name, "install.ps1",
+    )
 
 
 def human_output_declaration(script: Path) -> dict:
