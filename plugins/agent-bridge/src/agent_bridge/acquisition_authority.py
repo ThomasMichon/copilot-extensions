@@ -4,14 +4,20 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
+import time
+import uuid
 from collections.abc import Awaitable, Callable
 from pathlib import PurePosixPath, PureWindowsPath
 from typing import Any
 
 from ._peer_launch import ContextRefused
 from .acquisition_contract import AcquisitionRefused, AcquisitionRequest
+from .resolver_diagnostics import resolver_failure_detail, structured_resolver_error
 from .session_lifecycle_cli import _agent_worktrees_environment, _agent_worktrees_launch_prefix
 from .worktree_head import parse_head_payload
+
+log = logging.getLogger("agent-bridge")
 
 
 async def worktree_command(args: list[str], project: str | None) -> dict[str, Any]:
@@ -25,10 +31,36 @@ async def worktree_command(args: list[str], project: str | None) -> dict[str, An
     env = _agent_worktrees_environment()
     from agent_procutil import no_window_kwargs
 
+    started = time.monotonic()
+    correlation_id = uuid.uuid4().hex
     proc = await asyncio.create_subprocess_exec(
         *argv, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
         env=env, **no_window_kwargs(),
     )
+
+    def log_failure(reason: str, stdout: bytes | None = None, stderr: bytes | None = None) -> None:
+        operation = args[0] if args and args[0] in {
+            "create", "record", "head-session", "bind-session",
+        } else "other"
+        # The existing formatter owns parsing, redaction and per-field bounds.
+        # No raw response or argument list is serialized.
+        log.error("worktree_owner_failure %s", json.dumps({
+            "operation": operation,
+            "correlation_id": correlation_id,
+            "reason": reason,
+            "exit_code": proc.returncode,
+            "duration_ms": round((time.monotonic() - started) * 1000),
+            "capture_complete": stdout is not None and stderr is not None,
+            "stdout_bytes": len(stdout) if stdout is not None else None,
+            "stderr_bytes": len(stderr) if stderr is not None else None,
+            "owner_error": structured_resolver_error(
+                stdout.decode(errors="replace"), environment=env,
+            ) if stdout is not None else None,
+            "stderr": resolver_failure_detail(
+                "", stderr.decode(errors="replace"), environment=env,
+            ) if stderr else None,
+        }, ensure_ascii=False))
+
     try:
         if "--bridge-plugin-request" in args:
             # The producer cooperatively cancels this bounded preparation and
@@ -38,7 +70,14 @@ async def worktree_command(args: list[str], project: str | None) -> dict[str, An
             stdout, stderr = await asyncio.wait_for(proc.communicate(), 120)
     except (TimeoutError, asyncio.TimeoutError) as exc:
         # The owner may still be launching. Never terminate it or retry a launch.
+        log_failure("owner_operation_pending")
         raise AcquisitionRefused("owner_operation_pending", "worktree owner operation timed out") from exc
+    except asyncio.CancelledError:
+        log_failure("capture_cancelled")
+        raise
+    except OSError:
+        log_failure("capture_failed")
+        raise
     if proc.returncode:
         if "--bridge-plugin-request" in args:
             try:
@@ -50,6 +89,7 @@ async def worktree_command(args: list[str], project: str | None) -> dict[str, An
                 and failure.get("native_launch_started") is False
                 and failure.get("worktree_id") == args[args.index("--worktree-id") + 1]
             ):
+                log_failure("plugin_preparation_failed", stdout, stderr)
                 raise AcquisitionRefused(
                     "plugin_preparation_failed", str(failure.get("error") or "plugin preparation failed before launch"),
                 )
@@ -60,15 +100,22 @@ async def worktree_command(args: list[str], project: str | None) -> dict[str, An
                 failure = None
             creation = failure.get("creation") if isinstance(failure, dict) else None
             if isinstance(creation, dict) and creation.get("version") == 1 and creation.get("status") == "pending":
+                log_failure("owner_operation_pending", stdout, stderr)
                 raise AcquisitionRefused("owner_operation_pending", "original keyed workspace allocation is pending")
+        detail = resolver_failure_detail(
+            stdout.decode(errors="replace"), stderr.decode(errors="replace"), environment=env,
+        )
+        log_failure("owner_refused", stdout, stderr)
         raise AcquisitionRefused(
-            "owner_refused", stderr.decode(errors="replace").strip() or stdout.decode(errors="replace"),
+            "owner_refused", f"worktree owner exit_code={proc.returncode}: {detail}"[:1500],
         )
     try:
         result = json.loads(stdout)
     except (ValueError, TypeError) as exc:
+        log_failure("owner_response_invalid", stdout, stderr)
         raise AcquisitionRefused("owner_response_invalid", "worktree owner returned invalid JSON") from exc
     if not isinstance(result, dict):
+        log_failure("owner_response_invalid", stdout, stderr)
         raise AcquisitionRefused("owner_response_invalid", "worktree owner returned no object")
     if args[0] == "bind-session" and (
         result.get("bound") is not True or result.get("is_head") is not True
@@ -76,6 +123,7 @@ async def worktree_command(args: list[str], project: str | None) -> dict[str, An
         or result.get("session") != args[args.index("--session-id") + 1]
         or result.get("head_session") != result.get("session")
     ):
+        log_failure("native_binding_unproven", stdout, stderr)
         raise AcquisitionRefused("native_binding_unproven", "owner did not bind the exact native head")
     return result
 

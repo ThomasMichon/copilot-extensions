@@ -880,6 +880,32 @@ Known-value filtering also uses the supplied local resolver environment or
 configured SSH target environment. Overlapping values are replaced longest-first
 in one pass; this does not fetch the target's full remote environment.
 
+Acquisition worktree-owner failures use the same formatter, retain the observed
+exit code, and cap the final message at 1,500 characters after redaction.
+Typed preparation/pending outcomes, timeout uncertainty and successful-response
+validation are unchanged. Before propagating a captured failure, the
+`agent-bridge` logger emits one `worktree_owner_failure` record: an allowlisted
+operation name, a generated diagnostic correlation ID (not an owner identity or
+receipt), reason, observed exit code, elapsed milliseconds, capture-completeness
+and stream byte counts, bounded structured `owner_error`, and separately bounded
+`stderr`. Timeout, cancellation and capture errors log unavailable streams as
+null; capture completeness or a process exit never proves the native effect.
+Successful responses are not dumped.
+
+Records use the existing formatter's error/message/stage/code allowlist,
+normalization and credential redaction before its bounds: 800 message characters,
+80 per stage/code label and 400 stderr characters, plus truncation indicators.
+Each diagnostic record is below 8 KiB encoded as UTF-8. Raw envelopes, opaque
+stdout, argument lists and environment dictionaries are not serialized.
+The existing CLI logging configuration routes these records to stderr; the
+installed Windows supervisor redirects it to `agent-bridge-err.log` beside its
+PID file. Standard logging handler flushing/error handling and the service's
+existing log-file lifetime apply: this adds no rotation, aggregate size bound,
+fsync guarantee or permanent receipt history, and a service relaunch may replace
+the file. An operator disabling the logger or a failed logging sink still limits
+observability. This improves future evidence retention; it does not reconstruct
+lost output, prove no launch occurred, or authorize retrying an uncertain operation.
+
 Version-skew fallback never drops a supplied `--owner-ref` or
 `--caller-worktree`. Such requests fail closed when the resolver rejects their
 flags. Only an ownerless, callerless request rejected by the argument parser

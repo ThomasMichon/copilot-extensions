@@ -1,0 +1,9 @@
+{
+  "comment": "Retain bounded, redacted worktree-owner failures in Bridge service logs and refusal diagnostics without changing acquisition uncertainty.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}
