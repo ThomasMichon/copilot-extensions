@@ -118,11 +118,6 @@ def _windows_private_lease_file(root: Path, directory: Path, name: str) -> int:
                 raise OSError("runtime lease directory is not an ordinary directory")
             previous = descriptor_text(directory)
             if _legacy_windows_lease_acl(previous, directory=True):
-                if descriptor_text(root, 1) != f"O:{account}":
-                    raise PermissionError(
-                        "Legacy runtime lease access needs an installer under the owning account; "
-                        "the runtime root is not owned by this user."
-                    )
                 root_metadata = root.lstat()
                 if (
                     not stat.S_ISDIR(root_metadata.st_mode)
@@ -138,8 +133,11 @@ def _windows_private_lease_file(root: Path, directory: Path, name: str) -> int:
                     kernel.CloseHandle(root_handle)
                     raise
                 try:
-                    if not windows_owned_file(root_fd):
-                        raise PermissionError("Runtime lease repair refuses a public or foreign root")
+                    if not windows_owned_file(root_fd, require_user_access=True):
+                        raise PermissionError(
+                            f"Runtime lease repair refuses a public or foreign root, or one "
+                            f"without full access for this account: {root}"
+                        )
                 finally:
                     os.close(root_fd)
                 repairs = []
@@ -209,7 +207,11 @@ def _windows_private_lease_file(root: Path, directory: Path, name: str) -> int:
         kernel.CloseHandle(token)
 
 
-def windows_owned_file(fd: int) -> bool:
+def _windows_account_full_control(kind: int, flags: int, mask: int, sid: str, account: str) -> bool:
+    return kind == 0 and not flags & 8 and mask & 0x1F01FF == 0x1F01FF and sid == account
+
+
+def windows_owned_file(fd: int, *, require_user_access: bool = False) -> bool:
     """Admit the current user/enabled owner groups and a non-public write DACL."""
     import ctypes
     from ctypes import wintypes
@@ -274,7 +276,8 @@ def windows_owned_file(fd: int) -> bool:
             return value
 
         user, groups = token_info(1), token_info(2)
-        owners = {sid_string(ctypes.cast(user, ctypes.POINTER(SidAttributes)).contents.sid)}
+        account = sid_string(ctypes.cast(user, ctypes.POINTER(SidAttributes)).contents.sid)
+        owners = {account}
         count = ctypes.cast(groups, ctypes.POINTER(Groups)).contents.count
         entries = (SidAttributes * count).from_buffer(groups, Groups.entries.offset)
         owners.update(sid_string(entry.sid) for entry in entries
@@ -291,16 +294,19 @@ def windows_owned_file(fd: int) -> bool:
         if not security.GetAclInformation(dacl, ctypes.byref(size), ctypes.sizeof(size), 2):
             raise ctypes.WinError(ctypes.get_last_error())
         trusted = owners | {"S-1-5-18", "S-1-5-32-544", "S-1-3-4"}
+        user_access = False
         for index in range(size.count):
             pointer = wintypes.LPVOID()
             if not security.GetAce(dacl, index, ctypes.byref(pointer)):
                 raise ctypes.WinError(ctypes.get_last_error())
             ace = ctypes.cast(pointer, ctypes.POINTER(Ace)).contents
+            sid = sid_string(pointer.value + Ace.sid.offset) if ace.kind == 0 else ""
+            user_access |= _windows_account_full_control(ace.kind, ace.flags, ace.mask, sid, account)
             if ace.flags & 8 or ace.kind == 1:
                 continue
-            if ace.kind != 0 or (ace.mask & 0x500D0156 and sid_string(pointer.value + Ace.sid.offset) not in trusted):
+            if ace.kind != 0 or (ace.mask & 0x500D0156 and sid not in trusted):
                 return False
-        return True
+        return user_access or not require_user_access
     finally:
         if descriptor:
             kernel.LocalFree(descriptor)

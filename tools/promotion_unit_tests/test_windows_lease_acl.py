@@ -39,3 +39,18 @@ CASES = {
 @pytest.mark.parametrize("name", CASES)
 def test_foreign_public_partial_or_edited_acl_is_not_repair_authority(name):
     assert not leases._legacy_windows_lease_acl(CASES[name], directory=True)
+
+
+@pytest.mark.parametrize(("kind", "flags", "mask", "sid", "expected"), [
+    (0, 0, 0x1F01FF, "S-1-5-21-1001", True),
+    (0, 0x10, 0x1F01FF, "S-1-5-21-1001", True),
+    (0, 8, 0x1F01FF, "S-1-5-21-1001", False),
+    (1, 0, 0x1F01FF, "S-1-5-21-1001", False),
+    (0, 0, 0x120089, "S-1-5-21-1001", False),
+    (0, 0, 0x1F01FF, "S-1-5-32-544", False),
+    (0, 0, 0x1F01FF, "S-1-3-4", False),
+    (0, 0, 0x1F01FF, "S-1-5-21-1002", False),
+], ids=["direct", "inherited", "inherit-only", "deny", "read-only", "admin-only",
+        "owner-rights", "other-account"])
+def test_legacy_repair_requires_actual_account_full_control(kind, flags, mask, sid, expected):
+    assert leases._windows_account_full_control(kind, flags, mask, sid, "S-1-5-21-1001") is expected

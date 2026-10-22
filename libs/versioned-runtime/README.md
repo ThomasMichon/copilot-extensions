@@ -170,7 +170,8 @@ alongside SYSTEM and Administrators. They never depend on an elevated token's
 default owner or an Owner Rights-only DACL: an elevated SSH installation must
 remain usable by the same account's ordinary, non-administrator session.
 
-For an existing user-owned, non-public runtime root, the canonical helper can
+For an existing non-public root owned by the user or an enabled owner group,
+with an active full-control grant for the account's actual user SID, the canonical helper can
 repair only the exact administrator-owned private lease ACL previously generated
 by `mkdir(0700)`. It validates ordinary, single-link lock entries, retains an
 original security-descriptor/identity audit before changing permissions, and
@@ -179,7 +180,10 @@ Already repaired files permit a caught partial repair to resume. Overlapping
 repairs also accept the exact completed target descriptor after confirming the
 same filesystem identity, rather than mistaking a valid winner for corruption.
 Other descriptor or identity changes still refuse. Foreign,
-public, linked or unknown entries are not migration authority. A caller lacking
+public, linked or unknown entries are not migration authority. An elevated
+installer's Administrators-owned root or publication parent is admissible only
+with that private account grant; the helper does not change the parent's ACL or
+owner. Administrators or Owner Rights access alone is insufficient. A caller lacking
 the rights to repair the old administrator-owned state receives the real access
 error; the library never elevates itself.
 

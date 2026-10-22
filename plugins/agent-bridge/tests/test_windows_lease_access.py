@@ -66,7 +66,7 @@ def elevated_windows():
     return bool(ctypes.windll.shell32.IsUserAnAdmin())
 
 
-def legacy_permissions(path, *, directory):
+def legacy_permissions(path, *, directory, sddl=None):
     import ctypes as c
     from ctypes import wintypes as w
 
@@ -79,7 +79,10 @@ def legacy_permissions(path, *, directory):
     kernel.LocalFree.argtypes, kernel.LocalFree.restype = [w.LPVOID], w.LPVOID
     descriptor = w.LPVOID()
     assert convert(
-        "O:BAD:P(A;OICI;FA;;;OW)(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)" if directory else "O:BA",
+        sddl or (
+            "O:BAD:P(A;OICI;FA;;;OW)(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)"
+            if directory else "O:BA"
+        ),
         1, c.byref(descriptor), None,
     )
     try:
@@ -168,6 +171,50 @@ def test_unknown_legacy_directory_entry_refuses_before_permission_changes(tmp_pa
     with non_administrator():
         with pytest.raises(PermissionError):
             foreign.open("r+b")
+
+
+@pytest.mark.skipif(not elevated_windows(), reason="requires native elevated Windows token")
+@pytest.mark.parametrize("kind", ["retention", "construction", "publication"])
+def test_private_admin_owned_parent_retains_account_authority(tmp_path, kind):
+    import hashlib
+
+    root = tmp_path / "admin-owned-parent"
+    os.close(leases._windows_private_lease_file(tmp_path, root, "root-fixture"))
+    legacy_permissions(root, directory=False)  # Change only owner; keep the account's full grant.
+    directory = root / f".{kind}-leases"
+    directory.mkdir()
+    legacy_permissions(directory, directory=True)
+    key = "selectors"
+    path = directory / (hashlib.sha256(key.encode()).hexdigest() + ".lock")
+    legacy_file(path, b"retained")
+    before = path.stat().st_ino
+    with leases._kernel_lease(root, key, kind=kind, shared=False):
+        assert path.stat().st_ino == before
+    with non_administrator():
+        with leases._kernel_lease(root, key, kind=kind, shared=False):
+            assert path.stat().st_ino == before
+        assert path.read_bytes() == b"retained"
+
+
+@pytest.mark.skipif(not elevated_windows(), reason="requires native elevated Windows token")
+@pytest.mark.parametrize("public", [False, True], ids=["no-account-grant", "public-root"])
+def test_admin_owned_parent_without_private_account_authority_refuses(tmp_path, public):
+    root = tmp_path / "untrusted-parent"
+    os.close(leases._windows_private_lease_file(tmp_path, root, "root-fixture"))
+    if public:
+        legacy_permissions(
+            root, directory=True,
+            sddl="O:BAD:P(A;OICI;FA;;;WD)(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)",
+        )
+    else:
+        legacy_permissions(root, directory=True)
+    directory = root / ".publication-leases"
+    directory.mkdir()
+    legacy_permissions(directory, directory=True)
+    with pytest.raises(PermissionError, match="public or foreign root"):
+        with leases._kernel_lease(root, "selectors", kind="publication", shared=False):
+            pass
+    assert not list(root.glob(".lease-access-repair-*.json"))
 
 
 @pytest.mark.skipif(not elevated_windows(), reason="requires native elevated Windows token")
