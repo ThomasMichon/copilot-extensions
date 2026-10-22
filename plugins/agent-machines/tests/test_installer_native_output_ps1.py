@@ -8,15 +8,12 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
-import tomllib
 
 import pytest
 
 PLUGIN = Path(__file__).resolve().parents[1]
 INSTALLER = PLUGIN / "scripts" / "init.ps1"
-VERSION = tomllib.loads((PLUGIN / "pyproject.toml").read_text(encoding="utf-8"))[
-    "project"
-]["version"]
+VERSION = json.loads((PLUGIN / "plugin.json").read_text(encoding="utf-8"))["version"]
 HOSTS = [
     pytest.param(shutil.which(name), id=name)
     for name in ("pwsh", "powershell.exe")

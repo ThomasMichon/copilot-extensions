@@ -316,7 +316,13 @@ bounded source delta inspection.
   admitting-parent capture, unchanged unrequested bytes, compact lifecycle
   JSON and first-stamp refusal/absence controls. Full clean-room runtime
   construction is unchanged and was not repeated; no host or external-venue
-  update is authorized for this candidate. No dependency was installed.
+  update is authorized for this candidate. No runtime dependency was installed.
+- Review caught a Python 3.10 collection regression in the new native fixture's
+  version lookup. It now reads the synchronized `plugin.json` version using
+  the already-imported JSON parser. All ten nodes collect on the existing
+  Python 3.10.20 interpreter and the native controls pass again. Only missing
+  conditional Pytest dependencies were restored into isolated task scratch;
+  no interpreter, plugin runtime or existing test environment was modified.
 - Documentation impact is limited to the plugin's output boundary, the
   shared install contract and the canonical legacy-probe reference. This is
   a qualified source candidate, not a merged or installed release. Both
