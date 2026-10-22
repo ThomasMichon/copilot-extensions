@@ -54,7 +54,8 @@ def status(env: dict[str, str] | None = None) -> tuple[int, str]:
 
 def classify(rc: int, text: str, login: str) -> dict[str, str]:
     scopes = {key.casefold(): value for key, value in parse_gh_account_scopes(text).items()}
-    failure = gh_account_failures(text).get(login.casefold())
+    failures = gh_account_failures(text)
+    failure = failures.get(login.casefold())
     if failure == "timeout":
         state, message = "error", "GitHub authentication verification timed out; refresh to retry."
     elif failure == "failed" or login.casefold() not in scopes:
@@ -65,6 +66,8 @@ def classify(rc: int, text: str, login: str) -> dict[str, str]:
             state, message = "error", "GitHub authentication could not be verified; refresh to retry."
         else:
             state, message = "auth_required", "Sign in to GitHub to view CodeSpaces."
+    elif rc and not failures:
+        state, message = "error", "GitHub authentication could not be verified; refresh to retry."
     elif "codespace" not in {scope.casefold() for scope in scopes[login.casefold()]}:
         state, message = "scope_blocked", "Authorize the codespace scope to view CodeSpaces."
     else:

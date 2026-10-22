@@ -95,7 +95,7 @@ headless widget/action with mocked authentication and land through review/CI.
       updates do not retain a stale successful authentication status.
 - [x] Verify no global account switch, token output or session-environment
       mutation; test the vendor command/config boundary with synthetic inputs.
-- [x] Run bounded isolated targeted suites, targeted Ruff, install-contract and
+- [ ] Run bounded isolated targeted suites, targeted Ruff, install-contract and
       required publication checks. Do not perform a real OAuth ceremony.
 
 ## Proposal
@@ -116,7 +116,7 @@ requirements, not optional implementation details.
   verification; existing per-process account pinning consumes verified results.
   No reusable authentication broker exists in the provider, so no optional
   sibling or adopter-private broker is imported.
-- Source validation: 243 provider/CLI/lifecycle tests and 202 Manager
+- Source validation: 244 provider/CLI/lifecycle tests and 202 Manager
   contract/production-widget/preview tests pass in isolated bounded runs.
   Tests drive actual clicks, visible device instructions, cancel/error/success,
   provider refresh, account mismatch and credential adoption with mocked vendor

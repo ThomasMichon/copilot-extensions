@@ -27,6 +27,7 @@ def status_text(login="example-user", scope="repo"):
     (0, status_text(scope="codespace"), "ready"),
     (1, "Timeout trying to log in to github.com account example-user", "error"),
     (1, "TLS connection failed", "error"),
+    (1, status_text(scope="codespace") + "API verification failed", "error"),
 ])
 def test_classify(rc, text, expected):
     assert picker_auth.classify(rc, text, "example-user")["status"] == expected
