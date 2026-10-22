@@ -122,7 +122,9 @@ def _payload_command(root: Path | None, command: str) -> Path | None:
         return None
     except (OSError, ValueError) as exc:
         raise ManifestError(f"Payload command declaration is unreadable: {exc}") from exc
-    if isinstance(declaration, dict) and declaration.get("command") == command:
+    if not isinstance(declaration, dict):
+        raise ManifestError("Payload command declaration must be an object")
+    if declaration.get("command") == command:
         return candidates[0]
     return None
 
@@ -190,6 +192,7 @@ def _rewrite_manifest_commands(
         value = container.get(key)
         if value is None:
             return
+        value = _as_argv(value, where=f"`{key}`")
         try:
             container[key] = _resolve_command(
                 cast(Sequence[str], value),
@@ -226,7 +229,7 @@ def _rewrite_manifest_commands(
             # and must always propagate unconverted, regardless of
             # `require_targets` (e.g. `_resolve_command`'s own empty-argv
             # check).
-            if require_targets and not optional:
+            if (require_targets or reject_unusable) and not optional:
                 raise TargetUnusableError(str(exc)) from exc
             if optional:
                 container["_preview_error"] = f"Preview command unusable: {exc}"

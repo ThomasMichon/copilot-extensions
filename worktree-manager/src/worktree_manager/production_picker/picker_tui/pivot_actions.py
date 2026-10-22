@@ -25,7 +25,7 @@ def _as_argv(value: object, *, where: str) -> tuple[str, ...]:
         not isinstance(value, Sequence)
         or isinstance(value, (str, bytes))
         or not value
-        or any(not isinstance(item, str) or not item for item in value)
+        or any(not isinstance(item, str) or not item or "\x00" in item for item in value)
     ):
         raise ManifestError(f"{where} must be a non-empty array of strings")
     return tuple(value)

@@ -48,6 +48,31 @@ def _pivot(**extra) -> dict:
     }
 
 
+@pytest.mark.parametrize("surface", [
+    "list", "actions", "view_actions", "worktree_actions", "config_sections",
+])
+@pytest.mark.parametrize("invalid", [42, ["example", False], ["bad\x00command"]])
+def test_discovery_isolates_malformed_argv_from_valid_peer(tmp_path, surface, invalid):
+    home = tmp_path / "home"
+    root = home / ".copilot/installed-plugins"
+    _settings(home, {"agent-good@example": True, "agent-bad@example": True})
+    _manifest(root, "example", "agent-good", "good", {
+        "schema_version": 1, "label": "Good", "list": [sys.executable],
+    })
+    bad = {"schema_version": 1, "label": "Bad", "list": [sys.executable]}
+    if surface == "list":
+        bad["list"] = invalid
+    else:
+        bad[surface] = [{"label": "Malformed", "run": invalid}]
+    _manifest(root, "example", "agent-bad", "bad", bad)
+    report = discover_contracts(home_dir=home, plugins_root=root)
+    assert [contribution.plugin for contribution in report.contributions] == ["agent-good"]
+    assert any(
+        finding.code == "invalid-contract" and finding.plugin == "agent-bad"
+        for finding in report.findings
+    )
+
+
 @pytest.fixture(autouse=True)
 def _fixture_owned_plugin_roots(monkeypatch):
     for key in (

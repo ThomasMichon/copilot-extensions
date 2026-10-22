@@ -891,10 +891,7 @@ def test_unattributed_create_action_malformed_run_does_not_abort_scan(tmp_path):
 
 
 def test_unattributed_create_action_invalid_path_does_not_abort_scan(tmp_path):
-    # `_as_argv` accepts a syntactically valid non-empty string, but one
-    # containing a null byte raises a bare ValueError inside `Path()`
-    # construction (before any filesystem check) -- must still sink only this
-    # one manifest, not abort the whole scan with an uncaught exception.
+    # An embedded NUL must sink only this manifest, not abort valid peers.
     registry = tmp_path / "pivots"
     registry.mkdir()
     ok_command = _command(tmp_path / "commands", name="ok")

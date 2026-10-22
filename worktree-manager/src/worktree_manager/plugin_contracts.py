@@ -178,7 +178,7 @@ def _as_argv(value: object, *, where: str) -> tuple[str, ...]:
         raise ContractError(f"{where} must be a non-empty array of strings")
     if not value:
         raise ContractError(f"{where} must be a non-empty array of strings")
-    if any(not isinstance(item, str) or not item for item in value):
+    if any(not isinstance(item, str) or not item or "\x00" in item for item in value):
         raise ContractError(f"{where} must contain only non-empty strings")
     return tuple(value)
 
