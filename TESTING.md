@@ -74,6 +74,13 @@ python tools/run-promotion-unit-tests.py --source-sha <full-source-commit> --out
 ```
 
 The command requires the existing `pytest` and `coverage` test dependencies.
+On Windows, pytest's existing Colorama console adapter is initialized before
+unit observation starts. Unit-side native-loader attempts remain rejected;
+`tools/test_promotion_unit_windows_io.py` exercises that distinction in a fresh
+native process outside the admitted unit packet.
+Open-flag cases use semantic node IDs rather than platform-dependent constant
+values; the descriptor mock preserves an opaque extra bit without requiring a
+POSIX-only flag on Windows.
 Their interpreter environment must live outside the checkout: dependency
 sources inside a repository-local venv are correctly treated as unadmitted
 local imports. The runner scopes pytest collection to the declared source root

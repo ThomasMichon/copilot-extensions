@@ -271,6 +271,12 @@ A manifest is explicit input, not a generated product release or proof of
 artifact availability. Role closures must be stated directly; there is no
 dependency resolver, artifact URL, executable path or apply operation.
 
+The explicit [artifact-to-release assembly API](docs/release-assembly.md)
+produces that same canonical manifest from supplied component contracts, role
+closures and actual bounded local artifact bytes. It is an unprivileged
+producer, not signing, publication, retained staging or installation; normal
+client commands do not invoke it.
+
 The strict schema-v1 `fleet-manager.installation-observation` declares
 `authority`, `installation`, canonical `release_digest`, finite epoch
 `observed_at`/`expires_at`, boolean `complete`, and `components`. Each component

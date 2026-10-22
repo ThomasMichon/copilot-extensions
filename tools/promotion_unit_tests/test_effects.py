@@ -49,7 +49,10 @@ def test_writes_are_limited_to_synthetic_temporary_storage(tmp_path):
         run.audit("open", (str(tmp_path / "host-data.json"), "w", 0))
 
 
-@pytest.mark.parametrize("flags", [os.O_RDONLY | os.O_TRUNC, os.O_RDONLY | os.O_APPEND])
+@pytest.mark.parametrize(
+    "flags", [os.O_RDONLY | os.O_TRUNC, os.O_RDONLY | os.O_APPEND],
+    ids=["truncate", "append"],
+)
 def test_readonly_mutating_open_flags_are_refused_before_any_file_open(tmp_path, flags):
     run = UnitRun(Mock(), tmp_path, {}, tmp_path / "synthetic")
     run.active = True
@@ -108,7 +111,7 @@ def test_descriptor_relative_open_validates_the_actual_target_before_execution(t
 
 
 def test_guarded_open_keeps_descriptor_and_flag_semantics_and_clears_its_context(tmp_path, monkeypatch):
-    flags = os.O_RDONLY | os.O_NOFOLLOW
+    flags = os.O_RDONLY | (1 << 28)
     monkeypatch.setattr(sys, "platform", "linux")
     monkeypatch.setattr(os, "readlink", lambda path: str(tmp_path))
     run = UnitRun(Mock(), tmp_path, {}, tmp_path)

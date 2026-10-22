@@ -28,7 +28,7 @@ resource acquisition and identity bindings remain external adapters.
 
 | Participant | Role | Reached via |
 |-------------|------|-------------|
-| `ticking-wrench` | Evidence-to-contract plan and proposed integration slice | #6681 and this effort |
+| `ticking-wrench` | Integration proposal and appointed artifact-assembly/publisher-integration source slice | #6681 / #6030 and this effort |
 | Existing #6030 / #6240 / #6424 owners | Construction, role lifecycle and installation | Retained owner accepted the exclusive source leaves; ordered shared wiring remains with that owner |
 | Existing #5789 / #6443 / #6804 owners | Routing, authentication, enrollment and Gateway integration | Their existing issue threads |
 | Existing #6241 owner | Operation admission and receipt authority | Existing Fleet Control V2 coordination |
@@ -38,8 +38,9 @@ resource acquisition and identity bindings remain external adapters.
 
 - **Topology:** independent worktrees and per-slice PRs, after explicit interface
   and file agreement.
-- **Host:** `ticking-wrench` owns this proposal, not another participant's runtime
-  or deployment.
+- **Host:** `ticking-wrench` owns the proposal and bounded assembly/publisher
+  integration source, not another participant's runtime lifecycle, operational
+  signing custody or deployment.
 - **Delegates:** no new runtime writer is assigned by this plan.
 - **Handoff:** name the accepted owner, exact scope and unresolved validation;
   source publication, installed state and live convergence are separate facts.
@@ -55,10 +56,15 @@ resource acquisition and identity bindings remain external adapters.
   integration participant. Shared CLI, staging, admission, manifests and
   lifecycle files remain with the construction owner. Source-leaf acceptance
   is not deployment or an implemented setup hook.
-- Generic artifact publication needs an explicit participant and
-  operation reservation before shared setup wiring consumes it. That appointment
-  remains unassigned; proposal hosting, construction lineage, pure policy/runtime
-  leaves and client admission do not confer publishing or signing custody.
+- The artifact-assembly/publisher-integration source appointment belongs to
+  `ticking-wrench`, reserved under #6681/#6030. Its first new source/test/docs
+  seam produces the existing role/release schema from actual artifact bytes.
+  Shared verification, staging, client admission, construction, default CLI,
+  publisher workflow and agent-ssh files remain outside that reservation.
+- Privileged publication must use an existing approved mechanism with compatible
+  provenance verification. Source appointment, construction lineage, pure
+  policy/runtime leaves and client admission do not grant a signing purpose,
+  new credentials or permission to bypass a refused proof method.
 - Use existing owner contacts for operation reservations. Publishing a contract
   amendment does not transfer the source or effect authority described by those
   reservations.
@@ -124,18 +130,23 @@ fleet membership into credential authority.
 | Operation | Retained owner or prerequisite |
 |-----------|-------------------------------|
 | Release selection and complete role closure | #6240's existing contract; pure release-selection data is not publication |
-| Generic artifact publication | Explicit participant and operation reservation still required; unassigned |
+| Artifact assembly and publisher-integration source | `ticking-wrench`, reserved under #6681/#6030 |
+| Privileged publication and signing | Existing approved mechanism only; verify the actual compatible release/proof seam before invoking it |
 | Ordered construction, admission, lifecycle and later setup-hook wiring | `wobbly-contraption`, within retained #6424/#6240 scope |
 | Routing, authentication, enrollment and provider interoperability | Existing #5789/#6443/#6804 owners |
 | Target-local profile emission, source audit and canonical aliases | Existing agent-ssh owner |
 | Operation admission, uncertainty and receipts | Existing #6241 owner |
 
-Before effectful integration, the artifact publisher and setup consumer must
+Before effectful integration, the appointed source owner and setup consumer must
 agree the actual release/source seam: selected immutable input, role/platform
 closure, provenance and verification, supported distribution and compatible
-rollback. Record the participant and reservation here when accepted. Historical
+rollback. Source assembly uses the existing `fleet-manager.release` schema;
+it does not require a new consumer protocol. The existing approved Python
+publisher's hosted attestation and the Fleet verifier's pinned-key-only support
+remain a concrete proof-compatibility boundary, not permission to select another
+method or create a signer. Historical
 Python artifact pipeline failures under #6535/#6632 or trusted-control ownership
-under #6237 are not current generic transport-artifact receipts or an appointment.
+under #6237 are not current generic transport-artifact publication receipts.
 Do not infer custody from their mere presence or create another publisher to
 fill the gap.
 
@@ -309,13 +320,18 @@ onboarded merely because its source is published.
 - [x] Clear this proposal's normal review/publication gate before runtime work.
 - [x] Adopt #7513's reviewed portable ownership, module and qualified-migration
   intent without a duplicate vision or private engine.
-- [ ] Obtain the actual generic artifact publisher participant/operation
-  reservation and its accepted #6240 release/source seam before setup wiring.
-- [ ] Review the coherent integration-contract amendment against retained
+- [x] Reserve the appointed artifact-assembly/publisher-integration source
+  participant and exact new-file seam under #6681/#6030.
+- [ ] Verify the approved publication mechanism and compatible #6240
+  release/source/proof seam before privileged publication or setup wiring.
+- [x] Review the coherent integration-contract amendment against retained
   lifecycle, routing, authentication, credential and Chat scopes.
 
 ### Phase 2 - Driver and directional policy
 
+- [ ] Implement the first bounded artifact-to-release producer in the existing
+  SDK and qualify actual source-independent package/role-consumer behavior.
+  This does not sign, publish, authenticate or activate a release.
 - [x] Publish the accepted pure per-target policy leaf and focused installed
   consumer contracts; source merge does not close configuration or setup.
 - [x] Review and implement the explicit harness/knowledge declaration,
@@ -545,3 +561,48 @@ takeover or implementation completion is asserted.
   independent directions, normal credential renewal and qualified prototype
   retirement while retaining existing source and effect owners. No executor,
   artifact signing grant, enrollment, credential action or rollout occurred.
+
+### 2026-10-21 - Integration amendment reviewed and tracker aligned
+
+- #7537 merged as `0430fbc259153bd90105e386703aaba0ee496306` after
+  exact-head approval `5595997783`, required CI and no open findings.
+- Re-read the Plan and Validation Plan after merge and resolved only the
+  contract-review item. The artifact publisher participant, accepted release
+  seam, setup wiring and actual qualification remain open.
+- Aligned #6681's title and body with the reviewed portable module/transport
+  contract. No relay product is mandatory and no new source, signing,
+  credential, enrollment or deployment authority is assigned.
+
+### 2026-10-22 - Artifact assembly and installed consumer qualification
+
+- Implemented the reserved unprivileged `release_assembly` producer in the
+  existing SDK. It validates and snapshots explicit contracts and complete role
+  closures before artifact access, hashes the bounded actual streams, and emits
+  existing canonical schema-v1 release bytes without writes or publication.
+- Refreshed onto current source, including the existing compatible optional
+  dependency floor. Normal governed standalone preparation now succeeds;
+  no feed, seasoning, dependency-set or timeout override was introduced.
+- All 31 focused assembly cases pass. The existing release/artifact
+  compatibility selection passes 116 cases with one native FIFO case skipped
+  on Windows. A real built wheel is installed offline into a fresh target;
+  copied SDK/library source is removed before isolated producer and all three
+  role consumers run. Link/tamper refusal, package removal and unrelated user
+  state preservation pass. Synthetic SSH/Bastion bytes are not runtime proof.
+- Required unit-packet execution exposed a Windows framework-bootstrap defect:
+  pytest's existing Colorama I/O initialization attempted its native load only
+  after unit observation started. The narrow correction initializes that
+  framework adapter before observation; unit-side native-load rejection is
+  unchanged. Added admitted platform/error cases and a fresh native negative
+  counterpart, which passes against a real attempted Windows DLL load.
+- The exact admitted packet now passes all 759 cases with per-unit production
+  call coverage, no skips and no forbidden effects. Platform-dependent
+  open-flag IDs are semantic, and the descriptor mock uses a portable opaque
+  bit. The runner is an explicit required coverage target for its new cases;
+  no existing node, target, observation or timeout check was removed.
+- Source review and merge remain pending. Local unit evidence is not Main
+  qualification, artifact publication or installed fleet adoption.
+- Existing release/authentication/staging/admission, default CLI, publisher
+  workflow, credentials and SSH registry/profile owners remain untouched.
+  Hosted-attestation versus pinned-key verification interoperability is still
+  a separate pre-publication gate, not a reason to create keys or another proof
+  method. No setup wiring, live service, enrollment or deployment is claimed.
