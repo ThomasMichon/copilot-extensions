@@ -197,6 +197,9 @@ _Operator-required scope; agent-recommended implementation and validation._
 - [x] Land the PR-owned request reconciliation and bounded consumer replay/ACK
   transaction core without activating a serving adapter (confirmed by #7786).
   Authenticated serving/dispatch and full fleet acceptance remain below.
+- [x] Land an opt-in trusted caller handoff in the real Gateway/connector SDK,
+  preserving the identity-less HTTP proxy path (confirmed by #7810). PR-specific
+  scope mapping, operations and full serving acceptance remain below.
 - [ ] Define and deliver the [PR-service consumer contract](pr-service-contract.md)
   through normal reviewed source changes, including missing shared seams and
   real serving/consumer proof. Consult related campaigns without a separate
@@ -276,8 +279,53 @@ callback an implicit credential store.
 
 ## Journal
 
+### 2026-10-22 - Bind admitted PR callers to durable replay operations
+
+- Added the optional PR-owned `WatchGateway` source adapter around the merged
+  real connector SDK. Trusted configuration maps the admitted
+  fleet/Gateway/slot/principal and a target alias to `ConsumerScope`; request
+  bodies cannot nominate consumer/account/repository identity or callbacks.
+  The versioned bounded operations cover capabilities, registration,
+  inspection, pending reads, exact ACK and cancellation.
+- Added explicit first provision and complete-envelope disk transactions in
+  `ReplayStore`, using the existing process/thread-owned `OperationLock` for
+  each load/use/atomic commit. Missing, corrupt or foreign-namespace state is
+  not empty state. There is no cached core between transactions. This is
+  local transaction exclusion, not active placement, shared-volume,
+  enrollment-revocation or installation/cutover authority.
+- Bounded disk offload keeps the actual connector loop responsive. Cancelled
+  callers leave their transactions tracked; explicit drain stops admission
+  and waits, or visibly refuses safe retirement on timeout.
+- Focused synthetic validation exercises the real TLS/PoP/WebSocket Gateway
+  and PR operations, subject isolation, forged labels, original-ID
+  reconciliation, adapter/connector replacement, ACK loss/retry and caller
+  withdrawal. Separate real-child checks exercise disk contention/replay.
+  Existing replay/registry/native-delivery contracts stay selected.
+- Reused the existing bounded plugin-test runner's explicit same-checkout Fleet
+  dependency preparation. Fleet's linked standalone build resource requires
+  retaining canonical `libs/versioned-runtime`, as the index preparation
+  already does; neither dependency seasoning nor containment was bypassed.
+- Current-base integration also exposed a real shared retained-input overlap:
+  Fleet's declared package resource created a partial parent directory, so
+  project retention skipped that parent's metadata. The canonical policy now
+  retains complete projects before merging resources. Editable/noneditable
+  overlap regressions and a fresh real PR/Fleet preparation cover this
+  prerequisite; no local runtime was updated.
+- Documentation impact: updated the plugin README, replay and Gateway
+  references, architecture map and consumer-contract availability. This
+  closes part of the PR vision's scoped durable-delivery behavior under the
+  independent-installation/optional-composition patterns; it adds no new
+  daemon, listener, installer, forge provider or deployment.
+- Full contract checkboxes remain open: current enrollment/effect fencing,
+  authorized forge observation, the shared Dispatch consumer, lifecycle/
+  placement integration, release, authorized installation and actual fleet
+  acceptance are not established by these synthetic serving tests.
+
 ### 2026-10-22 - Carry authenticated callers into a bounded service handler
 
+- #7810 merged as `94718b751eb6c0d41b9555c1baae905594283fb4` after
+  exact-head approving review, the resolved expiry-isolation finding and all
+  required checks. This confirms source delivery, not release or deployment.
 - Traced the actual caller admission, owner-retained grant, Gateway request
   frame and fixed HTTP backend path. The missing subject handoff is now an
   explicit `caller-context-v1` admission/attachment negotiation, not an

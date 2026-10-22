@@ -531,24 +531,27 @@ def selectable_tests(tmp_path, monkeypatch):
     return tests
 
 
-def test_index_preparation_selects_same_checkout_fleet_dependency(tmp_path, monkeypatch):
+@pytest.mark.parametrize("name,extra", [
+    ("agent-index", "auth"), ("agent-pull-requests", "service-gateway"),
+])
+def test_preparation_selects_same_checkout_fleet_dependency(tmp_path, monkeypatch, name, extra):
     monkeypatch.setattr(runner, "REPO", tmp_path)
     monkeypatch.setattr(runner, "VENV_ROOT", tmp_path / "venvs")
-    plugin = tmp_path / "plugins" / "agent-index"
+    plugin = tmp_path / "plugins" / name
     plugin.mkdir(parents=True)
     monkeypatch.setattr(runner, "_plugin_dir", lambda _name: plugin)
     (plugin / "pyproject.toml").write_text(
-        '[project.optional-dependencies]\ndev = ["fleet-manager[auth]>=0.1.0.dev1"]\n',
+        f'[project.optional-dependencies]\ndev = ["fleet-manager[{extra}]>=0.1.0.dev1"]\n',
         encoding="utf-8",
     )
     fleet = tmp_path / "fleet-manager"
     fleet.mkdir()
     metadata = fleet / "pyproject.toml"
     metadata.write_text('[project]\nversion = "0.1.0.dev1"\n', encoding="utf-8")
-    (runner.VENV_ROOT / "agent-index").mkdir(parents=True)
-    before = runner._dep_fingerprint("agent-index")
+    (runner.VENV_ROOT / name).mkdir(parents=True)
+    before = runner._dep_fingerprint(name)
     metadata.write_text('[project]\nversion = "0.1.0.dev2"\n', encoding="utf-8")
-    assert runner._dep_fingerprint("agent-index") != before
+    assert runner._dep_fingerprint(name) != before
     calls = []
     monkeypatch.setattr(
         runner.subprocess, "run",
@@ -561,10 +564,10 @@ def test_index_preparation_selects_same_checkout_fleet_dependency(tmp_path, monk
         return runner.subprocess.run([uv, "pip", "install", *arguments])
 
     monkeypatch.setattr(runner, "run_uv_install", prepare)
-    runner._ensure_venv("agent-index", "fixture-uv", reinstall=False)
+    runner._ensure_venv(name, "fixture-uv", reinstall=False)
     install = calls[-1]
     assert install[-len(runner.RUNNER_DEPENDENCIES) - 2:] == [
-        "-e", str(fleet) + "[auth]", *runner.RUNNER_DEPENDENCIES,
+        "-e", str(fleet) + f"[{extra}]", *runner.RUNNER_DEPENDENCIES,
     ]
     assert not any("http" in argument for argument in install)
     assert retained == [(

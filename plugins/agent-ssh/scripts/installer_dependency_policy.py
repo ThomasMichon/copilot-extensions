@@ -807,9 +807,6 @@ def retain_uv_install(
                 lambda match: replacements[match[0]], value,
             )
 
-        for resource in resources:
-            shutil.copytree(_native_retained_path(resource), _native_retained_path(mirror(resource)), dirs_exist_ok=True,
-                            copy_function=_copy_retained_file)
         for project in sorted(projects, key=lambda path: len(path.parts)):
             destination = mirror(project)
             if not Path(_native_retained_path(destination)).is_dir():
@@ -821,6 +818,9 @@ def retain_uv_install(
                         ".pytest_cache", ".ruff_cache", "node_modules", "build", "dist",
                     ),
                 )
+        for resource in resources:
+            shutil.copytree(_native_retained_path(resource), _native_retained_path(mirror(resource)), dirs_exist_ok=True,
+                            copy_function=_copy_retained_file)
         source_hashes = {}
         for project in projects:
             destination = Path(_native_retained_path(mirror(project)))

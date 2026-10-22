@@ -122,8 +122,14 @@ registration is an idempotent network retry.
 The internal [PR-owned replay core](../../../plugins/agent-pull-requests/docs/watch-replay.md)
 now supplies that source-domain transaction behavior. Its caller-provided scope,
 single-writer custody and commit callback are embedding obligations, not already
-implemented serving/Gateway authority. It adds no production route or dispatch
-consumer; the full delivery checklist remains open.
+implemented serving/Gateway authority. The optional
+[PR Gateway adapter](../../../plugins/agent-pull-requests/docs/watch-gateway.md)
+now supplies configured admitted-principal scope mapping and versioned bounded
+operations around an explicitly provisioned complete-envelope disk store. Its
+existing per-operation lock prevents overlapping transactions; that is not
+active placement/lifecycle custody or an atomic enrollment-revocation fence.
+Neither component activates a production role or dispatch consumer; the full
+delivery checklist remains open.
 
 Delegated dispatch waits retain their existing finite positive timeout
 requirement. This slice does not impose a new mandatory timeout on supported

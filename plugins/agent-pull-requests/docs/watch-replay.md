@@ -37,8 +37,11 @@ or readiness baseline in place of the previous observation.
 
 The core accepts no callback argv, delivery URL, shell expression or credential.
 This library neither advertises health capabilities nor extends the existing
-watch daemon's register/unregister wire contract. The Gateway, service role,
-coordinator consumer and installation/cutover integrations remain separate work.
+watch daemon's register/unregister wire contract. The optional
+[Gateway adapter](watch-gateway.md) supplies configured scope mapping, bounded
+operations and disk transaction custody around this core. Service activation,
+authorized provider observation, coordinator consumption and
+installation/cutover integration remain separate work.
 
 ## Reconciliation and retention
 

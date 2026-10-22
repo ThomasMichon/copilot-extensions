@@ -1,0 +1,185 @@
+"""Optional Gateway SDK adapter; no listener, forge client or daemon activation."""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+import re
+from dataclasses import dataclass
+from types import MappingProxyType
+
+from fleet_manager.gateway_service_channel import BODY_BYTES
+from fleet_manager.gateway_service_context import identifier
+from fleet_manager.gateway_service_handler import HandlerBinding, ServiceRequest, ServiceResponse
+from single_instance_lease import OperationLockedError, OperationOwnershipError
+
+from .watch_replay import MAX_BATCH, ConsumerScope
+from .watch_notification import positive_seconds
+from .watch_replay_store import (
+    ReplayCallerExpired, ReplayStore, ReplayStoreInvalid, json_object,
+)
+
+_TARGET = re.compile(r"[a-z0-9][a-z0-9-]{0,63}")
+_PATH = re.compile(r"/v1/watch/([a-z0-9][a-z0-9-]{0,63})/([a-z]+)")
+_LOG = logging.getLogger(__name__)
+_FIELDS = {
+    "register": (
+        {"request_id", "issued_at", "number", "until"},
+        {"deadline_at"},
+    ),
+    "inspect": ({"request_id", "issued_at"}, set()),
+    "cancel": ({"request_id", "issued_at", "registration_id"}, set()),
+    "acknowledge": ({"request_id", "issued_at", "registration_id", "event_id"}, set()),
+    "pending": (set(), {"limit"}),
+    "capabilities": (set(), set()),
+}
+
+
+@dataclass(frozen=True)
+class WatchScopeBinding:
+    """Trusted deployment input, never reconstructed from request labels."""
+
+    principal: str
+    target: str
+    scope: ConsumerScope
+
+    def __post_init__(self) -> None:
+        identifier(self.principal)
+        if not isinstance(self.target, str) or not _TARGET.fullmatch(self.target):
+            raise ValueError("invalid watch target")
+        if type(self.scope) is not ConsumerScope:
+            raise ValueError("invalid watch scope")
+
+
+def _response(status: int, value: dict) -> ServiceResponse:
+    return ServiceResponse(
+        status, (("content-type", "application/json"), ("cache-control", "no-store")),
+        json.dumps(value, allow_nan=False).encode("utf-8"),
+    )
+
+
+def _payload(operation: str, body: bytes) -> dict:
+    value = json_object(body) if body else {}
+    required, optional = _FIELDS[operation]
+    if not required <= value.keys() or value.keys() - required - optional:
+        raise ValueError("invalid watch request fields")
+    if operation == "register":
+        until = value["until"]
+        if not isinstance(until, list) or any(not isinstance(item, str) for item in until):
+            raise ValueError("invalid watch transitions")
+        value["until"] = tuple(until)
+    if operation == "pending" and (
+        type(value.get("limit", MAX_BATCH)) is not int
+        or not 1 <= value.get("limit", MAX_BATCH) <= MAX_BATCH
+    ):
+        raise ValueError("invalid watch batch limit")
+    return value
+
+
+class WatchGateway:
+    """Bind admitted callers to configured scopes and bounded replay operations.
+
+    Construct only beside the trusted connector. This handler is not standalone
+    authentication. Gateway policy still owns channel/caller admission; no
+    body/header/query label can supply the principal or account/repository.
+    """
+
+    def __init__(
+        self, store: ReplayStore, *, fleet: str, gateway: str, slot: str,
+        bindings: tuple[WatchScopeBinding, ...],
+    ) -> None:
+        for name in (fleet, gateway, slot):
+            identifier(name)
+        selected = {}
+        if not isinstance(bindings, tuple):
+            raise ValueError("watch scope bindings must be immutable")
+        for binding in bindings:
+            if type(binding) is not WatchScopeBinding:
+                raise ValueError("invalid watch scope binding")
+            key = (binding.principal, binding.target)
+            if key in selected:
+                raise ValueError("duplicate watch scope binding")
+            selected[key] = binding.scope
+        self.store = store
+        self.fleet, self.gateway, self.slot = fleet, gateway, slot
+        self.bindings = MappingProxyType(selected)
+        self._tasks: set[asyncio.Task[ServiceResponse]] = set()
+        self._closing = False
+
+    def handler_binding(self) -> HandlerBinding:
+        return HandlerBinding(self.fleet, self.gateway, self.handle)
+
+    async def handle(self, request: ServiceRequest) -> ServiceResponse:
+        if type(request) is not ServiceRequest:
+            raise TypeError("expected trusted service request")
+        caller = request.context
+        if (
+            (caller.fleet, caller.gateway, caller.slot) != (self.fleet, self.gateway, self.slot)
+            or caller.expires_at <= self.store.clock()
+        ):
+            return _response(403, {"error": "watch_caller_refused"})
+        matched = _PATH.fullmatch(request.target)
+        if matched is None:
+            return _response(404, {"error": "watch_route_not_found"})
+        target, operation = matched.groups()
+        scope = self.bindings.get((caller.principal, target))
+        if scope is None:
+            return _response(403, {"error": "watch_scope_refused"})
+        if operation not in _FIELDS:
+            return _response(404, {"error": "watch_route_not_found"})
+        if request.method != ("GET" if operation == "capabilities" else "POST"):
+            return _response(405, {"error": "watch_method_refused"})
+        if len(request.body) > BODY_BYTES:
+            return _response(413, {"error": "watch_request_limit"})
+        if operation == "capabilities" and request.body:
+            return _response(400, {"error": "invalid_watch_request"})
+        if request.body and dict(request.headers).get("content-type", "").split(";")[0] != (
+            "application/json"
+        ):
+            return _response(415, {"error": "watch_json_required"})
+        try:
+            payload = _payload(operation, request.body)
+        except (ValueError, UnicodeError, RecursionError):
+            return _response(400, {"error": "invalid_watch_request"})
+        if self._closing:
+            return _response(503, {"error": "watch_service_draining"})
+        if len(self._tasks) >= 8:
+            return _response(503, {"error": "watch_service_busy"})
+        task = asyncio.create_task(self._execute(scope, operation, payload, caller.expires_at))
+        self._tasks.add(task)
+        task.add_done_callback(self._completed)
+        # Transport cancellation cannot release an in-progress disk transaction.
+        return await asyncio.shield(task)
+
+    def _completed(self, task: asyncio.Task[ServiceResponse]) -> None:
+        self._tasks.discard(task)
+        if not task.cancelled() and task.exception() is not None:
+            _LOG.error("watch-service-failed code=unexpected-operation-failure")
+
+    async def _execute(
+        self, scope: ConsumerScope, operation: str, payload: dict, expires_at: int,
+    ) -> ServiceResponse:
+        try:
+            value = await asyncio.to_thread(
+                self.store.execute, scope, operation, payload, expires_at=expires_at,
+            )
+        except ReplayCallerExpired:
+            return _response(403, {"error": "watch_caller_expired"})
+        except OperationLockedError:
+            return _response(503, {"error": "watch_store_busy"})
+        except (OSError, OperationOwnershipError, ReplayStoreInvalid):
+            _LOG.error("watch-service-failed code=watch-store-unavailable")
+            return _response(503, {"status": "uncertain", "reason": "watch_store_unavailable"})
+        except (ValueError, OverflowError):
+            return _response(400, {"error": "invalid_watch_request"})
+        return _response(200, value)
+
+    async def drain(self, *, timeout: float) -> None:
+        """Stop admission and join disk work, even after its caller disconnected."""
+        timeout = positive_seconds(timeout)
+        self._closing = True
+        if self._tasks:
+            _, pending = await asyncio.wait(self._tasks, timeout=timeout)
+            if pending:
+                raise TimeoutError("watch operations are not drained")

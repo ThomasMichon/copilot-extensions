@@ -177,6 +177,14 @@ The embedding adapter still owes authenticated scope, authorized observations,
 one active writer, lifecycle custody and atomic persistence of the complete
 envelope. No Gateway identity or forge credential authority is implied.
 
+The optional [`watch_gateway.WatchGateway` adapter](docs/watch-gateway.md)
+now binds the real Gateway connector's admitted caller to configured
+consumer/account/repository scopes and serves bounded versioned replay
+operations from a separately provisioned disk store. Its optional `fleet`
+extra does not affect ordinary CLI/native installs. This source adapter
+starts no daemon or listener; production lifecycle, forge observation,
+Dispatch consumption and installed/fleet acceptance remain separate work.
+
 ## Native configured observation (source capability)
 
 The existing watch owner also accepts an explicitly attributed Worktrees
