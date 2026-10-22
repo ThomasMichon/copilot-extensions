@@ -443,7 +443,7 @@
     "tools/promotion_unit_tests/test_qualification.py": "fcdbec1e68ad3937543a5703fd970b4b4cb5ee671f709a5b744308101ddf0206",
     "tools/promotion_unit_tests/test_runtime_regressions.py": "4c52b1c8a43470bde06526442bd0f99e337b86ba3802c03ac37d5b7f06b65cfd",
     "tools/promotion_unit_tests/test_selection.py": "cc0c254e2c96dd2594f772e7181e3b2f501b69c09aab6d468b55046b738fe94b",
-    "tools/publish_python_artifacts.py": "366a8a13db473047b14afb80879b88aef86b954a6556b59c5c8c8146df642c06",
+    "tools/publish_python_artifacts.py": "bf494b8186d4367c117ccd0c63e64a20d472a4226a73eee07873e0715122f465",
     "tools/qualify_promotion_candidate.py": "2e636eb5e52536650d95df489248cf4cea74ddbb08989c322a4958b842cace98",
     "tools/run-promotion-unit-tests.py": "66c205e4c53da7763435b90f89fa16a9780afc3221622ba7553123dbdb83c8bf",
     "tools/validate_materialized_candidate.py": "d840c5a4755f5b2be4fb528588f2065f554e466e8c2b9ade7cd66270d2fb7cea",

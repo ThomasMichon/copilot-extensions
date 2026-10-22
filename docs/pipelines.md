@@ -312,6 +312,11 @@ and a GitHub-hosted runner. Verification uses the read-only workflow token,
 not the release PAT. `publish_python_artifacts.py`
 verifies the index first, then validates its exact bundle set before checking
 those bundles' attestations; unrelated or missing files fail closed.
+Index authentication, bundle-set validation and any original Main admission
+verification remain serial. Only the independent bundle attestations use up
+to four concurrent verifications, with the same pinned identities, read-only
+token and per-subject deadline. Every verification must pass and all workers
+are joined before the caller can publish or emit a success receipt.
 `promote_release.py --python-artifacts-dir <dir>`
 recomputes composition and refuses missing/corrupt/mis-targeted artifacts
 before pushing a candidate, including repeating the archive-content checks.
@@ -358,7 +363,8 @@ and final-publication raw readback use at most four concurrent downloads, each
 with the same consumer token and 120-second deadline. Every download must
 finish and pass its exact digest check before a success receipt is emitted;
 worker failures propagate and all owned workers are joined. Release/tag/source
-validation and signer checks are unchanged and are not parallelized.
+validation remains serial; signer identity checks remain mandatory as described
+above.
 These source helpers take effect only when the independently governed control
 selects a reviewed helper revision; a Dev merge alone does not change its pin.
 

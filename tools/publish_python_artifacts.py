@@ -114,8 +114,11 @@ def verify_attestations(
                 )
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise PromotionArtifactError(f"cannot read signed promotion artifact index: {exc}") from exc
-    for entry in validated["artifacts"]:
+    def verify(entry: dict) -> None:
         verify_attestation_subject(directory / entry["filename"], **identity)
+
+    with ThreadPoolExecutor(max_workers=4) as workers:
+        list(workers.map(verify, validated["artifacts"]))
 
 
 def _tag_commit(repository: str, tag: str) -> str | None:

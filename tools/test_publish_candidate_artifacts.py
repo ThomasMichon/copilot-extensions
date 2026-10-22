@@ -17,6 +17,121 @@ from test_promotion_python_artifacts import DEV, MAIN, TREE, _publish_fixture, _
 from verify_promotion_workflows import VerificationError
 
 
+@pytest.mark.parametrize("failure", [None, "signer", "timeout"])
+def test_bundle_attestations_are_bounded_joined_and_keep_every_identity(
+    tmp_path, monkeypatch, failure,
+) -> None:
+    index = {"schema_version": 1, "artifacts": []}
+    for identifier in range(9):
+        filename = f"bundle-{identifier}.zip"
+        (tmp_path / filename).write_bytes(b"synthetic subject")
+        index["artifacts"].append({"filename": filename})
+    (tmp_path / artifacts.INDEX_NAME).write_text(json.dumps(index), encoding="utf-8")
+    lock, first_wave = threading.Lock(), threading.Event()
+    active = peak = 0
+    observed = []
+    validated = False
+
+    def validate(*args, **kwargs):
+        nonlocal validated
+        assert observed == [artifacts.INDEX_NAME]
+        validated = True
+        return index
+
+    def verify(argv, **kwargs):
+        nonlocal active, peak
+        subject = Path(argv[2]).name
+        assert argv == [
+            "attestation", "verify", str(tmp_path / subject), "--repo", "example/plugins",
+            "--signer-workflow", "example/plugins/.github/workflows/validate-and-promote.yml",
+            "--signer-digest", MAIN, "--source-digest", MAIN,
+            "--source-ref", "refs/heads/main", "--deny-self-hosted-runners",
+        ]
+        assert kwargs == {"verification": True}
+        if subject == artifacts.INDEX_NAME:
+            assert not observed and not validated
+            observed.append(subject)
+            return subprocess.CompletedProcess(argv, 0, "verified", "")
+        assert validated
+        with lock:
+            active += 1
+            peak = max(peak, active)
+            observed.append(subject)
+            if active == 4:
+                first_wave.set()
+        try:
+            assert first_wave.wait(5), "bundle attestations were serialized"
+            if subject == "bundle-0.zip" and failure:
+                if failure == "timeout":
+                    raise subprocess.TimeoutExpired(argv, 120)
+                return subprocess.CompletedProcess(argv, 1, "", "invalid signer")
+            return subprocess.CompletedProcess(argv, 0, "verified", "")
+        finally:
+            with lock:
+                active -= 1
+
+    monkeypatch.setattr(publisher, "validate_artifacts", validate)
+    monkeypatch.setattr(publisher, "_gh", verify)
+    kwargs = dict(repository="example/plugins", signer_digest=MAIN, source_digest=MAIN,
+                  source_ref="refs/heads/main")
+    if failure:
+        error = subprocess.TimeoutExpired if failure == "timeout" else artifacts.PromotionArtifactError
+        with pytest.raises(error):
+            publisher.verify_attestations(tmp_path, **kwargs)
+    else:
+        publisher.verify_attestations(tmp_path, **kwargs)
+        assert sorted(observed[1:]) == sorted(entry["filename"] for entry in index["artifacts"])
+    assert peak == 4 and active == 0
+    assert len(observed) == len(set(observed))
+
+
+@pytest.mark.parametrize("failure", [None, "ancestry", "signer"])
+def test_original_admission_is_verified_before_any_bundle_worker(
+    prepared, monkeypatch, failure,
+) -> None:
+    directory, service, _, _, _ = prepared
+    index = json.loads((directory / artifacts.INDEX_NAME).read_text(encoding="utf-8"))
+    original = "d" * 40
+    index["admission"]["signer_digest"] = original
+    index["admission"]["source_digest"] = original
+    _write_index(directory, index)
+    observed = []
+
+    def ancestor(before, after, **kwargs):
+        assert (before, after) == (original, MAIN)
+        assert observed == [(artifacts.INDEX_NAME, MAIN)]
+        return failure != "ancestry"
+
+    def verify(argv, **kwargs):
+        assert argv[:2] == ["attestation", "verify"]
+        assert kwargs == {"verification": True}
+        subject = Path(argv[2]).name
+        signer = argv[argv.index("--signer-digest") + 1]
+        observed.append((subject, signer))
+        if signer == original and failure == "signer":
+            return subprocess.CompletedProcess(argv, 1, "", "invalid original signer")
+        return subprocess.CompletedProcess(argv, 0, "verified", "")
+
+    import promote_release as promotion
+
+    monkeypatch.setattr(promotion, "_is_ancestor", ancestor)
+    monkeypatch.setattr(publisher, "_gh", verify)
+    before = list(service.writes)
+    kwargs = dict(repository="example/plugins", signer_digest=MAIN, source_digest=MAIN,
+                  source_ref="refs/heads/main", repo=directory.parent)
+    if failure:
+        with pytest.raises(artifacts.PromotionArtifactError):
+            publisher.verify_attestations(directory, **kwargs)
+        assert all(subject == artifacts.INDEX_NAME for subject, _ in observed)
+    else:
+        publisher.verify_attestations(directory, **kwargs)
+        assert observed == [
+            (artifacts.INDEX_NAME, MAIN), (artifacts.INDEX_NAME, original),
+            (index["artifacts"][0]["filename"], MAIN),
+        ]
+    assert service.writes == before
+
+
 def test_raw_readback_is_bounded_parallel_and_checks_every_exact_asset(monkeypatch) -> None:
     payloads = {identifier: bytes([identifier]) for identifier in range(1, 10)}
     expected = [
@@ -166,7 +281,10 @@ class PublicationService:
             return subprocess.CompletedProcess(argv, code, payload, error)
 
         if argv[:2] == ["attestation", "verify"]:
-            return result(code=1, error="invalid signer") if self.failure == "attestation" else result()
+            refused = self.failure == "attestation" or (
+                self.failure == "bundle-attestation" and Path(argv[2]).name != artifacts.INDEX_NAME
+            )
+            return result(code=1, error="invalid signer") if refused else result()
         if argv[:2] == ["release", "create"]:
             tag = argv[2]
             assert tag not in self.releases and "--clobber" not in argv
@@ -288,7 +406,7 @@ def test_real_prepublish_cli_checks_qualification_signatures_and_final_downloads
     assert (directory / artifacts.INDEX_NAME).is_file()
 
 
-@pytest.mark.parametrize("failure", ["read", "digest", "attestation"])
+@pytest.mark.parametrize("failure", ["read", "digest", "attestation", "bundle-attestation"])
 def test_no_success_receipt_when_required_final_publication_evidence_fails(
     prepared: tuple, failure: str,
 ) -> None:
@@ -297,7 +415,7 @@ def test_no_success_receipt_when_required_final_publication_evidence_fails(
     assert publisher.main(argv) == 1
     assert not output.exists()
     assert not any("merge" in call for call in service.writes)
-    if failure == "attestation":
+    if failure in ("attestation", "bundle-attestation"):
         assert "demo-v1.0" not in service.releases
 
 
