@@ -1040,3 +1040,11 @@ authorized installed proof remain distinct obligations.
   recovery and transactional shared-draft Save/Reset remain the next bounded
   #7141 work. Both parent plans remain Active and no deployment is authorized
   by publication or merge.
+- Current-head review identified captured stdout/stderr loss on timeout:
+  the common subprocess helper returned only its truncated exception before
+  full-result formatting could run. Full-result callers now retain both
+  captured streams and an explicit timeout diagnostic. Ordinary callers keep
+  their exact prior terse timeout behavior. The real child flushes a long
+  receipt and diagnostic before hanging; both rendered command/form paths
+  show them and retain the local draft. The final contained result/transport
+  selection passed 27 tests with one explicit platform skip.

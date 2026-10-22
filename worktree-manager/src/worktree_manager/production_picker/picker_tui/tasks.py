@@ -762,7 +762,9 @@ class RegisteredPivotRuntime:
         :func:`format_form_template`, or a plain template via
         :func:`format_template`). ``preserve_output`` retains full receipts on
         both success and failure for full-content contributed command results."""
-        proc, error = self._invoke_resolved(argv, timeout=ACTION_TIMEOUT)
+        proc, error = self._invoke_resolved(
+            argv, timeout=ACTION_TIMEOUT, **({"preserve_output": True} if preserve_output else {}),
+        )
         if proc is None:
             return False, error
         if preserve_output:
@@ -790,7 +792,7 @@ class RegisteredPivotRuntime:
         return True, proc.stdout
 
     def _invoke_resolved(
-        self, argv: Sequence[str], *, timeout: float,
+        self, argv: Sequence[str], *, timeout: float, preserve_output: bool = False,
     ) -> tuple[subprocess.CompletedProcess[str] | None, str]:
         argv = list(argv)
         if not argv:
@@ -803,6 +805,18 @@ class RegisteredPivotRuntime:
             )
         except FileNotFoundError:
             return None, f"{argv[0]} not found on PATH"
+        except subprocess.TimeoutExpired as exc:
+            if not preserve_output:
+                return None, str(exc)[:200]
+
+            def text(value):
+                return value.decode("utf-8", errors="replace") if isinstance(value, bytes) else value or ""
+
+            parts = [text(exc.stdout).strip()]
+            if exc.stderr:
+                parts.append("stderr:\n" + text(exc.stderr).strip())
+            parts.append(f"Command timed out after {timeout:g}s")
+            return None, "\n\n".join(part for part in parts if part)
         except (OSError, subprocess.SubprocessError) as exc:
             return None, str(exc)[:200]
         return proc, ""

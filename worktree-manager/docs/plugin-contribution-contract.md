@@ -147,7 +147,9 @@ A non-streaming command or row form may opt into `"result_view": "text"`.
 The Picker paints a pending full-content screen before invoking the existing
 asynchronous command transport, then retains full stdout, stderr and a nonzero
 exit status in a plain-text scrollable result. Escape/Return closes it after
-the command finishes. Unknown views and combinations with `progress: true`,
+the command finishes. A timeout retains already-captured stdout/stderr beside
+an explicit timeout diagnostic; it does not establish that the provider failed
+to persist an operation. Unknown views and combinations with `progress: true`,
 `kind: "internal"` or `kind: "card"` are rejected.
 
 This is presentation, not a provider receipt protocol: **Command completed**

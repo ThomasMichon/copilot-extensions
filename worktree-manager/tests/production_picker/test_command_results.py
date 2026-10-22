@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -139,3 +140,60 @@ def test_both_native_categories_opt_in_to_full_result_presentation():
         reg = pivots.parse_manifest(json.loads(path.read_text()), name=name, source_path=str(path))
         actions = {action.key: action for action in reg.actions}
         assert actions["steer"].result_view == actions["inspect-evidence"].result_view == "text"
+
+
+@pytest.mark.parametrize("form", [False, True])
+def test_timed_out_child_retains_captured_receipt_and_diagnostics(
+    tmp_path, monkeypatch, form,
+):
+    monkeypatch.setenv("AGENT_WORKTREES_STEER_DRAFTS", str(tmp_path / "drafts"))
+    monkeypatch.setattr(tasks, "ACTION_TIMEOUT", 2)
+    receipt = "accepted-original-request-" + "x" * 500
+    script = (
+        "import sys,time;"
+        f"print({receipt!r}, flush=True);"
+        "print('original diagnostic', file=sys.stderr, flush=True);"
+        "time.sleep(60)"
+    )
+    action = {
+        "label": "Inspect", "run": [sys.executable, "-c", script], "result_view": "text",
+    }
+    if form:
+        action.update(kind="form", fields_from="card.request_input")
+    reg = pivots.parse_manifest(_manifest(action), name="example", source_path="fixture.json")
+    runtime = tasks.RegisteredPivotRuntime(reg)
+    monkeypatch.setattr(runtime, "repoll", lambda scope: None)
+    draft = _steer_draft_path("timeout-task")
+    draft.parent.mkdir(parents=True)
+    draft.write_text('{"values":{"answer":"retained"}}', encoding="utf-8")
+
+    async def run():
+        app = PickerApp(_fixture_source(), live=False)
+        async with app.run_test() as pilot:
+            screen = app.query_one(PickerScreen)
+            await _wait_for_initial_setup(pilot, screen)
+            monkeypatch.setattr(screen, "_pivot_runtime", lambda selected: runtime)
+            if form:
+                screen._run_pivot_form_submit(
+                    reg, reg.actions[0], {"task_id": "timeout-task"}, "Sample", {},
+                )
+            else:
+                screen._run_task_action(reg, reg.actions[0], {"id": "timeout-task"})
+            await _wait(pilot, lambda: isinstance(app.screen, CommandResultScreen) and not app.screen.pending)
+            text = str(app.screen.query_one("#command-result", Static).render())
+            assert receipt in text and "original diagnostic" in text
+            assert "Command failed" in text and "Command timed out after 2s" in text
+            assert draft.exists()
+
+    asyncio.run(run())
+
+
+def test_ordinary_command_timeout_retains_terse_compatibility(monkeypatch):
+    monkeypatch.setattr(tasks, "ACTION_TIMEOUT", 2)
+    reg = pivots.parse_manifest(_manifest({"label": "Read", "run": ["provider"]}),
+                                name="example", source_path="fixture.json")
+    argv = [
+        sys.executable, "-c", "import time;print('partial',flush=True);time.sleep(60)",
+    ]
+    ok, message = tasks.RegisteredPivotRuntime(reg).run_resolved(argv)
+    assert not ok and message == str(subprocess.TimeoutExpired(argv, 2))[:200]
