@@ -3,7 +3,8 @@
 - **Status:** Active; wave plan reviewed, remaining implementations require
   their own claims and per-wave design.
 - **Parent:** [Worktree Manager control plane](README.md)
-- **Coordination:** #357; adoption #356; prior enablement premise #543;
+- **Coordination:** parent effort Journal and per-wave implementation issues;
+  historical acceptance #357; adoption #356; prior enablement premise #543;
   completed confirmation prior art #6044/#6096; remaining dispatch toggles owned
   by `agent-dispatch-workers-config-section`.
 - **Vision:** [Configuration workbench](../../../visions/installer/configurator/README.md)
@@ -163,14 +164,105 @@ surface. Record an explicit reason for inapplicable/unavailable tiers, not a
 silent skip. Completion requires every applicable gate resolved or transferred
 to a named tracked objective; a plan merge does not complete this phase.
 
+## Preserved Configurator acceptance from #357
+
+This is an agent-recommended administrative mapping of existing acceptance,
+not new implementation scope. This existing Active plan is the canonical home
+for the complete original and inherited #357 checklist. #357 remains open until
+this record has passed normal review, merged and been read back. Its later
+supersession would retire only the tracker, not complete these unchecked items.
+
+Preserve #356's active first-repository CLI/setup/trust/readiness claim and
+exclusions, #542's assignment and first-run Picker acceptance, #6379's
+backstage/Workers release and installed gate, #6283's remote scope, the native
+Repositories adapter/maintenance owner, and every existing domain, lifecycle,
+source and rollout owner. Those execution tokens remain open under their own
+completion gates; collecting their acceptance here does not retire them.
+
+- [ ] Provide the standalone non-agentic Configurator through its own entry and
+  soft bare-harness handoff. Show actual Projects, Repos, Plugins
+  (known/installed/enabled per project), prerequisites, machines, configuration
+  and accounts. When Manager is absent, preserve trustworthy help/install
+  guidance without a hard Worktrees-to-Manager dependency or loss of standalone
+  plugin operation.
+- [ ] Preserve #542's TTY-gated bare/front-door behavior: non-TTY, piped and ACP
+  calls remain legible; fresh-empty contexts land in Setup/Doctor; engine plus
+  adoption reaches Worktrees. Missing sources guide Install core, Add machine,
+  Adopt repo and Enable plugins through existing owners. Retain its complete
+  empty/partial/provisioned and TTY/non-TTY matrix, assignment and claims.
+- [ ] Expose real drift, prerequisite, broken/stale launcher and mis-registration
+  findings with explicit supported repair. Keep validity, reachability,
+  authentication and observed runtime activity distinct. Browsing, rendering
+  and status must not provision, start workers or repair state to obtain a read.
+- [ ] Preserve #356's adopt-local, clone-remote-into-chosen-root and skip choices,
+  consent-driven registration/discovery and actual knowledge linking/pairing.
+  Keep its narrow CLI/setup owner. Ordinary discovery and session launch must
+  not enroll automatic maintenance.
+- [ ] Show per-plugin effective values and conventions from each repository and
+  project versus user-only scope, with provenance, precedence, masks and
+  configured/live distinctions. Existing backstage and bounded native adapter
+  delivery are partial evidence, not the whole workbench.
+- [ ] Preserve the reviewed #6178/#6227 refinement: repository, knowledge,
+  plugin and preset source views are read-only. Direct changes use only owning
+  machine-local preview/apply/reset/killswitch APIs with exact target, baseline,
+  effects and consent, preserving unrelated settings and non-overridable policy.
+  Do not restore an unrestricted source YAML/Git editor.
+- [ ] Source maintenance retains explicit target/baseline/delta/acceptance,
+  deduplication, cancellation, authorized worktree/review/merge ownership,
+  conflict handling, refreshed effective proof and independent evaluation.
+  No task, agent or pool starts by browse; disclose agentic effects before
+  explicit submission.
+- [ ] Preserve #111's explicit selected-project Configuration/Maintenance
+  Backfill session titles action through the existing engine, with registry/
+  title update counts and visible failures. Never scan/write titles on launch,
+  paint or Configuration browsing.
+- [ ] Preserve #358's revised shared harness-plugin-carried onboard-preset
+  contract across Phase 7 and Wave 4, not arbitrary Git-reference ingestion or
+  parallel engines. Discover/merge upgraded defaults with provenance,
+  conflict/effect preview and authorized local adoption. Retain explicit
+  choices, related-repo/venue defaults and repository identity/account authority;
+  expose provenance in state and doctor.
+- [ ] Preserve #399's one-time idempotent optional payload link/create/list/
+  remove lifecycle, stable plugin/source identity and selected current
+  payload/config resolution on every use. Prove upgrades avoid stale copied
+  configuration or repeated agent setup; explain unavailable, disabled and
+  ambiguous inputs, including Manager-absent operation. Reuse canonical
+  contribution/configuration owners, not a parallel registry.
+- [ ] Preserve #544's minimum Add machine identity/host/transport flow with
+  explicit consent through existing machine/SSH owners and actual switcher/
+  resolver consumption. Separate validity, reachability, authentication and live
+  health. Direct writes remain supported machine-local state; versioned
+  topology/knowledge changes require explicit source maintenance. Do not
+  duplicate credential/topology editors or absorb richer #63/#67 scope.
+- [ ] Complete applicable owner-consumer, source-byte immutability, local reset/
+  inheritance, stale/invalid/absent provider, legacy compatibility, upgrade,
+  Manager-absent, fresh-install and actual UI/readiness acceptance. Keep native
+  and installed gates with existing owners; identify unavailable/inapplicable
+  tiers. Plans, parser tests and screenshots are not full capability proof.
+
+All unfinished implementation and adoption remain planned. This record changes
+no source execution, configuration, queue, credentials, service, assignment or
+custody.
+
+<!-- backlog-reconciliation:7556:transfer:357:to:efforts/active/worktree-manager-control-plane/phase-5-configuration-workbench.md -->
+
 ## Coordination
 
 Claim exact waves through the parent Journal and owning issues before editing.
 Land independently useful slices serially through `dev` PRs. No shared feature
 branch or standing delegates are assigned. Re-read recent sibling effort claims
 before taking a domain panel; preserve others' open PRs and runtime ownership.
+If no existing open issue owns the chosen wave, record its bounded implementation
+issue and owner in the parent Journal before implementation. Historical #357
+is acceptance provenance, not a replacement for those live execution tokens.
 
 ## Journal
+
+- **2026-10-22** - Recorded the complete original/inherited #357 acceptance
+  for reviewed tracker consolidation and routed live coordination through the
+  existing parent Journal and per-wave issues. All waves and declared
+  validation remain unresolved; #356/#542/#6379/#6283 and domain owners retain
+  custody. This documentation record does not itself close #357.
 
 - **2026-10-14** - Claimed #6711 as a bounded Wave 0 continuation; inventory
   confirms #6427's existing backstage and preserves #6379/#6283 ownership.
