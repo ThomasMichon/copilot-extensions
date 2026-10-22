@@ -1,0 +1,9 @@
+{
+  "comment": "Declare init installer human output and capture native construction-shell and GC count diagnostics",
+  "changes": [
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    }
+  ]
+}

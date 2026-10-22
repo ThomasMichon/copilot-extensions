@@ -2655,7 +2655,7 @@ changes only the producer's stdout/stderr text writers, preserving native
 command decoding and pipeline stdin encoding.
 `tools/sync-installer-engine.py` vendors this helper and generates
 `<entrypoint-stem>.human-output.json`, binding the declaration to both source files
-(for example, `install.human-output.json` or Containers'
+(for example, `install.human-output.json` or Containers' and MCP's
 `init.human-output.json`). Standalone adopters declare their actual entrypoint;
 using the output initializer does not adopt the shared installer engine.
 Regenerate after changing either file. Release materialization validates all
@@ -2673,6 +2673,12 @@ letting raw child bytes bypass the declared encoding. A failed Docker probe
 reports its exit code as a non-fatal warning, not a successful version check;
 Docker remains optional for installing the CLI. The POSIX preflight likewise
 preserves stderr and reports nonzero status without aborting installation.
+
+MCP's PowerShell construction-shell and GC count subprocesses likewise use its
+existing dual-stream helper, forwarding diagnostics through the producer's
+text writer. The preceding GC command's explicit stderr suppression remains
+unchanged. Scalar count output retains its single-line shape. Construction
+ownership, failure decisions and the MCP stdio protocol are not changed.
 
 This declaration admits the existing Python updater's human-stream adapter;
 it does not replace signature/provenance checks or change `-File` arguments,

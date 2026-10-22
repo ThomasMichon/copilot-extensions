@@ -31,6 +31,15 @@ def _helper() -> str:
     return ". " + _quote(INSTALLER.parent / "versioned_runtime_native.ps1") + "\n"
 
 
+def _producer_setup(directory: Path) -> str:
+    for name in ("installer-human-output.ps1", "versioned_runtime_native.ps1"):
+        shutil.copyfile(INSTALLER.parent / name, directory / name)
+    text = INSTALLER.read_text(encoding="utf-8")
+    start = text.index("Set-StrictMode -Version 2.0")
+    end = text.index("# === install-contract:test-persistent-environment", start)
+    return text[start:end]
+
+
 def _cleanup_diagnostic_readback(directory: Path) -> str:
     records = ["Fixture-only construction timeout diagnostics (original 20s bound):"]
     for name in ("stages.log", "python-stacks.log"):
@@ -181,6 +190,140 @@ Write-Output $output
     assert result.stdout.strip().splitlines() == ["native-exit=17", "stdout-retained"]
     assert "policy-denied" in result.stderr
     assert "E" * 131072 in result.stderr
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows redirected producer encoding")
+@pytest.mark.parametrize("host", HOSTS)
+@pytest.mark.parametrize("native_exit", [0, 23])
+def test_construction_shell_stderr_uses_requested_producer_encoding(
+    host: str | None, native_exit: int, tmp_path: Path,
+) -> None:
+    if host is None:
+        pytest.skip("PowerShell host unavailable")
+    text = INSTALLER.read_text(encoding="utf-8")
+    start = text.index("function Invoke-VersionedSlotClean {")
+    end = text.index("\nfunction Invoke-VersionedMarkComplete", start)
+    native = tmp_path / "versioned_runtime.py"
+    native.write_text(
+        "import json,os,sys\nfrom pathlib import Path\n"
+        "Path(os.environ['MCP_NATIVE_RECEIPT']).write_text("
+        "json.dumps([sys.flags.isolated,sys.argv[1:]]), encoding='utf-8')\n"
+        "sys.stderr.buffer.write(b'native detail caf\\xe9\\n')\n"
+        "print(\"function Start-RuntimeConstruction { "
+        "param($Python,$Helper,$Root,$Version,$PayloadHash,$LinkName) "
+        "[IO.File]::WriteAllText($env:MCP_NATIVE_CALLED,'called'); return $true }\")\n"
+        f"sys.exit({native_exit})\n",
+        encoding="ascii",
+    )
+    script = tmp_path / "construction-output.ps1"
+    root = tmp_path / "runtime with spaces"
+    script.write_text(
+        "[Console]::OutputEncoding = [Text.Encoding]::GetEncoding(1252)\n"
+        "$OutputEncoding = [Text.ASCIIEncoding]::new()\n"
+        + _producer_setup(tmp_path)
+        + f"""
+function Assert-SourceRuntime {{}}
+function Get-BootstrapPython {{ {_quote(sys.executable)} }}
+function Get-PayloadHash {{ 'fixture-hash' }}
+$VersionedRuntime = $true
+$InstallDir = {_quote(root)}
+$LinkDir = Join-Path $InstallDir '.venv'
+$SrcVersion = '2.0.0'
+{text[start:end]}
+try {{
+    Invoke-VersionedSlotClean
+    [Console]::Out.WriteLine('completed')
+}} catch {{
+    [Console]::Out.WriteLine('caught=' + $_.Exception.Message)
+}}
+if ([Console]::OutputEncoding.CodePage -ne 1252 -or $OutputEncoding.CodePage -ne 20127) {{
+    throw 'native decoding or stdin changed'
+}}
+exit 0
+""",
+        encoding="ascii",
+    )
+    receipt = tmp_path / "native-argv.json"
+    called = tmp_path / "called"
+    result = subprocess.run(
+        [host, "-NoProfile", "-NonInteractive", "-File", str(script)],
+        env={
+            **os.environ, "COPILOT_EXTENSIONS_HUMAN_UTF8": "1",
+            "MCP_NATIVE_RECEIPT": str(receipt), "MCP_NATIVE_CALLED": str(called),
+        },
+        capture_output=True, timeout=20, creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads(receipt.read_text(encoding="utf-8")) == [
+        1, ["--root", str(root), "construction-shell", "--shell", "ps1"],
+    ]
+    assert "native detail caf\u00e9" in result.stderr.decode("utf-8")
+    if native_exit == 0:
+        assert called.read_text(encoding="utf-8-sig") == "called"
+        assert result.stdout.decode("utf-8").strip() == "completed"
+    else:
+        assert not called.exists()
+        assert result.stdout.decode("utf-8").startswith("caught=")
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows redirected producer encoding")
+@pytest.mark.parametrize("host", HOSTS)
+def test_gc_count_preserves_native_warning_and_literal_json(
+    host: str | None, tmp_path: Path,
+) -> None:
+    if host is None:
+        pytest.skip("PowerShell host unavailable")
+    text = INSTALLER.read_text(encoding="utf-8")
+    start = text.index("    try {\n        $gcJson = & $VenvPython")
+    end = text.index("\n}\n\n# -- 4. Deploy", start)
+    count = text[start:end]
+    assert count.count("$gcN = ") == 1
+    # Exercise the count child's visible diagnostic, not the preceding
+    # command's explicitly suppressed stderr.
+    count = count.replace(
+        "$gcN = ",
+        "$env:PYTHONWARNINGS = -join ([char]99, [char]97, [char]102, [char]233)\n"
+        "        $gcN = ",
+    )
+    gc = tmp_path / "gc.py"
+    gc.write_text(
+        "import json\nprint(json.dumps({'removed': ['fixture-only']}))\n",
+        encoding="ascii",
+    )
+    script = tmp_path / "gc-output.ps1"
+    script.write_text(
+        "[Console]::OutputEncoding = [Text.Encoding]::GetEncoding(1252)\n"
+        "$OutputEncoding = [Text.ASCIIEncoding]::new()\n"
+        + _producer_setup(tmp_path)
+        + "\n".join(
+            line for line in text.splitlines()
+            if line.startswith(("function Write-Ok ", "function Write-Skip "))
+        )
+        + f"""
+$VenvPython = {_quote(sys.executable)}
+$VrScript = {_quote(gc)}
+$InstallDir = {_quote(tmp_path / "runtime with spaces")}
+{count}
+if ([Console]::OutputEncoding.CodePage -ne 1252 -or $OutputEncoding.CodePage -ne 20127) {{
+    throw 'native decoding or stdin changed'
+}}
+""",
+        encoding="ascii",
+    )
+    environment = {
+        **os.environ, "COPILOT_EXTENSIONS_HUMAN_UTF8": "1", "PYTHONIOENCODING": "cp1252",
+    }
+    environment.pop("PYTHONWARNINGS", None)
+    result = subprocess.run(
+        [host, "-NoProfile", "-NonInteractive", "-File", str(script)],
+        env=environment,
+        capture_output=True, timeout=20, creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    error = result.stderr.decode("utf-8")
+    assert error.count("Invalid -W option ignored") == 1
+    assert "caf\u00e9" in error
+    assert "Collected 1 stale version dir(s)" in result.stdout.decode("utf-8")
 
 
 @pytest.mark.parametrize("host", HOSTS)

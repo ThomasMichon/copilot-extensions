@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify MCP init through the existing updater first-stamp and initializer contracts",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "dev"
+    }
+  ]
+}

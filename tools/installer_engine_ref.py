@@ -68,6 +68,7 @@ HUMAN_PROLOGUE = (
 HUMAN_STANDALONE_ENTRYPOINTS = {
     "agent-worktrees": "install.ps1",
     "agent-containers": "init.ps1",
+    "agent-mcp": "init.ps1",
 }
 
 

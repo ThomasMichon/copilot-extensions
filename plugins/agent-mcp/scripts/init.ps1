@@ -25,6 +25,13 @@ param(
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
+
+if ($env:COPILOT_EXTENSIONS_HUMAN_UTF8 -eq '1') {
+    if (-not [IO.File]::Exists((Join-Path $PSScriptRoot 'installer-human-output.ps1'))) {
+        throw 'Required installer human-output initializer is unavailable.'
+    }
+    . (Join-Path $PSScriptRoot 'installer-human-output.ps1')
+}
 . (Join-Path $PSScriptRoot 'versioned_runtime_native.ps1')
 
 # === install-contract:test-persistent-environment -- keep byte-identical across installers ===
@@ -359,7 +366,11 @@ function Invoke-VersionedSlotClean {
     $py = Get-BootstrapPython
     if (-not $py) { throw 'Construction requires a bootstrap Python interpreter' }
     if (-not (Get-Command Start-RuntimeConstruction -ErrorAction SilentlyContinue)) {
-        $helpers = (& $py -I $vr --root $InstallDir construction-shell --shell ps1 | Out-String)
+        $constructionError = ''
+        $helpers = (Invoke-Hidden -FilePath $py -ArgList @(
+            '-I', $vr, '--root', $InstallDir, 'construction-shell', '--shell', 'ps1'
+        ) -ErrorOutput ([ref]$constructionError) | Out-String)
+        if ($constructionError) { [Console]::Error.Write($constructionError) }
         if ($LASTEXITCODE -ne 0) { throw 'Canonical construction adapter is unavailable' }
         Invoke-Expression $helpers
     }
@@ -895,7 +906,11 @@ if ($VersionedRuntime -and -not $env:AGENT_MCP_NO_VERSION_REAP) {
         $gcJson = & $VenvPython $VrScript --root $InstallDir --link-name '.venv' `
             --json gc --protect-pids --min-age-days 0.05 2>$null
         $gcArg = (($gcJson | Out-String).Trim())
-        $gcN = & $VenvPython -c 'import sys,json; a=sys.argv[1] if len(sys.argv)>1 else ""; print(len(json.loads(a).get("removed",[])) if a.strip()[:1]=="{" else 0)' $gcArg
+        $gcCountError = ''
+        $gcN = (Invoke-Hidden -FilePath $VenvPython -ArgList @(
+            '-c', 'import sys,json; a=sys.argv[1] if len(sys.argv)>1 else ""; print(len(json.loads(a).get("removed",[])) if a.strip()[:1]=="{" else 0)', $gcArg
+        ) -ErrorOutput ([ref]$gcCountError) | Out-String).Trim()
+        if ($gcCountError) { [Console]::Error.Write($gcCountError) }
         if ([int]$gcN -gt 0) { Write-Ok "Collected $gcN stale version dir(s)" }
     } catch { Write-Skip "Version-gc skipped ($($_.Exception.Message))" }
 }

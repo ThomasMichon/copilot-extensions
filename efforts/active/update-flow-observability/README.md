@@ -136,8 +136,11 @@ matrix below are _(agent-recommended)_ implementation details.
   about unavailable elapsed timing outside finite renderer scopes (#7727).
 - [ ] Finish the remaining standalone installer output boundaries through
   their actual output owners.
-- [ ] Admit Containers' actual PowerShell `init.ps1` producer and preserve its
-  optional Docker preflight diagnostics and failure status on both platforms.
+- [x] Admit Containers' actual PowerShell `init.ps1` producer and preserve its
+  optional Docker preflight diagnostics and failure status on both platforms
+  (#7854).
+- [ ] Qualify MCP's actual PowerShell `init.ps1` producer and its remaining
+  visible native diagnostic boundaries without formatting MCP protocol output.
 - [ ] Prefix every human-readable install/update line with a wall-clock time;
   suffix it with honestly labeled monotonic elapsed time or completed-step
   duration. Do not represent arbitrary child-line arrival as execution cost.
@@ -254,8 +257,46 @@ bounded source delta inspection.
 
 ## Journal
 
+### 2026-10-22 - MCP native diagnostics qualified before output enrollment
+
+- Real `-File` fixtures reproduced legacy-encoded stderr bypassing the text
+  writer at both the construction-shell and GC count subprocess boundaries.
+  Both PS5 and PowerShell 7 controls failed before either boundary was
+  routed through the existing native helper.
+- The two visible diagnostic sites now use that same dual-stream helper
+  with explicit error capture and text-writer forwarding, including
+  successful native commands' warnings. Construction flags, failure checks,
+  callback ownership and GC protections are unchanged. The preceding GC
+  command retains its explicit stderr suppression. Scalar count output is
+  trimmed to preserve its original single-line presentation.
+- Only after those native controls passed was `init.ps1` enrolled with the
+  canonical initializer and source-bound declaration. Real updater first
+  stamps, legacy/helper-absence controls and all eleven output producers'
+  release-materialization fixtures passed. The MCP bridge, CLI JSON and
+  stdio protocol are not decorated or re-routed.
+- The final same-source qualification passed 237 Windows cases with two
+  skips and 187 native Linux cases with 42 platform skips. Existing native
+  cleanup, literal argv, large-stderr, construction-failure and timeout
+  diagnostics remain covered under their original deadlines and containment
+  limits. No dependency was installed.
+- The broad run also exposed an outdated test that still rejected the
+  public update request owner's now-supported `--json` option. Its coverage
+  now verifies actual request dispatch without invoking that owner, while
+  retaining rejection of undeclared `--quiet`; no updater policy changed.
+- The simple end-to-end and first-touch tier uses an empty home and the real
+  first-stamp adapter. Full fresh-machine construction was not repeated
+  because the construction contract did not change. No external-venue
+  update is authorized for this candidate; promotion and rollout remain
+  separately owned obligations.
+- This qualifies one more source boundary, not remaining Machines/Budget
+  producers, equivalent no-op measurements or parent launch completion.
+
 ### 2026-10-22 - Containers' declared producer retains native diagnostics
 
+- #7854 merged after current-head approval, empty review threads and green
+  required checks. The authorized review-rule exception covered only the
+  additional CODEOWNER vote; no CI gate was bypassed. Both parent trackers
+  remain open. This is merged source, not an installed release claim.
 - A real native preflight fixture reproduced two defects before enrollment:
   inherited Windows stderr bypassed the requested UTF-8 text writer, and a
   nonzero Docker version probe still printed success. The POSIX counterpart
@@ -293,6 +334,11 @@ bounded source delta inspection.
   installed promotion and rollout remain unproved, under the existing owner.
 - This is one source boundary, not completion of the remaining standalone,
   equivalent no-op cost, rollout or parent launch obligations.
+- Next source slice: qualify MCP's actual `init.ps1` producer. Its native
+  work already passes through the existing dual-stream helper; retain that
+  behavior and prove the actual first-stamp and encoding boundaries before
+  declaring capture support. Machines and Budget remain separate unqualified
+  boundaries.
 
 ### 2026-10-22 - Second authorized capture changed releases again
 
