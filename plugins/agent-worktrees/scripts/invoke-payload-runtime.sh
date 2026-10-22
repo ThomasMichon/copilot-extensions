@@ -8,6 +8,8 @@ PAYLOAD_ROOT="${AGENT_WORKTREES_PAYLOAD_ROOT:-}"
 }
 
 SCRIPT_DIR="$PAYLOAD_ROOT/scripts"
+_aw_update_entry_dir="$PAYLOAD_ROOT/bin"
+. "$_aw_update_entry_dir/agent-worktrees-update-entry.sh"
 MODE_RUNNER="$SCRIPT_DIR/installation-context/installation-context.sh"
 JSON_QUERY="$SCRIPT_DIR/installation-context/json-query.awk"
 RUNTIME_RESOLVER="$SCRIPT_DIR/resolve-runtime.sh"

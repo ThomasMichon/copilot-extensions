@@ -1171,6 +1171,75 @@ not replace installation identity, and not every plugin surface receives it.
 
 ## Plugin update ≠ runtime install
 
+### Shell-first update recovery
+
+The installed project binstub still delegates with `--project <name>` to its
+owned Worktrees front door. For `update`, that front door (including the
+payload-local dispatcher) fetches the remote Manager bootstrap **before**
+resolving a runtime, provisioning a venv, importing Python packages, or checking
+an installed Manager's health. CMD reaches the same branch through its
+PowerShell shim. The child remains inside the caller's process/Job containment;
+the entry does not detach or create a new console.
+The existing Windows Git-sh front door selects that same native PowerShell
+early entry before parsing registrations, preserving native `C:\...` roots
+instead of interpreting them as POSIX paths. Only the helper filename is
+converted with `cygpath`; source/root authority is not changed.
+
+The registered Manager root (or the existing explicit root/default when no
+provider is registered) is preserved. Its durable `config.toml` `[source]`
+overrides select the repository and ref; missing fields use the publication-owned
+defaults in the shell entry, checked against the supported Manager bootstrap
+defaults. Selection never reads `current-version`, an installed payload, or
+`source_config.py`: a missing/corrupt selected runtime cannot disable recovery.
+This is the existing config-over-bootstrap-defaults contract, not a second
+configuration authority. Source overrides are not rewritten, and an alternate
+selected control-plane provider is not replaced.
+
+GitHub sources with portable raw URLs retain the direct-download fast path.
+Other SSH, HTTPS, file, absolute or relative local Git sources use a fresh
+`git init`/exact-ref fetch/detached checkout in private per-attempt scratch, then
+invoke that checkout's ordinary `worktree-manager/bootstrap.sh` or `.ps1`.
+Relative filesystem sources are anchored before Git changes directories.
+A failed raw download may retry **only the same configured Git source**, using
+normal Git credentials. No arbitrary-host raw URL is invented. Missing Git or
+native acquisition failures are explicit failures, not canonical-source
+fallbacks. Repository-routing environment variables are cleared without
+discarding credential/SSH inputs. The shell reader supports basic and literal
+quoted values, including escaped quotes/backslashes emitted by `source set`;
+unsupported/malformed explicit syntax fails visibly before acquisition and is
+distinct from broken-runtime recovery.
+
+Windows scratch is created atomically with a protected DACL, owner equal to
+`WindowsIdentity.GetCurrent().User`, and explicit inheritable FullControl for
+that SID (plus SYSTEM/Administrators). Both file and directory inheritance are
+present; Owner Rights/default elevated ownership are not used. Existing paths
+are never adopted. Native Git children use no-window, caller-contained process
+launches with concurrent stdout/stderr drains. Each attempt cleans up only its
+own scratch, while preserving argument boundaries and native exit status.
+
+The fetched bootstrap uses the supported Manager runtime constructor. Before
+publishing a Manager, fresh installer code checks existing command bytes against
+the published ownership recognizer and validates registration/root identity,
+preserving foreign commands. The fresh Manager repairs the core through its
+supported, source-policy/ownership-admitted installer before running its normal
+whole-suite `update` orchestration, without fetching a second Manager source.
+Project arguments and the original invocation context cross the bootstrap.
+Installing the Manager alone never counts as suite success: repair failures
+and the eventual update's native exit status
+propagate to the caller. `--no-manager`, read-only `--auth-report`, update help,
+and non-update commands keep their existing dispatch behavior.
+An older global helper need not equal the newly fetched payload: admission
+also accepts exact bytes from the prior installation's revalidated
+`commandBinding` payload or selected source snapshot. The fresh canonical
+ownership reader/builder validates that existing source/installation owner
+without importing the installed application or writing a new receipt.
+Unrelated bytes, missing ownership, indirect files, and inconsistent ownership records
+remain refusals; helper evolution does not require a growing release-hash list.
+
+The opt-in [real local-Git acceptance lane](../TESTING.md#shell-first-update-real-local-git-acceptance)
+uses harmless fetched bootstraps and actual project CMD/PowerShell/POSIX entries;
+it is separate from required unit promotion and from production installation.
+
 `copilot plugin update <name>` only refreshes the plugin's **marketplace
 payload** — the cached source plus any skills/hooks/agents — under
 `~/.copilot/installed-plugins/copilot-extensions/<name>`. It does **not** run the

@@ -11,6 +11,8 @@ if (-not $payloadRoot -or -not (Test-Path -LiteralPath $payloadRoot -PathType Co
     exit 126
 }
 $payloadRoot = (Resolve-Path -LiteralPath $payloadRoot).Path
+. (Join-Path $payloadRoot 'bin\agent-worktrees-update-entry.ps1') @args
+if ($_awUpdateHandled) { exit $LASTEXITCODE }
 $scriptDir = Join-Path $payloadRoot 'scripts'
 $modeRunner = Join-Path $scriptDir 'installation-context\installation-context.ps1'
 $runtimeResolver = Join-Path $scriptDir 'resolve-runtime.ps1'

@@ -40,6 +40,17 @@ if (Test-Path $Config) {
     }
 }
 
+$installerArgs = @()
+$commandArgs = @($args)
+if ($commandArgs.Count -and $commandArgs[0] -ceq '--repair-update') {
+    if ($commandArgs.Count -lt 4 -or $commandArgs[3] -cne 'update') {
+        throw 'Incomplete or invalid update bootstrap source/command.'
+    }
+    $Repo = $commandArgs[1]
+    $Ref = $commandArgs[2]
+    $installerArgs += '--repair-update'
+    $commandArgs = @($commandArgs | Select-Object -Skip 3)
+}
 Write-Host 'copilot-extensions Worktree Manager - bootstrap'
 
 # -- Prerequisites (auto-provision; restart-aware; user-local first) ----------
@@ -81,15 +92,23 @@ if (-not $HaveGit) {
 # -- Fetch the payload (git clone/fetch when available, else GitHub tarball) ---
 if ($HaveGit) {
     New-Item -ItemType Directory -Force -Path $Staging | Out-Null
-    if (Test-Path (Join-Path $Staging '.git')) {
-        git -C $Staging fetch --depth 1 $Repo $Ref | Out-Null
-        if ($LASTEXITCODE -ne 0) { throw "git fetch of $Repo@$Ref failed (exit $LASTEXITCODE)." }
-        git -C $Staging checkout -q FETCH_HEAD
-        if ($LASTEXITCODE -ne 0) { throw "git checkout of $Repo@$Ref failed (exit $LASTEXITCODE)." }
-    } else {
+    if (-not (Test-Path (Join-Path $Staging '.git'))) {
         if (Test-Path $Staging) { Remove-Item -Recurse -Force $Staging }
-        git clone --depth 1 --branch $Ref $Repo $Staging | Out-Null
-        if ($LASTEXITCODE -ne 0) { throw "git clone of $Repo@$Ref failed (exit $LASTEXITCODE)." }
+        git init --quiet -- $Staging
+        if ($LASTEXITCODE -ne 0) {
+            [Console]::Error.WriteLine("git init failed (exit $LASTEXITCODE).")
+            exit $LASTEXITCODE
+        }
+    }
+    git -C $Staging fetch --depth 1 -- $Repo $Ref | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        [Console]::Error.WriteLine("git fetch of $Repo@$Ref failed (exit $LASTEXITCODE).")
+        exit $LASTEXITCODE
+    }
+    git -C $Staging -c core.hooksPath= checkout -q --detach FETCH_HEAD
+    if ($LASTEXITCODE -ne 0) {
+        [Console]::Error.WriteLine("git checkout of $Repo@$Ref failed (exit $LASTEXITCODE).")
+        exit $LASTEXITCODE
     }
     $PayloadParent = $Staging
 } else {
@@ -107,7 +126,10 @@ if ($HaveGit) {
     if (Test-Path $Extract) { Remove-Item -Recurse -Force $Extract }
     New-Item -ItemType Directory -Force -Path $Extract | Out-Null
     tar -xzf $Tar -C $Extract   # bsdtar ships with Windows 10 1803+
-    if ($LASTEXITCODE -ne 0) { throw "Extracting the payload tarball failed (exit $LASTEXITCODE)." }
+    if ($LASTEXITCODE -ne 0) {
+        [Console]::Error.WriteLine("Extracting the payload tarball failed (exit $LASTEXITCODE).")
+        exit $LASTEXITCODE
+    }
     $PayloadParent = (Get-ChildItem $Extract -Directory | Select-Object -First 1).FullName
     Remove-Item $Tar -Force
 }
@@ -123,12 +145,12 @@ try {
         $Python = & uv python find --no-project '>=3.11'
     }
     if ($LASTEXITCODE -ne 0 -or -not $Python) { throw 'Manager needs Python 3.11 or newer.' }
-    & $Python -I -S -B -X utf8 (Join-Path $PWD 'scripts\runtime_install.py') --root $Root --payload $PWD -- @args
-    if ($LASTEXITCODE -ne 0) { throw "Manager construction or command failed ($LASTEXITCODE)." }
+    & $Python -I -S -B -X utf8 (Join-Path $PWD 'scripts\runtime_install.py') --root $Root --payload $PWD @installerArgs -- @commandArgs
+    $commandExit = $LASTEXITCODE
 } finally {
     Pop-Location
 }
-
-if (($env:PATH -split ';') -notcontains $LocalBin) {
+if ($commandExit -eq 0 -and ($env:PATH -split ';') -notcontains $LocalBin) {
     Write-Warning "Add '$LocalBin' to your PATH (uv and the worktree-manager binstub live there), then restart your shell."
 }
+exit $commandExit

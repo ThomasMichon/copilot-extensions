@@ -1481,23 +1481,39 @@ def _cmd_update(rest: list[str]) -> int:
     The run is recorded through ``update_events``; the exit code follows the
     shared update table (0 success, non-zero failure classes).
     """
+    fresh_manager = rest[:1] == ["--repair-engine"]
+    if fresh_manager:
+        from .update_bootstrap import repair_engine
+
+        if len(rest) < 2:
+            print("Update repair requires its fresh source checkout.", file=sys.stderr)
+            return 2
+        rc = repair_engine(Path(rest[1]))
+        if rc:
+            return rc
+        rest = rest[2:]
     from .update_events import UpdateRun
 
     run = UpdateRun()
     try:
+        if fresh_manager:
+            return run.finish(_cmd_update_steps(rest, run, fresh_manager=True))
         return run.finish(_cmd_update_steps(rest, run))
     except BaseException as exc:
         run.abort(exc)
         raise
 
 
-def _cmd_update_steps(rest: list[str], run) -> int:
+def _cmd_update_steps(rest: list[str], run, *, fresh_manager: bool = False) -> int:
     from . import engine_client as ec
-    from .self_install import self_update
+    from .self_install import SelfUpdateResult, self_update
 
     # 1. Self-update the Manager (best-effort; the new slot takes effect next run).
     with run.self_update_phase():
-        su = self_update(dry_run=False)
+        su = (
+            SelfUpdateResult(action="already-current", version=__version__)
+            if fresh_manager else self_update(dry_run=False)
+        )
         cutover = su.cutover if isinstance(su.cutover, dict) else None
         cutover_failed = bool(
             cutover

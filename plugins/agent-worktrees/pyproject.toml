@@ -128,6 +128,7 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+norecursedirs = ["*.egg", ".*", "_darcs", "build", "CVS", "dist", "node_modules", "venv", "{arch}", "native"]
 markers = [
     "guard: fast structural/contract guard tests (marketplace + picker integrity) run automatically in the pre-push hook; the full suite runs in CI",
     "real_installer_processes: run installers as real process trees (no subprocess.run adapter)",

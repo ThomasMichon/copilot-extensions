@@ -3017,8 +3017,11 @@ function Deploy-GlobalBinstub {
     if ((Get-Variable PythonRuntimeHelpersPublished -Scope Script -ValueOnly -ErrorAction SilentlyContinue) -eq $true) { return }
     Assert-SourceRuntime
     Ensure-InstallDir $LocalBin
-    foreach ($name in @('agent-worktrees.ps1', 'agent-worktrees.cmd', 'agent-worktrees')) {
+    foreach ($name in @('agent-worktrees-update-entry.sh', 'agent-worktrees-update-entry.ps1', 'agent-worktrees-update-json.awk', 'agent-worktrees.ps1', 'agent-worktrees.cmd', 'agent-worktrees')) {
         $src = Join-Path $PluginDir "bin\$name"
+        if ($name -eq 'agent-worktrees-update-json.awk') {
+            $src = Join-Path $ScriptDir 'installation-context\json-query.awk'
+        }
         $dst = Join-Path $LocalBin $name
         if (Test-Path $src) {
             if ((Get-Variable Action -ValueOnly -ErrorAction SilentlyContinue) -eq 'publish-runtime-helpers' -and
@@ -3931,6 +3934,22 @@ function Remove-Binstub {
             Write-ServiceChanged "Removed binstub: $path"
         }
     }
+    foreach ($stub in @('agent-worktrees-update-entry.sh', 'agent-worktrees-update-entry.ps1', 'agent-worktrees-update-json.awk')) {
+        $path = Join-Path $LocalBin $stub
+        $source = Join-Path $PluginDir "bin\$stub"
+        if ($stub -eq 'agent-worktrees-update-json.awk') {
+            $source = Join-Path $ScriptDir 'installation-context\json-query.awk'
+        }
+        if ((Test-Path -LiteralPath $path -PathType Leaf) -and
+            -not ([IO.File]::GetAttributes($path) -band [IO.FileAttributes]::ReparsePoint)) {
+            $actual = [IO.File]::ReadAllText($path).Replace("`r`n", "`n")
+            $expected = [IO.File]::ReadAllText($source).Replace("`r`n", "`n")
+            if ($actual -ceq $expected) {
+                Remove-Item -LiteralPath $path
+                Write-ServiceChanged "Removed owned update helper: $path"
+            }
+        }
+    }
 }
 
 function Remove-LegacyBinstubs {
@@ -4075,7 +4094,10 @@ switch ($Action) {
             if (-not (Deploy-RuntimeResolvers)) { throw 'Required resolvers were not published.' }
         } else { throw 'Invalid helper publication scope.' }
         if (-not $ContextualInstall) {
-            foreach ($stub in @('agent-worktrees', 'agent-worktrees.ps1', 'agent-worktrees.cmd')) {
+            if (-not (Test-Path -LiteralPath (Join-Path $ScriptDir 'installation-context\json-query.awk') -PathType Leaf)) {
+                throw 'Update source reader is missing.'
+            }
+            foreach ($stub in @('agent-worktrees-update-entry.sh', 'agent-worktrees-update-entry.ps1', 'agent-worktrees', 'agent-worktrees.ps1', 'agent-worktrees.cmd')) {
                 if (-not (Test-Path -LiteralPath (Join-Path $PluginDir "bin\$stub") -PathType Leaf)) {
                     throw "Required global binstub is missing: $stub"
                 }

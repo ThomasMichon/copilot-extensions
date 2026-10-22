@@ -1,0 +1,13 @@
+{
+  "comment": "Bootstrap updates before installed runtime resolution using durable source authority and exact Git repo/ref acquisition; bind private Windows scratch to TokenUser and retain whole-suite orchestration.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

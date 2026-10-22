@@ -43,6 +43,16 @@ if [ -f "$CONFIG" ]; then
     [ -n "${cfg_ref:-}" ] && REF="$cfg_ref"
 fi
 
+installer_args=()
+if [ "${1-}" = --repair-update ]; then
+    [ "$#" -ge 4 ] || { echo 'ERROR: incomplete update bootstrap source.' >&2; exit 2; }
+    REPO="$2"
+    REF="$3"
+    shift 3
+    [ "${1-}" = update ] || { echo 'ERROR: update bootstrap only accepts update.' >&2; exit 2; }
+    installer_args+=(--repair-update)
+fi
+
 echo 'copilot-extensions Worktree Manager - bootstrap'
 
 # -- Prerequisites (auto-provision; restart-aware; user-local first) ----------
@@ -88,13 +98,12 @@ fi
 # -- Fetch the payload (git clone/fetch when available, else GitHub tarball) ---
 if [ "$have_git" -eq 1 ]; then
     mkdir -p "$STAGING"
-    if [ -d "$STAGING/.git" ]; then
-        git -C "$STAGING" fetch --depth 1 "$REPO" "$REF" >/dev/null 2>&1
-        git -C "$STAGING" checkout -q FETCH_HEAD
-    else
+    if [ ! -d "$STAGING/.git" ]; then
         rm -rf "$STAGING"; mkdir -p "$STAGING"
-        git clone --depth 1 --branch "$REF" "$REPO" "$STAGING" >/dev/null 2>&1
+        git init --quiet -- "$STAGING"
     fi
+    git -C "$STAGING" fetch --depth 1 -- "$REPO" "$REF"
+    git -C "$STAGING" -c core.hooksPath= checkout -q --detach FETCH_HEAD
     payload_parent="$STAGING"
 else
     # Derive the codeload tarball URL from the (GitHub) source; a non-GitHub
@@ -139,4 +148,4 @@ case ":$PATH:" in
 esac
 
 # Then run whatever the caller asked for through the freshly-installed app.
-exec "$PYTHON" -I -S -B -X utf8 scripts/runtime_install.py --root "$ROOT" --payload "$PWD" -- "$@"
+exec "$PYTHON" -I -S -B -X utf8 scripts/runtime_install.py --root "$ROOT" --payload "$PWD" "${installer_args[@]}" -- "$@"

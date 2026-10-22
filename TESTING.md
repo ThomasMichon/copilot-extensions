@@ -1975,6 +1975,36 @@ python tools\run-plugin-tests.py agent-worktrees -k native_shell_collection
 python tools\run-plugin-tests.py agent-worktrees --allow-explicit-tiers -k 'installer_copilot_resolution or installer_pipefail or invoke_payload_runtime_posix'
 ```
 
+### Shell-first update: real local Git acceptance
+
+Run this explicit native lane under a process-tree supervisor (a Windows Job
+supervisor on Windows), never raw pytest:
+
+```text
+python tools/run-plugin-tests.py agent-worktrees --allow-explicit-tiers --test-file tests/native/test_update_entry_local_git.py --test-timeout 45 --subsuite-timeout 180 --plugin-timeout 240
+```
+
+The lane creates private temporary roots and a real bare Git repository holding
+only harmless `worktree-manager/bootstrap.sh` and `.ps1` fixtures. Its ordinary
+Manager `config.toml` selects that source with a `file://` URI and exact ref;
+there is no source-selection bypass. Fixture Git objects are deterministic:
+no `git commit`, identity lookup, publication, SSH or network source is used.
+The generated project launchers and installed shared launchers are unmodified.
+POSIX executes the actual shell entry; Windows executes both actual project
+`.cmd` and `.ps1` entries with missing and failing old runtimes.
+When an eligible Git Bash is installed, Windows also exercises the existing
+global sh binstub with its real Windows `provider_root` registration. That
+entry must select the native PowerShell early path before POSIX root parsing.
+Unavailable/unsupported native shells are reported as skipped, not positive
+platform acceptance.
+
+Success means the freshly fetched fixture records exact argv and exits **73**,
+with no old resolver/interpreter/Manager marker, no installer staging, and no
+remaining per-attempt scratch. It is deliberately **not** whole-suite update
+success. Native Windows execution and console/foreground observation remain
+separate acceptance evidence. The `tests/native` directory is excluded from
+default discovery and required unit promotion; collect it explicitly as above.
+
 The keyed workspace-creation regressions have an opt-in native companion.
 It runs the real create parser/handler, Git allocation, tracking writer, and
 creation journal in a fresh synthetic owner, then replays from a second Python

@@ -25,7 +25,14 @@ SETUP = (
     "default-setup.ps1", "default-setup.sh", "launch-command.ps1", "launch-command.sh",
     "reconcile-machine-settings.ps1", "reconcile-machine-settings.sh",
 )
-TOOLS = ("agent-worktrees", "agent-worktrees.cmd", "agent-worktrees.ps1")
+TOOLS = (
+    "agent-worktrees-update-entry.sh",
+    "agent-worktrees-update-entry.ps1",
+    "agent-worktrees-update-json.awk",
+    "agent-worktrees",
+    "agent-worktrees.cmd",
+    "agent-worktrees.ps1",
+)
 
 
 def declared_copies(content: Path, root: Path, scope: str, shell: str, contextual: bool) -> list[dict]:
@@ -58,7 +65,11 @@ def declared_copies(content: Path, root: Path, scope: str, shell: str, contextua
     if not contextual:
         home = Path(os.environ.get("USERPROFILE") or Path.home()) if os.name == "nt" else Path.home()
         for name in TOOLS:
-            add(content / "bin" / name, home / ".local/bin" / name, shell == "sh",
+            source = (
+                content / "scripts/installation-context/json-query.awk"
+                if name == "agent-worktrees-update-json.awk" else content / "bin" / name
+            )
+            add(source, home / ".local/bin" / name, shell == "sh",
                 shell == "ps1", required=True)
     return result
 

@@ -2382,8 +2382,9 @@ deploy_tool_binstub() {
     _assert_source_runtime || return 1
     mkdir -p "$LOCAL_BIN" || return 1
     local stub stub_src
-    for stub in agent-worktrees agent-worktrees.cmd agent-worktrees.ps1; do
+    for stub in agent-worktrees-update-entry.sh agent-worktrees-update-entry.ps1 agent-worktrees-update-json.awk agent-worktrees agent-worktrees.cmd agent-worktrees.ps1; do
         stub_src="$PLUGIN_DIR/bin/$stub"
+        [[ "$stub" != agent-worktrees-update-json.awk ]] || stub_src="$SCRIPT_DIR/installation-context/json-query.awk"
         if [[ -f "$stub_src" ]]; then
             _publish_runtime_file "$stub_src" "$LOCAL_BIN/$stub" || return 1
             ok "Tool binstub: $LOCAL_BIN/$stub"
@@ -3296,7 +3297,8 @@ case "$ACTION" in
             *) exit 1 ;;
         esac
         if ! $CONTEXTUAL_INSTALL; then
-            for stub in agent-worktrees agent-worktrees.cmd agent-worktrees.ps1; do
+            [[ -f "$SCRIPT_DIR/installation-context/json-query.awk" ]] || { err "Update source reader is missing"; exit 1; }
+            for stub in agent-worktrees-update-entry.sh agent-worktrees-update-entry.ps1 agent-worktrees agent-worktrees.cmd agent-worktrees.ps1; do
                 [[ -f "$PLUGIN_DIR/bin/$stub" ]] || { err "Required tool binstub missing: $stub"; exit 1; }
             done
             deploy_tool_binstub || exit 1
@@ -3464,6 +3466,15 @@ case "$ACTION" in
             fi
         done
 
+        for stub in agent-worktrees-update-entry.sh agent-worktrees-update-entry.ps1 agent-worktrees-update-json.awk; do
+            stub_src="$PLUGIN_DIR/bin/$stub"
+            [[ "$stub" != agent-worktrees-update-json.awk ]] || stub_src="$SCRIPT_DIR/installation-context/json-query.awk"
+            if [[ -f "$LOCAL_BIN/$stub" && ! -L "$LOCAL_BIN/$stub" ]] &&
+               cmp -s "$stub_src" "$LOCAL_BIN/$stub"; then
+                rm -f "$LOCAL_BIN/$stub"
+                changed "Removed owned update helper: $LOCAL_BIN/$stub"
+            fi
+        done
         # Sweep any lingering legacy alias binstubs
         remove_legacy_binstubs
 

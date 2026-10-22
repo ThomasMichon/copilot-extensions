@@ -6,6 +6,8 @@
 # model, #581/#1085/#1106) -- prefers the slot's POSIX console script, then its
 # Windows python via -m, then the newest installed slot; PATH python is the last
 # resort (#234 defect 2).
+_aw_update_entry_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)"
+. "$_aw_update_entry_dir/agent-worktrees-update-entry.sh"
 export PYTHONUTF8=1
 # Sanitize inherited Python runtime variables before dispatching to the
 # resolved, architecture-correct runtime-slot interpreter (#2411 parity with

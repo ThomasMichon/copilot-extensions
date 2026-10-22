@@ -1,3 +1,5 @@
+. (Join-Path $PSScriptRoot 'agent-worktrees-update-entry.ps1') @args
+if ($_awUpdateHandled) { exit $LASTEXITCODE }
 $env:PYTHONUTF8 = '1'
 # Sanitize inherited Python runtime variables before dispatching to the
 # resolved, architecture-correct runtime-slot interpreter (#2411). A stray
