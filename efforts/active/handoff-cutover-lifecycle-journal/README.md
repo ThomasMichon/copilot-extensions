@@ -5,7 +5,7 @@
 - **Branch(es):** `worktree/<local-agent-worktree-branch>` (private branch name; not public-safe to record verbatim)
 - **Created:** 2026-09-11
 - **Status:** Active
-- **Umbrella issue:** [#2457](https://github.com/ThomasMichon/copilot-extensions/issues/2457)
+- **Source umbrella:** #2457; continuing coordination is this Plan/Validation/Journal and open bounded-source issues
 - **Sub-issues:** TBD
 
 ## Guiding Intent
@@ -58,6 +58,18 @@ of speculatively designing for both at once.
 ## Participants
 
 Single local agent, no dispatch/coordination topology needed.
+
+## Coordination
+
+This existing Active ROOT Plan, Validation and Journal remain the continuing
+observability coordination record. #2457 is the source umbrella, retained open until the
+complete reviewed intake and current full readback permit administrative supersession;
+afterward it is historical provenance, not a required live claim token. Continue through
+eligible open bounded-source issues and the SAME current architecture/producer/journal
+custodians. Keep #912's SAME explicit nonexpiring claimant and all twelve direct
+#1920/#1921/#1922 rows, #3000/head/task and host/provider roles untouched. Independent
+Bridge/ACP runner instrumentation remains a separately deferred owner, not implicit
+thirteen-stage equivalence or remediation authority.
 
 ## Context
 
@@ -613,7 +625,84 @@ _Correlated via a facility-driven sweep of open `bug`-labeled issues against act
 - [ ] **#1246** context-handoff: transient worktree lookup failure is reported as missing baton
   - Uses this effort's own "baton" lifecycle-journal language -- a direct match.
 
+### Current correlation baseline for the retained objective
+
+Current first-class token/predecessor/successor fields and nullable defaults
+are delivered source baseline. Historical 'never initialized' or missing-field
+prose above describes the earlier slice, not proof those fields are absent
+now. The remaining acceptance audits actual producer population, early null
+semantics, exact concurrent-attempt links and full archival/platform proof;
+this clarification settles no existing unchecked item.
+
+### Direct complete thirteen-stage observability objective from #2457
+
+<!-- backlog-reconciliation:7556:transfer:2457:to:efforts/active/handoff-cutover-lifecycle-journal/README.md -->
+
+This SAME existing reviewed ROOT remains Active and becomes final tracking only after
+normal reviewed actual merge and full current readback. Preserve
+Architecture/producer/validation ownership, every original Plan/Validation/Journal row,
+prior source/native proof and all live claim/host/provider custody. The mandate is
+observation and durable diagnosis, not authority to operate or repair a live handoff.
+Keep the explicitly deferred independent Bridge/ACP runner extension separate; do not
+invent its thirteen-stage equivalence.
+
+- [ ] Preserve all thirteen real stages: worktree create; mux assignment; actual Copilot
+  invocation (or explicitly distinguished invocation attempt); initial session binding;
+  first status; trigger; host acknowledgement; successor spawn start plus terminal
+  outcome; successor session binding; authoritative successor claim; identity-checked
+  predecessor closing; session end; and confirmed handoff completion. One early
+  acknowledgement/checkpoint cannot stand in for later facts.
+- [ ] Preserve project/worktree, exact launch/attempt, opaque token, nullable early
+  session, predecessor/successor, timestamp and source correlation. Credit CURRENT
+  first-class linkage fields/defaults; reconcile stale checklist wording from actual
+  producer population rather than declaring implemented fields absent.
+  Concurrent/retried attempts must never merge by recency or an incomplete key.
+- [ ] Keep stage outcome gating honest: duplicate/refused claims and failed retire are
+  visible failure facts, not successful stage stamps. Preserve spawn-in-flight versus
+  success/failure, bind versus candidate versus semantic delivery versus head/custody
+  acknowledgement, and exactly-once complete only after the correct predecessor is gone
+  and rightful successor linked. Do not change lifecycle authority merely to simplify
+  logging.
+- [ ] Retain durable project-scoped/worktree trace, contained paths and explicit attempt
+  selection/most-recent policy, with visible missing/failed stages, bounded
+  read/diagnostic failure and health/orphan naming. Preserve current write-through/drop
+  observability and interprocess locking, not just thread tests or source declarations.
+- [ ] Complete FULL per-stage traces in BOTH predecessor and successor session-state
+  archives with linked identities and early-stage backfill, allowing either retained
+  session folder to traverse the chain after rolling logs or per-worktree state are
+  removed. Existing linkage request records/project trace are real partials, not a
+  silent waiver of full dual archival scope.
+- [ ] Preserve the original supported-platform concurrent independent-writer validation,
+  complete one-cutover thirteen-stage happy path, partial/killed-spawn negative and
+  actual native/disposable archival evidence. Name source/interpreter/platform and
+  honest unavailable/skipped results. Do not replace it with a helper-only stamp test or
+  add an unrelated universal every-host campaign.
+- [ ] Preserve historical authorized Phase 4 remediations and completed docs at their
+  actual bounded scope without reopening superseded hypotheses. Retain the later
+  age-based reclaim/live-successor and missing stage-9 question until actual current
+  source/effect disposition is established; age never becomes source/claim release
+  authority.
+- [ ] Preserve #912's SAME nonexpiring claimant and direct #1920/#1921/#1922 safety,
+  #3000 arbitration, actual head/task/host/provider owners and independent reliability
+  follow-ups. Correlation/observation and a proposed transfer grant no consume, head
+  claim, adoption, link, spawn, cancellation or retirement operation.
+- [ ] Keep ALL existing ROOT Plan AND Validation obligations, including source
+  population, mirrored archival, exact failure predicates and runner boundaries.
+  Reconcile current umbrella/dependent owner references to this same ROOT/Journal and
+  eligible open bounded-source coordination, without leaving a required closed live
+  token or releasing a claim.
+
+Receiving gate: land the complete unchecked residual and corresponding
+Validation/Coordination through a NEW normal reviewed ACTUAL merge, read back the
+CURRENT full ROOT Plan/Validation/Coordination and unchanged owners, then and only then
+supersede #2457 as tracking. Keep Status Active until the complete own Plan/Validation
+resolves or transfers to named accepted objectives. If policy/custody still needs #2457
+live or any clause is missing, retain it. No handoff/lifecycle, native/model, state,
+source or process action is authorized.
+
 ## Validation Plan
+
+- [ ] Complete every directly retained #2457 Plan/Validation clause above at its original evidence tier, preserving all owners, holds and unfinished acceptance. Administrative consolidation is not implementation.
 
 - [ ] Unit/integration tests per plugin (existing test layout — see
       `plugins/agent-worktrees/tests/`, `plugins/context-handoff/tests/`)
@@ -715,6 +804,13 @@ instrument stage 7 (host ack)/8 (spawn-started) distinctly from stage
 `activity.jsonl` by hand as done here.
 
 ## Journal
+
+### 2026-10-22 - Direct retained acceptance from #2457
+
+- Preserved the complete #2457 scope in this existing Plan and
+  Validation without claiming implementation or transferring source/resource
+  custody. Normal reviewed merge and current complete readback precede any
+  administrative supersession; the substantive acceptance stays open.
 
 ### 2026-09-11 — Kickoff
 - Effort created from a live operator report: handoff cutover silently fails

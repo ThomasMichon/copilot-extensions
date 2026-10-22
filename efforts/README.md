@@ -78,10 +78,10 @@ that pattern to this repository.
 | [Agent-Process Self-Report Registry](active/agent-process-self-report-registry/README.md) | Draft | #5559 |
 | [Full-Harness Startup Reliability](active/full-harness-startup-reliability/README.md) | Active | #3303 |
 | [Unified Skill Review](active/unified-skill-review/README.md) | Draft | #2847 |
-| [Handoff Cutover Lifecycle Journal](active/handoff-cutover-lifecycle-journal/README.md) | Draft | #2457 |
+| [Handoff Cutover Lifecycle Journal](active/handoff-cutover-lifecycle-journal/README.md) | Active; complete retained acceptance, implementation/native gates open | Plan/Validation/Journal and open bounded-source issues; #2457 is source provenance after reviewed complete intake |
 | [Handoff Live Cutover](active/handoff-live-cutover/README.md) | Active | #2249† |
 | [Handoff Cutover Reload Robustness](active/handoff-cutover-reload-robustness/README.md) | Active | #5250† |
-| [Context-Handoff Overhaul](active/context-handoff-overhaul/README.md) | Draft | #2594 |
+| [Context-Handoff Overhaul](active/context-handoff-overhaul/README.md) | Active; complete retained acceptance, implementation/native gates open | Plan/Validation/Journal and open bounded-source issues; #2594 is source provenance after reviewed complete intake |
 | [Custom Context Aggregator Retirement](active/custom-context-aggregator-retirement/README.md) | Draft | #2173 |
 | [SessionStart Static/Dynamic Content Conformance](active/sessionstart-static-dynamic-conformance/README.md) | Active | #2256 |
 | [agent-logger Aggregate Configuration](active/agent-logger-aggregate-configuration/README.md) | Active; complete aggregate authorization and adoption acceptance retained | Plan/Validation/Journal plus open bounded source issues; #1817 is historical after complete reviewed intake |

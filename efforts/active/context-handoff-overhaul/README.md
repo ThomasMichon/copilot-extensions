@@ -10,7 +10,7 @@
   further slices continue on new branches)
 - **Created:** 2026-09-13
 - **Status:** Active
-- **Umbrella issue:** #2594
+- **Source umbrella:** #2594; continuing coordination is this Plan/Validation/Journal and open bounded-source issues
 - **Sub-issues:** #2595 · #2596 · #2597 · #2598 · #2599
 
 ## Guiding Intent
@@ -23,6 +23,22 @@ successor instead. This effort closes the gap between that standing intent
 (now stated in `visions/plugins/context-handoff`) and the current
 implementation, without discarding the substantial, already-correct work three
 prior/in-flight efforts already landed.
+
+## Coordination
+
+This existing Active ROOT Plan, Validation and Journal remain the continuing overhaul
+coordination record, with the SAME continuity/configuration/native, task/storage,
+ground/head, journal and admitted provider custodians. #2594 is the complete source
+umbrella, kept open until its entire original and inherited acceptance, checked
+source/design decisions and operative pointers receive normal reviewed intake and
+current full readback. After that administrative supersession its historical issue is
+not a required live claim token. #2598/#2628 follow their independent complete intake
+gates; open bounded-source coordination, including #5683/#5684, #4619 and
+current-head/provider work, continues through this root rather than an expired or closed
+reservation. Preserve #912's SAME explicit UNRELEASED nonexpiring claimant and all
+twelve direct #1920/#1921/#1922 clauses; #3000 receives case tracking, not that
+resource/source custody. No review of these documents releases a claim, grants process
+effects or completes any parent effort.
 
 ## Context
 
@@ -475,7 +491,444 @@ _Correlated via a facility-driven sweep of open `bug`-labeled issues against act
 - [ ] **#2660** context-handoff consume ETIMEDOUT: agent-dispatch identity/repo resolution shells out to `agent-worktrees get` twice, each costing 6.5-9.5s
   - A context-handoff consume timeout is squarely this effort's plugin scope.
 
+### Current contractual interpretation of retained historical slices
+
+The direct acceptance below preserves the later accepted refinements without
+unchecking delivered source/design slices. #4513 supersedes historical prose
+that mode `off` refused manual entry: supported manual generation, storage,
+trigger and consume remain available; automatic behavior remains separately
+gated. #2599's archival acceptance preserves full either-session post-exit/reap
+retracing: the old Phase 5 'optional convenience' shorthand is not a waiver.
+Full mirrored traces remain open unless the existing journal owner reviews
+and proves the originally allowed authoritative archival equivalent. Current
+native SAME-owner context-only rollover is distinct from the custom successor
+process mechanism in the historical Request; it does not create fake lineage.
+
+### Already-reviewed source/design credit retained from #4181
+
+The following checked source/design decisions remain credited at their finite
+scope. They do not check any provider/native/rollout acceptance or authorize
+restoring obsolete payload process management.
+
+- [x] Preserve the original intent that semantic continuity/task orchestration lives
+  above generic worktree/session-launch primitives. Context-handoff owns continuity
+  policy, full baton storage/recovery, save/consume and pickup signalling through
+  existing task/file owners; plain worktree creation must not grow a rival
+  continuity/task policy.
+- [x] Apply the accepted countermand in merged #2175: context-handoff is process-manager
+  agnostic and trigger_handoff is signal-only. Do NOT restore mux manipulation, direct
+  successor spawn or physical predecessor kill inside the payload plugin merely to
+  implement the old literal wording.
+- [x] Keep actual process/pane launch, candidate/serving identity verification and
+  authorized physical retirement with the admitted execution-host/provider and its
+  existing lifecycle primitives. A host adapter implemented in the Worktrees/Bridge
+  package acts in that provider role; it does not make the generic ground ledger a
+  separate orchestration owner.
+- [x] Keep canonical worktree/head/lineage and ownership facts with their ground owner,
+  and task claims/consume state with their existing task/storage owners. Compose genuine
+  successor consumption, acknowledged ownership and independent predecessor proof; a
+  signal, process start, queued task or prompt receipt does not grant retirement or
+  complete the parent objective.
+- [x] Preserve native same-owner context-only checkpoint/new-context continuity as
+  distinct from a custom new-owner/process handoff. Save-only/manual/off/auto policy,
+  recovery locator availability and current #912/#3000/journal/provider custody remain
+  unchanged; no legacy force or claim-expiry behavior is revived.
+
+### Complete retained overhaul acceptance from #2594
+
+<!-- backlog-reconciliation:7556:transfer:2594:to:efforts/active/context-handoff-overhaul/README.md -->
+
+This direct ROOT Plan/Validation/Coordination supplement preserves the ENTIRE existing
+Active effort, completed implementation/design credit, current Journal and SAME
+continuity/provider/ground/native/source custodians. It carries EVERY accepted source
+block from910,1632,1645,1663,1584,2155,2597,2599,2583,2660,3331,3973,4181 and all
+original goals. No source text is replaced by a historical issue link. Existing912
+chained-cutover reservation is expressly UNRELEASED; no claim, resource, native gate or
+owner is discharged. Verify continuing root and current open bounded source coordination
+before2594 becomes historical; if any clause/custody cannot survive, retain it.
+
+#### Original programme, policy and already-reviewed boundary
+
+- [ ] Preserve original configurable pressure escalation, full goal/open-item continuity
+  and perpetuating fresh/successor mandate, host-agnostic running-successor OR
+  actionable manual recovery, caller worktree-scoped continuity, visible manual
+  instructions, auditable chain and one-legitimate-successor recovery. Credit
+  closed2595/2596 source deliveries without reopening their finite acceptance or marking
+  the parent/native validation Done.
+- [ ] Keep native SAME-owner revision-bound checkpoint/terminal context rollover
+  distinct from custom new-owner/process cutover. Preserve current supported native
+  selection and explicit unavailable/unknown/config evidence; native context
+  continuation must not manufacture a new-owner seed, spawned-session stages or
+  predecessor retirement. Unknown metadata is not proof native support is unavailable.
+- [ ] Honor effective off/manual-only/auto, supported manual entry availability,
+  repo/user precedence and configurable percentages OR absolute tokens. Save-only
+  storage and lineage recording never arm automatic pickup. A current feature/capability
+  flag or human diagnostic force is not a general agent permission to
+  consume/spawn/retire.
+- [ ] Carry all owned watches/polls/schedules/writers, PRs/claims/leases and peer
+  coordination. Quiesce/capture through existing execution owners before ordinary
+  transfer, name deliberate successor-side rearming; bounded emergency capture records
+  unknown/uncaptured obligations rather than an empty inventory and must not silently
+  race predecessor work against successor. Preserve the original effort/user completion
+  gate across every hop.
+
+Already-reviewed SOURCE/DESIGN boundary retained from4181/2175: context-handoff owns
+continuity policy, full storage/recovery/save/consume/pickup signalling above generic
+ground primitives; trigger is PROCESS-MANAGER AGNOSTIC AND SIGNAL-ONLY. The admitted
+execution host/provider owns actual process/pane launch, current identity verification
+and authorized physical retirement. Ground owns canonical worktree/head/lineage facts
+and existing task/storage owners own claims/consume. Do NOT restore payload mux
+manipulation/direct successor spawn/kill or create rival ground continuity policy. These
+checked decisions are credited, not new unfinished work or a new mandatory native
+test/rollout gate; only the original remaining provider/storage/lineage obligations
+continue below.
+
+#### Record-first locator and independent file recovery
+
+- [ ] Retain durable predecessor-attributed recoverable TASK and FILE locators.
+  Explicitly settle save-only recovery with a safe local pointer OR an owner-reviewed
+  authoritative equivalent without creating launch eligibility; manual-only may record
+  lineage but cannot spawn/retire. Keep unknown note/record failures distinct from
+  confirmed notes and preserve offline locator recovery; current-head/target arbitration
+  stays with3000's actual owner.
+- [ ] With coordinator unavailable and Worktrees absent from PATH, save the COMPLETE
+  prompt using the exact attributable available session/payload-owned command/runtime.
+  Hostile same-named PATH tools cannot intercept; missing/foreign/replaced/unverified
+  provenance refuses explicitly, not by marketplace scan, install guessing or another
+  catalog. Reuse1096/current command-resolution authority, no second resolver.
+- [ ] Qualify actual FILE fallback Windows arguments/Unicode/environment isolation and
+  supported POSIX storage, not only mocked logical calls. Optional coordinator failure
+  cannot block independent file storage. Distinguish resolver failure from actual file
+  absence.
+- [ ] On TOTAL storage failure preserve the full composed prompt in an explicitly
+  reported safe artifact/equivalent with a real exact owned recovery invocation; never
+  claim storage or invent a token when nothing was written. Preserve prior valid baton,
+  one-time consume/replay, worktree/session binding, deployment/skew/mode policy and
+  retry diagnostics without logging full private continuation/secrets.
+
+#### Non-mux terminal and specifically selected Herdr realization
+
+- [ ] Persist/verify the baton BEFORE any successor launch. Non-mux predecessor proof
+  includes process creation identity plus expected executable/command and owning
+  terminal/provider identity where available; PID alone, stale foreground CWD or reused
+  pane/session cannot choose another predecessor.
+- [ ] Launch through an admitted platform-owned terminal/presentation API with prompt
+  file/equivalent lossless transport, not shell interpolation or a required existing
+  mux. Require exact baton consumption AND acknowledged worktree/session ownership
+  before independently verified predecessor retirement; reject self-retirement,
+  PID/birth/terminal/session reuse and ambiguity.
+- [ ] Retry/cancel stays idempotent and recoverable: failed launch, uncertain receipt or
+  unconsumed baton preserves predecessor/manual recovery and cannot create uncontrolled
+  overlapping successors. Preserve existing mux and explicitly selected headless
+  behavior; detached headless/AHP-with-mux5898 is not proof of the distinct non-mux
+  terminal contract.
+- [ ] Herdr specifically retains a genuine local predecessor pane/session/provider
+  identity and durable one-time ordinary-checkout baton WITHOUT Worktrees
+  registration/state-directory dependency. Preserve exact locator, consume owner and
+  meaningful storage/lookup/replay failure.
+- [ ] Invoke ONLY the explicitly selected installed Herdr adapter once through the
+  seeded task-file contract and actual launch permission. Never guess via PATH, choose
+  provider by version alone, race direct/marketplace tool registrations or route to an
+  incompatible mux-only consumer without an explicit capability outcome.
+- [ ] Herdr launch/cancel/uncertainty keeps predecessor alive; later retirement requires
+  successful exact successor consume/ownership through its identity-checked
+  checkpoint/retry lifecycle. Preserve actual successor and reject
+  self/stale-incarnation retirement. Keep non-Herdr/mux/manual paths, existing
+  installation/continuity/host ownership and no duplicate provider registration.
+- [ ] Preserve original actual Windows/POSIX/non-mux and Herdr
+  ordinary-checkout/no-Worktrees/stale-CWD/single-launch/repeated-consume/failure/identity-reuse/checkpointed-retirement
+  scenarios. Mocked adapters, source publication and native/real-pane/installed rollout
+  remain distinct; unavailable combinations stay explicit.
+
+#### Default-off coordinator fallback without a new host authority
+
+- [ ] Reconcile only exact eligible stale proposed/queued handoff machine/worktree after
+  configured grace; revalidate current task claim/status/head and just-in-time normal
+  pickup at the mutation/admission boundary. At-most-once attempt insertion is not
+  task/head ownership.
+- [ ] Keep fallback DEFAULT-OFF/operator-configurable and respect EACH origin's
+  save-only/manual-only/auto policy. Use one bounded existing governed coordinator
+  cycle, stable short seed and at-most-once automatic attempt with visible
+  failure/unavailable/manual outcome, not permanent per-handoff watchdogs or retries
+  into overlaps.
+- [ ] Ask the associated admitted Bridge/host to replace under its CURRENT
+  lifecycle/target/resource/process-incarnation contract; historical2808 reclaim
+  plumbing is not universal permission or a demand to restore obsolete unsafe behavior.
+  Preserve912's UNRELEASED reservation,1920/1921/1922/3000 and all existing owner
+  fences.
+- [ ] Cover
+  claim-after-enumeration/concurrent-cycle/live-head/stale-target/unbound-or-missing-worktree/unavailable-host
+  cases. Keep exact baton/predecessor/manual seed under uncertain
+  admission/launch/consume; actual consume and authoritative ownership precede any
+  authorized physical retirement. Never self-consume, self-retire or expire a held claim
+  by age.
+- [ ] Preserve supported headed/headless/Windows/POSIX actual ownership qualification
+  separately from seed/thread/idempotency fixtures, source/release inclusion, activation
+  and native consumption. At-most-once/start/receipt is not semantic pickup, accepted
+  responsibility or parent completion.
+
+#### Journal lineage and independent archival retraceability
+
+- [ ] Verify all THIRTEEN actual mux/CLI stages: worktree creation; mux assignment;
+  invocation versus attempt; session-start binding; status report; trigger; admitted
+  host acknowledgement; successor spawn START and success/failure; successor session
+  binding; authoritative head claim; pickup/predecessor-closing; bound session end;
+  complete only after exact predecessor gone plus successor head.
+  Gated/already-claimed/failure states do not masquerade as successful stages; no
+  fabricated events.
+- [ ] Preserve project/worktree/token/launch-attempt/session/source/time and
+  predecessor/successor linkage with explicit NULL/unknown where meaningful, especially
+  before a session exists. Retries/concurrent attempts remain separate; consume
+  delivery, head acknowledgement, process existence and transport success are distinct
+  facts.
+- [ ] Preserve post-exit/post-reap retraceability from BOTH predecessor and successor.
+  Deferred mirrored per-session FULL trace writes remain open UNLESS the existing
+  journal owner reviews an authoritative archival equivalent and PROVES independent
+  required retraceability; request-link stamps or a per-worktree renderer alone are not
+  blanket equivalence.
+- [ ] Retain actual human/JSON handoff-trace, neutral-CWD/project resolution, explicit
+  token OR documented deterministic most-recent attempt, visible gaps and safe
+  error/retention semantics. Missing records mean NOT OBSERVED, not never occurred; keep
+  secrets/full continuation out of diagnostics.
+- [ ] Retain journal health.find_orphaned_handoffs stage/owner/attempt integration and
+  exact diagnosis/recovery classifications, not automatic remediation authority.
+  Preserve actual native WINDOWS concurrent append/locking and supported launch/archive
+  qualification; POSIX stand-ins, OS branches and schema tables do not prove
+  Windows/native behavior.
+- [ ] Keep journal MUX/CLI scope explicit. Its excluded independent Bridge
+  runner/cross-runner atomic-claim follow-up remains separate, not automatically
+  thirteen-stage compliant. Native same-owner unchanged-process rollover creates no fake
+  terminal successor lineage. Re-read BOTH actual journal and overhaul Plan/Validation
+  before claiming closure; no duplicate trace/lifecycle owner or effort Done from a
+  wrapper move.
+
+#### Delegation versus continuity and exact source identity
+
+- [ ] Preserve2583 author's retraction: independent cross-repo delegated workers are NOT
+  same-worker in-place successors and need not retire the caller. Reject incompatible
+  handoff/delegation before effects where the owning API can prove it OR return
+  actionable classification/warning; an unrelated launch/prompt receipt is not
+  acknowledged continuity or retirement permission.
+- [ ] Preserve exact task/worktree/source affinity and predecessor/candidate/consumer
+  identity with truthful queued/claimed/delivered state; storage, lineage note, arming,
+  spawn, prompt receipt, consume and head transfer stay distinct. Audit workspace/source
+  metadata against ACTUAL execution, not modified-file paths alone or legitimate later
+  related-repo/CWD work; preserve valid evidence instead of inventing a routing cause.
+- [ ] Keep2551's separate real foreign-process/WIP-commit report and its
+  workspaces/provenance/current driver/provider custody untouched.2583 retraction closes
+  none of it. Preserve912/3000/journal/host authority: contradictory/unknown ownership
+  keeps recovery and refuses convenient destructive retirement.
+- [ ] Cover intentional independent delegation, same-worktree continuation, target
+  mismatch/stale partial metadata, declined/failed launch and consumed/claimed
+  continuity with lossless source/context reporting; source fixtures do not replace
+  separately authorized real-host/native qualification.
+
+#### Consume/save metadata cost without weakened identity
+
+- [ ] Attribute the actual consume/save/state-dir call graph BEFORE coordinator work:
+  owner-ref, repo-remote lane, exact worktree/session binding and sibling-call counts
+  separately from full claim/start/submit/payload round trips. Eliminate avoidable
+  repeats through existing owner-provided metadata or bounded PER-INVOCATION reuse, not
+  a second resolver or stale cross-context cache.
+- [ ] Preserve explicit selectors, CWD/session/worktree/logical execution-space/install
+  provenance and non-PR get-key PR-graft exclusion3277. Any real PR/plugin-activation
+  cache keeps its current invalidation/foreign-repo owner; generic TTL/startup
+  optimization or historical individual-get timing is not proof of this consumer.
+- [ ] Verify real consume AND save completion and bounded sibling calls under
+  representative cold/warm/concurrent load with ORIGINAL approved deadlines/workload.
+  Preserve exact claim/replay/lane authority; timeout/unavailable/lost claim remains
+  explicit, not repeated compatibility shell probes after timeout, spent-baton replay or
+  liveness-as-consumption. Optional coordinator failure stays separate from independent
+  file save/full-prompt/locator recovery and all prior policy/provider gates.
+
+#### Same-turn exact seed communication and host/config hardening
+
+- [ ] On custom task/file/process-transfer save/offer, trigger or declined-offer report,
+  relay the exact VALID STORED seed plus concise usage in the SAME TURN across
+  off/manual-only/auto and successful/already-claimed/failed/unavailable-host outcomes.
+  Preserve literal locator/recovery identity, not the full brief, with actual supported
+  intended-successor pickup/payload-local recovery, no invented command or claimed
+  automatic loading.
+- [ ] Declined offers stay NONCOMMITTAL: valid existing seed without arming, quiescing,
+  sync/commit or current-owner changes. If no durable baton exists, say so; never
+  manufacture an unusable token or perform unauthorized storage to print one. If another
+  real consumer holds it, report claimant/status and safe coordination rather than
+  inviting replay or treating displayed seed as ownership.
+- [ ] Apply this communication contract consistently to save/trigger
+  outputs/descriptions, offers/declines and extension-free surfaces. Keep native
+  owner-bound checkpoint/terminal new-context flow distinct: no new-owner
+  seed/task/physical-successor lineage by word association. Actual caller/model-facing
+  response branches must be qualified; generated source/receipt is not proof of
+  delivered response.
+- [ ] Resolve attributable effective config/source for payload, actual host/plugin
+  instance and manual entrypoints BEFORE dependent decisions, with nonblocking readiness
+  and explicit invalid/unavailable state. Distinguish genuine drift from valid repo/user
+  overrides/skew; no temporary default silently overrides real off/auto/threshold, no
+  new resolver or secret-bearing dump, and file existence/loader/ready count is not
+  consumed-policy proof.
+- [ ] Define duplicate-load scope as ONE native session/extension incarnation:
+  concurrent startup/duplicate copies/reconnect cannot double-register tools/listeners
+  or trigger pressure/cutover. Independent concurrent sessions remain independent; no
+  machine-global lock blocking them. Async initialization/cancel/restart/version changes
+  preserve ownership/idempotency and explicit refusal/recovery without seizing foreign
+  instances or duplicate successor effects.
+- [ ] Replace ambiguous experimental wording with actual supported
+  host/capability/version/config policy; unknown/unavailable remains honest without
+  enabling flags or inventing authority. Preserve current native/custom separation,
+  supported manual entry, all mode/save-only/parent gates. Qualify
+  drift/no-drift/overrides/same-session duplicate/independent
+  concurrent/reconnect/skew/supported capability through existing contained and
+  separately authorized native/model-facing lanes, not source/readiness alone.
+
+#### Root validation, continuing ownership and completion gate
+
+- [ ] Preserve the ENTIRE current ROOT Validation and every focused case above at its
+  ORIGINAL evidence tier, including actual background-flow successor continuity, safe
+  owned-work transfer, correct mode/threshold decisions, host/manual fallback,
+  multi-hop/archive lineage and real host/platform identity. Preserve delivered native
+  pane/checked design credit separately from remaining full consume/owner/proof; no new
+  unrelated all-host/all-parent test or ACK ceremony is added.
+- [ ] Keep configuration/UX (source #2598), #5683/#5684/current-head/journal/provider
+  bounded source coordination and every actual claimant/hold with the SAME owners,
+  through this root and eligible open bounded-source issues after complete intake.
+  Normal reviewed document intake must
+  reconcile current coordination/operative pointers to this live ROOT
+  Plan/Validation/Journal, never a closed2594 claim token. In particular912's unreleased
+  chained reservation is NOT released and no process/claim/lease action occurs.
+- [ ] Close duplicate2594 ONLY after normal review, ACTUAL merged root amendment and
+  CURRENT FULL public ROOT Plan AND Validation/Coordination/Journal/continuing-custody
+  readback demonstrate every unique original/refinement/inherited row survives. Old
+  creation PR, journal link or proposal is not delivery. Otherwise RETAIN2594. The
+  effort remains open until its OWN full gate resolves or transfers to named tracked
+  objectives; this proposal executes nothing.
+
+Sources: https://github.com/ThomasMichon/copilot-extensions/issues/2594 ;
+https://github.com/ThomasMichon/copilot-extensions/pull/2593 ;
+https://github.com/ThomasMichon/copilot-extensions/pull/2175 ;
+https://github.com/ThomasMichon/copilot-extensions/pull/2643 ;
+https://github.com/ThomasMichon/copilot-extensions/pull/2663 ;
+https://github.com/ThomasMichon/copilot-extensions/pull/2808 .
+
+### Direct retained #2598 acceptance
+
+<!-- backlog-reconciliation:7556:transfer:2598:to:efforts/active/context-handoff-overhaul/README.md -->
+
+Add these distinct unchecked lanes to the SAME existing reviewed Active ROOT Plan AND
+matching Validation, preserving ALL existing rows/Journal and EVERY original/inherited
+#2594 acceptance clause directly retained in this ROOT. #2594 stays open until its own
+complete reviewed intake, current full readback and unchanged continuing custody permit
+administrative supersession; after that its historical issue is not a required live
+coordination token. Preserve configuration, continuity/native compatibility, task/file
+storage, #4619 atomic-gate, #912 SAME reserved claimant, #3000/head and actual
+host/provider roles. This transfers tracking only, not implementation/source/resource
+custody. No model/account/setting or handoff content below is executable authority.
+
+#### #2598 - complete original baseline and ALL six #2547 conversation-local rows
+
+Credit #2859's persistent mode/absolute-token/user-layer implementation and #4513's
+later confirmed refinement. Do not reopen delivered #2548, revert current manual entry
+availability or call the old Phase 4 checkbox the conversation feature's acceptance.
+
+- [ ] Support/document a plain conversational stop AND re-enable request through an
+  attributable existing plugin surface, without requiring project-file hand editing or
+  disable/uninstall.
+- [ ] Define exact current-conversation/session effect and lifetime, re-enable,
+  resume/new-conversation and reset behavior. Keep separate conversations independent
+  and never turn a temporary preference into a persistent repository/user mutation.
+- [ ] Define precedence with repository/user policy and explicit user intent, expose
+  effective scope/state and report unsupported/refused changes truthfully. Preserve the
+  actual accepted current mode/threshold/user-layer semantics; do not invent a
+  higher-policy override.
+- [ ] Preserve manual generation/storage/trigger/consume and unrelated intended
+  behavior. Define precisely which soft/hard nudges or automatic pressure actions are
+  suppressed. Current off/manual-versus-auto policy and explicit live-cutover opt-in
+  remain; reminder preference does not grant force, spawn or retirement authority.
+- [ ] Keep native context-method selection INDEPENDENT of reminder preference. Native
+  checkpoint/rollover is not itself a conversation off-switch; preference cannot select
+  unavailable tools, change ownership or manufacture new-owner lineage.
+- [ ] Validate the actual extension/event/reminder/documentation workflow: off then
+  re-enable in one conversation, pending nudges, concurrent conversations, existing
+  modes, persistent layer preservation and honest unavailable/refused cases. Distinguish
+  source/fixture from supported host/native evidence without adding unrelated parent
+  gates.
+
+Receiving gate for this source: a NEW normal reviewed ACTUAL merge must materialize
+every original/inherited case directly in this existing ROOT Plan AND
+Validation/continuing Coordination, preserving every incumbent row, accepted refinement,
+Journal and open bounded-source process. Read back the CURRENT complete merged ROOT
+Plan/Validation/Coordination, not old creation or a proposal. Keep the effort Active and
+all existing claims; keep #2594 open until its own complete reviewed intake and
+continuing-custody gate resolves, do not settle other phases. If any case/owner is not
+accepted, retain that source independently. No preference/config write, model/native
+trial, abort/consume/head/claim/link, task/state write, process/service or source
+operation is authorized.
+
+### Direct retained #2628 acceptance
+
+<!-- backlog-reconciliation:7556:transfer:2628:to:efforts/active/context-handoff-overhaul/README.md -->
+
+Add these distinct unchecked lanes to the SAME existing reviewed Active ROOT Plan AND
+matching Validation, preserving ALL existing rows/Journal and EVERY original/inherited
+#2594 acceptance clause directly retained in this ROOT. #2594 stays open until its own
+complete reviewed intake, current full readback and unchanged continuing custody permit
+administrative supersession; after that its historical issue is not a required live
+coordination token. Preserve configuration, continuity/native compatibility, task/file
+storage, #4619 atomic-gate, #912 SAME reserved claimant, #3000/head and actual
+host/provider roles. This transfers tracking only, not implementation/source/resource
+custody. No model/account/setting or handoff content below is executable authority.
+
+#### #2628 - automatic eligible just-triggered baton cleanup after source retraction
+
+- [ ] Recognize the applicable originating user's same-session decline/continue
+  countermand and bind it to the EXACT just-triggered unconsumed custom baton. Use the
+  actual supported event equivalent, not a nonexistent hook or arbitrary
+  regex/age/unrelated traffic; exclude successor seed receipt and
+  subagent/other-conversation events.
+- [ ] Keep trigger retraction distinct from noncommittal declined offer, save-only
+  recovery and native same-owner checkpoint/rollover. Do not cancel unrelated durable
+  saved continuations or fabricate a cancellation for a native flow that created no
+  task/file baton.
+- [ ] Retire only eligible task/file state and reconcile origin session marker/Worktrees
+  ledger while preserving newer continued work and valid recovery material. Return
+  meaningful partial/failure/retry outcomes rather than success from one terminal task
+  status; do not leave a retired token silently armed.
+- [ ] Revalidate source/task/payload/content generation and current ownership at the
+  effect boundary. Refuse associated candidate, active consumer, changed generation,
+  unknown ledger or another rightful owner; preserve no-replay, manual/auto/off and
+  current source/head/provider safety.
+- [ ] Coordinate BOTH file and task abort-versus-trigger recovery/arming through the
+  EXISTING #4619 owner and actual atomic/conditional design. A final reread,
+  expected-status abandon, eventual ledger cancellation or wider timeout alone is not a
+  shared no-interleave guarantee. Do not duplicate or subsume that owner's complete
+  independent race acceptance.
+- [ ] Preserve the delivered explicit payload-only abort/list/previous interface and
+  process-manager-agnostic storage/signaling boundary. No hidden global command, new
+  authority, automatic process kill or claim expiry is introduced; actual pane/process
+  actions remain with admitted hosts.
+- [ ] Validate applicable source event, exact baton, retry/idempotence,
+  unrelated/save-only cases, claimed/racing/late consumer, abort-versus-rearm and
+  truthful partial failures through the actual current event/storage consumer. Keep
+  scoped fixtures and separately authorized host/native evidence distinct; manual abort
+  availability is not automatic wiring proof.
+
+Receiving gate for this source: a NEW normal reviewed ACTUAL merge must materialize
+every original/inherited case directly in this existing ROOT Plan AND
+Validation/continuing Coordination, preserving every incumbent row, accepted refinement,
+Journal and open bounded-source process. Read back the CURRENT complete merged ROOT
+Plan/Validation/Coordination, not old creation or a proposal. Keep the effort Active and
+all existing claims; keep #2594 open until its own complete reviewed intake and
+continuing-custody gate resolves, do not settle other phases. If any case/owner is not
+accepted, retain that source independently. No preference/config write, model/native
+trial, abort/consume/head/claim/link, task/state write, process/service or source
+operation is authorized.
+
 ## Validation Plan
+
+- [ ] Complete every directly retained #2628 Plan/Validation clause above at its original evidence tier, preserving all owners, holds and unfinished acceptance. Administrative consolidation is not implementation.
+
+- [ ] Complete every directly retained #2598 Plan/Validation clause above at its original evidence tier, preserving all owners, holds and unfinished acceptance. Administrative consolidation is not implementation.
+
+- [ ] Complete every directly retained #2594 Plan/Validation clause above at its original evidence tier, preserving all owners, holds and unfinished acceptance. Administrative consolidation is not implementation.
 
 - [ ] Force-tier: a live session artificially pushed past the force threshold
   auto-hands-off without further mutating tool calls landing after the
@@ -577,6 +1030,27 @@ detail; a fuller Proposal will fill in once Phase 0's issue-filing and review
 gate land._
 
 ## Journal
+
+### 2026-10-22 - Direct retained acceptance from #2628
+
+- Preserved the complete #2628 scope in this existing Plan and
+  Validation without claiming implementation or transferring source/resource
+  custody. Normal reviewed merge and current complete readback precede any
+  administrative supersession; the substantive acceptance stays open.
+
+### 2026-10-22 - Direct retained acceptance from #2598
+
+- Preserved the complete #2598 scope in this existing Plan and
+  Validation without claiming implementation or transferring source/resource
+  custody. Normal reviewed merge and current complete readback precede any
+  administrative supersession; the substantive acceptance stays open.
+
+### 2026-10-22 - Direct retained acceptance from #2594
+
+- Preserved the complete #2594 scope in this existing Plan and
+  Validation without claiming implementation or transferring source/resource
+  custody. Normal reviewed merge and current complete readback precede any
+  administrative supersession; the substantive acceptance stays open.
 
 ### 2026-09-29 — CLI-parity slice (Phase 7 successor-side fallback item)
 - Closed the long-open Phase 7 bullet "harden the successor-side fallback so
