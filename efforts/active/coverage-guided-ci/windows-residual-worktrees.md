@@ -87,7 +87,47 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Admitted fixture-semantic batches
 
+### B-RECONCILE stage complete native fixture support without replacing overrides
+
+Baseline: the actual #7776 merge. Both installation-context fixture
+staging paths now share `_stage_installation_context`, which copies each
+missing immediate Python/PowerShell sibling independently. Existing
+fixture-owned files remain untouched even when another support file is
+missing. Current Dev already copied all PowerShell siblings on first
+staging, but gated the whole copy on one entrypoint's presence; this
+extraction repairs incomplete staging without replacing current overrides.
+
+The helper, complete `env` fixture and new regression match pinned
+preserved source. All original test functions, decorators and assertions
+are unchanged. The regression verifies byte equality for every native
+sibling, modifies the portable entrypoint, removes the guest helper,
+then proves restaging repairs the missing helper while preserving the
+override. Existing native context stamp/selection consumers still run.
+
+Complete native Windows reconcile module: 164 passed, one existing
+POSIX execute-bit skip, 65.59 seconds pytest / 83.12 preparation-cleanup
+inclusive. No new skip or exclusion. Exactly two work-stealing workers
+retained the original 30-second item watchdog, 240-second diagnostic
+group and every native/process/memory/mark bound. Ruff and thirteen
+install contracts passed. Functional integration only, not quiet-host,
+whole-suite or repeated same-head qualification.
+
+This below-altitude fixture correction changes no production, command,
+configuration, installation or architecture contract. Documentation
+impact is this ledger. Clean-room production provisioning and live
+external-venue lanes are inapplicable; the regression itself exercises
+fresh fixture staging and incomplete-fixture repair. Other residuals
+and parent qualification/settlement remain open.
+
 ### B-GENERATION align the raced foreign-record fence with generation three
+
+Actual disposition: #7776 merged as
+`531cd24a184c94f99f1067096f9536a1d93be6eb`; fresh full Copilot
+review `5609547858` approved exact head
+`7c75cfe5beda914439fd0755b4d2dd71c9378e82`.
+All overview/inline/general channels and threads were clear;
+every required check and live authority passed before merge.
+The child is finalized.
 
 Baseline: the actual #7771 merge. The session register/deregister
 raced-foreign-record regression now documents generation three and

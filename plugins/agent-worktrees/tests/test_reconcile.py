@@ -21,14 +21,20 @@ REPO = Path(__file__).resolve().parents[3]
 INSTALLATION_CONTEXT = (
     REPO / "libs" / "installation-context" / "installation_context.py"
 )
-INSTALLATION_CONTEXT_PS1 = (
-    REPO / "libs" / "installation-context" / "installation-context.ps1"
-)
 
 
 # ---------------------------------------------------------------------------
 # Fixtures / helpers
 # ---------------------------------------------------------------------------
+
+def _stage_installation_context(destination: Path) -> None:
+    destination.mkdir(parents=True, exist_ok=True)
+    for pattern in ("*.py", "*.ps1"):
+        for source in INSTALLATION_CONTEXT.parent.glob(pattern):
+            target = destination / source.name
+            if not target.is_file():
+                shutil.copyfile(source, target)
+
 
 @pytest.mark.parametrize("pointer_exists", [False, True])
 @pytest.mark.parametrize(
@@ -222,20 +228,12 @@ def env(tmp_path: Path, monkeypatch):
         if installer:
             (pdir / "scripts" / installer).write_text("#!/bin/sh\n", encoding="utf-8")
         if name in {"agent-machines", "agent-index", "agent-worktrees"}:
-            helper_py = (
+            helpers = (
                 pdir
                 / "scripts"
                 / "installation-context"
-                / "installation_context.py"
             )
-            helper_py.parent.mkdir(parents=True, exist_ok=True)
-            if not helper_py.is_file():
-                for source in INSTALLATION_CONTEXT.parent.glob("*.py"):
-                    shutil.copyfile(source, helper_py.parent / source.name)
-            helper_ps1 = helper_py.with_name("installation-context.ps1")
-            if not helper_ps1.is_file():
-                for source in INSTALLATION_CONTEXT_PS1.parent.glob("*.ps1"):
-                    shutil.copyfile(source, helper_py.parent / source.name)
+            _stage_installation_context(helpers)
         return pdir
 
     def deploy_runtime(name: str, version: str):
@@ -271,14 +269,8 @@ def env(tmp_path: Path, monkeypatch):
             / "installation-context"
             / "installation_context.py"
         )
-        helper.parent.mkdir(parents=True, exist_ok=True)
-        if not helper.is_file():
-            for source in INSTALLATION_CONTEXT.parent.glob("*.py"):
-                shutil.copyfile(source, helper.parent / source.name)
+        _stage_installation_context(helper.parent)
         helper_ps1 = helper.with_name("installation-context.ps1")
-        if not helper_ps1.is_file():
-            for source in INSTALLATION_CONTEXT_PS1.parent.glob("*.ps1"):
-                shutil.copyfile(source, helper.parent / source.name)
         durable = e.home / ".copilot-extensions"
         namespace_generation = 0
         if marketplace_key == MKT:
@@ -393,6 +385,27 @@ def env(tmp_path: Path, monkeypatch):
     yield e
     for cell_home in e.cell_homes:
         shutil.rmtree(cell_home, ignore_errors=True)
+
+
+def test_payload_fixture_retains_all_native_installation_context_support(env):
+    payload = env.install_payload("agent-worktrees", "2.0.0", scope="universal")
+    helpers = payload / "scripts" / "installation-context"
+    sources = [
+        source
+        for pattern in ("*.py", "*.ps1")
+        for source in INSTALLATION_CONTEXT.parent.glob(pattern)
+    ]
+    for source in sources:
+        assert (helpers / source.name).read_bytes() == source.read_bytes()
+    portable = helpers / "installation_context.py"
+    overridden = portable.read_bytes() + b"\n# fixture-owned override\n"
+    portable.write_bytes(overridden)
+    (helpers / "guest-environment.ps1").unlink()
+    _stage_installation_context(helpers)
+    assert portable.read_bytes() == overridden
+    assert (helpers / "guest-environment.ps1").read_bytes() == (
+        INSTALLATION_CONTEXT.parent / "guest-environment.ps1"
+    ).read_bytes()
 
 
 def _services(plan: dict, phase: str | None = None) -> set[str]:
