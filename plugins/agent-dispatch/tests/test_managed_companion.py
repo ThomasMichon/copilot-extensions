@@ -1339,6 +1339,7 @@ def test_selected_state_recovery_validate_is_bounded(harness):
     assert h.daemon._poll_managed_recovery_validate(h.rid, previous, monotonic() + 1) is True
 
 
+@pytest.mark.timeout(120)
 def test_real_managed_companion_readiness_rollback_and_stop(tmp_path, monkeypatch):
     plugin = _project(tmp_path)
     script = plugin / "service.py"

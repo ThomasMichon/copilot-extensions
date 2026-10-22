@@ -20,6 +20,20 @@ SCRIPTS = PLUGIN / "scripts"
 PACKAGE = "1.2.3-dev4"
 HEADLESS = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 
+
+def run_publication_bash(argv: list[str], tmp_path: Path) -> subprocess.CompletedProcess:
+    from agent_dispatch.procutil import run_background_capture
+
+    # Git Bash pays native process-start cost for each stat/hash probe.
+    timeout = 40 if os.name == "nt" else 20
+    result = run_background_capture(
+        argv, env=environment(tmp_path), cwd=tmp_path, timeout=timeout,
+        max_output=65536,
+    )
+    assert result is not None, f"publication fixture exceeded {timeout}s or could not start"
+    return result
+
+
 def function(ext: str, name: str) -> str:
     lines = (SCRIPTS / f"install.{ext}").read_text(encoding="utf-8").splitlines(keepends=True)
     declaration = (
@@ -340,6 +354,8 @@ def activate(env: dict[str, str], root: Path, version: str) -> None:
 
 
 def run(ext: str, entry: Path, args: list[str], env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+    from agent_dispatch.procutil import run_background_capture
+
     executable = (
         (shutil.which("pwsh") or shutil.which("powershell"))
         if ext == "ps1" else shutil.which("bash")
@@ -354,10 +370,11 @@ def run(ext: str, entry: Path, args: list[str], env: dict[str, str]) -> subproce
         f"py={shutil.which('py', path=env.get('PATH'))}",
         file=sys.stderr, flush=True,
     )
-    result = subprocess.run(
-        [executable, *prefix, str(entry), *args], env=env,
-        capture_output=True, text=True, timeout=90, creationflags=HEADLESS,
+    result = run_background_capture(
+        [executable, *prefix, str(entry), *args], env=env, timeout=90,
+        max_output=65536,
     )
+    assert result is not None, "publication fixture exceeded 90s or could not start"
     print(
         f"publication fixture: end code={result.returncode}, elapsed={time.monotonic() - started:.3f}s\n"
         + result.stderr,

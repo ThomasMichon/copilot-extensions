@@ -2302,6 +2302,8 @@ def test_do_spawn_forwards_retained_facts_to_ordinary_bridge(monkeypatch):
     )
     task = {
         "id": "t1",
+        "spawn_reservation_key": "reservation",
+        "_spawn_client": types.SimpleNamespace(get_reservation=lambda key: {"key": key}),
         "spawn_worktree": "wt-1",
         "spawn_worktree_ownership": "reused",
         "spawn_conversation_retired": False,
@@ -2330,6 +2332,8 @@ def test_do_spawn_conveys_retirement_to_ordinary_bridge(monkeypatch):
     )
     task = {
         "id": "t1",
+        "spawn_reservation_key": "reservation",
+        "_spawn_client": types.SimpleNamespace(get_reservation=lambda key: {"key": key}),
         "spawn_worktree": "wt-1",
         "spawn_worktree_ownership": "reused",
         "spawn_conversation_retired": True,

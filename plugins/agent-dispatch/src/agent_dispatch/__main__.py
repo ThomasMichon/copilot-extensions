@@ -18,6 +18,12 @@ import time
 from pathlib import Path as Path  # noqa: F401 -- compatibility export for tests
 from typing import Any
 
+from .delegated_waiter_contract import CALLBACK_COMMAND
+
+if __name__ == "__main__" and sys.argv[1:2] == [CALLBACK_COMMAND]:
+    from .delegated_waiter_callback import main as callback_main
+    raise SystemExit(callback_main(sys.argv[2:]))
+
 import httpx
 
 from . import __version__

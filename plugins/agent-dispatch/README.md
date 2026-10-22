@@ -2185,6 +2185,15 @@ agent-dispatch run --resume <machine/worktree> --task <id> -- agent-worktrees pr
 agent-dispatch run --detach --resume <machine/worktree> --task <id> -- agent-worktrees pr-watch 42
 ```
 
+For a terminal PR wait, explicit `--pr-watch-repo <owner/repo>
+--pr-watch-number <number>` opts into negotiated, optional delegation to
+`agent-pull-requests`' acknowledged shared watch owner. Keep the real command
+after `--`: it remains the process fallback when either owner's capability or
+the caller's reproducible credential context is unavailable. No optional plugin
+is installed or auto-started just to enable this optimization. See
+[`Delegated PR waits`](docs/delegated-pr-waits.md) for transition syntax, safe
+fallback decisions, generation-fenced at-least-once completion, and recovery.
+
 Everything after `--` is the blocking wait command (its own flags are never parsed
 as `run` options). With `--detach` the wait is re-exec'd as a fully detached,
 cheap OS-level waiter (no agent, no tokens); the expensive worker session is spun

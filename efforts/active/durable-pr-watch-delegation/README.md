@@ -144,7 +144,7 @@ _Agent-recommended design and validation, explicitly selected for review._
 - [x] Adopt canonical graceful-cutover primitives with installer-driven activation, passive health, exact-instance promotion and retirement, and crash-consistent marker/manifest/route recovery (source landed in #7160).
 - [x] Define and enforce one installation-scoped watch-state writer across predecessor drain and successor subscription/delivery adoption; preserve event and registration identities without overlapping live-generation delivery (source landed in #7160).
 - [x] Prove rollback, commit-forward, governance refusal, crash recovery, callback drain, and refusal of lease-only owners without verifiable same-cell ownership on Windows and Linux before landing the cutover prerequisite (exact-head native acceptance `39226209682`).
-- [ ] Land and deploy the governed lifecycle prerequisite as part of PR-owner adoption before enabling installation-cell dispatch delegation. Source landed in #7160; release and authorized deployment remain pending.
+- [ ] Land and deploy the governed lifecycle prerequisite as part of PR-owner adoption before enabling installation-cell dispatch delegation. Source landed in #7160 and is released in #7291; complete installed-contract acceptance remains pending.
 
 ### Installation-cell prerequisite
 
@@ -154,7 +154,7 @@ _Agent-recommended prerequisite, explicitly selected by the operator._
 - [x] Adopt the canonical installation-context payload, installer/runtime-resolution and state-root contract in `agent-pull-requests`, preserving supported legacy installs without silent cell-to-legacy fallback (source landed in #7160).
 - [x] Include the PR owner in the generated same-cell peer-launch contract and declare release impact for every generated consumer (source landed in #7160).
 - [x] Prove first installation, upgrade, invalid/foreign receipt refusal, state isolation, actual two-cell PR-owner invocation, and pending watch-subscription recovery using the shipped payload rather than a fabricated sibling contract (exact-head native acceptance `39226209682`).
-- [ ] Land and deploy the adoption prerequisite before enabling installation-cell dispatch delegation. Source landed in #7160; keep the saved dispatch integration resumable and inactive until release and authorized deployment clear.
+- [ ] Land and deploy the adoption prerequisite before enabling installation-cell dispatch delegation. Source landed in #7160 and is released in #7291; keep dispatch delegation inactive until complete installed-contract acceptance clears.
 
 ### Phase 1 - Review the recovery contract
 
@@ -211,7 +211,7 @@ _Operator-required scope; agent-recommended implementation and validation._
 
 ### Phase 4 - Deploy and close _(agent-recommended)_
 
-- [ ] Confirm promotion of the changed source to the release branch by content, then deploy through the unified update surface.
+- [ ] Confirm promotion of the changed source to the release branch by content, then deploy through the unified update surface. Prerequisite promotion and content are confirmed in #7291. An operator-authorized local unified update installs the PR-owner runtime but exits nonzero on independent construction/profile failures. Complete update and isolated installed-contract proof remain pending; the dispatch integration itself has not been published.
 - [ ] Exercise the deployed contract in isolated state without interrupting shared coordinators, watch subscriptions, or peer sessions.
 - [ ] Complete the fleet service acceptance in the linked plan on explicitly
   approved capacity, including persistent registration/delivery and the actual
@@ -255,6 +255,213 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-10-21 - Qualify fenced callbacks and preserve the process alternative
+
+- The reconciled source negotiates both capabilities before preparing a
+  generation. Arbitrary commands, explicit credentials and unprovable client
+  routing remain ordinary process waits. Uncertain subscription setup does not
+  create a second wait owner.
+- Same-cell callbacks retain only a nonsecret installation identity, re-enter
+  the existing canonical peer boundary, validate the current Dispatch receipt,
+  and reconstruct its routing rather than inheriting the PR daemon's client
+  overrides. Foreign or deactivated receipts refuse without acknowledging.
+- Real isolated owner/coordinator tests prove coalescing, TCP outage, owner and
+  coordinator restart, stable persisted event replay, timeout and one durable
+  wake. Both cell selections exercise real callback subprocesses and canonical
+  peer resolution; this does not substitute for installed native-account proof.
+- After a clean managed pull-forward, the selected current-source negotiation,
+  fencing, coordinator, process and owner contracts pass 325 cases with 19
+  explicit skips. The installed-contract guard, fatal Python lint, headless
+  launch guard and contribution-scoped module-size check also pass.
+- With explicit operator approval, repair stale test fixtures for the current
+  reservation/invocation contract and bound their native process trees. Windows
+  publication flows receive focused item budgets for their measured native
+  work; global suite limits and assertions remain intact. The complete default
+  periodic portfolio has not yet passed as a whole.
+- Add a manual, narrowly selected Linux/Windows source-acceptance path to the
+  existing installation-context workflow. Actual hosted execution, review,
+  merge, release and authorized installed proof remain open. No shared service,
+  deployment, Dispatch subscription or fleet route is activated.
+- Preserve all prerequisite journals in this substantive integration. The
+  fleet-consumer agreement, first-class service expansion and final closure
+  remain part of this Active parent rather than being implied complete by
+  local delegation.
+
+### 2026-10-21 - Resume fenced dispatch delegation
+
+- The operator directs this driver to focus solely on PR-Watch delegation;
+  unrelated installation and connectivity repairs have separate owners.
+- Pulled the prerequisite worktree forward while retaining its unpublished
+  journal commits. The installed attributable PR-owner command now reports
+  `0.3.18-dev1`; complete isolated installed-contract acceptance remains open.
+- Preserved the saved delegation branch and reconciled its implementation onto
+  current `dev`. Retained current coordinator capabilities and source-qualified
+  versioning. Reused the already-landed PR-owner peer/state-root contract rather
+  than replaying its obsolete precursor.
+- No live coordinator, subscription, service activation or deployment changed.
+  Current-source tests and the remaining integration/acceptance gates remain open.
+
+### 2026-10-20 - Run the explicitly authorized local unified update
+
+- The operator explicitly directs this session to run the local unified
+  harness update and handle its errors, warnings and blockers. This permits
+  the local canonical update rather than waiting exclusively on delivery to
+  the previously retained updater; it does not authorize a competing updater,
+  immutable-slot rewrite, feed-policy bypass or Dispatch/fleet activation.
+- The single update completes after 777.7 seconds with exit 1. Payload refresh,
+  anchor fast-forward and multiple runtime installations succeed. The
+  PR-owner installer completes at `0.3.17-dev1`, and its real payload-local CLI
+  imports and dispatches `--help` without starting a watcher. This is not the
+  full isolated deployed-contract acceptance.
+- Actual Bridge health now reports `0.9.67-dev1`, ready and not draining.
+  #7058's SSH profile-port correction is therefore live. A subsequent framed
+  read-only request exposes the separately tracked binary-stdin defect:
+  the actual management shim exchanges a valid hello, then corrupts a request
+  frame; the same SSH route and selected runtime return the expected structured
+  refusal under a diagnostic direct-runtime invocation. That invocation is not
+  used to deliver work. Add fresh evidence to the existing #7264 repair,
+  preserving its retained #5694/#7119 consumer gates and source ownership.
+- Index correctly refuses same-version content conflict. Read-only comparison
+  establishes that only two generated helper bytecode files differ between
+  self-stages; their embedded absolute staging paths contaminate whole-payload
+  identity while all source files match. Preserve the completed slot and
+  refusal. Notify the retained canonical-helper owner in #7234 under #5472;
+  no marker, lock, bytecode or installed source is edited as a workaround.
+- Machines initially times out on a construction lease. A concurrent builder
+  subsequently completes the selected `0.2.28-dev1` slot, and the real CLI
+  reports that version. Do not delete the persistent kernel-lock file or
+  infer its owner from its timestamp. Final unified-update convergence is
+  still owed rather than treating later completion as a successful first run.
+- The registered Manager launcher fails dependency resolution and emits no
+  stdout. The Terminal profile refresher calls that same launcher and attempts
+  to parse its empty stdout as JSON; settings corruption is not demonstrated.
+  An approved mirror reports a recent upload date for an old, digest-identical
+  public dependency, conflicting with the retained seven-day filter during
+  universal resolution. Keep the governed feed and age policy intact.
+  Current bootstrap has no platform-local production repair path; the coherent
+  source remedy requires provisioning and checking the selected platform's
+  runtime before publishing its launcher, rather than a binstub rewrite.
+- Three installers visibly fall back to inherited streams because they do not
+  declare the native UTF-8 output contract. MCP and budget installation complete;
+  that compatibility fallback is not an encoding failure or permission to claim
+  unsupported framing. No output contract or error is suppressed.
+- The update remains incomplete. No independent repair PR supersedes another
+  contributor's open work, no shared service is manually restarted, and no
+  policy or installation admission guard is weakened. Preserve the remaining
+  source and governance decisions with the parent still Active.
+
+### 2026-10-20 - Diagnose the retained-owner carrier failure without repair
+
+- The operator requests read-only diagnosis of the carrier handshake failure.
+  Ordinary SSH reachability and a fresh isolated carrier using the configured
+  SSH profile both succeed. The serving daemon's read-only remote resolution
+  still returns HTTP 503 `carrier_unavailable` with `IncompleteReadError`.
+- Observe the actual daemon-created SSH command rather than attributing the
+  error to generic packet corruption. It forces `-p 22`, overriding the
+  profile's tunnel endpoint. Repeating that exact override produces exit 255,
+  zero stdout bytes and a banner-exchange connection refusal; profile-based
+  invocation receives a valid framed carrier hello.
+- The old serving Bridge is `0.9.62-dev1`. Its remote-operation adapter passes
+  topology user/port defaults into `SSHProfileSource`, overriding the
+  configured profile. #7058 already corrects that adapter to use the alias
+  alone. The released `0.9.65-dev1` remote-operation source at #7291 matches
+  the corrected source blob exactly; no competing source fix is needed.
+- Preserve the retained updater and existing session. The remaining boundary
+  is governed rollout of the released correction, not changing SSH profiles,
+  hardcoding a tunnel port, manually restarting the shared daemon or bypassing
+  the attributable command surface. This diagnosis performs no runtime update,
+  service restart, session replacement or delegation activation. The parent
+  remains Active and installed-contract proof is still owed.
+
+### 2026-10-20 - Confirm released adoption and bootstrap content
+
+- The operator reports that promotion is unpaused and a release is available.
+  Read the current trusted Main state rather than retaining the earlier pause
+  as a permanent blocker: `paused` is false and `pause_reason` is null.
+- Promotion #7291 actually merges at
+  `9c7a61518540787498c77a284f640c36bbe7d8e4` at
+  `2026-10-20T00:50:39Z`, publishing qualified Dev
+  `af4ef48d7175d6e2a3aace81bc61017efd45e315`. That Dev snapshot contains
+  the merged #7160 adoption and #7240 bootstrap fixes. The generated candidate
+  `5fc89aa4106820482516279c95c21a6ff9fa08fd` and merged Main have the
+  identical whole-tree identity `bf9c3992c2e55d7472561416d1378788aedf2685`.
+- Confirm the release by content, not original-source ancestry against
+  generated Main. All 233 selected PR-owner, lifecycle, peer-launch,
+  singleton, bootstrap and runner-contract files retain their exact source
+  blobs and modes. All 106 materialized PR-owner library files match their
+  canonical Dev sources; both shipped installer engines match the canonical
+  installer-engine library. Release version for `agent-pull-requests` is
+  `0.3.16-dev1`.
+- The release gate is cleared, not the deployment gate. Preserve the retained
+  unified-updater owner's custody; do not start a parallel updater, replace a
+  shared owner, enable Dispatch delegation or activate fleet routes from a
+  release notification alone. No installation or running-state proof is
+  claimed by this entry.
+- Keep combined land-and-deploy items unchecked pending authorized rollout
+  and isolated deployed-contract proof. Dispatch, fleet-owner agreement,
+  service acceptance and final closure remain open; the parent stays Active.
+- The operator subsequently authorizes rollout through the existing retained
+  unified-updater owner, followed by isolated deployed-contract validation,
+  explicitly excluding a parallel updater, Dispatch activation and fleet
+  activation. Coordination readiness is confirmed, but the bounded request to
+  that owner's exact retained worktree fails with HTTP 503
+  `carrier_unavailable`: `carrier handshake failed: IncompleteReadError`.
+  Delivery is not confirmed. Preserve owner custody and the existing session;
+  do not retry in a loop, restart shared services, substitute an updater or
+  infer installation from release availability. Rollout and installed proof
+  remain blocked on restoring the retained-owner communication path.
+
+### 2026-10-19 - Confirm the intentional release hold after green Dev CI
+
+- Post-fix Dev CI `39253165776` succeeds on exact merged source
+  `de8b5f4b81853c5b03517177d4769ebf9f7ef5ab`, with no failed or
+  unfinished jobs. The bootstrap regression no longer leaves Dev red.
+- The actual completion trigger `39255839947` identifies that source and
+  dispatches promotion run `39255877612`. Although the run concludes
+  successfully, only its admission gate executes; every qualification,
+  publication and merge job skips. This is not a released candidate.
+- The trusted Main gate explicitly reports that automatic validation and
+  promotion are deferred because Main is paused. The unchanged Main
+  `a325f5063e7cc0a2b3276be81be3e4959f8f4651` records operator-approved
+  containment until pre-merge qualification makes it safe to consume under
+  #6237; its last promoted Dev source remains
+  `fc61ab3aa44ac2b235ea540601127ff91129b81c`.
+- Preserve that administrative gate and the retained release/updater ownership.
+  Do not unpause, dispatch a bypass qualification/promotion, install, update or
+  activate delegation merely to complete this effort. No polling loop remains
+  useful while the explicit hold is in force; all owned watches have finished
+  and their results are captured.
+- The current source slice is merged and green, not released or deployed.
+  The parent remains Active, with release/authorized deployment awaiting the
+  retained #6237 gate and all Dispatch/fleet/final-closure obligations intact.
+
+### 2026-10-19 - Merge the proven bootstrap fix forward
+
+- #7240 actually merges at `de8b5f4b81853c5b03517177d4769ebf9f7ef5ab`
+  after exact head `0f8de077ba0c073e4c34ba32a6cd2f482a5a1e5b`
+  receives genuine automated approval `5571272800`, required CI
+  `39248507940` succeeds, and all fifteen selected native jobs pass in
+  `39248519840`. The earlier same-head CI `39248249746` also succeeds;
+  no failed run, hold, required check or review request is ignored.
+- Actual Windows normal-upgrade job `118046294407` executes all 39 selected
+  cases with no skips in 257.63 seconds. Windows PowerShell records two
+  invocations, 300 native observer samples, zero visible windows, zero
+  foreground transitions and four timeout participants exited. PowerShell 7
+  records two invocations, 224 samples and the same zero-window/zero-focus/
+  four-exit result. Both prove native Job membership, empty-Job termination
+  and signaled original process handles, not merely creation flags.
+- Reply with these measurements and resolve the one review thread only after
+  its actual native execution passes. Re-read the full approval body and every
+  thread page before the role-scoped managed merge; the overview's retained
+  open-finding banner does not supersede the resolved, proven thread.
+  No review or CI bypass is used.
+- Re-read the parent after merge. The bounded source regression and required
+  Windows proof are complete; release qualification must now run again on
+  source containing this fix. Combined deployment prerequisites, dispatch
+  integration, fleet-owner agreement, installed proof and final closure remain
+  open. No install, update, rollout, shared-owner replacement or dispatch
+  activation follows from this merge. The effort remains Active.
 
 ### 2026-10-19 - Add the required live Windows launch regression
 
@@ -935,6 +1142,11 @@ callback an implicit credential store.
 - Reconciled its six completed Phase 2 Plan items; the remaining adoption, integration, and deployment items stay open.
 - The real peer-boundary test found missing PR-owner installation-context payload support, so merely adding the peer name cannot satisfy cell-scoped delegation.
 - Operator selected full PR-owner installation-cell adoption before finishing delegation. This amendment adds that reviewed prerequisite without discarding the saved integration.
+### 2026-10-10 - Notification prerequisite merged
+
+- #6019 merged as `a936d3b39` after current-head review with zero open findings and successful required CI. Full contained notification coverage reached 158 passing tests.
+- Fixed the directly blocking dispatch CI job budget under #6052 without skipping tests; the corrected CI completed successfully.
+- Pulled forward onto the merged source. Beginning negotiated dispatch integration; the effort remains active through deployment and closure.
 
 ### 2026-10-09 - Resumed deferred work
 

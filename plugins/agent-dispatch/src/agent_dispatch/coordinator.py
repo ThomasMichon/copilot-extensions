@@ -63,6 +63,7 @@ from .queue import TaskQueue
 from .run_waiter_recovery import (
     DEFAULT_RUN_WAITER_ARM_GRACE_SECONDS,
     recover_run_waiters,
+    maintain_delegated_recovery,
 )
 from .satellites import FleetDirectory
 from .worktree_status_relay import WorktreeStatusRelayStore
@@ -342,6 +343,7 @@ def create_app(
             await _recover_run_waiters_pass()
             await asyncio.sleep(DEFAULT_RUN_WAITER_ARM_GRACE_SECONDS)
             await _recover_run_waiters_pass()
+            await maintain_delegated_recovery(queue, _recover_run_waiters_pass)
 
         async def _recover_run_waiters_after_prepare() -> None:
             while True:

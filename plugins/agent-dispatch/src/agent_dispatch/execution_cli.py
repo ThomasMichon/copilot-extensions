@@ -246,6 +246,22 @@ def _cmd_run(args: argparse.Namespace) -> int:
         message=args.message,
         waiter_generation=args.waiter_generation,
     )
+    delegation = None
+    owner_prefix = None
+    delegation_reason = "not_requested"
+    requested = (getattr(args, "pr_watch_repo", None) or getattr(args, "pr_watch_number", None)
+                 or getattr(args, "pr_watch_until", None))
+    if requested:
+        if not (args.detach and spec.task_id and getattr(args, "pr_watch_repo", None)
+                and getattr(args, "pr_watch_number", None)):
+            print("agent-dispatch: PR delegation requires --detach --task --pr-watch-repo --pr-watch-number", file=sys.stderr)
+            return 2
+        from .delegated_waiter_cli import negotiate
+        try:
+            delegation, owner_prefix, delegation_reason = negotiate(args, spec.command, _core()._client)
+        except ValueError as exc:
+            print(f"agent-dispatch: {exc}", file=sys.stderr)
+            return 2
 
     if args.detach:
         suspended = None
@@ -255,7 +271,8 @@ def _cmd_run(args: argparse.Namespace) -> int:
         if spec.task_id:
             from . import hibernation_claims
 
-            reason = f"hibernating: {' '.join(spec.command)}"
+            reason = (f"hibernating: PR watch {delegation['repo']}#{delegation['number']}"
+                      if delegation else f"hibernating: {' '.join(spec.command)}")
             worker_id = None
             try:
                 with _core()._client(args) as c:
@@ -296,8 +313,22 @@ def _cmd_run(args: argparse.Namespace) -> int:
                         reason=reason,
                         resume_worktree=spec.resume_worktree or "",
                         command=list(spec.command),
+                        **({"kind": "delegated", "delegation": delegation} if delegation else {}),
                     )
             except Exception as exc:  # noqa: BLE001
+                if delegation:
+                    try:
+                        with _core()._client(args) as c:
+                            current = c.delegated_preparation(spec.task_id, delegation["preparation_id"])
+                        if current.get("coordinator_id") == delegation["coordinator_id"]:
+                            prepared = current.get("waiter")
+                    except Exception:  # noqa: BLE001 -- uncertain prepare never spawns another owner
+                        pass
+                    _core()._emit({
+                        "detached": False, "kind": "delegated", "error": "ambiguous_prepare",
+                        "waiter": prepared, "recovery": "awaiting_generation_recovery",
+                    })
+                    return 1
                 rollback = (
                     _rollback_detached_wait(args, spec, suspended)
                     if suspended and "status" in suspended
@@ -336,6 +367,12 @@ def _cmd_run(args: argparse.Namespace) -> int:
                     "error": "could not prepare the detached waiter transactionally",
                 }
             )
+        if delegation:
+            from .delegated_waiter_cli import activate
+            report = activate(args, spec, prepared, owner_prefix, _core()._client)
+            report["suspended"] = suspended
+            _core()._emit(report)
+            return 0 if report["detached"] else 1
         try:
             globals()["_DETACHED_CLI_ARGS"] = args
             handle = _core()._spawn_detached_waiter(spec)
@@ -365,6 +402,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
                 "suspended": suspended,
                 "waiter": waiter,
                 "rollback": rollback,
+                **({"delegation_fallback": delegation_reason} if requested else {}),
                 **handle,
             }
         )

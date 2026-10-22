@@ -79,12 +79,8 @@ def _run_waiter_summary(queue: TaskQueue, task_id: str) -> dict | None:
     waiter = queue.get_active_run_waiter(task_id)
     if waiter is None:
         return None
-    return {
-        "command": waiter["command"],
-        "state": waiter["state"],
-        "created_at": waiter["created_at"],
-        "updated_at": waiter["updated_at"],
-    }
+    from .queue_run_waiter_records import run_waiter_summary
+    return run_waiter_summary(waiter)
 
 
 def _task_with_spawn_dict(queue: TaskQueue, task: Task) -> dict:
@@ -361,13 +357,9 @@ def register_task_routes(
         suspended task is suspended (the exact blocking-wait command) without
         an N+1 per-task query. Trimmed the same way :func:`_run_waiter_summary`
         trims the single-task shape, for one consistent wire shape either way."""
+        from .queue_run_waiter_records import run_waiter_summary
         return {
-            waiter["task_id"]: {
-                "command": waiter["command"],
-                "state": waiter["state"],
-                "created_at": waiter["created_at"],
-                "updated_at": waiter["updated_at"],
-            }
+            waiter["task_id"]: run_waiter_summary(waiter)
             for waiter in queue.list_active_run_waiters()
         }
 

@@ -348,7 +348,7 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
     trigger = workflow.get("on", workflow.get(True))
     assert set(trigger) == {"workflow_dispatch"}
     inputs = trigger["workflow_dispatch"]["inputs"]
-    assert set(inputs) == {"watch_owner"}
+    assert set(inputs) == {"watch_owner", "dispatch_delegation"}
     assert inputs["watch_owner"]["type"] == "boolean"
     assert inputs["watch_owner"]["default"] is False
     routes = {
@@ -359,10 +359,11 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
         "watch-owner-native-linux", "watch-owner-native-windows",
         "watch-owner-macos-refusal",
         "watch-owner-boundaries-linux", "watch-owner-boundaries-windows",
+        "dispatch-delegation-linux", "dispatch-delegation-windows",
     }
     for name, runner in routes.items():
         job = workflow["jobs"][name]
-        assert job["if"] == "${{ !inputs.watch_owner }}"
+        assert job["if"] == "${{ !inputs.watch_owner && !inputs.dispatch_delegation }}"
         assert job["runs-on"] == runner
         assert job["timeout-minutes"] == 4
         matrix = job["strategy"]["matrix"]
@@ -443,6 +444,33 @@ def test_watch_owner_acceptance_is_opt_in_native_and_separately_contained() -> N
     assert "--allow-host-state" not in commands[0]["run"]
     assert "--allow-explicit-tiers --timeout 300 --plugin-timeout 600" in commands[0]["run"]
     assert "-k native_macos_governed_watch_refuses_unprovable_identity" in commands[0]["run"]
+
+
+def test_dispatch_delegation_acceptance_is_bounded_and_independently_selected() -> None:
+    workflow = yaml.safe_load(
+        (HERE.parent / ".github/workflows/installation-context-acceptance.yml").read_text()
+    )
+    trigger = workflow.get("on", workflow.get(True))
+    selector = trigger["workflow_dispatch"]["inputs"]["dispatch_delegation"]
+    assert selector["type"] == "boolean" and selector["default"] is False
+    for name, runner in (
+        ("dispatch-delegation-linux", "ubuntu-latest"),
+        ("dispatch-delegation-windows", "windows-latest"),
+    ):
+        job = workflow["jobs"][name]
+        assert job["if"] == "${{ inputs.dispatch_delegation }}"
+        assert job["runs-on"] == runner and job["timeout-minutes"] == 10
+        assert not job.get("strategy") and not job.get("continue-on-error")
+        commands = [step for step in job["steps"] if "run" in step]
+        assert len(commands) == 1 and not commands[0].get("env")
+        assert commands[0]["run"].split() == [
+            "python", "tools/run-plugin-tests.py", "agent-dispatch",
+            "--test-file", "tests/test_delegated_waiter_cli.py",
+            "--test-file", "tests/test_delegated_waiter_context.py",
+            "--test-file", "tests/test_delegated_waiter_fences.py",
+            "--test-file", "tests/test_delegated_waiter_owner_contract.py",
+            "--max-files-per-sub-suite", "2",
+        ]
 
 
 def test_foundation_lane_leaves_new_native_matrix_to_its_scoped_step() -> None:

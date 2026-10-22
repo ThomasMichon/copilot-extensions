@@ -7,13 +7,17 @@ on:
         description: Run PR-owner native-account and contained owner-boundary acceptance instead
         type: boolean
         default: false
+      dispatch_delegation:
+        description: Run isolated Dispatch PR-watch callback and replay contracts instead
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
 jobs:
   derived-diagnostics-posix:
-    if: ${{ !inputs.watch_owner }}
+    if: ${{ !inputs.watch_owner && !inputs.dispatch_delegation }}
     name: Native POSIX copies (${{ matrix.mode }}, ${{ matrix.pointer }})
     runs-on: ubuntu-latest
     timeout-minutes: 4
@@ -34,7 +38,7 @@ jobs:
           python -m pytest -q --durations=15 libs/payload-invocation/tests/test_derived_diagnostic_cli.py -k "${{ matrix.mode }} and ${{ matrix.pointer }}"
 
   derived-diagnostics-windows:
-    if: ${{ !inputs.watch_owner }}
+    if: ${{ !inputs.watch_owner && !inputs.dispatch_delegation }}
     name: Native Windows copies (${{ matrix.mode }}, ${{ matrix.pointer }})
     runs-on: windows-latest
     timeout-minutes: 4
@@ -152,3 +156,30 @@ jobs:
     timeout-minutes: 35
     strategy: *watch-owner-boundaries-strategy
     steps: *watch-owner-boundaries-steps
+
+  dispatch-delegation-linux:
+    if: ${{ inputs.dispatch_delegation }}
+    name: Isolated Dispatch PR delegation (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps: &dispatch-delegation-steps
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Receipt-bound callbacks, real owner replay and process fallback
+        run: >-
+          python tools/run-plugin-tests.py agent-dispatch
+          --test-file tests/test_delegated_waiter_cli.py
+          --test-file tests/test_delegated_waiter_context.py
+          --test-file tests/test_delegated_waiter_fences.py
+          --test-file tests/test_delegated_waiter_owner_contract.py
+          --max-files-per-sub-suite 2
+
+  dispatch-delegation-windows:
+    if: ${{ inputs.dispatch_delegation }}
+    name: Isolated Dispatch PR delegation (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps: *dispatch-delegation-steps

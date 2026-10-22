@@ -571,20 +571,21 @@ def test_a_read_that_hits_the_limit_says_it_may_be_incomplete():
 
 def test_a_hung_reader_never_keeps_the_process_alive(tmp_path):
     import sys
-    import time
 
     script = (
         "import time\n"
         "from agent_dispatch import attention_sources as s\n"
         "from agent_dispatch.attention_store import FirstObserved\n"
         f"store = FirstObserved(__import__('pathlib').Path(r'{tmp_path}') / 'o.json')\n"
+        "started = time.monotonic()\n"
         "env = s.collect({'hang': lambda r: time.sleep(60)}, timeouts={'hang': 0.3}, selected=None,\n"
         "                config_errors=[], store=store)\n"
         "print(env['sources'][0]['status'])\n"
+        "print(time.monotonic() - started)\n"
     )
-    started = time.monotonic()
     done = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, timeout=30)
-    assert done.stdout.strip() == "failed" and time.monotonic() - started < 15
+    status, elapsed = done.stdout.strip().splitlines()
+    assert done.returncode == 0 and status == "failed" and float(elapsed) < 15
 
 
 def test_cli_next_on_a_degraded_empty_read_is_not_all_clear(monkeypatch, capsys):

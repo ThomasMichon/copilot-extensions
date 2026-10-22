@@ -1,0 +1,9 @@
+{
+  "comment": "Negotiate generation-fenced acknowledged PR-watch delegation with credential-safe process fallback and bounded recovery.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

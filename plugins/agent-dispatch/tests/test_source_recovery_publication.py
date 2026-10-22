@@ -10,6 +10,9 @@ import pytest
 
 from . import source_publication_fixture as fixture
 
+# A Windows case composes several native installer calls, not one 30-second unit.
+pytestmark = pytest.mark.timeout(120) if os.name == "nt" else []
+
 
 def _stage(tmp_path: Path, ext: str):
     if ext == "sh" and os.name == "nt":
