@@ -134,6 +134,8 @@ an interrupted attempt remains unknown, not a fabricated successful release.
 Concurrent stops join the same shutdown completion rather than cancelling
 another shutdown's caller. Cancellation is reserved for establishment or
 reconnect work, and `stop_nowait()` cooperates with an already-running shutdown.
+Shutdown waits for lifecycle ownership to be released, not for the entire caller
+task to finish: that caller can safely join shutdown from its own `finally`.
 For generation-bound consumer cleanup, use `await stop_attempt(attempt_id)`:
 the match and local retirement share that lifecycle boundary. A stale attempt
 returns `None` without stopping a reconnected successor. A matching attempt
@@ -146,6 +148,9 @@ sweep descendants. Cancellation during refusal cleanup latches unknown, and a
 late-spawn process whose termination fails remains referenced so a later explicit
 stop can retry its owned cleanup. Completing that cleanup does not settle an
 unknown remote observation or publication.
+Retirement is confirmed only when the captured process has an observed exit
+code. A helper returning without raising is insufficient; an unconfirmed exit
+keeps the process reference, records unknown and prevents replacement.
 
 This library supplies no authenticated production observer, enrollment
 projection, fleet publication ledger, installer or adoption. Local socket and

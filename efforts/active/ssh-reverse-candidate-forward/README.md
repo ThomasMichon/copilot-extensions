@@ -249,3 +249,7 @@ redacted cause codes rather than raw credential-shaped diagnostics.
   it was not started or repaired to manufacture platform proof. Source/test and
   canonical containment bytes were verified unchanged through the index-only
   rebase, preserving independent effort rows. Fresh-head review remains required.
+- Review also exposed caller-finally shutdown re-entry and termination helpers
+  returning without observed exit. Wait for lifecycle ownership release instead
+  of whole-caller completion; retain process custody and unknown when its
+  return code is still unset. Dedicated regressions cover both boundaries.

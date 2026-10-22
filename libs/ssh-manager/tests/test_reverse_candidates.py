@@ -522,6 +522,51 @@ async def test_concurrent_stops_join_shutdown_without_cancelling_the_first_calle
     assert len(spawned) == 2 and relay.is_alive
     await relay.stop()
 
+
+async def test_stop_waits_for_operation_release_not_callers_finally_cleanup(monkeypatch):
+    relay, spawned, retired, _ = fixture_owner(monkeypatch, ["ready"])
+    entered = asyncio.Event()
+    async def observe(_attempt):
+        entered.set()
+        await asyncio.Event().wait()
+    relay._observe_candidate = observe
+    finished = []
+    async def caller():
+        try:
+            await relay.establish()
+        finally:
+            await relay.stop()
+            finished.append(True)
+    operation = asyncio.create_task(caller())
+    await entered.wait()
+    await asyncio.wait_for(relay.stop(), 2)
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(operation, 2)
+    assert finished == [True] and retired == spawned
+    assert relay.reverse_status.state == "unknown"
+
+
+async def test_unconfirmed_termination_keeps_custody_and_blocks_replacement(monkeypatch):
+    relay, spawned, retired, _ = fixture_owner(monkeypatch, ["ready", "ready"])
+    await relay.establish()
+    async def unconfirmed(*_args):
+        return None  # the inherited helper can time out without raising
+    monkeypatch.setattr(FiniteReverseForward, "_terminate", unconfirmed)
+    with pytest.raises(ReverseForwardError, match="cleanup-unconfirmed"):
+        await relay.stop()
+    assert relay._proc is spawned[0] and spawned[0].returncode is None
+    assert relay.reverse_status.state == "unknown"
+    with pytest.raises(ReverseForwardError):
+        await relay.start()
+    assert len(spawned) == 1
+    async def confirmed(self, proc):
+        proc.returncode = -9
+        retired.append(proc)
+    monkeypatch.setattr(FiniteReverseForward, "_terminate", confirmed)
+    await relay.stop()
+    assert relay._proc is None and retired == spawned
+    assert relay.reverse_status.state == "unknown"
+
 @pytest.mark.parametrize("host,port", [
     ("0.0.0.0", 1234), ("example.com", 1234), ("127.0.0.1", 0),
     ("localhost", True), ("::1", 65536),

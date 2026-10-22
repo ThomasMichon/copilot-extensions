@@ -128,6 +128,8 @@ class FiniteReverseForward(SupervisedRelayForward):
         self._observe_candidate = observe
         self._selection_lock = asyncio.Lock()
         self._lifecycle_task: asyncio.Task | None = None
+        self._lifecycle_released = asyncio.Event()
+        self._lifecycle_released.set()
         self._stop_requests = 0
         self._shutdown_future: asyncio.Future | None = None
         self._retiring_process = None
@@ -166,12 +168,14 @@ class FiniteReverseForward(SupervisedRelayForward):
                 self._request_id, None, "unavailable", "lifecycle-busy",
             ))
         await self._selection_lock.acquire()
+        self._lifecycle_released.clear()
         self._lifecycle_task = task
         try:
             yield
         finally:
             self._lifecycle_task = None
             self._selection_lock.release()
+            self._lifecycle_released.set()
 
     async def _spawn_owned(self, args: list[str], remaining: float):
         pending = asyncio.create_task(create_ssh_subprocess(
@@ -365,6 +369,10 @@ class FiniteReverseForward(SupervisedRelayForward):
             self._status = replace(self._status, state="unknown", reason="cleanup-failed")
             log.error("Reverse forward owned process cleanup failed")
             return False
+        if proc.returncode is None:
+            self._status = replace(self._status, state="unknown", reason="cleanup-unconfirmed")
+            log.error("Reverse forward termination is unconfirmed; process custody retained")
+            return False
         if self._proc is proc:
             self._proc = None
             self._notify_pid_change()
@@ -386,7 +394,7 @@ class FiniteReverseForward(SupervisedRelayForward):
             active = self._lifecycle_task
             if active is not None and active is not asyncio.current_task():
                 active.cancel()
-                await asyncio.gather(active, return_exceptions=True)
+                await self._lifecycle_released.wait()
             async with self._lifecycle():
                 await super().stop()
                 if self._status.state != "unknown":
