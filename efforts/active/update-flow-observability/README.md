@@ -142,6 +142,8 @@ matrix below are _(agent-recommended)_ implementation details.
 - [x] Normalize known legacy native progress markers to the shared human state
   vocabulary without changing owner states, completion or structured outcomes
   (#7736).
+- [x] Restore the registered payload-refresh phase after marketplace
+  authorization without changing auth, acquisition or outcome semantics (#7801).
 - [ ] Consolidate banners, status names, nesting and error presentation;
   preserve useful detail without duplicate timestamps, repeated status
   prefixes or contradictory aggregate success.
@@ -244,6 +246,105 @@ Bridge serving-version gap and supervisor framing defect survived that
 bounded source delta inspection.
 
 ## Journal
+
+### 2026-10-22 - Isolate repeated probe startup before changing its invocation
+
+- The installed planning observation attributed 9.201 seconds to eleven
+  serial helper invocations, not to their authority checks alone. An isolated
+  eight-process experiment separated interpreter startup, helper loading and
+  the actual probe body using the canonical helper closure and synthetic
+  legacy/policy fixtures. No deployed files or real installation state changed.
+- With the same Python 3.11 interpreter, sampled empty starts took 160/134 ms
+  with/without site initialization; direct allowed probes took 474/345 ms and
+  invalid-policy probes 409/383 ms. Instrumented warm calls attributed 246/205
+  ms to loading and 38/36 ms to the probe body. These small samples are not an
+  equivalent installed-flow speedup or proof that all remaining time is idle.
+- Complete allowed and invalid-policy JSON, exact exit status and every
+  fixture byte/mtime were unchanged. Disabling site initialization does change
+  the pre-3.14 venv prefix and removes site/editable import paths: those changes
+  are explicit, not filtered from the evidence. The standard-library-only
+  helper does not use those prefixes or paths for its authority decisions.
+- The source now adds `-S` only to this isolated, payload-owned Python probe.
+  It preserves `-I`, UTF-8, the selected executable, per-attempt validation and
+  the native fallback. The existing six Windows authority scenarios compare
+  complete output and exit status against site-initialized Python in addition
+  to their native-adapter comparison. The exact-argv regression failed first.
+  Complete covering reconciliation/probe suites passed on Windows (173 passed,
+  one platform skip, 135.50 seconds) and the same frozen source on Linux (168
+  passed, six platform skips, 40.12 seconds), at the unchanged limits.
+- The first Windows attempt could not collect because the cached environment
+  lacked a newly declared local dependency. The canonical prepare-only path
+  restored that environment; the actual regression then failed as expected
+  before the source change. Install-contract, lint, documentation and effort
+  structure guards pass. This is a below-altitude invocation optimization,
+  not a new planner, cache, installation policy or service.
+- Documentation impact: Worktrees' README owns the selected-interpreter,
+  standard-library and pre-3.14 prefix explanation; the source-owned effort
+  owns the limited cost evidence. A patch changefile names Worktrees only.
+  Clean-room installation was not run because no construction or first-install
+  code changed; fresh isolated probe consumers were exercised instead. Live
+  execution of this unpromoted candidate is not authorized by an earlier
+  update's consent. Review, release and installed qualification remain open.
+- A fresh read of #7117 found a separate shared-lock-recovery claimant.
+  Preserve that source ownership rather than opening a competing repair.
+
+### 2026-10-22 - Explicit recovery completed one normal update, not fleet rollout
+
+- After explicit operator authorization, an ordinary one-file publication-lock
+  directory was archived atomically to a unique sibling, preserving its owner
+  receipt. The recorded owner was absent, a full host restart occurred after
+  acquisition, the exact receipt remained unchanged and no installer was active.
+  No automatic stale-lock reclaim, force update or service termination was used.
+- The single authorized normal ARM64 update then exited zero: Manager took
+  2,568.6 seconds, engine execution 2,450.0 seconds and runtime reconciliation
+  1,302.8 seconds. Worktrees took 416.6 seconds, Bridge 372.1, Codespaces 230.7,
+  Dispatch 286.3 and Index 144.8. These are changed-version flows, not healthy
+  no-op measurements or evidence that every host shares the original failure.
+- Read-only post-update checks confirmed matching selected/deployed versions
+  for Worktrees, Bridge and Index. The monitor reported ready with current
+  roster readiness; Bridge reported healthy, ready and not draining. Index
+  retained its client role without activating a service. The publication lock
+  was absent and the archived receipt's digest was unchanged.
+- Bridge recovered a prior aborted cutover, then completed its normal healthy
+  transition with a clean unforced drain, predecessor exit and relay adoption.
+  That successful recovery does not identify why the earlier cutover aborted.
+  Anchor synchronization explicitly skipped a stale-index condition; no anchor
+  repair was attempted. Other historical host failures remain distinct.
+- Payload and runtime module hashes matched the source before #7801, not its
+  phase correction. Therefore this run proves neither that correction nor the
+  new probe optimization live. No second update was started. The supported
+  explicit recovery command remains with #7117's existing claimant; the
+  broader effort, safe rollout holds and parent launch obligations stay open.
+
+### 2026-10-22 - Attribution correction merged; measured planning costs remain
+
+- #7801 merged as `74753fa551edcd4cc91ee395fa4698331e2452de` after
+  Copilot approved exact head `91b3e5c78999cdf8b039ddb16d68d6e54d4f6b7a`,
+  the actual review reported no open issues, discussion threads were empty and
+  every current-head required check passed. The initial changefile failure was
+  fixed by moving client-specific documentation to its actual owner, not by
+  bypassing CI or creating an unrelated Manager release.
+- Re-read the effort's Plan and Validation Plan after actual merge. Closed
+  only the source phase-attribution item, retained the published tip on a backup
+  and advanced confirmed merged history. This does not prove installed rollout,
+  publication recovery, shorter planning or completion of the effort.
+- A separate installed Windows `reconcile-plugins --peek` observation exited
+  successfully in 19.093 seconds with unchanged plan-cache bytes and mtime.
+  Eleven serial installation-context probes occupied 9.201 seconds; 42 Git
+  commands occupied 3.815 seconds. Their non-overlapping union was 13.016
+  seconds. The remaining 6.077 seconds includes startup, Python work, gaps and
+  capture completion; it is not demonstrated idle time.
+- The observer's 162 process records matched its Job accounting total, with a
+  peak of seven concurrent processes. Launcher/worker lifetimes were not
+  double-counted in the logical spans. Observer work overlapped the invocation;
+  these figures are neither a speedup against the earlier 17.610-second run nor
+  qualification of the current Dev source. The selected catalog declared an
+  older installed payload, so further attribution must retain that provenance.
+- Next cost work must isolate repeated helper loading from authority checks
+  and investigate repeated Git/context preparation under #6086's existing
+  ownership. Keep per-attempt authority, fresh planning and execution admission.
+  The separately authorized live recovery remains conditional on a safe idle
+  window; another session's maintenance must not be interrupted.
 
 ### 2026-10-21 - Reproduce update failures and correct payload cost attribution
 

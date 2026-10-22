@@ -781,7 +781,7 @@ def _run_installation_mode_helper(
             command.extend(["-Context", str(context)])
     else:
         command = [
-            sys.executable, "-I", "-X", "utf8",
+            sys.executable, "-I", "-S", "-X", "utf8",
             str(helper),
             action,
             "--source-json",
