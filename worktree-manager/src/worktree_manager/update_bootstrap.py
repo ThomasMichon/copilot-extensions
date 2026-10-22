@@ -24,6 +24,16 @@ class _Installation:
     primitive: ModuleType | None = None
 
 
+def prepare_update(rest: list[str]) -> tuple[list[str], bool, int]:
+    """Consume only the private bootstrap prefix before ordinary orchestration."""
+    if rest[:1] != ["--repair-engine"]:
+        return rest, False, 0
+    if len(rest) < 2:
+        print("Update repair requires its fresh source checkout.", file=sys.stderr)
+        return rest, True, 2
+    return rest[2:], True, repair_engine(Path(rest[1]))
+
+
 def _policy_sdk(source: Path):
     from .core_install import install_script
 

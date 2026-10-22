@@ -1481,19 +1481,12 @@ def _cmd_update(rest: list[str]) -> int:
     The run is recorded through ``update_events``; the exit code follows the
     shared update table (0 success, non-zero failure classes).
     """
-    fresh_manager = rest[:1] == ["--repair-engine"]
-    if fresh_manager:
-        from .update_bootstrap import repair_engine
-
-        if len(rest) < 2:
-            print("Update repair requires its fresh source checkout.", file=sys.stderr)
-            return 2
-        rc = repair_engine(Path(rest[1]))
-        if rc:
-            return rc
-        rest = rest[2:]
+    from .update_bootstrap import prepare_update
     from .update_events import UpdateRun
 
+    rest, fresh_manager, rc = prepare_update(rest)
+    if rc:
+        return rc
     run = UpdateRun()
     try:
         if fresh_manager:

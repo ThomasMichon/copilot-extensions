@@ -72,6 +72,19 @@ def test_update_bootstrap_does_not_route_ordinary_update_through_repair(monkeypa
     assert manager._cmd_update(["--force"]) == 5
 
 
+def test_update_bootstrap_missing_source_never_repairs_or_orchestrates(monkeypatch, capsys):
+    monkeypatch.setattr(
+        update_bootstrap, "repair_engine",
+        lambda source: pytest.fail("missing bootstrap source must not repair"),
+    )
+    monkeypatch.setattr(
+        manager, "_cmd_update_steps",
+        lambda *args, **kwargs: pytest.fail("missing bootstrap source must not orchestrate"),
+    )
+    assert manager._cmd_update(["--repair-engine"]) == 2
+    assert "requires its fresh source checkout" in capsys.readouterr().err
+
+
 def test_update_bootstrap_fresh_manager_does_not_reselect_source(monkeypatch):
     from worktree_manager import engine_client, self_install
 
