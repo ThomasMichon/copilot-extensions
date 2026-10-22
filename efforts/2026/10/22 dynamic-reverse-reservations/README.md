@@ -4,10 +4,10 @@
 - **Repo:** copilot-extensions
 - **Branch model:** reviewed proposal, then bounded implementation and qualification.
 - **Created:** 2026-10-22
-- **Status:** Active
-- **Vision:** [directional connectivity and credential continuity](../../../visions/machine-fleet/README.md#directional-connectivity-and-credential-continuity),
-  [honest reachability and derived profiles](../../../visions/plugins/agent-ssh/README.md#honest-reachability),
-  and [collision-free service endpoints](../../../visions/plugin-services/README.md).
+- **Status:** Done
+- **Vision:** [directional connectivity and credential continuity](../../../../visions/machine-fleet/README.md#directional-connectivity-and-credential-continuity),
+  [honest reachability and derived profiles](../../../../visions/plugins/agent-ssh/README.md#honest-reachability),
+  and [collision-free service endpoints](../../../../visions/plugin-services/README.md).
 - **Umbrella issue:** #7719
 
 ## Guiding Intent
@@ -104,6 +104,13 @@ and excluded shared SSH configuration, production credentials, forwarding
 grants, installed services and runtime changes. They do not appoint a
 production adapter owner or expand the held-source appointment.
 
+**Accepted closeout (summary):** the operator explicitly accepted transferring
+the remaining production integration gates to the existing parent objective
+#7238 and closing only this bounded source campaign. The parent remains open;
+component custody, unresolved operations and unrelated resources are preserved.
+This closeout authorizes no new agent, rollout or finalization of the
+controlling harness worktree.
+
 The concrete API, finite-tuple strategy, state transitions and test matrix
 below are **agent-recommended realization**, not additional operator requests
 or an already supplied runtime contract.
@@ -117,11 +124,11 @@ or an already supplied runtime contract.
 - [x] Separate actual OpenSSH permission constraints from local rendezvous
   prior art and explicitly identify missing integration authority.
 - [x] Review and land the corresponding
-  [endpoint vision reconciliation](../../../visions/plugin-services/README.md#minimal-network-exposure),
+  [endpoint vision reconciliation](../../../../visions/plugin-services/README.md#minimal-network-exposure),
   preserving ordinary OS-assigned ephemeral defaults and scoped, exclusive,
   temporary ownership for constrained boundary transports.
 - [x] Review and land the explicit
-  [constrained reverse-SSH pattern amendment](../../../docs/patterns/service-transport.md#constrained-reverse-ssh-listener-grants),
+  [constrained reverse-SSH pattern amendment](../../../../docs/patterns/service-transport.md#constrained-reverse-ssh-listener-grants),
   or select a conforming approach, before any finite-positive-port engine
   implementation. No forwarding-permission expansion resolves this gate.
 - [x] Review and land this canonical proposal before engine implementation.
@@ -164,18 +171,18 @@ All steps in this phase are agent-recommended.
 - [x] Run the current required admitted unit packet, targeted tests and
   publication guards; obtain current-head review and CI, then merge through
   the managed source flow.
-- [ ] Reconcile every validation item and record exact remaining integration
+- [x] Reconcile every validation item and record exact remaining integration
   obligations before closing this source campaign.
 
 ### Phase 4 - Explicit integration disposition
 
-- [ ] Obtain a concrete accepted objective from the existing transport,
+- [x] Blocked; transferred to `ThomasMichon/copilot-extensions#7238`: Obtain a concrete accepted objective from the existing transport,
   permission/enrollment and lifecycle owners for any missing production
   adapter, authoritative discovery and supervisor integration.
-- [ ] Either qualify an explicitly accepted integration within this source
+- [x] Deferred to `ThomasMichon/copilot-extensions#7238`: Either qualify an explicitly accepted integration within this source
   boundary or transfer it to that named tracked objective. A synthetic
   adapter is not an implemented production owner.
-- [ ] Keep distribution, permission changes and authorized running adoption
+- [x] Deferred to `ThomasMichon/copilot-extensions#7238`: Keep distribution, permission changes and authorized running adoption
   separate; no source-only result retires a working predecessor.
 
 ## Validation Plan
@@ -200,7 +207,7 @@ All implementation-specific selections are agent-recommended.
   forwarding, occupied-tuple recovery, exhaustion, exact `permitlisten`/
   peer `permitopen` refusal and cleanup. Keep the fixture observer distinct
   from the still-open production composition and ownership items.
-- [ ] **Existing policy and lifecycle:** both `permitlisten` and peer
+- [x] Blocked; transferred to `ThomasMichon/copilot-extensions#7238`: **Existing policy and lifecycle:** both `permitlisten` and peer
   `permitopen`, authenticated target identity, current direction policy,
   bounded existing-supervisor reconnect and independent connection
   preservation require the real owning adapter, not a fake callback.
@@ -489,3 +496,49 @@ No production API or runtime readiness is claimed by this proposal.
 - Focused fatal Ruff, all thirteen install contracts, headless-launch and
   asynchronous timeout-handler guards passed. Required current-head CI and
   review remain publication gates for this reproducible test addition.
+
+### 2026-10-22 - Reproducible consumer tests merged; production disposition remains
+
+- #7858 actually merged as `b6d425d0e73f8b3e828b6489347f31646d90c85a`
+  at 11:17:05Z, from exact head
+  `5d30e3fbf26290dfb7c522594010c0c9e3cabb2f`. Copilot review
+  `5613205142` approved that head with no open findings; the complete review
+  body, empty comments/thread inventory and actual required green checks were
+  verified before managed completion. Only the ordinary authorized additional
+  CODEOWNER-review exception applied, not a CI waiver.
+- Managed publication rebased the distribution inputs, so re-executed the
+  complete focused cohort at the published head rather than reusing the prior
+  source receipt: all 82 cases passed without failures or skips in 7.59
+  seconds, including the three actual OpenSSH consumer parameters. Complete
+  preparation, execution and cleanup took 13.720 seconds, with unchanged
+  source hashes and removed private arenas. The
+  [published-head qualification](https://github.com/ThomasMichon/copilot-extensions/pull/7858#issuecomment-6339352915)
+  is separate from the earlier source run.
+- Re-read this full canonical Plan and Validation Plan after the actual merge.
+  The supplied-owner coordinator, accepted finite-forward composition and
+  reproducible isolated qualification are upstream. The campaign remains
+  Active for its explicit Phase 4 disposition: an accepted production
+  policy/identity/observer/journal/discovery/lifecycle objective or accepted
+  tracked transfer, not a synthetic owner promoted into production.
+- #7719 remains open. No installed runtime, shared configuration, forwarding
+  permission, service, source custodian or working predecessor changed.
+
+### 2026-10-22 - Accepted parent transfer and bounded source closeout
+
+- The operator explicitly accepted transferring the remaining production
+  integration gates to the existing parent objective #7238 and closing only
+  this bounded source campaign. The parent is not complete; no component
+  custody, new agent, permission, runtime adoption or controlling-harness
+  finalization is authorized by that acceptance.
+- Recorded the concrete retained scope on the
+  [open parent objective](https://github.com/ThomasMichon/copilot-extensions/issues/7238#issuecomment-6347417391):
+  authenticated current participant/session/target and both direction
+  policies; the original-correlation effect journal/generation CAS;
+  authoritative observation/discovery; existing supervisor/reconnect/
+  lifecycle integration; and separately authorized distribution, live
+  qualification/adoption and predecessor migration. Existing source
+  custodians and unresolved operation correlations remain unchanged.
+- Resolved every Plan and Validation Plan item through either actual merged
+  source/qualification or the explicit checked tracked-transfer forms above.
+  The source campaign is Done and archived; #7719 is retired only after this
+  closeout clears its normal review/publication gate. #7238 stays open.

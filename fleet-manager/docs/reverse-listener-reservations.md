@@ -175,6 +175,8 @@ containment can mask a leak.
 
 These are isolated source-consumer results, not Windows/macOS OpenSSH
 qualification, production native SSH recovery, live discovery/supervisor
-integration, permission projection, installation or rollout. Their distinct
-owners and remaining qualification gates are recorded in
-[the canonical effort](../../efforts/active/dynamic-reverse-reservations/README.md).
+integration, permission projection, installation or rollout. The bounded source
+campaign and its explicit transfers are recorded in
+[the archived effort](../../efforts/2026/10/22%20dynamic-reverse-reservations/README.md).
+Remaining production integration/qualification belongs to the existing parent
+objective #7238; source custodians and rollout authorization remain unchanged.

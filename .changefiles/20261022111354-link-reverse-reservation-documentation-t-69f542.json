@@ -1,0 +1,9 @@
+{
+  "comment": "Link reverse reservation documentation to its archived source and retained production parent",
+  "changes": [
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    }
+  ]
+}

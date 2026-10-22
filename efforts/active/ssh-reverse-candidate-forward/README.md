@@ -18,7 +18,7 @@ Preserve fixed-port consumers and the current supervisor by default.
 
 This effort owns only the transport leaf of the canonical dynamic reverse
 reservation campaign proposed in #7726
-(`efforts/active/dynamic-reverse-reservations/README.md`). It does not duplicate that campaign's authenticated
+(`efforts/2026/10/22 dynamic-reverse-reservations/README.md`). It does not duplicate that campaign's authenticated
 admission, generation publication or uncertainty ledger.
 
 ## Participants
