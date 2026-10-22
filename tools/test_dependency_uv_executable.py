@@ -131,7 +131,7 @@ def test_projection_refuses_incomplete_or_reordered_markers(tmp_path, content):
         installer_engine_ref.native_executable_config(canonical)
 
 
-def test_projection_refuses_a_linked_canonical_authority(tmp_path):
+def test_projection_refuses_a_linked_canonical_authority(tmp_path, native_file_symlink):
     import installer_engine_ref
 
     canonical, _config, owner = _projection_fixture(tmp_path)
@@ -139,7 +139,7 @@ def test_projection_refuses_a_linked_canonical_authority(tmp_path):
     outside = tmp_path / "outside.py"
     outside.write_bytes(original)
     owner.unlink()
-    owner.symlink_to(outside)
+    native_file_symlink(owner, outside)
     with pytest.raises(ValueError, match="linked native executable source"):
         installer_engine_ref.native_executable_config(canonical)
     assert outside.read_bytes() == original
