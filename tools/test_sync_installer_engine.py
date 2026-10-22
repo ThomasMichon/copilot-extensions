@@ -85,15 +85,32 @@ def test_installer_action_identity_uses_existing_progress_helpers(
     states = []
     for plugin in (
         "agent-dispatch", "agent-vault", "agent-pull-requests", "agent-ssh", "budget-guidance",
+        "agent-bridge", "agent-index", "agent-logger",
+        "agent-containers", "agent-mcp", "agent-machines",
     ):
-        source = (REPO / "plugins" / plugin / "scripts" / ("install" + suffix)).read_text(
+        initializer = plugin in {"agent-containers", "agent-mcp", "agent-machines"}
+        entrypoint = ("init" if initializer else "install") + suffix
+        source = (REPO / "plugins" / plugin / "scripts" / entrypoint).read_text(
             encoding="utf-8",
         )
+        assert re.search(
+            r"""\b(?:Write-Host|echo)\s+(['"])={3,}\s+\S+\s+(?:install|init|stamp|provision)\b""",
+            source,
+        ) is None, plugin
         source_lines = source.splitlines()
         actions = ["install", "update"] if plugin in {"agent-dispatch", "agent-vault"} \
-            else ["install"]
+            else ["install"] if plugin in {
+                "agent-pull-requests", "agent-ssh", "budget-guidance",
+            } else []
         cases = [(state, f"{plugin} {action}") for action in actions
                  for state in ("running", "done")]
+        if powershell or plugin in {"agent-bridge", "agent-dispatch", "agent-index", "agent-vault"}:
+            deferred = "explicit setup" if plugin == "agent-index" else "first use"
+            cases.append(("running", f"{plugin} stamp; runtime deferred to {deferred}"))
+        if initializer:
+            cases.append(("running", f"{plugin} init"))
+        if powershell and plugin == "agent-bridge":
+            cases.append(("running", f"{plugin} provision"))
         if plugin == "agent-dispatch":
             cases.append(("skipped", "agent-dispatch install (superseded by a newer concurrent build)"))
         for state, message in cases:

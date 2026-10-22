@@ -2196,7 +2196,7 @@ _install_supervisor_service() {
 # Cheap 'stamp': splat the binstub + payload marker, defer the venv build to first
 # use (fits a sessionStart hook's grace window). No venv, no uv.
 do_stamp() {
-    echo ''; echo '=== agent-dispatch stamp (defer runtime to first use) ==='; echo ''
+    _step 'agent-dispatch stamp; runtime deferred to first use'
     mkdir -p "$INSTALL_DIR" "$LOCAL_BIN" || return 1
     # Serialized under the SAME global activation lock _versioned_activate/
     # _ensure_runtime's own post-supersession-check deploy_binstub use: this

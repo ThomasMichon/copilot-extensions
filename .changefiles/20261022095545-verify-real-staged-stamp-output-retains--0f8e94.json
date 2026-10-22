@@ -1,0 +1,9 @@
+{
+  "comment": "Verify real staged stamp output retains deferral reasons without decorative banners or blank progress records.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "dev"
+    }
+  ]
+}

@@ -1522,7 +1522,7 @@ STUB
 # grace window): record the REAL payload path + deploy the self-provisioning
 # binstub -- NO venv, NO uv. The runtime builds itself on the binstub's first use.
 do_stamp() {
-    echo ""; echo "=== agent-bridge stamp (defer runtime to first use) ==="; echo ""
+    _step 'agent-bridge stamp; runtime deferred to first use'
     mkdir -p "$INSTALL_DIR"
     if $PUBLISH_GLOBAL_BINSTUBS; then
         mkdir -p "$LOCAL_BIN"
@@ -1947,7 +1947,6 @@ do_install() {
     # Write deploy manifest
     _write_deploy_manifest
 
-    echo ""
     _ok "agent-bridge installed"
     echo "  Install dir: $INSTALL_DIR"
     if $PUBLISH_GLOBAL_BINSTUBS; then
@@ -1959,7 +1958,6 @@ do_install() {
     echo "  API:         http://127.0.0.1:$PORT"
 
     # Start service and verify health
-    echo ""
     _step "Starting service after install..."
     do_start
 }

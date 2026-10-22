@@ -864,8 +864,7 @@ function Invoke-Stamp {
     # venv build to the binstub's first use. No venv, no uv; fits a sessionStart
     # grace window and NEVER holds the marketplace payload open (it copies from
     # the already self-staged $PluginDir, freeing the singleton immediately).
-    Write-Host ''
-    Write-Host '=== agent-ssh stamp (defer runtime to first use) ===' -ForegroundColor Cyan
+    Write-Step 'agent-ssh stamp; runtime deferred to first use'
     if (-not $SrcVersion) { Write-Fail 'Cannot stamp: no version in pyproject.toml'; exit 1 }
     foreach ($dir in @($InstallDir, $LocalBin)) {
         if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
@@ -1259,7 +1258,6 @@ Write-DeployManifest `
     } else { @{} }) `
     -PayloadHash $(if ($SourceRuntimeIdentity) { $sourceManifestHash } else { Get-PayloadHash })
 
-Write-Host ''
 $prevEAP = $ErrorActionPreference
 $ErrorActionPreference = 'Continue'
 $importOk = $false

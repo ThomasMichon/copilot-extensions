@@ -7,6 +7,7 @@ import argparse
 import errno
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -476,6 +477,9 @@ def test_real_standalone_first_stamp_uses_declared_human_adapter(shell, plugin, 
     assert "#< CLIXML" not in captured.err
     assert all(line.startswith("[") for line in captured.err.splitlines())
     assert f"Stamped: {plugin} binstub on PATH" in captured.err
+    assert f"running {plugin} stamp; runtime deferred to first use" in captured.err
+    assert "===" not in captured.err
+    assert re.search(r"\] update/engine/[^ ]+ \[elapsed ", captured.err) is None
     assert "[elapsed " in captured.err
     assert f"{plugin} done exit 0 [duration " in captured.err
 

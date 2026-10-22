@@ -469,8 +469,7 @@ function Invoke-Stamp {
     # into ~/.agent-containers/snapshots/<ver>/, record markers, and deploy the
     # self-provisioning binstub -- deferring the heavy venv build to first use.
     # No venv, no uv; never holds the marketplace payload open.
-    Write-Host ''
-    Write-Host '=== agent-containers stamp (defer runtime to first use) ===' -ForegroundColor Cyan
+    Write-Step 'agent-containers stamp; runtime deferred to first use'
     if (-not $SrcVersion) { Write-Fail 'Cannot stamp: no version in pyproject.toml'; exit 1 }
     foreach ($dir in @($InstallDir, $LocalBin)) {
         if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
@@ -599,9 +598,7 @@ if ($Action -eq 'stamp') {
 
 # -- Preflight checks --------------------------------------------------
 
-Write-Host ''
-Write-Host '=== agent-containers init ===' -ForegroundColor Cyan
-Write-Host ''
+Write-Step 'agent-containers init'
 
 if (-not (Test-Path $PkgSrcDir)) {
     Write-Fail "Package source not found at $PkgSrcDir"
@@ -785,7 +782,6 @@ try {
 
 # -- 6. Verify ----------------------------------------------------------
 
-Write-Host ''
 $prevEAP = $ErrorActionPreference
 $ErrorActionPreference = 'Continue'
 $importOk = $false
@@ -822,8 +818,6 @@ if ($pathDirs -contains $LocalBin) {
     }
 }
 
-Write-Host ''
-Write-Host '=== agent-containers init complete ===' -ForegroundColor Cyan
 Write-Host '  Try: agent-containers version' -ForegroundColor DarkGray
 exit 0
 } finally {

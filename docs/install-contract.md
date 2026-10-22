@@ -2715,7 +2715,13 @@ skipped progress. Captured parents normalize these helpers to running, done or
 skipped diagnostics with elapsed time. Only the parent's actual completion
 records an operation duration and result. This is emitter-side cleanup, not
 generic banner recognition or suppression of arbitrary empty child lines.
-Uninstall presentation is unchanged.
+Stamp actions likewise use the existing progress helpers, retaining whether
+runtime construction is deferred to first use or to explicit setup. Containers,
+MCP and Machines initialize with ordinary progress, without a second decorative
+completion banner before cleanup; the admitting parent records the final exit
+only after cleanup. Bridge's provisioning action follows the same convention.
+Status/uninstall presentation and programmatic CLI/protocol streams are
+unchanged.
 
 ### External dependency seasoning
 

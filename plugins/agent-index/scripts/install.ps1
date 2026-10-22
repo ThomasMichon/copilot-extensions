@@ -2628,7 +2628,7 @@ function New-IndexSnapshot {
 }
 
 function Invoke-Stamp {
-    Write-Host ''; Write-Host '=== agent-index stamp (defer runtime to explicit setup) ===' -ForegroundColor Cyan; Write-Host ''
+    Write-Step 'agent-index stamp; runtime deferred to explicit setup'
     if (-not $SrcVersion) { Write-Fail 'Cannot stamp: no version in pyproject.toml'; exit 1 }
     foreach ($dir in @($InstallDir, $LocalBin)) {
         if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }

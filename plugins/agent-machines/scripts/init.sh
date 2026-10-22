@@ -1532,7 +1532,6 @@ _versioned_mark_complete() {
     _runtime_construction_complete "$actual_hash"
 }
 
-echo ''
 # --- self-provisioning (runtime-self-provisioning pattern) -------------------
 # Vendor a standalone uv when absent (pristine box has neither uv nor pip/venv).
 _ensure_uv() {
@@ -1796,8 +1795,7 @@ if [[ "$ACTION" == "stamp" ]]; then
     exit 0
 fi
 
-echo '=== agent-machines init ==='
-echo ''
+_step 'agent-machines init'
 
 if [[ ! -d "$PKG_SRC_DIR" ]]; then
     _fail "Package source not found at $PKG_SRC_DIR"
@@ -2102,7 +2100,5 @@ if [[ "$CELL_MODE" == 0 ]]; then
     esac
 fi
 
-echo ''
-echo '=== agent-machines init complete ==='
 echo '  Try: agent-machines version'
 exit 0

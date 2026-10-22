@@ -1,0 +1,9 @@
+{
+  "comment": "Replace installer-owned stamp and initialization decoration with existing progress helpers while preserving deferred-runtime policy and final exit ownership.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

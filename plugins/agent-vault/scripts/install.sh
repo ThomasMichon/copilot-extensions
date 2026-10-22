@@ -559,7 +559,7 @@ _ensure_uv_index() {
 # use (fits a sessionStart hook's grace window). No venv, no uv.
 do_stamp() {
     _assert_source_runtime || return 1
-    echo ''; echo '=== agent-vault stamp (defer runtime to first use) ==='; echo ''
+    _step 'agent-vault stamp; runtime deferred to first use'
     mkdir -p "$INSTALL_DIR" "$LOCAL_BIN" || {
         _fail "Stamp directories cannot be prepared: $INSTALL_DIR"; return 1;
     }

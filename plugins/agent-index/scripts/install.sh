@@ -1160,7 +1160,7 @@ STUBEOF
 do_stamp() {
     _stamp_index_payload() {
     _index_publication_fresh || { _skip 'Newer runtime or stamp superseded stamp'; return 0; }
-    echo ''; echo '=== agent-index stamp (defer runtime to explicit setup) ==='; echo ''
+    _step 'agent-index stamp; runtime deferred to explicit setup'
     local source_payload=""
     if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
         source_payload="$(_source_snapshot)" || return 1

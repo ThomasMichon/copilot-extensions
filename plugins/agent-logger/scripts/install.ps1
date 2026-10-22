@@ -1735,8 +1735,7 @@ function Invoke-Stamp {
     # 5 auxiliary binstubs + scheduled task) to a provision on first use. No venv,
     # no uv; never holds the marketplace payload open (copies from the already
     # self-staged $PluginDir).
-    Write-Host ''
-    Write-Host '=== agent-logger stamp (defer runtime to first use) ===' -ForegroundColor Cyan
+    Write-Step 'agent-logger stamp; runtime deferred to first use'
     if (-not $SrcVersion) { Write-Fail 'Cannot stamp: no version in pyproject.toml'; exit 1 }
     foreach ($dir in @($InstallDir, $LocalBin)) {
         if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }

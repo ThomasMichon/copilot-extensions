@@ -642,8 +642,7 @@ function Exit-InstallLock {
 
 function Invoke-Stamp {
     Test-SourceRuntimeUnchanged
-    Write-Host ''
-    Write-Host '=== agent-pull-requests stamp (defer runtime to first use) ===' -ForegroundColor Cyan
+    Write-Step 'agent-pull-requests stamp; runtime deferred to first use'
     if (-not $SrcVersion) { Write-Fail 'Cannot stamp: no version in pyproject.toml'; exit 1 }
     foreach ($dir in @($InstallDir, $LocalBin)) {
         if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
@@ -853,7 +852,6 @@ try {
         -VersionOverride $PackageVersion `
         -AdditionalFields $sourceFields
 
-    Write-Host ''
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     & $LinkPython -c 'import agent_pull_requests' 2>$null

@@ -614,9 +614,7 @@ _versioned_mark_complete() {
     _runtime_construction_complete "$actual_hash"
 }
 
-echo ''
-echo '=== agent-mcp init ==='
-echo ''
+_step 'agent-mcp init'
 
 if [[ ! -d "$PKG_SRC_DIR" ]]; then
     _fail "Package source not found at $PKG_SRC_DIR"
@@ -913,7 +911,5 @@ case ":$PATH:" in
     *) _step "Add $LOCAL_BIN to your PATH (e.g. in ~/.bashrc): export PATH=\"\$HOME/.local/bin:\$PATH\"" ;;
 esac
 
-echo ''
-echo '=== agent-mcp init complete ==='
 echo '  Try: agent-mcp version'
 exit 0

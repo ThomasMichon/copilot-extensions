@@ -2146,8 +2146,7 @@ function Invoke-Stamp {
     # self-provisioning binstub -- deferring the heavy venv build to first use.
     # No venv, no uv; never holds the marketplace payload open (copies from the
     # already self-staged $PluginDir).
-    Write-Host ''
-    Write-Host '=== agent-machines stamp (defer runtime to first use) ===' -ForegroundColor Cyan
+    Write-Step 'agent-machines stamp; runtime deferred to first use'
     if (-not $SrcVersion) { Write-Fail 'Cannot stamp: no version in pyproject.toml'; exit 1 }
     # Same round-10 finding as Invoke-StampBinstubOnly above: the generated
     # launcher's marker root is hardcoded, not -InstallDir-aware.
@@ -2260,9 +2259,7 @@ if ($Action -eq 'stamp') { Invoke-Stamp; exit 0 }
 
 # -- Preflight checks --------------------------------------------------
 
-Write-Host ''
-Write-Host '=== agent-machines init ===' -ForegroundColor Cyan
-Write-Host ''
+Write-Step 'agent-machines init'
 
 if (-not (Test-Path $PkgSrcDir)) {
     Write-Fail "Package source not found at $PkgSrcDir"
@@ -2615,7 +2612,6 @@ if ($CellMode) {
 
 # -- 6. Verify ----------------------------------------------------------
 
-Write-Host ''
 $prevEAP = $ErrorActionPreference
 $ErrorActionPreference = 'Continue'
 $importOk = $false
@@ -2645,8 +2641,6 @@ if ($pathDirs -contains $LocalBin) {
     }
 }
 
-Write-Host ''
-Write-Host '=== agent-machines init complete ===' -ForegroundColor Cyan
 if ($CellMode) {
     Write-Host '  Runtime is ready through the owning payload command.' -ForegroundColor DarkGray
 } else {

@@ -781,8 +781,7 @@ function Invoke-Stamp {
     # venv build to the binstub's first use. No venv, no uv; fits a sessionStart
     # grace window and NEVER holds the marketplace payload open (it copies from
     # the already self-staged $PluginDir, freeing the singleton immediately).
-    Write-Host ''
-    Write-Host '=== budget-guidance stamp (defer runtime to first use) ===' -ForegroundColor Cyan
+    Write-Step 'budget-guidance stamp; runtime deferred to first use'
     if (-not $SrcVersion) { Write-Fail 'Cannot stamp: no version in pyproject.toml'; exit 1 }
     foreach ($dir in @($InstallDir, $LocalBin)) {
         if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
@@ -1125,7 +1124,6 @@ $manifest | ConvertTo-Json -Depth 8 | Set-Content -Path $tmp -Encoding UTF8
 Move-Item -Force -Path $tmp -Destination $ManifestPath
 Write-Ok "Deploy manifest written (source: $kind)"
 
-Write-Host ''
 $prevEAP = $ErrorActionPreference
 $ErrorActionPreference = 'Continue'
 $importOk = $false

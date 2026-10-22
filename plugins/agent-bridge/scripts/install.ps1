@@ -2291,7 +2291,7 @@ function Invoke-Stamp {
     # provisioning binstub -- deferring the heavy venv build (and the daemon/service
     # registration) to the binstub's first use. No venv, no uv; fits a sessionStart
     # grace window and NEVER holds the marketplace payload open.
-    Write-Host ''; Write-Host '=== agent-bridge stamp (defer runtime to first use) ===' -ForegroundColor Cyan; Write-Host ''
+    Write-Step 'agent-bridge stamp; runtime deferred to first use'
     if (-not $SrcVersion) { Write-Fail 'Cannot stamp: no version in pyproject.toml'; exit 1 }
     $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
     $dirs = @($InstallDir)
@@ -2637,7 +2637,6 @@ function Invoke-Install {
         Write-Ok 'Scoped install left the user PATH unchanged'
     }
 
-    Write-Host ''
     Write-Ok 'agent-bridge installed'
     Write-Host "  Install dir: $InstallDir"
     if ($publishGlobalBinstubs) {
@@ -2650,15 +2649,12 @@ function Invoke-Install {
     Write-Host "  API:         http://$($__ep.Bind):$($__ep.Port)"
 
     # Start service and verify health
-    Write-Host ''
     Write-Step 'Starting service after install...'
     Invoke-Start
 }
 
 function Invoke-Provision {
-    Write-Host ''
-    Write-Host '=== agent-bridge provision ===' -ForegroundColor Cyan
-    Write-Host ''
+    Write-Step 'agent-bridge provision'
 
     if (-not (Test-Path $LinkPython)) {
         # Preserve the self-provisioning binstub contract: `provision` is the

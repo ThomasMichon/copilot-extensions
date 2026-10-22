@@ -614,9 +614,7 @@ if [[ "$ACTION" == "stamp" ]]; then
     exit 0
 fi
 
-echo ''
-echo '=== agent-containers init ==='
-echo ''
+_step 'agent-containers init'
 
 if [[ ! -d "$PKG_SRC_DIR" ]]; then
     _fail "Package source not found at $PKG_SRC_DIR"
@@ -789,7 +787,5 @@ case ":$PATH:" in
     *) _step "Add $LOCAL_BIN to your PATH (e.g. in ~/.bashrc): export PATH=\"\$HOME/.local/bin:\$PATH\"" ;;
 esac
 
-echo ''
-echo '=== agent-containers init complete ==='
 echo '  Try: agent-containers version'
 exit 0

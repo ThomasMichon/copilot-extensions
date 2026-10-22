@@ -145,8 +145,8 @@ matrix below are _(agent-recommended)_ implementation details.
 - [x] Qualify Budget Guidance's actual self-staged PowerShell installer and
   its construction-shell diagnostics before declaring captured UTF-8 output
   (#7888).
-- [ ] Qualify Machines' actual nested PowerShell/Python producers, including
-  legacy decision progress and undecorated lifecycle JSON.
+- [x] Qualify Machines' actual nested PowerShell/Python producers, including
+  legacy decision progress and undecorated lifecycle JSON (#7901).
 - [ ] Prefix every human-readable install/update line with a wall-clock time;
   suffix it with honestly labeled monotonic elapsed time or completed-step
   duration. Do not represent arbitrary child-line arrival as execution cost.
@@ -262,6 +262,53 @@ Bridge serving-version gap and supervisor framing defect survived that
 bounded source delta inspection.
 
 ## Journal
+
+### 2026-10-22 - Remaining stamp and initialization decoration qualified
+
+- Eleven PowerShell stamp producers and their four decorated Bash
+  counterparts now report their existing action and deferral reason through
+  the existing progress helper. Index still explicitly defers construction
+  to setup, not first use. Containers, MCP and Machines report initialization
+  through the same helpers on both platforms, without a decorative completion
+  banner before cleanup. Bridge's PowerShell provisioning action is ordinary
+  progress too.
+- Only these emitters and adjacent routine blank writes changed. All eleven
+  complete PowerShell entrypoints parse and retain identical nonpresentation
+  tokens after checkout-line-ending normalization. All seven changed Bash
+  entrypoints pass native syntax checks. Status/uninstall output, interactive
+  policy prompts, arbitrary child lines, helpers, native arguments, cleanup
+  and programmatic CLI/protocol streams are unchanged.
+- The existing native emitter test now executes the affected helpers and
+  literal calls on PS5, PowerShell 7 and Bash. Real staged stamp controls on
+  both Windows hosts preserve deferral reasons and the final exit outcome,
+  without banners or empty framed records. The complete Windows
+  updater/materialization cohort passed 229 cases with two platform skips;
+  the exact frozen candidate's Linux counterpart passed 191 with 40 platform
+  skips. All thirteen install contracts and canonical declarations pass.
+- Unit and simple end-to-end tiers cover source emitters, actual staged first
+  stamps and release materialization. This changes presentation only, so
+  unchanged full runtime-assembly clean-room scenarios were not repeated.
+  No live host/external-venue update is authorized, and no no-op cost or
+  deployment improvement is claimed. The broader presentation, installed-state
+  and equivalent-operation-count completion gates remain open.
+
+### 2026-10-22 - Machines qualification merged; presentation cleanup next
+
+- #7901 merged after a fresh approval at the Python 3.10-compatible head,
+  resolution of its collection finding and all required checks passing.
+  The attribution check initially encountered an empty HTTP 500 response
+  from GitHub's commit-to-PR endpoint; one diagnosed retry passed without
+  changing metadata rules, adding a dummy commit or bypassing CI.
+- All thirteen PowerShell producer declarations are now qualified at their
+  actual entrypoints. This is source qualification, not installed-release
+  proof or an equivalent healthy-no-op measurement. The effort and #6600
+  remain open; no further live host update is authorized.
+- The remaining presentation audit distinguishes installer-owned stamp,
+  initialization and provisioning banners from status/uninstall output and
+  contract comments. The next slice removes decoration at those emitters,
+  retaining deferral reasons, diagnostics and the admitting parent's timed
+  outcomes. It must not filter arbitrary child output or alter Bridge's
+  programmatic CLI/protocol streams.
 
 ### 2026-10-22 - Machines nested producers qualified before publication
 

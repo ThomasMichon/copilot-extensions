@@ -514,8 +514,7 @@ function Invoke-Stamp {
     # self-provisioning binstub -- deferring the heavy venv build to first use.
     # No venv, no uv; never holds the marketplace payload open (copies from the
     # already self-staged $PluginDir).
-    Write-Host ''
-    Write-Host '=== agent-mcp stamp (defer runtime to first use) ===' -ForegroundColor Cyan
+    Write-Step 'agent-mcp stamp; runtime deferred to first use'
     if (-not $SrcVersion) { Write-Fail 'Cannot stamp: no version in pyproject.toml'; exit 1 }
     foreach ($dir in @($InstallDir, $LocalBin)) {
         if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
@@ -638,9 +637,7 @@ if ($Action -eq 'stamp') { Invoke-Stamp; exit 0 }
 
 # -- Preflight checks --------------------------------------------------
 
-Write-Host ''
-Write-Host '=== agent-mcp init ===' -ForegroundColor Cyan
-Write-Host ''
+Write-Step 'agent-mcp init'
 
 if (-not (Test-Path $PkgSrcDir)) {
     Write-Fail "Package source not found at $PkgSrcDir"
@@ -968,7 +965,6 @@ Write-Ok "Deploy manifest written (source: $kind)"
 
 # -- 6. Verify ----------------------------------------------------------
 
-Write-Host ''
 $prevEAP = $ErrorActionPreference
 $ErrorActionPreference = 'Continue'
 $importOk = $false
@@ -998,8 +994,6 @@ if ($pathDirs -contains $LocalBin) {
     }
 }
 
-Write-Host ''
-Write-Host '=== agent-mcp init complete ===' -ForegroundColor Cyan
 Write-Host '  Try: agent-mcp version' -ForegroundColor DarkGray
 exit 0
 } catch {

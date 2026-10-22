@@ -1075,7 +1075,7 @@ function Invoke-Stamp {
     # service registration) to the binstub's first use. No venv, no uv; fits a
     # sessionStart grace window and NEVER holds the marketplace payload open (it
     # copies from the already self-staged $PluginDir, freeing the singleton).
-    Write-Host ''; Write-Host '=== agent-vault stamp (defer runtime to first use) ===' -ForegroundColor Cyan; Write-Host ''
+    Write-Step 'agent-vault stamp; runtime deferred to first use'
     if (-not $SrcVersion) { Write-Fail 'Cannot stamp: no version in pyproject.toml'; exit 1 }
     $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
     foreach ($dir in @($InstallDir, $LocalBin)) {
