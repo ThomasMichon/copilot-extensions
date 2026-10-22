@@ -72,8 +72,10 @@ Recorded fields:
   examines at most 32 independently framed JSON values and refuses oversized
   (>65,536-character) or malformed outer envelopes.
   Stderr retains separately redacted, control-normalized text (1,600 characters);
-  JSON envelopes select the same diagnostic fields and embedded
-  prompt/environment-dump lines are omitted. Existing ordinary status labels
+  JSON envelopes select the same diagnostic fields. If prompt/environment
+  context is detected anywhere in stderr, only selected structured diagnostic
+  fields remain; the entire raw text is omitted, including warning-prefixed or
+  malformed multiline dumps. Existing ordinary status labels
   and phrase indicators remain supplemental, not error classification.
   The shared redactor strips ANSI/control characters and known credential
   assignments, provider-token shapes, URL credentials, authorization values and

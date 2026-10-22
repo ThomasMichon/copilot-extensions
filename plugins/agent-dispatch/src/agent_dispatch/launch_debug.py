@@ -99,17 +99,16 @@ def _streams(value: str | bytes | None, environment: dict[str, str], *,
         if safe_diagnostic_text(item, 800, environment) == item
     ]
     if stderr:
-        if isinstance(body, (dict, list)) or text.lstrip().startswith(("{", "[")):
+        opaque_context = re.search(
+            r"""["'](?:env|environment|prompt|startup_invocation)["']\s*:""",
+            normalized_diagnostic_text(text),
+        )
+        if opaque_context:
+            result["text"] = json.dumps(result["fields"]) if result["fields"] else "<omitted:opaque-context>"
+        elif isinstance(body, (dict, list)) or text.lstrip().startswith(("{", "[")):
             result["text"] = json.dumps(result["fields"]) if result["fields"] else "<omitted:opaque-envelope>"
         else:
-            # An embedded prompt/environment dump is not a diagnostic field.
-            lines = [
-                "<omitted:opaque-context>"
-                if re.search(r"""["'](?:env|environment|prompt|startup_invocation)["']\s*:""", line)
-                else line
-                for line in text[:65536].splitlines()
-            ]
-            result["text"] = safe_diagnostic_text("\n".join(lines), 1600, environment)
+            result["text"] = safe_diagnostic_text(text, 1600, environment)
         result["content"] = "redacted"
     return result
 

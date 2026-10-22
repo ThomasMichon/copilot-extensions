@@ -174,6 +174,25 @@ def test_unavailable_empty_and_partial_captures_are_distinct(tmp_path, monkeypat
             assert row["stdout"]["sha256"] == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 
 
+@pytest.mark.parametrize("stderr", [
+    'transport warning\n{\n  "env": {\n    "OTHER": "private-value"\n  }\n}',
+    'transport warning\n{\n  "env": {\n    "OTHER": "private-value"',
+    'transport warning\n{\n  "prompt": {\n    "text": "private-value"\n  }\n}',
+    'transport warning\n{\n  "en\x1b[31mv": {\n    "OTHER": "private-value"\n  }\n}',
+], ids=["warning-envelope", "malformed-envelope", "nested-prompt", "control-obscured-context"])
+def test_warning_prefixed_opaque_blocks_are_omitted_completely(tmp_path, monkeypatch, stderr):
+    root = enable(tmp_path, monkeypatch)
+    trace = launch_debug.begin(["bridge"], ["--json", "status", "actor"])
+    assert trace
+    trace.finish(result=subprocess.CompletedProcess(
+        [], 1, '{"error":"tracking_write refused: RPC outcome unknown"}', stderr,
+    ))
+    row = finished(root)[1]
+    assert "private-value" not in json.dumps(row)
+    assert row["stderr"]["text"] == "<omitted:opaque-context>"
+    assert row["stdout"]["fields"]["error"] == "tracking_write refused: RPC outcome unknown"
+
+
 def test_documented_dispatch_recipes_match_actual_parser_without_network(monkeypatch):
     from agent_dispatch.__main__ import build_parser
     parser = build_parser()
