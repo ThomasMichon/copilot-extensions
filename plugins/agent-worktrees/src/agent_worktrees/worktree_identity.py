@@ -59,6 +59,24 @@ def _worktree_id_from_git(cwd: Path) -> str | None:
     return None
 
 
+def _confirmed_anchor_checkout(cwd: Path, anchor: Path) -> bool:
+    try:
+        result = git_ops.git(
+            "rev-parse", "--is-bare-repository", "--absolute-git-dir",
+            cwd=str(cwd), check=False, timeout=10,
+        )
+        lines = (result.stdout or "").strip().splitlines()
+        if result.returncode != 0 or len(lines) != 2:
+            return False
+        git_dir = Path(lines[1])
+        root = git_dir if lines[0] == "true" else (
+            git_dir.parent if lines[0] == "false" and git_dir.name == ".git" else None
+        )
+        return root is not None and root.resolve() == anchor.resolve()
+    except Exception:
+        return False
+
+
 def tracked_invocation_record(
     cwd: Path, *, project: str, anchor: Path | None,
 ) -> tracking.WorktreeRecord | None:
@@ -68,7 +86,10 @@ def tracked_invocation_record(
         return None
     tracking_path = cfg.project_dir(project) / "worktrees"
     worktree_id = _worktree_id_from_git(cwd)
-    if worktree_id is None and anchor is not None and cwd.is_relative_to(anchor.resolve()):
+    if (
+        worktree_id is None and anchor is not None
+        and cwd.is_relative_to(anchor.resolve()) and _confirmed_anchor_checkout(cwd, anchor)
+    ):
         return None
     record = (
         tracking.load_record_by_id(worktree_id, tracking_path=tracking_path)

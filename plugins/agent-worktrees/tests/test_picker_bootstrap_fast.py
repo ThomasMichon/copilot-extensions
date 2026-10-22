@@ -27,6 +27,10 @@ def test_anchor_bootstrap_does_not_enumerate_worktrees(monkeypatch, tmp_path, ca
     _bootstrap(monkeypatch, tmp_path, cwd / "src" if nested else cwd)
     monkeypatch.setattr(worktree_identity, "_worktree_id_from_git", lambda cwd: None)
     monkeypatch.setattr(
+        worktree_identity.git_ops, "git",
+        lambda *a, **k: SimpleNamespace(returncode=0, stdout=f"false\n{cwd / '.git'}\n"),
+    )
+    monkeypatch.setattr(
         tracking, "find_worktree_id_by_cwd",
         lambda *a, **k: pytest.fail("anchor bootstrap enumerated the roster"),
     )
@@ -83,3 +87,21 @@ def test_bare_headless_check_does_not_resolve_unrelated_pr_topology(monkeypatch,
 
     monkeypatch.setattr(manager_launch_cli.cfg, "load_config", load)
     assert manager_launch_cli._is_headless_project() is headless
+
+
+def test_failed_git_probe_keeps_nested_tracking_fallback(monkeypatch, tmp_path, capfd):
+    root = tmp_path / "anchor" / "workspace"
+    _bootstrap(monkeypatch, tmp_path, root / "nested")
+    monkeypatch.setattr(worktree_identity, "_worktree_id_from_git", lambda cwd: None)
+
+    def failed_probe(*args, **kwargs):
+        raise OSError("fixture Git unavailable")
+
+    monkeypatch.setattr(worktree_identity.git_ops, "git", failed_probe)
+    monkeypatch.setattr(tracking, "find_worktree_id_by_cwd", lambda *a, **k: "tracked")
+    monkeypatch.setattr(
+        tracking, "load_record_by_id",
+        lambda *a, **k: SimpleNamespace(repo="project", worktree_path=str(root)),
+    )
+    assert context_cli.cmd_picker_bootstrap(SimpleNamespace(json=True)) == 0
+    assert json.loads(capfd.readouterr().out)["workspace"] == str(root)
