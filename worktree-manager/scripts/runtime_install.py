@@ -15,6 +15,7 @@ import tempfile
 import uuid
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
+from typing import TextIO
 
 SCRIPTS = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPTS))
@@ -207,9 +208,23 @@ def _activate_after_bootstrap_update(root: Path, slot: Path) -> None:
         raise RuntimeError(f"Constructed Manager daemon activation failed ({process.returncode})")
 
 
+def _windows_console_stream(stream: TextIO | None) -> bool:
+    if stream is None:
+        return False
+    import ctypes
+    from ctypes import wintypes
+    import msvcrt
+
+    mode = wintypes.DWORD()
+    probe = ctypes.WinDLL("kernel32", use_last_error=True).GetConsoleMode
+    probe.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+    probe.restype = wintypes.BOOL
+    return bool(probe(msvcrt.get_osfhandle(stream.fileno()), ctypes.byref(mode)))
+
+
 def _dispatch_manager(command: list[str]) -> int:
     if os.name == "nt":
-        console = any(stream is not None and stream.isatty()
+        console = any(_windows_console_stream(stream)
                       for stream in (sys.stdin, sys.stdout, sys.stderr))
         process = subprocess.Popen(
             command, stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr,
