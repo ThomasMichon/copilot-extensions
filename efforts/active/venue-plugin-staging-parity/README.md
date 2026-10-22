@@ -359,6 +359,14 @@ or a reason to create a daemon.
   Vendoring, install closure, module caps, lint and the unchanged protocol
   fixtures pass. Live SSH/native acceptance and authorized rollout remain
   unperformed, and the parent remains Active.
+- Dev advanced during review and enrolled activation-preservation's import
+  closure in the exact unit packet. The managed branch sync retained a recovery
+  checkpoint; the manifest now binds only the changed compatibility export
+  and its new canonical parser, without changing nodes, targets, effects or
+  budgets. A bounded Windows packet attempt reached 839 passes before the
+  already documented Linux-only activation cohort attempted native Windows
+  loading and was refused by the unchanged observer. That is not a passing
+  packet or native qualification; the required hosted Linux packet must pass.
 
 ### 2026-10-22 - Correct configured remote identity and attached recovery
 
