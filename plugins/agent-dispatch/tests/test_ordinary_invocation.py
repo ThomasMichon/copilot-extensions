@@ -36,6 +36,162 @@ def test_ready_and_frozen_invocation_commit_and_read_back_together(intent):
     assert queue.get_reservation(reservation.key).agent_info == written.agent_info
 
 
+def test_trace_distinguishes_local_bytes_from_sorted_retained_values(intent, tmp_path, monkeypatch):
+    import hashlib
+    from agent_dispatch import launch_debug
+    from agent_dispatch.ordinary_invocation import native_payload
+
+    queue, task, reservation, info, _, invocation = intent
+    record_created_agent(queue, reservation.key, task_generation=task.generation,
+                         agent_info=info, startup_invocation=invocation)
+    retained = queue.get_reservation(reservation.key).agent_info["startup_invocation"]
+    initial = json.dumps(native_payload(invocation), ensure_ascii=False)
+    reconstructed = json.dumps(native_payload(retained), ensure_ascii=False)
+    assert json.loads(initial) == json.loads(reconstructed)
+    assert len(initial.encode("utf-8")) == len(reconstructed.encode("utf-8"))
+    assert hashlib.sha256(initial.encode("utf-8")).hexdigest() != hashlib.sha256(
+        reconstructed.encode("utf-8"),
+    ).hexdigest()
+
+    monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(tmp_path / "trace-install"))
+    monkeypatch.setenv("AGENT_DISPATCH_BRIDGE_CLI_TRACE", "1")
+    trace = launch_debug.begin(["bridge"], ["--json", "send", "bridge-a"],
+                               prompt_input=initial, input_reference=reservation.key)
+    assert trace
+    stdin = json.loads(trace.path.read_text().splitlines()[0])["stdin"]
+    assert stdin["sha256"] == hashlib.sha256(initial.encode("utf-8")).hexdigest()
+    canonical = json.dumps(json.loads(reconstructed), sort_keys=True,
+                           separators=(",", ":"), ensure_ascii=False, allow_nan=False)
+    assert stdin["json_sha256"] == hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    assert stdin["json_status"] == "valid"
+    assert invocation["prompt"] not in trace.path.read_text()
+
+
+def _launch_debug_recipe(call, reservation):
+    import re
+    from pathlib import Path
+
+    document = Path(__file__).resolve().parents[1] / "docs" / "launch-debugging.md"
+    recipe, = re.findall(r"```python\n(.*?)```", document.read_text(encoding="utf-8"), re.S)
+    namespace = {"call": call, "reservation": reservation}
+    exec(compile(recipe, str(document), "exec"), namespace)
+    return namespace
+
+
+@pytest.mark.parametrize("retained_readback", [False, True], ids=["old-byte-exact", "sorted-value-exact"])
+def test_documented_stdin_recipe_with_real_child_and_retained_readback(
+    intent, tmp_path, monkeypatch, capsys, retained_readback,
+):
+    import sys
+    from agent_dispatch import launch_debug
+    from agent_dispatch.ordinary_invocation import native_payload
+    from agent_dispatch.procutil import no_window_kwargs
+
+    queue, task, reservation, info, _, invocation = intent
+    record_created_agent(queue, reservation.key, task_generation=task.generation,
+                         agent_info=info, startup_invocation=invocation)
+    retained = asdict(queue.get_reservation(reservation.key))
+    if not retained_readback:
+        retained["agent_info"]["startup_invocation"] = invocation
+    original = json.dumps(native_payload(invocation), ensure_ascii=False)
+    child = tmp_path / "bounded_json_consumer.py"
+    child.write_text(
+        "import json,sys\nvalue=json.load(sys.stdin)\nprint(json.dumps({'ok':value['version']==1}))\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(tmp_path / "trace-install"))
+    monkeypatch.setenv("AGENT_DISPATCH_BRIDGE_CLI_TRACE", "1")
+    prefix, argv = [sys.executable], [str(child)]
+    trace = launch_debug.begin(prefix, argv, prompt_input=original, timeout=5)
+    assert trace
+    result = subprocess.run(
+        [*prefix, *argv], input=original, capture_output=True, text=True,
+        encoding="utf-8", timeout=5, check=False, **no_window_kwargs(),
+    )
+    trace.finish(result=result)
+    call = json.loads(trace.path.read_text().splitlines()[0])
+    if not retained_readback:
+        # Old traces can still prove byte identity without an additive field.
+        call["stdin"].pop("json_status")
+        call["stdin"].pop("json_sha256")
+    consumed = _launch_debug_recipe(call, retained)
+    assert consumed["result"].returncode == result.returncode == 0
+    assert json.loads(consumed["result"].stdout) == {"ok": True}
+    assert json.loads(consumed["payload"]) == json.loads(original)
+    expected = "JSON-value-exact (not byte-exact)" if retained_readback else "byte-exact"
+    assert capsys.readouterr().out.strip() == expected
+    assert (consumed["payload"] != original) is retained_readback
+    assert "Unicode caf" not in trace.path.read_text()
+
+
+@pytest.mark.parametrize("change", ["old-trace", "changed-value"])
+def test_documented_stdin_recipe_never_waives_missing_or_mismatched_evidence(
+    intent, tmp_path, monkeypatch, change,
+):
+    from agent_dispatch import launch_debug
+    from agent_dispatch.ordinary_invocation import native_payload
+
+    queue, task, reservation, info, _, invocation = intent
+    record_created_agent(queue, reservation.key, task_generation=task.generation,
+                         agent_info=info, startup_invocation=invocation)
+    retained = asdict(queue.get_reservation(reservation.key))
+    original = json.dumps(native_payload(invocation), ensure_ascii=False)
+    monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(tmp_path / "trace-install"))
+    monkeypatch.setenv("AGENT_DISPATCH_BRIDGE_CLI_TRACE", "1")
+    trace = launch_debug.begin(["must-not-run"], [], prompt_input=original)
+    assert trace
+    call = json.loads(trace.path.read_text().splitlines()[0])
+    if change == "old-trace":
+        call["stdin"].pop("json_status")
+        call["stdin"].pop("json_sha256")
+        message = "old/invalid trace"
+    else:
+        retained["agent_info"]["startup_invocation"]["prompt"] += " changed"
+        message = "JSON values differ"
+    with pytest.raises(AssertionError, match=message):
+        _launch_debug_recipe(call, retained)
+
+
+@pytest.mark.parametrize("payload,status", [
+    (None, "absent"), ("", "invalid"), ("not JSON", "invalid"), ("{", "invalid"),
+    ('{"value": NaN}', "invalid"), ('{"value": "\\ud800"}', "invalid"),
+    ("null", "valid"), ('{"value": false}', "valid"),
+])
+def test_stdin_json_digest_availability_is_explicit_and_nonblocking(tmp_path, monkeypatch, payload, status):
+    from agent_dispatch import launch_debug
+
+    monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(tmp_path / "trace-install"))
+    monkeypatch.setenv("AGENT_DISPATCH_BRIDGE_CLI_TRACE", "1")
+    trace = launch_debug.begin(["bridge"], ["status"], prompt_input=payload)
+    assert trace
+    stdin = json.loads(trace.path.read_text().splitlines()[0])["stdin"]
+    assert stdin["json_status"] == status
+    assert (stdin["json_sha256"] is not None) is (status == "valid")
+    result = subprocess.CompletedProcess([], 19, "unchanged", "")
+    trace.finish(result=result)
+    assert result.returncode == 19 and result.stdout == "unchanged"
+
+
+def test_json_digest_does_not_log_sensitive_input_and_default_off_does_not_parse(tmp_path, monkeypatch):
+    from agent_dispatch import launch_debug
+
+    monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(tmp_path / "trace-install"))
+    monkeypatch.setenv("AGENT_DISPATCH_BRIDGE_CLI_TRACE", "1")
+    payload = '{"prompt":"private-synthetic-assignment","token":"synthetic-auth-value"}'
+    trace = launch_debug.begin(["bridge"], ["send", "actor"], prompt_input=payload)
+    assert trace
+    text = trace.path.read_text()
+    assert json.loads(text)["stdin"]["json_status"] == "valid"
+    assert "private-synthetic-assignment" not in text and "synthetic-auth-value" not in text
+    monkeypatch.setenv("AGENT_DISPATCH_BRIDGE_CLI_TRACE", "0")
+
+    def no_parse(*args, **kwargs):
+        raise AssertionError("default-off tracing parsed stdin")
+
+    monkeypatch.setattr(launch_debug.json, "loads", no_parse)
+    assert launch_debug.begin(["bridge"], ["send", "actor"], prompt_input=payload) is None
+
+
 def test_deferral_keeps_original_key_label_generation_and_prompt(intent):
     queue, task, reservation, info, prompt, invocation = intent
     record_created_agent(queue, reservation.key, task_generation=0,

@@ -60,6 +60,12 @@ Recorded fields:
   non-exact instead of silently reconstructing it.
 - Stdin source (`none` or `frozen_startup_invocation`), retained reservation
   reference, UTF-8 byte size and SHA-256. **Never stdin/prompt content.**
+  These raw byte fields remain unchanged. Additive `json_status` is `valid`,
+  `invalid` or `absent`; `json_sha256` is null unless valid. The JSON digest
+  hashes UTF-8 `json.dumps(json.loads(input), sort_keys=True, separators=(",", ":"),
+  ensure_ascii=False, allow_nan=False)`. It compares parsed JSON values across
+  object-key ordering/formatting, not historical byte identity; it is not an
+  independent authorization or receipt.
 - **Separate stdout and stderr** sizes/digests and causal diagnostics.
   Each stream declares `capture`: `complete` for observed completed-process
   output, `partial` for bytes captured before a timeout, or `unavailable` when
@@ -144,7 +150,11 @@ before sending, not manual database edits.
 
 For a send, use the existing frozen invocation from an authenticated coordinator
 reservation read, **in memory** in the Dispatch runtime. The serialization used
-at the boundary is exactly:
+at the boundary uses `json.dumps(..., ensure_ascii=False)`, but the initial
+send can serialize the locally prepared mapping while storage sorts its keys.
+Retained readback therefore preserves the JSON values without necessarily
+preserving the original insertion order or raw digest. Distinguish those two
+claims explicitly:
 
 ```python
 import hashlib
@@ -159,8 +169,22 @@ payload = json.dumps(
     native_payload(reservation["agent_info"]["startup_invocation"]), ensure_ascii=False,
 )
 assert call["argv_exact"] and call["cwd_exact"]
-assert len(payload.encode("utf-8")) == call["stdin"]["bytes"]
-assert hashlib.sha256(payload.encode("utf-8")).hexdigest() == call["stdin"]["sha256"]
+raw = payload.encode("utf-8")
+observed = call["stdin"]
+if (len(raw) == observed["bytes"]
+        and hashlib.sha256(raw).hexdigest() == observed["sha256"]):
+    reconstruction = "byte-exact"
+else:
+    assert observed.get("json_status") == "valid" and observed.get("json_sha256"), (
+        "Raw mismatch: old/invalid trace has no JSON-value digest; exactness is unproven"
+    )
+    canonical = json.dumps(json.loads(payload), sort_keys=True, separators=(",", ":"),
+                           ensure_ascii=False, allow_nan=False)
+    assert hashlib.sha256(canonical.encode("utf-8")).hexdigest() == observed["json_sha256"], (
+        "Retained JSON values differ from the observed input"
+    )
+    reconstruction = "JSON-value-exact (not byte-exact)"
+print(reconstruction)  # Classification only; never print the payload.
 # Only after choosing to perform this real operation, not as an automatic replay:
 result = subprocess.run(
     [*call["prefix"], *call["argv"]], cwd=call["cwd"], input=payload,
@@ -172,9 +196,14 @@ result = subprocess.run(
 
 This reuses `native_payload`: do not copy a prompt into a debug log, serialize
 the entire stored envelope, mint a new invocation key or recreate a reservation.
-A digest mismatch, missing frozen source or omitted metadata means the input
-is not proven exact. Recover the original source through existing tooling,
-or describe any reconstruction explicitly. After timeout inspect the retained
+A raw digest mismatch must never be described as byte-exact, even when the
+additive JSON-value digest matches. An old trace without that digest cannot
+silently waive a failed raw check: recover the original byte order/source, or
+leave the reconstruction unproven. A JSON-value mismatch, missing frozen source
+or omitted metadata also leaves it unproven. This is diagnostic evidence, not a
+change to execution, admission, ownership or receipt checks. Do not change the
+frozen invocation or actual send serializer just to force a hash match.
+After timeout inspect the retained
 session/status and ordinary receipt before deciding what to do; tracing adds
 no automatic retry.
 

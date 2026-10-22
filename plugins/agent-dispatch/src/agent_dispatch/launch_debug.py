@@ -165,12 +165,19 @@ def begin(prefix: list[str], argv: list[str], *, prompt_input: str | None = None
     if not _enabled(root):
         return None
     environment = {key: value for key, value in os.environ.items() if value and _SECRET_KEY.search(key)}
-    if prompt_input:
+    json_status, json_sha256 = "absent", None
+    if prompt_input is not None:
         environment["TRACE_STDIN_SECRET"] = prompt_input
+        envelope = None
         try:
             envelope = json.loads(prompt_input)
-        except (ValueError, RecursionError):
-            envelope = None
+            canonical = json.dumps(envelope, sort_keys=True, separators=(",", ":"),
+                                   ensure_ascii=False, allow_nan=False)
+            json_sha256 = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+        except (ValueError, RecursionError, UnicodeError):
+            json_status = "invalid"
+        else:
+            json_status = "valid"
         if isinstance(envelope, dict) and isinstance(envelope.get("prompt"), str) and envelope["prompt"]:
             environment["TRACE_PROMPT_SECRET"] = envelope["prompt"]
     safe_prefix = [_safe(arg, environment) for arg in prefix]
@@ -194,6 +201,7 @@ def begin(prefix: list[str], argv: list[str], *, prompt_input: str | None = None
             "timeout_seconds": timeout,
             "stdin": {
                 **_metadata(prompt_input), "source": "frozen_startup_invocation" if prompt_input is not None else "none",
+                "json_status": json_status, "json_sha256": json_sha256,
                 "reference": _safe(input_reference, environment) if input_reference else None,
                 "content": "omitted",
             },
