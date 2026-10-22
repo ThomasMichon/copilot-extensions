@@ -369,12 +369,20 @@ def test_owned_pr_rebase_publishes_with_original_lease(pr_repo, monkeypatch, sch
     assert not git_ops.is_commit_ancestor(old, tip, cwd=path)
     raw_url = "".join(["https://", "developer:", "synthetic-password", "@example.com/repo.git"])
     original_git = pr_rebase._git
+    original_rows = pr_rebase._commit_rows
+    observed_rows = []
 
     def url_with_credentials(*args, cwd):
         if args == ("remote", "get-url", "--push", "origin"):
             return raw_url
         return original_git(*args, cwd=cwd)
 
+    def read_rows(base, head, cwd):
+        rows = original_rows(base, head, cwd)
+        observed_rows.append(((base, head), rows))
+        return rows
+
+    monkeypatch.setattr(pr_rebase, "_commit_rows", read_rows)
     with monkeypatch.context() as patch:
         patch.setattr(pr_rebase, "_git", url_with_credentials)
         record = _record(wid)
@@ -383,12 +391,20 @@ def test_owned_pr_rebase_publishes_with_original_lease(pr_repo, monkeypatch, sch
             old, cwd=str(path),
         )
         assert proof is not None
+        assert len(observed_rows) == 2
         pr_rebase._save(proof, str(path))
         metadata = Path(_git("rev-parse", "--absolute-git-dir", cwd=path))
         serialized = (metadata / "agent-worktrees-pr-rebase.json").read_text()
         assert raw_url not in serialized and "synthetic-password" not in serialized
         assert json.loads(serialized)["remote_fingerprint"] == hashlib.sha256(raw_url.encode()).hexdigest()
     assert _publish(command, config, wid)
+    if flow == "manual":
+        assert len(observed_rows) == 4
+        assert observed_rows[:2] == observed_rows[2:]
+        assert all(
+            first[1] is not second[1]
+            for first, second in zip(observed_rows[:2], observed_rows[2:])
+        )
     assert _git("--git-dir", str(remote), "rev-parse", branch, cwd=path) == tip
     record = _record(wid)
     assert record.pr.head_sha == tip
@@ -653,19 +669,27 @@ def test_owned_pr_rebase_publishes_explicit_conflict_continuation(pr_repo, comma
 @pytest.mark.guard
 @pytest.mark.parametrize("changed_message", [" Message\n", "Message\n\n"])
 def test_owned_pr_rebase_conflict_message_is_compared_without_stripping(monkeypatch, changed_message):
+    old, new, onto = "a" * 40, "b" * 40, "c" * 40
+    messages = []
+
     def fake_git(*args, cwd, check, isolated_repository):
         assert isolated_repository
         if args[-1] == "base..original":
-            stdout = "old base\n"
-        elif args[-1] == "onto..finished":
-            stdout = "new onto\n"
+            stdout = f"{old} base\n"
+        elif args[-1] == f"{onto}..finished":
+            stdout = f"{new} {onto}\n"
         else:
             stdout = "current-tree\n"
         return subprocess.CompletedProcess(args, 0, stdout=stdout)
 
     def fake_run(args, **kwargs):
         assert not kwargs.get("text")
-        message = "Message\n" if args[-1] == "old" else changed_message
+        if "log" in args:
+            return subprocess.CompletedProcess(
+                args, 0, stdout=f"{onto} {'1' * 40}\n{new} {'2' * 40}\n".encode(), stderr=b"",
+            )
+        messages.append(args[-1])
+        message = "Message\n" if args[-1] == old else changed_message
         stdout = b"Author\x00author@example.com\x002026-01-01T00:00:00Z\x00" + message.encode()
         return subprocess.CompletedProcess(args, 0, stdout=stdout, stderr=b"")
 
@@ -674,9 +698,10 @@ def test_owned_pr_rebase_conflict_message_is_compared_without_stripping(monkeypa
     monkeypatch.setattr(pr_rebase, "_ancestor", lambda *args: False)
     monkeypatch.setattr(pr_rebase, "_merge_tree", lambda *a: ("replay-tree", True))
     assert pr_rebase._conflict_lineage(
-        "base", "original", "onto", "finished", ["old-patch"], ["new-patch"],
-        [("new", "rebase (continue): Message")], "unused",
+        "base", "original", onto, "finished", ["old-patch"], ["new-patch"],
+        [(new, "rebase (continue): Message")], "unused",
     ) is None
+    assert messages == [old, new]
 
 
 @pytest.mark.guard

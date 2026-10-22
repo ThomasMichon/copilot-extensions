@@ -250,6 +250,11 @@ multiline values and valueless settings. This is invocation-local evidence, not
 a cache: later publications re-read configuration, and URL pinning, hooks,
 ownership, leases and bounded child cleanup remain enforced.
 
+Verified source replays reuse fresh pinned range rows within one decision and
+read the corresponding raw commit trees in one ordered probe. Tree evidence
+does not replace parent reconstruction, raw author/message comparison, explicit
+conflict-continuation proof or the existing upstream-empty-commit checks.
+
 ## Captured child ownership
 
 Bounded Git publication and static-guidance Git preflights use a headless

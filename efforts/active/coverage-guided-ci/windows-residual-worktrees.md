@@ -87,6 +87,61 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Admitted narrow batches
 
+### R fresh pinned replay ranges and raw trees
+
+`verify` reads each pinned old/new range once, sharing those rows only
+between that decision's diagnostic patch series and lineage reconstruction.
+A later verification obtains new lists and fresh Git reads. `_tree_ids`
+accepts only complete SHA-1/SHA-256 commit IDs, deduplicates them in request
+order and reads their raw trees in one bounded isolated binary Git probe.
+Exactly one ordered, complete row per requested commit is required;
+missing, truncated, malformed, duplicate or substituted output refuses
+proof. Notes, signatures, color, replacement objects and inherited foreign
+repository selectors cannot become tree evidence.
+
+The extraction retains current Dev's stronger empty-upstream behavior:
+only an empty commit already reachable from the pinned upstream can lack
+a diagnostic patch ID. A source-owned empty commit still refuses proof.
+The old-range filter is local to its consumer rather than mutating shared
+range evidence. Existing parent reconstruction, clean/no-op replay,
+explicit conflict continuation and raw author/message comparison remain
+independent conditions; cached patch IDs never authorize replay.
+
+B-REPLAY-OBSERVE adds exact range-read counts and fresh-list assertions to
+the existing real original-lease cases. The conflict-message double now
+provides complete pinned IDs and actual-shaped raw tree output, and
+asserts both unstripped identity/message reads occurred before refusal.
+No fixture conversion, replay permission, retention authority, assertion
+retirement, mark or runner-group change is bundled.
+
+The focused raw-tree module and existing replay module collect seventy
+unique nodes. With the existing exhaustive opt-in enabled, all but the
+separate native-consoleless control passed in exhaustive disjoint
+15/15/15/15/10 functional groups: 69 passed, one original opt-in skip,
+275.09 seconds including collection, preparation and cleanup. Group walls
+were 10.58/37.83/130.42/64.31/25.28 seconds. Enabling that existing native
+opt-in then passed its consoleless two-cycle control and all twenty-two
+raw-tree cases without skips, 20.48 seconds inclusive. Together these
+account for all seventy original collected identities without exclusions.
+
+A further normal, unpartitioned replay-module run enabled both opt-ins
+and passed all forty-eight assertions without skips, but took 243.39
+seconds including preparation and cleanup (235.97 seconds pytest).
+The diagnostic therefore failed the unchanged 240-second inclusive
+headroom target and receives no performance-qualification credit.
+All executions used exactly two workers, retained existing marks and
+every item/native/process/memory bound, and made no host quietness claim.
+Ruff and thirteen install contracts pass. Full-plugin and repeated
+same-head performance acceptance remain open.
+
+Documentation impact: the plugin README and this census describe fresh
+range/tree evidence. This below-altitude optimization changes no public
+command/configuration or replay authorization boundary. Real temporary Git
+histories provide the simple consumer end-to-end lane. No installer,
+bootstrap or first-provision behavior changes, so production clean-room
+and external development-venue lanes are inapplicable. Full native
+same-head and all normal-group qualification remain parent obligations.
+
 ### P fresh publication transport evidence
 
 `_remote_snapshot` resolves fetch and complete push URLs once per decision
