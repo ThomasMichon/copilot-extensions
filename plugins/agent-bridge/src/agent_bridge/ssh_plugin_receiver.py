@@ -14,7 +14,7 @@ import threading
 # The worker owns the kill-on-close Job before it can execute preparation or
 # spawn installers. It inherits containment; no breakaway or durable process.
 _WORKER = r"""
-import ctypes,os,sys
+import ctypes,os,sys,threading
 if os.name == 'nt':
     from ctypes import wintypes as w
     class Basic(ctypes.Structure):
@@ -48,6 +48,14 @@ if os.name == 'nt':
         raise ctypes.WinError(ctypes.get_last_error())
     if not kernel.AssignProcessToJobObject(job,kernel.GetCurrentProcess()):
         raise ctypes.WinError(ctypes.get_last_error())
+    kernel.TerminateJobObject.argtypes = [w.HANDLE,w.UINT]
+    kernel.TerminateJobObject.restype = w.BOOL
+    def expire(handle=job,terminate=kernel.TerminateJobObject,exit_now=os._exit):
+        if not terminate(handle,124):
+            exit_now(124)
+    deadline = threading.Timer(float(sys.argv[1]),expire)
+    deadline.daemon = True
+    deadline.start()
 exec(compile(sys.stdin.buffer.read().decode('utf-8'),'<ssh-plugin-preparation>','exec'))
 """
 
@@ -57,7 +65,7 @@ import base64,json,os,signal,subprocess,sys,time
 try:
     request=json.loads(sys.stdin.buffer.read())
     worker=subprocess.Popen(
-        [sys.executable,'-I','-S','-X','utf8','-u','-c',request['bootstrap']],
+        [sys.executable,'-I','-S','-X','utf8','-u','-c',request['bootstrap'],str(request['timeout'])],
         stdin=subprocess.PIPE)
     try:
         worker.communicate(base64.b64decode(request['program']),timeout=request['timeout'])
@@ -129,7 +137,7 @@ def supervise(encoded: str, timeout: float) -> None:
         stdout, stderr, code = _posix_run(encoded, timeout)
     else:
         worker = subprocess.Popen(
-            [sys.executable, "-I", "-S", "-X", "utf8", "-u", "-c", _WORKER],
+            [sys.executable, "-I", "-S", "-X", "utf8", "-u", "-c", _WORKER, str(timeout)],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),  # headless-guard: allow streamed stdlib receiver has no host agent_procutil
         )

@@ -431,11 +431,19 @@ with both output pipes drained concurrently. The streamed receiver bounds its
 worker to 540 seconds and contains installer descendants in a POSIX process
 group or a Windows kill-on-close Job. A POSIX keeper retains group ownership
 until cleanup on success, error or timeout; its own bounded fallback also
-handles a lost supervisor. Cancellation waits for the bounded
+handles a lost supervisor. Windows starts an independent worker-owned Job
+deadline before executing preparation, so losing the supervisor does not
+remove the deadline. Cancellation waits for the bounded
 channel to settle before propagating: killing a local SSH client alone does not
 prove that the remote writer stopped. A failed or cancelled preparation never
 opens productive ACP stdio. This is ACP preparation integration, not proof of
 headed SSH CLI parity or of a deployed/running release.
+
+The receiver verifies the Git repository root separately from the productive
+execution directory. Registration and its raw compiled context belong to that
+root; the launch retains the resolved execution cwd, including nested
+directories. Prepared launch metadata carries both identities rather than
+requiring an execution subdirectory to equal the repository root.
 
 Remaining exclusions are command wrappers, privileged
 configurations (including POSIX `requires_admin`), sub-daemon relays and

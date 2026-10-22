@@ -301,6 +301,51 @@ async def test_spawn_prepares_after_allocation_before_existing_productive_comman
 
 
 @pytest.mark.asyncio
+async def test_nested_execution_cwd_keeps_native_repository_root_and_productive_directory(
+    receiver, monkeypatch,
+):
+    target, manager, _controller, child, _home = receiver
+    _checkout(child, plugin=True)
+    nested = child / "tools" / "nested execution"
+    nested.mkdir(parents=True)
+    target.cwd = "/stale/configured-checkout"
+    target.worktree_id = None
+    manager.ensure_connected = AsyncMock()
+    monkeypatch.setattr(transport, "get_default_manager", lambda: manager)
+    monkeypatch.setattr(transport, "_effective_auth_hooks", lambda hooks: hooks)
+    monkeypatch.setattr(transport, "_resolve_worktree_remote", AsyncMock(return_value={"launch": {
+        "worktree_id": "actual-child", "work_dir": str(nested),
+    }}))
+
+    async def open_stdio(host, command):
+        assert target.cwd == str(nested)
+        context = target.prepared_plugins
+        assert context["cwd"] == str(nested) and context["repository_root"] == str(child)
+        assert context["logical_payloads"] == {"sample@local": str(child / ".ai" / "sample")}
+        assert (child / ".github" / "copilot" / "settings.local.json").is_file()
+        assert not (nested / ".github").exists()
+        return SimpleNamespace(pid=999)
+
+    manager.open_stdio_channel = AsyncMock(side_effect=open_stdio)
+    process = await transport.spawn_ssh(target)
+    assert process.target.cwd == str(nested)
+    manager.open_stdio_channel.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_applicable_receiver_requires_a_verified_repository_root(receiver):
+    target, manager, _controller, _child, _home = receiver
+    manager.exec_command = AsyncMock(return_value=SimpleNamespace(
+        exit_code=0, timed_out=False, stderr="", stdout="__VENUE_CHECKOUT__" + json.dumps({
+            "requested_cwd": target.cwd, "cwd": target.cwd, "applicable": True,
+        }),
+    ))
+    with pytest.raises(ValueError, match="verified repository root"):
+        await ssh_plugin_preparation.prepare_ssh_plugins(target, manager, environment={})
+    assert target.prepared_plugins is None
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("failure", ["exit", "timeout", "cancel"])
 async def test_preparation_failure_never_opens_productive_stdio(receiver, monkeypatch, failure):
     target, manager, _controller, _child, _home = receiver
@@ -424,17 +469,21 @@ async def test_receiver_early_exit_reaps_mutating_descendants(receiver, tmp_path
 
 
 @pytest.mark.asyncio
-async def test_lost_supervisor_does_not_orphan_early_exit_descendants(tmp_path):
+@pytest.mark.parametrize("active_past_deadline", [False, True])
+async def test_lost_supervisor_does_not_orphan_descendants(tmp_path, active_past_deadline):
     from agent_bridge import ssh_plugin_receiver
 
     heartbeat, started = tmp_path / "heartbeat", tmp_path / "started"
-    encoded = base64.b64encode(_mutating_receiver(
-        heartbeat, started, early_exit=0, exit_delay=.5,
-    ).encode()).decode()
+    program = (
+        _mutating_receiver(heartbeat, started) if active_past_deadline else
+        _mutating_receiver(heartbeat, started, early_exit=0, exit_delay=.5)
+    )
+    timeout = 1 if active_past_deadline else 3
+    encoded = base64.b64encode(program.encode()).decode()
     script = tmp_path / "supervisor.py"
     script.write_text(
         Path(ssh_plugin_receiver.__file__).read_text(encoding="utf-8")
-        + f"\nsupervise({encoded!r},3)\n",
+        + f"\nsupervise({encoded!r},{timeout})\n",
         encoding="utf-8",
     )
     before = time.monotonic()
@@ -451,7 +500,7 @@ async def test_lost_supervisor_does_not_orphan_early_exit_descendants(tmp_path):
             await asyncio.sleep(.02)
         process.kill()
         await asyncio.to_thread(process.communicate, timeout=10)
-        await asyncio.sleep(1)
+        await asyncio.sleep(1.5 if active_past_deadline else 1)
         settled = heartbeat.read_bytes()
         await asyncio.sleep(.3)
         assert heartbeat.read_bytes() == settled

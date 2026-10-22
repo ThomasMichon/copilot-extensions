@@ -113,14 +113,27 @@ async def prepare_ssh_plugins(target, manager, *, environment: dict[str, str]) -
     probe = await _run_python(
         manager, target,
         prefix
-        + "import pathlib\n"
+        + "import pathlib,shutil,subprocess\n"
         + f"requested=base64.b64decode({checkout!r}).decode('utf-8')\n"
         + "checkout=pathlib.Path(requested).resolve(strict=True)\n"
         + "if not checkout.is_dir():\n"
         + "    raise ValueError('SSH execution checkout is not an existing directory')\n"
         + "applicable=any((parent/'.git').exists() for parent in (checkout,*checkout.parents))\n"
+        + "repository_root=None\n"
+        + "if applicable:\n"
+        + "    os.chdir(checkout)\n"
+        + "    git=shutil.which('git')\n"
+        + "    if git is None: raise FileNotFoundError('SSH plugin preparation requires Git')\n"
+        + "    result=subprocess.run([git,'rev-parse','--show-toplevel'],\n"
+        + "        capture_output=True,text=True,timeout=30,\n"
+        + "        creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))\n"
+        + "    if result.returncode:\n"
+        + "        raise RuntimeError('SSH repository lookup failed: '+result.stderr.strip())\n"
+        + "    if not result.stdout.strip(): raise RuntimeError('SSH repository lookup returned no root')\n"
+        + "    repository_root=str(pathlib.Path(result.stdout.strip()).resolve(strict=True))\n"
         + "print('__VENUE_CHECKOUT__'+json.dumps({\n"
-        + "    'requested_cwd':requested,'cwd':str(checkout),'applicable':applicable}))\n",
+        + "    'requested_cwd':requested,'cwd':str(checkout),'applicable':applicable,\n"
+        + "    'repository_root':repository_root}))\n",
     )
     line = next(
         (line for line in reversed(probe.splitlines()) if line.startswith("__VENUE_CHECKOUT__")),
@@ -141,12 +154,17 @@ async def prepare_ssh_plugins(target, manager, *, environment: dict[str, str]) -
             "applicable": False, "cwd": target.cwd, "plugins": [], "logical_payloads": {},
         }
         return None
+    repository_root = proof.get("repository_root")
+    if not isinstance(repository_root, str) or not repository_root.strip():
+        raise ValueError("SSH plugin preparation returned no verified repository root")
     plan = await venue_plugin_plan({"repo": target.project}, caller=target)
     output = await _run_python(
         manager, target,
         prefix + build_prepare_python(plan, target.cwd, include_prepared_context=True),
     )
-    context = parse_prepared_context(output, expected_repo=target.cwd)
+    context = parse_prepared_context(output, expected_repo=repository_root)
     directories = parse_prepared(output)
-    target.prepared_plugins = context
+    target.prepared_plugins = {
+        **context, "repository_root": repository_root, "cwd": target.cwd,
+    }
     return [arg for directory in directories for arg in ("--plugin-dir", directory)]

@@ -322,6 +322,27 @@ or a reason to create a daemon.
 
 ## Journal
 
+### 2026-10-22 - Keep Windows deadlines independent and distinguish execution cwd
+
+- #7856's next review found that a Windows worker surviving its supervisor
+  retained its own Job handle but lost the supervisor's deadline enforcement.
+  The worker now starts an independent deadline before executing preparation;
+  expiry terminates its entire Job, even if the supervisor is gone.
+- The exact regression keeps the worker and its mutating child active past a
+  one-second deadline, rather than making the worker voluntarily exit. The
+  published prior source fails the heartbeat-stability control; corrected
+  source passes, before the child's six-second natural completion. Probe
+  writers and temporary files were cleaned up.
+- The same review identified valid nested execution directories being compared
+  against a repository-root registration context. The receiver now verifies
+  the Git root separately, validates the raw compiled context against that
+  root, and retains the productive execution cwd with explicit repository-root
+  metadata. A native child-marketplace and launch-order regression exercises a
+  nested directory; an absent root proof fails explicitly.
+- The adapter suite passes all 32 cases, including the real SSH controls.
+  These corrections remain in the current source PR; no running-release,
+  privileged or complete parent-effort result is implied.
+
 ### 2026-10-22 - Correct session-qualified controller and early-exit cleanup
 
 - #7856's first review identified two real gaps. The shared venue planner now
