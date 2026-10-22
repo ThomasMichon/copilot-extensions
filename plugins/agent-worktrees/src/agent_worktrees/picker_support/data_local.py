@@ -76,14 +76,14 @@ def reconcile_prs() -> int:
     A PR merged externally (the ``auto-merge`` label / provider API, bypassing
     ``finalize``/``pr-status``) leaves the local record stale at ``open``, so the
     Picker shows already-merged worktrees as having open PRs. This reconciles
-    every local worktree whose active PR is still non-terminal and persists the
-    resolved state, so the next render is honest.
+    every eligible tracked PR, including closed entries and terminal entries
+    with live resource claims, so the next render is honest.
 
-    Returns the count of records whose active PR moved to a terminal state.
+    Returns the count of records whose PR state or claim disposition changed.
     Never raises: an unconfigured/unreachable provider leaves state untouched.
     Local machine only -- remote worktrees reconcile on their owning machine.
     """
-    from .. import pr_ops
+    from .. import pr_ops, pr_reconcile
 
     try:
         config = cfg.load_config()
@@ -94,17 +94,13 @@ def reconcile_prs() -> int:
         return 0
     changed = 0
     for rec in records:
-        active = rec.active_pr()
-        if active is None or active.number is None:
-            continue
-        if tracking._pr_is_terminal(active):
+        if not any(pr_ops._pr_needs_reconcile(rec, pr) for pr in rec.prs):
             continue
         try:
-            pr_ops._reconcile_active_pr(rec, config, best_effort=True)
+            updated = pr_reconcile.reconcile_pr_state(rec, config, best_effort=True)
         except Exception:
             continue
-        new_active = rec.active_pr()
-        if new_active is not None and tracking._pr_is_terminal(new_active):
+        if updated:
             changed += 1
     return changed
 

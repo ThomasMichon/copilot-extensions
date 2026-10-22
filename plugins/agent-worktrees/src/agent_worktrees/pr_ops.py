@@ -1596,17 +1596,22 @@ def _reconcile_active_pr(
         _reconcile_pr(record, pr, config, best_effort=best_effort)
 
 
+def _pr_needs_reconcile(record: tracking.WorktreeRecord, pr: PRRecord) -> bool:
+    """Whether provider state can advance this PR or its resource obligation."""
+    return pr.number is not None and (
+        pr.state == "closed" or not tracking._pr_is_terminal(pr) or any(
+            c.kind == "pr" and c.ref == _pr_claim_ref(pr) and c.is_live
+            for c in record.resources
+        )
+    )
+
+
 def _reconcile_pr(
     record: tracking.WorktreeRecord, active: PRRecord | None, config: Config,
     *, best_effort: bool = False,
 ) -> None:
     """Persist one authority-matched provider observation and claim transition."""
-    if active is None or active.number is None:
-        return
-    if tracking._pr_is_terminal(active) and active.state != "closed" and not any(
-        c.kind == "pr" and c.ref == _pr_claim_ref(active) and c.is_live
-        for c in record.resources
-    ):
+    if active is None or not _pr_needs_reconcile(record, active):
         return
     prcfg = config.default_repo.pr
     api_base = getattr(prcfg, "api_base", "") or ""
@@ -1695,6 +1700,8 @@ def _reconcile_pr(
             tracking.save_record(fresh)
         pr_publication_state.copy_pr(active, current)
         record.resources = fresh.resources
+        for name in ("status", "completed_at", "status_note_at", "last_finalized_at"):
+            setattr(record, name, getattr(fresh, name))
     if released_ref or claimed_ref:
         claim_history.record_pr_event(
             released_ref or claimed_ref, worktree_id=record.worktree_id,

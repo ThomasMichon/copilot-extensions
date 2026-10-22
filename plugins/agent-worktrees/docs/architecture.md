@@ -972,6 +972,10 @@ containers, bridge sessions) so finalizing never orphans unfinished work. (Effor
   source content as landed nor releases a parent claim on its child worktree.
   Head containment can heal display state but is not provider-terminal evidence
   for releasing an otherwise open PR resource.
+  Both Picker reconciliation paths use the same eligibility and claim transition
+  logic. Reopening a finalized owner preserves its prior completion history and
+  refreshes the caller's lifecycle fields, so a later save cannot restore stale
+  finality over an active PR obligation.
 - **Ledger CRUD + reclaim.** `agent-worktrees claims {show,add,settle,release}`.
   `claims add --owner-ref <machine/project/worktree_id>` journals onto a
   **cross-project** owner resolved by qualified ref (not the caller's cwd) — for a

@@ -121,6 +121,7 @@ def heal_numberless_active_pr(
 
 def reconcile_pr_state(
     record: tracking.WorktreeRecord | None, config: Config,
+    *, best_effort: bool = False,
 ) -> bool:
     """Full out-of-band PR-state reconcile for one worktree record.
 
@@ -133,7 +134,7 @@ def reconcile_pr_state(
     before = ([(p.number, p.state) for p in record.prs],
               [(c.kind, c.ref, c.state) for c in record.resources])
     healed = heal_numberless_active_pr(record, config)
-    _reconcile_active_pr(record, config)
+    _reconcile_active_pr(record, config, best_effort=best_effort)
     after = ([(p.number, p.state) for p in record.prs],
              [(c.kind, c.ref, c.state) for c in record.resources])
     return healed or before != after

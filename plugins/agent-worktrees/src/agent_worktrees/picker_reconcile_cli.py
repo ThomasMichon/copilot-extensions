@@ -119,14 +119,12 @@ def build_payload(*, worktree_ids: list[str] | None = None) -> dict:
     # reconcile. Profiling a single-worktree call (the Picker's per-row
     # Actions-dialog refine, #3307 2026-09-30 render-perf follow-up) found
     # this was the dominant cost, paid in full even though the overwhelming
-    # common case (no PR, or an already-terminal one) never uses ``config``
+    # common case (no PR, or an already-settled merge) never uses ``config``
     # at all.
     reconcilable = []
     for rec in records:
-        active = rec.active_pr()
-        if active is None or active.number is None or tracking._pr_is_terminal(active):
-            continue
-        reconcilable.append(rec)
+        if any(pr_ops._pr_needs_reconcile(rec, pr) for pr in rec.prs):
+            reconcilable.append(rec)
 
     config = None
     if reconcilable:
@@ -137,13 +135,13 @@ def build_payload(*, worktree_ids: list[str] | None = None) -> dict:
 
     pr_terminal_count = 0
     if config is not None:
+        from . import pr_reconcile
         for rec in reconcilable:
             try:
-                pr_ops._reconcile_active_pr(rec, config, best_effort=True)
+                changed = pr_reconcile.reconcile_pr_state(rec, config, best_effort=True)
             except Exception:
                 continue
-            active = rec.active_pr()
-            if active is not None and tracking._pr_is_terminal(active):
+            if changed:
                 pr_terminal_count += 1
 
     pathful_records = [

@@ -5,7 +5,7 @@ import types
 from pathlib import Path
 
 from agent_worktrees import __main__ as m
-from agent_worktrees import picker_reconcile_cli
+from agent_worktrees import picker_reconcile_cli, pr_reconcile
 
 
 class _PR:
@@ -27,6 +27,7 @@ class _Record:
         self.worktree_id = worktree_id
         self.worktree_path = str(worktree_path)
         self.prs = prs or []
+        self.resources = []
         self.bound_live = bound_live
         self.mux_live = mux_live
 
@@ -79,7 +80,7 @@ def test_picker_reconcile_local_json_reports_group_c_payload(
         assert best_effort is True
         record.prs[0].state = "merged"
 
-    monkeypatch.setattr(picker_reconcile_cli.pr_ops, "_reconcile_active_pr", _reconcile)
+    monkeypatch.setattr(pr_reconcile, "_reconcile_active_pr", _reconcile)
     monkeypatch.setattr(
         picker_reconcile_cli.reclaim,
         "resolve_bound_copilots",

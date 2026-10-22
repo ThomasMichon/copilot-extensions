@@ -720,3 +720,90 @@ class TestReconcileActivePrSelfHeal:
         pr_ops._reconcile_active_pr(rec, self._config())
         assert tracking.load_record(rec.yaml_path).resources[0].state == "active"
         assert claim_history.history_for_ref("o/r#7") == []
+
+    def test_provider_reopen_preserves_owner_reopening_through_caller_save(
+        self, tmp_path, monkeypatch,
+    ):
+        rec = self._record(tmp_path, monkeypatch)
+        rec.active_pr().state = "closed"
+        rec.resources = [tracking.ResourceClaim(
+            kind="pr", ref="o/r#7", state="released",
+        )]
+        rec.status = "finalized"
+        rec.completed_at = "2026-06-02T10:00:00"
+        rec.status_note_at = "2026-06-02T10:00:00"
+        tracking.save_record(rec)
+        self._patch(monkeypatch, self._fake_provider(merged=False, contained=False))
+        pr_ops._reconcile_active_pr(rec, self._config())
+        assert rec.status == "active"
+        assert rec.completed_at is None
+        assert rec.status_note_at is None
+        assert rec.last_finalized_at == "2026-06-02T10:00:00"
+        tracking.save_record(rec)
+        saved = tracking.load_record(rec.yaml_path)
+        assert saved.status == "active"
+        assert saved.completed_at is None
+        assert saved.status_note_at is None
+        assert saved.last_finalized_at == "2026-06-02T10:00:00"
+        assert saved.resources[0].state == "active"
+
+    @pytest.mark.parametrize("entrypoint", ["local-cli", "local-data"])
+    @pytest.mark.parametrize("scenario", [
+        "cached-closed", "reopened", "contained-display", "older-closed",
+    ])
+    def test_picker_reconciles_terminal_claims_and_reopens(
+        self, tmp_path, monkeypatch, entrypoint, scenario,
+    ):
+        from agent_worktrees import picker_reconcile_cli, reclaim, sessions
+        from agent_worktrees.picker_support import data_local
+        from agent_worktrees.providers import PullResult
+
+        rec = self._record(tmp_path, monkeypatch)
+        rec.active_pr().state = "merged" if scenario == "contained-display" else "closed"
+        rec.resources = [tracking.ResourceClaim(
+            kind="pr", ref="o/r#7",
+            state="released" if scenario == "reopened" else "active",
+        )]
+        if scenario == "older-closed":
+            rec.prs.append(tracking.PRRecord(
+                state="merged", number=8, branch="pr/new", provider="gitea", repo="o/r",
+                opened_at="2026-06-02T10:00:00",
+            ))
+        tracking.save_record(rec)
+
+        class _Provider:
+            name = "gitea"
+
+            def get_pull(self, repo, number, **kwargs):
+                assert number == 7
+                return PullResult(
+                    number=number, merged=False,
+                    state="open" if scenario == "reopened" else "closed",
+                )
+
+        self._patch(monkeypatch, _Provider())
+        monkeypatch.setattr(cfg, "load_config", self._config)
+        monkeypatch.setattr(cfg, "detect_platform", lambda: "linux")
+        monkeypatch.setattr(
+            tracking, "list_records",
+            lambda *args, **kwargs: [tracking.load_record(rec.yaml_path)],
+        )
+        monkeypatch.setattr(reclaim, "resolve_bound_copilots", lambda: [])
+        monkeypatch.setattr(sessions, "mux_status_many", lambda ids: {})
+        monkeypatch.setattr(sessions, "worktree_session_lock_state", lambda record: (False, []))
+
+        def run_picker():
+            if entrypoint == "local-data":
+                return data_local.reconcile_prs()
+            return picker_reconcile_cli.build_payload()["summary"]["pr_terminal_count"]
+
+        assert run_picker() == 1
+        saved = tracking.load_record(rec.yaml_path)
+        assert saved.resources[0].state == (
+            "active" if scenario == "reopened" else "released"
+        )
+        assert next(p for p in saved.prs if p.number == 7).state == (
+            "open" if scenario == "reopened"
+            else "merged" if scenario == "contained-display" else "closed"
+        )
+        assert run_picker() == 0
