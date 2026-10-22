@@ -35,6 +35,16 @@ def handoff_environment(args: list[str]) -> dict[str, str]:
     return {}
 
 
+def handoff_launch_options(environment: dict[str, str], handoff: dict[str, str]) -> dict[str, object]:
+    """Keep scoped Windows updates headless without changing interactive passthrough."""
+    options: dict[str, object] = {"env": {**environment, **handoff}}
+    if handoff and os.name == "nt":
+        from agent_procutil import no_window_kwargs
+
+        options.update(no_window_kwargs())
+    return options
+
+
 def parse_options(rest: list[str]) -> tuple[argparse.Namespace, list[str]]:
     parser = argparse.ArgumentParser(prog="worktree-manager update", allow_abbrev=False)
     mode = parser.add_mutually_exclusive_group()
