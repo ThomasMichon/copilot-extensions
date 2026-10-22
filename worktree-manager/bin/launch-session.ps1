@@ -242,7 +242,7 @@ $CopilotArgs = $FilteredArgs
 Write-SetupLog 'launch-session.ps1 starting'
 Write-LaunchTrace 'launcher_start'
 if ($CopilotPassthrough.Count -gt 0) {
-    Write-SetupLog "Copilot passthrough args: $($CopilotPassthrough -join ' ')"
+    Write-SetupLog "Copilot passthrough: $($CopilotPassthrough.Count) argument(s)"
 }
 
 # When launched in --stdio mode (ACP protocol), stdout is the JSON-RPC
@@ -842,7 +842,6 @@ function Invoke-UpdateApply {
             if ($prePlan -and $prePlan.action -eq 'self-update') {
                 Write-SetupStatus 'Bootstrap services are stale; updating them...'
                 foreach ($update in $prePlan.updates) {
-                    Write-SetupLog "  command: $($update.command)"
                     $argv = @($update.argv)
                     if ($argv.Count -gt 0) {
                         Invoke-SetupAction -CommandArgv $argv -Update $update `
@@ -899,7 +898,6 @@ function Invoke-UpdateApply {
                     Write-SetupLog "Plugin reconcile: skipping $($u.service) (copilot not on PATH)" 'WARN'
                     continue
                 }
-                Write-SetupLog "Plugin reconcile: $($u.service) -> $($rargv -join ' ')"
                 Invoke-SetupAction -CommandArgv $rargv -Update $u `
                     -Scope "launch/reconcile/pass-$rpass/$($u.service)" -Label "Plugin reconcile: $($u.service)"
             }
@@ -2002,7 +2000,7 @@ if (-not $noMux) {
     # Clear nesting vars so psmux doesn't kill the detached session.
     # The new session is independent — it shouldn't inherit the parent's
     # nesting state even though we're creating it from inside a psmux pane.
-    Write-SetupLog "psmux: pane command: $($cmd -join ' ')"
+    Write-SetupLog "psmux: pane command: $($cmd.Count) argument(s)"
 
     # Route the pane through pane-wrapper.ps1 so the child's real exit code is
     # observable (recorded as a pane_exited activity mark) and a crash shows a

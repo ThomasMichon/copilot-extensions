@@ -272,7 +272,7 @@ set -- "${FILTERED_ARGS[@]+"${FILTERED_ARGS[@]}"}"
 setup_log INFO 'launch-session.sh starting'
 launch_trace launcher_start
 if [[ ${#COPILOT_PASSTHROUGH[@]} -gt 0 ]]; then
-    setup_log INFO "Copilot passthrough args: ${COPILOT_PASSTHROUGH[*]}"
+    setup_log INFO "Copilot passthrough: ${#COPILOT_PASSTHROUGH[@]} argument(s)"
 fi
 
 # Recovery escape hatch resolves from explicit project identity or CWD.
@@ -769,7 +769,6 @@ for key, value in environment.items():
                     while IFS= read -r _update_env; do
                         [[ -n "$_update_env" ]] && _UPDATE_ENV+=("$_update_env")
                     done <<< "$_UPDATE_ENV_TEXT"
-                    setup_log INFO "  command: ${UPDATE_ARGV[*]}"
                     _setup_progress_begin "bootstrap/$SVC_NAME"
                     if env ${_UPDATE_ENV[@]+"${_UPDATE_ENV[@]}"} \
                         "${UPDATE_ARGV[@]}" 2>&1 | while IFS= read -r _ul || [[ -n "$_ul" ]]; do setup_log INFO "$_ul"; done; then
@@ -852,7 +851,6 @@ if update.get('phase') == 'runtime': print(json.dumps(update))
                     setup_log WARN "Plugin reconcile: skipping $_RSVC (copilot not on PATH)"
                     continue
                 fi
-                setup_log INFO "Plugin reconcile: $_RSVC -> ${_RARGV[*]}"
                 _RENV=()
                 _RENV_TEXT=$("$PYTHON" -c "
 import sys, json

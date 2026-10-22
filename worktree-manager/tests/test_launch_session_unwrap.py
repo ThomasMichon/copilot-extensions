@@ -211,7 +211,9 @@ def test_windows_launcher_encodes_wrapped_psmux_pane_argv():
     assert "argv = @($wrapperArgs)" in ps
     assert "[IO.File]::WriteAllText($paneArgsFile, $argsJson)" in ps
     assert '$paneArgsFile.Replace("\'", "\'\'")' in ps
-    assert "-EncodedCommand" not in ps
+    pane_start = ps.index('    Write-SetupLog "psmux: creating session $sessName"')
+    pane_create = ps.index("& $script:AwPsmuxBin new-session -d -s $sessName", pane_start)
+    assert "-EncodedCommand" not in ps[pane_start:pane_create]
     assert "$paneCmd = $wrapPrefix + $cmd" not in ps
     assert "& $script:AwPsmuxBin new-session -d -s $sessName" in ps
     assert "-c $plan.work_dir @envFlags @paneCmd" in ps

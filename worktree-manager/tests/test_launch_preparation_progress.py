@@ -203,7 +203,7 @@ def test_native_maintenance_reports_outcomes_and_replans(tmp_path, shell, curren
     # The fixture planner/actions need only stdlib, not the runner's site packages.
     fixture_python = getattr(sys, "_base_executable", sys.executable)
     canonical = "[12:00:01.120Z] update/nested running preserved detail [elapsed 3.1s]"
-    literal = "space ' ; $ ` &"
+    literal = "private-maintenance-fixture space ' ; $ ` &"
     child = tmp_path / "action.py"
     child.write_text(
         "import os,sys,time\nfrom pathlib import Path\n"
@@ -260,6 +260,7 @@ def test_native_maintenance_reports_outcomes_and_replans(tmp_path, shell, curren
         f"for update in updates: update['runtime_root']={str(runtime_root)!r}\n"
         "updates[2]['service']='agent-worktrees'; updates[2].pop('phase')\n"
         f"updates.append(dict(service='repository-bootstrap',argv=[sys.executable,{str(independent_script)!r}]))\n"
+        "for update in updates: update['command']=' '.join(update['argv'])\n"
         f"print(json.dumps(dict(action={('self-update' if boundary == 'bootstrap' else 'reconcile')!r} "
         f"if n==1 and not {current!r} else 'continue',updates=updates)))\n",
         encoding="utf-8",
@@ -365,6 +366,7 @@ def test_native_maintenance_reports_outcomes_and_replans(tmp_path, shell, curren
     assert result.returncode == 0, result.stdout + result.stderr
     assert result.stdout == ""
     report = result.stderr + (log.read_text() if log.exists() else "")
+    assert literal not in report, "launcher persisted raw action arguments"
     if shell == "bash":
         assert sum("-m update_telemetry.shell " in line for line in spawns.read_text().splitlines()) == 1
         assert "unexpected per-line date spawn" not in report

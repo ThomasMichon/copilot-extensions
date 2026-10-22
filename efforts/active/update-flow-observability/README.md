@@ -127,8 +127,11 @@ matrix below are _(agent-recommended)_ implementation details.
 - [x] Persist detached Windows marketplace-installer output through a
   launch-owned observer without changing the installer's native authority
   (#7683).
-- [ ] Frame detached Bash marketplace-installer output through its launch-owned
-  observer, retaining the native invocation and existing log destination.
+- [x] Frame detached Bash marketplace-installer output through its launch-owned
+  observer, retaining the native invocation and existing log destination
+  (#7697).
+- [x] Replace routine raw-command echoes with passthrough/pane argument counts
+  and existing timed action labels, preserving native argument values.
 - [ ] Finish the remaining detached/standalone installer and early/late Bash
   output boundaries through their actual output owners.
 - [ ] Prefix every human-readable install/update line with a wall-clock time;
@@ -236,6 +239,56 @@ Bridge serving-version gap and supervisor framing defect survived that
 bounded source delta inspection.
 
 ## Journal
+
+### 2026-10-21 - Keep argument values out of routine launch diagnostics
+
+- Both launchers now log passthrough argument counts instead of values;
+  Windows pane preparation likewise records only the count. Removed duplicate
+  bootstrap and reconciliation command echoes, retaining their service labels,
+  timed outcomes, admission diagnostics and child output. This does not add a
+  generic redactor or promise to sanitize arbitrary child-emitted output.
+- Native source-prefix and pane-preparation fixtures first reproduced raw
+  private arguments in the log, then proved exact forwarding with count-only
+  diagnostics. The existing native maintenance fixture now includes a private
+  command/argument sentinel, including allowed, refused and current plans,
+  while retaining child execution, environment, exit and replanning assertions.
+- The Windows selection passed 69 cases and the POSIX selection passed 46,
+  with platform-specific skips. Each also found the same overly broad pane
+  guard: it banned encoded commands across the whole launcher, including the
+  already-reviewed detached observer. Scoped that ban to the actual pane
+  creation path; the pane, install-contract and headless guard selection then
+  passed 306 cases with 15 platform-specific skips. These counts overlap;
+  no timeout, native boundary or case was removed.
+- The fixtures exercise fresh isolated log directories and real native shell
+  consumers. Full runtime construction and live external installation are not
+  claimed: this slice changes diagnostic content only, and promoted installed
+  qualification remains subject to the existing rollout gate. No runtime,
+  installer, staging parent, watchdog or publication authority was changed.
+- Updated Manager's launch-preparation documentation and its patch changefile.
+  This is a below-altitude presentation correction within Phase 2's existing
+  redaction contract, not a new architecture. Publication, review and merge
+  remain pending; the broader effort and deployment holds remain open.
+
+### 2026-10-21 - Detached Bash source slice merged; broader gates remain open
+
+- #7697 merged as `087265dfd0fd311de8d80b547a7468c5a61bedf1` after
+  Copilot approved exact corrected head
+  `996a45dc711dfcb537b19063b795a7ea4d333242`, with no unresolved review
+  threads and green current-head CI, including the required PR gate.
+  The earlier compatibility observation was reproduced and corrected,
+  not dismissed because the review footer reported no open issues.
+- Re-read the Plan and Validation Plan after the actual merge and marked
+  only detached Bash observation complete. Retained the published tip on
+  a backup and advanced only fully merged history; no unpublished work,
+  running installation or ownership state was discarded.
+- Next independent presentation audit: early/late launch log records and
+  routine raw-command diagnostics. Preserve native/protocol arguments and
+  useful failure evidence without persisting prompt-bearing command lines.
+  The context output adapter still awaits coordination on #6928; do not
+  replace its contributor-owned watchdog or staging parent.
+- Equivalent whole-flow costs, other standalone output owners and promoted
+  installed qualification remain open. This source merge neither proves
+  rollout nor authorizes another updater.
 
 ### 2026-10-21 - Detached Bash output owner and context-watchdog coordination
 
