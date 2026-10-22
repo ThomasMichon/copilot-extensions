@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from agent_worktrees import config as cfg
-from agent_worktrees import finalize, git_collab, git_ops, pr_break_glass, pr_ops, pr_publish, pr_recovery, pr_rewrite, tracking
+from agent_worktrees import finalize, git_collab, git_ops, pr_break_glass, pr_ops, pr_publish, pr_recovery, pr_recovery_plan, pr_rewrite, tracking
 from agent_worktrees.config import Config
 from agent_worktrees.providers.base import PullResult
 from test_pr_break_glass import _copy_recovered_pr, _recovered_pr
@@ -161,6 +161,47 @@ def test_recovery_cas_never_falls_back_to_unapproved_fast_forward(
     assert calls[0]["force_with_lease_expect"] == actual
     assert pr_publish._tip("origin", branch, str(wt)) == racing != source
     assert record(wid).pr.head_sha == saved
+
+
+def test_revalidation_uses_one_fresh_destination_snapshot_for_identity_and_slug(
+    recovered_pr: RecoveredPR, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config, wid, wt, remote, saved, _branch = recovered_pr
+    current = record(wid)
+    pr = current.pr
+    operation = pr_recovery_plan.build(
+        config, current, pr, source_head=git("rev-parse", "HEAD", cwd=wt),
+        expected_head=saved, identity=pr_publish.push_identity("origin", cwd=str(wt)),
+        overrides=(), cwd=str(wt),
+    )
+    snapshot = pr_publish._remote_snapshot
+    reads = []
+
+    def observed(*args, **kwargs):
+        result = snapshot(*args, **kwargs)
+        reads.append(result[2])
+        return result
+
+    monkeypatch.setattr(pr_publish, "_remote_snapshot", observed)
+    pr_recovery_plan.revalidate(
+        config, current, pr, operation, remote="origin",
+        observe=pr_rewrite.observe_pr, cwd=str(wt),
+    )
+    # Selection and revalidation each read afresh; slug and identity share
+    # only the latter snapshot, never a prior or later decision's authority.
+    assert len(reads) == 2
+    assert all(target.head_repo and target.head_identity for target in reads)
+    before = record(wid).pr.head_sha
+    git("remote", "set-url", "--push", "origin", str(remote.parent / "repointed.git"), cwd=wt)
+    with pytest.raises(ValueError, match="Recovery publication destination changed"):
+        pr_recovery_plan.revalidate(
+            config, current, pr, operation, remote="origin",
+            observe=pr_rewrite.observe_pr, cwd=str(wt),
+        )
+    assert len(reads) == 3
+    assert not reads[-1].head_repo and not reads[-1].head_identity
+    assert record(wid).pr.head_sha == before == saved
+    assert git("--git-dir", str(remote), "rev-parse", pr.branch, cwd=wt) == saved
 
 
 def backed_publication(

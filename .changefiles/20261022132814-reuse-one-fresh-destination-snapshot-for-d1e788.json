@@ -1,0 +1,9 @@
+{
+  "comment": "Reuse one fresh destination snapshot for recovery revalidation identity and repository checks.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

@@ -137,8 +137,9 @@ def revalidate(
     target = pr_publish.push_target(config.default_repo, pr, cwd)
     if target is None or target.remote != remote:
         raise ValueError("Recovery publication destination changed before publication.")
-    identity = pr_publish.push_identity(remote, cwd=cwd)
-    if not identity or not pr_publish.push_slug(remote, cwd=cwd):
+    _, _, destination = pr_publish._remote_snapshot(remote, cwd=cwd)
+    identity = destination.head_identity
+    if not identity or not destination.head_repo:
         raise ValueError("Recovery destination is no longer readable.")
     observed = observe(config, pr)
     tip = pr_publish._tip(remote, pr.branch, cwd)
