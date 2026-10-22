@@ -5,7 +5,7 @@
   spanning worktrees, machines, CodeSpaces, and containers.
 - **Scope:** branch (links per-plugin child visions as they are authored)
 - **Status:** Active
-- **Last revised:** 2026-10-19
+- **Last revised:** 2026-10-21
 - **Reality docs:** [`docs/architecture.md`](../../docs/architecture.md) ·
   [`docs/harness-runbook.md`](../../docs/harness-runbook.md) · each plugin's
   `docs/architecture.md`
@@ -225,9 +225,22 @@ container agent are all reachable through **one** creation / inspection /
 communication contract. Where an agent runs is a venue detail, not a different
 interface.
 
+### local-first-machine-customization
+A control-plane repository can register, load and launch its harness on the
+current machine without declaring any machine manifest entries. The local
+execution environment supplies the baseline identity and capability; a machine
+manifest is optional customization, not permission to use that machine.
+
+When present, the manifest augments that baseline with friendly-name mapping,
+per-machine service loadouts, SSH roles, dispatch assignments and other declared
+customizations. Omitting it, leaving it empty or declaring only other machines
+does not disable ordinary local use. Optional customization does not invent a
+second identity authority or grant access to another execution environment.
+
 ### host-qualified-guest-identity
-A physical machine has one stable configured name and a separately recorded OS
-hostname. Windows, WSL and other declared execution environments belong to that
+A physical machine has a stable local identity, optionally customized by a
+configured name, and a separately recorded OS hostname. Windows, WSL and other
+execution environments belong to that
 machine; selecting an environment does not create another physical machine.
 Structured interfaces expose machine and environment separately. An interface
 that requires one execution identifier may use a compact address such as
@@ -236,7 +249,7 @@ that requires one execution identifier may use a compact address such as
 A host and each of its persistent guests are independently addressable through
 compact, stable logical names. A guest needs one distinguishing qualifier, not
 a growing chain of platform, distribution and transport suffixes. The owning
-machine map declares the host/guest relationship and selected substrate;
+machine map can customize the host/guest relationship and selected substrate;
 spelling is a convenience, never execution authority.
 
 An adopter may designate one WSL guest as its normal worktree environment and

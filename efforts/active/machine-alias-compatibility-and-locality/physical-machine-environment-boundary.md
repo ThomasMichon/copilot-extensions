@@ -247,14 +247,16 @@ source slice. Exercise the opt-in through the actual producer APIs in isolated
 fixtures. A later reviewed activation change owns ordinary call-site selection.
 
 For a genuinely new tuple allocation, derive `WorktreeMachineIdentity` from
-`execution_spaces.registry_for_config`, the existing shared
-`resolve_machine_selection`, and the actual execution platform, after the
-existing current-space fence. Require a declared, unambiguous local execution
-selection with consistent physical machine, environment and execution key.
-Missing registry evidence or conflicting platform refuses before allocation;
-do not synthesize authority by trimming a suffix, observing hostname alone, or
-accepting a caller-constructed tuple. `Config.machine` remains the execution
-identifier and its existing scoped-key requirements remain intact.
+the existing shared identity seam and actual local execution context, applying
+`execution_spaces.registry_for_config` and `resolve_machine_selection` for
+optional declared customization. The initial merged gated implementation
+requires a registry entry; the operator's
+[manifest-independent amendment](manifest-independent-local-identity.md)
+supersedes that precondition before ordinary activation. Missing or unrelated
+map entries must not deny basic local operation. Explicit conflicts and foreign
+receiving-space authority still refuse; neither a suffix nor caller-constructed
+tuple supplies that authority. `Config.machine` remains a one-term execution
+identifier, not a globally reinterpreted physical-name field.
 
 | Authoritative boundary | Implementation obligation |
 |---|---|
@@ -331,12 +333,25 @@ Do not rewrite old receipts or backfill identity merely by replaying them.
   The final equivalence slice is included in natural qualification
   `39602465019` for source `68b58730fb829745c5ed351b6623833e2637638b`;
   its recorded Main landing has the exact qualified tree.
-- [ ] Verify released, installed reader acceptance in every relevant consumer
+- [x] Verify released, installed reader acceptance in every relevant consumer
   before proposing ordinary producer-default activation. Source fixtures,
   merged adapters and artifact publication are not installed acceptance.
+  Deployed Worktrees, Dispatch, Bridge and Manager passed 69 guarded
+  synthetic-wire cases on WSL and 69 on native Windows through their actual
+  installed boundaries, including legacy, versioned tuple, malformed and
+  cross-environment refusal cases. Imported modules and the codec originate
+  inside each selected runtime; no live records or services were modified by
+  the probes. This does not close the live Manager-source, creation/resume or
+  later activation gates below.
 - [ ] Review any ordinary-default activation separately, only after retained
   replay, one-term equivalence and installed-reader gates pass. Actual rollout
   remains separately authorized; no historical-record migration is implied.
+  Installed preflight exposed the initial gated implementation's unnecessary
+  registry precondition. The operator explicitly rejected requiring map entries
+  or cross-project bindings for basic local operation. Correct that assumption
+  through the [local-identity amendment](manifest-independent-local-identity.md),
+  rather than copying registries, inferring authority from suffixes or silently
+  retaining a legacy new-record format.
 
 ### Reviewed source coverage map
 
@@ -354,7 +369,7 @@ coverage, not native or installed-consumer acceptance.
 
 ## Validation Plan
 
-- [ ] The same configured physical machine is reported in Windows and WSL;
+- [x] The same configured physical machine is reported in Windows and WSL;
   environment and compact execution ID differ explicitly and OS hostname is
   independent metadata.
 - [ ] Physical deployment selectors admit the already-declared host in either
