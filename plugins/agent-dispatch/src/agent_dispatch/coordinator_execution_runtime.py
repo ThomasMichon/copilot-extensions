@@ -26,11 +26,18 @@ def _own_process(incarnation: str) -> CoordinatorExecutionRuntime:
     return CoordinatorExecutionRuntime(incarnation, pid, token)
 
 
+def coordinator_incarnation(app: FastAPI) -> str:
+    """Share one server-created incarnation across this application's senders."""
+    if not hasattr(app.state, "execution_incarnation"):
+        app.state.execution_incarnation = uuid.uuid4().hex
+    return app.state.execution_incarnation
+
+
 def register_execution_runtime_routes(
     app: FastAPI, queue: TaskQueue, bus: EventBus, *, control_token: str | None
 ) -> None:
     governance = LoopGovernance()
-    incarnation = uuid.uuid4().hex
+    incarnation = coordinator_incarnation(app)
 
     def emit(event: str, detail: dict[str, object]) -> None:
         bus.publish({"type": event, **detail})

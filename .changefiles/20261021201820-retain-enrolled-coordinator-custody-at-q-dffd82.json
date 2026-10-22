@@ -1,0 +1,9 @@
+{
+  "comment": "Retain enrolled coordinator custody at qualified CI repair launch and task delivery boundaries",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

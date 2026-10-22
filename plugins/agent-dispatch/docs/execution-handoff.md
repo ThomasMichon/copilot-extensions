@@ -4,9 +4,9 @@ Back to [agent-dispatch](../README.md).
 
 `agent_dispatch.execution_effect_adapter` defines the optional adopter boundary
 from the reviewed [execution handoff contract](../../../efforts/active/acknowledged-execution-handoff/contract.md).
-This is a construction-stage library API, not an installed coordinator
-capability, an operator switch or a live handoff command. It does not change
-ordinary Dispatch execution.
+This is a construction-stage library API with a bounded coordinator sender
+integration, not an operator switch or a live handoff command. Execution outside
+the explicitly qualified sender cohort is unchanged.
 
 ## Ownership
 
@@ -151,8 +151,10 @@ send. Existing custody remains observable and settleable without retroactively
 enrolling a legacy runtime; replay never grants another send. This accounting
 check does not authenticate the in-process caller or prove process liveness.
 
-This API is **not wired to production senders**. Complete runtime enrollment,
-authenticated sender integration, fresh and already admitted launches,
+The [coordinator-owned CI repair path](#coordinator-owned-ci-repair-sends)
+uses this accounting for launch and task-turn delivery in already qualified
+scopes. Complete runtime enrollment, other authenticated sender integration,
+fresh and already admitted launches,
 strict resumes, ordinary/restricted transports, redrives and both wake outboxes
 remain gates. Runtime callers must enforce the new-versus-replayed distinction
 at their actual send boundary and reconcile ambiguous responses through the
@@ -218,4 +220,44 @@ assert the process has exited, that other runtimes are enrolled or that a
 sender uses custody. `send_admission` and `acknowledged` remain false. Supervisor
 enrollment, all actual launch/resume/delivery/redrive boundaries, both wake
 paths, legacy qualification, effect settlement and handback remain open.
-Ordinary execution is unchanged and no live transition command is exposed.
+Execution outside the bounded sender cohort is unchanged and no live transition
+command is exposed.
+
+## Coordinator-owned CI repair sends
+
+For a producer scope already qualified through the control-only resolver, the
+coordinator-owned CI repair route now enrolls its own process and records custody
+immediately before the idle-body launch and the subsequent task-seed delivery.
+Both stages share the application's server-created incarnation. Canonical
+installation governance and process identity are rechecked before custody;
+caller-provided runtime or installation labels are never used. Producer rollover
+between stages refuses the old in-flight continuation instead of silently
+adopting it into the replacement producer generation.
+
+Launch admission follows the independent CI policy probe. A refusal before
+transport creates no ambiguous send record. Once custody is admitted, a successful
+launch response with a session identity or an accepted delivery records `sent`.
+Timeouts, transport errors, nonzero launch results, missing session identities
+and refused delivery replies remain `unknown`, not `not_sent`. If settlement
+itself fails, the persisted `pending` record remains a retry fence. Neither
+outcome establishes task completion or process exit.
+
+Scope closure and custody admission retain their queue-transaction ordering:
+closure first prevents transport; custody first retains an in-flight participant
+that blocks acknowledgement. Closure after idle launch but before task delivery
+refuses the task turn and preserves the existing release obligation and session
+handle. Replaying an active reservation or an admitted stage never sends again.
+
+Unqualified legacy scopes and other sender paths retain their existing behavior.
+A missing binding cannot erase historical qualification retained in runtime,
+send or closure records. Such history still requires canonical provenance rather
+than falling back to the legacy transport path. This cohort is not complete
+legacy reconciliation or universal execution fencing. Supervisor senders,
+strict resumes, redrives, both wake paths, adopter effects and handback remain
+open, and no closure/acknowledgement control is exposed.
+
+`tests/test_coordinator_execution_sender.py` exercises the actual route and
+factory against a synthetic queue, installation authority and Bridge transport,
+including admission-before-send, closure between stages, ambiguous outcomes,
+provenance refusal, producer rollover and retry refusal. It does not launch
+real workers or establish installation or running adoption.

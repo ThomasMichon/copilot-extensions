@@ -95,7 +95,8 @@ grants.
       supervisor enrollment and final launch gates remain open.
       Internal reservation-send custody also serializes first admission
       with closure and retains pending/ambiguous transport outcomes; it is not
-      yet wired to production senders. An empty inventory is never an
+      wired to coordinator-owned CI repair launch and task delivery in already
+      qualified scopes; other senders remain open. An empty inventory is never an
       acknowledgement.
 - [ ] Define the adopter effect-fence adapter and implement generation-bound
       mutation admission without conflating effect authority with task ownership.
@@ -145,6 +146,28 @@ do not treat a validated adapter response as complete task admission or live
 handoff support.
 
 ## Journal
+
+### 2026-10-21 - Mediate the coordinator-owned CI repair sender cohort
+- The existing CI route now uses canonical process/installation enrollment and
+  reservation-bound custody at its actual launch and task-delivery boundaries.
+  Independent policy refusal precedes custody; ambiguous transport remains
+  unresolved, and closure between stages preserves the release obligation.
+- Existing legacy transport behavior is outside this qualified cohort. Historical
+  qualification cannot disappear into a fallback, and an in-flight launch cannot
+  silently adopt a replacement producer generation.
+- This advances Phase 2, not its completion. Supervisor enrollment and senders,
+  wakes, legacy qualification, effects, acknowledgement and handback remain open.
+  Source review does not authorize installation or a running transition.
+
+### 2026-10-21 - Retry fence merged; actual sender integration next
+- #7676 merged to `dev` as `b726e4e09a08ad94a451a7a8a655964c184a4ba8`
+  after current-head Copilot approval and the required checks. Unresolved sends
+  now fence fresh reservations and recovery mutations without erasing custody.
+- This closes the retry prerequisite only. Phase 2 remains open for authenticated
+  runtime enrollment and actual launch, delivery, resume, redrive and wake
+  mediation, followed by legacy qualification, effects and handback.
+- Source landing is not promotion, installation, running adoption or an
+  acknowledged transition.
 
 ### 2026-10-21 - Preserve unresolved sends across reservation retries
 - New reservation attempts, operator rearm and fresh-conversation authorization
