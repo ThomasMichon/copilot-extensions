@@ -87,7 +87,48 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Admitted fixture-semantic batches
 
+### B-LANDING-ASSERT non-mutating probe evidence
+
+Baseline: the actual #7698 merge. The multi-commit squash/later-upstream-edit
+case first fetches the actual squash, snapshots every ref, invokes the real
+`squash_landed` probe and requires all refs to remain unchanged. Its later
+upstream edit, complete landing explanation and finalization-precondition
+assertions remain in place. That extended function matches the pinned
+preserved source.
+
+All 33 existing tests, fixture dependencies, decorators and old assertions
+remain. `test_the_probe_moves_no_ref` is unchanged and separately collected.
+The default-base/provider-call-zero case is also unchanged, including
+its location. The historical probe-case removal and default-base-case
+relocation are proposed for retirement from future extraction, not
+retirement of tests or contracts; neither delta is needed to add the
+non-mutating checks to the combined scenario. Commit-helper OID returns
+and all creation-point, reset, shadowing and private-copy checks remain
+unchanged.
+
+Complete native Windows landing module: 33 passed, zero skips,
+141.79 seconds pytest / 154.72 preparation-cleanup inclusive. Exactly two
+work-stealing workers retain the original 30-second item watchdog,
+all marks/resource ceilings and the 240-second diagnostic group.
+Functional integration only, not quiet-host, whole-suite or repeated
+same-head qualification.
+
+This below-altitude assertion-only change affects no production,
+command, configuration, installation or architecture contract.
+Documentation impact is this ledger. Clean-room provisioning and
+external-venue lanes are inapplicable; other B/N and S/F/G/P/R/A
+contracts remain separate.
+
 ### B-LEASE-ASSERT preview, apply and repeated-apply evidence
+
+Actual disposition: #7698 merged as
+`df0ab9b2ada18528d7fc8389246dd46a878f048a`; full Copilot review
+`5607842453` approved exact head
+`23d3d6adf2fe394cdfae4f5bc23fc1e292c5848d`.
+Overview, inline/general channels and threads had no findings;
+required CI was green and the child worktree is finalized.
+The reviewed removal/rename-delta retirement below is accepted;
+every original test identity remains.
 
 Baseline: the actual #7695 merge. Extend
 `test_squash_stale_dry_run_reports_without_pushing` after its original
@@ -99,7 +140,7 @@ Every existing test identity, fixture dependency, decorator and assertion
 remains. The standalone
 `test_squash_stale_is_idempotent_on_an_already_squashed_ref` is unchanged.
 The historical removal of that case and rename of the preview case are
-proposed for retirement from future extraction, not retirement of their
+retired from future extraction, not retirement of their
 tests or contracts. The assertion additions do not need either delta.
 The real force-with-lease race, live-holder checks, lease generations,
 private-copy seed isolation and all retention cases remain unchanged.

@@ -206,6 +206,10 @@ def test_a_multi_commit_squash_later_edited_upstream_is_landed(env):
     change as one patch is the squash commit."""
     tip = _two_commit_change(env.clone)
     _squash_onto(env.seed, "main", SQUASHED)
+    _git("fetch", "-q", "origin", cwd=env.clone)
+    refs = _git("for-each-ref", "--format=%(refname) %(objectname)", cwd=env.clone)
+    assert finalize_ref.squash_landed(tip, "origin/main", str(env.clone)) is True
+    assert _git("for-each-ref", "--format=%(refname) %(objectname)", cwd=env.clone) == refs
     _commit(env.seed, "a.txt", SQUASHED.replace("eight", "EIGHT"), "a later upstream edit")
     _git("push", "-q", "origin", "main", cwd=env.seed)
     _git("fetch", "-q", "origin", cwd=env.clone)
