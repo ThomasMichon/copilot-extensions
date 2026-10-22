@@ -87,6 +87,42 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Admitted narrow batches
 
+### C one fresh committed-config absence probe
+
+Each committed branch resolution first probes its literal candidate paths
+with one bounded `ls-tree -z --full-tree`. Only a successful, textually
+empty result proves absence and avoids the separate missing-blob reads.
+Presence retains ordered `git show` reads; the first existing blob still
+wins even when empty or malformed. An unavailable probe warns and retains
+those same ordered reads within the existing shared deadline. No result
+survives a later decision, and the optional second branch gets its own
+fresh probe. Branch precedence, disk fallback and parser behavior are
+unchanged.
+
+Native regressions exercise actual Git absence followed by a later committed
+candidate, literal bracket paths, first-match empty/malformed/valid blobs,
+uncommitted shadows, five probe-unavailability shapes and deadline exhaustion
+before fallback or a second resolution. The complete unpartitioned config
+and hook modules pass 173 tests without skips: 49.80 seconds pytest,
+61.89 seconds preparation/cleanup inclusive, exactly two work-stealing
+workers. Original item/group/native/process/memory bounds remain unchanged.
+Ruff F/E9, thirteen install contracts and diff checks pass.
+
+A fresh contained native interpreter calls actual `cfg.load_config`
+against an initially config-free repository, then observes newly committed
+policy despite a contradictory uncommitted file. It passes in 3.61 seconds
+including preparation/cleanup. Two earlier one-off consumer attempts failed
+on fixture assumptions (the unchanged default is `master`, and canonical
+config parents must be created recursively); neither receives passing credit.
+
+This below-altitude optimization changes no command, configuration schema,
+authority, precedence or installation lifecycle. Documentation impact is
+this census and the source effort journal. Fresh temporary repositories
+exercise first-touch resolution, not production installer provisioning;
+external-venue and rollout lanes are inapplicable. This is bounded functional
+evidence, not complete-plugin, quiet-host or repeated same-head qualification.
+Other residuals and parent #5694/#5682 settlement remain open.
+
 ### H one fresh configuration read per protection decision
 
 `hooks._protected_branches` reads the in-repo mapping once and, when no

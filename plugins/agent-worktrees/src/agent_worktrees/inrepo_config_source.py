@@ -19,6 +19,8 @@ from __future__ import annotations
 
 import contextlib
 import contextvars
+import logging
+import subprocess
 import time
 from pathlib import Path
 from collections.abc import Callable
@@ -135,6 +137,41 @@ def _read_committed_blob(
     return proc.stdout if proc.returncode == 0 else None
 
 
+def _has_committed_candidates(
+    anchor: Path, remote: str, branch: str, candidates: tuple[Path, ...], deadline: float,
+) -> bool | None:
+    """Prove all candidates absent in one fresh probe; otherwise retain ordered reads."""
+    if not candidates:
+        return False
+    timeout = _probe_timeout(deadline)
+    if timeout is None:
+        return None
+    try:
+        proc = git_ops.git(
+            "--literal-pathspecs", "ls-tree", "-z", "--full-tree", f"{remote}/{branch}", "--",
+            *(candidate.as_posix() for candidate in candidates),
+            cwd=anchor, check=False, capture=True, timeout=timeout,
+        )
+    except (OSError, ValueError, subprocess.TimeoutExpired, git_ops.GitError) as exc:
+        logging.getLogger("agent-worktrees").warning(
+            "Committed-config presence probe unavailable (%s); retaining bounded ordered reads.",
+            type(exc).__name__,
+        )
+        return None
+    if proc.returncode != 0:
+        logging.getLogger("agent-worktrees").warning(
+            "Committed-config presence probe failed (git exit %s); retaining bounded ordered reads.",
+            proc.returncode,
+        )
+        return None
+    if not isinstance(proc.stdout, str):
+        logging.getLogger("agent-worktrees").warning(
+            "Committed-config presence probe returned non-text output; retaining bounded ordered reads.",
+        )
+        return None
+    return bool(proc.stdout)
+
+
 def load_inrepo_config_from_committed_ref(
     anchor: Path, rel_path_candidates: tuple[Path, ...], remote: str = "origin",
     *, parser: Callable[[str], dict[str, Any]] = parse_yaml_text_safe,
@@ -165,6 +202,8 @@ def load_inrepo_config_from_committed_ref(
         return {}
 
     def _read_config_on(branch: str) -> dict[str, Any] | None:
+        if _has_committed_candidates(anchor, remote, branch, rel_path_candidates, deadline) is False:
+            return None
         for rel_path in rel_path_candidates:
             text = _read_committed_blob(anchor, remote, branch, rel_path, deadline)
             if text is not None:

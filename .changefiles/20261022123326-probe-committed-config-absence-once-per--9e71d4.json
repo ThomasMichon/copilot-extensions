@@ -1,0 +1,9 @@
+{
+  "comment": "Probe committed config absence once per fresh branch resolution while preserving ordered bounded fallback reads.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
