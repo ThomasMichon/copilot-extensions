@@ -32,6 +32,12 @@ The PowerShell script carries a UTF-8 BOM for Windows PowerShell 5.1.
 The batch script is ASCII-only and resolves its sibling through `%~dp0`, so
 neither wrapper depends on a code page being able to encode installation or
 command-directory names.
+The compatibility command and registration's PowerShell probe request
+`-ExecutionPolicy Bypass` for that child process, matching the shared installer
+wrapper convention. They do not change persistent execution policy or override
+Group Policy. A caller whose current PowerShell host disallows local scripts
+can use the compatibility command or start the primary with that explicit
+process option.
 
 Each command selects the exact completed candidate's interpreter, using
 `-I -S -B` and the canonical slot-local retention bootstrap before importing site

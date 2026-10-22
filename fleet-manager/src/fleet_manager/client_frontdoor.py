@@ -39,7 +39,7 @@ def _commands(directory, slot):
     cmd = (
         "@echo off\r\nsetlocal DisableDelayedExpansion\r\n"
         '"%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" '
-        '-NoProfile -NonInteractive -File "%~dp0fleet-manager.ps1" %*\r\n'
+        '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "%~dp0fleet-manager.ps1" %*\r\n'
         "exit /b %ERRORLEVEL%\r\n"
     )
     return {
@@ -97,7 +97,8 @@ def _health(directory, slot, checkpoint, descriptor, evidence, expected):
     if os.name == "nt":
         powershell = Path(os.environ["SYSTEMROOT"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"
         commands = [
-            [powershell, "-NoProfile", "-NonInteractive", "-File", directory / "fleet-manager.ps1"],
+            [powershell, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+             "-File", directory / "fleet-manager.ps1"],
             [os.environ["COMSPEC"], "/d", "/c", directory / "fleet-manager.cmd"],
         ]
     else:

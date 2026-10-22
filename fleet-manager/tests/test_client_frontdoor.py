@@ -74,6 +74,7 @@ def test_created_command_proofs_and_fresh_exact_noop(selected, primitive):
         assert (directory / "fleet-manager.ps1").read_bytes().startswith(codecs.BOM_UTF8)
         assert (directory / "fleet-manager.cmd").read_bytes().isascii()
         assert b"%~dp0fleet-manager.ps1" in (directory / "fleet-manager.cmd").read_bytes()
+        assert b"-ExecutionPolicy Bypass" in (directory / "fleet-manager.cmd").read_bytes()
     receipt = construction._read(namespace / frontdoor.REGISTERED)
     workspace = namespace / frontdoor.HISTORY / receipt["publication"]
     publication = primitive._runtime_component("versioned_runtime_publication")
@@ -256,17 +257,38 @@ def test_higher_active_candidate_updates_only_attributed_commands(selected, prim
 
 
 @pytest.mark.timeout(90)
-def test_installed_retained_frontdoor_outside_checkout_and_exact_rerun(primitive, built_client, tmp_path):
+def test_installed_retained_frontdoor_outside_checkout_and_exact_rerun(
+    primitive, built_client, tmp_path, monkeypatch,
+):
     root, fixture, staged, trusted, user, floor, _report = built_client
     directory = command_directory(tmp_path, "client commands \u00e9\u4e2d")
+    if os.name == "nt":
+        original_environment = construction._environment
+
+        def restricted_environment(slot):
+            environment = original_environment(slot)
+            assert "PSExecutionPolicyPreference" not in environment
+            environment["PSExecutionPolicyPreference"] = "Restricted"
+            return environment
+
+        monkeypatch.setattr(construction, "_environment", restricted_environment)
     activate(root, fixture, staged, trusted)
     program = """
 import json,sys
 from pathlib import Path
 from fleet_manager.artifact_staging import stage_authenticated_artifacts
 from fleet_manager.client_frontdoor import register_client_frontdoor
+from fleet_manager import client_construction as construction
 from fleet_manager.planning import canonical
 value=json.loads(sys.stdin.readline())
+if value["restricted_powershell"]:
+    original=construction._environment
+    def restricted(slot):
+        environment=original(slot)
+        assert "PSExecutionPolicyPreference" not in environment
+        environment["PSExecutionPolicyPreference"]="Restricted"
+        return environment
+    construction._environment=restricted
 with stage_authenticated_artifacts(
     canonical(value["manifest"]),value["proof"],value["policy"],value["sources"],
     authority=value["identity"]["authority"],installation=value["identity"]["installation"],
@@ -294,6 +316,7 @@ with stage_authenticated_artifacts(
                 **fixture, "policy": trusted, "root": str(root), "identity": identity(),
                 "selection": selection(fixture), "target": target(fixture), "stage": str(area),
                 "directory": str(directory),
+                "restricted_powershell": os.name == "nt",
             }) + "\n")
             process.stdin.close()
             process.stdin = None
@@ -309,17 +332,31 @@ with stage_authenticated_artifacts(
     assert sorted(report["reused"] for report in reports) == [False, True]
     result = reports[0]
     assert result["health"]["status"] == "installed" and result["frontdoor_registered"]
-    program = (
-        [Path(os.environ["SYSTEMROOT"]) / "System32/WindowsPowerShell/v1.0/powershell.exe",
-         "-NoProfile", "-NonInteractive", "-File", directory / "fleet-manager.ps1"]
-        if os.name == "nt" else [directory / "fleet-manager"]
-    )
-    health = subprocess.run(
-        [*map(str, program), "--version"], cwd=directory,
-        capture_output=True, text=True, timeout=20, check=False, **FLAGS,
-    )
-    assert health.returncode == 0, health.stderr
-    assert health.stdout.strip() == f"fleet-manager {result['health']['package_version']}"
+    environment = os.environ.copy()
+    if os.name == "nt":
+        environment["PSExecutionPolicyPreference"] = "Restricted"
+        powershell = Path(os.environ["SYSTEMROOT"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"
+        control = subprocess.run(
+            [str(powershell), "-NoProfile", "-NonInteractive", "-File",
+             str(directory / "fleet-manager.ps1"), "--version"],
+            cwd=directory, env=environment, capture_output=True, text=True,
+            timeout=20, check=False, **FLAGS,
+        )
+        assert control.returncode != 0 and "UnauthorizedAccess" in control.stderr
+        programs = [
+            [powershell, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+             "-File", directory / "fleet-manager.ps1"],
+            [os.environ["COMSPEC"], "/d", "/c", directory / "fleet-manager.cmd"],
+        ]
+    else:
+        programs = [[directory / "fleet-manager"]]
+    for program in programs:
+        health = subprocess.run(
+            [*map(str, program), "--version"], cwd=directory, env=environment,
+            capture_output=True, text=True, timeout=20, check=False, **FLAGS,
+        )
+        assert health.returncode == 0, health.stderr
+        assert health.stdout.strip() == f"fleet-manager {result['health']['package_version']}"
     repeated = register(root, fixture, staged, trusted, directory)
     assert repeated["reused"] and not repeated["mutations_performed"]
     assert database_bytes(root) == floor and user.read_bytes() == b"preserved configuration\n"

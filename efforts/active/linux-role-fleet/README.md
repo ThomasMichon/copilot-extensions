@@ -904,3 +904,16 @@ These bounded Windows selections are not a new full Windows-suite claim.
   controls. Linux passed all 19 frontdoor, 27 constructor and six native-process
   cases with the Unicode fixture, plus both package-context builds. The
   implementation and broader campaign still await their own remaining gates.
+
+### 2026-10-22 - Scope Windows wrapper execution policy to the child
+- The next #7866 review found the missing process execution-policy option in
+  the PowerShell registration probe and batch compatibility command. Both now
+  pass `-ExecutionPolicy Bypass`, matching the shared installer wrapper without
+  changing persistent host policy or overriding Group Policy.
+- Native coverage injects `Restricted` into the actual returned sanitized
+  probe environments, not just the parent session. A real no-option primary
+  control refuses with `UnauthorizedAccess`; the explicit primary and batch
+  invocations pass, including Unicode paths, independent owners and verified
+  reuse. All 19 native frontdoor cases passed within the existing 120-second
+  portfolio budget; all 19 Linux cases passed too. No policy or timeout
+  waiver, live activation or completed-campaign claim follows.
