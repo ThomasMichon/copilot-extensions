@@ -1175,6 +1175,143 @@ def test_normal_update_only_blocks_on_acquired_marketplaces(monkeypatch, core_de
     assert context.cmd_report(standalone) == 4
 
 
+@pytest.mark.parametrize("scenario", ["fresh", "fallback", "prepared"])
+@pytest.mark.parametrize("failed", [False, True])
+def test_registered_payload_work_restores_phase_after_auth(
+    tmp_path, monkeypatch, capsys, scenario, failed,
+):
+    import update_telemetry as ut
+    from update_telemetry.human import HumanOperation, current_operation
+
+    from agent_worktrees import output
+
+    project = tmp_path / "project"
+    home = tmp_path / "telemetry"
+    monkeypatch.setenv("CE_UPDATE_AUTH", "on")
+    monkeypatch.setenv(ut.ENV_HOME, str(home))
+    for variable in (ut.ENV_RUN_ID, ut.ENV_EVENTS, ut.ENV_OWNER):
+        monkeypatch.delenv(variable, raising=False)
+    monkeypatch.setattr(
+        sources, "marketplaces",
+        lambda cwd: [_source(id="marketplace:copilot-extensions", cwd=cwd)],
+    )
+    reports = []
+
+    def report(items):
+        reports.extend(item.cwd for item in items)
+        return auth.AuthReport([
+            auth.SourceAuth(
+                item, [], status="fixable_by_fallback", expected_account="fixture",
+                alternative={"method": "gh", "status": "ok"},
+            )
+            for item in items
+        ])
+
+    monkeypatch.setattr(auth, "report", report)
+    monkeypatch.setattr(update_runtime, "_core_helper", lambda name, local: local)
+    monkeypatch.setattr(update_runtime, "_project_update_context", lambda: project)
+    phase = None
+    real_enter = update_events.enter
+
+    def enter(value):
+        nonlocal phase
+        real_enter(value)
+        phase = value
+
+    monkeypatch.setattr(update_events, "enter", enter)
+    work = []
+
+    def observe(action):
+        work.append((
+            action, phase, update_events._run._step[0], current_operation().label,
+        ))
+
+    def refresh(marketplace, *, cwd):
+        observe("refresh")
+        assert context.child_environment(cwd)["env"]["CE_UPDATE_AUTH_ROUTES"]
+        return cwd is not None
+
+    def browse(marketplace, *, cwd):
+        observe("browse")
+        assert cwd == project
+        return {"fixture"}
+
+    def acquire(name, marketplace, *, cwd):
+        observe("acquire")
+        assert context.child_environment(cwd)["env"]["CE_UPDATE_AUTH_ROUTES"]
+        return "plugin update failed: exit 23" if failed else "OK"
+
+    real_header = output.header
+
+    def header(title):
+        observe("summary")
+        real_header(title)
+
+    monkeypatch.setattr(update_runtime, "_refresh_marketplace", refresh)
+    monkeypatch.setattr(update_runtime, "_browse_marketplace_plugins", browse)
+    monkeypatch.setattr(update_runtime, "_update_one_plugin_payload", acquire)
+    monkeypatch.setattr(output, "header", header)
+    target_context = None if scenario == "fallback" else project
+    targets = {"fixture": update_runtime._RegisteredPluginTarget(
+        target_context, update_runtime._PluginActivation.ACTIVE,
+    )}
+    sink = io.StringIO()
+    update_events.start()
+    events_path = update_events._run.events_path
+    try:
+        with HumanOperation("update/engine", stream=sink):
+            with context.session() as session:
+                if scenario == "prepared":
+                    session.prepare(project)
+                update_events.enter("payload_refresh")
+                ok = update_runtime._update_registered_plugins(targets)
+                assert session.context_required[target_context] is True
+                if scenario == "fallback":
+                    assert session.context_required[project] is False
+                assert not session.unresolved
+            rc = update_events.finish(0 if ok else 1)
+    finally:
+        update_events.finish(1)
+
+    assert [item[0] for item in work] == [
+        *(["refresh", "refresh"] if scenario == "fallback" else ["refresh"]),
+        "browse", "acquire", "summary",
+    ]
+    assert all(item[1:] == ("payload_refresh",) * 3 for item in work), work
+    assert reports == ([None, project] if scenario == "fallback" else [project])
+    assert ok is not failed
+    assert rc == (1 if failed else 0)
+    status = json.loads((home / "update-status.json").read_text(encoding="utf-8"))
+    assert status["plugins"]["fixture@copilot-extensions"]["outcome"] == (
+        ut.COMMAND_FAILED if failed else ut.VERIFIED_CURRENT
+    )
+    events, errors = ut.read_events(events_path)
+    assert errors == 0
+    starts = [
+        event["phase"] for event in events
+        if event["component"] == "run" and event["event"] == "start"
+        and event["phase"] != "run"
+    ]
+    ends = [
+        event["phase"] for event in events
+        if event["component"] == "run" and event["event"] == "end"
+        and event["phase"] != "run"
+    ]
+    assert starts == ends
+    assert starts.count("auth_report") == len(reports)
+    assert capsys.readouterr().out == ""
+    human = sink.getvalue()
+    assert "auth_report failed" not in human
+    assert human.count("payload_refresh failed") == int(failed)
+    assert human.count("payload_refresh starting") == (
+        sum(
+            "payload_refresh done" in line or "payload_refresh failed" in line
+            for line in human.splitlines() if "[duration " in line
+        )
+    )
+    assert current_operation() is None
+
+
 @pytest.mark.parametrize("user_required", [False, True])
 @pytest.mark.parametrize("telemetry", [False, True])
 def test_inventory_only_auth_context_remains_advisory(

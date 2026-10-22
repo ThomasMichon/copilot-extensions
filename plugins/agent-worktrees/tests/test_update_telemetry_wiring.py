@@ -350,7 +350,8 @@ def test_real_unrequested_entrypoint_smoke_needs_no_output_helper(shell, tmp_pat
     payload = tmp_path / "payload"
     scripts = payload / "scripts"
     scripts.mkdir(parents=True)
-    shutil.copyfile(source / "scripts" / "install.ps1", scripts / "install.ps1")
+    for name in ("install.ps1", "versioned_runtime_native.ps1", "source-runtime.ps1"):
+        shutil.copyfile(source / "scripts" / name, scripts / name)
     shutil.copyfile(source / "plugin.json", payload / "plugin.json")
     home = tmp_path / "home"
     home.mkdir()
@@ -367,7 +368,7 @@ def test_real_unrequested_entrypoint_smoke_needs_no_output_helper(shell, tmp_pat
         env=environment, cwd=tmp_path, capture_output=True, timeout=10,
         creationflags=subprocess.CREATE_NO_WINDOW,
     )
-    assert result.returncode == 0, result.stderr
+    assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
     receipt = json.loads((home / ".agent-worktrees" / "smoke.json").read_text("utf-8-sig"))
     assert receipt["ran_from"] == str(scripts)
     assert not (scripts / "installer-human-output.ps1").exists()
@@ -380,6 +381,9 @@ def test_real_unrequested_entrypoint_smoke_needs_no_output_helper(shell, tmp_pat
         creationflags=subprocess.CREATE_NO_WINDOW,
     )
     assert requested.returncode != 0
+    assert "Required installer human-output initializer is unavailable." in (
+        requested.stderr.decode("utf-8", errors="replace")
+    )
     assert not (home / ".agent-worktrees" / "smoke.json").exists()
 
 

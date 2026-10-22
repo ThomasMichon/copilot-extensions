@@ -245,6 +245,71 @@ bounded source delta inspection.
 
 ## Journal
 
+### 2026-10-21 - Reproduce update failures and correct payload cost attribution
+
+- A newly captured normal Windows ARM64 update refreshed its payloads, then
+  failed before Worktrees runtime construction: the command-binding publication
+  lock named a dead owner and required explicit repair. The stale lock and
+  missing supported recovery entrypoint are already tracked in #7117. No lock
+  was removed, archived or silently reclaimed. Other observed payload sharing
+  errors, native installer failures and historical deadline failures remain
+  distinct cases rather than one inferred fleet-wide cause.
+- The same stdio exposed a concrete attribution defect: a 1.727-second
+  marketplace auth report retained its phase while registered payload refresh
+  continued for another 224 seconds. That work appeared under a 226.6-second
+  `auth_report`, although it was not authentication. Runtime preflight in this
+  run was 18.7 seconds; a prior run's 56.759 seconds is not evidence of one
+  particular slow probe.
+- Registered plugin refresh now restores the existing `payload_refresh`
+  facade after both ordinary and fallback marketplace authorization. This
+  preserves the auth session, required-context promotion, credential overlays,
+  acquisition order, exit status and structured outcomes. It corrects both JSON
+  phase accounting and human framing, without a new clock or reporting owner.
+- Deterministic regressions exercise real session preparation with stubbed
+  external operations. Four fresh/fallback cases first failed on the wrong
+  phase; two already-prepared cases already passed. The final cases check
+  refresh, browse, acquisition and summary attribution, phase closure, human
+  framing, clean stdout and unchanged success/failure/auth behavior.
+- Full covering qualification also found an incomplete native smoke fixture.
+  It now copies the installer's two unconditional companion scripts while
+  still omitting the optional human-output initializer. Both Windows shells
+  prove ordinary smoke execution needs no initializer and requested capture
+  explicitly refuses its absence; the shipped installer is unchanged.
+- Final authentication, auth-usage and telemetry-wiring suites passed on
+  Windows (265 passed, two platform skips, 126.40 seconds) and the same frozen
+  source on Linux (245 passed, 22 platform skips, 68.57 seconds). The original
+  30-second item, 300-second group and resource caps remain. Linux needed the
+  canonical packaged test environment: isolated credential children correctly
+  ignore source-only `PYTHONPATH` injection. The hardened wrapper was attempted
+  but its host CLI could not run without native Node, so qualification used
+  the documented bounded-runner fallback with prepared test dependencies.
+- Fresh-machine construction is not exercised by this phase-boundary change.
+  The live update above establishes the failing attribution contract, not
+  deployment of this unpromoted candidate; installed validation still belongs
+  to the explicitly authorized rollout owner.
+- This source correction does not fix publication recovery or claim a faster
+  reconcile plan. Safe explicit recovery, component-level cost attribution and
+  equivalent before/after measurements remain open, as do promoted-installed
+  qualification and the effort's original ownership holds.
+
+### 2026-10-21 - Remaining identity banners merged; keep protocols undecorated
+
+- #7754 merged as `53ea6f887d843698f9db55bce62423e0f0f50310` after
+  Copilot approved exact head `9ed44f690b4eaf24435d8adc406c003c6b59e420`,
+  the actual review reported no open findings, discussion threads were empty
+  and every current-head required check passed.
+- Re-read the effort's Plan and Validation Plan after actual merge. Retained
+  the published source tip on a backup and advanced confirmed merged history.
+  This closes the inventoried literal install/update identity-banner blocks,
+  not remaining standalone timing, whole-flow measurement or rollout gates.
+- The operator reiterated the programmatic-CLI boundary: protocol and
+  machine-readable exchanges must remain free of human presentation. These
+  edits target native installer statements only, not Bridge command handlers
+  or message protocols. No general command-stream formatter is introduced.
+- The effort stays active with its original ownership/deployment holds; this
+  worktree is not finalized. Continue remaining standalone-output work only at
+  an admitted installer output owner, never by decorating a general CLI.
+
 ### 2026-10-21 - Consolidate the remaining literal installer identity banners
 
 - The bounded emitter inventory found remaining install/update action banners

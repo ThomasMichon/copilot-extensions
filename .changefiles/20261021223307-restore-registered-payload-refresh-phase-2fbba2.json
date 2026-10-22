@@ -1,0 +1,9 @@
+{
+  "comment": "Restore registered payload-refresh phase attribution after marketplace authentication.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
