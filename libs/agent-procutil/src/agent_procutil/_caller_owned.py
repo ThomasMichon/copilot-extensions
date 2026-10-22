@@ -59,6 +59,11 @@ def _pidfd_pid(fd: int) -> int:
 
 
 def _require_posix_support() -> None:
+    if sys.platform == "darwin":
+        from agent_procutil._darwin_caller_owned import require_support
+
+        require_support()
+        return
     if not sys.platform.startswith("linux") or not hasattr(os, "pidfd_open"):
         raise RuntimeError("caller-owned POSIX execution requires Linux pidfd group observation")
     fd = os.pidfd_open(os.getpid())
@@ -79,6 +84,25 @@ def _pidfd_exited(fd: int) -> bool:
 
 
 def _confirm_group(process: subprocess.Popen) -> None:
+    if sys.platform == "darwin":
+        from agent_procutil._darwin_caller_owned import GroupCensus
+
+        try:
+            census = GroupCensus()
+            deadline = time.monotonic() + 2.0
+            empty = 0
+            while True:
+                active = _observe_unreaped(process) is None
+                active |= census.active(process.pid)
+                empty = 0 if active else empty + 1
+                if empty == 2:
+                    return
+                if time.monotonic() >= deadline:
+                    raise TimeoutError("native process group still has live members")
+                time.sleep(0.005)
+        except (OSError, RuntimeError, ValueError) as error:
+            raise OwnedCleanupError(process) from error
+        return
     deadline = time.monotonic() + 2.0
     empty = 0
     try:
@@ -212,6 +236,7 @@ def run(
                 [
                     sys.executable, "-I", "-S", "-u", "-c", _BOOTSTRAP,
                     str(Path(__file__).resolve().parents[1]), str(reader),
+                    *([str(os.getpid())] if sys.platform == "darwin" else []),
                 ],
                 timeout=timeout, input_text=frame, capture=True, pass_fds=(reader,),
                 capture_limits=(6 * (max_stdout_bytes + max_stderr_bytes) + 4096, 65536),
@@ -239,8 +264,14 @@ def _retire() -> None:
 
 def _main() -> None:
     require_contained_worker()
-    if len(sys.argv) != 2:
+    darwin = sys.platform == "darwin"
+    if len(sys.argv) != (3 if darwin else 2):
         raise RuntimeError("caller-owned lifetime descriptor is missing")
+    owner_watch = None
+    if darwin:
+        from agent_procutil._darwin_caller_owned import OwnerWatch
+
+        owner_watch = OwnerWatch(int(sys.argv[2]))
     lifetime = int(sys.argv[1])
     if not stat.S_ISFIFO(os.fstat(lifetime).st_mode):
         raise RuntimeError("caller-owned lifetime descriptor is not a pipe")
@@ -261,6 +292,16 @@ def _main() -> None:
 
     watcher = threading.Thread(target=watch, name="native-caller-lifetime", daemon=True)
     watcher.start()
+    if owner_watch is not None:
+        def watch_owner() -> None:
+            try:
+                owner_watch.wait()
+            finally:
+                _retire()
+
+        threading.Thread(
+            target=watch_owner, name="native-caller-exit", daemon=True,
+        ).start()
     response: dict = {"version": 1, "kind": "execution"}
     try:
         frame = sys.stdin.buffer.readline(_MAX_REQUEST + 1)

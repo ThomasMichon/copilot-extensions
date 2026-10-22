@@ -822,6 +822,22 @@ def _append_update_if_stale(
     )
 
 
+def write_reconcile_status(status_arg, payload: dict[str, object]) -> None:
+    """Atomically publish canonical provisioning status, including driver failures."""
+    if not status_arg:
+        return
+    status_path = Path(status_arg).expanduser()
+    status_path.parent.mkdir(parents=True, exist_ok=True)
+    data = {
+        "version": 1,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        **payload,
+    }
+    temp = status_path.with_name(f".{status_path.name}.{os.getpid()}.tmp")
+    temp.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    os.replace(temp, status_path)
+
+
 def cmd_reconcile_plugins(args: argparse.Namespace) -> int:
     """Reconcile repo-configured copilot-extensions plugins (JSON action plan)."""
     from . import reconcile
@@ -859,18 +875,7 @@ def cmd_reconcile_plugins(args: argparse.Namespace) -> int:
     status_arg = getattr(args, "status", None)
 
     def _write_status(payload: dict[str, object]) -> None:
-        if not status_arg:
-            return
-        status_path = Path(status_arg).expanduser()
-        status_path.parent.mkdir(parents=True, exist_ok=True)
-        data = {
-            "version": 1,
-            "updated_at": datetime.now(timezone.utc).isoformat(),
-            **payload,
-        }
-        temp = status_path.with_name(f".{status_path.name}.{os.getpid()}.tmp")
-        temp.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-        os.replace(temp, status_path)
+        write_reconcile_status(status_arg, payload)
 
     repo_override = getattr(args, "repo", None)
     repo_dir = repo_override or worktree_identity._find_repo_dir()

@@ -12,7 +12,7 @@ from update_driver import (
 )
 from update_driver import boot
 
-PLATFORM = "windows" if os.name == "nt" else "linux"
+PLATFORM = "windows" if os.name == "nt" else ("darwin" if sys.platform == "darwin" else "linux")
 OLD = PLATFORM + ":11111111-1111-4111-8111-111111111111"
 NEW = PLATFORM + ":22222222-2222-4222-8222-222222222222"
 
@@ -40,6 +40,50 @@ def test_native_boot_identity_is_stable_and_valid():
     assert boot.valid_boot_identity(first)
     assert kernel_boot_identity() == first
     assert first.startswith(PLATFORM + ":")
+
+
+@pytest.mark.parametrize("failure", ["none", "errno", "short", "unterminated", "zero", "invalid"])
+def test_darwin_boot_identity_uses_native_session_uuid(monkeypatch, failure):
+    import ctypes
+    from types import SimpleNamespace
+
+    identifier = b"12345678-1234-4234-8234-123456789ABC"
+
+    def query(name, data, size, new, new_size):
+        assert name == b"kern.bootsessionuuid"
+        assert new is None and new_size == 0 and size._obj.value == 37
+        if failure == "errno":
+            ctypes.set_errno(1)
+            return -1
+        value = b"0" * 36 if failure == "invalid" else identifier
+        if failure == "zero":
+            value = b"00000000-0000-0000-0000-000000000000"
+        data.raw = value + (b"x" if failure == "unterminated" else b"\0")
+        size._obj.value = 36 if failure == "short" else 37
+        return 0
+
+    def load(path, **kwargs):
+        assert path == "/usr/lib/libSystem.B.dylib" and kwargs == {"use_errno": True}
+        return SimpleNamespace(sysctlbyname=query)
+
+    monkeypatch.setattr(boot, "os", SimpleNamespace(name="posix"))
+    monkeypatch.setattr(boot, "sys", SimpleNamespace(platform="darwin"))
+    monkeypatch.setattr(ctypes, "CDLL", load)
+    if failure == "none":
+        assert boot.kernel_boot_identity() == "darwin:" + identifier.decode().lower()
+    else:
+        with pytest.raises((OSError, RuntimeError)):
+            boot.kernel_boot_identity()
+
+
+@pytest.mark.parametrize("value", [
+    "darwin:00000000-0000-0000-0000-000000000000",
+    "darwin:12345678-1234-4234-8234-123456789ABC",
+    "darwin:12345678123442348234123456789abc",
+    "freebsd:12345678-1234-4234-8234-123456789abc",
+])
+def test_boot_identity_rejects_noncanonical_evidence(value):
+    assert not boot.valid_boot_identity(value)
 
 
 def test_same_boot_refuses_and_preserves_failure(area, monkeypatch):

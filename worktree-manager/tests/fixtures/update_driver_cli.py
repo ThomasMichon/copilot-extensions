@@ -10,11 +10,13 @@ from pathlib import Path
 
 import update_driver
 from worktree_manager import __main__ as manager
+from worktree_manager import engine_client
 from worktree_manager import update_driver_cli as boundary
 
 
 def main() -> int:
     boundary.source_identity = lambda: {"repo": "fixture-source", "ref": "fixed"}
+    engine_client.installed_engine_command = lambda: ["synthetic-marker-provider"]
     if sys.argv[1] == "submit":
         original = update_driver.runtime_command
 
@@ -29,7 +31,10 @@ def main() -> int:
     def execute(rest):
         events = Path(os.environ["UPDATE_DRIVER_TEST_EVENTS"])
         with events.open("a", encoding="utf-8") as stream:
-            stream.write(json.dumps({"phase": "start", "pid": os.getpid(), "time": time.time()}) + "\n")
+            stream.write(json.dumps({
+                "phase": "start", "pid": os.getpid(), "time": time.time(),
+                "provider": engine_client.engine_base_command(),
+            }) + "\n")
             stream.flush()
         print("synthetic canonical updater started", file=sys.stderr, flush=True)
         time.sleep(0.1)

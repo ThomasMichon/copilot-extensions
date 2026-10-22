@@ -27,11 +27,16 @@ def execute(root: str, identifier: str, witness: str, procutil_path: str) -> int
     database = Path(root) / "queue.sqlite3"
     with closing(sqlite3.connect(f"{database.as_uri()}?mode=ro", uri=True)) as db:
         row = db.execute(
-            "SELECT runner,state FROM requests WHERE id=?", (identifier,),
+            "SELECT runner,state,spec FROM requests WHERE id=?", (identifier,),
         ).fetchone()
     if row is None or row[1] != "running":
         raise RuntimeError("runner has no active request")
     runner = json.loads(row[0])
+    context = dict(json.loads(row[2])["context"])
+    for key in runner.get("context_keys", ()):
+        os.environ.pop(key, None)
+        if key in context:
+            os.environ[key] = context[key]
     os.chdir(runner["cwd"])
     os.environ.update(dict(runner.get("env", ())))
     os.environ["UPDATE_DRIVER_WITNESS"] = witness

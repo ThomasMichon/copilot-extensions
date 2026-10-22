@@ -153,16 +153,24 @@ before a launched thread has assigned its identity.
 Normal early stdin closure preserves the target's result; unexpected input
 errors remain explicit.
 
-Native POSIX caller-death execution currently requires Linux `pidfd_open`,
-readable `/proc` pidfd identity, and the existing unreaped-child/default-SIGCHLD
-prerequisites. Unsupported prerequisites refuse before target launch. One finite
+Native POSIX caller-death execution uses Linux `pidfd_open` and readable `/proc`
+pidfd identity, or macOS `kqueue` process-exit events and `libproc` group census.
+Both require unreaped-child/default-SIGCHLD custody. Unsupported native API
+prerequisites refuse before target launch. macOS uses native `waitid(WNOWAIT)`
+even on Python versions that do not expose it; Linux retains its Python/native
+pidfd path. One finite
 helper owns its session/group before starting the target in that inherited
 scope. A dedicated lifetime writer belongs only to the caller; EOF, including
 caller `SIGTERM`/`SIGKILL`, retires that group. Synchronized fork callbacks close
 active lifetime writers in unrelated fork children as well as excluding them
 from exec inheritance. The caller retains unreaped custody
-of the helper through the final group sweep and poll-based pidfd exit confirmation
-before reporting completion. No caller pre-wrapping, persistent daemon,
+of the helper through the final group sweep and native exit confirmation before
+reporting completion. On macOS the guardian registers `EVFILT_PROC/NOTE_EXIT`
+against its still-live direct parent, checking parent identity on both sides of
+registration; reparenting or a native observation error refuses or retires the
+scope. `libproc` confirms there are no live members of the pinned group before
+its original leader is reaped. Individual census PIDs are never signalled.
+No caller pre-wrapping, persistent daemon,
 per-session subscription worker, network endpoint or sibling runtime is needed.
 The helper imports only the caller's selected canonical package under isolated
 Python, not an ambient CWD or `PYTHONPATH` fallback.
@@ -172,6 +180,12 @@ authorization or hostile-code sandbox. POSIX descendants must remain in the
 inherited group; deliberate session/group escape, privilege changes and
 cross-kernel execution require their own supported owner rather than a claimed
 native-tree guarantee.
+
+`tests/test_darwin_caller_owned.py` covers native API construction, parent
+identity changes, unavailable observations and wrong-member identities with
+synthetic ABI results on every host. Its macOS-only checks exercise actual
+kernel construction, bounded execution and abrupt caller death with a finite
+target and descendant. Skips on other hosts are not macOS execution evidence.
 
 The complete argument/input control request is limited to 16 MiB. POSIX
 completion frames are separately bounded from the declared stream budgets,

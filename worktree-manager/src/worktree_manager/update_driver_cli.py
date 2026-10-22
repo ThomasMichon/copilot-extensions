@@ -91,7 +91,13 @@ def source_identity() -> dict[str, str]:
 
 
 def request_context() -> dict[str, str]:
-    return {key: os.environ[key] for key in _CONTEXT_KEYS if key in os.environ}
+    from .engine_client import ENGINE_ARGV_ENV, inherited_engine_command
+
+    context = {key: os.environ[key] for key in _CONTEXT_KEYS if key in os.environ}
+    accepted = inherited_engine_command()
+    if accepted is not None:
+        context[ENGINE_ARGV_ENV] = json.dumps(accepted)
+    return context
 
 
 @contextmanager
@@ -99,7 +105,7 @@ def _request_environment(context):
     values = dict(context)
     if values.keys() - set(_CONTEXT_KEYS):
         raise ValueError("update request contains unsupported execution context")
-    previous = request_context()
+    previous = {key: os.environ[key] for key in _CONTEXT_KEYS if key in os.environ}
     try:
         for key in _CONTEXT_KEYS:
             os.environ.pop(key, None)
@@ -193,7 +199,9 @@ def cmd_update_request(rest: list[str]) -> int:
         )
         argv, env = driver.runtime_command("worktree_manager", ["update", *forwarded])
         request = driver.enqueue(
-            spec, runner=driver.TrustedRunner(argv, str(cwd), env=tuple(env.items())),
+            spec, runner=driver.TrustedRunner(
+                argv, str(cwd), env=tuple(env.items()), context_keys=_CONTEXT_KEYS,
+            ),
         )
         print(f"Update request {request.id}; log: {request.log_path}", file=sys.stderr)
         worker_process = None

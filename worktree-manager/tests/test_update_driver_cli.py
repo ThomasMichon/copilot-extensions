@@ -49,6 +49,20 @@ def test_request_context_never_persists_credentials(monkeypatch):
     assert context["AGENT_WORKTREES_UPDATE_CONTEXT"] == "example-context"
 
 
+def test_queue_captures_consumed_provider_without_restoring_ambient_transport(queued, monkeypatch):
+    import json
+    from worktree_manager import engine_client
+
+    provider = ["synthetic-selected-provider", "--provider-option"]
+    monkeypatch.setattr(engine_client, "_INHERITED_ENGINE_COMMAND", provider)
+    monkeypatch.delenv(engine_client.ENGINE_ARGV_ENV, raising=False)
+    seen, _request = queued
+    assert driver.cmd_update_request([]) == 6
+    assert json.loads(dict(seen["spec"].context)[engine_client.ENGINE_ARGV_ENV]) == provider
+    assert engine_client.ENGINE_ARGV_ENV in seen["runner"].context_keys
+    assert engine_client.ENGINE_ARGV_ENV not in driver.os.environ
+
+
 def test_source_identity_preserves_explicit_selection(tmp_path, monkeypatch):
     from worktree_manager import self_install
 
@@ -235,6 +249,29 @@ def test_real_cli_worker_preserves_exit_and_serializes_processes(tmp_path, monke
     requests = update_driver.status()
     assert len(requests) in (1, 2)
     assert all(request.state == "completed" and request.exit_code == 6 for request in requests)
+
+
+def test_actual_queued_manager_keeps_consumed_provider(tmp_path, monkeypatch):
+    import json
+    import sys
+    from pathlib import Path
+    from agent_procutil.owned_process import run_owned
+    from worktree_manager import engine_client
+
+    home = tmp_path / "home"
+    home.mkdir()
+    events = tmp_path / "events.jsonl"
+    provider = [sys.executable, str(tmp_path / "selected-provider.py")]
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.setenv("UPDATE_DRIVER_TEST_EVENTS", str(events))
+    monkeypatch.setenv(engine_client.ENGINE_ARGV_ENV, json.dumps(provider))
+    fixture = Path(__file__).parent / "fixtures" / "update_driver_cli.py"
+    result = run_owned([sys.executable, str(fixture), "submit", "--wait"], timeout=20)
+    assert result.returncode == 6, result.stderr
+    records = [json.loads(line) for line in events.read_text().splitlines()]
+    assert records[0]["provider"] == provider
+    assert records[0]["provider"] != ["synthetic-marker-provider"]
 
 
 def test_recovery_inspection_and_settlement_never_start_an_updater(queued, monkeypatch, capsys):

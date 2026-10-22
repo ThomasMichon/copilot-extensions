@@ -69,6 +69,7 @@ class TrustedRunner:
     cwd: str
     timeout: float = 7200
     env: tuple[tuple[str, str], ...] = ()
+    context_keys: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -162,7 +163,15 @@ def _runner(runner: TrustedRunner) -> TrustedRunner:
         raise InvalidRequestError("runner environment accepts only Python import mapping")
     if len({k for k, _v in pairs}) != len(pairs):
         raise InvalidRequestError("runner environment keys must be unique")
-    return TrustedRunner(argv, cwd, runner.timeout, pairs)
+    context_keys = _vector(runner.context_keys)
+    if len(context_keys) > 64 or len(set(context_keys)) != len(context_keys) or any(
+        not re.fullmatch(r"[A-Z_][A-Z0-9_]{0,127}", key)
+        or key.startswith("UPDATE_DRIVER_")
+        or key in {"PYTHONPATH", "__PYVENV_LAUNCHER__"}
+        for key in context_keys
+    ):
+        raise InvalidRequestError("runner context keys must be unique environment identifiers")
+    return TrustedRunner(argv, cwd, runner.timeout, pairs, tuple(sorted(context_keys)))
 
 
 def runtime_command(

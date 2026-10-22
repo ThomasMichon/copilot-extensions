@@ -23,6 +23,12 @@ def _context() -> tuple[tuple[str, str], ...]:
     return tuple((key, os.environ[key]) for key in _CONTEXT_KEYS if key in os.environ)
 
 
+def _invocation_cwd() -> Path:
+    from . import __main__ as core
+
+    return (core._INVOCATION_CWD or Path.cwd()).resolve()
+
+
 @contextmanager
 def _execution_context(context):
     values = dict(context)
@@ -121,7 +127,7 @@ def cmd_update_request(args: argparse.Namespace) -> int:
         project = cfg.active_project()
         flags = _flags(args)
         bypass = ["--no-manager"] if getattr(args, "no_manager", False) else []
-        cwd = Path.cwd().resolve()
+        cwd = _invocation_cwd()
         spec = driver.RequestSpec(
             backend="engine", argv=tuple([*bypass, *flags]), project=project or "", cwd=str(cwd),
             source=str(cfg.install_dir().resolve()), context=_context(),
@@ -131,7 +137,9 @@ def cmd_update_request(args: argparse.Namespace) -> int:
             "agent_worktrees", [*project_args, "update", *bypass, *flags],
         )
         request = driver.enqueue(
-            spec, runner=driver.TrustedRunner(argv, str(cwd), env=tuple(environment.items())),
+            spec, runner=driver.TrustedRunner(
+                argv, str(cwd), env=tuple(environment.items()), context_keys=_CONTEXT_KEYS,
+            ),
         )
         print(f"Update request {request.id}; log: {request.log_path}", file=sys.stderr)
         worker_process = None

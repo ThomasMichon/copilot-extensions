@@ -83,6 +83,40 @@ def test_two_process_workers_have_no_transaction_overlap(area):
     assert all(wait(request.id, root=root, timeout=1).exit_code == 0 for request in requests)
 
 
+def test_each_queued_scope_is_applied_before_product_routing(area, monkeypatch):
+    import json
+
+    root = area / "state"
+    monkeypatch.setenv("FIXTURE_SCOPE", "wrong-worker-scope")
+    monkeypatch.setenv("FIXTURE_OPTION", "must-not-leak")
+    script = (
+        "import json,os,pathlib,sys;"
+        "before=os.getcwd();"
+        "os.chdir(pathlib.Path(os.environ['FIXTURE_SCOPE'])/'anchor');"
+        "pathlib.Path(sys.argv[1]).write_text(json.dumps("
+        "{'before':before,'anchor':os.getcwd(),'option':os.environ.get('FIXTURE_OPTION')}))"
+    )
+    requests = []
+    for name in ("first", "second"):
+        scope = area / name
+        (scope / "anchor").mkdir(parents=True)
+        request = enqueue(
+            RequestSpec("fixture", project="same-project", context=(("FIXTURE_SCOPE", str(scope)),)),
+            runner=TrustedRunner(
+                (sys.executable, "-c", script, str(scope / "result.json")), str(area),
+                context_keys=("FIXTURE_SCOPE", "FIXTURE_OPTION"),
+            ),
+            root=root,
+        )
+        requests.append(request)
+    collect(worker(area))
+    for request, name in zip(requests, ("first", "second")):
+        assert status(request.id, root=root).exit_code == 0
+        assert json.loads((area / name / "result.json").read_text()) == {
+            "before": str(area), "anchor": str(area / name / "anchor"), "option": None,
+        }
+
+
 def test_real_active_request_does_not_swallow_arrival_and_streams(area):
     root = area / "state"
     first = enqueue(RequestSpec("fixture"), runner=runner(area, delay=".7", code="23"), root=root)

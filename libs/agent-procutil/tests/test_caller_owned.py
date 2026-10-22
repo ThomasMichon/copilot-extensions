@@ -26,8 +26,8 @@ from agent_procutil.owned_process import (
 )
 
 native_execution = pytest.mark.skipif(
-    os.name != "nt" and not sys.platform.startswith("linux"),
-    reason="caller-owned native execution supports Windows and Linux",
+    os.name != "nt" and not sys.platform.startswith("linux") and sys.platform != "darwin",
+    reason="caller-owned native execution supports Windows, Linux and macOS",
 )
 
 
@@ -180,7 +180,7 @@ def test_absolute_deadline_retires_target_after_output_closes(capture):
     assert time.monotonic() - started < 4
 
 
-@pytest.mark.parametrize("platform", ["darwin", "freebsd14"])
+@pytest.mark.parametrize("platform", ["freebsd14"])
 def test_unsupported_posix_platform_refuses_before_spawn(monkeypatch, platform):
     def forbidden(*args, **kwargs):
         raise AssertionError("unsupported platform reached native spawn")

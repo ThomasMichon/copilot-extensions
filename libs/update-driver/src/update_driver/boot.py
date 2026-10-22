@@ -15,7 +15,7 @@ def valid_boot_identity(value: object) -> bool:
         platform, identifier = value.split(":", 1)
         parsed = uuid.UUID(identifier)
         return (
-            platform in {"windows", "linux"} and parsed.int != 0
+            platform in {"windows", "linux", "darwin"} and parsed.int != 0
             and str(parsed) == identifier
         )
     except (ValueError, AttributeError):
@@ -49,6 +49,22 @@ def kernel_boot_identity() -> str:
         value = "linux:" + Path("/proc/sys/kernel/random/boot_id").read_text(
             encoding="ascii",
         ).strip().lower()
+    elif sys.platform == "darwin":
+        import ctypes
+
+        query = ctypes.CDLL("/usr/lib/libSystem.B.dylib", use_errno=True).sysctlbyname
+        query.argtypes = [
+            ctypes.c_char_p, ctypes.c_void_p, ctypes.POINTER(ctypes.c_size_t),
+            ctypes.c_void_p, ctypes.c_size_t,
+        ]
+        query.restype = ctypes.c_int
+        data = ctypes.create_string_buffer(37)
+        size = ctypes.c_size_t(len(data))
+        if query(b"kern.bootsessionuuid", data, ctypes.byref(size), None, 0) != 0:
+            raise OSError(ctypes.get_errno(), "native Darwin boot identity query unavailable")
+        if size.value != len(data) or data.raw[-1:] != b"\0":
+            raise RuntimeError("native Darwin boot identity is malformed")
+        value = "darwin:" + data.raw[:-1].decode("ascii").lower()
     else:
         raise RuntimeError("native boot identity is unsupported on this platform")
     if not valid_boot_identity(value):

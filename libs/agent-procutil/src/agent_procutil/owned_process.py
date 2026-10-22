@@ -8,6 +8,7 @@ import os
 import selectors
 import signal
 import subprocess
+import sys
 import threading
 import time
 
@@ -76,6 +77,10 @@ def _observe_unreaped(process: subprocess.Popen):
         raise RuntimeError("native child custody requires the default SIGCHLD disposition")
     if process.returncode is not None:
         raise RuntimeError("native child custody was already released")
+    if sys.platform == "darwin":
+        from agent_procutil._darwin_caller_owned import observe_unreaped
+
+        return observe_unreaped(process)
     try:
         status = os.waitid(
             os.P_PID, process.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT,
@@ -382,10 +387,15 @@ def _run_owned(
         raise ValueError("inherit_process_group must be a boolean")
     if inherit_process_group:
         require_contained_worker()
-    if not windows and not all(hasattr(os, name) for name in (
-        "waitid", "P_PID", "WEXITED", "WNOHANG", "WNOWAIT",
-    )):
-        raise RuntimeError("native child execution requires unreaped POSIX custody")
+    if not windows:
+        if sys.platform == "darwin":
+            from agent_procutil._darwin_caller_owned import _waitid
+
+            _waitid()
+        elif not all(hasattr(os, name) for name in (
+            "waitid", "P_PID", "WEXITED", "WNOHANG", "WNOWAIT",
+        )):
+            raise RuntimeError("native child execution requires unreaped POSIX custody")
     if not windows and signal.getsignal(signal.SIGCHLD) != signal.SIG_DFL:
         raise RuntimeError("native child custody requires the default SIGCHLD disposition")
     deadline = time.monotonic() + timeout

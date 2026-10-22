@@ -42,10 +42,19 @@ entrypoint. No command/runner submission CLI exists.
   cwd is normalized, while argument ordering and spelling remain significant.
   Adapters own semantic option normalization and safe-field projection. Never
   put credentials in argv, source, context, error strings, or runner metadata.
-- `TrustedRunner(argv, cwd, timeout=7200, env=())` stores a complete internally
+- `TrustedRunner(argv, cwd, timeout=7200, env=(), context_keys=())` stores a complete internally
   constructed pinned invocation. Only Python import mapping (`PYTHONPATH`,
   `__PYVENV_LAUNCHER__`) can be persisted as environment metadata. Authentication
   remains inherited at execution time, never serialized.
+  `context_keys` declares the adapter-approved, credential-free environment
+  projection from `RequestSpec.context`: before product startup, the runner
+  clears every declared key and restores only the request's saved values.
+  This happens before module import and project routing, not just inside an
+  eventual command handler. Absent keys cannot leak from the caller that
+  happened to start the shared worker. The declaration participates in pending
+  equivalence; driver capability and Python import keys cannot be projected.
+  Adapters must retain the original invocation directory as the runner cwd
+  when their front door changes directory during project resolution.
 - `runtime_command(module, args=()) -> (argv, env)` uses `direct_python` and
   the current runtime's `.runtime-bootstrap/runtime_launcher.py` with
   `-I -S -B -X utf8` when present. It never resolves a newer selected slot.
@@ -102,7 +111,7 @@ entrypoint. No command/runner submission CLI exists.
 The default executor reads each persisted trusted runner over a subprocess
 boundary; one product never imports another. The original worker runtime owns
 `agent_procutil.owned_process.run_caller_owned`, a finite strict native Job on
-Windows or Linux caller-death guardian/group. The private shim changes cwd,
+Windows or a Linux/macOS caller-death guardian/group. The private shim changes cwd,
 sets only safe import mapping and the ephemeral witness, directs stdout/stderr
 straight to `<request-id>.log`, and executes the exact pinned product invocation.
 On Windows it waits for the product inside the owned Job rather than using
@@ -183,8 +192,8 @@ is not cleared merely because cleanup probably completed or the lock is free.
 
 Schema **2** records `Request.boot_id` at transaction admission, under the
 installation lock, before invoking the executor. `kernel_boot_identity()`
-reads Linux's kernel boot UUID or Windows
-`NtQuerySystemInformation(SystemBootEnvironmentInformation=90)` BootIdentifier.
+reads Linux's kernel boot UUID, macOS `sysctlbyname("kern.bootsessionuuid")`,
+or Windows `NtQuerySystemInformation(SystemBootEnvironmentInformation=90)` BootIdentifier.
 It never derives identity from uptime, timestamps, PIDs, or a user-set flag.
 Unsupported/missing native evidence fails admission explicitly.
 
@@ -268,5 +277,9 @@ canonical exit status 7 afterward; two contained-worker controls and ordinary
 bounded children die with that Job. The canonical procutil window observer
 asserts zero new visible consoles or foreground transitions across the cycles.
 No scheduler, service, live installer, or home-state update is involved.
-Linux guardian behavior is reused, but this change's recorded execution is
-Windows, not a Linux native-lifetime or real-reboot qualification claim.
+Linux guardian behavior is reused; macOS uses the canonical helper's native
+kqueue parent-death observation, unreaped-child custody and libproc group census.
+Synthetic ABI and dispatch tests cover its construction and refusal paths;
+macOS-only native lifetime tests remain separately runnable. This change's
+recorded production-lifetime execution is Windows, not a Linux/macOS native
+lifetime or real-reboot qualification claim.

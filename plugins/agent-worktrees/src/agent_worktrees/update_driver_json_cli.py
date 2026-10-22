@@ -84,7 +84,7 @@ def _run_request(
                         text = json.dumps({"ok": False, "reason": "canonical-executor-failed"})
                     _publish_result(request, text)
                     return code
-        project, cwd = cfg.active_project(), Path.cwd().resolve()
+        project, cwd = cfg.active_project(), update_driver_cli._invocation_cwd()
         spec = driver.RequestSpec(
             backend=backend, argv=tuple(flags), project=project or "", cwd=str(cwd),
             source=str(cfg.install_dir().resolve()), context=update_driver_cli._context(),
@@ -94,7 +94,10 @@ def _run_request(
             "agent_worktrees", [*project_args, verb, *flags],
         )
         request = driver.enqueue(
-            spec, runner=driver.TrustedRunner(command, str(cwd), env=tuple(environment.items())),
+            spec, runner=driver.TrustedRunner(
+                command, str(cwd), env=tuple(environment.items()),
+                context_keys=update_driver_cli._CONTEXT_KEYS,
+            ),
         )
         print(f"Update request {request.id}; log: {request.log_path}", file=sys.stderr)
         worker, environment = driver.runtime_command("update_driver", ["worker"])
@@ -116,7 +119,21 @@ def _run_request(
         return result.exit_code
     except (driver.DriverError, driver.ParticipantError, OSError, ValueError) as error:
         print(f"Update driver: {error}", file=sys.stderr)
-        print(json.dumps({"ok": False, "reason": "update-driver", "message": str(error)}))
+        failure = {"ok": False, "reason": "update-driver", "message": str(error)}
+        if verb == "reconcile-plugins":
+            repo = getattr(args, "repo", None) or update_cli.worktree_identity._find_repo_dir()
+            update_cli.write_reconcile_status(
+                getattr(args, "status", None),
+                {**failure, "repo": str(Path(repo).resolve()) if repo else None, "failed": []},
+            )
+        elif verb == "stage-update":
+            update_cli.write_reconcile_status(
+                getattr(args, "status", None) or update_stage.status_path(),
+                {**failure, "stage_done": False, "plugin_changed": False,
+                 "runtime_apply_blocked": "update-driver"},
+            )
+        if emit_json:
+            print(json.dumps(failure))
         return 1
 
 

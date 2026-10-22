@@ -335,7 +335,7 @@ def test_freeze_real_worktrees_graph_is_self_contained(engine, tmp_path):
 @pytest.fixture
 def procutil(engine):
     root = Path(__file__).resolve().parents[3]
-    package = root / "plugins" / "agent-worktrees" / "libs" / "agent-procutil"
+    package = root / "libs" / "agent-procutil"
     return engine._procutil(engine.FrozenInputs(package, (package,), "unused"))
 
 
@@ -476,7 +476,7 @@ def test_owned_child_hard_owner_death_reaps_writer_tree(engine, procutil, tmp_pa
         f"sys.path[:0]=[{str(root / 'libs' / 'installer-engine')!r},"
         f"{str(root / 'plugins' / 'agent-worktrees' / 'scripts')!r}]\n"
         "import installer_engine as engine\n"
-        f"package=pathlib.Path({str(root / 'plugins' / 'agent-worktrees' / 'libs' / 'agent-procutil')!r})\n"
+        f"package=pathlib.Path({str(root / 'libs' / 'agent-procutil')!r})\n"
         "procutil=engine._procutil(engine.FrozenInputs(package,(package,),'unused'))\n"
         f"root=pathlib.Path({str(tmp_path)!r})\n"
         "with engine.runtime.construction_lease(root,'1.0') as descriptor:\n"

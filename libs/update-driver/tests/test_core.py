@@ -61,6 +61,29 @@ def test_identity_includes_runner_and_source(area):
     assert sample(area, source="public:dev").id != first.id
 
 
+@pytest.mark.parametrize("keys", [
+    ("FIXTURE_SCOPE", "FIXTURE_SCOPE"),
+    ("invalid-key",),
+    ("UPDATE_DRIVER_WITNESS",),
+    ("PYTHONPATH",),
+    ("__PYVENV_LAUNCHER__",),
+])
+def test_runner_context_projection_rejects_invalid_or_authority_keys(area, keys):
+    with pytest.raises(InvalidRequestError, match="context keys"):
+        enqueue(
+            RequestSpec("fixture"), root=area / "state",
+            runner=TrustedRunner((sys.executable, "-c", "pass"), str(area), context_keys=keys),
+        )
+
+
+def test_runner_context_projection_participates_in_pending_identity(area):
+    first = sample(area, context=(("FIXTURE_SCOPE", "selected"),))
+    declared = replace(first.runner, context_keys=("FIXTURE_SCOPE",))
+    second = enqueue(first.spec, runner=declared, root=area / "state")
+    assert second.id != first.id
+    assert status(second.id, root=area / "state").runner.context_keys == ("FIXTURE_SCOPE",)
+
+
 def test_running_cannot_swallow_later_request(area):
     root = area / "state"
     first = sample(area)

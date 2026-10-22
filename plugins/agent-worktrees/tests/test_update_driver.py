@@ -51,6 +51,8 @@ def queued(monkeypatch, tmp_path):
     monkeypatch.setattr(update_driver, "wait", wait)
     monkeypatch.setattr(boundary.cfg, "active_project", lambda: "example")
     monkeypatch.setattr(boundary.cfg, "install_dir", lambda: tmp_path)
+    from agent_worktrees import __main__ as core
+    monkeypatch.setattr(core, "_INVOCATION_CWD", None)
     monkeypatch.setattr(update_cli, "cmd_update", forbidden)
     return seen, request
 
@@ -69,6 +71,61 @@ def test_no_manager_does_not_bypass_the_queue(queued):
     assert boundary.cmd_update_request(_args(no_manager=True)) == 4
     assert seen["spec"].argv == ("--no-manager",)
     assert seen["runner"].argv[-2:] == ("update", "--no-manager")
+
+
+def test_queued_update_keeps_original_context_after_project_chdir(queued, tmp_path, monkeypatch):
+    from agent_worktrees import __main__ as core
+
+    caller, anchor = tmp_path / "caller", tmp_path / "anchor"
+    caller.mkdir()
+    anchor.mkdir()
+    monkeypatch.chdir(anchor)
+    monkeypatch.setattr(core, "_INVOCATION_CWD", caller)
+    monkeypatch.setenv("AGENT_HOME", str(tmp_path / "selected-installation"))
+    seen, _request = queued
+    assert boundary.cmd_update_request(_args()) == 4
+    assert seen["spec"].cwd == str(caller)
+    assert seen["runner"].cwd == str(caller)
+    assert dict(seen["spec"].context)["AGENT_HOME"] == str(tmp_path / "selected-installation")
+    assert seen["runner"].context_keys == boundary._CONTEXT_KEYS
+
+
+def test_actual_queued_engine_keeps_each_scope_and_original_invocation(tmp_path, monkeypatch):
+    import json
+    import sys
+    from pathlib import Path
+    from agent_procutil.owned_process import run_owned
+
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    for key in boundary._CONTEXT_KEYS:
+        monkeypatch.delenv(key, raising=False)
+    fixture = Path(__file__).parent / "fixtures" / "update_driver_context.py"
+    for name in ("first", "second"):
+        scope = tmp_path / name
+        (scope / "anchor").mkdir(parents=True)
+        invocation = scope / "invocation"
+        settings = invocation / ".github" / "copilot" / "settings.json"
+        settings.parent.mkdir(parents=True)
+        settings.write_text("{}")
+        monkeypatch.setenv("AGENT_HOME", str(scope))
+        monkeypatch.chdir(invocation)
+        result = run_owned(
+            [sys.executable, str(fixture), "submit"], timeout=20,
+        )
+        assert result.returncode == 0, result.stderr
+    monkeypatch.setenv("AGENT_HOME", str(tmp_path / "first"))
+    result = run_owned([sys.executable, "-m", "update_driver", "worker"], timeout=20)
+    assert result.returncode == 0, result.stderr
+    for name in ("first", "second"):
+        scope = tmp_path / name
+        assert json.loads((scope / "result.json").read_text()) == {
+            "anchor": str(scope / "anchor"),
+            "invocation": str(scope / "invocation"),
+            "update_context": str(scope / "invocation"),
+        }
 
 
 def test_detach_receipt_is_not_a_successful_installation(queued, capsys):

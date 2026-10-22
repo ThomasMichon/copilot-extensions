@@ -83,6 +83,60 @@ def test_protocol_output_limit_fails_without_silent_truncation():
     assert buffer.getvalue() == ""
 
 
+@pytest.mark.parametrize("emit_json", [False, True])
+def test_early_stage_failure_respects_stdout_contract(tmp_path, monkeypatch, capsys, emit_json):
+    import update_driver
+
+    def refuse():
+        raise update_driver.ParticipantError("synthetic custody refusal")
+
+    status = tmp_path / "stage.json"
+    status.write_text('{"stage_done":true,"plugin_changed":true}')
+    monkeypatch.setattr(boundary.update_stage, "status_path", lambda: status)
+    monkeypatch.setattr(update_driver, "borrowed_custody", refuse)
+    assert boundary.cmd_stage_request(_args(json=emit_json)) == 1
+    result = capsys.readouterr()
+    assert "synthetic custody refusal" in result.err
+    if emit_json:
+        assert json.loads(result.out)["reason"] == "update-driver"
+    else:
+        assert result.out == ""
+    failed = json.loads(status.read_text())
+    assert failed["stage_done"] is False and failed["plugin_changed"] is False
+    assert failed["runtime_apply_blocked"] == "update-driver"
+
+
+@pytest.mark.parametrize("phase", ["custody", "enqueue", "launch"])
+def test_driver_refusal_replaces_previous_success_status(tmp_path, monkeypatch, capsys, phase):
+    import update_driver
+
+    repo, status = tmp_path / "repo", tmp_path / "status.json"
+    status.write_text(json.dumps({"version": 1, "ok": True, "repo": str(repo)}))
+
+    def refuse(*args, **kwargs):
+        raise update_driver.ParticipantError("synthetic custody refusal")
+
+    monkeypatch.setattr(update_driver, "borrowed_custody", lambda: None)
+    monkeypatch.setattr(boundary.cfg, "active_project", lambda: None)
+    monkeypatch.setattr(boundary.cfg, "install_dir", lambda: tmp_path)
+    monkeypatch.setattr(update_driver, "runtime_command", lambda *args: (("synthetic",), {}))
+    monkeypatch.setattr(update_driver, "enqueue", lambda *args, **kwargs: SimpleNamespace(
+        id="synthetic-request", log_path=tmp_path / "request.log",
+    ))
+    monkeypatch.setattr(update_driver, {
+        "custody": "borrowed_custody", "enqueue": "enqueue", "launch": "ensure_worker",
+    }[phase], refuse)
+    assert boundary.cmd_reconcile_request(_args(apply=True, repo=str(repo), status=str(status))) == 1
+    failed = json.loads(status.read_text())
+    assert failed["version"] == 1 and failed["ok"] is False
+    assert failed["repo"] == str(repo)
+    assert failed["reason"] == "update-driver"
+    assert failed["failed"] == []
+    assert "synthetic custody refusal" in failed["message"]
+    assert failed["updated_at"]
+    assert json.loads(capsys.readouterr().out)["ok"] is False
+
+
 def test_queued_json_round_trip_returns_original_payload_and_exit(tmp_path, monkeypatch, capsys):
     import update_driver
 
