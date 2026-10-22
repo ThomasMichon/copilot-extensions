@@ -14,6 +14,7 @@ from threading import RLock
 from typing import NoReturn
 
 from .gateway_manifest import ServiceSlot
+from .gateway_identity_provider import IdentityProvider
 from .gateway_service_context import (
     ServiceContext, ServicePolicyError, identifier, parse_context, require,
 )
@@ -116,10 +117,14 @@ class ServiceAuthority:
     """
 
     def __init__(self, *, fleet: str, gateway: str, source: Callable[[], bytes],
-                 clock: Callable[[], int]) -> None:
+                 clock: Callable[[], int],
+                 identity_provider: IdentityProvider | None = None) -> None:
         self._fleet, self._gateway = identifier(fleet), identifier(gateway)
         require(callable(source), "invalid-source")
         require(callable(clock), "invalid-clock")
+        require(identity_provider is None or type(identity_provider) is IdentityProvider,
+                "invalid-identity-provider")
+        self._identity_provider = identity_provider
         self._source, self._clock = source, clock
         self._lock = RLock()
         self._snapshot: ServiceSnapshot | None = None
@@ -170,7 +175,8 @@ class ServiceAuthority:
         except OSError:
             self._fail("source-unavailable")
         try:
-            context, candidate_verifier = parse_context(raw, self._clock)
+            context, candidate_verifier = parse_context(
+                raw, self._clock, identity_provider=self._identity_provider)
             require(context.manifest.fleet == self._fleet
                     and context.manifest.gateway == self._gateway, "owner-mismatch")
         except ServicePolicyError as exc:

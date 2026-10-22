@@ -143,12 +143,12 @@ class Rig:
     def save(self):
         self.policy.write_bytes(planning.canonical(self.h.document))
 
-    async def start(self):
+    async def start(self, *, identity_provider=None):
         self.save()
         for backend in self.backends:
             self.origins.append(await backend.start())
         self.serving = await start(self.listener, self.policy, reload_interval=0.05,
-                                   clock=self.h.clock)
+                                   clock=self.h.clock, identity_provider=identity_provider)
         self.origin = self.serving.origin
         self.state = self.serving.app[STATE]
         self.session = aiohttp.ClientSession(

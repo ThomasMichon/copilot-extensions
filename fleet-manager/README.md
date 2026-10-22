@@ -11,6 +11,11 @@ no production Gateway/index offload or managed install/update/uninstall,
 telemetry sink or fleet resource mutation is claimed.
 Broader fleet delivery remains the [canonical effort](../efforts/active/linux-role-fleet/README.md).
 
+The opt-in [service Gateway SDK](docs/gateway-service-profile.md) accepts a
+code-registered provider-neutral public-trust adapter. Vendor implementation,
+login and trust acquisition stay downstream; the existing `jwt-pop-v1` request
+verifier and ordinary CLI/default identity behavior remain unchanged.
+
 ```text
 fleet-manager plan --template recommended.json --config adopter.json --inventory live.json --fleet-id example --machine-limit 5
 ```

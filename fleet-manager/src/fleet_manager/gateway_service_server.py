@@ -22,6 +22,7 @@ from .gateway_service_channel import (
     send, send_encoded, shape, target, unpack,
 )
 from .gateway_service_context import ServiceContext, ServicePolicyError
+from .gateway_identity_provider import IdentityProvider
 from .gateway_service_listener import Listener, read_bounded
 from .gateway_service_policy import ServiceAuthority, ServiceCandidate
 from .gateway_manifest import RouteSpec, ServiceSlot
@@ -414,12 +415,14 @@ def outcome(request: web.Request, code: str) -> str:
 
 
 async def build_app(listener: Listener, policy_path: Path, *, reload_interval: float = 1,
-                    clock: Callable[[], int] = lambda: int(time.time())) -> web.Application:
+                    clock: Callable[[], int] = lambda: int(time.time()),
+                    identity_provider: IdentityProvider | None = None) -> web.Application:
     """Build without binding; the policy file is the sole explicit runtime source."""
     listener.tls()
     authority = ServiceAuthority(
         fleet=listener.fleet, gateway=listener.gateway,
-        source=lambda: read_bounded(policy_path), clock=clock)
+        source=lambda: read_bounded(policy_path), clock=clock,
+        identity_provider=identity_provider)
     state = ServiceRuntime(authority, listener, reload_interval)
     await state.reload()
     app = web.Application(middlewares=[guarded], client_max_size=BODY_BYTES, handler_args={
