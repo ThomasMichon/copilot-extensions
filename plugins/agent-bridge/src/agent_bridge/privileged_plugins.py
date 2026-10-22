@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field, field_validator
 from .spawn_target import REQUEST_OVERRIDES_KEY, SpawnTarget
 
 META_KEY = "agent-bridge/privileged-launch"
-_CONTEXT_KEY = "privileged_plugin_context"
+CONTEXT_KEY = "privileged_plugin_context"
 _MAX_CONTEXT_BYTES = 256 * 1024
 
 
@@ -139,6 +139,17 @@ async def lifecycle_rpc(client: Any, method: Any, **params: Any) -> Any:
         or type(receipt.get("version")) is not int or receipt["version"] != 1
     ):
         raise PrivilegedLaunchRefused("Privileged receiver did not confirm the required preparation")
+    from .acp_preferences import AcpPreferencesMixin
+    from .session_preferences import SOURCE_ENV
+
+    if context.env.get(SOURCE_ENV) == "target-settings":
+        selected = AcpPreferencesMixin._selected_preferences(getattr(result, "config_options", None))
+        if not selected.get("model") or receipt.get("preferences") != selected:
+            raise PrivilegedLaunchRefused("Privileged receiver did not confirm its verified preferences")
+        # The receiver already applied the request in its actual execution
+        # profile. Standard ACP readback must preserve that selection rather
+        # than resolving unprivileged defaults a second time.
+        client.confirmed_preferences = selected
     return result
 
 
@@ -180,7 +191,7 @@ def apply_context(target: SpawnTarget, context: PrivilegedContext) -> SpawnTarge
                 "controller_worktree_origin": context.controller_origin,
                 "controller_session_id": context.caller_session_id,
             },
-            _CONTEXT_KEY: {
+            CONTEXT_KEY: {
                 "digest": context.digest(), "controller_cwd": context.controller_cwd,
             },
         },
@@ -201,7 +212,7 @@ def require_local_receiver(target: SpawnTarget) -> None:
 
 def controller_source(target: SpawnTarget) -> tuple[bool, str | None]:
     """Producer filesystem authority is separate from receiver-owned allocation."""
-    metadata = (target.venue or {}).get(_CONTEXT_KEY)
+    metadata = (target.venue or {}).get(CONTEXT_KEY)
     if metadata is None:
         return False, None
     require_local_receiver(target)
@@ -214,21 +225,48 @@ def controller_source(target: SpawnTarget) -> tuple[bool, str | None]:
 def receipt(session: Any, context: PrivilegedContext) -> dict[str, Any]:
     """An incumbent is reusable only with this context and actual preparation."""
     require_local_receiver(session.target)
-    bound = (session.target.venue or {}).get(_CONTEXT_KEY, {})
+    bound = (session.target.venue or {}).get(CONTEXT_KEY, {})
     prepared = session.target.prepared_plugins
     if (
         bound.get("digest") != context.digest() or not isinstance(prepared, dict)
         or prepared.get("applicable") is False or not isinstance(prepared.get("cwd"), str)
         or not isinstance(prepared.get("plugins"), list) or not isinstance(prepared.get("logical_payloads"), dict)
-        or Path(prepared["cwd"]).resolve() != Path(session.target.cwd or "").resolve()
+        or not isinstance(prepared.get("execution_cwd"), str)
+        or Path(prepared["execution_cwd"]).resolve() != Path(session.target.cwd or "").resolve()
     ):
         raise PrivilegedLaunchRefused("Privileged session has no matching prepared launch; refusing adoption")
-    return {META_KEY: {"version": 1, "digest": context.digest()}}
+    result: dict[str, Any] = {"version": 1, "digest": context.digest()}
+    options = preference_options(session, context)
+    if options is not None:
+        from .acp_preferences import AcpPreferencesMixin
+
+        result["preferences"] = AcpPreferencesMixin._selected_preferences(options)
+    return {META_KEY: result}
+
+
+def preference_options(session: Any, context: PrivilegedContext) -> Any:
+    """Expose only the receiver's completed target-settings readback."""
+    from .acp_preferences import AcpPreferencesMixin
+    from .session_preferences import SOURCE_ENV
+
+    if context.env.get(SOURCE_ENV) != "target-settings":
+        return None
+    client = session.client
+    if (
+        client is None or client.preference_source != "target-settings"
+        or client._preferences_ready is not True
+    ):
+        raise PrivilegedLaunchRefused("Privileged receiver preferences are not verified")
+    options = client._verified_options
+    selected = AcpPreferencesMixin._selected_preferences(options)
+    if not selected.get("model") or selected != client.confirmed_preferences:
+        raise PrivilegedLaunchRefused("Privileged receiver preference readback is incomplete")
+    return options
 
 
 def require_bound_session(session: Any, context: PrivilegedContext) -> None:
     """Refuse legacy/mismatched incumbents before resume can start anything."""
     require_local_receiver(session.target)
-    bound = (session.target.venue or {}).get(_CONTEXT_KEY, {})
+    bound = (session.target.venue or {}).get(CONTEXT_KEY, {})
     if bound.get("digest") != context.digest():
         raise PrivilegedLaunchRefused("Privileged session belongs to a different or legacy launch context")

@@ -613,6 +613,8 @@ async def resolve_local_launch(
             prepared_context.get("applicable") is False or not prepared_context.get("cwd")
         ):
             raise RuntimeError("Privileged plugin preparation requires a repository-backed checkout")
+        if target.elevated:
+            prepared_context["execution_cwd"] = work_dir
         if replacement is not None:
             launch_prefix = args[:-len(target.copilot_args)] if target.copilot_args else args
             args = [*launch_prefix, *_prepared_plugin_args(target, replacement)]

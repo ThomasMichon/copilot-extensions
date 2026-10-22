@@ -278,14 +278,15 @@ class _SessionStartMixin:
         def on_acp_event(event_type: str, data: dict[str, Any]) -> None:
             self._route_acp_event(session, event_type, data)
 
-        # Persist to DB. `config_json` carries `mcp_servers` -- otherwise a
-        # session's declared per-session MCP toolset (e.g. a reviewer's
-        # dedicated, credential-bound tools) lives ONLY in this in-memory
-        # Session object and is silently lost on any daemon restart, not just
-        # a resume within the same process (the downstream tracker).
+        # Rehydration must reconstruct request-owned toolsets and model/effort
+        # inputs, not substitute defaults from a restarted frontend.
         config_json = (
-            json.dumps({"mcp_servers": session.mcp_servers})
-            if session.mcp_servers else None
+            json.dumps({
+                "mcp_servers": session.mcp_servers,
+                **({"model_override": model} if model is not None else {}),
+                **({"effort_override": effort} if effort is not None else {}),
+            })
+            if session.mcp_servers or model is not None or effort is not None else None
         )
         self._db.create_session(
             session_id=session_id,

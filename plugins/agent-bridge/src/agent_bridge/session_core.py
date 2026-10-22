@@ -255,12 +255,14 @@ class _SessionCoreMixin(_SessionDrainGateMixin):
     @staticmethod
     def _provider_backed_target(target: SpawnTarget) -> bool:
         """Whether a persisted target carries namespace-provider metadata."""
+        from .privileged_plugins import CONTEXT_KEY
+
         return any(
             isinstance(value, dict) and bool(value)
             for value in (target.codespace, target.container)
         ) or (
             isinstance(target.venue, dict)
-            and any(key != _REQUEST_OVERRIDES_KEY for key in target.venue)
+            and any(key not in {_REQUEST_OVERRIDES_KEY, CONTEXT_KEY} for key in target.venue)
         )
 
     async def _refresh_provider_target(self, session: Session) -> None:
@@ -683,6 +685,12 @@ class _SessionCoreMixin(_SessionDrainGateMixin):
                 except (TypeError, ValueError):
                     config_data = None
                 if isinstance(config_data, dict):
+                    model = config_data.get("model_override")
+                    effort = config_data.get("effort_override")
+                    if isinstance(model, str):
+                        session.model_override = model
+                    if isinstance(effort, str):
+                        session.effort_override = effort
                     servers = config_data.get("mcp_servers")
                     if isinstance(servers, list):
                         session.mcp_servers = [

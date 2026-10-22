@@ -328,6 +328,15 @@ or a reason to create a daemon.
 
 ### 2026-10-22 - Integrate the actual privileged receiver in source
 
+- Addressed #7899's first review at the actual consumer boundaries: target-settings
+  new/load now return verified receiver options and selection for standard
+  primary readback; model/effort inputs survive full frontend rehydration;
+  static privileged metadata cannot trigger namespace-provider refresh; and
+  execution subdirectories remain distinct from repository registration roots.
+  The expanded managed regression set passes 396 cases, including 38 privileged
+  cases with real SDK metadata and preference application plus actual
+  SessionManager cold resume. Contract validation still passes both contracts
+  and all 456 unchanged fixtures. Live elevation and rollout remain unqualified.
 - Published source candidate #7899 for review. Its managed rebase includes no
   intervening Bridge or shared-library changes; the qualified implementation
   is unchanged. Required CI, review, merge and subsequent publication remain

@@ -345,7 +345,7 @@ class BridgeAgent(Agent):
         mcp_servers: list[Any] | None = None,
         **kwargs: Any,
     ) -> LoadSessionResponse | None:
-        from .privileged_plugins import read_context, receipt, require_bound_session
+        from .privileged_plugins import preference_options, read_context, receipt, require_bound_session
 
         context = read_context(kwargs, self._default_agent)
         session = self._sm.get_session(session_id)
@@ -368,7 +368,10 @@ class BridgeAgent(Agent):
             )
         self._track_session(session_id)
         if context is not None:
-            return LoadSessionResponse(field_meta=receipt(session, context))
+            return LoadSessionResponse(
+                field_meta=receipt(session, context),
+                config_options=preference_options(session, context),
+            )
         return LoadSessionResponse()
 
     async def resume_session(
@@ -481,9 +484,13 @@ class BridgeAgent(Agent):
         )
         response = self._session_response(session.session_id, role="owner")
         if context is not None:
-            from .privileged_plugins import receipt
+            from .privileged_plugins import preference_options, receipt
 
-            response.field_meta = {**(response.field_meta or {}), **receipt(session, context)}
+            return NewSessionResponse(
+                session_id=response.session_id,
+                field_meta={**(response.field_meta or {}), **receipt(session, context)},
+                config_options=preference_options(session, context),
+            )
         return response
 
     def _singleton_slot_key(self, target: SpawnTarget) -> str | None:

@@ -142,9 +142,19 @@ prepared there before the fresh Session Host starts, and ACP uses that same
 allocated cwd. No alternate launcher, account, elevation method, authentication
 path or native reload is introduced.
 
+The preparation receipt records execution cwd independently of the repository
+root used for settings registration, so a configured subdirectory launch stays
+in that subdirectory. In target-settings mode, new/load responses carry the
+receiver's verified ACP config options and matching selected preferences. The
+primary validates and preserves that selection through normal ACP readback;
+it does not resolve unprivileged defaults again or infer preference readiness
+from plugin preparation alone.
+
 The session response confirms the exact launch context after preparation.
 Load requires that same persisted context and an actual prepared launch;
-stopped sessions re-prepare through the existing owner. Legacy or mismatched
+explicit model/effort inputs survive frontend rehydration, and privileged
+binding metadata does not turn a static target into a namespace-provider
+target. Stopped sessions re-prepare through the existing owner. Legacy or mismatched
 incumbents are not retrofitted, adopted or silently replaced by a new
 conversation. This refusal is terminal even when ordinary resume allows a
 fresh-conversation fallback. Old callers without the metadata keep their
