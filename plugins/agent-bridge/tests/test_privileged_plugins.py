@@ -13,7 +13,7 @@ from acp._transport import memory_transport_pair
 from acp.agent.connection import AgentSideConnection
 from acp.client.connection import ClientSideConnection
 from acp.exceptions import RequestError
-from acp.schema import InitializeResponse, NewSessionResponse
+from acp.schema import InitializeResponse, NewSessionResponse, TextContentBlock
 from pydantic import ValidationError
 
 from agent_bridge import elevated, privileged_plugins as module, transport, venue_plugins
@@ -364,8 +364,9 @@ async def test_primary_rejects_unconfirmed_receiver_preferences():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("resume_failure", [None, "load", "missing-native"])
 async def test_receiver_cold_resume_keeps_binding_through_real_manager(
-    tmp_path, monkeypatch, receiver, session_manager, mock_acp_client,
+    tmp_path, monkeypatch, receiver, session_manager, mock_acp_client, resume_failure,
 ):
     from agent_bridge import session_manager as core
 
@@ -410,6 +411,31 @@ async def test_receiver_cold_resume_keeps_binding_through_real_manager(
     monkeypatch.setattr(core, "spawn", AsyncMock(side_effect=spawn))
     monkeypatch.setattr(core, "AcpClient", MagicMock(return_value=mock_acp_client))
     agent = BridgeAgent(restarted, resolver=resolver, default_agent="worker")
+    native_id = current.acp_session_id
+    if resume_failure is not None:
+        monkeypatch.setattr("agent_bridge.session_resume._MAX_RESUME_ROUNDS", 2)
+        mock_acp_client.new_session.reset_mock()
+        mock_acp_client.send_prompt.reset_mock()
+        mock_acp_client.stderr_tail.return_value = ""
+        if resume_failure == "load":
+            mock_acp_client.load_session.side_effect = ConnectionError("native load unavailable")
+            error, message, attempts = ConnectionError, "native load unavailable", 2
+        else:
+            current.acp_session_id = None
+            error, message, attempts = RuntimeError, "no ACP session ID", 0
+        with pytest.raises(error, match=message):
+            await agent.prompt(
+                [TextContentBlock(type="text", text="must not create a replacement")],
+                current.session_id,
+            )
+        assert current.status == SessionStatus.STOPPED
+        assert current.acp_session_id == (native_id if resume_failure == "load" else None)
+        assert restarted.db.get_session(current.session_id)["acp_session_id"] == native_id
+        assert mock_acp_client.load_session.await_count == attempts
+        mock_acp_client.new_session.assert_not_awaited()
+        mock_acp_client.send_prompt.assert_not_awaited()
+        resolver.resolve_async.assert_not_awaited()
+        return
     response = await agent.load_session(str(root), session.session_id, **{module.META_KEY: bound.model_dump()})
     assert response.field_meta == module.receipt(current, bound)
     assert current.status == SessionStatus.IDLE

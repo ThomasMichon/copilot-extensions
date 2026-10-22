@@ -337,6 +337,14 @@ or a reason to create a daemon.
   cases with real SDK metadata and preference application plus actual
   SessionManager cold resume. Contract validation still passes both contracts
   and all 456 unchanged fixtures. Live elevation and rollout remain unqualified.
+- The next review identified receiver-side prompt auto-resume's independent
+  recreation fallback. Resume now disables recreation at admission for both
+  the primary relay and a persisted privileged receiver binding. Actual
+  BridgeAgent prompt admission through SessionManager exhausts native load
+  retries without creating a conversation or changing its native ID, and a
+  missing native ID refuses before spawn. The focused receiver/session suite
+  passes 247 cases, including 40 privileged cases; ordinary opt-in fallback
+  remains covered by existing session tests.
 - Published source candidate #7899 for review. Its managed rebase includes no
   intervening Bridge or shared-library changes; the qualified implementation
   is unchanged. Required CI, review, merge and subsequent publication remain

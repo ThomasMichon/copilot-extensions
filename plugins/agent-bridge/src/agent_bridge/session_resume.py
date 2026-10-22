@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any
 from .session_preferences import client_preferences
 from .models import SessionStatus
 from .transport import SpawnTarget
-from .privileged_plugins import PrivilegedLaunchRefused, relay_agent, start_client
+from .privileged_plugins import CONTEXT_KEY, PrivilegedLaunchRefused, relay_agent, start_client
 from .session_manager import (
     _MAX_RESUME_ROUNDS,
     _default_cwd,
@@ -169,6 +169,8 @@ class _SessionResumeMixin:
         async with session._lifecycle_lock:
             from .acquisition_gates import assert_resume_allowed
             assert_resume_allowed(self._db, session)
+            if relay_agent(session.target) is not None or CONTEXT_KEY in (session.target.venue or {}):
+                allow_recreate = False
             worktree_id = session.target.worktree_id
             owner_native_resume = owner_native_resume or (
                 worktree_id is not None
@@ -397,7 +399,7 @@ class _SessionResumeMixin:
                         )
                         continue
                     # Ladder exhausted.
-                    if not allow_recreate or relay_agent(session.target) is not None:
+                    if not allow_recreate:
                         # No fresh-session fallback (e.g. an explicit `resume`):
                         # surface the failure rather than silently drop context.
                         session.status = SessionStatus.STOPPED

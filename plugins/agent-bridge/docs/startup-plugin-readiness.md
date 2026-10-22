@@ -157,7 +157,10 @@ binding metadata does not turn a static target into a namespace-provider
 target. Stopped sessions re-prepare through the existing owner. Legacy or mismatched
 incumbents are not retrofitted, adopted or silently replaced by a new
 conversation. This refusal is terminal even when ordinary resume allows a
-fresh-conversation fallback. Old callers without the metadata keep their
+fresh-conversation fallback. A persisted privileged binding also disables
+receiver-side prompt auto-resume's recreation fallback, including when its
+native conversation ID is missing; task admission must fail instead.
+Old callers without the metadata keep their
 existing ACP shape; already-elevated static launches can prepare their own
 receiver-native selection.
 

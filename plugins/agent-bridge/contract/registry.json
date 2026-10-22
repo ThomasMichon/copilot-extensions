@@ -206,9 +206,9 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/session_resume.py",
-          "sha256": "58cbc6352a6c9aee8b90f40af63dcf4f92e64551123b81a57ae4ae757d016546",
+          "sha256": "ebb74fa2d20ac9230e1415265b664ad330fab3f53b984b69cffa9aa8d62a0e9e",
           "semantic": false,
-          "non_semantic_reason": "Privileged ACP relay initialization carries its separately negotiated version-1 launch context and treats context refusal as terminal rather than recreating an incumbent. HTTP-45 fields, response shapes, negotiation floors and existing ordinary session behavior are unchanged; privileged ACP metadata is covered by focused SDK round-trip and receiver-preparation tests."
+          "non_semantic_reason": "Privileged ACP relay initialization carries its separately negotiated version-1 launch context. Both primary relay and persisted receiver binding forbid fresh-conversation fallback, including prompt auto-resume and missing native IDs. HTTP-45 fields, response shapes, negotiation floors and existing ordinary session behavior are unchanged; focused SDK, receiver-preparation and actual SessionManager retry-exhaustion tests cover this internal continuity contract."
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/session_core.py",
