@@ -17,6 +17,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from .gateway_auth import Admission, Signer, thumbprint
 from .gateway_broker import Broker
 from .gateway_contract import (
+    CREDENTIAL_WORKERS,
     INDEX_CONTRACT,
     MAX_WIRE,
     GatewayConfig,
@@ -77,7 +78,7 @@ class Gateway:
                     and b.expires_at > time.time() for b in self.config.backends
                 ):
                     supported.append("index.search")
-                if context.peer.role == "index-worker" and any(
+                if context.peer.role in CREDENTIAL_WORKERS and any(
                     r["worker"] == context.peer.principal for r in self.config.credential_rules
                 ):
                     supported.append("credential.get")

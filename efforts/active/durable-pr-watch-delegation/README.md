@@ -232,9 +232,10 @@ _Operator-required scope; agent-recommended implementation and validation._
   creation, policy-gated completion and wait, preserving the default GitHub
   interface without another forge adapter (confirmed by #7850). Broader client,
   serving and deployed conformance remain below.
-- [ ] Land and exercise connector-owned request lifetime through PR replay
+- [x] Land and exercise connector-owned request lifetime through PR replay
   lookup/commit/result boundaries. Treat current-policy withdrawal as network
-  disconnect, preserving uncertain in-flight commits and original-ID recovery.
+  disconnect, preserving uncertain in-flight commits and original-ID recovery
+  (source confirmed by #7915; provider and deployed acceptance remain open).
 - [ ] Define and deliver the [PR-service consumer contract](pr-service-contract.md)
   through normal reviewed source changes, including missing shared seams and
   real serving/consumer proof. Consult related campaigns without a separate
@@ -449,9 +450,10 @@ All items below are **agent-recommended** acceptance checks.
 - [x] Unit: already-terminal PR, finite timeout, polling outage, expired wait, and malformed inputs produce the intended explicit results (#6019 and #7714).
 - [x] Compatibility: old/new client, coordinator, and watch-owner combinations retain legacy schemas and a functioning process fallback; missing optional plugin affects only the optimization (#7714).
 - [ ] Credentials: explicit CLI credentials and command-backed configuration still authenticate; no credential value is persisted in callback argv, subscription state, result diagnostics, or logs.
-- [ ] Service disconnect: real Gateway policy withdrawal and channel loss stop
+- [x] Service disconnect: real Gateway policy withdrawal and channel loss stop
   later replay work, preserve custody of already-started commits, emit no false
-  success and reconcile the same request after fresh authorization/reconnect.
+  success and reconcile the same request after fresh authorization/reconnect
+  (#7915; synthetic issuer and isolated real TLS/disk, not provider/deployment proof).
 - [x] Integration: real isolated watch owner and coordinator exercise subscribe/prepare/arm/finish, coordinator outage then recovery, duplicate delivery, stale-generation callback, and registration failure without a duplicate wait owner (#7714).
 - [x] Fresh state: the supported first-touch path establishes only the owning plugin's state; two independent subscribers share one PR observation stream and need no per-task waiter process (#7714; installed adoption acceptance remains a separate prerequisite).
 - [x] Platform: bounded callback launch and shutdown/restart behavior pass on Windows and Linux, using existing contained test tooling (exact-head source acceptance `39716960139`; installed native-account proof remains open).
@@ -479,6 +481,62 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-10-22 - Bind PR observation credentials in the existing exchange
+
+- Added a distinct `pr-worker` credential role to the existing Gateway
+  broker/controller/worker exchange. It has no index corpus or index-query
+  authority. Exact provider/API-base/repository/observation/authentication
+  scope participates in rule selection, mandatory external provider
+  verification, signed request correlation and recipient-sealed material.
+- The recipient checks that typed scope before ACK. The legacy string-only
+  index token loader refuses it instead of erasing the target or confusing
+  ADO bearer material with a PAT. No issuer, broker, supervisor or forge
+  adapter was added; no runtime, credentials or placement were activated.
+- Validation: 464 cases pass across the new PR-credential tests and existing
+  Gateway worker/runtime/auth/fence/identity/process/manifest contracts.
+  Real isolated TLS/PoP/controller/broker/JWE/ACK calls prove fresh acquisition,
+  exact target and provider-result refusal, restart-policy revocation and
+  rejection before ACK of a wrongly scoped but validly signed sealed reply.
+  Fatal Python lint and all 13 install contracts pass.
+- No installer/bootstrap path changed, so a new clean-room installation lane
+  is not applicable. No live provider, production credentials or external
+  deployment lane was exercised: this source-only SDK exchange has no
+  activated PR consumer, and source publication grants none of those changes.
+- This closes a source seam toward the PR vision's
+  `explicit-backends-and-credential-authority` and
+  `one-operator-with-separated-scopes` behaviors, following the existing
+  optional-integration and explicit-failure patterns. It does not close
+  the consumer-contract credential checkbox: native provider HTTP/CLI
+  effect-boundary renewal and actual production-provider validation remain.
+- The trace found that Worktrees captures GitHub credentials when building
+  a fetcher and ADO headers once per multi-request observation. The next
+  slice must reuse those native drivers while obtaining typed credentials
+  at each actual authenticated request, preserving explicit native CLI
+  behavior and refusing any service-side ambient fallback.
+
+### 2026-10-22 - Merge the reviewed disconnect boundary and retain service follow-through
+
+- #7915 merged as `d22e6e32f310a4a707cb6239fd89ea9d4f592ee2` at
+  `2026-10-22T18:36:19Z`, from published head
+  `359ec8692d92ef71d9ad2aaada1e0505a936a1c8`. Current-head Copilot review
+  `5619049618` approved with no open issues; its one prior finding was corrected
+  and resolved, and required checks were green. Managed completion used the
+  documented missing-additional-CODEOWNER exception, not a CI bypass.
+- The final 402-case Gateway/PR selection proves the real isolated serving
+  path, known-disconnect lookup/commit/result checkpoints, independent lifetimes,
+  timeout-before-cleanup ordering, retained disk custody and original-ID recovery.
+  This is source/synthetic-identity proof, not production credential, container
+  lifecycle, installed runtime or live fleet acceptance.
+- Re-read the complete parent Plan and Validation after merge, preserving all
+  retained #2400/#2700 intake and its bounded ownership. Closed only this source
+  disconnect slice and its matching validation. The effort remains Active.
+- Next: deliver the PR worker's real account/repository/action credential
+  binding through existing provider/Gateway owners, then the typed shared
+  service consumer and independently installable lifecycle. The static
+  credential profile currently admits only index workers; PR must not
+  impersonate that identity, invent a corpus, or add another issuer/controller.
+  Source merge authorizes no runtime update, credential acquisition or placement.
 
 ### 2026-10-22 - Complete retained acceptance from #2700
 

@@ -13,7 +13,7 @@ from jwcrypto import jwe, jwk
 
 from .gateway_auth import Signer, thumbprint, verify
 from .gateway_client import CredentialMaterial, GatewayClient
-from .gateway_contract import CREDENTIAL_ACTIONS, GatewayError, encode, number, require
+from .gateway_contract import CREDENTIAL_ACTIONS, ForgeScope, GatewayError, encode, number, require
 from .planning import digest
 
 
@@ -41,6 +41,7 @@ class RelayPolicy:
     scopes: tuple[str, ...]
     action: str
     fields: dict[str, str]
+    forge: ForgeScope | None = None
 
 
 class RelayCredentialProvider:
@@ -54,12 +55,14 @@ class RelayCredentialProvider:
         for policy in policies:
             require(policy.action in CREDENTIAL_ACTIONS, "unsupported-action")
             require(set(policy.fields) <= {"host", "resource", "tenant", "scope"}, "invalid-relay-fields")
+            require(policy.forge is None or type(policy.forge) is ForgeScope, "invalid-forge-binding")
         self.source, self.policies, self.verify_material = source, policies, verify_material
 
     async def acquire(self, request: dict, *, timeout: float) -> CredentialMaterial | None:
         policy = next((p for p in self.policies if all(
             getattr(p, k) == (tuple(request[k]) if k == "scopes" else request[k])
-            for k in ("source", "account", "audience", "scopes", "action"))), None)
+            for k in ("source", "account", "audience", "scopes", "action"))
+            and (p.forge.to_dict() if p.forge is not None else None) == request.get("forge")), None)
         if policy is None or not self.source.supports(policy.action, policy.fields):
             return None
         raw = await self.source.resolve(policy.action, dict(policy.fields), timeout=timeout)
@@ -131,8 +134,10 @@ class Controller:
         if material is not None:
             require(isinstance(material, CredentialMaterial), "provider-contract-invalid")
             parameters = binding["parameters"]
+            forge = ForgeScope.load(parameters["forge"]) if "forge" in parameters else None
             supported = (all(getattr(material, k) == parameters[k] for k in ("source", "account", "audience"))
                          and material.scopes == tuple(parameters["scopes"])
+                         and material.forge == forge
                          and type(material.expires_at) is int and time.time() < material.expires_at)
             if not supported:
                 receipt = self.signer.sign({"binding": binding, "state": "UNSUPPORTED"}, binding["worker"], ttl,
@@ -147,7 +152,8 @@ class Controller:
             effective_expiry = min(material.expires_at, dispatch_deadline)
             plain = encode({"binding": binding, "token": material.token, "expires_at": effective_expiry,
                             "source": material.source, "account": material.account,
-                            "audience": material.audience, "scopes": list(material.scopes)})
+                            "audience": material.audience, "scopes": list(material.scopes),
+                            **({"forge": forge.to_dict()} if forge is not None else {})})
             envelope = jwe.JWE(plain, protected=protected, algs=["RSA-OAEP-256", "A256GCM"])
             envelope.add_recipient(jwk.JWK(**recipient))
             sealed = envelope.serialize(compact=True)

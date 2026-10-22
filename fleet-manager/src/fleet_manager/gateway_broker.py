@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 
 from .gateway_auth import AuthContext, Signer, thumbprint, verify
 from .gateway_contract import (
+    CREDENTIAL_WORKERS,
     GatewayConfig,
     correlation,
     credential,
@@ -88,11 +89,12 @@ class Broker:
     def submit(self, context: AuthContext, payload: dict) -> dict:
         value = request(payload)
         peer = context.peer
-        require(peer.role == "index-worker", "role-denied")
+        require(peer.role in CREDENTIAL_WORKERS, "role-denied")
         require(value["operation"] == "credential.get", "unsupported-operation")
         require(value["service_id"] == peer.service and value["installation_id"] == peer.installation
                 and value["generation"] == peer.generation, "worker-binding-mismatch")
         parameters = credential(value["parameters"])
+        require((peer.role == "pr-worker") == ("forge" in parameters), "credential-scope-denied")
         require(parameters["recipient"] == peer.principal and peer.recipient_jwk is not None,
                 "recipient-denied")
         require(parameters["source"] in peer.sources and parameters["account"] in peer.accounts
@@ -100,8 +102,9 @@ class Broker:
                 and parameters["job"] in peer.jobs
                 and set(parameters["scopes"]) <= set(peer.scopes), "credential-scope-denied")
         rule = next((r for r in self.config.credential_rules
-                     if r["worker"] == peer.principal and all(r[k] == parameters[k] for k in
-                        ("source", "account", "audience", "action", "scopes"))), None)
+                     if r["worker"] == peer.principal and r.get("forge") == parameters.get("forge")
+                     and all(r[k] == parameters[k] for k in
+                             ("source", "account", "audience", "action", "scopes"))), None)
         require(rule is not None, "provider-policy-denied")
         key = (peer.principal, value["request_id"])
         with self._lock:
@@ -179,7 +182,7 @@ class Broker:
 
     def result(self, context: AuthContext, payload: dict) -> dict:
         fields(payload, {"request_id", "request_digest"})
-        require(context.peer.role == "index-worker", "role-denied")
+        require(context.peer.role in CREDENTIAL_WORKERS, "role-denied")
         with self._lock:
             self._expire()
             item = self._items.get((context.peer.principal, payload["request_id"]))
@@ -196,7 +199,7 @@ class Broker:
 
     def ack(self, context: AuthContext, payload: dict) -> dict:
         fields(payload, {"request_id", "request_digest"})
-        require(context.peer.role == "index-worker", "role-denied")
+        require(context.peer.role in CREDENTIAL_WORKERS, "role-denied")
         with self._lock:
             self._expire()
             item = self._items.get((context.peer.principal, payload["request_id"]))

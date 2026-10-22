@@ -187,13 +187,19 @@ through its operator's configured provider binding, renewing at the actual
 HTTP/Git boundary. Watch access is not permission to mutate a PR or administer
 the fleet. A token label cannot downscope a provider's broader credential.
 
-The older Gateway enrollment/credential path is index-specific; the opt-in
-generic service profile does not add a PR-worker forge credential binding.
-A PR worker must not masquerade as `index-worker`, invent corpus/source
-values, or forward ambient credentials to bypass that gap. The implementation
-must define and validate the PR-worker binding, permitted action/resource/account
-and provider-result validation before production consumption. Existing provider
-custody, expiry, revocation and provider/OS session longevity remain authoritative.
+The existing credential Gateway now accepts a distinct `pr-worker` enrollment
+without an index corpus. Its rules and credential requests require an exact
+typed `ForgeScope` (provider, HTTPS endpoint, repository, observation permission
+and authentication type), bound through provider policy, verified material and
+recipient-sealed delivery. The existing controller/provider retains actual
+resource/permission/expiry/revocation validation; target labels alone cannot
+downscope a token. The string-only index consumer refuses that typed binding.
+The opt-in generic service profile does not itself acquire forge credentials.
+A PR worker must not masquerade as `index-worker`, invent corpus/source values
+or forward ambient credentials. Wiring the typed exchange into the actual
+native provider HTTP/CLI boundary and validating production provider results
+remain open before production consumption. Existing provider custody, expiry,
+revocation and provider/OS session longevity remain authoritative.
 
 No secret enters registration state, replay records, images, manifests, argv
 or diagnostics. Actual provider challenges are visible; no periodic human
@@ -205,14 +211,17 @@ The driver closes these items with reviewed contracts and implementation evidenc
 not a separate round of owner sign-offs. Consultation is non-blocking; actual
 conflicts and required repository review remain binding.
 
-- [ ] Define and test the versioned PR service offer, supported logical
+- [x] Define and test the versioned PR service offer, supported logical
   operations, actual request/response bounds, trusted backend identity and
-  admission/delegation verification point.
-- [ ] Bind and exercise current policy/enrollment authority and its
+  admission/delegation verification point (source adapter #7832 and serving
+  witness #7915; no installed offer or deployment is claimed).
+- [x] Bind and exercise current policy/enrollment authority and its
   lookup/effect/emission checkpoints in the real serving path, with the
   disconnect semantics above; an isolated snapshot/permit DTO does not count
   as serving authority. Prove both refusal before a later effect and original-ID
-  reconciliation of a commit already in flight at policy withdrawal.
+  reconciliation of a commit already in flight at policy withdrawal
+  (#7915, actual TLS/PoP/channel and disk with synthetic issuer material;
+  protected provider enrollment and durable lifecycle authority remain separate).
 - [ ] Define and test the PR worker's account/repository/action binding,
   provider-result validation and renewal/revocation outcomes without reusing
   an index identity or another operator's credentials.

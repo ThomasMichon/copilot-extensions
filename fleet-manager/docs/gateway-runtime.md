@@ -70,10 +70,13 @@ Certificate verification is never disabled.
   that trust set. CLI startup verifies the private/public key match.
   The key file is custodian-managed, not embedded in source configuration;
 - `enrollments`: at most 128 current principals. Each supplies `principal`,
-  `role` (`query`, `index-worker`, `credential-controller`), `service`,
+  `role` (`query`, `index-worker`, `pr-worker`, `credential-controller`), `service`,
   `installation`, positive `generation`, `expires_at`, nonempty exact lists
   `sources`, `corpora`, `accounts`, `audiences`, `scopes`, `jobs`,
   public P-256 `proof_jwk`, and optional public RSA `recipient_jwk`.
+  A `pr-worker` must use an empty `corpora` list; a credential controller
+  may also use an empty list. PR credential consumption does not invent an
+  index corpus or confer index-query authority.
   Credential workers must have a recipient RSA key (2048–4096 bits).
   Controllers additionally supply an independently pinned Ed25519 `receipt_jwk`
   for sealed-credential receipts, not their DPoP key;
@@ -82,7 +85,8 @@ Certificate verification is never disabled.
   canonical `sources`, trusted HTTPS `endpoint`, `ca`, `issuer`, public `jwks`
   and `contract`. Only `fleet-index-scoped-v1` can execute;
 - `credential_rules`: at most 128 unambiguous exact worker/source/account/
-  audience/scopes/action selections bound to a configured `controller`;
+  audience/scopes/action selections bound to a configured `controller`.
+  PR-worker rules additionally require the exact `forge` target below;
 - `pending_limit` (1–256), `lease_seconds` (2–60), boolean `remote`;
 - `tls: {host, port, certificate, key}`: external certificate/key path
   references. Port zero permits an explicitly owned embedding/test listener;
@@ -216,10 +220,31 @@ is not delivered**.
 ## Subscribed credential control and consumption
 
 `credential.get` uses the same request identity fields. Its parameters are
-exactly `{job, source, account, audience, scopes, action, recipient}`.
+`{job, source, account, audience, scopes, action, recipient}` for index workers.
+PR workers additionally require `forge`, matching their exact configured rule:
+
+```json
+{
+  "provider": "azure-devops",
+  "api_base": "https://dev.azure.test/example",
+  "repository": "project/repository",
+  "permission": "observe",
+  "authentication": "bearer"
+}
+```
+
+`ForgeScope` accepts `github` or `azure-devops`, an explicit HTTPS API base
+without credentials/query/fragment/trailing slash, an exact two-component
+repository and only the `observe` permission. Authentication is `bearer`,
+or `basic` for an ADO PAT. This preserves the distinction between ADO access
+tokens and PATs; the consumer must not infer an auth scheme from token bytes.
+The endpoint/repository/account selection is trusted configuration, not ambient
+CLI settings or a worker-selected alternate route. Index workers cannot send
+`forge`; PR workers cannot omit it or acquire index credentials.
+
 The authenticated worker's service/install/job/source/account/audience/scopes/
 recipient/generation must match current enrollment and exact provider policy.
-Query identities cannot acquire ingestion credentials. Only closed existing
+Query identities cannot acquire worker credentials. Only closed existing
 relay actions `get-azure-token`, `get-github-token`, `get-access-token` exist;
 there are no arbitrary CLI, git-helper, store/erase or HTTP verbs.
 
@@ -238,6 +263,13 @@ honor actual audience/permissions, expiry and revocation or return `None`.
 There is no default verifier, fake production provider or unverified JWT expiry
 decoder. A broad token is not magically downscoped by a source label. Existing
 provider acquisition remains outside Gateway custody/coordinator lifetime.
+For PR consumption, `RelayPolicy.forge` participates in exact policy selection,
+and the external verifier must validate the actual provider, endpoint,
+repository, read-only permissions, authentication type, expiry and revocation.
+It returns `CredentialMaterial.forge: ForgeScope` only for that verified
+target. Missing, mismatched or expired material is `UNSUPPORTED`, never
+relabelled to satisfy the request. Custom `CredentialProvider` implementations
+have the same actual-provider-verification obligation.
 Ordinary provider failures, including subprocess diagnostics, become a signed
 `UNAVAILABLE` outcome without rendering exception text or ending the resident
 responder. Collection is limited to that provider call; cancellation and other
@@ -247,6 +279,8 @@ responses.
 Credential material is sealed to the enrolled RSA recipient with jwcrypto JWE
 (`RSA-OAEP-256`, `A256GCM`), containing exact request binding and effective
 expiry. The controller signs the ciphertext digest/binding/recipient/state.
+For PR workers the sealed plaintext also carries the verified `forge` scope;
+the recipient independently compares it to the original request before ACK.
 Gateway validates that outer signature and correlates delivery without
 decrypting, persisting or logging plaintext. Only the worker decrypts.
 The effective delivery expiry is capped by the request deadline even if the
@@ -260,6 +294,10 @@ excluded from repr. Ack loss raises `ack-uncertain` and does not return a token.
 Credential expiry is checked again after acknowledgement before material is
 returned. Consumers acquire/refresh at their HTTP/Git boundaries through the explicit
 worker policy below. No ambient, anonymous or stale-token fallback.
+The PR worker's typed SDK exchange is available through
+`CredentialWorker.acquire()`. This alone does not connect the native PR forge
+driver or an observation daemon: per-request renewal at that consumer's actual
+HTTP/CLI boundary and production provider verification remain separate work.
 
 State: `PENDING -> DISPATCHED -> READY -> DELIVERED -> ACKED`, or explicit
 `UNSUPPORTED/UNAVAILABLE/UNKNOWN`. Dispatch and delivery are each one-shot;
@@ -318,6 +356,11 @@ JSON with `schema: fleet-manager.credential-worker`, `version: 1` and:
 - `bindings`: one unambiguous closed credential-parameter object per
   source/account, each containing `job`, `source`, `account`, `audience`,
   `scopes`, `action` and the enrolled `recipient`.
+
+This string-only loader remains an index consumer. It refuses `forge`
+bindings with `typed-forge-consumer-required` rather than discarding their
+target/authentication metadata. PR callers retain the typed material from
+`CredentialWorker.acquire()`; there is no implicit index-worker identity.
 
 The issuer/custodian renews the external access-token reference independently;
 the SDK reads it before every signed request. Neither this file loader nor the

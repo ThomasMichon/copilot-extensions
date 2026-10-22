@@ -1,4 +1,4 @@
-"""Bounded credential consumption by an explicitly enrolled ingestion worker."""
+"""Bounded credential consumption by an explicitly enrolled worker."""
 
 from __future__ import annotations
 
@@ -99,6 +99,7 @@ def token_provider(path: Path, *, source: str, account: str) -> Callable[[], str
     identities = set()
     for binding in bindings:
         credential(binding)
+        require("forge" not in binding, "typed-forge-consumer-required")
         identity = (binding["source"], binding["account"])
         require(identity not in identities, "ambiguous-provider-policy")
         identities.add(identity)

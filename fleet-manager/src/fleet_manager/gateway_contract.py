@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -11,6 +11,7 @@ from .planning import PlanError, canonical, decode, digest
 MAX_WIRE = 65536
 INDEX_CONTRACT = "fleet-index-scoped-v1"
 CREDENTIAL_ACTIONS = frozenset({"get-azure-token", "get-github-token", "get-access-token"})
+CREDENTIAL_WORKERS = frozenset({"index-worker", "pr-worker"})
 
 
 class GatewayError(ValueError):
@@ -38,8 +39,8 @@ def number(value: Any, low: int = 1, high: int = 2**53) -> int:
     return value
 
 
-def strings(value: Any, maximum: int = 32) -> tuple[str, ...]:
-    require(type(value) is list and 0 < len(value) <= maximum)
+def strings(value: Any, maximum: int = 32, *, minimum: int = 1) -> tuple[str, ...]:
+    require(type(value) is list and minimum <= len(value) <= maximum)
     result = tuple(text(item) for item in value)
     require(len(set(result)) == len(result))
     return result
@@ -83,6 +84,48 @@ def endpoint(value: Any, *, remote: bool = False) -> str:
 
 
 @dataclass(frozen=True)
+class ForgeScope:
+    """Exact observation target; the provider must independently verify its permissions."""
+
+    provider: str
+    api_base: str
+    repository: str
+    permission: str
+    authentication: str
+
+    def __post_init__(self) -> None:
+        require(self.provider in ("github", "azure-devops"), "unsupported-forge")
+        base = text(self.api_base, 2048)
+        try:
+            parsed = urlsplit(base)
+            port = parsed.port
+        except ValueError:
+            raise GatewayError("invalid-forge-endpoint") from None
+        require(parsed.scheme == "https" and parsed.hostname is not None
+                and parsed.username is None and parsed.password is None
+                and not parsed.query and not parsed.fragment and not base.endswith("/")
+                and "\\" not in base and not any(c.isspace() for c in base)
+                and (port is None or 0 < port <= 65535), "invalid-forge-endpoint")
+        repository = text(self.repository)
+        parts = repository.split("/")
+        require(len(parts) == 2 and all(part and part == part.strip() and part not in (".", "..")
+                                       for part in parts)
+                and not any(c in repository for c in "\\?#%"), "invalid-forge-repository")
+        require(self.permission == "observe", "unsupported-forge-permission")
+        require(self.authentication in ("basic", "bearer")
+                and (self.provider != "github" or self.authentication == "bearer"),
+                "unsupported-forge-authentication")
+
+    @classmethod
+    def load(cls, value: Any) -> ForgeScope:
+        fields(value, set(cls.__dataclass_fields__))
+        return cls(**value)
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
 class Enrollment:
     principal: str
     role: str
@@ -107,7 +150,9 @@ class Enrollment:
                {"recipient_jwk", "receipt_jwk"})
         for key in ("principal", "role", "service", "installation"):
             text(value[key])
-        require(value["role"] in ("query", "index-worker", "credential-controller"))
+        require(value["role"] in ("query", *CREDENTIAL_WORKERS, "credential-controller"))
+        if value["role"] == "pr-worker":
+            require(value["corpora"] == [], "pr-worker-corpus-denied")
         public_key(value["proof_jwk"], "EC")
         recipient = value.get("recipient_jwk")
         if recipient is not None:
@@ -119,7 +164,10 @@ class Enrollment:
                 "controller-signing-key-required")
         return cls(*(value[k] for k in ("principal", "role", "service", "installation")),
                    number(value["generation"]), number(value["expires_at"]),
-                   *(strings(value[k]) for k in ("sources", "corpora", "accounts", "audiences", "scopes", "jobs")),
+                   strings(value["sources"]),
+                   strings(value["corpora"], minimum=0 if value["role"] in
+                           ("pr-worker", "credential-controller") else 1),
+                   *(strings(value[k]) for k in ("accounts", "audiences", "scopes", "jobs")),
                    value["proof_jwk"], recipient, receipt)
 
 
@@ -224,18 +272,22 @@ class GatewayConfig:
         require(type(rules) is list and len(rules) <= 128)
         identities = set()
         for rule in rules:
-            fields(rule, {"worker", "controller", "source", "account", "audience", "scopes", "action"})
+            fields(rule, {"worker", "controller", "source", "account", "audience", "scopes", "action"},
+                   {"forge"})
             for key in ("worker", "controller", "source", "account", "audience", "action"):
                 text(rule[key])
             strings(rule["scopes"])
             require(rule["action"] in CREDENTIAL_ACTIONS, "unsupported-action")
+            forge = ForgeScope.load(rule["forge"]) if "forge" in rule else None
             identity = (rule["worker"], rule["source"], rule["account"], rule["audience"], rule["action"],
-                        tuple(rule["scopes"]))
+                        tuple(rule["scopes"]), forge)
             require(identity not in identities, "ambiguous-provider-policy")
             identities.add(identity)
             worker = next((e for e in enrolled if e.principal == rule["worker"]), None)
             controller = next((e for e in enrolled if e.principal == rule["controller"]), None)
-            require(worker is not None and worker.role == "index-worker" and worker.recipient_jwk is not None)
+            require(worker is not None and worker.role in CREDENTIAL_WORKERS
+                    and worker.recipient_jwk is not None)
+            require((worker.role == "pr-worker") == (forge is not None), "forge-binding-required")
             require(controller is not None and controller.role == "credential-controller")
             for peer in (worker, controller):
                 require(rule["source"] in peer.sources and rule["account"] in peer.accounts
@@ -277,11 +329,13 @@ def search(value: Any) -> dict:
 
 
 def credential(value: Any) -> dict:
-    fields(value, {"job", "source", "account", "audience", "scopes", "action", "recipient"})
+    fields(value, {"job", "source", "account", "audience", "scopes", "action", "recipient"}, {"forge"})
     for key in ("job", "source", "account", "audience", "action", "recipient"):
         text(value[key])
     strings(value["scopes"])
     require(value["action"] in CREDENTIAL_ACTIONS, "unsupported-action")
+    if "forge" in value:
+        ForgeScope.load(value["forge"])
     return value
 
 
