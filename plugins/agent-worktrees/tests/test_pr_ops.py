@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pr_test_helpers import _git
+from pr_test_helpers import _git, _stub_remote_target
 from pr_workflow_setup import PRWorkflowSetup
 
 from agent_worktrees import config as cfg
@@ -259,10 +259,7 @@ class TestPRPublication(PRWorkflowSetup):
         """Today's config resolves origin, but the live PR's head is on the fork
         it was published to: the re-squashed head goes there, stays recorded, and
         the PR head is the fork owner's (so a not-yet-opened PR opens from it)."""
-        from agent_worktrees import pr_publish
-        real_slug = pr_publish.push_slug
-        monkeypatch.setattr(pr_publish, "push_slug", lambda r, *, cwd: (
-            "alice/ext" if r == "fork" else real_slug(r, cwd=cwd)))
+        _stub_remote_target(monkeypatch, "fork", "alice/ext")
         config, wid, wt_path, fork_dir, branch = self._fork_headed_rerun(fork_pr_repo)
         result = pr_ops.create_pr(wid, config, title="Add feature")
         assert result.get("success"), result
@@ -281,9 +278,7 @@ class TestPRPublication(PRWorkflowSetup):
         remote and under the publication lock."""
         from agent_worktrees import finalize as fin
         from agent_worktrees import pr_publish
-        real_slug = pr_publish.push_slug
-        monkeypatch.setattr(pr_publish, "push_slug", lambda r, *, cwd: (
-            "alice/ext" if r == "fork" else real_slug(r, cwd=cwd)))
+        _stub_remote_target(monkeypatch, "fork", "alice/ext")
         config, wid, wt_path, fork_dir, branch = self._fork_headed_rerun(fork_pr_repo)
         assert pr_ops.create_pr(wid, config, title="Add feature").get("success")
         rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
@@ -314,9 +309,9 @@ class TestPRPublication(PRWorkflowSetup):
         rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
         assert rec.pr.head_repo == "alice/ext"  # round-trips through the record
         repo = config.repos["ext"]
-        monkeypatch.setattr(pr_publish, "push_slug", lambda r, *, cwd: "Alice/Ext")
+        _stub_remote_target(monkeypatch, "fork", "Alice/Ext")
         assert pr_publish.push_remote(repo, rec.pr, str(wt_path)) == "fork"
-        monkeypatch.setattr(pr_publish, "push_slug", lambda r, *, cwd: "bob/ext")
+        _stub_remote_target(monkeypatch, "fork", "bob/ext")
         assert pr_publish.push_remote(repo, rec.pr, str(wt_path)) is None
         result = pr_ops.create_pr(wid, config, title="Add feature")
         assert result.get("error") == pr_publish.UNREADABLE_REMOTE
@@ -431,9 +426,7 @@ class TestPRPublication(PRWorkflowSetup):
         was chosen is required, so a same-slug repoint before the lock is refused, and
         a fork push with no identity at all is refused too."""
         from agent_worktrees import pr_publish
-        real_slug = pr_publish.push_slug
-        monkeypatch.setattr(pr_publish, "push_slug", lambda r, *, cwd: (
-            "alice/ext" if r == "fork" else real_slug(r, cwd=cwd)))
+        _stub_remote_target(monkeypatch, "fork", "alice/ext")
         _config, wid, wt_path, fork_dir, branch = self._fork_headed_rerun(fork_pr_repo)
         rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
         rec.pr.remote = rec.pr.head_repo = rec.pr.head_identity = ""  # fresh/legacy: nothing recorded
@@ -503,9 +496,7 @@ class TestPRPublication(PRWorkflowSetup):
         """The PR head's owner recorded at publish (an explicit pr.fork.owner) wins over
         the fork repository's owner on a rerun, e.g. after opening was deferred."""
         from agent_worktrees import pr_publish
-        real_slug = pr_publish.push_slug
-        monkeypatch.setattr(pr_publish, "push_slug", lambda r, *, cwd: (
-            "alice/ext" if r == "fork" else real_slug(r, cwd=cwd)))
+        _stub_remote_target(monkeypatch, "fork", "alice/ext")
         config, wid, wt_path, _fork_dir, branch = self._fork_headed_rerun(fork_pr_repo)
         rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
         rec.pr.head_owner = "alice-org"

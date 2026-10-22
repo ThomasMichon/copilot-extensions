@@ -272,6 +272,37 @@ def test_explicit_rewrite_preserves_hook_rejection_and_dry_run(rebased_snapshot_
     assert record_for(wid).pr.head_sha == old
 
 
+def test_explicit_rewrite_uses_one_fresh_destination_snapshot(rebased_refspec_pr_repo, monkeypatch, capsys):
+    config, wid, wt, remote, old = rebased_refspec_pr_repo
+    record = record_for(wid)
+    before = record.yaml_path.read_bytes()
+    other = remote.parent / "repointed.git"
+    git("clone", "--bare", str(remote), str(other), cwd=wt)
+    original = pr_publish._remote_snapshot
+    snapshots = []
+    repoint = False
+
+    def observed(name, *, cwd):
+        result = original(name, cwd=cwd)
+        snapshots.append(result[2])
+        if repoint and len(snapshots) == 3:
+            git("remote", "set-url", name, str(other), cwd=wt)
+        return result
+
+    monkeypatch.setattr(pr_publish, "_remote_snapshot", observed)
+    assert finalize.push_changes(wid, config, rewrite_pr=True, dry_run=True)
+    assert len(snapshots) == 2
+    assert snapshots[0] == snapshots[1]
+    repoint = True
+    assert not finalize.push_changes(wid, config, rewrite_pr=True, dry_run=True)
+    assert len(snapshots) == 4
+    assert snapshots[2].head_identity != snapshots[3].head_identity
+    assert "publication destination changed" in capsys.readouterr().out
+    assert record.yaml_path.read_bytes() == before
+    for repository in (remote, other):
+        assert git("rev-parse", f"refs/heads/{record.pr.branch}", cwd=repository) == old
+
+
 def test_low_level_rewrite_requires_exact_lease(monkeypatch):
     calls = []
     monkeypatch.setattr(git_ops, "git", lambda *a, **k: calls.append(a))

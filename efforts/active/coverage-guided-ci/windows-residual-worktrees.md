@@ -87,6 +87,69 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Admitted narrow batches
 
+### P fresh publication transport evidence
+
+`_remote_snapshot` resolves fetch and complete push URLs once per decision
+and derives both the repository slug and full destination identity from
+those same results. Recorded/discovered targets, publication and remote
+recording reuse that invocation-local evidence. Explicit rewrite still
+obtains its own later snapshot and rejects a repoint after target selection;
+no value persists across decisions. Same-slug destinations on another host
+and fetch/push disagreement remain refusals.
+
+`_transport_settings` uses one literal remote-key regular expression and
+NUL-framed configuration read instead of one subprocess per known key.
+It preserves setting-key order, repeated and multiline values, and
+valueless settings. Only an empty no-match result with no diagnostic means
+absence. Read errors, malformed framing and unexpected keys explicitly
+refuse publication. URL pinning, hooks, configured deadlines, ownership,
+leases and later mutation checks are unchanged.
+
+The directly coupled B-PUBSTUB adapter wraps the real snapshot and relabels
+only a valid local transport as a synthetic provider repository. A real-Git
+regression proves a conflicting push URL cannot become valid through that
+adapter. Existing publication/custom-head/recovery scenarios retain their
+real URL reads, effects and refusal assertions. The deadline double
+recognizes the actual no-match query, and the rewrite regression proves
+equal snapshots followed by fresh unequal identities leave both remote
+heads and the tracking record unchanged. No test relocation, fixture-seed
+batch, assertion retirement, mark or normal runner-group change is bundled.
+B-RECOVERED and B-BACKED remain separately owned follow-up contracts.
+
+Native Windows focused evidence/dispatch/deadline checks passed 68 nodes
+in 51.36 seconds including preparation and cleanup. All 78 direct
+publication/custom-head/rewrite nodes passed in 230.22 seconds, and all
+55 confirmation/audit nodes passed in 226.47 seconds. Advanced and routine
+recovery collection contains 80 unique nodes; an exhaustive bijection
+accounts for all of them in six complete eleven-node groups followed by
+two seven-node groups. All passed without skips. Group walls were
+114.50/123.88/158.92/126.72/133.12/151.05/98.33/158.81 seconds.
+These are separate functional diagnostics, not one qualified plugin run.
+The first attempt to execute those eighty cases in one diagnostic exhausted
+the intact 900-second budget and cut its seventh group; its incomplete
+aggregate receives no pass credit. The tail was then run in full, without
+crediting partially completed failed-group nodes.
+
+The normal advanced-recovery module also exceeded the intact 240-second
+group limit (242.58 seconds inclusive, return code 124). An earlier combined
+advanced/routine diagnostic failed the same bound and reported 4,922.62
+seconds inclusive; its unexplained elapsed-time discrepancy gets no
+qualification credit. Neither failure is waived by the functional batches.
+Existing pin/hook/state/lease modules passed 53 nodes in 85.00 seconds,
+with only their two pre-existing Windows trailing-space-directory skips.
+No skip or exclusion was introduced. Every execution used exactly two
+workers and retained all item, group, native, process and memory bounds.
+Ruff and thirteen install contracts pass.
+
+Documentation impact: the plugin README describes fresh transport evidence;
+no public command or configuration changes. This is a below-altitude
+optimization of existing publication proof. Temporary real Git repositories
+exercise the consumer boundary without external infrastructure. No
+installer, bootstrap or first-provision behavior changes; production
+clean-room and external development-venue lanes are inapplicable.
+Normal-group and repeated complete same-head native qualification remain
+open; bounded functional batches never substitute for those gates.
+
 ### G fresh graph evidence before creation-history inference
 
 `_tracked_branch_ahead` omits a tautological identical-ref probe; every

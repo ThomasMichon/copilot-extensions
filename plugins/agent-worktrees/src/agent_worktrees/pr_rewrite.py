@@ -134,8 +134,8 @@ def push_changes(worktree_id: str, config: Config, record: tracking.WorktreeReco
             target = pr_publish.push_target(repo, pr, cwd)
             if target is None:
                 raise ValueError(pr_publish.UNREADABLE_REMOTE)
-            identity = pr_publish.push_identity(target.remote, cwd=cwd)
-            slug = pr_publish.push_slug(target.remote, cwd=cwd)
+            _, _, destination = pr_publish._remote_snapshot(target.remote, cwd=cwd)
+            identity, slug = destination.head_identity, destination.head_repo
             if not identity or not slug:
                 raise ValueError(pr_publish.REPOINTED)
             if ((not recovery or pr.rewrite_identity)
