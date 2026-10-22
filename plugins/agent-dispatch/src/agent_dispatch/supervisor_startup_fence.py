@@ -7,12 +7,33 @@ import time
 
 from .client import DispatchError
 from .queue_records import SpawnState, Status
-from .spawn_factories import _parse_fleet_body_handle, _parse_local_body_handle
+from .spawn_factories import _machine_from_owner, _parse_fleet_body_handle, _parse_local_body_handle
 
 log = logging.getLogger("agent-dispatch.supervisor")
 
 
 class TerminalStartupMixin:
+    def _retained_cli_machine(self, reservation: dict, task: dict) -> str | None:
+        """Resolve a retained native body's location, never the observer's host."""
+        session = reservation.get("session_handle")
+        if session and task.get("owner_session_id") == session:
+            machine = _machine_from_owner(task.get("completed_by") or task.get("owner"))
+            if machine:
+                return machine
+        try:
+            attachments = self.client.attachments(task["id"])
+        except (DispatchError, AttributeError):
+            log.warning("retained CLI location unavailable for task %s", task.get("id"))
+            return None
+        machines = {
+            item["machine"]
+            for item in attachments
+            if item.get("session_id") == session
+            and item.get("worktree_id") == reservation.get("worktree")
+            and isinstance(item.get("machine"), str) and item["machine"]
+        }
+        return next(iter(machines)) if len(machines) == 1 else None
+
     def _cool_dormant_bodies(self) -> int:
         """Stop suspended bodies while excluding every concurrent resume.
 

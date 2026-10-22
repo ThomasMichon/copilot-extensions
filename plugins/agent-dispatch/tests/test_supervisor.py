@@ -128,6 +128,9 @@ class QueueBackedClient:
             raise DispatchError(404, f"no such reservation: {key}")
         return asdict(reservation)
 
+    def attachments(self, task_id):
+        return [asdict(item) for item in self._q.attachment_history(task_id)]
+
     def record_spawn_worktree(self, key, worktree, **kwargs):
         return asdict(
             self._q.record_spawn_worktree(key, worktree, **kwargs)
@@ -181,6 +184,7 @@ class QueueBackedClient:
         disposition="failed",
         session_handle=None,
         worktree=None,
+        finished_startup_revision=None,
     ):
         return asdict(
             self._q.request_spawn_release(
@@ -189,6 +193,7 @@ class QueueBackedClient:
                 disposition=disposition,
                 session_handle=session_handle,
                 worktree=worktree,
+                finished_startup_revision=finished_startup_revision,
             )
         )
 
@@ -815,13 +820,17 @@ def test_exact_gone_releasing_body_frees_process_capacity(
     q, client, session_handle, worktree, verdict_kwarg
 ):
     first = q.create("releasing")
+    if worktree:
+        client.attachments = lambda _task: [{
+            "session_id": session_handle, "worktree_id": worktree, "machine": "peer-host",
+        }]
     reservation, _ = q.reserve_spawn(first.id)
     q.record_spawn(
         reservation.key,
         session_handle=session_handle,
         worktree=worktree,
     )
-    q.request_spawn_release(reservation.key, disposition="failed")
+    q.request_spawn_release(reservation.key, disposition="failed", finished_startup_revision=q.get_reservation(reservation.key).startup_revision,)
     q.create("runnable")
     spawn = _ok_spawn()
     sup = Supervisor(
@@ -4939,6 +4948,7 @@ def test_yielded_fleet_body_is_not_replaced_before_safe_teardown(
     q.record_spawn(
         reservation.key,
         session_handle="fleet-body:worker-host:session-live",
+        startup_complete=True, startup_revision=reservation.startup_revision,
     )
     q.claim_one("fleet-owner", task_id=task.id)
     q.start(task.id, "fleet-owner")
@@ -4968,7 +4978,7 @@ def test_yielded_fleet_body_respawns_only_after_explicit_end(q, client):
     reservation, _ = q.reserve_spawn(task.id)
     q.record_spawn(
         reservation.key,
-        session_handle="fleet-body:worker-host:session-live",
+        session_handle="fleet-body:worker-host:session-live", startup_complete=True, startup_revision=1,
     )
     q.claim_one("fleet-owner", task_id=task.id)
     q.start(task.id, "fleet-owner")
@@ -5005,7 +5015,7 @@ def test_yielded_created_worktree_is_concluded_before_respawn(q, client):
     q.record_spawn(
         reservation.key,
         session_handle="local-body:bridge-1",
-        worktree="wt-created",
+        worktree="wt-created", startup_complete=True, startup_revision=1,
     )
     q.claim_one("host-a/wt-created", task_id=task.id)
     q.start(
@@ -5055,7 +5065,7 @@ def test_yielded_attempt_checkpoints_identity_before_bridge_end_and_restart(q, c
         creating_host="host-a", driver="agent-dispatch",
     )
     q.record_spawn(
-        reservation.key, session_handle="local-body:bridge-1", worktree="wt-created",
+        reservation.key, session_handle="local-body:bridge-1", worktree="wt-created", startup_complete=True, startup_revision=1,
     )
     q.claim_one("host-a/wt-created", task_id=task.id)
     q.start(task.id, "host-a/wt-created", owner_session_id="session-exact")
@@ -5123,6 +5133,7 @@ def test_native_released_attempt_identity_survives_process_exit(tmp_path):
             q.record_spawn(
                 reservation.key, session_handle="local-body:bridge-1",
                 worktree="wt-created",
+                startup_complete=True, startup_revision=reservation.startup_revision,
             )
             q.claim_one("host-a/wt-created", task_id=task.id)
             q.start(task.id, "host-a/wt-created", owner_session_id="session-exact")
@@ -5206,7 +5217,7 @@ def test_failed_attempt_cleanup_retries_after_body_release(q, client):
     q.request_spawn_release(
         reservation.key,
         detail="launch failed",
-        disposition="failed",
+        disposition="failed", finished_startup_revision=q.get_reservation(reservation.key).startup_revision,
     )
     spawn = _ok_spawn()
     first = Supervisor(
@@ -5215,6 +5226,7 @@ def test_failed_attempt_cleanup_retries_after_body_release(q, client):
         repo=TEST_REPO,
         machine="host-a",
         verdict_fn=lambda *_args: "gone",
+        worktree_directory_present_fn=lambda *_args: False,
         attempt_conclusion_fn=lambda *_args: {
             "action": "failed",
             "reason": "lifecycle lock busy",
@@ -5289,7 +5301,7 @@ def test_retires_unleased_worktree_reservation_when_directory_confirmed_absent(
     q.request_spawn_release(
         reservation.key,
         detail="worktree preparation failed",
-        disposition="failed",
+        disposition="failed", finished_startup_revision=q.get_reservation(reservation.key).startup_revision,
     )
     assert q.get(task.id).owner is None  # never claimed -> no owner_session_id
     probe_calls = []
@@ -5337,7 +5349,7 @@ def test_probes_the_spawn_fns_own_allocation_project_when_overridden(q, client):
     q.request_spawn_release(
         reservation.key,
         detail="worktree preparation failed",
-        disposition="failed",
+        disposition="failed", finished_startup_revision=q.get_reservation(reservation.key).startup_revision,
     )
     spawn = _ok_spawn()
     spawn.allocation_project_for = lambda _task: "routed-project"
@@ -5386,12 +5398,12 @@ def test_missing_allocation_project_degrades_only_that_reservation(q, client):
     q.request_spawn_release(
         reservation.key,
         detail="worktree preparation failed",
-        disposition="failed",
+        disposition="failed", finished_startup_revision=q.get_reservation(reservation.key).startup_revision,
     )
     q.request_spawn_release(
         other_reservation.key,
         detail="worktree preparation failed",
-        disposition="failed",
+        disposition="failed", finished_startup_revision=q.get_reservation(other_reservation.key).startup_revision,
     )
 
     def raising_project_selector(task_dict):
@@ -5721,7 +5733,7 @@ def test_confirms_absence_with_case_insensitive_creating_host_match(q, client):
     q.request_spawn_release(
         reservation.key,
         detail="worktree preparation failed",
-        disposition="failed",
+        disposition="failed", finished_startup_revision=q.get_reservation(reservation.key).startup_revision,
     )
     sup = Supervisor(
         client,
@@ -5756,7 +5768,7 @@ def test_held_attempt_cleanup_remains_visible_without_fencing_replacement(
     q.request_spawn_release(
         reservation.key,
         detail="launch failed",
-        disposition="failed",
+        disposition="failed", finished_startup_revision=q.get_reservation(reservation.key).startup_revision,
     )
     conclusions = []
     spawn = _ok_spawn()
@@ -5766,6 +5778,7 @@ def test_held_attempt_cleanup_remains_visible_without_fencing_replacement(
         repo=TEST_REPO,
         machine="host-a",
         verdict_fn=lambda *_args: "gone",
+        worktree_directory_present_fn=lambda *_args: False,
         attempt_conclusion_fn=lambda *args: conclusions.append(args) or {
             "action": "preserved",
             "reason": "dirty-worktree",
@@ -5810,7 +5823,7 @@ def test_pending_cleanup_fences_successor_before_claim(q, client):
     )
     q.request_spawn_release(
         old_reservation.key,
-        disposition="failed",
+        disposition="failed", finished_startup_revision=q.get_reservation(old_reservation.key).startup_revision,
     )
     q.retire_spawn(
         old_reservation.key,
@@ -5897,7 +5910,7 @@ def test_cleanup_retry_does_not_touch_settled_successor_worktree(q, client):
         creating_host="host-a",
         driver="agent-dispatch",
     )
-    q.request_spawn_release(old_reservation.key, disposition="failed")
+    q.request_spawn_release(old_reservation.key, disposition="failed", finished_startup_revision=q.get_reservation(old_reservation.key).startup_revision,)
     q.retire_spawn(
         old_reservation.key,
         exact_absence=True,
@@ -5948,7 +5961,7 @@ def test_cleanup_retry_tracks_successor_inherited_worktree_after_replacement(
         creating_host="host-a",
         driver="agent-dispatch",
     )
-    q.request_spawn_release(old_reservation.key, disposition="failed")
+    q.request_spawn_release(old_reservation.key, disposition="failed", finished_startup_revision=q.get_reservation(old_reservation.key).startup_revision,)
     q.retire_spawn(
         old_reservation.key,
         exact_absence=True,
@@ -6036,7 +6049,7 @@ def test_absent_local_release_calls_idempotent_end(q, client):
     )
     q.request_spawn_release(
         reservation.key,
-        disposition="settled",
+        disposition="settled", finished_startup_revision=q.get_reservation(reservation.key).startup_revision,
     )
     ended = []
     sup = Supervisor(
@@ -6059,7 +6072,7 @@ def test_absent_local_release_calls_idempotent_end(q, client):
 def test_retired_pending_without_worktree_claims_before_completion(q, client):
     task = q.create("work")
     reservation, _ = q.reserve_spawn(task.id)
-    q.request_spawn_release(reservation.key, disposition="failed")
+    q.request_spawn_release(reservation.key, disposition="failed", finished_startup_revision=q.get_reservation(reservation.key).startup_revision,)
     q.retire_spawn(
         reservation.key,
         exact_absence=True,
@@ -6098,7 +6111,7 @@ def test_failed_absent_session_end_retries_after_exclusive_release(q, client):
     )
     q.request_spawn_release(
         reservation.key,
-        disposition="settled",
+        disposition="settled", finished_startup_revision=q.get_reservation(reservation.key).startup_revision,
     )
     end_results = iter([False, True])
     ended = []
@@ -6157,7 +6170,7 @@ def test_retired_session_end_failure_backs_off_and_becomes_held(q, client):
         reservation.key,
         session_handle="local-body:session-stopped",
     )
-    q.request_spawn_release(reservation.key, disposition="settled")
+    q.request_spawn_release(reservation.key, disposition="settled", finished_startup_revision=q.get_reservation(reservation.key).startup_revision,)
     ended = []
     sup = Supervisor(
         client,
@@ -6205,7 +6218,7 @@ def test_failing_session_end_allows_worktree_cleanup_immediately(q, client):
         session_handle="local-body:session-stopped",
         worktree="wt-created",
     )
-    q.request_spawn_release(reservation.key, disposition="failed")
+    q.request_spawn_release(reservation.key, disposition="failed", finished_startup_revision=q.get_reservation(reservation.key).startup_revision,)
     ended = []
     conclusions = []
     sup = Supervisor(
@@ -6261,7 +6274,7 @@ def test_due_session_cleanup_runs_while_worktree_cleanup_is_backed_off(
         session_handle="local-body:session-stopped",
         worktree="wt-created",
     )
-    q.request_spawn_release(reservation.key, disposition="failed")
+    q.request_spawn_release(reservation.key, disposition="failed", finished_startup_revision=q.get_reservation(reservation.key).startup_revision,)
     q.retire_spawn(
         reservation.key,
         exact_absence=True,
@@ -6309,6 +6322,9 @@ def test_due_session_cleanup_runs_while_worktree_cleanup_is_backed_off(
 
 
 def test_retired_worktree_cleanup_failure_backs_off_and_becomes_held(q, client):
+    client.attachments = lambda _task: [{
+        "session_id": "session-gone", "worktree_id": "wt-created", "machine": "host-a",
+    }]
     task = q.create("work")
     reservation, _ = q.reserve_spawn(task.id)
     q.record_spawn_worktree(
@@ -6323,7 +6339,7 @@ def test_retired_worktree_cleanup_failure_backs_off_and_becomes_held(q, client):
         session_handle="session-gone",
         worktree="wt-created",
     )
-    q.request_spawn_release(reservation.key, disposition="failed")
+    q.request_spawn_release(reservation.key, disposition="failed", finished_startup_revision=q.get_reservation(reservation.key).startup_revision,)
     conclusions = []
     sup = Supervisor(
         client,
@@ -6367,7 +6383,7 @@ def test_gone_body_retires_before_session_cleanup_uses_capacity(q, client):
         session_handle="local-body:session-stopped",
         worktree="wt-shared",
     )
-    q.request_spawn_release(reservation.key, disposition="failed")
+    q.request_spawn_release(reservation.key, disposition="failed", finished_startup_revision=q.get_reservation(reservation.key).startup_revision,)
     replacement_task = q.create(
         "replacement",
         exclusive_key="stable:resource",
@@ -6413,7 +6429,7 @@ def test_gone_body_retires_before_worktree_cleanup(q, client):
         session_handle="local-body:session-stopped",
         worktree="wt-created",
     )
-    q.request_spawn_release(reservation.key, disposition="failed")
+    q.request_spawn_release(reservation.key, disposition="failed", finished_startup_revision=q.get_reservation(reservation.key).startup_revision,)
     conclusions = []
 
     def conclude(*args):
@@ -6455,7 +6471,7 @@ def test_gone_fleet_body_retires_before_worktree_cleanup(q, client):
         session_handle="fleet-body:host-b:session-gone",
         worktree="wt-fleet",
     )
-    q.request_spawn_release(reservation.key, disposition="failed")
+    q.request_spawn_release(reservation.key, disposition="failed", finished_startup_revision=q.get_reservation(reservation.key).startup_revision,)
     conclusions = []
 
     def conclude(*args):
@@ -6484,6 +6500,9 @@ def test_gone_fleet_body_retires_before_worktree_cleanup(q, client):
 
 
 def test_gone_worktree_body_retires_before_cleanup(q, client):
+    client.attachments = lambda _task: [{
+        "session_id": "session-gone", "worktree_id": "wt-gone", "machine": "host-a",
+    }]
     task = q.create("work", exclusive_key="stable:worktree")
     reservation, _ = q.reserve_spawn(task.id)
     q.record_spawn_worktree(
@@ -6498,7 +6517,7 @@ def test_gone_worktree_body_retires_before_cleanup(q, client):
         session_handle="session-gone",
         worktree="wt-gone",
     )
-    q.request_spawn_release(reservation.key, disposition="failed")
+    q.request_spawn_release(reservation.key, disposition="failed", finished_startup_revision=q.get_reservation(reservation.key).startup_revision,)
     conclusions = []
 
     def conclude(*args):
@@ -6576,7 +6595,7 @@ def test_yielded_targeted_worktree_is_preserved_without_conclusion(q, client):
     q.record_spawn(
         reservation.key,
         session_handle="local-body:bridge-1",
-        worktree="wt-target",
+        worktree="wt-target", startup_complete=True, startup_revision=1,
     )
     q.claim_one("host-a/wt-target", task_id=task.id)
     q.start(task.id, "host-a/wt-target")

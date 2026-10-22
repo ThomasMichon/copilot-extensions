@@ -145,6 +145,56 @@ def _mock_spawn_fail(monkeypatch, *, returncode=1, stderr="boom"):
 
 # -- fresh (queued) task ------------------------------------------------------
 
+@pytest.mark.parametrize("phase", ["acquiring", "binding", "binding-failed"])
+def test_suspended_reembodiment_keeps_capacity_until_ownership_binding(
+    q, client, monkeypatch, phase,
+):
+    from agent_dispatch import tracking
+    from agent_dispatch.supervisor import Supervisor
+    from tests._helpers import TEST_REPO
+
+    task = q.create("Suspended interactive task")
+    q.claim_one("host-a/wt-existing", task_id=task.id)
+    q.start(task.id, "host-a/wt-existing", owner_session_id="old-native")
+    q.suspend(task.id, "host-a/wt-existing", reason="turn ended")
+    _mock_prepare(monkeypatch, worktree_id="wt-existing")
+    _mock_spawn_ok(monkeypatch, worktree_id="wt-existing")
+    acquire = session_acquisition.acquire
+    resume = client.resume
+    checked = []
+    supervisor = Supervisor(
+        client, spawn_fn=lambda _: pytest.fail("no second startup"), repo=TEST_REPO,
+        verdict_fn=lambda *_: tracking.GONE,
+    )
+
+    def assert_retained():
+        reservation = asdict(q.latest_reservation(task.id))
+        assert reservation["startup_complete"] is False
+        assert supervisor._reservation_has_live_process(reservation, asdict(q.get(task.id)))
+        checked.append(True)
+
+    def pending_acquire(*args, **kwargs):
+        if phase == "acquiring":
+            assert_retained()
+        return acquire(*args, **kwargs)
+
+    def pending_bind(*args, **kwargs):
+        if phase != "acquiring":
+            assert_retained()
+        if phase == "binding-failed":
+            raise ValueError("synthetic ownership race")
+        return resume(*args, **kwargs)
+
+    monkeypatch.setattr(session_acquisition, "acquire", pending_acquire)
+    monkeypatch.setattr(client, "resume", pending_bind)
+    if phase == "binding-failed":
+        with pytest.raises(InteractiveEmbodimentError, match="failed to bind"):
+            launch_interactive_embodiment(client, task.id, machine="host-a")
+    else:
+        launch_interactive_embodiment(client, task.id, machine="host-a")
+    assert checked == [True]
+    assert q.latest_reservation(task.id).startup_complete is (phase != "binding-failed")
+
 
 def test_queued_task_claims_launches_and_starts(q, client, monkeypatch):
     t = q.create("work", repo="github.com/example/repo")

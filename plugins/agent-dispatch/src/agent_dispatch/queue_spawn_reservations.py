@@ -826,6 +826,8 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin):
                 conn.execute("COMMIT")
                 raise TaskError(f"reservation {key} is {row['state']!r}, not releasing")
             require_no_cooling(row)
+            if not row["startup_complete"] and not row["startup_fenced"]:
+                raise TaskError("spawn retirement requires completed startup; original caller remains unresolved")
             to_state = (
                 SpawnState.SETTLED
                 if row["release_disposition"] == "settled"
@@ -874,11 +876,16 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin):
         disposition: str = "failed",
         session_handle: str | None = None,
         worktree: str | None = None,
+        finished_startup_revision: int | None = None,
         now: float | None = None,
     ) -> SpawnReservation:
         """Fence an attempt and atomically retain any failed body identity."""
         if disposition not in {"failed", "settled"}:
             raise TaskError(f"invalid spawn release disposition: {disposition!r}")
+        if finished_startup_revision is not None and (
+            type(finished_startup_revision) is not int or finished_startup_revision < 1
+        ):
+            raise TaskError("finished startup requires its current revision")
         ts = self._now(now)
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
@@ -897,6 +904,14 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin):
                 raise TaskError(
                     f"reservation {key} worktree is {row['worktree']!r}, "
                     f"not {worktree!r}"
+                )
+            if finished_startup_revision is not None:
+                if row["startup_revision"] != finished_startup_revision:
+                    raise TaskError("startup revision changed before failed startup closure")
+                # The original caller has returned definitively. Fence future
+                # startup without pretending its failed launch was successful.
+                conn.execute(
+                    "UPDATE spawn_reservations SET startup_fenced = 1 WHERE key = ?", (key,),
                 )
             if row["state"] == SpawnState.RELEASING:
                 release_disposition = (

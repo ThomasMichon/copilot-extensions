@@ -394,6 +394,7 @@ def _spawn_worker_for(args: argparse.Namespace, task: dict) -> None:
                             project=spawn_task.get("spawn_allocation_project"),
                             worktree_path=spawn_task.get("spawn_worktree_path"),
                             allocation_reservation_key=spawn_task.get("spawn_allocation_reservation_key"),
+                            finished_startup_revision=reservation.get("startup_revision"),
                         )
                     else:
                         c.fail_spawn(key, detail=detail)
@@ -422,6 +423,7 @@ def _release_failed_created_spawn(
     project: str | None = None,
     worktree_path: str | None = None,
     allocation_reservation_key: str | None = None,
+    finished_startup_revision: int | None = None,
 ) -> None:
     """Fence and synchronously conclude a one-shot spawn's created checkout."""
     from . import embody
@@ -431,6 +433,7 @@ def _release_failed_created_spawn(
         key,
         detail=detail,
         disposition="failed",
+        finished_startup_revision=finished_startup_revision if body_absent else None,
     )
     try:
         outcome = embody.conclude_dispatch_attempt(

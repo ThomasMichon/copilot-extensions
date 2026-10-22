@@ -267,6 +267,32 @@ Inspect routing, resident processes and runtime selection before recovery;
 do not blindly retry or revert database files. The option is valid only for
 `update` without `--no-service` / `-NoService`.
 
+For an explicitly authorized historical restoration, capture the currently
+selected immutable marketplace assembly **before** changing it:
+`python scripts/retained_runtime.py capture --root <runtime-root>` emits a JSON
+record to save in a private operator-owned file. It binds the original manifest,
+payload and completed slot by content, rejects editable dependencies, and does
+not copy or modify the runtime or database. Retain the payload and slot; this
+record is not an archive or a schema-compatibility certificate.
+
+Use the **current guarded controller**, not the historical installer:
+`bash scripts/install.sh restore --retained-runtime <record> --install-dir <runtime-root>`
+or `install.ps1 -Action restore -RetainedRuntime <record> -InstallDir <runtime-root>`.
+Restoration holds the runtime manager's retention lease through the full
+operation, checks the retained bytes again, skips construction/completion-marker
+rewrites and GC, restores the original deployment manifest and payload selectors,
+and refreshes launchers, native service definitions and the configured supervisor.
+Its coordinator cutover is always strict; failed or ambiguous cutover never
+falls back to a restart or supervisor reconciliation. As with strict update,
+selection/publication can precede a failed cutover and is not automatically
+undone. The regular update path is unchanged.
+
+Before restoring an older writer, contain new admissions, resolve all pending
+startup/cooling operations, verify database compatibility and inspect routing
+and resident generations. Stop on uncertainty; never restore database/WAL files
+or treat a retention lease or archive as proof of writer quiescence. A changed,
+missing or source-managed assembly is refused rather than rebuilt or relabelled.
+
 Both installers source the canonical installer engine during development;
 release tooling materializes byte-identical payload-local copies. The engine
 owns pinned, checksum-verified uv acquisition, transient venv/package retries

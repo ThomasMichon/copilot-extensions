@@ -316,7 +316,7 @@ def test_exclusive_key_reuses_worktree_without_retired_session(q):
         session_handle="local-body:session-retired",
         worktree="wt-reviewer",
     )
-    q.request_spawn_release(r1.key)
+    q.request_spawn_release(r1.key, finished_startup_revision=q.get_reservation(r1.key).startup_revision,)
     q.retire_spawn(
         r1.key,
         exact_absence=True,
@@ -399,7 +399,7 @@ def test_retired_session_is_not_recarried_from_legacy_failed_attempt(q):
         session_handle="local-body:session-retired",
         worktree="wt-reviewer",
     )
-    q.request_spawn_release(retired.key)
+    q.request_spawn_release(retired.key, finished_startup_revision=q.get_reservation(retired.key).startup_revision,)
     q.retire_spawn(
         retired.key,
         exact_absence=True,
@@ -444,7 +444,7 @@ def test_conversation_retired_marker_survives_a_handle_less_retry(q):
         session_handle="local-body:session-retired-2",
         worktree="wt-reviewer-2",
     )
-    q.request_spawn_release(retired.key)
+    q.request_spawn_release(retired.key, finished_startup_revision=q.get_reservation(retired.key).startup_revision,)
     q.retire_spawn(
         retired.key,
         exact_absence=True,
@@ -489,7 +489,7 @@ def test_conversation_retired_marker_clears_once_a_fresh_session_lands(q):
         session_handle="local-body:session-retired-3",
         worktree="wt-reviewer-3",
     )
-    q.request_spawn_release(retired.key)
+    q.request_spawn_release(retired.key, finished_startup_revision=q.get_reservation(retired.key).startup_revision,)
     q.retire_spawn(
         retired.key,
         exact_absence=True,
@@ -753,7 +753,7 @@ def test_release_pending_reservation_rejects_direct_terminal_transition(
 def test_retire_requires_exact_absence_and_uses_release_disposition(q):
     failed_task = q.create("failed")
     failed, _ = q.reserve_spawn(failed_task.id)
-    q.request_spawn_release(failed.key, disposition="failed")
+    q.request_spawn_release(failed.key, disposition="failed", finished_startup_revision=q.get_reservation(failed.key).startup_revision,)
     with pytest.raises(TaskError, match="exact absence proof"):
         q.retire_spawn(failed.key, exact_absence=False)
     retired_failed = q.retire_spawn(failed.key, exact_absence=True)
@@ -761,7 +761,7 @@ def test_retire_requires_exact_absence_and_uses_release_disposition(q):
 
     settled_task = q.create("settled")
     settled, _ = q.reserve_spawn(settled_task.id)
-    q.request_spawn_release(settled.key, disposition="settled")
+    q.request_spawn_release(settled.key, disposition="settled", finished_startup_revision=q.get_reservation(settled.key).startup_revision,)
     retired_settled = q.retire_spawn(settled.key, exact_absence=True)
     assert retired_settled.state == SpawnState.SETTLED
 
@@ -855,7 +855,7 @@ def test_claimed_cleanup_prevents_successor_worktree_reuse(q):
     )
     q.request_spawn_release(
         old_reservation.key,
-        disposition="failed",
+        disposition="failed", finished_startup_revision=q.get_reservation(old_reservation.key).startup_revision,
     )
     q.retire_spawn(
         old_reservation.key,
@@ -905,7 +905,7 @@ def test_tokenless_pending_cleanup_prevents_worktree_reuse(q):
         creating_host="host-a",
         driver="agent-dispatch",
     )
-    q.request_spawn_release(old_reservation.key, disposition="failed")
+    q.request_spawn_release(old_reservation.key, disposition="failed", finished_startup_revision=q.get_reservation(old_reservation.key).startup_revision,)
     pending = q.retire_spawn(
         old_reservation.key,
         exact_absence=True,
@@ -938,7 +938,7 @@ def test_cleanup_claim_expires_and_is_reclaimable(q):
         creating_host="host-a",
         driver="agent-dispatch",
     )
-    q.request_spawn_release(reservation.key, disposition="failed")
+    q.request_spawn_release(reservation.key, disposition="failed", finished_startup_revision=q.get_reservation(reservation.key).startup_revision,)
     q.retire_spawn(
         reservation.key,
         exact_absence=True,
@@ -1026,7 +1026,7 @@ def test_expired_claim_still_fences_reuse_and_rejects_old_result(q):
         creating_host="host-a",
         driver="agent-dispatch",
     )
-    q.request_spawn_release(old_reservation.key, disposition="failed")
+    q.request_spawn_release(old_reservation.key, disposition="failed", finished_startup_revision=q.get_reservation(old_reservation.key).startup_revision,)
     q.retire_spawn(
         old_reservation.key,
         exact_absence=True,
@@ -1074,7 +1074,7 @@ def test_http_cleanup_claim_returns_token(api):
     ).json()["reservation"]
     api.post(
         f"/spawn-reservations/{reservation['key']}/release",
-        json={"disposition": "failed"},
+        json={"disposition": "failed", "finished_startup_revision": 1},
     )
     api.post(
         f"/spawn-reservations/{reservation['key']}/retire",
@@ -1249,7 +1249,7 @@ def test_rearm_cannot_bypass_pending_cleanup_worktree_fence(q):
         creating_host="host-a",
         driver="agent-dispatch",
     )
-    q.request_spawn_release(pending.key, disposition="failed")
+    q.request_spawn_release(pending.key, disposition="failed", finished_startup_revision=q.get_reservation(pending.key).startup_revision,)
     q.retire_spawn(
         pending.key,
         exact_absence=True,
@@ -1468,7 +1468,7 @@ def test_http_releasing_requires_proof_gated_retire(api):
     ).json()["reservation"]
     api.post(
         f"/spawn-reservations/{reservation['key']}/release",
-        json={"disposition": "failed"},
+        json={"disposition": "failed", "finished_startup_revision": 1},
     )
 
     for operation in ("fail", "settle", "defer"):
@@ -1645,7 +1645,7 @@ def test_http_rearm_rejects_pending_cleanup(api):
     ).json()["reservation"]
     api.post(
         f"/spawn-reservations/{pending['key']}/release",
-        json={"disposition": "failed"},
+        json={"disposition": "failed", "finished_startup_revision": 1},
     )
     api.post(
         f"/spawn-reservations/{pending['key']}/retire",
@@ -1830,7 +1830,7 @@ class _QueueBackedClient:
         return asdict(self._q.defer_spawn(key, detail=detail))
 
     def request_spawn_release(
-        self, key, *, detail=None, disposition="failed"
+        self, key, *, detail=None, disposition="failed", finished_startup_revision=None
     ):
         from dataclasses import asdict
 
@@ -1839,6 +1839,7 @@ class _QueueBackedClient:
                 key,
                 detail=detail,
                 disposition=disposition,
+                finished_startup_revision=finished_startup_revision,
             )
         )
 
@@ -2203,7 +2204,7 @@ def test_conclusion_exception_respects_independent_body_absence(
         worktree="wt-created",
         session_id=None,
         detail="spawn failed",
-        body_absent=body_absent,
+        body_absent=body_absent, finished_startup_revision=reservation.startup_revision,
     )
 
     result = q.get_reservation(reservation.key)

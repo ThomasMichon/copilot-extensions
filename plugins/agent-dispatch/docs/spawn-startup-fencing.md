@@ -9,12 +9,28 @@ synchronous launch/resume succeeds. Recovery publication cannot manufacture
 completion. A new startup invalidates completion and advances
 `startup_revision`; an older callback cannot complete the newer revision.
 
-Incomplete `spawned` and historical incomplete `cold` reservations retain
+Incomplete `reserving`, `spawned`, `releasing` and historical incomplete `cold` reservations retain
 process capacity before and after task abandonment, regardless of a cached
 cooling observation or a currently absent body. Completed terminal startups
 must be fenced against future startup before exact absence can free capacity.
 This does not settle the reservation, release an exclusive resource or
 authorize workspace cleanup.
+
+Interactive re-embodiment also remains incomplete through the final ownership
+bind, not merely through acquisition. Release requests do not close a pending
+startup; exact current absence cannot retire it while its original caller may
+still act. A definitively failed original caller can supply
+`finished_startup_revision` to `request_spawn_release`. The coordinator checks
+that revision and fences further startup without setting `startup_complete`.
+This is not an observer's reconciliation shortcut: lost responses or remote
+operations that can still apply must remain unresolved. The first-party
+failed-create paths supply this closure only for a definitive `not_started`
+outcome. Successful callbacks continue to publish completion normally.
+
+Retained native CLI liveness uses the exact session's machine from current
+ownership or durable attachment history. An abandoned task's cleared owner
+must not redirect a remote-body probe to the local registry. Missing or
+conflicting location retains capacity and cleanup custody.
 
 ## Physical cooling versus resume
 

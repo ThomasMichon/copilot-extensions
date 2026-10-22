@@ -605,8 +605,10 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
         return spawn_snapshot(task, reservation, worktree, prepared, ownership, replaced)
 
     def _reservation_has_live_process(self, reservation: dict, task: dict) -> bool:
-        if reservation.get("state") in {SpawnState.SPAWNED, SpawnState.COLD} and (
-            reservation.get("startup_complete") is not True or reservation.get("cooling_token")
+        if reservation.get("state") in SpawnState.ACTIVE and (
+            reservation.get("startup_complete") is not True
+            and reservation.get("startup_fenced") is not True
+            or reservation.get("cooling_token")
         ):
             self._retain_terminal_startup(reservation, task, "startup or cooling unresolved")
             return True
@@ -655,13 +657,16 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                 return True
             if not worktree:
                 return bool(reservation.get("session_handle"))
+            machine = self._retained_cli_machine(reservation, task)
+            if not machine:
+                self._retain_terminal_startup(reservation, task, "exact body location unproven")
+                return True
             try:
                 return (
                     self.verdict_fn(
                         worktree,
-                        _machine_from_owner(task.get("completed_by") or task.get("owner"))
-                        if terminal_spawn else _machine_from_owner(task.get("owner")),
-                        reservation["session_handle"] if terminal_spawn else task.get("owner_session_id"),
+                        machine,
+                        reservation["session_handle"],
                     )
                     != _tracking().GONE
                 )
@@ -1422,6 +1427,11 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
             if not self._matches_pool(task):
                 continue
             body_already_released = res.get("state") in SpawnState.RELEASABLE
+            if not body_already_released and (
+                res.get("startup_complete") is not True and res.get("startup_fenced") is not True
+            ):
+                self._retain_terminal_startup(res, task, "original startup caller unresolved")
+                continue
             can_release = body_already_released
             claim_token: str | None = None
             if body_already_released:
@@ -1660,14 +1670,13 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                             "session_handle"
                         )
                     else:
-                        try:
-                            verdict = self.verdict_fn(
-                                worktree,
-                                _machine_from_owner(task.get("owner")),
-                                task.get("owner_session_id"),
-                            )
-                        except Exception:
-                            verdict = _tracking().UNKNOWN
+                        machine = self._retained_cli_machine(res, task) if raw_session else None
+                        verdict = _tracking().UNKNOWN
+                        if machine:
+                            try:
+                                verdict = self.verdict_fn(worktree, machine, raw_session)
+                            except Exception:
+                                log.exception("retained CLI liveness failed for %s", res["key"])
                         if (
                             verdict == _tracking().UNKNOWN
                             and task.get("owner") is None
@@ -2248,11 +2257,14 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
         worktree = _worktree_from_reservation(reservation, task.get("owner"))
         if not worktree:
             return reservation.get("state") == SpawnState.RESERVING, None
+        machine = self._retained_cli_machine(reservation, task)
+        if not machine:
+            return False, None
         try:
             verdict = self.verdict_fn(
                 worktree,
-                _machine_from_owner(task.get("completed_by") or task.get("owner")),
-                task.get("owner_session_id"),
+                machine,
+                reservation.get("session_handle"),
             )
         except Exception:
             verdict = _tracking().UNKNOWN

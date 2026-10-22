@@ -778,12 +778,15 @@ class DispatchClient(CleanupRecoveryClientMixin, CategoryClientMixin, ScheduleCl
         self, key: str, *, detail: str | None = None,
         disposition: str = "failed", session_handle: str | None = None,
         worktree: str | None = None,
+        finished_startup_revision: int | None = None,
     ) -> dict:
         payload = {"detail": detail, "disposition": disposition}
         if session_handle is not None:
             payload["session_handle"] = session_handle
         if worktree is not None:
             payload["worktree"] = worktree
+        if finished_startup_revision is not None:
+            payload["finished_startup_revision"] = finished_startup_revision
         return self._unwrap(
             self._http.post(f"/spawn-reservations/{key}/release", json=payload)
         )

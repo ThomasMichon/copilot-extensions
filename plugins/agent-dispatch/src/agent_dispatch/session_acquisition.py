@@ -12,6 +12,7 @@ from .procutil import agent_bridge_launch_prefix, no_window_kwargs
 def spawn_snapshot(task: dict, reservation: dict, worktree: str, prepared: dict, ownership: str, replaced: bool) -> dict:
     return {
         **task, "spawn_worktree": worktree, "spawn_reservation_key": reservation["key"],
+        "spawn_startup_revision": reservation.get("startup_revision"),
         "spawn_worktree_path": prepared["path"], "spawn_worktree_ownership": ownership,
         "spawn_allocation_project": prepared.get("project"),
         "spawn_allocation_reservation_key": reservation.get("allocation_reservation_key") or reservation["key"],

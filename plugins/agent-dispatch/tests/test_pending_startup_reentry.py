@@ -75,7 +75,8 @@ def test_recovery_redrive_cannot_close_a_pending_original_start(tmp_path, monkey
     assert launched == [task.id]
 
 
-def test_concurrent_cooling_cannot_hide_a_pending_resume(tmp_path):
+@pytest.mark.parametrize("release", [None, "direct", "suspended"])
+def test_concurrent_cooling_cannot_hide_a_pending_resume(tmp_path, release):
     queue = OwnerResultQueue(tmp_path / "tasks.db")
     client = QueueBackedClient(queue)
     task = queue.create("Suspended review", labels=["review"])
@@ -124,10 +125,17 @@ def test_concurrent_cooling_cannot_hide_a_pending_resume(tmp_path):
             local_cold_fn=lambda _: pytest.fail("pending resume must not be stopped"),
         )
         concurrent.cool_dormant_bodies()
+        if release == "direct":
+            queue.request_spawn_release(reservation.key, detail="requested during pending resume")
+        elif release == "suspended":
+            queue.release_suspended(task.id, "original-owner", reason="requested during pending resume")
+        if release:
+            with pytest.raises(TaskError, match="startup"):
+                queue.retire_spawn(reservation.key, exact_absence=True)
         queue.abandon(task.id, permitted=True, reason="withdraw during pending resume")
         assert len(concurrent._active_reservations()) == 1
         retained = queue.get_reservation(reservation.key)
-        assert retained.state == SpawnState.SPAWNED
+        assert retained.state == (SpawnState.RELEASING if release else SpawnState.SPAWNED)
         assert retained.startup_revision == before.startup_revision
         assert retained.startup_complete is False
         assert retained.startup_fenced is False

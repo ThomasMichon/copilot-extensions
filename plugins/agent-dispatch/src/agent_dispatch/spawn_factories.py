@@ -347,6 +347,7 @@ class _SpawnReleaseClient(Protocol):
         disposition: str = "failed",
         session_handle: str | None = None,
         worktree: str | None = None,
+        finished_startup_revision: int | None = None,
     ) -> object: ...
 
 
@@ -376,6 +377,9 @@ def request_failed_created_spawn_release(
             else None
         ),
         worktree=handle.get("worktree") or spawn_task.get("spawn_worktree"),
+        finished_startup_revision=(
+            spawn_task.get("spawn_startup_revision") if handle.get("not_started") is True else None
+        ),
     )
 
 

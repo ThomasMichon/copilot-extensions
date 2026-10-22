@@ -101,6 +101,9 @@ def test_closed_terminal_capacity_probes_the_exact_body(tmp_path, kind, verdict)
         reservation.key, session_handle=handles[kind], worktree="retained-worktree",
         startup_complete=True, startup_revision=1,
     )
+    if kind == "cli":
+        queue.claim_one("peer-host/retained-worktree", task_id=task.id)
+        queue.start(task.id, "peer-host/retained-worktree", owner_session_id=handles[kind])
     queue.abandon(task.id, permitted=True, reason="Assignment withdrawn")
     calls = []
 
@@ -110,8 +113,10 @@ def test_closed_terminal_capacity_probes_the_exact_body(tmp_path, kind, verdict)
             raise OSError("Synthetic liveness transport unavailable")
         return verdict
 
+    client = QueueBackedClient(queue)
+    client.attachments = lambda task_id: [asdict(item) for item in queue.attachment_history(task_id)]
     supervisor = Supervisor(
-        QueueBackedClient(queue), spawn_fn=lambda _: pytest.fail("capacity is read-only"),
+        client, spawn_fn=lambda _: pytest.fail("capacity is read-only"),
         repo=TEST_REPO, local_body_verdict_fn=observe, fleet_verdict_fn=observe,
         script_body_verdict_fn=observe, verdict_fn=observe,
     )
@@ -120,9 +125,28 @@ def test_closed_terminal_capacity_probes_the_exact_body(tmp_path, kind, verdict)
         "local": ("retained",),
         "fleet": ("worker-host", "retained"),
         "script": (42, "start-token"),
-        "cli": ("retained-worktree", None, "retained-native"),
+        "cli": ("retained-worktree", "peer-host", "retained-native"),
     }
     assert calls == [expected[kind]]
+
+def test_terminal_cli_without_location_never_uses_an_empty_local_registry(tmp_path):
+    queue = OwnerResultQueue(tmp_path / "tasks.db")
+    task = queue.create("Unlocated retained native body")
+    reservation, _ = queue.reserve_spawn(task.id)
+    queue.record_spawn(
+        reservation.key, session_handle="unlocated-native", worktree="retained-worktree",
+        startup_complete=True, startup_revision=reservation.startup_revision,
+    )
+    queue.abandon(task.id, permitted=True, reason="Assignment withdrawn")
+    client = QueueBackedClient(queue)
+    client.attachments = lambda _task_id: []
+    probes = []
+    supervisor = Supervisor(
+        client, spawn_fn=lambda _: pytest.fail("no launch"), repo=TEST_REPO,
+        verdict_fn=lambda *args: probes.append(args) or tracking.GONE,
+    )
+    assert len(supervisor._active_reservations()) == 1
+    assert probes == []
 
 
 def test_closed_absent_body_frees_capacity_without_releasing_held_cleanup(tmp_path):

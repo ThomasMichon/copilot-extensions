@@ -121,6 +121,7 @@ class RequestSpawnReleaseBody(BaseModel):
     disposition: str = "failed"
     session_handle: str | None = None
     worktree: str | None = None
+    finished_startup_revision: int | None = Field(default=None, ge=1, strict=True)
 
 
 class RetireSpawnBody(ReservationDetailBody):

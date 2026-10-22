@@ -21,6 +21,7 @@ def test_durable_callers_request_escape_and_preserve_test_containment(
 ):
     monkeypatch.setattr(agent_procutil, "_is_windows", lambda: True)
     monkeypatch.setattr(agent_procutil, "contained_test_mode", lambda: contained)
+    monkeypatch.setattr("agent_procutil.daemon_broker.caller_in_job", lambda: False)
     canonical = agent_procutil.windowless_daemon_kwargs
     requests = []
 

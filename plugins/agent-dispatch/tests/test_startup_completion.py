@@ -29,6 +29,45 @@ def test_startup_completion_is_explicit_and_invalidated_by_identity_change(tmp_p
     refreshed = queue.record_spawn(reservation.key, session_handle="local-body:replacement")
     assert refreshed.startup_complete is False
 
+def test_failed_original_caller_can_close_only_its_own_revision(tmp_path):
+    queue = TaskQueue(tmp_path / "tasks.db")
+    task = queue.create("Failed startup", exclusive_key="retained:resource")
+    reservation, _ = queue.reserve_spawn(task.id)
+    with pytest.raises(TaskError, match="revision changed"):
+        queue.request_spawn_release(
+            reservation.key, finished_startup_revision=reservation.startup_revision + 1,
+        )
+    assert queue.get_reservation(reservation.key).state == "reserving"
+    released = queue.request_spawn_release(
+        reservation.key, finished_startup_revision=reservation.startup_revision,
+    )
+    assert released.startup_fenced is True
+    assert released.startup_complete is False
+    with pytest.raises(TaskError, match="not one of"):
+        queue.record_spawn(
+            reservation.key, session_handle="late-native", startup_complete=True,
+            startup_revision=reservation.startup_revision,
+        )
+    assert queue.retire_spawn(reservation.key, exact_absence=True).state == "failed"
+
+
+def test_failed_startup_closure_round_trips_the_client_and_route(tmp_path):
+    queue = TaskQueue(tmp_path / "tasks.db")
+    task = queue.create("Failed startup")
+    reservation, _ = queue.reserve_spawn(task.id)
+    with TestClient(create_app(queue)) as api:
+        def forward(request):
+            result = api.post(request.url.path, json=json.loads(request.content))
+            return httpx.Response(result.status_code, json=result.json())
+
+        with DispatchClient("http://testserver", transport=httpx.MockTransport(forward)) as client:
+            released = client.request_spawn_release(
+                reservation.key, finished_startup_revision=reservation.startup_revision,
+            )
+            assert released["startup_fenced"] is True
+            assert released["startup_complete"] is False
+            assert client.retire_spawn(reservation.key, exact_absence=True)["state"] == "failed"
+
 
 def test_pending_resume_revokes_completion_before_callback(tmp_path):
     queue = TaskQueue(tmp_path / "tasks.db")

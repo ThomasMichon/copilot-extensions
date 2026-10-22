@@ -346,9 +346,8 @@ def launch_interactive_embodiment(
         _release_prelaunch_claim(client, task_id, worker_id, resuming=resuming)
         raise InteractiveEmbodimentError("embody launched but returned no session id")
 
-    client.record_spawn(
+    published = client.record_spawn(
         key, session_handle=session_id, worktree=handle.get("worktree") or worktree_id,
-        startup_complete=True,
         startup_revision=reservation.get("startup_revision"),
     )
 
@@ -368,6 +367,12 @@ def launch_interactive_embodiment(
         raise InteractiveEmbodimentError(
             f"launched but failed to bind ownership: {exc}"
         ) from exc
+
+    client.record_spawn(
+        key, session_handle=session_id, worktree=handle.get("worktree") or worktree_id,
+        startup_complete=True,
+        startup_revision=published.get("startup_revision"),
+    )
 
     return {
         "task_id": task_id,
