@@ -548,6 +548,49 @@ def test_launcher_hold_survives_preparation_beyond_mux_startup_grace(real_keeper
     assert state["holds"]["anchor-repo@devbox"]["updated_at"] == 1400.0
 
 
+@pytest.mark.parametrize("failure", ["reservation", "preparation"])
+def test_failed_rejoin_preserves_existing_live_mux_hold(real_keeper, monkeypatch, failure):
+    clock = [1000.0]
+    monkeypatch.setattr(shared_keeper_holds.time, "time", lambda: clock[0])
+    monkeypatch.setattr(detach, "_mux_exists", lambda *a: True)
+    detach.ensure_keeper(
+        "devbox", venue_port=41234, mux="wt-anchor-repo", hold_id="anchor-repo@devbox",
+        probe=lambda mux: detach._probe_hold(object(), mux),
+    )
+    def refuse(*a, **kw):
+        state = real_keeper.read("devbox")
+        assert state["holds"]["anchor-repo@devbox"]["mux"] == "wt-anchor-repo"
+        raise RuntimeError("required plugin unavailable")
+    monkeypatch.setattr(
+        "venue_copilot.detached.reserve_with_retry" if failure == "reservation"
+        else "agent_ssh.copilot_plugins.prepare", refuse,
+    )
+    assert detach.cmd_detach(_args()) == 1
+    # The launcher's PID is now gone; only the original native mux is live.
+    monkeypatch.setattr(detach, "process_identity", lambda pid: None)
+    clock[0] += 400.0
+    _state, holds, live_muxes = detach._holds().prune_snapshot(
+        "devbox", probe=lambda mux: detach._probe_hold(object(), mux),
+    )
+    assert holds["anchor-repo@devbox"]["mux"] == "wt-anchor-repo"
+    assert "wt-anchor-repo" in live_muxes and real_keeper.alive("devbox")
+
+
+def test_stop_during_preparation_refuses_pid_hold_without_releasing_native_ownership(
+    real_keeper, seams, monkeypatch,
+):
+    def prepare(*a):
+        hold = real_keeper.read("devbox")["holds"]["anchor-repo@devbox"]
+        assert hold["mux"] == detach._attached_hold_mux(os.getpid())
+        assert detach.cmd_stop(_args(stop=True, detach=False)) == 1
+        assert seams.release == [] and seams.deregister == []
+        assert not any("tmux kill-session" in command for command in seams.remote)
+        return {"version": 1, "cwd": "/workspaces/repo", "plugins": [], "logical_payloads": {}}
+    monkeypatch.setattr("agent_ssh.copilot_plugins.prepare", prepare)
+    assert detach.cmd_detach(_args()) == 0
+    assert real_keeper.read("devbox")["holds"]["anchor-repo@devbox"]["mux"] == "wt-anchor-repo"
+
+
 def test_failed_keeper_handoff_cleans_up_native_session(seams, monkeypatch):
     def fail(*a):
         raise RuntimeError("keeper handoff failed")

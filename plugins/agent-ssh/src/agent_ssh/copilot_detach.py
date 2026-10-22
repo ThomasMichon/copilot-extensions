@@ -424,15 +424,19 @@ def ensure_keeper(
     mux: str,
     hold_id: str | None = None,
     hold_pid: int | None = None,
+    preserve_live_mux: bool = False,
     probe: HoldProbe | None = None,
 ) -> dict[str, Any]:
     holds_store = _holds()
     hold_id = hold_id or mux
     hold_mux = _attached_hold_mux(hold_pid) if hold_pid and hold_pid > 0 else mux
-    holds_store.prune_snapshot(_state_key(target), probe=probe)
+    _state, _holds_snapshot, live_muxes = holds_store.prune_snapshot(_state_key(target), probe=probe)
     with holds_store.lock(_state_key(target)):
         state = read_keeper_state(target)
         holds = holds_store.read_holds(state)
+        prior_mux = holds.get(hold_id, {}).get("mux")
+        if preserve_live_mux and prior_mux in live_muxes and not prior_mux.startswith(_ATTACHED_HOLD_PREFIX):
+            hold_mux = prior_mux
         holds, hold_added, hold_updated_at = holds_store.refresh_hold_with_status(
             holds,
             hold_id,
@@ -546,6 +550,7 @@ class _SshAdapter:
             mux=mux,
             hold_id=self.hold_id,
             hold_pid=os.getpid() if self._launch_pending else None,
+            preserve_live_mux=self._launch_pending,
             probe=lambda held_mux: _probe_hold(self.ssh_config, held_mux),
         )
         raw_updated = result.get("hold_updated_at")
@@ -651,6 +656,8 @@ def cmd_stop(args: argparse.Namespace) -> int:
         return _fail(str(exc), plan)
     held_mux = _holds().hold_mux_or_none(_state_key(args.target), plan["scope_id"])
     if held_mux:
+        if held_mux.startswith(_ATTACHED_HOLD_PREFIX):
+            return _fail("SSH launch is still preparing this scope; retry stop after it settles", plan)
         plan["mux_session"] = held_mux
         plan["venue"]["mux_session_name"] = plan["mux_session"]
     try:

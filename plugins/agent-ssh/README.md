@@ -113,6 +113,10 @@ The full expected-repository fence runs before recovery as well as preparation.
 The forward stays tied to the live launcher throughout preparation, then
 transfers to mux liveness; an attached client subsequently transfers its hold
 to that client's PID and releases the refreshed hold when attach exits.
+An existing, probe-confirmed live mux hold stays mux-backed during rejoin, so
+a failed reservation or preparation cannot leave it tied to an exiting caller.
+Stop refuses a scope that still has a launcher-PID hold rather than treating
+that liveness token as a tmux target or releasing native ownership.
 
 `namespace-target-repo <ssh-target>` is the read-only query Bridge uses to
 select related plugins from the actual remote workspace's Git origin; it does

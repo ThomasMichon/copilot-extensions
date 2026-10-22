@@ -426,6 +426,15 @@ or a reason to create a daemon.
   pass the 77-case focused rerun. Bridge guards pass 351 with eight skips,
   dispatch/real-selector tests pass 57, and both contracts with all 456 frozen
   fixtures still pass without packet, provenance or protocol-floor changes.
+- Review of exact remediation head `084b619656` confirmed those eight findings
+  resolved, but found two further hold-transition defects. Rejoin now
+  preserves a probe-confirmed live mux backing rather than replacing it with
+  the caller's PID; reservation/preparation failure and pruning after the
+  caller exits therefore leave the original session's forward intact. Stop
+  explicitly refuses a still-preparing scope before a PID liveness token can
+  replace its native mux target. Real hold refresh/pruning and stop-during-
+  preparation regressions cover both paths. Current-head review and required
+  CI remain prerequisites; no source slice is treated as parent completion.
 
 ### 2026-10-22 - Land privileged receiver source and continue the parent
 
