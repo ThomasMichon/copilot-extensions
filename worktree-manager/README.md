@@ -173,9 +173,9 @@ exit code from the command, not its output consumer, and decodes staged metadata
 with NUL-delimited fields so an empty optional value cannot shift the installer
 path or runtime root.
 
-Launcher-owned diagnostics record passthrough and Windows pane argument counts,
-not argument values. Bootstrap and reconciliation actions retain their service
-labels, timed outcomes and child diagnostics without a duplicate raw command
+Launcher-owned diagnostics record passthrough and Windows pane/direct-handoff
+argument counts, not argument values. Bootstrap and reconciliation actions retain
+their service labels, timed outcomes and child diagnostics without a duplicate raw command
 echo. Execution arguments are unchanged; this does not redact arbitrary output
 emitted by a child command.
 

@@ -130,7 +130,7 @@ matrix below are _(agent-recommended)_ implementation details.
 - [x] Frame detached Bash marketplace-installer output through its launch-owned
   observer, retaining the native invocation and existing log destination
   (#7697).
-- [x] Replace routine raw-command echoes with passthrough/pane argument counts
+- [x] Replace routine raw-command echoes with passthrough/pane/direct argument counts
   and existing timed action labels, preserving native argument values.
 - [ ] Finish the remaining detached/standalone installer and early/late Bash
   output boundaries through their actual output owners.
@@ -268,6 +268,14 @@ bounded source delta inspection.
   This is a below-altitude presentation correction within Phase 2's existing
   redaction contract, not a new architecture. Publication, review and merge
   remain pending; the broader effort and deployment holds remain open.
+- The first review of #7708 found a missed Windows direct-handoff command
+  echo that contradicted the documented count-only boundary. Four new native
+  direct-launch fixtures first reproduced the exposure after confirming exact
+  child argv and exits, then passed with a count-only handoff record. They
+  execute the actual passthrough append and complete direct-launch block on
+  both Windows shells with child exit zero and seven. The routine command
+  logging scan found no remaining full-command echoes; child-emitted diagnostic
+  and explicit runtime-path evidence are unchanged.
 
 ### 2026-10-21 - Detached Bash source slice merged; broader gates remain open
 

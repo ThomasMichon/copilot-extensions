@@ -2405,7 +2405,7 @@ if (-not $noMux) {
     exit 1
 }
 
-Write-SetupLog "Handing off to setup script: $($cmd -join ' ')"
+Write-SetupLog "Handing off to setup script: $($cmd.Count) argument(s)"
 Write-Host 'Launching Copilot...'
 Write-Host ''
 

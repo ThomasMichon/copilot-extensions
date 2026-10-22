@@ -31,6 +31,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -237,3 +238,52 @@ def test_native_pane_preparation_logs_count_without_changing_argv(tmp_path, shel
     log = logs[0].read_text("utf-8-sig")
     assert expected[2] not in log
     assert "psmux: pane command: 5 argument(s)" in log
+
+
+@pytest.mark.parametrize("shell", ["pwsh", "powershell"])
+@pytest.mark.parametrize("exit_code", [0, 7])
+def test_native_direct_launch_logs_count_and_preserves_child_argv(tmp_path, shell, exit_code):
+    if os.name != "nt" or not shutil.which(shell):
+        pytest.skip("Windows launcher contract")
+    source = _LAUNCH_PS1.read_text("utf-8")
+    prefix = source[:source.index("# Recovery fast-path: skip resolve/picker")]
+    append_start = source.index("# Append copilot passthrough args (from after -- separator)")
+    append_end = source.index("\nif ($ahpArgs.Count", append_start)
+    direct_start = source.index("# ── Direct launch (explicit --no-mux only)")
+    expected = ["--prompt", "private-direct-fixture space ' ; $ ` &", "--allow-all"]
+    payload = tmp_path / "arguments.json"
+    payload.write_text(json.dumps(expected), encoding="utf-8")
+    captured = tmp_path / "captured.json"
+    child = tmp_path / "direct-child.py"
+    child.write_text(
+        "import json,sys\nfrom pathlib import Path\n"
+        "Path(sys.argv[1]).write_text(json.dumps(sys.argv[2:]),encoding='utf-8')\n"
+        f"sys.exit({exit_code})\n",
+        encoding="utf-8",
+    )
+    fixture = tmp_path / "direct.ps1"
+    fixture.write_text(
+        prefix
+        + "\n$noMux=$true; $ahpArgs=@()\n"
+        "$plan=[pscustomobject]@{worktree_id='fixture';post_exit=$false}\n"
+        "function Write-ActivityLog { param($Event,$WorktreeId,$Fields) }\n"
+        "$CopilotPassthrough=@(foreach($item in "
+        "(Get-Content -Raw -LiteralPath $env:FIXTURE_ARGUMENTS | ConvertFrom-Json)){[string]$item})\n"
+        f"$cmd=@('{getattr(sys, '_base_executable', sys.executable)}','{child}','{captured}')\n"
+        + source[append_start:append_end]
+        + "\n" + source[direct_start:],
+        encoding="utf-8-sig",
+    )
+    result = subprocess.run(
+        [shell, "-NoProfile", "-File", str(fixture)],
+        capture_output=True, text=True, encoding="utf-8", timeout=15, cwd=tmp_path,
+        env=dict(os.environ, TEMP=str(tmp_path), TMP=str(tmp_path), FIXTURE_ARGUMENTS=str(payload)),
+        creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    assert result.returncode == exit_code, result.stdout + result.stderr
+    assert json.loads(captured.read_text("utf-8")) == expected
+    logs = list((tmp_path / "worktree-setup-logs").glob("setup-*.log"))
+    assert len(logs) == 1
+    log = logs[0].read_text("utf-8-sig")
+    assert expected[1] not in log + result.stdout + result.stderr
+    assert "Handing off to setup script: 6 argument(s)" in log
