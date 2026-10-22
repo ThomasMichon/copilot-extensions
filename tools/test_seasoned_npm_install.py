@@ -175,7 +175,7 @@ def test_real_npm_admission_before_locked_install(
         installer.npm_command()
     except installer.AdmissionError:
         pytest.skip("native npm unavailable")
-    artifacts, releases, downloads, requests = {}, {}, [], []
+    artifacts, releases, downloads, requests, audit_requests = {}, {}, [], [], []
     started = time.monotonic()
     names = ["@resvg/resvg-js", "fixture-transitive"]
     for name in names:
@@ -197,6 +197,10 @@ def test_real_npm_admission_before_locked_install(
     class Registry(BaseHTTPRequestHandler):
         def log_message(self, *args):
             pass
+
+        def do_POST(self):
+            audit_requests.append(self.path)
+            self.send_error(501, "advisory requests are outside locked installation")
 
         def do_GET(self):
             from urllib.parse import unquote
@@ -250,7 +254,7 @@ def test_real_npm_admission_before_locked_install(
     monkeypatch.setattr(installer, "__file__", str(tmp_path / "install.py"))
     monkeypatch.delenv("npm_config_registry", raising=False)
     (tmp_path / ".npmrc").write_text(
-        "registry=" + url + "\naudit=false\nfund=false\nupdate-notifier=false\n", encoding="utf-8",
+        "registry=" + url + "\naudit=true\nfund=false\nupdate-notifier=false\n", encoding="utf-8",
     )
     monkeypatch.setenv("npm_config_userconfig", str(empty_config))
     monkeypatch.setenv("npm_config_globalconfig", str(global_config))
@@ -316,6 +320,7 @@ def test_real_npm_admission_before_locked_install(
         else:
             result = installer.main(arguments)
             error = capsys.readouterr().err
+        assert audit_requests == [], "locked installation must not query advisory endpoints"
         if timestamp == "2020-01-01T00:00:00Z" and mutation is None:
             assert result == 0, error
             assert set(downloads) == set(artifacts), error
