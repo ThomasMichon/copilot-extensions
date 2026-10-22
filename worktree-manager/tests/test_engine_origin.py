@@ -4,6 +4,7 @@ from __future__ import annotations
 import copy
 import json
 import os
+import shutil
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
@@ -380,3 +381,67 @@ def test_owned_windows_job_quiesces_once_on_timeout(case, monkeypatch):
     with pytest.raises(subprocess.TimeoutExpired):
         case.native(["copilot"], case.env, case.home)
     assert events == ["quiesce", "close", "wait"]
+
+
+def test_registered_url_alias_preserves_full_definition(case, monkeypatch):
+    definition = {"source": {"source": "url", "url": "https://example.test/repo.git", "ref": "v1"}}
+    case.settings.write_text(json.dumps({"extraKnownMarketplaces": {"fixture": definition}}))
+    fp = primitive.source_identity(primitive.normalize_source(definition["source"]), "fixture")
+    selected = origin_api.select_registered_origin(
+        primitive, copilot_home=case.home, plugin_id=PLUGIN, source_fingerprint=fp["fingerprint"],
+    )
+    _effect(case, monkeypatch)
+    actual = origin_api.refresh_registered_origin(primitive, selected, environment=case.env)
+    assert actual["source"]["kind"] == "git"
+    assert selected.definition == definition == origin_api._registrations(case.home)["fixture"]
+
+
+@pytest.mark.parametrize("unrelated", [
+    {"source": {"source": "npm", "package": "@example/plugins"}},
+    {"source": {"source": "git-subdir", "url": "https://example.test/other.git", "path": "sub"}},
+    {"source": {"source": "directory", "path": "/definitely-missing-unrelated-marketplace"}},
+])
+def test_unrelated_native_registration_does_not_block_owner(case, unrelated):
+    settings = {"fixture": DEFINITION, "unrelated": unrelated}
+    case.settings.write_text(json.dumps({"extraKnownMarketplaces": settings}))
+    assert _select(case).source == f"{PLUGIN}@fixture"
+
+
+def test_invalid_selected_owner_is_not_hidden_by_valid_unrelated_origin(case):
+    case.settings.write_text(json.dumps({"extraKnownMarketplaces": {
+        "fixture": {"source": {"source": "github", "repo": ""}},
+        "unrelated": {"source": {"source": "github", "repo": "Other/Repo"}},
+    }}))
+    with pytest.raises(RuntimeError):
+        _select(case, marketplace_id=case.identity["marketplaceId"], payload_hint=case.payload)
+
+
+def test_matching_deleted_directory_still_fails_strict_admission(case):
+    directory = case.home.parent / "deleted-owner"
+    directory.mkdir()
+    descriptor = {"source": "directory", "path": str(directory)}
+    expected = primitive.source_identity(primitive.normalize_source(descriptor), "fixture")
+    directory.rmdir()
+    case.settings.write_text(json.dumps({"extraKnownMarketplaces": {
+        "fixture": {"source": descriptor}, "unrelated": DEFINITION,
+    }}))
+    with pytest.raises(RuntimeError, match="resolve|directory"):
+        origin_api.select_registered_origin(
+            primitive, copilot_home=case.home, plugin_id=PLUGIN,
+            source_fingerprint=expected["fingerprint"],
+        )
+
+
+def test_unconfirmed_cleanup_retains_scratch_and_custody(case, monkeypatch):
+    selected = _select(case)
+    failure = origin_api.OwnedCleanupError(SimpleNamespace(pid=123))
+
+    def fail(*args):
+        raise failure
+    monkeypatch.setattr(origin_api, "_native_acquisition", fail)
+    with pytest.raises(origin_api.OwnedCleanupError) as error:
+        origin_api.refresh_registered_origin(primitive, selected, environment=case.env)
+    try:
+        assert error.value is failure and failure.neutral_directory.is_dir()
+    finally:
+        shutil.rmtree(failure.neutral_directory)

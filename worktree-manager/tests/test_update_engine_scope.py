@@ -131,8 +131,8 @@ def test_scoped_activation_change_during_repair_is_not_admitted(repair_case, mon
     incumbent = case.update._incumbent
     reads = []
 
-    def change_activation(source, environment):
-        selected = incumbent(source, environment)
+    def change_activation(source, environment, payload):
+        selected = incumbent(source, environment, payload)
         reads.append(selected)
         if len(reads) == 1:
             activation = root / "installation-activation.json"

@@ -1220,7 +1220,10 @@ own scratch, while preserving argument boundaries and native exit status.
 The fetched bootstrap uses the supported Manager runtime constructor. Before
 publishing a Manager, fresh installer code checks existing command bytes against
 the published ownership recognizer and validates registration/root identity,
-preserving foreign commands. Resident Manager activation remains inside the
+preserving foreign commands. It repeats that admission after construction,
+immediately before command/provider publication, so a newly changed owner is
+not overwritten by a candidate prepared against earlier evidence.
+Resident Manager activation remains inside the
 constructed candidate's lifetime and selector-publication transaction. It runs
 with the candidate's own interpreter and dependencies; a failed or refused
 cutover restores the prior selectors and stops recovery before engine repair.
@@ -1234,6 +1237,9 @@ installer is missing or corrupt. The complete registration, source fingerprint,
 materialized plugin and native installer are revalidated after acquisition;
 neither an exit-zero message nor an unrelated fresh checkout establishes source
 ownership. Registration choices are never rewritten or relabelled.
+Historical snapshots can establish an incumbent owner, but the repair always
+executes the refreshed native payload's installer; missing or damaged snapshot
+installers are not dependencies of that repair.
 
 The fresh Manager then repairs the core through its
 supported, source-policy/ownership-admitted installer before running its normal

@@ -43,18 +43,23 @@ def test_update_bootstrap_acquires_source_before_native_repair(monkeypatch, tmp_
     calls = []
     monkeypatch.setattr(
         update_bootstrap, "_refresh_source",
-        lambda source, env: calls.append("acquire") or identity,
+        lambda source, env: calls.append("acquire") or update_bootstrap._RefreshedSource(
+            identity, installation.payload,
+        ),
     )
     monkeypatch.setattr(
         update_bootstrap, "_incumbent",
-        lambda source, env: calls.append("admit") or installation,
+        lambda source, env, payload: calls.append(("admit", payload)) or installation,
     )
     monkeypatch.setattr(
         update_bootstrap, "_invoke",
         lambda target, action, env: calls.append(("native", target, action)) or 19,
     )
     assert update_bootstrap.repair_engine(tmp_path / "fresh-source") == 19
-    assert calls == ["acquire", "admit", "admit", ("native", installation, "update")]
+    assert calls == [
+        "acquire", ("admit", installation.payload), ("admit", installation.payload),
+        ("native", installation, "update"),
+    ]
 
 
 def test_update_bootstrap_missing_installer_is_failure(monkeypatch, capsys):

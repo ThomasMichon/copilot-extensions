@@ -24,6 +24,12 @@ class _Installation:
     primitive: ModuleType | None = None
 
 
+@dataclass(frozen=True)
+class _RefreshedSource:
+    identity: dict[str, Any]
+    payload: Path
+
+
 def prepare_update(rest: list[str]) -> tuple[list[str], bool, int]:
     """Consume only the private bootstrap prefix before ordinary orchestration."""
     if rest[:1] != ["--repair-engine"]:
@@ -34,7 +40,9 @@ def prepare_update(rest: list[str]) -> tuple[list[str], bool, int]:
     return rest[2:], True, repair_engine(Path(rest[1]))
 
 
-def _policy_sdk(source: Path):
+def _policy_sdk(
+    source: Path,
+) -> tuple[Path, Path, dict[str, Any], dict[str, Any], ModuleType]:
     from .core_install import install_script
 
     fresh_script = install_script(source)
@@ -49,7 +57,7 @@ def _policy_sdk(source: Path):
     return fresh_script, sdk, helper, api, primitive
 
 
-def _refresh_source(source: Path, environment: dict[str, str]) -> dict[str, Any]:
+def _refresh_source(source: Path, environment: dict[str, str]) -> _RefreshedSource:
     """Validate captured ownership before rehydrating missing or damaged source bytes."""
     from .engine_origin import refresh_registered_origin, select_registered_origin
 
@@ -130,12 +138,12 @@ def _refresh_source(source: Path, environment: dict[str, str]) -> dict[str, Any]
     if (root / "bin").exists() and not (root / "bin").is_dir():
         raise RuntimeError("Engine runtime bin is not an ordinary directory")
     refresh_registered_origin(primitive, origin, environment=environment)
-    return expected
+    return _RefreshedSource(expected, origin.payload)
 
 
 def _scoped_incumbent(
     sdk: Path, helper: dict[str, Any], primitive: ModuleType,
-    environment: dict[str, str], context: str, home: Path,
+    environment: dict[str, str], context: str, home: Path, refreshed_payload: Path,
 ) -> _Installation:
     path = Path(context)
     if not path.is_absolute() or len(path.parents) < 5:
@@ -143,6 +151,7 @@ def _scoped_incumbent(
     durable = path.parents[4]
     receipt = primitive.validate_context_receipt(
         path, durable, expected_plugin_id="agent-worktrees", environment=environment,
+        expected_payload_root=refreshed_payload,
     )
     payload = Path(receipt["payloadRoot"])
     helper["_ordinary"](payload)
@@ -161,7 +170,9 @@ def _scoped_incumbent(
     return _Installation(root, payload, identity, sdk, arguments, primitive)
 
 
-def _incumbent(source: Path, environment: dict[str, str]) -> _Installation:
+def _incumbent(
+    source: Path, environment: dict[str, str], refreshed_payload: Path,
+) -> _Installation:
     """Read existing source/installation ownership with the fresh policy SDK."""
     fresh_script, sdk, helper, api, primitive = _policy_sdk(source)
     _, profile = primitive._current_environment(
@@ -170,32 +181,31 @@ def _incumbent(source: Path, environment: dict[str, str]) -> _Installation:
     home = Path(profile)
     context = environment.get("COPILOT_EXTENSIONS_CONTEXT", "").strip()
     if context:
-        return _scoped_incumbent(sdk, helper, primitive, environment, context, home)
+        return _scoped_incumbent(
+            sdk, helper, primitive, environment, context, home, refreshed_payload,
+        )
     root = home / ".agent-worktrees"
     helper["_ordinary"](root / "bin")
     if (root / "bin").exists() and not (root / "bin").is_dir():
         raise RuntimeError("Engine runtime bin is not an ordinary directory")
-    sources = helper["_published_engine_sources"](home, sdk)
-    if not sources:
-        raise RuntimeError("Engine repair has no revalidated incumbent publication")
+    payload = refreshed_payload
+    helper["_ordinary"](payload)
+    script = payload / "scripts" / fresh_script.name
+    helper["_ordinary"](script)
+    if not script.is_file():
+        raise RuntimeError("Refreshed engine payload has no supported native installer")
     query = dict(environment)
     query.pop("COPILOT_PLUGIN_ROOT", None)
-    for payload in sources:
-        script = payload / "scripts" / fresh_script.name
-        helper["_ordinary"](script)
-        if not script.is_file():
-            continue
-        receipt = api["publish_legacy_binding"](
-            primitive, payload_root=payload, plugin_id="agent-worktrees",
-            legacy_root=root, environment=query,
-        )
-        if (
-            receipt["pluginId"] != "agent-worktrees" or receipt["mode"] != "legacy"
-            or Path(receipt["runtimeRoot"]) != root
-        ):
-            raise RuntimeError("Validated engine publication names another installation")
-        return _Installation(root, payload, receipt, sdk)
-    raise RuntimeError("Validated incumbent payload has no supported native installer")
+    receipt = api["publish_legacy_binding"](
+        primitive, payload_root=payload, plugin_id="agent-worktrees",
+        legacy_root=root, environment=query,
+    )
+    if (
+        receipt["pluginId"] != "agent-worktrees" or receipt["mode"] != "legacy"
+        or Path(receipt["runtimeRoot"]) != root
+    ):
+        raise RuntimeError("Validated engine publication names another installation")
+    return _Installation(root, payload, receipt, sdk)
 
 
 def _identity(installation: _Installation) -> dict[str, Any]:
@@ -282,8 +292,9 @@ def repair_engine(source: Path) -> int:
     """Restore only the attributable installation, using its owning source."""
     environment = dict(os.environ)
     try:
-        expected = _refresh_source(source, environment)
-        selected = _incumbent(source, environment)
+        refreshed = _refresh_source(source, environment)
+        expected = refreshed.identity
+        selected = _incumbent(source, environment, refreshed.payload)
         if _identity(selected) != expected:
             raise RuntimeError("Engine installation/source identity changed during acquisition")
         actions = (
@@ -291,7 +302,7 @@ def repair_engine(source: Path) -> int:
             or (selected.root / "bin").is_dir() else ("provision", "update")
         )
         for action in actions:
-            current = _incumbent(source, environment)
+            current = _incumbent(source, environment, refreshed.payload)
             if _identity(current) != expected:
                 raise RuntimeError("Engine installation/source identity changed during repair")
             rc = _invoke(current, action, environment)
