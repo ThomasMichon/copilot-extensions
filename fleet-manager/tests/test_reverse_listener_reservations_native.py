@@ -1,12 +1,19 @@
-"""Real loopback resource contracts, not an OpenSSH or production-owner adapter."""
+"""Loopback, installed and opt-in OpenSSH contracts, not production adapters."""
 
 from dataclasses import replace
+from contextlib import AsyncExitStack
 import asyncio
 import errno
 import hashlib
+import hmac
+import os
+from pathlib import Path
+import secrets
 import shutil
 import socket
+import subprocess
 import sys
+import tempfile
 import threading
 import time
 
@@ -411,3 +418,307 @@ print('installed-coordinator:published,idempotent,source-independent')
     finally:
         shutil.rmtree(installed)
     assert not installed.exists() and unrelated.read_bytes() == b"preserved"
+
+
+async def openssh_consumer_scenario(directory, mode):
+    import pwd
+
+    from agent_procutil import no_window_kwargs
+    from ssh_manager.config_sources import SSHConfig
+    from ssh_manager.process import terminate_ssh_process_tree
+    from ssh_manager.proxy import create_ssh_subprocess
+    from ssh_manager.reverse_candidates import (
+        FiniteReverseForward, ReverseEndpoint, ReverseEvidence, ReverseForwardError,
+    )
+
+    repository = Path(__file__).resolve().parents[2]
+    import ssh_manager
+    assert Path(ssh_manager.__file__).resolve().is_relative_to(repository / "libs/ssh-manager/src")
+    sshd = shutil.which("sshd")
+    keygen = shutil.which("ssh-keygen")
+    assert sshd and keygen and shutil.which("ssh"), "explicit OpenSSH lane requires existing binaries"
+    secret = secrets.token_bytes(32)
+    ports = []
+    occupied = alternate = independent = control = target = 0
+    owned = []
+    observed_pids = set()
+    writers = set()
+    handlers = set()
+    server = ssh_process = log_stream = None
+    log = directory / "sshd.log"
+    cleanup = AsyncExitStack()
+
+    def listening():
+        return {
+            int(row.split()[1].split(":")[1], 16)
+            for row in Path("/proc/net/tcp").read_text().splitlines()[1:]
+            if row.split()[3] == "0A"
+        }
+
+    async def serve(reader, writer):
+        handlers.add(asyncio.current_task())
+        writers.add(writer)
+        try:
+            value = await asyncio.wait_for(reader.readline(), 2)
+            writer.write(hmac.new(secret, value, hashlib.sha256).hexdigest().encode() + b"\n")
+            await writer.drain()
+        finally:
+            writer.close()
+            try:
+                await writer.wait_closed()
+            finally:
+                writers.discard(writer)
+
+    async def verify(port):
+        reader, writer = await asyncio.wait_for(asyncio.open_connection("127.0.0.1", port), 2)
+        try:
+            value = secrets.token_hex(24).encode() + b"\n"
+            writer.write(value)
+            await writer.drain()
+            response = await asyncio.wait_for(reader.readline(), 2)
+            assert hmac.compare_digest(
+                response.strip(), hmac.new(secret, value, hashlib.sha256).hexdigest().encode(),
+            )
+        finally:
+            writer.close()
+            await writer.wait_closed()
+
+    async def close_application():
+        server.close()
+        await server.wait_closed()
+        pending = tuple(writers)
+        for writer in pending:
+            writer.close()
+        await asyncio.wait_for(asyncio.gather(
+            *(writer.wait_closed() for writer in pending), *handlers,
+        ), 5)
+
+    try:
+        for _ in range(4):
+            sock = listener()
+            ports.append(sock)
+            cleanup.callback(sock.close)
+        occupied, alternate, independent, control = [sock.getsockname()[1] for sock in ports]
+        server = await asyncio.start_server(serve, "127.0.0.1", 0)
+        cleanup.push_async_callback(close_application)
+        target = server.sockets[0].getsockname()[1]
+        for name in ("host", "client"):
+            subprocess.run(
+                [keygen, "-q", "-t", "ed25519", "-N", "", "-f", str(directory / name)],
+                stdin=subprocess.DEVNULL, capture_output=True, check=True, timeout=10,
+                **no_window_kwargs(),
+            )
+        grants = [
+            "restrict", "port-forwarding",
+            *(f'permitlisten="127.0.0.1:{port}"' for port in (occupied, alternate, independent)),
+            f'permitopen="127.0.0.1:{target}"',
+        ]
+        authorized = directory / "authorized_keys"
+        authorized.write_text(",".join(grants) + " " + (directory / "client.pub").read_text())
+        authorized.chmod(0o600)
+        alias = "fixture-" + secrets.token_hex(6)
+        public = (directory / "host.pub").read_text().split()
+        (directory / "known_hosts").write_text(f"{alias} {public[0]} {public[1]}\n")
+        username = pwd.getpwuid(os.getuid()).pw_name
+        server_config = directory / "sshd_config"
+        server_config.write_text("\n".join([
+            f"Port {control}", "ListenAddress 127.0.0.1",
+            f"HostKey {directory / 'host'}", f"PidFile {directory / 'sshd.pid'}",
+            f"AuthorizedKeysFile {authorized}", f"AllowUsers {username}",
+            "AuthenticationMethods publickey", "PubkeyAuthentication yes",
+            "PasswordAuthentication no", "KbdInteractiveAuthentication no", "UsePAM no",
+            "StrictModes yes", "PermitRootLogin no", "UseDNS no", "MaxSessions 0",
+            "AllowTcpForwarding yes", "AllowAgentForwarding no", "X11Forwarding no",
+            "PermitTTY no", "GatewayPorts no", "LogLevel DEBUG3",
+            "PermitListen " + " ".join(
+                f"127.0.0.1:{port}" for port in (occupied, alternate, independent)
+            ),
+            f"PermitOpen 127.0.0.1:{target}", "",
+        ]))
+        client_config = directory / "ssh_config"
+        client_config.write_text("\n".join([
+            f"Host {alias}", " HostName 127.0.0.1", f" Port {control}", f" User {username}",
+            f" IdentityFile {directory / 'client'}", " IdentitiesOnly yes", " IdentityAgent none",
+            " StrictHostKeyChecking yes", f" HostKeyAlias {alias}",
+            f" UserKnownHostsFile {directory / 'known_hosts'}",
+            " GlobalKnownHostsFile /dev/null", " ProxyCommand none",
+            " ControlMaster no", " ControlPath none", "",
+        ]))
+        client_config.chmod(0o600)
+        config = SSHConfig(host_alias=alias, config_file=str(client_config))
+        subprocess.run(
+            [sshd, "-t", "-f", str(server_config)],
+            stdin=subprocess.DEVNULL, capture_output=True, check=True, timeout=10,
+            **no_window_kwargs(),
+        )
+        for sock in ports[1:]:
+            sock.close()
+        log_stream = log.open("wb")
+        cleanup.callback(log_stream.close)
+        ssh_process = await create_ssh_subprocess(
+            sshd, "-D", "-e", "-f", str(server_config), config=config,
+            stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.DEVNULL,
+            stderr=log_stream,
+        )
+        cleanup.push_async_callback(terminate_ssh_process_tree, ssh_process)
+        for _ in range(100):
+            assert ssh_process.returncode is None, "isolated rootless sshd exited"
+            if control in listening():
+                break
+            await asyncio.sleep(0.01)
+        assert control in listening()
+
+        def transport_for(permitted, correlation, timeout):
+            attempts = []
+
+            async def observe(attempt):
+                attempts.append(attempt)
+                observed_pids.add(attempt.process_pid)
+                assert attempt.request_id == correlation
+                if not attempt.process_settled:
+                    assert attempt.endpoint.port == occupied
+                    assert ports[0].fileno() >= 0
+                    diagnostic = log.read_text(errors="replace")
+                    assert "Address already in use" in diagnostic and str(occupied) in diagnostic
+                    return ReverseEvidence(attempt.attempt_id, "occupied", "collision")
+                await verify(attempt.endpoint.port)
+                return ReverseEvidence(attempt.attempt_id, "ready", "readiness")
+
+            transport = FiniteReverseForward(
+                config, tuple(ReverseEndpoint(item.host, item.port) for item in permitted),
+                request_id=correlation, observe=observe, ready_timeout=min(timeout, 10),
+                host_port_resolver=lambda: target,
+            )
+            owned.append(transport)
+            cleanup.push_async_callback(transport.stop)
+            return transport, attempts
+
+        peer, _ = transport_for((Listener("127.0.0.1", independent),), "independent", 10)
+        await peer.establish()
+        await verify(independent)
+
+        class SSHJournalFixture(JournalOwner):
+            """The canonical synthetic journal composed with the actual SSH leaf."""
+
+            async def admit(self, selected, *, timeout):
+                admitted = await super().admit(selected, timeout=timeout)
+                if isinstance(admitted, Admission):
+                    admitted = replace(admitted, valid_until=int(time.time()) + 60)
+                    self.records[selected.correlation]["admission"] = admitted
+                return admitted
+
+            async def reserve(self, admitted, *, timeout):
+                from fleet_manager.reverse_listener_reservations import Pending
+
+                self.called("reserve", admitted, timeout)
+                row = self.records[admitted.request.correlation]
+                assert row["admission"] == admitted and "dispatch" not in row
+                refused = self.current_rejection(admitted.request)
+                if refused is not None:
+                    row["terminal"] = refused
+                    return refused
+                row["dispatch"] = True
+                transport, attempts = transport_for(
+                    admitted.request.permitted, admitted.request.correlation, timeout,
+                )
+                row["transport"], row["attempts"] = transport, attempts
+                try:
+                    await asyncio.wait_for(transport.establish(), timeout)
+                except ReverseForwardError as error:
+                    if (error.status.state == "unavailable"
+                            and error.status.reason == "candidates-exhausted"):
+                        refused = Rejected(
+                            admitted.request, "unavailable", "candidates-exhausted",
+                        )
+                        row["terminal"] = refused
+                        return refused
+                    return Pending(admitted.request)
+                status = transport.reverse_status
+                assert status.state == "ready"
+                attempt = status.attempt
+                candidate = Candidate(
+                    admitted, Listener(attempt.endpoint.host, attempt.endpoint.port), attempt.attempt_id,
+                )
+                row["candidate"] = candidate
+                self.held[candidate.resource] = candidate
+                return candidate
+
+            async def publish(self, candidate, *, timeout):
+                await asyncio.wait_for(verify(candidate.listener.port), timeout)
+                if mode == "stale-generation":
+                    self.generation += 1
+                return await super().publish(candidate, timeout=timeout)
+
+            async def discard(self, candidate, *, timeout):
+                row = self.records[candidate.admission.request.correlation]
+                assert row["candidate"] == candidate and "rejected" in row
+                status = await asyncio.wait_for(
+                    row["transport"].stop_attempt(candidate.resource), timeout,
+                )
+                if status is None or status.state != "stopped":
+                    return "unknown"
+                return await super().discard(candidate, timeout=timeout)
+
+        permitted = (Listener("127.0.0.1", occupied), Listener("127.0.0.1", alternate))
+        journal = SSHJournalFixture(permitted)
+        journal.target = hashlib.sha256(secret).hexdigest()
+        journal.policy = hashlib.sha256(authorized.read_bytes()).hexdigest()
+        selected = request(
+            correlation=mode, permitted=permitted,
+            target_identity=journal.target, policy_digest=journal.policy,
+        )
+        if mode == "lost-acknowledgement":
+            def interrupt(stage, value):
+                if stage == "published":
+                    raise TimeoutError("lost fixture publication acknowledgement")
+            journal.intercept = interrupt
+        first = await coordinate(selected, owner=journal)
+        row = journal.records[selected.correlation]
+        transport = row["transport"]
+        assert len(row["attempts"]) == 2 and journal.calls.count("reserve") == 1
+        assert row["candidate"].resource == row["attempts"][-1].attempt_id
+        if mode == "stale-generation":
+            assert first.state == "conflict" and not transport.is_alive
+            assert journal.held == {} and journal.calls.count("discard") == 1
+        else:
+            assert first.state == ("unknown" if mode == "lost-acknowledgement" else "published")
+            assert transport.is_alive and journal.calls.count("discard") == 0
+            await verify(alternate)
+            again = await coordinate(selected, owner=journal)
+            assert again.state == "published" and again.publication.generation == 1
+            assert len(row["attempts"]) == 2 and journal.calls.count("reserve") == 1
+        await verify(independent)
+        assert_original_listener_usable(ports[0])
+        assert "Accepted publickey" in log.read_text()
+    finally:
+        await cleanup.aclose()
+        assert all(not transport.is_alive for transport in owned)
+        if ssh_process is not None:
+            assert ssh_process.returncode is not None
+        for _ in range(100):
+            if not {occupied, alternate, independent, control, target}.intersection(listening()):
+                break
+            await asyncio.sleep(0.01)
+        assert not {occupied, alternate, independent, control, target}.intersection(listening())
+        assert not any(Path(f"/proc/{pid}").exists() for pid in observed_pids)
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="the isolated OpenSSH fixture is Linux-only")
+@pytest.mark.skipif(
+    os.environ.get("FLEET_MANAGER_TEST_OPENSSH") != "1",
+    reason="temporary OpenSSH test keys require explicit FLEET_MANAGER_TEST_OPENSSH=1",
+)
+@pytest.mark.parametrize("mode", ["published", "lost-acknowledgement", "stale-generation"])
+def test_real_openssh_coordinator_consumer_retains_exact_resource_and_original_custody(mode, monkeypatch):
+    import pwd
+
+    assert os.geteuid() != 0, "the isolated OpenSSH lane requires an existing unprivileged user"
+    repository = Path(__file__).resolve().parents[2]
+    monkeypatch.syspath_prepend(str(repository / "libs/ssh-manager/src"))
+    monkeypatch.syspath_prepend(str(repository / "libs/agent-procutil/src"))
+    home = pwd.getpwuid(os.getuid()).pw_dir
+    # StrictModes rejects an authorized-key path beneath a world-writable /tmp.
+    with tempfile.TemporaryDirectory(prefix="fleet-reverse-ssh-", dir=home) as temporary:
+        directory = Path(temporary)
+        asyncio.run(asyncio.wait_for(openssh_consumer_scenario(directory, mode), 20))
+    assert not directory.exists()

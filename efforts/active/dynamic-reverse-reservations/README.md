@@ -95,6 +95,15 @@ authentication/lifecycle code, changes to forwarding permissions, live repair
 and rollout. These limits remain part of the request, not optional
 implementation preferences.
 
+**Later qualification-only authorization (summary):** the operator separately
+answered `true` to restoring a disposable test environment in the existing
+Linux venue through the configured seven-day dependency policy, and then to
+creating a disposable loopback-only OpenSSH fixture with existing binaries,
+temporary test keys and host-key pins. Both authorizations required cleanup
+and excluded shared SSH configuration, production credentials, forwarding
+grants, installed services and runtime changes. They do not appoint a
+production adapter owner or expand the held-source appointment.
+
 The concrete API, finite-tuple strategy, state transitions and test matrix
 below are **agent-recommended realization**, not additional operator requests
 or an already supplied runtime contract.
@@ -122,14 +131,15 @@ or an already supplied runtime contract.
 
 All steps in this phase are agent-recommended.
 The proposal and its governing vision and pattern amendments cleared review
-and merged in #7726. Integration still requires the actual accepted #7720
-provider contract; a coordinator-facing protocol does not assert that the
-transport provider already implements it.
+and merged in #7726. The accepted #7720 transport leaf is supplied by #7779.
+The isolated supplied-owner consumer composes that callable contract; it does
+not implement production permission, journal, discovery or lifecycle authority.
 
 - [x] Implement the strictly bounded new coordination module described in
   [design.md](design.md), with explicit typed conflict, refusal, unavailable
   and unknown outcomes.
-- [ ] Compose the accepted #7720 finite-forward contract without duplicating
+- [x] Compose the accepted #7720 finite-forward contract in an isolated
+  supplied-owner consumer without duplicating
   candidate selection or process/reconnect ownership. Keep an unavailable
   production adapter explicit.
 - [x] Retain the actual successful candidate resource; publish only after
@@ -151,7 +161,7 @@ All steps in this phase are agent-recommended.
   publication, lost acknowledgement and stale generation/cleanup events.
 - [x] Qualify the installed, source-independent module/consumer boundary on
   supported native platforms; keep actual SSH and lifecycle proof distinct.
-- [ ] Run the current required admitted unit packet, targeted tests and
+- [x] Run the current required admitted unit packet, targeted tests and
   publication guards; obtain current-head review and CI, then merge through
   the managed source flow.
 - [ ] Reconcile every validation item and record exact remaining integration
@@ -185,17 +195,18 @@ All implementation-specific selections are agent-recommended.
 - [x] **Installed consumer:** noneditable artifact, no source checkout,
   actual callable consumer, separate Windows/Linux outcomes and cleanup
   observed before test containment can mask a leak.
-- [ ] **Actual OpenSSH:** use only an existing isolated fixture and its
-  already available credential/host-key material. If unavailable, retain an
-  exact named integration gate; socket tests or mocked arguments do not
-  satisfy this item.
+- [x] **Actual OpenSSH transport leaf:** after the operator's explicit
+  disposable-fixture authorization, exercise real authenticated reverse
+  forwarding, occupied-tuple recovery, exhaustion, exact `permitlisten`/
+  peer `permitopen` refusal and cleanup. Keep the fixture observer distinct
+  from the still-open production composition and ownership items.
 - [ ] **Existing policy and lifecycle:** both `permitlisten` and peer
   `permitopen`, authenticated target identity, current direction policy,
   bounded existing-supervisor reconnect and independent connection
   preservation require the real owning adapter, not a fake callback.
-- [x] **No live effects:** no deployment, key/enrollment provisioning,
+- [x] **No live effects:** no deployment, production key/enrollment provisioning,
   permission widening, shared service restart or unowned resource cleanup.
-- [ ] **Publication:** source tests plus required admitted units and ordinary
+- [x] **Publication:** source tests plus required admitted units and ordinary
   metadata/contract/lint checks; exact current review, green CI and actual
   merge. Release/rollout remains separately owned.
 
@@ -327,3 +338,154 @@ No production API or runtime readiness is claimed by this proposal.
   focused cases are covered across those overlapping runs; no failed case
   was skipped or a deadline widened. Current-head provider review and CI
   remain required before merge.
+
+### 2026-10-22 - Coordinator source merged; integration boundary retained
+
+- #7787 actually merged as `f44c83c7425b2627fc5b149f43da7ecbb1055341`
+  at 06:24:17Z, from exact head
+  `2d2e32e5ee2167b75bbdae545855e6060b5cd9dd`. Current-head Copilot review
+  `5610033237` approved with no open findings; the addressed Python 3.10
+  thread was resolved and the actual required metadata, source-unit,
+  guard/lint and aggregate checks passed before the managed provider merge.
+- Re-read the canonical Plan and Validation Plan after the actual merge.
+  The bounded source/native publication is complete. The campaign remains
+  Active: composing the accepted finite-forward leaf, an existing isolated
+  OpenSSH fixture and concrete production-owner integration/transfer are
+  still open. This merge is neither production recovery nor release/rollout.
+- Returned the exact result to the existing #7720 contributor and requested
+  its accepted callable revision and next transport/real-SSH qualification
+  objective. Its pending source and rebase remain with that owner. No
+  unavailable policy, journal, discovery, credential or lifecycle authority
+  was inferred from a protocol, an old claim or an unreachable actor.
+
+### 2026-10-22 - Independent finite-forward Linux consumer witness
+
+- The existing finite-forward owner requested one independent Linux witness
+  of its four focused candidate, native candidate, relay-channel and forward
+  test files. The initial existing Python 3.10 interpreter lacked pytest, so
+  the conditional no-setup request was reported unavailable rather than
+  silently creating a new environment.
+- The operator then explicitly authorized a disposable test-only environment
+  in the existing Linux venue, using the configured seven-day-seasoned feed
+  and only those four suites. This grant did not change source ownership,
+  SSH credentials, forward permissions, runtime configuration or rollout.
+- Exact published candidate `72c8edcb31ce97da04d6cdbbe66916500cb43081`
+  passed all 84 cases on CPython 3.10.20, with no failures or skips, through
+  its canonical process-tree containment and isolated state. The unchanged
+  item/tree bounds were 30/300 seconds. Pytest took 1.39 seconds; preparation,
+  execution and cleanup took 4.725 seconds. The canonical seasoning helper
+  supplied pytest 9.1.1, pytest-asyncio 1.4.0 and pytest-timeout 2.4.0.
+- All extracted tracked-source hashes remained unchanged. The disposable
+  source/environment and test sandbox were removed; JUnit independently
+  recorded all 84 successful cases. Returned the material result to the
+  existing owner and published the
+  [exact-head witness](https://github.com/ThomasMichon/copilot-extensions/pull/7779#issuecomment-6336458502).
+- This closes only that requested Linux consumer witness. Actual OpenSSH,
+  accepted transport composition, production policy/journal/discovery and
+  lifecycle integration remain open; no source-only result supplies those
+  owners or authorizes adoption.
+
+### 2026-10-22 - Authorized isolated OpenSSH transport qualification
+
+- The operator explicitly authorized temporary test-only SSH credentials and
+  host pins for a disposable loopback fixture, using existing binaries and
+  no shared configuration, production permissions or installed runtime.
+- The first attempt stopped before any scenario passed: OpenSSH's enabled
+  `StrictModes` rejected the authorized-key path below `/tmp`. Preserved that
+  negative evidence and corrected only the private fixture location to a
+  task-owned directory below the existing user's home. Strict modes,
+  authentication, host pins and candidate source were not weakened.
+- Exact candidate `72c8edcb31ce97da04d6cdbbe66916500cb43081` then passed
+  seven scenarios with actual OpenSSH 10.2p1 and CPython 3.10.20: an
+  independent authenticated reverse path; occupied fixed-tuple failure;
+  two-tuple exhaustion; recovery with retained resource and stale/matching
+  attempt-release fencing; `permitlisten` refusal without rotation;
+  unknown acknowledgement remaining latched after cleanup; and exact peer
+  `permitopen` success/refusal. No SSH spawn, settle or candidate-selection
+  implementation was mocked or replaced.
+- The fixture observer used its own server logs, held sockets and per-run
+  HMAC application challenge. It is not a production authentication,
+  enrollment, journal/CAS or discovery adapter. The unrelated established
+  path and separately held fixture listeners survived the other owners'
+  failure and cleanup.
+- The contained successful run took 3.889 seconds including cleanup, with
+  unchanged tracked-source hashes. Owned clients, server and listeners were
+  checked before outer containment ended. A separate post-caller check
+  confirmed fixture/source paths absent and no surviving fixture-marker
+  processes; temporary keys and pins were removed. Returned the
+  [real OpenSSH witness](https://github.com/ThomasMichon/copilot-extensions/pull/7779#issuecomment-6337392243)
+  to the existing finite-forward owner.
+- Only the transport-leaf OpenSSH validation item is now resolved. Accepted
+  coordinator composition, current production direction policy, remote
+  identity/observer and journal/discovery/lifecycle integration remain open,
+  as do distribution and authorized running adoption.
+- The existing owner subsequently published actual observer-correlation and
+  fragmented-diagnostic fixes at
+  `76fbcaf4f1901a42627a54d32637614ce62cba08`. Because production bytes
+  changed, qualified that exact revision anew rather than relabelling the
+  previous result: all 89 cases in the same four requested files passed with
+  no skips in 1.46 seconds, followed by the same seven actual OpenSSH
+  scenarios. Preparation, both runs and cleanup took 7.056 seconds under
+  unchanged per-phase bounds. Source hashes remained unchanged; separate
+  post-caller checks again confirmed retirement. The
+  [revised-head witness](https://github.com/ThomasMichon/copilot-extensions/pull/7779#issuecomment-6337514901)
+  preserves the earlier positive and StrictModes-negative results separately.
+- A separate exact-revision consumer run then composed the shipped
+  coordinator with that actual finite-forward class, reusing the repository's
+  existing synthetic journal fixture. Its independent SSH control and three
+  composed scenarios passed: retained publication/idempotent replay; lost
+  publication acknowledgement with the serving resource preserved and the
+  original receipt reobserved without rebinding; and stale-generation
+  rejection retiring only the matching unpublished SSH attempt. Each request
+  invoked the leaf once, leaving its two-candidate selection entirely there.
+- That distinct composition run took 5.244 seconds including preparation and
+  cleanup, with unchanged source hashes and no production-source patches.
+  The prior 89-test and seven-scenario runs were not repeated or relabelled.
+  The [consumer witness](https://github.com/ThomasMichon/copilot-extensions/issues/7719#issuecomment-6337725175)
+  demonstrates callable compatibility, not a production journal, identity or
+  lifecycle adapter. The finite-forward owner's later review revisions still
+  require their own accepted disposition; no earlier candidate is labelled
+  as the final reviewed or merged revision.
+
+### 2026-10-22 - Accepted finite-forward dependency and reproducible consumer lane
+
+- The original finite-forward owner actually merged #7779 as
+  `c8056322f8ba803d2414bbb5fc815a33cbb460a9`, from approved head
+  `e5e38610e902c882bd8440d45389b43fd8d00b6d`. This contributor neither
+  took over that source nor performed its merge.
+- Qualified that exact reviewed head after its dependency rebase and native
+  contention correction: all 89 requested tests passed without skips in
+  1.48 seconds, followed by seven actual OpenSSH leaf scenarios. That run
+  took 7.146 seconds including preparation/cleanup; a separate four-scenario
+  coordinator consumer run took 5.385 seconds. Both retained unchanged source
+  hashes, bounded containment and configured seven-day seasoning. Separate
+  post-caller checks confirmed both fixtures retired. The
+  [reviewed-head witness](https://github.com/ThomasMichon/copilot-extensions/pull/7779#issuecomment-6337993250)
+  remains distinct from earlier candidate evidence.
+- Re-read this complete canonical Plan and Validation Plan after the merge.
+  The accepted callable revision is now available. Production admission,
+  observation, journal/CAS, discovery, lifecycle and authorized adoption are
+  still open; this dependency merge does not complete the campaign.
+- Pulled the backed source branch forward onto that actual merge, preserving
+  the local journal updates. Preserving the proven consumer as explicit
+  opt-in, self-cleaning Linux tests in the already-owned native test file,
+  with the coupled owning documentation. Default collection must not create
+  keys or start SSH. Windows default-off selection produced three explicit
+  skips; actual Linux execution of the checked-in fixture remains required
+  before publication.
+- Exact source `d59d2834df90146c3857d4e2fb9e7a1da1eba439` then passed
+  all 82 focused pure/native/installed cases on Linux CPython 3.10.20,
+  including the three checked-in actual OpenSSH consumer parameters, with no
+  failures or skips in 5.49 seconds. Full preparation and cleanup took
+  9.737 seconds under the unchanged 30-second item/300-second tree bounds.
+  The initially missing pytest was confirmed before canonical seven-day
+  test-tool preparation; no interpreter or SSH binary was installed.
+- A separate supported-Linux default-off run selected exactly those three
+  cases: all explicitly skipped in 0.40 seconds with the opt-in absent.
+  Together with the Windows default-off check, this distinguishes an inert
+  default from actual Linux fixture execution rather than crediting skipped
+  nodes as qualification. Source hashes remained unchanged and both
+  disposable test environments/source arenas were removed.
+- Focused fatal Ruff, all thirteen install contracts, headless-launch and
+  asynchronous timeout-handler guards passed. Required current-head CI and
+  review remain publication gates for this reproducible test addition.

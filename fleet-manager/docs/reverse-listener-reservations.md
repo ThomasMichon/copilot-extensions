@@ -6,7 +6,7 @@ a production SSH adapter, permission/enrollment owner, discovery registry,
 durable effect journal, daemon or reconnect loop. The default CLI and Gateway
 do not import or select it. The existing finite-forward contribution under
 #7720 owns actual SSH candidate selection, resource/readiness and process
-custody; no existing method signature is assumed or patched here.
+custody; its accepted interface is consumed without patching shared source.
 
 ## Admission is an owner operation
 
@@ -38,9 +38,9 @@ does not qualify that integration.
 
 ### Concrete transport-candidate handoff
 
-The #7720 source owner published the prospective
-`ssh_manager.reverse_candidates.FiniteReverseForward` contract in #7779,
-separately from this coordinator. It is asynchronous, accepts 1-16 exact
+`ssh_manager.reverse_candidates.FiniteReverseForward` is the accepted #7720
+transport leaf from #7779, separate from this coordinator. It is asynchronous,
+accepts 1-16 exact
 `ReverseEndpoint` values and a stable `request_id`, and exposes an immutable
 attempt/status plus an asynchronous trusted `observe` callback. Its existing
 supervised-forward process/reconnect owner remains the resource owner.
@@ -53,12 +53,19 @@ The observer must return candidate-specific authenticated evidence for that
 same attempt. Current grants and the original operation's unresolved state
 also fence the existing reconnect gate.
 
+For confirmed unpublished cleanup, the owner binds `Candidate.resource` to
+the original attempt ID and invokes `await stop_attempt(attempt_id)` under its
+own journal fence. A stale `None` result does not confirm disposal of the
+requested resource. An `unknown` status remains unsettled after local
+process retirement. A separate status check followed by unconditional
+`stop()` cannot supply this attempt fence.
+
 The candidate leaf's default readiness timeout is longer than this
 coordinator's total budget. An adapter must pass/enforce the actual remaining
 budget; it cannot accept that default or start a new budget for each candidate.
-No adapter, observer or authoritative journal is fabricated here. The
-candidate's review/merge and the separately accepted production owner remain
-integration prerequisites; this handoff is not installed readiness.
+No production adapter, observer or authoritative journal is fabricated here. The
+separately accepted production owner and its integration remain prerequisites;
+this source handoff is not installed readiness.
 
 ## One attempt, retained resources
 
@@ -130,9 +137,44 @@ target in isolated Python outside the checkout, then removes only that owned
 target while preserving unrelated fixture state. Each platform's execution is
 separate evidence; passing on Windows does not imply Linux or macOS.
 
-Actual OpenSSH requires the separately accepted provider adapter and an already
-supplied isolated SSH/credential fixture. No such fixture, production adapter,
-native SSH recovery, live discovery/supervisor integration, permission
-projection, installation or rollout is supplied by this module. Their distinct
+### Explicit isolated OpenSSH consumer lane
+
+The native test module additionally supplies an opt-in **Linux-only** fixture
+for the accepted SSH leaf and the actual coordinator. It reuses the canonical
+synthetic journal fixture; it is not a production permission, enrollment,
+observer, journal/CAS or lifecycle adapter.
+
+Set `FLEET_MANAGER_TEST_OPENSSH=1` explicitly when running the contained
+standalone suite to enable its three consumer scenarios:
+
+```sh
+FLEET_MANAGER_TEST_OPENSSH=1 python tools/run-standalone-tests.py fleet-manager --python <prepared-test-interpreter>
+```
+
+The lane requires an existing unprivileged Linux user and working `ssh`,
+`sshd`, `ssh-keygen` and server prerequisite directories. Missing prerequisites
+fail the explicitly requested lane; the test never installs binaries, elevates
+or repairs the host. Without the opt-in, or on Windows/macOS, these cases are
+explicitly skipped without creating keys or starting a server.
+
+Each case creates private temporary test keys, host pins and configuration for
+a loopback-only user-mode server. Its key and server policy allow only the
+fixture's finite reverse listeners and exact peer target. `StrictModes` and
+strict host-key checking remain enabled. The private temporary directory is
+below the actual user's home because OpenSSH rejects authorized-key paths with
+a world-writable `/tmp` ancestor; no shared SSH configuration is edited.
+
+The serving observer uses fixture-owned collision evidence and an HMAC
+application challenge. Real SSH selection, retained processes and exact
+attempt cleanup remain with the existing leaf. The cases prove retained
+publication/idempotence, unknown publication acknowledgement with original
+receipt reobservation and no rebinding, and stale-generation cleanup that
+preserves an independent established path. Fixture clients, server, sockets,
+handler tasks and temporary key files are closed and checked before outer
+containment can mask a leak.
+
+These are isolated source-consumer results, not Windows/macOS OpenSSH
+qualification, production native SSH recovery, live discovery/supervisor
+integration, permission projection, installation or rollout. Their distinct
 owners and remaining qualification gates are recorded in
 [the canonical effort](../../efforts/active/dynamic-reverse-reservations/README.md).

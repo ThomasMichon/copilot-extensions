@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve opt-in isolated OpenSSH reservation consumer and uncertainty regression tests",
+  "changes": [
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    }
+  ]
+}

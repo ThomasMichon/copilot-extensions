@@ -11,7 +11,7 @@ that pattern to this repository.
 | Effort | Status | Coordination |
 |--------|--------|--------------|
 | [Coordinated Launch Maintenance](active/coordinated-launch-maintenance/README.md) | Draft; nonblocking healthy handoff with coordinated adopted background maintenance | #7694; preserves #6812/#6820/#7667 owners |
-| [Dynamic Reverse Reservations](active/dynamic-reverse-reservations/README.md) | Active; reviewed intent merged, bounded supplied-owner source next; production permission/lifecycle integration retained | #7719; preserves #63/#6681/#5789/#6804/#6240/#6424 owners |
+| [Dynamic Reverse Reservations](active/dynamic-reverse-reservations/README.md) | Active; coordinator/finite-forward source merged, opt-in SSH consumer qualification; production integration retained | #7719; preserves #63/#6681/#5789/#6804/#6240/#6424 owners |
 | [SSH Reverse Candidate Forward](active/ssh-reverse-candidate-forward/README.md) | Active; reviewed intent merged; finite SSH owner candidate and lifecycle review corrections in progress | #7720; complements #7719 publication without a second selector; actual OpenSSH/adoption remain separate |
 | [CodeSpaces Authentication CTA](active/codespaces-authentication-cta/README.md) | Draft; click-only provider authentication and Manager CTA | #7793; no live authorization or deployment |
 | [Backlog Reconciliation](active/backlog-reconciliation/README.md) | Active; oldest-first evidence and requirement-preserving consolidation, no implementation | #7556; 1,458 baseline, 729 guidance checkpoint |
