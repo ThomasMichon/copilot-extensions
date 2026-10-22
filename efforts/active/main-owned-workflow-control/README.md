@@ -279,10 +279,13 @@ authorizes critical main-path acceptance or a bounded administrative change.
   metadata, source/tag identity and receipt gates. Existing-control selection
   and comparable natural publication timing remain open under Phase 6;
   source merge alone does not activate a new trusted helper pin.
-- [ ] Land and observe the bounded tracking-write guard traversal reuse,
+- [x] Land and observe the bounded tracking-write guard traversal reuse (#7692),
   preserving all sibling files, failure handling, alias fixed points and
   diagnostic ordering. Keep local paired timing separate from hosted timing
   and the broader whole-flow acceptance gates.
+- [ ] Land and observe bounded headless-guard analysis reuse, preserving all
+  production roots, six enforcement rules, allowlists and failure handling.
+  Keep local paired timing distinct from natural hosted observations.
 - [ ] Remove redundant release-shaped PR and main-push validation only where
   existing trusted gates and exact-SHA release evidence cover the removed work;
   first prove no generated-output coverage or required context is lost.
