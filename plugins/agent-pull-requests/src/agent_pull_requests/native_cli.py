@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Callable
 import json
 import math
 import subprocess
@@ -11,6 +12,18 @@ import time
 
 from .native_command import run_command
 from .watch_provider import command_path, fetch_snapshot
+
+
+def validate_selector(value: str) -> str:
+    if not value.strip():
+        raise argparse.ArgumentTypeError("worktrees command selector must not be empty")
+    return value
+
+
+class MergeMethodAction(argparse.Action):
+    def __call__(self, parser, namespace, values, option_string=None):
+        namespace.method = self.const
+        namespace.method_explicit = True
 
 
 def _mutation(args: argparse.Namespace, prefix: list[str]) -> tuple[int, dict]:
@@ -26,10 +39,10 @@ def _mutation(args: argparse.Namespace, prefix: list[str]) -> tuple[int, dict]:
         if args.draft:
             argv.append("--draft")
     else:
-        if args.method != "squash" or args.delete_branch or args.auto:
+        if args.method_explicit or args.delete_branch or args.auto:
             raise ValueError(
                 "native merge uses the target's merge policy; "
-                "--merge, --rebase, --auto and --delete-branch are not supported"
+                "--squash, --merge, --rebase, --auto and --delete-branch are not supported"
             )
         argv = ["pr-merge", args.repo, str(args.number), "--now", "--json"]
     try:
@@ -87,10 +100,11 @@ def _read(args: argparse.Namespace, prefix: list[str]) -> tuple[int, dict]:
         time.sleep(min(args.interval, remaining))
 
 
-def run(args: argparse.Namespace, *, prefix: list[str] | None = None) -> int:
+def run(
+    args: argparse.Namespace, *, prefix_factory: Callable[[], list[str]] | None = None,
+) -> int:
     try:
-        command = command_path(args.worktrees_command)
-        launch = prefix if prefix is not None else [command]
+        launch = prefix_factory() if prefix_factory is not None else [command_path(args.worktrees_command)]
         code, payload = (
             _mutation(args, launch) if args.command in ("create", "merge")
             else _read(args, launch)

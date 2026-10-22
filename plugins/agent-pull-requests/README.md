@@ -113,16 +113,19 @@ Merge delegates to `pr-merge --now`; the central role/profile gate may refuse
 it. Native ADO auto-completion, policy evaluation, latest-push evidence and
 authorized bypass configuration remain owned by Worktrees. An accepted,
 pending auto-completion is not reported as a completed merge. `--auto`,
-`--merge`, `--rebase` and `--delete-branch` are refused before mutation rather
+`--squash`, `--merge`, `--rebase` and `--delete-branch` are refused before mutation rather
 than silently overriding repository policy. Use the central consent workflow
 for a target whose profile does not allow `--now`.
 
 Each read has a 20-second deadline; each mutation has a 90-second deadline and
 bounded output. A lost mutation response is uncertain: reconcile with native
 status before retrying, never retry through the GitHub path. On Windows,
-PowerShell command arguments travel as JSON data over stdin, preserving
-multiline bodies and quotes. Batch command shims refuse shell-sensitive
-arguments; use the catalog's PowerShell command for those inputs.
+PowerShell command arguments travel as JSON data over stdin. PowerShell 7.3
+or newer with standard native argument passing is required through the final
+Python invocation, preserving empty arguments, multiline bodies and quotes.
+Older PowerShell hosts and batch command shims are refused before the target
+command executes; use the catalog's PowerShell command or a validated same-cell
+native peer. An empty selector is invalid, never a request for GitHub fallback.
 
 ## Acknowledged watch callbacks (opt-in)
 

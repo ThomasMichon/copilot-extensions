@@ -309,6 +309,15 @@ callback an implicit credential store.
   fail-loud patterns. It adds no daemon, credential store, forge adapter or
   deployment authority. Source publication/review remains pending; the parent
   effort is Active.
+- The first #7850 review found argument loss at the final Python call under
+  Windows PowerShell 5.1, empty selectors selecting GitHub, an explicit squash
+  request indistinguishable from the default, stale hints blocking an available
+  same-cell peer, and batch shims unsupported by direct process creation.
+  The correction requires PowerShell 7.3+ standard argument passing, rejects
+  batch shims and empty selectors, records explicit method selection, and
+  resolves the validated peer before considering any legacy hint. Native
+  regressions now cross the final Python call and prove old-host refusal
+  before target execution; no installed runtime or fleet capacity was changed.
 
 ### 2026-10-22 - Bind admitted PR callers to durable replay operations
 

@@ -6,6 +6,7 @@ import json
 import os
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -108,7 +109,8 @@ def test_native_refusal_does_not_retry_or_drop_policy_evidence(verb, command, mo
 
 @pytest.mark.parametrize("verb,extra", [
     ("create", ["--base", "other"]), ("merge", ["--auto"]),
-    ("merge", ["--merge"]), ("merge", ["--rebase"]), ("merge", ["--delete-branch"]),
+    ("merge", ["--squash"]), ("merge", ["--merge"]), ("merge", ["--rebase"]),
+    ("merge", ["--delete-branch"]),
 ])
 def test_native_unexpressible_flags_refuse_before_mutation(verb, extra, command, monkeypatch, capsys):
     calls = stub(monkeypatch, {})
@@ -186,18 +188,33 @@ def test_native_same_cell_selection_never_uses_legacy_hint(command, monkeypatch,
     monkeypatch.setattr(WatchInvocation, "capture", lambda **k: invocation)
     monkeypatch.setattr(cli, "_agent_worktrees_prefix", lambda: prefix)
     calls = stub(monkeypatch, report())
-    assert cli.main(arguments("status", command)) == 0
+    missing_hint = command + "-missing"
+    assert not Path(missing_hint).exists()
+    assert cli.main(arguments("status", missing_hint)) == 0
     assert json.loads(capsys.readouterr().out)["provider"] == "azure-devops"
     assert calls[0][0][:3] == prefix
     assert command not in calls[0][0]
 
 
+@pytest.mark.parametrize("verb", ["status", "wait", "create", "merge"])
+@pytest.mark.parametrize("selector", ["", "   "])
+def test_explicit_empty_native_selection_never_uses_github(verb, selector, command, capsys):
+    with pytest.raises(SystemExit) as exc:
+        cli.main(arguments(verb, selector))
+    assert exc.value.code == 2
+    assert "must not be empty" in capsys.readouterr().err
+
+
 @pytest.mark.skipif(os.name != "nt", reason="native PowerShell boundary")
 def test_native_powershell_arguments_are_data_across_real_process_boundary(tmp_path):
+    script = tmp_path / "echo-arguments.py"
+    script.write_text("import json, sys\nprint(json.dumps(sys.argv[1:]))\n", encoding="utf-8")
     command = tmp_path / "worktrees with space.ps1"
-    command.write_text("ConvertTo-Json -InputObject @($args) -Compress\n", encoding="utf-8")
+    python = sys.executable.replace("'", "''")
+    script_path = str(script).replace("'", "''")
+    command.write_text(f"& '{python}' '{script_path}' @args\nexit $LASTEXITCODE\n", encoding="utf-8")
     values = [
-        "pr-create", "--title", 'quotes " and apostrophe \' and & echo bad',
+        "pr-create", "", "--title", 'quotes " and apostrophe \' and & echo bad',
         "--body", "first\nsecond $(& exit 99) %PATH% !literal! \u00e9",
     ]
     result = native_command.run_command([str(command), *values], timeout=15)
@@ -206,11 +223,36 @@ def test_native_powershell_arguments_are_data_across_real_process_boundary(tmp_p
 
 
 @pytest.mark.skipif(os.name != "nt", reason="native batch boundary")
-def test_native_batch_refuses_unsafe_values_before_spawn(tmp_path, monkeypatch):
+@pytest.mark.parametrize("values", [["pr-status"], ["--body", "line\nsecond & echo bad"]])
+def test_native_batch_refuses_before_spawn(values, tmp_path, monkeypatch):
     command = tmp_path / "worktrees.cmd"
+    command.write_text("@exit /b 61\n", encoding="utf-8")
     monkeypatch.setattr(native_command, "run_caller_owned", lambda *a, **k: pytest.fail("spawned"))
     with pytest.raises(ValueError, match="PowerShell"):
-        native_command.run_command([str(command), "--body", "line\nsecond & echo bad"], timeout=15)
+        native_command.run_command([str(command), *values], timeout=15)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native PowerShell boundary")
+def test_native_does_not_fall_back_to_windows_powershell(tmp_path, monkeypatch):
+    command = tmp_path / "worktrees.ps1"
+    monkeypatch.setattr(native_command.shutil, "which", lambda name: None)
+    monkeypatch.setattr(native_command, "run_caller_owned", lambda *a, **k: pytest.fail("spawned"))
+    with pytest.raises(ValueError, match="7.3"):
+        native_command.run_command([str(command), "pr-status"], timeout=15)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native old PowerShell refusal boundary")
+def test_native_rejects_old_powershell_before_target_execution(tmp_path, monkeypatch):
+    interpreter = Path(os.environ["SystemRoot"]) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+    marker = tmp_path / "must-not-exist"
+    command = tmp_path / "worktrees.ps1"
+    marker_text = str(marker).replace("'", "''")
+    command.write_text(f"[IO.File]::WriteAllText('{marker_text}', 'executed')\n", encoding="utf-8")
+    monkeypatch.setattr(native_command.shutil, "which", lambda name: str(interpreter))
+    result = native_command.run_command([str(command), "pr-status"], timeout=15)
+    assert result.returncode == 126
+    assert "7.3 or newer" in result.stderr
+    assert not marker.exists()
 
 
 @pytest.mark.parametrize("verb", ["status", "wait", "create", "merge"])
@@ -233,24 +275,17 @@ def test_native_front_door_crosses_real_worktrees_command_boundary(
         expected = ["pr-merge", "project/repo", "7", "--now", "--json"]
         value = {"repo": "project/repo", "pr": 7, "applied": True, "merged": False}
     command = tmp_path / ("native command.ps1" if os.name == "nt" else "native-command")
+    python_script = (
+        f"import sys\nassert sys.argv[1:] == {expected!r}\n"
+        f"print({json.dumps(value)!r})\n"
+    )
     if os.name == "nt":
-        encoded = json.dumps(expected).replace("'", "''")
-        response = json.dumps(value).replace("'", "''")
-        script = (
-            f"$expected = '{encoded}' | ConvertFrom-Json\n"
-            "if ($args.Count -ne $expected.Count) { exit 61 }\n"
-            "for ($i = 0; $i -lt $args.Count; $i++) {\n"
-            "  if ($args[$i] -cne $expected[$i]) { exit 62 }\n"
-            "}\n"
-            f"[Console]::WriteLine('{response}')\n"
-            "exit 0\n"
-        )
+        target = tmp_path / "native_command.py"
+        target.write_text(python_script, encoding="utf-8")
+        python, target_path = (value.replace("'", "''") for value in (sys.executable, str(target)))
+        script = f"& '{python}' '{target_path}' @args\nexit $LASTEXITCODE\n"
     else:
-        script = (
-            f"#!{sys.executable}\nimport sys\n"
-            f"assert sys.argv[1:] == {expected!r}\n"
-            f"print({json.dumps(value)!r})\n"
-        )
+        script = f"#!{sys.executable}\n{python_script}"
     command.write_text(script, encoding="utf-8")
     if os.name != "nt":
         command.chmod(0o700)
