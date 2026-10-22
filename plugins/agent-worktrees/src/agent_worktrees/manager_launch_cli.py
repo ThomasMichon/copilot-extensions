@@ -517,7 +517,7 @@ def cmd_manager_install_trigger(project: str | None) -> int:
 def _is_headless_project() -> bool:
     """Return True if the active project is configured headless (CLI-only)."""
     try:
-        return cfg.load_config().headless
+        return cfg.load_config(include_control_plane_related_pr=False).headless
     except Exception:
         return False
 

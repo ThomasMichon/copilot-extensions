@@ -361,6 +361,8 @@ def test_project_flag_bare_invocation_uses_install_trigger_without_manager(monke
 
 
 def test_project_flag_preserves_invocation_context_before_chdir(monkeypatch, tmp_path):
+    from agent_worktrees import update_driver_cli
+
     invocation = tmp_path / "invocation"
     anchor = tmp_path / "anchor"
     settings = invocation / ".github" / "copilot" / "settings.json"
@@ -375,7 +377,8 @@ def test_project_flag_preserves_invocation_context_before_chdir(monkeypatch, tmp
     monkeypatch.setattr(m, "_cwd_is_inside_project", lambda _anchor: False)
     contexts = []
     monkeypatch.setattr(
-        "agent_worktrees.update_driver_cli.cmd_update_request",
+        update_driver_cli,
+        "cmd_update_request",
         lambda _args: contexts.append(m._invocation_update_context()) or 0,
     )
 

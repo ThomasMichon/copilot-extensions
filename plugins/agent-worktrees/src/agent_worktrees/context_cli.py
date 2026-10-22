@@ -486,10 +486,10 @@ def cmd_picker_bootstrap(args: argparse.Namespace) -> int:
     if not resolved:
         return output._json_error(f"unknown project {project!r}")
     should_switch = bool(anchor is not None and not _cwd_is_inside_project(anchor))
-    tracking_path = cfg.project_dir(resolved) / "worktrees"
     invocation_cwd = _core()._INVOCATION_CWD or Path.cwd()
-    worktree_id = tracking.find_worktree_id_by_cwd(str(invocation_cwd), project=resolved)
-    record = tracking.load_record_by_id(worktree_id, tracking_path=tracking_path) if worktree_id else None
+    from .worktree_identity import tracked_invocation_record
+
+    record = tracked_invocation_record(invocation_cwd, project=resolved, anchor=anchor)
     payload = {
         "version": 1,
         "project": resolved,

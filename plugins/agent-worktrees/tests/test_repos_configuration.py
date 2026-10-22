@@ -303,6 +303,7 @@ def test_disabled_managed_dropin_does_not_block_valid_preferences(native):
 def test_picker_bootstrap_workspace_is_a_tracked_selected_project_root(native, monkeypatch, capfd, location):
     from agent_worktrees import context_cli, tracking
 
+    monkeypatch.setattr(context_cli._core(), "_INVOCATION_CWD", None)
     workspace = native / "sample-worktree"
     nested = workspace / "nested"
     nested.mkdir(parents=True)

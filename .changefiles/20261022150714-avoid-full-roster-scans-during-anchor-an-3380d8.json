@@ -1,0 +1,9 @@
+{
+  "comment": "Avoid full roster scans during anchor and validated linked-worktree Picker bootstrap; skip unrelated PR topology in bare-launch headless detection.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

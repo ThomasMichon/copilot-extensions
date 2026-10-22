@@ -59,6 +59,33 @@ def _worktree_id_from_git(cwd: Path) -> str | None:
     return None
 
 
+def tracked_invocation_record(
+    cwd: Path, *, project: str, anchor: Path | None,
+) -> tracking.WorktreeRecord | None:
+    """Read one confirmed linked-worktree record before legacy path lookup."""
+    cwd = cwd.resolve()
+    if anchor is not None and cwd == anchor.resolve():
+        return None
+    tracking_path = cfg.project_dir(project) / "worktrees"
+    worktree_id = _worktree_id_from_git(cwd)
+    record = (
+        tracking.load_record_by_id(worktree_id, tracking_path=tracking_path)
+        if worktree_id else None
+    )
+    if record is not None and (
+        record.repo != project or not record.worktree_path
+        or not cwd.is_relative_to(Path(record.worktree_path).resolve())
+    ):
+        record = None
+    if record is None:
+        worktree_id = tracking.find_worktree_id_by_cwd(str(cwd), project=project)
+        record = (
+            tracking.load_record_by_id(worktree_id, tracking_path=tracking_path)
+            if worktree_id else None
+        )
+    return record
+
+
 def _linked_worktree_root(cwd: str | Path) -> Path | None:
     """Return git's actual linked-worktree root, never a configured projection."""
     candidate = Path(cwd).resolve()

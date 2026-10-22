@@ -640,6 +640,14 @@ automatically restore a potentially submitted prompt.
 | `<project> stage-update --indicator-state --json` | Cosmetic staged-update glyph state: `{"version":1,"indicator_state":"paused|checking|available|current|idle"}`. | Additive Phase 3d Group A extension on the existing `stage-update` verb. A newer Picker tolerates an older engine rejecting `--indicator-state` by degrading this glyph rather than failing startup. |
 | `<project> get <key>` | Scalar project value (e.g. `machine`, paths). | Plain value on stdout, **not** JSON — a deliberate exception for single-scalar reads. |
 
+`picker-bootstrap` also returns `workspace`, the tracked invocation worktree's
+absolute root or `null`. The anchor does not enumerate worktrees; a linked
+checkout first validates its Git worktree identity against one tracking record
+and the invocation path. Unconfirmed identities retain the legacy tracked-path
+fallback. Bootstrap does not adopt a checkout or rewrite tracking state.
+Bare-launch headless detection skips unrelated control-plane PR topology while
+preserving the normal layered headless setting.
+
 ## Pinned action verbs (the Picker's control plane)
 
 | Verb (as invoked) | Purpose |
