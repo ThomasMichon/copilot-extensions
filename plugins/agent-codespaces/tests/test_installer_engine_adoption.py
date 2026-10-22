@@ -156,12 +156,12 @@ def _run(ext: str, script: str, tmp_path: Path, env: dict[str, str]):
 def _fake_uv(tmp_path: Path, engine: Path = ENGINE) -> Path:
     # Reuse only the SUT's native file-I/O adapter in the fake executable;
     # importing the entire policy on every fake UV call repeats unrelated work.
-    policy_source = (engine / "installer_dependency_policy.py").read_text(encoding="utf-8")
+    adapter_module = (engine / "installer_dependency_config.py").read_text(encoding="utf-8")
     adapter = next(
-        node for node in ast.parse(policy_source).body
-        if isinstance(node, ast.FunctionDef) and node.name == "_native_retained_path"
+        node for node in ast.parse(adapter_module).body
+        if isinstance(node, ast.FunctionDef) and node.name == "native_retained_path"
     )
-    adapter_source = ast.get_source_segment(policy_source, adapter)
+    adapter_source = ast.get_source_segment(adapter_module, adapter)
     assert adapter_source is not None
     settings = (
         "PipInstallSettings { settings: PipSettings {\n"
@@ -196,7 +196,7 @@ def unseasoned(arguments):
     return result
 expected_sources = json.loads(os.environ.get("TEST_UV_EXPECTED_SOURCES", "{}"))
 if expected_sources and args[:2] == ["pip", "install"]:
-    native_path = _native_retained_path
+    native_path = native_retained_path
     config = Path(args[args.index("--config-file") + 1]).resolve()
     private_root = config.parent
     assert config.is_file() and not config.is_symlink()
