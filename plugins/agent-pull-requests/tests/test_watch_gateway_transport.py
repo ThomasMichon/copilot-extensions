@@ -61,6 +61,12 @@ def test_real_gateway_scopes_reconcile_restart_ack_and_policy_withdrawal(tmp_pat
             }
             rejected = await send("register", dict(original, account="foreign"), expected=400)
             assert rejected == {"error": "invalid_watch_request"}
+            before = store.path.read_bytes()
+            assert await send(
+                "register", dict(original, deadline_at=2**53 + 1), expected=400,
+            ) == {"error": "invalid_watch_request"}
+            assert store.path.read_bytes() == before
+            assert await send("pending", caller="caller-b") == {"events": [], "more": False}
             # Deliberately discard the initial success and reconcile its original request.
             await send("register", original)
             receipt = await send("register", original)

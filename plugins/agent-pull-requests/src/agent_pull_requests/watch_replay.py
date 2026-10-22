@@ -44,7 +44,13 @@ class ConsumerScope:
 
 
 def _timestamp(value: object) -> float:
-    return positive_seconds(value)
+    try:
+        normalized = positive_seconds(value)
+    except OverflowError:
+        raise ValueError("invalid replay timestamp") from None
+    if normalized != value:
+        raise ValueError("replay timestamp cannot be represented exactly")
+    return normalized
 
 
 def _check_event_size(payload: dict) -> None:

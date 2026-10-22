@@ -49,6 +49,8 @@ Targets below are **connector-relative**, after Gateway removes the assigned
 route prefix. Queries, encoded aliases, unknown fields and duplicate/non-finite
 JSON members are refused. A nonempty body requires `application/json`.
 No operation accepts arbitrary argv, provider URLs or credentials.
+Integer timestamps/deadlines that would round or overflow the registry's
+finite-float representation are refused before persistence.
 
 | Method / target | JSON fields |
 |-----------------|-------------|

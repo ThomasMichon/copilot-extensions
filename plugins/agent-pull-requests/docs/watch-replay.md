@@ -52,6 +52,9 @@ be no more than 24 hours old and not in the future. Repeating the same request
 returns its existing registration/outcome without resetting its deadline or
 replacing pending delivery. Different criteria or deadline return `conflict`.
 A new timestamp or request ID is a new request, not a reconciliation attempt.
+Integer timestamps/deadlines must be exactly representable as finite floats,
+matching registry persistence. Inputs that would round or overflow are rejected
+before committing, not accepted into an envelope that cannot reload.
 
 `inspect` returns only that scope/request's receipt. Unknown records return
 `uncertain`, never evidence of nonacceptance or permission for process fallback.

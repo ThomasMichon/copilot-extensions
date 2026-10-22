@@ -212,6 +212,26 @@ def test_invalid_registration_never_commits(gateway, change):
     assert gateway.store.path.read_bytes() == before
 
 
+@pytest.mark.parametrize("deadline", [2**53 + 1, 10**400])
+def test_deadline_precision_refusal_keeps_other_admitted_caller_usable(gateway, deadline):
+    async def scenario():
+        original = registration()
+        accepted = await gateway.handle(request("register", original, caller="caller-b"))
+        assert accepted.status == 200
+        receipt = json.loads(accepted.body)
+        before = gateway.store.path.read_bytes()
+        refused = await gateway.handle(request("register", dict(original, deadline_at=deadline)))
+        assert refused.status == 400
+        assert gateway.store.path.read_bytes() == before
+        inspect = {key: original[key] for key in ("request_id", "issued_at")}
+        response = await gateway.handle(request("inspect", inspect, caller="caller-b"))
+        assert response.status == 200 and json.loads(response.body) == receipt
+        pending = await gateway.handle(request(caller="caller-b"))
+        assert pending.status == 200 and json.loads(pending.body) == {"events": [], "more": False}
+        await gateway.drain(timeout=1)
+    asyncio.run(scenario())
+
+
 def test_work_is_bounded_per_channel_without_queuing_another_disk_worker(gateway, monkeypatch):
     async def scenario():
         release = threading.Event()

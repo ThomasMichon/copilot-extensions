@@ -320,6 +320,13 @@ callback an implicit credential store.
   authorized forge observation, the shared Dispatch consumer, lifecycle/
   placement integration, release, authorized installation and actual fleet
   acceptance are not established by these synthetic serving tests.
+- #7832 review found an integer deadline that was accepted exactly in the
+  replay record but rounded by registry restoration, making the next complete
+  envelope unreadable. Timestamp validation now rejects precision loss and
+  overflow before persistence in the core, not only in the wire adapter.
+  Reload and admitted-caller regressions retain another scope's existing
+  receipt, and the actual TLS flow also refuses the input without a write.
+  The focused replay/store/handler/transport/native contracts pass 229 cases.
 
 ### 2026-10-22 - Carry authenticated callers into a bounded service handler
 

@@ -166,6 +166,26 @@ def test_original_expired_deadline_fires_timeout_without_observation(owner):
     assert restored.snapshot()["records"][0]["deadline_at"] == now[0] - 1
 
 
+@pytest.mark.parametrize("deadline", [2**53 + 1, 10**400])
+def test_deadline_precision_refusal_preserves_another_scope_after_reload(owner, deadline):
+    core, disk, now = owner
+    receipt = register(core, now[0], OTHER, request="other")
+    before = disk.read_bytes()
+    with pytest.raises(ValueError):
+        register(core, now[0], deadline_at=deadline)
+    assert disk.read_bytes() == before
+    restored = WatchReplay(
+        core.namespace, state=json.loads(disk.read_bytes()),
+        commit=lambda state: _atomic_write_json(disk, state),
+    )
+    assert restored.inspect(OTHER, "other", now[0]) == receipt
+    assert restored.pending(OTHER) == {"events": [], "more": False}
+    assert register(restored, now[0], deadline_at=2**53 + 2)["status"] == "active"
+    assert WatchReplay(
+        core.namespace, state=json.loads(disk.read_bytes()), commit=lambda _state: None,
+    ).inspect(OTHER, "other", now[0]) == receipt
+
+
 @pytest.mark.parametrize("operation", ["register", "observe", "ack", "cancel"])
 @pytest.mark.parametrize("uncertain", [False, True])
 def test_write_failure_never_reports_success_or_loses_committed_state(owner, operation, uncertain):
