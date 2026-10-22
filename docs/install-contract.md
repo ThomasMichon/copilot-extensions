@@ -1270,6 +1270,10 @@ keep their existing dispatch behavior. Inspecting a durable request never
 triggers fresh installation.
 The Windows bootstrap waits for its constructed Manager observer in a
 windowless, caller-contained child and returns that child's exit status.
+It explicitly forwards the caller's standard streams, preserving interactive
+console input and redirected progress/diagnostics.
+An already interactive caller retains its existing console association;
+noninteractive/windowless callers never allocate a new console.
 It does not use Windows CRT process replacement as a completion signal;
 POSIX retains process replacement.
 An older global helper need not equal the newly fetched payload: admission

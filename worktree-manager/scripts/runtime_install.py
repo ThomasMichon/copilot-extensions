@@ -209,7 +209,12 @@ def _activate_after_bootstrap_update(root: Path, slot: Path) -> None:
 
 def _dispatch_manager(command: list[str]) -> int:
     if os.name == "nt":
-        process = subprocess.Popen(command, creationflags=subprocess.CREATE_NO_WINDOW)
+        interactive = all(stream is not None and stream.isatty()
+                          for stream in (sys.stdin, sys.stdout))
+        process = subprocess.Popen(
+            command, stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr,
+            creationflags=0 if interactive else subprocess.CREATE_NO_WINDOW,
+        )
         try:
             return process.wait()
         except BaseException:

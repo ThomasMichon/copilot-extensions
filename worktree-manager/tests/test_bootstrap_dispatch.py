@@ -33,8 +33,9 @@ def test_posix_bootstrap_retains_process_replacement(monkeypatch: pytest.MonkeyP
 
 
 @pytest.mark.parametrize("interrupted", [False, True])
+@pytest.mark.parametrize("interactive", [False, True])
 def test_windows_bootstrap_waits_for_observer_and_preserves_exit(
-    monkeypatch: pytest.MonkeyPatch, interrupted: bool,
+    monkeypatch: pytest.MonkeyPatch, interrupted: bool, interactive: bool,
 ) -> None:
     installer = self_install._runtime_installer()
     seen, waits = [], []
@@ -50,6 +51,9 @@ def test_windows_bootstrap_waits_for_observer_and_preserves_exit(
         return SimpleNamespace(wait=wait)
 
     monkeypatch.setattr(installer, "os", SimpleNamespace(name="nt"))
+    streams = {name: SimpleNamespace(isatty=lambda: interactive)
+               for name in ("stdin", "stdout", "stderr")}
+    monkeypatch.setattr(installer, "sys", SimpleNamespace(**streams))
     monkeypatch.setattr(
         installer, "subprocess", SimpleNamespace(Popen=launch, CREATE_NO_WINDOW=0x08000000),
     )
@@ -61,7 +65,9 @@ def test_windows_bootstrap_waits_for_observer_and_preserves_exit(
     else:
         assert installer._dispatch_manager(command) == 43
         assert len(waits) == 1
-    assert seen == [(command, {"creationflags": 0x08000000})]
+    assert seen == [(command, {
+        **streams, "creationflags": 0 if interactive else 0x08000000,
+    })]
 
 
 @pytest.mark.skipif(
@@ -72,30 +78,32 @@ def test_windows_bootstrap_waits_for_observer_and_preserves_exit(
 def test_native_windowless_bootstrap_waits_for_selected_manager(
     tmp_path: Path, code: int,
 ) -> None:
-    import agent_procutil
     from agent_procutil.owned_process import run_owned
 
     repo = Path(__file__).resolve().parents[2]
     observer = runpy.run_path(str(
         repo / "libs/agent-procutil/tests/test_spawn_daemon_windows_integration.py"
     ))
-    parent = agent_procutil.windowless_python()
+    parent = getattr(sys, "_base_executable", sys.executable)
     installer = repo / "worktree-manager/scripts/runtime_install.py"
-    arguments = ["-I", "-S", "-B", "-X", "utf8", "-m", "worktree_manager", "update",
-                 "--project", "example with spaces"]
+    arguments = ["-m", "worktree_manager", "update", "--project", "example with spaces"]
+    input_text = "bootstrap input \u00e9"
     with observer["_WindowObserver"](*observer["_configure_win32"]()) as windows:
         for cycle in range(2):
             marker = tmp_path / f"completed-{cycle}.json"
             child = tmp_path / f"selected-manager-{cycle}.py"
             child.write_text(
                 "import json,pathlib,sys,time\n"
+                "data=sys.stdin.read()\n"
+                "print('selected Manager stdout \\u00e9',flush=True)\n"
+                "print('selected Manager stderr \\u00e9',file=sys.stderr,flush=True)\n"
                 "time.sleep(.2)\n"
                 f"pathlib.Path({str(marker)!r}).write_text("
-                "json.dumps(sys.argv[1:]),encoding='utf-8')\n"
+                "json.dumps({'argv':sys.argv[1:],'stdin':data}),encoding='utf-8')\n"
                 f"raise SystemExit({code})\n",
                 encoding="utf-8",
             )
-            command = [getattr(sys, "_base_executable", sys.executable), str(child), *arguments]
+            command = [parent, "-I", "-S", "-B", "-X", "utf8", str(child), *arguments]
             outer = (
                 "import json,runpy,sys;"
                 "dispatch=runpy.run_path(sys.argv[1])['_dispatch_manager'];"
@@ -104,9 +112,13 @@ def test_native_windowless_bootstrap_waits_for_selected_manager(
             result = run_owned(
                 [parent, "-I", "-S", "-B", "-X", "utf8", "-c", outer,
                  str(installer), json.dumps(command)],
-                timeout=15,
+                timeout=15, input_text=input_text,
             )
             assert result.returncode == code, result.stderr
-            assert json.loads(marker.read_text(encoding="utf-8")) == arguments
+            assert result.stdout == "selected Manager stdout \u00e9\n"
+            assert result.stderr == "selected Manager stderr \u00e9\n"
+            assert json.loads(marker.read_text(encoding="utf-8")) == {
+                "argv": arguments, "stdin": input_text,
+            }
     assert windows.surfaced == {}
     assert windows.focus_changes == {}
