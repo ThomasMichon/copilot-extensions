@@ -116,10 +116,17 @@ requirements, not optional implementation details.
   verification; existing per-process account pinning consumes verified results.
   No reusable authentication broker exists in the provider, so no optional
   sibling or adopter-private broker is imported.
-- Source validation: 244 provider/CLI/lifecycle tests and 202 Manager
+- Source validation: 247 provider/CLI/lifecycle tests and 225 Manager
   contract/production-widget/preview tests pass in isolated bounded runs.
   Tests drive actual clicks, visible device instructions, cancel/error/success,
   provider refresh, account mismatch and credential adoption with mocked vendor
   boundaries. Install and headless-launch contracts pass.
 - Native OAuth and Windows credential-store/focus acceptance remain explicitly
   operator-run; no real authorization or runtime rollout was performed.
+- Validation also covers the shared context decorator's single-argument handler
+  contract, with the annotation callback passed only to the pool. Inventory
+  subprocess timeouts now produce error snapshots and recover on the next
+  subscription tick. The stream consumer publishes summary changes after an
+  empty initial snapshot without changing its row-arrival/reconnect budget.
+  Non-progress view commands pass through the same confirmation gate as
+  progress commands; a real headless click verifies Cancel-by-default.

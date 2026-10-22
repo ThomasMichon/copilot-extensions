@@ -129,6 +129,59 @@ def test_codespaces_view_action_actual_click_and_modal(monkeypatch, auth_state, 
         release.set()
 
 
+def test_nonprogress_view_command_honors_confirmation():
+    from worktree_manager.production_picker.picker_tui.engine_action_confirm import ActionConfirmScreen
+    from worktree_manager.production_picker.picker_tui.pivot_manifest import parse_manifest
+
+    reg = parse_manifest({
+        "label": "Example", "list": ["example-provider", "list"], "scope": "account",
+        "view_actions": [{
+            "label": "Remove", "run": ["example-provider", "remove"],
+            "confirm": True,
+        }],
+    }, name="confirm-view", source_path="fixture")
+
+    class Runtime:
+        def ensure(self, _scope):
+            pass
+
+        def get(self, _scope):
+            return "ready", [], ""
+
+        def get_summary(self, _scope):
+            return {}
+
+        def close(self):
+            pass
+
+    async def run():
+        app = PickerApp(_fixture_source(), live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.pivots.append({"label": reg.label, "kind": "registered", "pivot": reg, "placement": "left"})
+            scr.htabs.append(reg.label)
+            scr._pivot_runtimes[reg.name] = Runtime()
+            scr.htab = len(scr.pivots) - 1
+            calls = []
+            scr._run_task_action = lambda *args: calls.append(args)
+            scr.refresh()
+            await pilot.pause()
+            await pilot.click("#nf-buttons", offset=(4, 1))
+            await pilot.pause()
+            assert isinstance(app.screen, ActionConfirmScreen)
+            assert calls == []
+            await pilot.press("enter")
+            await pilot.pause()
+            assert calls == []
+            await pilot.click("#nf-buttons", offset=(4, 1))
+            await pilot.pause()
+            await pilot.press("left", "enter")
+            await pilot.pause()
+            assert len(calls) == 1
+
+    asyncio.run(run())
+
+
 @pytest.fixture(autouse=True)
 def _bind_composer_project(_reset_active_project) -> None:
     from worktree_manager.production_picker import context

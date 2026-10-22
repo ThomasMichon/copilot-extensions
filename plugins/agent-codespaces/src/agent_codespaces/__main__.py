@@ -101,7 +101,7 @@ def _context_admitted(
     def run(args: argparse.Namespace) -> int:
         try:
             validate_context()
-            return command(args, annotate=_annotate_pool_members)
+            return command(args)
         except ContextRefused as error:
             print(f"[BLOCKED] CodeSpace installation context refused: {error}", file=sys.stderr)
             return _COORDINATION_EXIT
@@ -4164,7 +4164,7 @@ def _cmd_pool(args: argparse.Namespace) -> int:
     if getattr(args, "picker_json", False):
         from .picker_pool import command
 
-        return command(args)
+        return command(args, annotate=_annotate_pool_members)
     budget_cores = args.budget if args.budget is not None else pool_mod.DEFAULT_BUDGET_CORES
     stale_after = (
         args.stale_after if args.stale_after is not None

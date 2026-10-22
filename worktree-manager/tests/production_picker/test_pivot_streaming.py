@@ -77,6 +77,16 @@ elif mode == "subscribe_empty_held":
     emit({"type": "delta", "entry": {"id": "a", "title": "A"}})
     for _ in range(300):
         time.sleep(0.1)
+elif mode == "subscribe_auth_empty":
+    emit({"type": "begin"})
+    emit({"type": "summary", "summary": {"auth_status": "auth_required"}})
+    emit({"type": "done"})
+    time.sleep(0.3)
+    emit({"type": "summary", "summary": {"auth_status": "scope_blocked"}})
+    time.sleep(0.3)
+    emit({"type": "summary", "summary": {"auth_status": "ready"}})
+    for _ in range(300):
+        time.sleep(0.1)
 elif mode == "echo_argv":
     # Reflects whether --subscribe was actually passed through, so the
     # runtime's argv construction (not just the manifest flag) is proven.
@@ -130,6 +140,21 @@ def test_streaming_paints_rows_and_summary(tmp_path):
     assert state == "ready"
     assert [r["id"] for r in rows] == ["a", "b"]
     assert rt.get_summary(None) == {"total": "2"}
+
+
+def test_empty_subscription_publishes_authentication_summary_changes(tmp_path):
+    rt = tasks.RegisteredPivotRuntime(_make_pivot(tmp_path, "subscribe_auth_empty", subscribe=True))
+    rt.ensure(None)
+    try:
+        for expected in ("auth_required", "scope_blocked", "ready"):
+            state, rows, error = _wait(
+                rt, None,
+                lambda state, rows, error: rt.get_summary(None).get("auth_status") == expected,
+            )
+            assert rt.get_summary(None)["auth_status"] == expected
+            assert state == "ready" and rows == [] and error == ""
+    finally:
+        rt.close()
 
 
 def test_streaming_delta_and_removed_update_in_place(tmp_path):

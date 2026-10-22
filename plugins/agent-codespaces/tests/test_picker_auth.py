@@ -210,3 +210,57 @@ def test_verified_provider_discovery_does_not_retry_unauthenticated_ambient(
     monkeypatch.setattr(lifecycle, "_list_codespaces_under", listing)
     assert lifecycle.list_codespaces() == []
     listing.assert_called_once_with("example-user")
+
+
+def test_context_admission_preserves_handler_signature(monkeypatch):
+    from agent_codespaces import __main__ as cli
+
+    admitted = Mock()
+    monkeypatch.setattr(cli, "validate_context", admitted)
+    args = argparse.Namespace(name="example-space")
+    calls = []
+
+    @cli._context_admitted
+    def handler(namespace):
+        calls.append(namespace)
+        return 42
+
+    assert handler(args) == 42
+    assert calls == [args]
+    admitted.assert_called_once()
+
+
+def test_pool_alone_receives_annotation_callback(monkeypatch):
+    from agent_codespaces import __main__ as cli
+
+    command = Mock(return_value=0)
+    monkeypatch.setattr(picker_pool, "command", command)
+    args = argparse.Namespace(picker_json=True)
+    assert cli._cmd_pool(args) == 0
+    command.assert_called_once_with(args, annotate=cli._annotate_pool_members)
+
+
+def test_inventory_timeout_publishes_error_then_recovers_empty_subscription(monkeypatch):
+    auth = {"status": "ready", "account": "example-user", "message": ""}
+    monkeypatch.setattr(picker_auth, "probe", lambda: auth)
+    monkeypatch.setattr(pool, "build_pool", Mock(side_effect=[
+        subprocess.TimeoutExpired("gh codespace list", 30), ([], object()),
+    ]))
+    monkeypatch.setattr(pool, "picker_payload", lambda *_: {"entries": [], "summary": {}})
+    pauses = iter([None, KeyboardInterrupt])
+
+    def sleep(_):
+        if next(pauses) is KeyboardInterrupt:
+            raise KeyboardInterrupt
+
+    monkeypatch.setattr(picker_pool.time, "sleep", sleep)
+    stream = io.StringIO()
+    monkeypatch.setattr("sys.__stdout__", stream)
+    args = SimpleNamespace(budget=None, stale_after=None, stream=True, subscribe=True, interval=1)
+    assert picker_pool.command(args) == 0
+    summaries = [
+        json.loads(line)["summary"] for line in stream.getvalue().splitlines()
+        if json.loads(line)["type"] == "summary"
+    ]
+    assert [summary["auth_status"] for summary in summaries] == ["error", "ready"]
+    assert "TimeoutExpired" in summaries[0]["banner_text"]

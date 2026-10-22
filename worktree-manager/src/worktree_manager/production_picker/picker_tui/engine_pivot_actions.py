@@ -20,9 +20,6 @@ class PickerScreenPivotActionsMixin:
         reg = self._reg_pivot()
         if reg is None or action not in self._pivot_view_actions():
             return
-        if action.internal or action.form or action.card or not action.progress:
-            self._run_task_action(reg, action, dict(self._task_summary()))
-            return
         rt = self._pivot_runtime(reg)
         scope = self._pivot_scope_key()
         ctx = dict(self._task_summary())
@@ -33,12 +30,15 @@ class PickerScreenPivotActionsMixin:
             rt.ensure(scope)
             self.refresh()
 
-        confirm_then(
-            self.app, action,
-            lambda: self.app.push_screen(
-                PivotProgressScreen(rt, action, ctx, completed=completed),
-            ),
-        )
+        def run():
+            if action.internal or action.form or action.card or not action.progress:
+                self._run_task_action(reg, action, ctx)
+            else:
+                self.app.push_screen(PivotProgressScreen(
+                    rt, action, ctx, completed=completed,
+                ))
+
+        confirm_then(self.app, action, run)
 
     def _cfgmenu_items(self):
         """The ⚙ Configuration menu entries, in display order: built-in

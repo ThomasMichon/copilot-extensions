@@ -582,7 +582,7 @@ class RegisteredPivotRuntime:
                     summary = dict(raw_summary) if isinstance(raw_summary, Mapping) else {
                         k: v for k, v in obj.items() if k != "type"
                     }
-                    if ready:
+                    if ready or done:
                         publish()
                 elif typ == "done":
                     saw_envelope = True
