@@ -39,6 +39,12 @@ class RegistryState:
                         )
                     if sub.delivery_mode == "pull":
                         entry["delivery_mode"] = "pull"
+                        if not key.worktrees_command:
+                            entry["pull_baseline"] = (
+                                {"head_sha": sub.baseline.head_sha,
+                                 "fingerprints": sub.baseline.fingerprints}
+                                if sub.baseline is not None else None
+                            )
                     if key.worktrees_command:
                         entry.update(
                             worktrees_command=key.worktrees_command,
@@ -49,7 +55,10 @@ class RegistryState:
                                 if sub.baseline is not None else None
                             ),
                         )
-                    elif sub.baseline is not None and sub.baseline.head_sha is not None:
+                    elif (
+                        sub.delivery_mode != "pull" and sub.baseline is not None
+                        and sub.baseline.head_sha is not None
+                    ):
                         entry["baseline_head_sha"] = sub.baseline.head_sha
                     if sub.continuous:
                         entry.update(
@@ -72,7 +81,7 @@ class RegistryState:
                     or "registration_id" in entry or "deadline_at" in entry
                     or "continuous" in entry or "queued" in entry
                     or "native_baseline" in entry or "worktrees_command" in entry
-                    or "delivery_mode" in entry
+                    or "delivery_mode" in entry or "pull_baseline" in entry
                 )
                 try:
                     if not isinstance(entry, dict):
@@ -139,7 +148,7 @@ class RegistryState:
                     if "baseline_head_sha" in entry:
                         head = entry["baseline_head_sha"]
                         if (
-                            command or sub.baseline is None
+                            command or mode == "pull" or sub.baseline is None
                             or head is not None and not isinstance(head, str)
                         ):
                             raise ValueError("invalid persisted baseline head")
@@ -148,25 +157,32 @@ class RegistryState:
                         if not isinstance(entry.get("target_id"), str) or not entry["target_id"]:
                             raise ValueError("native registration requires a bound target")
                         sub.target_id = entry["target_id"]
-                    native_baseline = entry.get("native_baseline")
-                    if native_baseline is not None:
+                    if "pull_baseline" in entry and (mode != "pull" or command):
+                        raise ValueError("pull baseline requires pull delivery without a command")
+                    if mode == "pull" and not command and (
+                        "pull_baseline" not in entry
+                        or (baseline is None) != (entry["pull_baseline"] is None)
+                    ):
+                        raise ValueError("missing or inconsistent pull baseline")
+                    extended = entry.get("native_baseline" if command else "pull_baseline")
+                    if extended is not None:
                         if (
-                            not command or sub.baseline is None
-                            or not isinstance(native_baseline, dict)
-                            or set(native_baseline) != {"head_sha", "fingerprints"}
-                            or native_baseline["head_sha"] is not None
-                            and not isinstance(native_baseline["head_sha"], str)
-                            or not isinstance(native_baseline["fingerprints"], dict)
+                            sub.baseline is None
+                            or not isinstance(extended, dict)
+                            or set(extended) != {"head_sha", "fingerprints"}
+                            or extended["head_sha"] is not None
+                            and not isinstance(extended["head_sha"], str)
+                            or not isinstance(extended["fingerprints"], dict)
                             or any(
                                 name not in (
                                     "votes", "approvals", "discussions", "policies", "gates", "readiness",
                                 )
                                 or not isinstance(value, str)
-                                for name, value in native_baseline["fingerprints"].items()
+                                for name, value in extended["fingerprints"].items()
                             )
                         ):
-                            raise ValueError("invalid native baseline")
-                        sub.baseline = Baseline(**baseline, **native_baseline)
+                            raise ValueError("invalid extended watch baseline")
+                        sub.baseline = Baseline(**baseline, **extended)
                     continuous = entry.get("continuous", False)
                     if type(continuous) is not bool or continuous and not (opted_in and command):
                         raise ValueError("invalid continuous registration")

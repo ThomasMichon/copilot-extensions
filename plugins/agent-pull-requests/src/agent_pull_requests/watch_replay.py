@@ -173,6 +173,10 @@ class WatchReplay:
                         or sub.deadline_at != record["deadline_at"]
                     ):
                         raise ValueError
+                    if record["deadline_at"] is not None:
+                        sub.deadline = time.monotonic() + max(
+                            0, record["deadline_at"] - self._clock(),
+                        )
                 registries[key] = registry
             if set(registries) != set(expected):
                 raise ValueError

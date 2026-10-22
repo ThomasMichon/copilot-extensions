@@ -31,6 +31,9 @@ authorized provider result. Different account/repository groups never share a
 registry; consumers within the same group share a single applied observation
 but retain independent registration/event identities. Renewal, provider-result
 validation and effect-side admission remain the serving adapter's obligation.
+Pull baselines persist the head and all supported observation fingerprints;
+staging or restart cannot silently adopt a new votes/approval/thread/policy/gate
+or readiness baseline in place of the previous observation.
 
 The core accepts no callback argv, delivery URL, shell expression or credential.
 This library neither advertises health capabilities nor extends the existing
@@ -52,6 +55,8 @@ A new timestamp or request ID is a new request, not a reconciliation attempt.
 The optional absolute `deadline_at` retains native unlimited-wait support when
 omitted; an already elapsed deadline is retained and produces a timeout on the
 next sweep. Dispatch's own finite-timeout requirement is unchanged.
+Restoration and each staged transaction reconstruct monotonic deadlines from
+the supplied owner's wall clock, not an independent host-clock sample.
 
 Active records, including pending events, are not evicted by receipt retention.
 ACK/cancel replaces the active record with a compact outcome retained for 24

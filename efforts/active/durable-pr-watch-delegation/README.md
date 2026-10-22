@@ -290,6 +290,12 @@ callback an implicit credential store.
   and after ACK, actual callback-scheduler separation, pre/post-replacement
   failures, retention/capacity/batch bounds and foreign/stale identities.
   Fatal Python lint and install-contract checks pass.
+- The first #7786 review identified injected-clock deadline reconstruction and
+  omitted rich fingerprint baselines at the transaction/restore boundary.
+  Rebased restored monotonic deadlines on the supplied clock and persisted a
+  validated pull baseline, with deterministic before/at-deadline checks and
+  all rich transitions exercised across staging and restart. Native callback
+  baselines remain on their existing serialization contract.
 - Documentation impact: updated the PR-plugin README and added the authoritative
   [internal replay contract](../../../plugins/agent-pull-requests/docs/watch-replay.md).
   This realizes part of the PR vision's durable delivery/scope behavior under

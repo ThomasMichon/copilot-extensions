@@ -405,3 +405,76 @@ def test_batch_byte_limit_stops_before_count_limit(owner):
     batch = core.pending(SCOPE)
     assert 1 < len(batch["events"]) < 16
     assert batch["more"] and len(json.dumps(batch).encode()) <= MAX_BATCH_BYTES
+
+
+def test_injected_clock_controls_restored_absolute_deadlines(tmp_path):
+    now = [1000.0]
+    disk = tmp_path / "replay.json"
+    commit = lambda state: _atomic_write_json(disk, state)
+    core = WatchReplay("fleet/service", state=None, commit=commit, clock=lambda: now[0])
+    receipt = register(core, now[0], deadline_at=1600.0)
+    core.sweep_timeouts()
+    assert core.pending(SCOPE)["events"] == []
+    now[0] = 1599.0
+    core = WatchReplay("fleet/service", state=json.loads(disk.read_text()), commit=commit,
+                       clock=lambda: now[0])
+    core.sweep_timeouts()
+    assert core.pending(SCOPE)["events"] == []
+    now[0] = 1600.0
+    core.sweep_timeouts()
+    pending = core.pending(SCOPE)["events"][0]
+    assert pending["timed_out"] and pending["registration_id"] == receipt["registration_id"]
+    assert core.inspect(SCOPE, "request-1", 1000.0)["deadline_at"] == 1600.0
+
+
+@pytest.mark.parametrize("restart", [False, True])
+@pytest.mark.parametrize("transition,field", [
+    ("head_changed", "head"), ("votes_changed", "votes"),
+    ("approvals_changed", "approvals"), ("threads_changed", "discussions"),
+    ("policies_changed", "policies"), ("gates_changed", "gates"),
+    ("ready_for_human", "readiness"), ("review_changed", "votes"),
+])
+def test_rich_baseline_survives_every_transaction_and_restart(owner, restart, transition, field):
+    core, disk, now = owner
+    core.register(SCOPE, "request-1", now[0], number=1, until=(transition,))
+
+    def snapshot(value):
+        return PRSnapshot(
+            head_sha=value if field == "head" else "stable",
+            observation={
+                "fingerprints": {field: value} if field not in ("head", "readiness") else {},
+                "ready_for_human": field == "readiness" and value == "b",
+            },
+        )
+
+    core.observe(SCOPE.account, SCOPE.repo, 1, snapshot("a"))
+    assert core.pending(SCOPE)["events"] == []
+    if restart:
+        core = WatchReplay("fleet/service", state=json.loads(disk.read_text()),
+                           commit=lambda state: _atomic_write_json(disk, state))
+    core.observe(SCOPE.account, SCOPE.repo, 1, snapshot("a"))
+    assert core.pending(SCOPE)["events"] == []
+    core.observe(SCOPE.account, SCOPE.repo, 1, snapshot("b"))
+    assert core.pending(SCOPE)["events"][0]["transitions"] == [transition]
+
+
+@pytest.mark.parametrize("corruption", ["missing", "null", "head", "fingerprints", "field"])
+def test_pull_baseline_corruption_cannot_silently_reset_observation(owner, corruption):
+    core, _, now = owner
+    register(core, now[0])
+    core.observe(SCOPE.account, SCOPE.repo, 1,
+                 PRSnapshot(head_sha="a", observation={"fingerprints": {"votes": "a"}}))
+    state = core.snapshot()
+    entry = state["registries"][0]["subscriptions"][0]
+    if corruption == "missing":
+        del entry["pull_baseline"]
+    elif corruption == "null":
+        entry["pull_baseline"] = None
+    elif corruption == "head":
+        entry["pull_baseline"]["head_sha"] = 1
+    elif corruption == "fingerprints":
+        entry["pull_baseline"]["fingerprints"]["votes"] = []
+    else:
+        entry["pull_baseline"]["fingerprints"]["unknown"] = "value"
+    with pytest.raises(ValueError, match="persisted watch replay"):
+        WatchReplay("fleet/service", state=state, commit=lambda _: pytest.fail("must not write"))
