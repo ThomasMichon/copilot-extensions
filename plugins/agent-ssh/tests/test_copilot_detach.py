@@ -630,6 +630,56 @@ def test_attached_pid_handoff_releases_with_refreshed_timestamp(real_keeper, mon
     assert state is None or seen["hold_id"] not in state["holds"]
 
 
+@pytest.mark.parametrize("retained", ["none", "peer", "refreshed"])
+def test_pending_attached_stop_retires_original_hold_before_immediate_fresh_attach(
+    real_keeper, monkeypatch, retained,
+):
+    from agent_ssh import copilot_delivery
+
+    clock, live = [1000.0], [True]
+    monkeypatch.setattr(shared_keeper_holds.time, "time", lambda: clock[0])
+    monkeypatch.setattr(detach, "_mux_exists", lambda _cfg, mux: mux == "wt-peer" or live[0])
+    monkeypatch.setattr(detach, "build_remote_exec_args", lambda *a, **kw: ["ssh", "synthetic"])
+    monkeypatch.setattr("venue_copilot.refs.deliver_note", lambda *a, **kw: False)
+    monkeypatch.setattr(detach.subprocess, "Popen", lambda *a, **kw: pytest.fail("must not attach"))
+    args = _args(detach=False, copilot_args=[])
+    assert detach.cmd_attached(args) == 75
+    pending = copilot_delivery.read("devbox", "anchor-repo@devbox")
+    original = pending["keeper_hold_id"]
+    if retained == "peer":
+        detach.ensure_keeper("devbox", venue_port=41234, mux="wt-peer", hold_id="peer", probe=lambda mux: True)
+    remote = detach._remote
+    def terminate(_cfg, command, **kwargs):
+        if "tmux kill-session" in command:
+            live[0] = False
+            if retained == "refreshed":
+                clock[0] += 1
+                detach._update_keeper_hold_mux("devbox", original, pending["mux_session"])
+        elif "agent-worktrees embody" in command:
+            live[0] = True
+        return remote(_cfg, command, **kwargs)
+    monkeypatch.setattr(detach, "_remote", terminate)
+    assert detach.cmd_stop(_args(stop=True, detach=False, copilot_args=[])) == 0
+    assert copilot_delivery.read("devbox", "anchor-repo@devbox") is None
+    expected = {"peer"} if retained == "peer" else {original} if retained == "refreshed" else set()
+    state = real_keeper.read("devbox")
+    assert set(state["holds"] if state else {}) == expected
+    monkeypatch.setattr("venue_copilot.refs.deliver_note", lambda *a, **kw: True)
+    class Child:
+        pid = 12345
+        def wait(self):
+            holds = real_keeper.read("devbox")["holds"]
+            assert len(holds) == len(expected) + 1
+            assert original in holds if retained == "refreshed" else original not in holds
+            return 0
+    monkeypatch.setattr(detach.subprocess, "Popen", lambda *a, **kw: Child())
+    assert detach.cmd_attached(args) == 0
+    state = real_keeper.read("devbox")
+    assert set(state["holds"] if state else {}) == expected
+    if retained == "refreshed":
+        assert state["holds"][original]["updated_at"] == 1001.0
+
+
 def test_launcher_hold_survives_preparation_beyond_mux_startup_grace(real_keeper, monkeypatch):
     clock = [1000.0]
     monkeypatch.setattr(shared_keeper_holds.time, "time", lambda: clock[0])

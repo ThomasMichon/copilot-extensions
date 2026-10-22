@@ -107,6 +107,15 @@ def retire_stopped(target: str, plan: dict, pending: dict) -> None:
             store.remove(target)
 
 
+def pending_keeper_hold_id(pending: dict, scope: str) -> str:
+    hold_id = pending.get("keeper_hold_id")
+    if not isinstance(hold_id, str) or (
+        hold_id != scope and not re.fullmatch(r"attached:[1-9][0-9]*:[a-f0-9]{32}", hold_id)
+    ):
+        raise RuntimeError("Pending SSH delivery lacks its original keeper hold identity")
+    return hold_id
+
+
 def recover(adapter, plan, pending) -> tuple[int, dict]:
     from venue_copilot import release_cli_mode
     from venue_copilot.detached import _bridge_path_ok, public_plan
@@ -124,11 +133,7 @@ def recover(adapter, plan, pending) -> tuple[int, dict]:
     mux = pending.get("mux_session")
     if type(port) is not int or not 0 < port < 65536 or not isinstance(mux, str) or not mux:
         raise RuntimeError("Pending SSH delivery lacks its original forward metadata")
-    hold_id = pending.get("keeper_hold_id")
-    if not isinstance(hold_id, str) or (
-        hold_id != plan["scope_id"] and not re.fullmatch(r"attached:[1-9][0-9]*:[a-f0-9]{32}", hold_id)
-    ):
-        raise RuntimeError("Pending SSH delivery lacks its original keeper hold identity")
+    hold_id = pending_keeper_hold_id(pending, plan["scope_id"])
     plan["mux_session"] = mux
     plan["venue"]["mux_session_name"] = mux
     adapter.hold_id = hold_id

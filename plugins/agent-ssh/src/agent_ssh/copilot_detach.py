@@ -713,6 +713,15 @@ def cmd_stop(args: argparse.Namespace) -> int:
                 or pending.get("envelope", {}).get("plugin_context", {}).get("cwd") != plan["workspace"]
             ):
                 raise RuntimeError("Pending SSH delivery does not match the native stop target")
+            pending_hold = None
+            if pending is not None:
+                hold_id = copilot_delivery.pending_keeper_hold_id(pending, plan["scope_id"])
+                with _holds().lock(_state_key(args.target)):
+                    hold = _holds().read_holds(read_keeper_state(args.target)).get(hold_id)
+                    if hold is not None:
+                        if hold["mux"] != pending["mux_session"]:
+                            raise RuntimeError("Pending SSH keeper hold changed before stop")
+                        pending_hold = (hold_id, hold["updated_at"])
             row = live_session_for(plan["scope_id"])
             rc, payload = stop_detached(
                 _SshAdapter(target=args.target, ssh_config=ssh_config, hold_id=plan["scope_id"]),
@@ -721,6 +730,12 @@ def cmd_stop(args: argparse.Namespace) -> int:
             )
             if rc == 0 and pending is not None:
                 try:
+                    if pending_hold is not None:
+                        stop_keeper(
+                            args.target, hold_id=pending_hold[0],
+                            expected_updated_at=pending_hold[1],
+                            probe=lambda mux: _probe_hold(ssh_config, mux),
+                        )
                     copilot_delivery.retire_stopped(args.target, plan, pending)
                 except (OSError, ValueError, RuntimeError) as exc:
                     return _fail(f"Native session stopped but delivery journal retirement failed: {exc}", plan)

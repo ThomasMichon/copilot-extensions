@@ -336,6 +336,24 @@ or a reason to create a daemon.
 
 ## Journal
 
+### 2026-10-22 - Retire the original pending attachment hold on verified stop
+
+- Current-head full review found a retained-hold leak in the stop path:
+  attached unknown admission used a unique hold, but stop released the scope
+  hold and retired the journal. Startup grace could retain the original hold
+  until an immediate fresh launch reused the same mux, keeping it alive after
+  the fresh attachment exited.
+- Stop now validates and captures the pending operation's original mux-backed
+  hold and timestamp before termination. Only after verified stop does it
+  conditionally release that captured hold, then archive and retire the
+  active journal. Unrelated or refreshed holds are not removed.
+- Real hold bookkeeping covers unknown attached admission, verified stop,
+  immediate fresh attachment and exit, with no peer, an unrelated peer, and
+  an interleaved refreshed owner. SSH discovery/recovery coverage passes
+  115 cases with three POSIX-only skips; lint and module caps pass. The prior
+  exact-head hosted Linux unit packet is green after the narrow import
+  readmission, but the new source head still owes review and required CI.
+
 ### 2026-10-22 - Coordinate discovery deadlines and canonical network keys
 
 - Full review's remaining summary concerns were reproducible: discovery

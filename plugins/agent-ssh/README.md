@@ -107,6 +107,11 @@ access, including existing directories. A verified `--stop` archives the exact
 pending operation under its private `retired` directory before removing its
 active entry; failed stop or changed ownership retains the journal. A later
 launch can start fresh without losing the stopped operation's evidence.
+Before terminating a pending launch, stop captures its original hold and
+timestamp. After verified termination it conditionally releases that hold
+before retiring the journal, so startup grace cannot carry an orphan hold
+into an immediate fresh attachment. Unrelated or subsequently refreshed holds
+are preserved; hold-cleanup failure leaves the active journal recoverable.
 Recovery updates and clears compare the complete original entry under the
 journal lock, so a concurrent retry cannot overwrite or erase a newer operation.
 The full expected-repository fence runs before recovery as well as preparation.
