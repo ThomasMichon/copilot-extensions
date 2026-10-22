@@ -29,12 +29,10 @@ const BOT = "copilot-pull-request-reviewer[bot]";
 async function run(options = {}) {
   const writes = [], reads = [], waits = [], failures = [], warnings = [], infos = [];
   let clock = NOW + (options.queueMs ?? 0);
-  let waitCompleted = false;
-  const snapshot = () => waitCompleted ? { ...options, ...options.afterWait } : options;
   const read = name => {
     reads.push(name);
     clock += options.readMs ?? 0;
-    if (snapshot().readError) throw snapshot().readError;
+    if (options.readErrorAt === name) throw new Error(`${name} read failed`);
   };
   const reader = {
     rest: {
@@ -43,23 +41,23 @@ async function run(options = {}) {
         get: async () => {
           read("pr");
           return { data: {
-            state: snapshot().state ?? "open",
-            draft: snapshot().draft ?? false,
-            base: { ref: snapshot().base ?? "dev" },
-            head: { sha: snapshot().head ?? "event-head" },
+            state: options.state ?? "open",
+            draft: options.draft ?? false,
+            base: { ref: options.base ?? "dev" },
+            head: { sha: options.head ?? "event-head" },
           } };
         },
         listRequestedReviewers: async () => {
           read("pending");
-          return { data: { users: snapshot().pendingUsers ??
-            (snapshot().pending ? [{ login: BOT, type: "Bot" }] : []) } };
+          return { data: { users: options.pendingUsers ??
+            (options.pending ? [{ login: BOT, type: "Bot" }] : []) } };
         },
         listReviews: "reviews",
       },
     },
     paginate: async (method) => {
       read(method);
-      return method === "events" ? snapshot().events ?? [] : snapshot().reviews ?? [];
+      return method === "events" ? options.events ?? [] : options.reviews ?? [];
     },
   };
   const constructions = [];
@@ -89,7 +87,6 @@ async function run(options = {}) {
     (callback, ms) => {
       waits.push(ms);
       clock += ms;
-      waitCompleted = true;
       callback();
     },
   );
@@ -101,13 +98,10 @@ function review(overrides = {}) {
     state: "COMMENTED", submitted_at: new Date(NOW).toISOString(), ...overrides };
 }
 
-test("unresolved request gets one sleep, fresh evidence and one nudge, no post-write polling", async () => {
+test("unrequested review gets one snapshot and one immediate nudge, no polling", async () => {
   const result = await run();
-  assert.deepEqual(result.waits, [300_000]);
-  assert.deepEqual(result.reads, [
-    "pr", "pending", "events", "reviews",
-    "pr", "pending", "events", "reviews",
-  ]);
+  assert.deepEqual(result.waits, []);
+  assert.deepEqual(result.reads, ["pr", "pending", "events", "reviews"]);
   assert.deepEqual(result.constructions, [{
     auth: "repository-token", retry: { enabled: false },
   }]);
@@ -122,34 +116,23 @@ test("pending review needs only PR and pending reads and no nudge", async () => 
   assert.equal(result.writes.length, 0);
 });
 
-test("queue time satisfies the event grace without holding a runner", async () => {
-  const result = await run({ queueMs: 900_000 });
-  assert.deepEqual(result.waits, []);
-  assert.equal(result.writes.length, 1);
-});
+for (const queueMs of [0, 120_000, 300_000, 900_000]) {
+  test(`queue time ${queueMs} never adds an initial review delay`, async () => {
+    const result = await run({ queueMs });
+    assert.deepEqual(result.waits, []);
+    assert.deepEqual(result.reads, ["pr", "pending", "events", "reviews"]);
+    assert.equal(result.writes.length, 1);
+  });
+}
 
-test("only the unelapsed event grace holds the runner", async () => {
-  const result = await run({ queueMs: 120_000 });
-  assert.deepEqual(result.waits, [180_000]);
-  assert.equal(result.writes.length, 1);
-});
-
-test("the exact grace boundary needs no additional delay", async () => {
-  assert.deepEqual((await run({ queueMs: 300_000 })).waits, []);
-});
-
-test("initial evidence read time counts toward the event grace", async () => {
-  const result = await run({ readMs: 25_000 });
-  assert.deepEqual(result.waits, [200_000]);
-  assert.equal(result.writes.length, 1);
-});
-
-test("slow initial evidence needs no second snapshot after grace already elapsed", async () => {
-  const result = await run({ readMs: 75_000 });
-  assert.deepEqual(result.waits, []);
-  assert.deepEqual(result.reads, ["pr", "pending", "events", "reviews"]);
-  assert.equal(result.writes.length, 1);
-});
+for (const readMs of [25_000, 75_000]) {
+  test(`evidence read time ${readMs} never adds a delay or second snapshot`, async () => {
+    const result = await run({ readMs });
+    assert.deepEqual(result.waits, []);
+    assert.deepEqual(result.reads, ["pr", "pending", "events", "reviews"]);
+    assert.equal(result.writes.length, 1);
+  });
+}
 
 test("invalid or future PR event time fails before any write", async () => {
   for (const updatedAt of ["invalid", new Date(NOW + 1).toISOString()]) {
@@ -184,31 +167,16 @@ for (const options of [{ state: "closed" }, { draft: true }, { base: "main" }]) 
   });
 }
 
-test("newer push leaves full grace period to latest queued run", async () => {
+test("newer push leaves the review request to latest queued run", async () => {
   const result = await run({ head: "newer-head" });
   assert.equal(result.writes.length, 0);
   assert.deepEqual(result.reads, ["pr"]);
   assert.deepEqual(result.waits, []);
 });
 
-for (const afterWait of [
-  { state: "closed" }, { draft: true }, { base: "main" },
-  { head: "newer-head" }, { pending: true },
-  { reviews: [review({ submitted_at: new Date(NOW + 240_000).toISOString() })] },
-]) {
-  test(`fresh post-wait state ${JSON.stringify(afterWait)} prevents a nudge`, async () => {
-    const result = await run({ afterWait });
-    assert.deepEqual(result.waits, [300_000]);
-    assert.equal(result.writes.length, 0);
-  });
-}
-
-for (const options of [
-  { readError: new Error("initial read failed") },
-  { afterWait: { readError: new Error("post-wait read failed") } },
-]) {
-  test(`failed eligibility read is not a request authorization`, async () => {
-    await assert.rejects(run(options), /read failed/);
+for (const readErrorAt of ["pr", "pending", "events", "reviews"]) {
+  test(`failed ${readErrorAt} read is not a request authorization`, async () => {
+    await assert.rejects(run({ readErrorAt }), /read failed/);
   });
 }
 
@@ -237,20 +205,29 @@ test("post-retarget review suppresses new nudge", async () => {
 
 test("recent native/manual request suppresses duplicate nudge", async () => {
   const result = await run({
-    afterWait: {
-      events: [{ event: "review_requested", requested_reviewer: { login: BOT, type: "Bot" },
-        created_at: new Date(NOW + 240_000).toISOString() }],
-    },
+    events: [{ event: "review_requested", requested_reviewer: { login: BOT, type: "Bot" },
+      created_at: new Date(NOW - 60_000).toISOString() }],
   });
+  assert.deepEqual(result.waits, []);
   assert.equal(result.writes.length, 0);
 });
 
-test("five-minute request boundary allows nudge when still no review", async () => {
+test("five-minute-old request allows nudge when still no review", async () => {
   const result = await run({
     events: [{ event: "review_requested", requested_reviewer: { login: BOT, type: "Bot" },
-      created_at: new Date(NOW).toISOString() }],
+      created_at: new Date(NOW - 300_000).toISOString() }],
   });
+  assert.deepEqual(result.waits, []);
   assert.equal(result.writes.length, 1);
+});
+
+test("request just inside its own grace still suppresses a nudge", async () => {
+  const result = await run({
+    events: [{ event: "review_requested", requested_reviewer: { login: BOT, type: "Bot" },
+      created_at: new Date(NOW - 299_999).toISOString() }],
+  });
+  assert.deepEqual(result.waits, []);
+  assert.equal(result.writes.length, 0);
 });
 
 test("Copilot Bot alias suppresses pending, recent-request and completed-review nudges", async () => {
@@ -258,10 +235,10 @@ test("Copilot Bot alias suppresses pending, recent-request and completed-review 
   const pending = await run({ pendingUsers: [user] });
   assert.equal(pending.writes.length, 0);
   assert.deepEqual(pending.reads, ["pr", "pending"]);
-  assert.equal((await run({ afterWait: { events: [{
+  assert.equal((await run({ events: [{
     event: "review_requested", requested_reviewer: user,
-    created_at: new Date(NOW + 240_000).toISOString(),
-  }] } })).writes.length, 0);
+    created_at: new Date(NOW - 60_000).toISOString(),
+  }] })).writes.length, 0);
   assert.equal((await run({ reviews: [review({ user })] })).writes.length, 0);
 });
 
@@ -274,7 +251,7 @@ test("human and unrelated Bot identities cannot suppress a review request", asyn
   ]) {
     assert.equal((await run({ pendingUsers: [user], reviews: [review({ user })],
       events: [{ event: "review_requested", requested_reviewer: user,
-        created_at: new Date(NOW + 240_000).toISOString() }],
+        created_at: new Date(NOW - 60_000).toISOString() }],
     })).writes.length, 1);
   }
 });
@@ -349,12 +326,8 @@ test("pinned github-script bundle constructs independently authenticated clients
       "Date", "setTimeout", ${JSON.stringify(script)});
     await run(require, writer, context, core, { env: { REVIEW_READ_TOKEN: "repository-token" } },
       { now: () => ${NOW + 300_000}, parse: Date.parse },
-      (callback, ms) => { assert.equal(ms, 300_000); callback(); });
+      () => { throw new Error("Immediate review request must not sleep"); });
     assert.deepEqual(calls, [
-      ["GET", "/repos/owner/repo/pulls/7"],
-      ["GET", "/repos/owner/repo/pulls/7/requested_reviewers"],
-      ["GET", "/repos/owner/repo/issues/7/timeline"],
-      ["GET", "/repos/owner/repo/pulls/7/reviews"],
       ["GET", "/repos/owner/repo/pulls/7"],
       ["GET", "/repos/owner/repo/pulls/7/requested_reviewers"],
       ["GET", "/repos/owner/repo/issues/7/timeline"],

@@ -418,6 +418,11 @@ authorizes critical main-path acceptance or a bounded administrative change.
   source closure, production-call coverage and the existing packet budget.
   #7874 and actual hosted execution prove all 778 admitted cases in 15.166
   seconds. This bounded Linux mapping is not full-census or Windows qualification.
+- [x] Map 33 original local plugin-resolution cases through 29 exact original
+  functions and unchanged parameterization, retaining the subprocess regression
+  outside the packet and preserving source closure, call coverage and budget.
+  #7881 and actual hosted execution prove all 811 admitted cases in 15.526
+  seconds. Full-census, platform and every-release acceptance remain separate.
 - [x] Verify a covering promotion activates the dev-owned baseline producer on
   default main; record authorized runtime adoption separately.
   #6631 and hosted job `115706505844` prove activation of #6438; this

@@ -200,8 +200,7 @@ jobs:
             });
             const pull_number = context.payload.pull_request.number;
             const request = { ...context.repo, pull_number };
-            const GRACE_MS = 5 * 60_000;
-            // Queue time already gives native/manual requests their grace.
+            const REQUEST_GRACE_MS = 5 * 60_000;
             const eventAt = Date.parse(context.payload.pull_request.updated_at);
             const startedAt = Date.now();
             if (!Number.isFinite(eventAt) || eventAt > startedAt) {
@@ -261,18 +260,10 @@ jobs:
               }
               return { lastRequestAt };
             };
-            // Settled requests need no grace; unresolved requests get one wait
-            // and a fresh snapshot, never a write based on pre-wait evidence.
-            let eligibility = await readEligibility();
+            const eligibility = await readEligibility();
             if (!eligibility) return;
-            const graceRemaining = Math.max(0, GRACE_MS - (Date.now() - eventAt));
-            if (graceRemaining > 0) {
-              await new Promise(resolve => setTimeout(resolve, graceRemaining));
-              eligibility = await readEligibility();
-              if (!eligibility) return;
-            }
             if (eligibility.lastRequestAt &&
-                Date.now() - eligibility.lastRequestAt < GRACE_MS) {
+                Date.now() - eligibility.lastRequestAt < REQUEST_GRACE_MS) {
               core.info("A Copilot request is within its five-minute grace period; no nudge.");
               return;
             }
