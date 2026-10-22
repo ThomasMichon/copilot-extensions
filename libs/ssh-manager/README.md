@@ -131,6 +131,9 @@ status; it does not install a replacement during another attempt's cleanup.
 Stored readiness is invalidated before an exited transport is replaced.
 `stop()` cancels an in-flight owner operation and waits for its owned cleanup;
 an interrupted attempt remains unknown, not a fabricated successful release.
+Concurrent stops join the same shutdown completion rather than cancelling
+another shutdown's caller. Cancellation is reserved for establishment or
+reconnect work, and `stop_nowait()` cooperates with an already-running shutdown.
 For generation-bound consumer cleanup, use `await stop_attempt(attempt_id)`:
 the match and local retirement share that lifecycle boundary. A stale attempt
 returns `None` without stopping a reconnected successor. A matching attempt

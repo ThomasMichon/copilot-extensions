@@ -239,3 +239,13 @@ redacted cause codes rather than raw credential-shaped diagnostics.
   cleanup regressions. The native fixture now enables `SO_REUSEADDR` only on
   POSIX for TIME_WAIT reconnects; Windows retains its occupied-listener
   semantics. Native Linux execution is still not claimed from Windows tests.
+- A later review identified concurrent shutdown callers cancelling each other.
+  They now share one shutdown-completion future, including attempt-specific stop;
+  a repeated async or nowait shutdown joins/cooperates rather than cancelling the
+  first teardown caller or manufacturing uncertainty after successful cleanup.
+  Both shutdown forms followed by restart are covered.
+- Current focused contained validation passes72 cases with the same one
+  Linux-only skip. The existing local Linux container engine is unavailable;
+  it was not started or repaired to manufacture platform proof. Source/test and
+  canonical containment bytes were verified unchanged through the index-only
+  rebase, preserving independent effort rows. Fresh-head review remains required.
