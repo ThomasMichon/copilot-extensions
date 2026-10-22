@@ -119,7 +119,7 @@ def request(root, fixture, area):
 
 @pytest.mark.timeout(110)
 @pytest.mark.parametrize("transition", [
-    "construct", "activate-runtime", "register-commands", "unregister-commands",
+    "construct", "activate-runtime", "register-commands", "unregister-commands", "deactivate-runtime",
 ])
 def test_actual_installed_console_client_state_transitions(
     tmp_path, primitive, signed_wheel, transition,
@@ -133,7 +133,7 @@ def test_actual_installed_console_client_state_transitions(
     fixture["proof"] = {**fixture["proof"], **signed["proofs"][0]}
     fixture["policy"]["keys"][0]["public_key"] = signed["public_key"]
     client_home = tmp_path
-    if transition in ("register-commands", "unregister-commands"):
+    if transition in ("register-commands", "unregister-commands", "deactivate-runtime"):
         client_home = tmp_path / "client \u00e9\u4e2d"
         client_home.mkdir(mode=0o700)
     root = root_at(client_home)
@@ -185,7 +185,7 @@ def test_actual_installed_console_client_state_transitions(
         assert activated["active"] and activated["health"]["status"] == "installed"
         assert not activated["frontdoor_registered"] and not activated["live_readiness_verified"]
         assert primitive.current_version(root / construction.NAMESPACE) == reports[2]["candidate"]
-        if transition in ("register-commands", "unregister-commands"):
+        if transition in ("register-commands", "unregister-commands", "deactivate-runtime"):
             directory = tmp_path / "registered commands \u00e9\u4e2d"
             directory.mkdir(mode=0o700)
             floor = database_bytes(root)
@@ -200,7 +200,7 @@ def test_actual_installed_console_client_state_transitions(
             assert not registered["live_readiness_verified"]
             assert registered["candidate"] == reports[2]["candidate"]
             assert database_bytes(root) == floor
-            if transition == "unregister-commands":
+            if transition in ("unregister-commands", "deactivate-runtime"):
                 namespace = root / construction.NAMESPACE
                 before = {name: (namespace / name).read_bytes() for name in (
                     "current-version", "last-known-good",
@@ -218,6 +218,19 @@ def test_actual_installed_console_client_state_transitions(
                     assert not any(Path(command).exists() for command in registered["commands"])
                 assert database_bytes(root) == floor
                 assert all((namespace / name).read_bytes() == content for name, content in before.items())
+                if transition == "deactivate-runtime":
+                    runtime = namespace / "versions" / reports[2]["candidate"]
+                    for reused in (False, True):
+                        result = subprocess.run(
+                            [str(console), "client-state", "deactivate-runtime", *base],
+                            cwd=tmp_path, capture_output=True, text=True, timeout=30, **FLAGS,
+                        )
+                        assert result.returncode == 0, result.stderr
+                        removed = json.loads(result.stdout)
+                        assert removed["selectors_absent"] and removed["reused"] == reused
+                        assert not removed["runtime_removed"] and not removed["installation_retired"]
+                        assert not any((namespace / name).exists() for name in before)
+                        assert runtime.is_dir() and database_bytes(root) == floor
 
 
 @pytest.mark.timeout(110)

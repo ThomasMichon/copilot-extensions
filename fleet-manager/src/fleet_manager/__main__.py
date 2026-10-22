@@ -48,7 +48,7 @@ def main(argv=None):
     state_commands = admission.add_subparsers(dest="state_command", required=True)
     for operation in (
         "initialize", "inspect", "admit", "construct", "activate-runtime",
-        "register-commands", "unregister-commands",
+        "register-commands", "unregister-commands", "deactivate-runtime",
     ):
         state = state_commands.add_parser(operation)
         state.add_argument("--root", type=Path, required=True)
@@ -110,6 +110,10 @@ def main(argv=None):
                 result = unregister_client_frontdoor(
                     args.root, identity, command_directory=args.command_directory,
                 )
+            elif args.state_command == "deactivate-runtime":
+                from .client_deactivation import deactivate_client_runtime
+
+                result = deactivate_client_runtime(args.root, identity)
             else:
                 recover_client_admission(args.root, identity)
                 if (

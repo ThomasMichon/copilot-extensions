@@ -151,7 +151,9 @@ an already-running client or release its runtime retention lease. No PATH or
 profile is changed, no service is contacted and the installation identity is
 not retired.
 
-Runtime removal, retained-good rollback, torn-producer-journal recovery,
+After command withdrawal, [owned selector withdrawal](client-runtime-activation.md#owned-selector-withdrawal)
+is a separate explicit transition that still preserves all runtime bytes.
+Runtime deletion, retained-good rollback, torn-producer-journal recovery,
 identity retirement and reinstall fencing, complete lifecycle orchestration and
 controller/node assembly remain separate obligations. Do not erase admission
 or retained evidence while candidates or commands can still be replayed.

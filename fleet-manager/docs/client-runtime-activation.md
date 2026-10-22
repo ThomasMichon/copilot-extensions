@@ -87,9 +87,62 @@ target digest, actual runtime fingerprint, local health, `reused` and
 remain `false`; this report is not a retained lease or authorization token.
 
 [Attributable frontdoor registration](client-frontdoor.md) is a separate explicit
-transition; activation does not register or update commands. Removal, retained-good rollback policy,
+transition; activation does not register or update commands. Runtime deletion, retained-good rollback policy,
 identity retirement/reinstall fencing and the complete managed installer remain
 separate obligations. In particular, do not delete admission or publication
 evidence while a retained candidate or registration could be replayed.
 Controller/node assembly, release promotion and authorized rollout are not
 performed by this command.
+
+## Owned selector withdrawal
+
+After explicitly unregistering commands, an independently installed owner can
+withdraw the installation's runtime selectors:
+
+```text
+fleet-manager client-state deactivate-runtime --root <private-installation> --identity identity.json
+```
+
+The Python entry point is
+`fleet_manager.client_deactivation.deactivate_client_runtime(root, identity)`.
+It needs the existing initialized installation and runtime-namespace ownership,
+not a selected release, artifact source, current signing policy, compatibility
+input or optional dependency. It never executes a candidate. A revoked or
+expired release therefore cannot grant new execution through this operation,
+but also does not prevent withdrawing an already-owned selector.
+
+Any registered, pending or unsettled-removal command record blocks deactivation.
+Use [owned command withdrawal](client-frontdoor.md#owned-withdrawal-and-retry)
+first. Deactivation acquires installation ownership, a SQLite transaction and
+the canonical selector target-writer lease **once**; both selectors share this
+non-reentrant lease. Every present selector must match complete canonical
+producer-created physical proof, including original and new generations in a
+pending upgrade. Same-byte foreign replacements, unattributed selectors,
+foreign `current` links, corrupt ownership and torn producer receipts refuse
+before removal. Missing already-withdrawn selectors are allowed.
+
+Before the first selector effect, `client-activation-removing.json` durably
+snapshots both active and pending activation references. Its
+`client-deactivations/<id>/` workspace retains the intent, an **empty-backup**
+canonical removal context and removal outcomes. The native recovery primitive
+withdraws only the proved selectors; it never restores saved selectors or
+executes an older runtime. Original activation history and backups remain.
+
+Activation and command registration refuse while selector removal is unsettled.
+After interruption, repeat `deactivate-runtime`: a fresh owner rereads the
+retained proofs, tolerates already-absent objects and partially cleared
+acknowledgements, and preserves any foreign replacement. Only after both
+selectors are absent and directory metadata is synced are active/pending
+references and the removal marker cleared. A repeated completed deactivation
+checks absence and reports a no-op. Torn or corrupt producer evidence remains
+a refusal, not a heuristic repair.
+
+The `fleet-manager.client-runtime-deactivation`, version `1`, report includes
+`active: false`, `selectors_absent: true`, the unchanged admitted receipt,
+`reused` and `mutations_performed`. `runtime_removed`, `installation_retired`,
+`frontdoor_registered`, `path_modified` and `live_readiness_verified` remain
+`false`. All completed/failed runtimes, retained-good bytes, configuration,
+user data, admission state and historical proofs remain intact. This does not
+stop an already-running client or release its retention custody. An explicit
+reactivation still owes fresh admission, policy, compatibility, bytes and health
+checks; deactivation is not a rollback authorization or whole-install uninstall.

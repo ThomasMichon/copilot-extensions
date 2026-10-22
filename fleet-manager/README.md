@@ -127,6 +127,12 @@ explicit private directory. Its separate `unregister-commands` transition
 withdraws physically proved registered/pending commands with owned interruption
 retry; it does not restore an older executable or remove runtimes. Neither
 operation edits PATH/profiles or retires an installation.
+After command withdrawal, the separate `deactivate-runtime` transition
+[withdraws owned runtime selectors](docs/client-runtime-activation.md#owned-selector-withdrawal),
+including a proved pending activation. Durable interruption retry preserves
+foreign replacements, all candidate/rollback bytes, historical proofs and the
+admitted floor. It does not delete runtimes, stop running clients or retire an
+installation.
 
 The [current-observation storage API](docs/current-observations.md) provides
 separate explicit SQLite current slots, origin-generation comparison, atomic

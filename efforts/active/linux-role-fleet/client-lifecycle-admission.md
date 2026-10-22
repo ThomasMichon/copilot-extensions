@@ -14,10 +14,15 @@ bounded forward retry merged in #7847. Its actual
 contract is documented in [runtime activation](../../../fleet-manager/docs/client-runtime-activation.md).
 Explicit [frontdoor registration](../../../fleet-manager/docs/client-frontdoor.md)
 merged in #7866 using the shared publication and retained-execution primitives.
-The next source slice withdraws physically proved registered/pending commands,
-with durable owned retry and no runtime rollback. Torn-producer-journal recovery,
-runtime removal and the complete managed lifecycle remain serial obligations,
-not delivered behavior or permission for live activation.
+Physically proved registered/pending command withdrawal, with durable owned
+retry and no runtime rollback, merged in #7882. Torn-producer-journal recovery,
+completed-runtime removal and the complete managed lifecycle remain
+serial obligations, not delivered behavior or permission for live activation.
+The next serial selector-withdrawal candidate is documented in
+[runtime activation](../../../fleet-manager/docs/client-runtime-activation.md#owned-selector-withdrawal).
+It requires settled command unregistration, withdraws only proved selectors,
+and retains all runtime/rollback bytes, admission and historical evidence.
+It is not completed-runtime deletion or installation retirement.
 
 ## Scope and ownership
 

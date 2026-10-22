@@ -1,0 +1,9 @@
+{
+  "comment": "Add physically owned client selector withdrawal and interruption retry without deleting runtime or admission state",
+  "changes": [
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    }
+  ]
+}

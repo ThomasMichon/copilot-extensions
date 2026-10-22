@@ -170,9 +170,13 @@ Implementation sequencing below is **agent-recommended**:
   durable admission is merged in #7459; construction and compatibility/local
   health are merged in #7804; physically attributed local runtime-selector
   activation and bounded forward retry are merged in #7847; explicit physically
-  attributed client command registration is merged in #7866. Pending-command
-  recovery, owned removal, retained-good recovery and a managed installer
-  remain open. None of these local prerequisites authorizes a live rollout.
+  attributed client command registration is merged in #7866; physically proved
+  registered/pending command withdrawal with durable retry is merged in #7882.
+  The next serial candidate adds owned selector withdrawal after settled command
+  unregistration; it preserves every runtime and the admission floor.
+  Torn-producer-journal recovery, completed-runtime removal, retained-good recovery
+  and a managed installer remain open. None of these local prerequisites
+  authorizes a live rollout.
   [Installation repair conductor](installation-repair-conductor.md) is the
   agent-recommended #6464 setup prerequisite proposal. Its ordinary-owner
   source implementation is merged in #6944; fresh-environment/native acceptance
@@ -981,3 +985,62 @@ These bounded Windows selections are not a new full Windows-suite claim.
   rollback, identity retirement/reinstall fencing, the full managed installer
   and broader fleet Plan/Validation obligations remain open. Source qualification
   and a future merge do not authorize promotion, rollout or live activation.
+
+### 2026-10-22 - Owned client command withdrawal merged
+- #7882 merged into `dev` at `2026-10-22T13:29:53Z`, commit
+  `7d42f525c5f99f09f4a1d4eb9660faf24e5e31ff`. Current-head Copilot review
+  `5614965766` approved `f3c6c08b8477babb7a5ca0297f4218cf1b38236c`
+  with no open issues or inline findings. Required CI, source attribution
+  and the repository-authorized managed completion path passed.
+- This closes only physically attributed command withdrawal and retry, including
+  pending attempts with complete durable producer proofs. It does not repair
+  torn producer journals, withdraw runtime selectors, remove retained runtimes,
+  retire installation identity or implement the full installer. No live machine,
+  service, enrollment, credential, PATH/profile or updater was changed.
+  Promotion and authorized installed rollout remain unobserved.
+- Re-read the canonical Plan/Validation Plan after merging. The parent campaign
+  remains Active; client runtime removal and the remaining lifecycle gates are
+  the next serial work, with retained-good compatibility/rollback still separate.
+  Preserve the accepted floor and retained evidence through that work. Broader
+  controller/node assembly, useful services, persistence and continuity remain
+  unresolved; no phase or effort completion is claimed.
+
+### 2026-10-22 - Owned selector withdrawal qualified for review
+- The next serial source slice adds explicit `deactivate-runtime`. It refuses
+  registered/pending/unsettled command state, verifies the installation owner
+  and complete native selector producer proofs, and uses an empty-backup
+  native removal context. Present foreign replacements and corrupt/torn
+  producer receipts refuse before selector effects.
+- A durable intent snapshots active and pending activation references before
+  removal. It blocks activation/registration until a fresh owner settles both
+  absent selectors and clears the acknowledgements. Mixed pending upgrades,
+  first activation without previous ownership, partial metadata settlement,
+  abrupt owner death and foreign replacement after interruption are covered.
+  It does not restore older selectors, stop a client or release live retention.
+- Unit/fault suites pass natively on Windows and in isolated Linux source/SDK
+  environments. A distinct installed process retries after abrupt death; an
+  independently installed dependency-free owner performs withdrawal. Real
+  installed Unicode-path console flows cover construction, activation, command
+  registration/unregistration, selector deactivation and exact no-op on both
+  platforms. Wheel/RECORD and repository-removed sdist rebuild controls pass.
+- The first implementation nested the selector target lease inside the same
+  non-reentrant publication lease. The bounded test caught the contention;
+  withdrawal now takes the canonical grouped target lease once. Test files run
+  in separate bounded portfolios rather than enlarging aggregate timeouts or
+  bypassing qualification-environment ownership.
+- Validation tiers: real local installed-consumer and fresh isolated source/SDK
+  checks were exercised. A full fresh OS and live fleet/controller venue were
+  not exercised: this is a local selector transition, not host bootstrap,
+  runtime deletion, fleet enrollment or deployment authority. Full hosting
+  extras and live readiness are not claimed.
+- Documentation-impact review: the standalone owner README, exact activation/
+  deactivation contract, frontdoor sequencing and this lifecycle plan are
+  updated. The suite architecture already delegates product detail to that
+  owner; no new plugin, service or generic installer mechanism is introduced.
+- The campaign remains Active. Completed-runtime removal still owes exclusive
+  construction/retention/reference/liveness fencing and durable partial-delete
+  recovery; it must not clear completion evidence to call failed-candidate
+  cleanup or raw-GC an installation. Retained-good rollback policy, identity
+  retirement/reinstall fencing, full installer, useful services and all broader
+  unresolved Plan/Validation items remain open. Merge, promotion and authorized
+  rollout remain distinct.

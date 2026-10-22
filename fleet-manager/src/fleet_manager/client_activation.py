@@ -15,6 +15,7 @@ from .planning import PlanError, digest, record
 
 ACTIVE = "client-active.json"
 PENDING = "client-activation-pending.json"
+REMOVING = "client-activation-removing.json"
 HISTORY = "client-activations"
 SELECTORS = ("current-version", "last-known-good")
 FIELDS = {"identity", "candidate", "runtime_sha256", "target_digest", "publication"}
@@ -46,6 +47,7 @@ def _state(value, identity):
 
 
 def _active(namespace, identity, publication):
+    _not_removing(namespace)
     if os.path.lexists(namespace / PENDING):
         construction._read(namespace / PENDING)
         raise PlanError("client selector outcome is unknown; owned publication recovery is required")
@@ -64,6 +66,11 @@ def _active(namespace, identity, publication):
         raise PlanError("client active receipt differs from its publication intent")
     _check_publication(namespace, active, publication)
     return active
+
+
+def _not_removing(namespace):
+    if os.path.lexists(namespace / REMOVING):
+        raise PlanError("client selector removal is unsettled; owned deactivate retry is required")
 
 
 def _proofs(namespace, active, publication):
@@ -202,6 +209,7 @@ def activate_client_runtime(root, identity, selection, staged, *,
                 publication = primitive._runtime_component("versioned_runtime_publication")
                 # The canonical selector lease spans validation, health and publication.
                 with primitive._publication_lease(namespace):
+                    _not_removing(namespace)
                     pending = None
                     if os.path.lexists(namespace / PENDING):
                         publishing = True
