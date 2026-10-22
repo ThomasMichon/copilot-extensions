@@ -1,6 +1,18 @@
 {
   "profile": "copilot-extensions.promotion-units/v1",
   "nodes": [
+    "tools/promotion_unit_tests/test_windows_lease_acl.py::test_exact_generated_legacy_acl_is_recognized[file]",
+    "tools/promotion_unit_tests/test_windows_lease_acl.py::test_exact_generated_legacy_acl_is_recognized[directory]",
+    "tools/promotion_unit_tests/test_windows_lease_acl.py::test_foreign_public_partial_or_edited_acl_is_not_repair_authority[foreign-owner]",
+    "tools/promotion_unit_tests/test_windows_lease_acl.py::test_foreign_public_partial_or_edited_acl_is_not_repair_authority[public-write]",
+    "tools/promotion_unit_tests/test_windows_lease_acl.py::test_foreign_public_partial_or_edited_acl_is_not_repair_authority[missing-entry]",
+    "tools/promotion_unit_tests/test_windows_lease_acl.py::test_foreign_public_partial_or_edited_acl_is_not_repair_authority[extra-entry]",
+    "tools/promotion_unit_tests/test_windows_lease_acl.py::test_foreign_public_partial_or_edited_acl_is_not_repair_authority[changed-rights]",
+    "tools/promotion_unit_tests/test_windows_lease_acl.py::test_foreign_public_partial_or_edited_acl_is_not_repair_authority[deny-entry]",
+    "tools/promotion_unit_tests/test_windows_lease_acl.py::test_foreign_public_partial_or_edited_acl_is_not_repair_authority[unprotected-directory]",
+    "tools/promotion_unit_tests/test_windows_lease_acl.py::test_foreign_public_partial_or_edited_acl_is_not_repair_authority[wrong-inheritance]",
+    "tools/promotion_unit_tests/test_windows_lease_acl.py::test_foreign_public_partial_or_edited_acl_is_not_repair_authority[trailing-data]",
+    "tools/promotion_unit_tests/test_windows_lease_acl.py::test_foreign_public_partial_or_edited_acl_is_not_repair_authority[empty]",
     "tools/promotion_unit_tests/test_contract.py::test_positive_unit_manifest_and_complete_observations",
     "tools/promotion_unit_tests/test_contract.py::test_duplicate_json_fields_cannot_hide_unit_selection",
     "tools/promotion_unit_tests/test_contract.py::test_unit_source_inventory_cannot_have_case_aliases",
@@ -427,6 +439,8 @@
   "sources": {
     "libs/lazy-cli-dispatch/src/lazy_cli_dispatch/__init__.py": "3730c088eec04121051bdc6780ad833f5ca32d8142e1593d25e78f4028bf76d6",
     "libs/lazy-cli-dispatch/tests/test_dispatch.py": "d8e724cd6ff798e1c4b47b02e94953eb2e21480e1308c9fa63e7321f066d5416",
+    "libs/versioned-runtime/versioned_runtime_leases.py": "eacf22e8ab14f9fb1d6ec14164e14a57f324d037d9933fdd91c164012cb4156a",
+    "tools/promotion_unit_tests/test_windows_lease_acl.py": "492028d8627d012268682cdcfe90b451bd110e74bc996707a3b7889466970e89",
     "plugins/agent-bridge/src/agent_bridge/live_turn_state.py": "7cc256ae9df554f76101c4519c38da6f000408e507ef1edfa6fc971a5b5d013f",
     "plugins/agent-worktrees/scripts/anchor_shell_parser.py": "c6a423ba34a9b4922dc57d2394f7708510cb31c290e41e18172e2c3187939c16",
     "plugins/agent-worktrees/scripts/anchor_write_guard.py": "2a30cb671d5eabc13edba7f1eb682635847a65915f38a0923b6f946736240766",
@@ -468,6 +482,7 @@
   },
   "coverage_targets": [
     "libs/lazy-cli-dispatch/src/lazy_cli_dispatch/__init__.py",
+    "libs/versioned-runtime/versioned_runtime_leases.py",
     "plugins/agent-bridge/src/agent_bridge/live_turn_state.py",
     "plugins/agent-worktrees/scripts/anchor_shell_parser.py",
     "plugins/agent-worktrees/scripts/anchor_write_guard.py",

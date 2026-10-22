@@ -162,6 +162,24 @@ identity, but makes no health or content claim. Multiple reuse owners coexist.
 Normal exit, exceptions, cancellation, and process death release the descriptor;
 surviving `.retention-leases` files are never removed and do not prove ownership.
 
+### Windows user-space permissions
+
+Construction, retention and publication lease directories and files explicitly
+name the process account's user SID as their owner and grant that user access,
+alongside SYSTEM and Administrators. They never depend on an elevated token's
+default owner or an Owner Rights-only DACL: an elevated SSH installation must
+remain usable by the same account's ordinary, non-administrator session.
+
+For an existing user-owned, non-public runtime root, the canonical helper can
+repair only the exact administrator-owned private lease ACL previously generated
+by `mkdir(0700)`. It validates ordinary, single-link lock entries, retains an
+original security-descriptor/identity audit before changing permissions, and
+changes ACLs in place without replacing files or releasing their kernel locks.
+Already repaired files permit a caught partial repair to resume. Foreign,
+public, linked or unknown entries are not migration authority. A caller lacking
+the rights to repair the old administrator-owned state receives the real access
+error; the library never elevates itself.
+
 A builder acquires retention **before** releasing construction, for example:
 
 ```python
