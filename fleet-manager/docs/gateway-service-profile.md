@@ -158,6 +158,47 @@ reporting the empty transmitted body's length as the corresponding asset size.
 | Per-request queue / unacknowledged chunks | 8 / 1 |
 | Request deadline / backend connect / backend idle read | 60s / 5s / 15s |
 
+### Opt-in caller-aware handler
+
+An SDK embedding can select `handler=HandlerBinding(fleet, gateway, handle)`
+instead of `backend_origin`. These choices are mutually exclusive. The trusted
+async handler receives an immutable `ServiceRequest` with the checked method,
+prefix-stripped target, allowed header tuples, bounded body and `CallerContext`.
+It returns a `ServiceResponse(status, headers=(), body=b"")`. Handler responses
+are buffered and limited to 32 KiB, then use the existing chunk/ACK path; this
+does not change the HTTP backend's 8 MiB response or streaming behavior.
+
+This mode explicitly negotiates `caller-context-v1` through the existing
+service-admit body and attachment confirmation. Legacy connectors send and
+receive the original exact frame shape. An older Gateway or unrecognized
+profile refuses; there is no silent downgrade to an identity-less backend.
+
+Only the Gateway constructs context, from its currently retained caller grant:
+`fleet`, `gateway`, `slot`, authenticated `principal`, and `expires_at` bounded by
+both caller-token and issuer-trust expiry. The context crosses the verified TLS
+service channel, not an HTTP identity header or client-selected URL. The
+connector checks exact fields, its deployment-selected fleet/Gateway/slot and
+expiry before invoking the handler. Client headers, body and query remain
+untrusted application input, never identity. No caller token, proof, cookie,
+key reference or credential is forwarded.
+
+Constructing a context object does not authenticate it or create an offline
+permit. There is no public HTTP handler endpoint to trust a serialized copy.
+The service embedding must map the admitted principal to its own configured
+account/resource permissions and persistent namespace; context does not grant
+forge credentials, cross-account access or administration. Handlers must be
+asynchronous and cooperate with cancellation and the existing deadline.
+Withdrawal, expiry, disconnect and channel replacement cancel their tasks;
+the Gateway also rechecks authority before response emission. This does not
+atomically fence an external effect already performed by a handler.
+Handler programming failures produce value-free diagnostics and explicit
+backend errors, never a success-shaped empty response.
+
+The `service-gateway` and `dev` extras support `aiohttp>=3.14.4,<4`, including
+its bounded parser fixes. The 3.14.5 compressed-control-frame change is not
+required: this profile explicitly disables WebSocket compression. The ordinary
+seven-day configured-feed seasoning policy still governs installation.
+
 The combined JSON envelope must also fit the frame bound, including base64
 and header escaping. Preflight rejection occurs before dispatch, so an
 oversized local envelope is a known refusal, not an uncertain mutation.

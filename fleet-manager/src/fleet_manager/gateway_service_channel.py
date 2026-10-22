@@ -229,8 +229,9 @@ class Channel:
     """An exact grant/generation owns every accepted frame and cancellation."""
 
     def __init__(self, ws: web.WebSocketResponse, authority: ServiceAuthority,
-                 grant: ServiceGrant) -> None:
+                 grant: ServiceGrant, *, caller_context: bool = False) -> None:
         self.ws, self.authority, self.grant = ws, authority, grant
+        self.caller_context = caller_context
         self.pending: dict[str, Pending] = {}
         self.retired: deque[str] = deque(maxlen=64)
         self.closed = False

@@ -42,12 +42,14 @@ profile already implements the PR operations proposed below.
 The service profile currently bounds request bodies to 32 KiB, requests to
 60 seconds and pending requests to 32 globally / 8 per channel. PR batches
 and polling must fit those limits; a Gateway request is not a durable wait.
-It strips caller credentials, cookies and client identity headers before
-forwarding to the backend. Its caller admission therefore does not, by itself,
-give a PR backend trusted consumer/account context or supply forge credentials
-to its worker. Specify and implement that context and its verification point
-through reviewed source changes before attributing remote registrations to a
-consumer; do not infer authority from stripped headers or request-body labels.
+Its HTTP proxy strips caller credentials, cookies and client identity headers.
+The optional `caller-context-v1` connector handler now supplies Gateway-derived
+fleet/Gateway/slot/principal and bounded expiry over the admitted TLS channel;
+it never forwards identity headers to the HTTP backend. The service must still
+map that admitted principal to its configured consumer/account/repository scope
+at its real operation boundary. This SDK seam alone does not implement PR
+routes, persistent namespace/writer custody or worker forge credentials.
+Do not infer authority from stripped headers or request-body labels.
 
 The [adoption readiness record](../../../fleet-manager/docs/gateway-adoption-readiness.md)
 separates generic source and isolated native amd64/ARM64 qualification from

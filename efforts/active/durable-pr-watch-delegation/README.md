@@ -194,6 +194,9 @@ _Operator-required scope; agent-recommended implementation and validation._
 - [x] Review and land the first-class PR plugin/service vision, single-operator
   fleet invariant and [fleet service plan](fleet-pr-service.md) before building
   its new runtime paths (confirmed by #7189).
+- [x] Land the PR-owned request reconciliation and bounded consumer replay/ACK
+  transaction core without activating a serving adapter (confirmed by #7786).
+  Authenticated serving/dispatch and full fleet acceptance remain below.
 - [ ] Define and deliver the [PR-service consumer contract](pr-service-contract.md)
   through normal reviewed source changes, including missing shared seams and
   real serving/consumer proof. Consult related campaigns without a separate
@@ -273,8 +276,42 @@ callback an implicit credential store.
 
 ## Journal
 
+### 2026-10-22 - Carry authenticated callers into a bounded service handler
+
+- Traced the actual caller admission, owner-retained grant, Gateway request
+  frame and fixed HTTP backend path. The missing subject handoff is now an
+  explicit `caller-context-v1` admission/attachment negotiation, not an
+  identity-header passthrough or a serialized offline permit.
+- The optional in-process connector handler receives immutable
+  fleet/Gateway/slot/principal and bounded-expiry context from the admitted
+  channel. It is mutually exclusive with the existing HTTP backend and limits
+  replies to 32 KiB using the existing chunk/ACK and cancellation path.
+  Legacy frame shapes and proxy defaults remain unchanged.
+- Real TLS/PoP/WebSocket tests cover caller-header/body/query spoofing,
+  separate admitted subjects, owner mismatch, withdrawal cancellation,
+  strict profile/context parsing, bounded replies and value-free handler
+  failures. The existing Gateway service portfolio also passes on the
+  supported dependency floor.
+- Fresh test provisioning exposed the existing unseasoned `aiohttp>=3.14.5`
+  floor. The Gateway's disabled-compression path supports the seasoned 3.14.4
+  release; both declared extras now admit it without bypassing the seven-day
+  policy. All 24 Fleet Python dependency declarations pass the live age
+  checks and the fresh environment uses the policy-resolved graph.
+- This is a source SDK seam, not PR-service activation or fleet acceptance.
+  The PR embedding must still bind each admitted subject to configured
+  account/repository permissions, persistent namespace/writer custody and
+  scoped forge credentials, then deliver the real operations and dispatch
+  consumer. All full-contract, installed and deployment items remain open.
+  No service, external identity or machine runtime was changed.
+
 ### 2026-10-21 - Build the bounded PR-owned replay transaction core
 
+- #7786 merged as `fea868b178df6fe700f7a87ebe771c80e2a75077` after
+  exact-head approval, both resolved original review threads and green required
+  CI. Final focused coverage is 245 passing tests: 58 replay, 103 existing
+  registry/delivery and 84 native-observation cases; 10 existing Linux-only
+  process cases skip on Windows. This confirms source merge, not promotion,
+  rollout or serving authority.
 - Implemented internal `WatchReplay` request reconciliation, account-separated
   observation groups, consumer-only bounded reads, exact ACK/cancel identities
   and compact completed receipts using the existing `WatchRegistry`. Original
@@ -311,8 +348,8 @@ callback an implicit credential store.
   credential renewal, dispatch generation fencing through that remote path and
   installed lifecycle remain unimplemented acceptance, not inferred from these
   tests. No shared runtime or deployment is changed or authorized.
-- Next: land the reviewed core, then connect it to the actual scoped serving
-  and consumer boundary. The five contract-delivery items remain unchecked;
+- Next: connect the merged core to the actual scoped serving and consumer
+  boundary. The five contract-delivery items remain unchecked;
   this groundwork alone does not satisfy any full-stack proof or close the
   effort. The no-owner-signoff correction landed in #7778.
 

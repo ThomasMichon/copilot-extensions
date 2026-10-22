@@ -91,6 +91,8 @@ class CallerScope:
     slot: ServiceSlot
     method: str
     target_uri: str
+    principal: str
+    expires_at: int
 
 
 @dataclass(frozen=True)
@@ -384,7 +386,9 @@ class ServiceAuthority:
                 del self._callers[grant.generation]
                 raise ServicePolicyError("revoked-grant")
             assert record.method is not None and record.target_uri is not None
-            return CallerScope(context.slot(record.slot), record.method, record.target_uri)
+            return CallerScope(
+                context.slot(record.slot), record.method, record.target_uri,
+                record.identity.subject, min(record.identity.expires_at, context.trust_valid_until))
 
     def release_caller(self, grant: CallerGrant) -> bool:
         """Release one exact retained request handle without evicting others."""

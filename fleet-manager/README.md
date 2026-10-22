@@ -123,6 +123,9 @@ The explicitly selected [outbound service profile](docs/gateway-service-profile.
 adds coherent live service policy and actual TLS HTTP/UX/response-stream routing
 over authenticated outbound connectors. Its optional `service-gateway` extra
 does not change default client dependencies or the legacy serving profile.
+An explicitly selected in-process handler can consume channel-derived caller
+context without forwarding identity headers to an HTTP backend; account and
+resource authorization remain the embedding service's responsibility.
 Container, protected-proxy/provider and production adoption remain separate gates.
 
 The explicit [runtime identity verifier](docs/runtime-authentication.md) adds

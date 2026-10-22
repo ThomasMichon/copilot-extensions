@@ -25,6 +25,7 @@ from .gateway_service_context import ServiceContext, ServicePolicyError
 from .gateway_service_listener import Listener, read_bounded
 from .gateway_service_policy import ServiceAuthority, ServiceCandidate
 from .gateway_manifest import RouteSpec, ServiceSlot
+from .gateway_service_handler import PROFILE
 
 LOG = logging.getLogger(__name__)
 STATE = web.AppKey("fleet-service-state", object)
@@ -35,6 +36,7 @@ DISPATCHED = web.RequestKey("fleet-service-dispatched", bool)
 class Ticket:
     candidate: ServiceCandidate
     deadline: float
+    caller_context: bool = False
 
 
 @dataclass(frozen=True)
@@ -172,7 +174,10 @@ class ServiceRuntime:
         self.control_budget()
         check(request.method == "POST", "method-denied", 405)
         value = unpack((await body(request, 16384)).decode("utf-8"))
-        shape(value, {"slot", "access", "proof"})
+        caller_context = "profile" in value
+        shape(value, {"slot", "access", "proof", "profile"} if caller_context
+              else {"slot", "access", "proof"})
+        check(not caller_context or value["profile"] == PROFILE, "unsupported-profile")
         check(all(isinstance(v, str) for v in value.values()), "invalid-admission")
         self.expire_tickets()
         check(len(self.tickets) < 64, "ticket-limit", 429)
@@ -180,7 +185,7 @@ class ServiceRuntime:
             value["access"], value["proof"], target_uri=self.origin + request.path,
             slot=value["slot"])
         ticket = secrets.token_hex(32)
-        self.tickets[ticket] = Ticket(candidate, time.monotonic() + 30)
+        self.tickets[ticket] = Ticket(candidate, time.monotonic() + 30, caller_context)
         return web.json_response({"ticket": ticket}, headers={"Cache-Control": "no-store"})
 
     async def attach(self, request: web.Request) -> web.WebSocketResponse:
@@ -208,10 +213,11 @@ class ServiceRuntime:
             assert ticket is not None
             candidate = ticket.candidate
             self.authority.revalidate_candidate(candidate)
-            await send(ws, {"type": "attached"})
+            await send(ws, {"type": "attached", **(
+                {"profile": PROFILE} if ticket.caller_context else {})})
             grant = self.authority.promote_service(candidate)
             candidate = None
-            channel = Channel(ws, self.authority, grant)
+            channel = Channel(ws, self.authority, grant, caller_context=ticket.caller_context)
             previous = self.channels.get(grant.slot)
             self.channels[grant.slot] = channel
             if previous:
@@ -277,10 +283,17 @@ class ServiceRuntime:
             selected = headers(request.headers.items(), REQUEST_HEADERS)
             self.checkpoint(channel, pending)
             stripped = path[len(route.prefix):] or "/"
+            caller = self.authority.revalidate_caller(grant)
+            context = {
+                "fleet": self.listener.fleet, "gateway": self.listener.gateway,
+                "slot": slot.name, "principal": caller.principal,
+                "expires_at": caller.expires_at,
+            } if channel.caller_context else None
             envelope = encode_frame({
                 "type": "request", "id": pending.id, "method": request.method,
                 "target": stripped + query, "headers": selected,
                 "body": base64.b64encode(payload).decode("ascii"), "timeout": DEADLINE,
+                **({"context": context} if context is not None else {}),
             })
             self.checkpoint(channel, pending)
             pending.dispatched = True
