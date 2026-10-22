@@ -291,7 +291,9 @@ def test_enqueue_after_empty_scan_before_release_cannot_lose_wakeup(area, monkey
     "boot", "executor",
     pytest.param("ignored-sigchld", marks=pytest.mark.skipif(os.name == "nt", reason="POSIX signal")),
     pytest.param("custom-sigchld", marks=pytest.mark.skipif(os.name == "nt", reason="POSIX signal")),
-    pytest.param("unreaped", marks=pytest.mark.skipif(os.name == "nt", reason="POSIX custody")),
+    pytest.param("unreaped", marks=pytest.mark.skipif(
+        not sys.platform.startswith("linux"), reason="Linux waitid wrapper prerequisite",
+    )),
 ])
 def test_failed_worker_admission_never_acknowledges_startup(area, failure):
     root = area / "state"
