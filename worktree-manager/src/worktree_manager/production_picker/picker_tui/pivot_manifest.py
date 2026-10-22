@@ -116,6 +116,7 @@ class PivotAction:
     card: Mapping[str, object] | None = None
     preview: tuple[str, ...] = ()
     preview_error: str = ""
+    result_view: str | None = None
 @dataclass(frozen=True)
 class Column:
     """One declarative column in a registered pivot's table view (D1).
@@ -543,6 +544,13 @@ def parse_manifest(data: Mapping[str, object], *, name: str, source_path: str) -
         a_progress = a.get("progress", False)
         if not isinstance(a_progress, bool):
             raise ManifestError(f"`actions[{i}].progress` must be a boolean when present")
+        result_view = a.get("result_view")
+        if result_view not in (None, "text"):
+            raise ManifestError(f"`actions[{i}].result_view` must be 'text' when present")
+        if result_view is not None and (kind not in (None, "command", "form") or a_progress):
+            raise ManifestError(
+                f"`actions[{i}].result_view` requires a non-streaming command or form"
+            )
         actions.append(
             PivotAction(
                 key=key,
@@ -557,6 +565,7 @@ def parse_manifest(data: Mapping[str, object], *, name: str, source_path: str) -
                 card=card,
                 preview=tuple(a.get("preview", ())),
                 preview_error=str(a.get("_preview_error") or ""),
+                result_view=result_view,
             )
         )
 

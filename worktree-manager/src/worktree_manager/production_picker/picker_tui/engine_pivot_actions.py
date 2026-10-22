@@ -281,6 +281,20 @@ class PickerScreenPivotActionsMixin:
             self._run_task_action_progress(reg, action, ctx, title)
             return
         rt = self._pivot_runtime(reg)
+        if getattr(action, "result_view", None) == "text":
+            from . import pivots as _pivots
+            from .configuration_form import CommandResultScreen
+            scope = self._pivot_scope_key()
+            argv = _pivots.format_template(action.run, ctx)
+            self._run_command_result(
+                action.label,
+                lambda: rt.run_resolved(argv, preserve_output=True),
+                lambda: rt.repoll(scope),
+                CommandResultScreen(
+                    action.label, context=reg.label, return_label=f"Return to {reg.label}",
+                ),
+            )
+            return
 
         def _work():
             ok, msg = rt.run_action(action, ctx)
@@ -451,33 +465,20 @@ class PickerScreenPivotActionsMixin:
             _after,
         )
     def _run_pivot_form_submit(self, reg, action, ctx, title, values):
-        """Run a submitted form action (A5): resolve ``{field.<name>}`` + entry
-        tokens in one safe pass, run the command via the pivot runtime, then
-        invalidate the cached list so the row reflects the new state. The command
-        (e.g. ``agent-dispatch steer submit``) is a subprocess, so it runs OFF the
-        render flow via :meth:`_run_bg` -- Confirm returns instantly and the UI
-        stays live while the coordinator round-trip completes.
+        """Run a submitted form off the render flow with single-pass values.
 
-        A blocking (but async -- the render flow is never frozen) modal
-        progress overlay covers that whole round-trip (operator report,
-        2026-10-07): Confirm used to dismiss straight back to the list with
-        only a footer status line as evidence anything was happening, so a
-        slow or hung coordinator looked indistinguishable from 'it worked'
-        until the result eventually, silently, landed. Reuses the existing
-        ``action-stream`` :class:`ProgressScreen` kind
-        (``_run_task_action_progress``'s own shape): a spinner while
-        in-flight, then an explicit done state the operator dismisses
-        themselves (Enter/Esc/Space, same as every other action-stream run)
-        -- so a successful delivery is *seen*, not just inferred from the
-        overlay's absence. On failure the overlay hands off to the richer,
-        full-detail :class:`SubmitErrorScreen` (draft-recovery guidance an
-        action-stream run's own terse inline error can't carry) instead of
-        rendering the failure itself."""
+        Declared text results retain full provider output in the shared command
+        screen; other forms retain their progress/error overlays. Both show
+        explicit completion and preserve the existing draft on command failure.
+        Refresh the task snapshot after the round-trip, not after worker startup.
+        """
         from . import pivots as _pivots
 
         rt = self._pivot_runtime(reg)
         argv = _pivots.format_form_template(action.run, ctx, values)
         task_id = ctx.get("task_id")
+        text_result = getattr(action, "result_view", None) == "text"
+        result_screen = None
 
         prog = {
             "kind": "action-stream",
@@ -491,12 +492,22 @@ class PickerScreenPivotActionsMixin:
             "items": [],
             "cancel": None,
         }
-        self.progress = prog
-        self._open_progress()
+        if text_result:
+            from .configuration_form import CommandResultScreen
+            result_screen = CommandResultScreen(
+                action.label, context=reg.label, return_label=f"Return to {reg.label}",
+            )
+            self.app.push_screen(result_screen)
+        else:
+            self.progress = prog
+            self._open_progress()
 
         def _work():
             try:
-                ok, msg = rt.run_resolved(argv)
+                ok, msg = (
+                    rt.run_resolved(argv, preserve_output=True) if text_result
+                    else rt.run_resolved(argv)
+                )
             except Exception as exc:  # never let a delivery attempt vanish silently
                 ok, msg = False, f"{type(exc).__name__}: {exc}"
             else:
@@ -556,11 +567,19 @@ class PickerScreenPivotActionsMixin:
                 if self.progress is prog:
                     self.progress = None
                     self.app.pop_screen()
-                self.app.push_screen(
-                    SubmitErrorScreen(action.label, msg or short, draft_path)
-                )
+                if result_screen is None:
+                    self.app.push_screen(
+                        SubmitErrorScreen(action.label, msg or short, draft_path)
+                    )
+                elif draft_path:
+                    msg = (msg or "") + f"\n\nLocal draft retained at: {draft_path}"
+            if result_screen is not None and result_screen.is_mounted:
+                result_screen.complete(ok, msg)
 
-        self._run_bg(action.label, _work, _done)
+        if text_result:
+            self.call_after_refresh(lambda: self._run_bg(action.label, _work, _done, quiet=True))
+        else:
+            self._run_bg(action.label, _work, _done)
     def _open_create_action(self):
         """Open the pivot-level ``create_action`` modal (Phase B,
         picker-new-session-prompt-and-composer) -- the registered-pivot

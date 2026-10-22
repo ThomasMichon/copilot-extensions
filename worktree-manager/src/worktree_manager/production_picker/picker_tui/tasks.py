@@ -761,7 +761,7 @@ class RegisteredPivotRuntime:
         ``{field.<name>}`` + entry tokens in one safe pass via
         :func:`format_form_template`, or a plain template via
         :func:`format_template`). ``preserve_output`` retains full receipts on
-        both success and failure for full-content Configuration results."""
+        both success and failure for full-content contributed command results."""
         proc, error = self._invoke_resolved(argv, timeout=ACTION_TIMEOUT)
         if proc is None:
             return False, error

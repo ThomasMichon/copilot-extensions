@@ -34,6 +34,7 @@ def _prior_tasks():
         action for action in prior["actions"] if action["key"] != "inspect-evidence"
     ]
     steer = next(action for action in prior["actions"] if action["key"] == "steer")
+    steer.pop("result_view", None)
     steer["run"] = [
         "agent-dispatch", "steer", "submit", "{task_id}", "{fields}", "--expected-status", "{status}",
     ]

@@ -71,31 +71,38 @@ class ConfigurationFormScreen(CreateActionFormMixin, Screen[dict | None]):
         super().on_mount()
 
 
-class ConfigurationResultScreen(Screen):
+class CommandResultScreen(Screen):
     CSS = """
-    ConfigurationResultScreen { padding: 1 2; }
-    ConfigurationResultScreen VerticalScroll { height: 1fr; }
-    ConfigurationResultScreen Static { height: auto; }
+    CommandResultScreen { padding: 1 2; }
+    CommandResultScreen VerticalScroll { height: 1fr; }
+    CommandResultScreen Static { height: auto; }
     """
     BINDINGS: ClassVar[list[Binding]] = [Binding("escape", "close", show=False)]
+    result_id = "command-result"
+    close_id = "command-result-close"
+    pending_message = "Running command..."
+    success_message = "Command completed"
+    failure_message = "Command failed"
 
-    def __init__(self, label):
+    def __init__(self, label, *, context, return_label):
         super().__init__()
         self.label = label
+        self.context = context
+        self.return_label = return_label
         self.pending = True
 
     def compose(self):
-        yield Static(f"Configuration / {self.label}", markup=False)
+        yield Static(f"{self.context} / {self.label}", markup=False)
         with VerticalScroll():
-            yield Static("Applying configuration...", id="config-result", markup=False)
-        yield Button("Return to Configuration", id="config-result-close", disabled=True)
+            yield Static(self.pending_message, id=self.result_id, markup=False)
+        yield Button(self.return_label, id=self.close_id, disabled=True)
 
     def complete(self, ok, message):
         self.pending = False
-        self.query_one("#config-result", Static).update(
-            ("Completed\n\n" if ok else "Failed\n\n") + str(message or "")
+        self.query_one(f"#{self.result_id}", Static).update(
+            (self.success_message if ok else self.failure_message) + "\n\n" + str(message or "")
         )
-        button = self.query_one("#config-result-close", Button)
+        button = self.query_one(f"#{self.close_id}", Button)
         button.disabled = False
         button.focus()
 
@@ -105,6 +112,18 @@ class ConfigurationResultScreen(Screen):
     def action_close(self):
         if not self.pending:
             self.dismiss()
+
+
+class ConfigurationResultScreen(CommandResultScreen):
+    CSS = CommandResultScreen.CSS.replace("CommandResultScreen", "ConfigurationResultScreen")
+    result_id = "config-result"
+    close_id = "config-result-close"
+    pending_message = "Applying configuration..."
+    success_message = "Completed"
+    failure_message = "Failed"
+
+    def __init__(self, label):
+        super().__init__(label, context="Configuration", return_label="Return to Configuration")
 
 
 class ConfigurationDetailScreen(Screen):

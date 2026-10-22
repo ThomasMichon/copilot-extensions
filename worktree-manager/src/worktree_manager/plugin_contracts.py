@@ -65,6 +65,7 @@ class ActionContract:
     available: bool = True
     preview: tuple[str, ...] = ()
     preview_error: str = ""
+    result_view: str | None = None
 
 
 @dataclass(frozen=True)
@@ -309,6 +310,11 @@ def _parse_actions(
         progress = item.get("progress", False)
         if not isinstance(progress, bool):
             raise ContractError(f"`{path}.progress` must be a boolean")
+        result_view = item.get("result_view")
+        if result_view not in (None, "text"):
+            raise ContractError(f"`{path}.result_view` must be 'text' when present")
+        if result_view is not None and (kind not in ("command", "form") or progress):
+            raise ContractError(f"`{path}.result_view` requires a non-streaming command or form")
         shortcut = _optional_path(
             item.get("shortcut"), where=f"`{path}.shortcut`")
         out.append(ActionContract(
@@ -326,6 +332,7 @@ def _parse_actions(
             card=card,
             preview=tuple(item.get("preview", ())),
             preview_error=str(item.get("_preview_error") or ""),
+            result_view=result_view,
         ))
     return tuple(out)
 

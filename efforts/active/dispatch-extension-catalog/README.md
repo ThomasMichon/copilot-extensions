@@ -994,3 +994,49 @@ authorized installed proof remain distinct obligations.
 - This is a reviewed-intent candidate only. No runtime, template, installed
   queue, service, source activation or rollout changed. Implementation,
   cross-client acceptance and all remaining production/release gates stay open.
+
+### 2026-10-18 - Full terminal command results implemented for review
+
+- #7149 merged the bounded contract after exact-head approving review and
+  complete normal CI, including the required aggregate. Re-read both Plan and
+  Validation Plan; the contract's implementation checkbox remains open.
+- The first implementation slice adds an optional generic `result_view: text`
+  to contributed commands/forms. Reuse the Configuration result screen and
+  existing asynchronous command runtime, retaining complete stdout, stderr,
+  nonzero exit status and plain-text rendering. Both native task categories
+  opt in for steering and evidence inspection. Command completion is not
+  labelled worker delivery or consumption.
+- Existing configuration results, progress streams, ordinary actions and
+  failed-form local drafts retain their behavior. Historical migration
+  fixtures remove only the new current-template presentation field when
+  reconstructing their old bytes; the exact trusted hash and production
+  ownership guard are unchanged. Both owner changefiles are included.
+- Contained native Windows result/configuration/action/stream/category checks
+  passed 162 tests with one explicit platform skip. The earlier configuration
+  backstage and local form-flow selection also passed. Changed Python lint
+  and the thirteen-plugin install contract passed.
+- One earlier contained run reported all fourteen new assertions passing but
+  exited 125 after detecting a persistent user-environment change. That
+  unattributed shared-host signal is also recorded in #6900. No host rollback,
+  guard relaxation or attribution claim was made; the later complete contained
+  selection passed with the unchanged guard. This does not diagnose that signal.
+- Current-head review and full normal CI remain required. Exact-request
+  restart/vanished-card recovery, owner-guarded shared drafts, cross-client
+  acceptance, release and authorized installed proof remain open. No live
+  queue, service, source activation or installed update was used.
+
+### 2026-10-22 - Terminal result slice resumed and rebased
+
+- Rebased the preserved implementation onto current `dev` without conflicts.
+  The final rendered test waits for the actual layout and focuses the scroll
+  container before scrolling; it now proves content beyond the old truncation
+  boundary is reachable at narrow width, not only retained in widget text.
+- The rebased contained native Windows result, configuration, form, action,
+  stream and historical-contribution selection passed 196 tests with two
+  explicit skips. Changed Python lint, unchanged module ceilings and the
+  thirteen-plugin install contract passed. The native required CI lane remains
+  the independent POSIX proof; no full-suite or installed proof is inferred.
+- This is the full-result presentation slice only. Original-request restart
+  recovery and transactional shared-draft Save/Reset remain the next bounded
+  #7141 work. Both parent plans remain Active and no deployment is authorized
+  by publication or merge.

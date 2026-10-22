@@ -1,0 +1,9 @@
+{
+  "comment": "Show complete steering and evidence command results in both native task categories.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

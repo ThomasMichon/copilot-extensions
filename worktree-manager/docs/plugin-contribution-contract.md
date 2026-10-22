@@ -141,6 +141,29 @@ The command arrays are process-boundary contracts. The Manager invokes the
 contributing plugin's canonical CLI; it never imports the plugin runtime or
 reads the plugin's private state.
 
+### Full command results
+
+A non-streaming command or row form may opt into `"result_view": "text"`.
+The Picker paints a pending full-content screen before invoking the existing
+asynchronous command transport, then retains full stdout, stderr and a nonzero
+exit status in a plain-text scrollable result. Escape/Return closes it after
+the command finishes. Unknown views and combinations with `progress: true`,
+`kind: "internal"` or `kind: "card"` are rejected.
+
+This is presentation, not a provider receipt protocol: **Command completed**
+means the command exited successfully, not that a worker consumed input or
+finished work. Providers own receipt validation and acceptance/delivery facts.
+Both native dispatch task categories use it for steering and evidence inspection;
+their receipt output remains intact, including original acceptance, current
+original-wake state and consumption when reported. Failed form commands retain
+the existing local draft and show its recovery path. This does not add restart
+receipt recovery or card-bound/shared draft guarantees.
+
+Actions without this field keep their status-line/progress behavior.
+Configuration actions retain their existing full-content result presentation,
+including partial-failure receipts. No background poller or provider SDK import
+is needed for this opt-in.
+
 ## Configuration backstage contributions
 
 A list contribution may declare `"placement": "config"` (the default is

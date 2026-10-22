@@ -22,6 +22,7 @@
   "actions": [
     {
       "key": "inspect-evidence",
+      "result_view": "text",
       "label": "Inspect evidence — results, progress, statistics and attachments",
       "run": ["agent-dispatch", "inspect-task", "{task_id}", "--machine", "{machine}"],
       "description": "Read the full task, result/log references, events, progress, statistics and durable attachment lineage on the owning machine."
@@ -40,6 +41,7 @@
     },
     {
       "key": "steer", "label": "Steer — read the card & answer", "kind": "form",
+      "result_view": "text",
       "fields_from": "card.request_input", "title_from": "card.title", "body_from": "card.body",
       "run": ["agent-dispatch", "steer", "submit", "{task_id}", "{fields}", "--expected-status", "{status}", "--expected-revision", "{steering_revision}"],
       "when": {"group": "Blocked"}

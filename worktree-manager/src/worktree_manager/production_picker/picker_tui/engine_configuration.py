@@ -50,11 +50,13 @@ class PickerConfigurationMixin:
 
     def _run_configuration_command(self, label, work, reload):
         from .configuration_form import ConfigurationResultScreen
-        result_screen = ConfigurationResultScreen(label)
+        self._run_command_result(label, work, reload, ConfigurationResultScreen(label))
+
+    def _run_command_result(self, label, work, reload, result_screen):
         self.app.push_screen(result_screen)
 
         def done(result):
-            ok, message = result if result else (False, "Provider submission failed")
+            ok, message = result if result else (False, "Provider command failed")
             self.debug = f"{label}: {message}" if ok else f"{label} failed: {message}"
             if result_screen.is_mounted:
                 result_screen.complete(ok, message)
