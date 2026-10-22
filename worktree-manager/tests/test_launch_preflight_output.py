@@ -1,7 +1,8 @@
-"""Finite native preflights own their diagnostic renderer, not session lifetime."""
+"""Finite preflights own clocks; early/late diagnostics do not invent timing."""
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import os
 from pathlib import Path
 import re
@@ -14,6 +15,59 @@ import pytest
 
 pytestmark = pytest.mark.skipif(os.name != "posix", reason="native Bash preflight contract")
 ROOT = Path(__file__).resolve().parents[2]
+
+
+@pytest.mark.parametrize("interactive", [False, True])
+@pytest.mark.parametrize("clock_available", [False, True])
+def test_fallback_logs_utc_without_claiming_a_monotonic_scope(
+    tmp_path: Path, interactive: bool, clock_available: bool,
+) -> None:
+    source = (ROOT / "worktree-manager/bin/launch-session.sh").read_text(encoding="utf-8")
+    functions = source[source.index("setup_log() {"):source.index("\n# Write header")]
+    log = tmp_path / "setup.log"
+    clock_calls = tmp_path / "clock-calls"
+    fixture = tmp_path / "fallback.sh"
+    fixture.write_text("\n".join([
+        "set -euo pipefail",
+        functions,
+        f"SETUP_LOG={shlex.quote(str(log))}",
+        f"_SHOW_LAUNCH_STATUS={int(interactive)}",
+        "PYTHON=/must-not-be-started",
+        "date() {",
+        f"  printf '%s\\n' \"$*\" >> {shlex.quote(str(clock_calls))}",
+        '  [[ "$*" == "-u +%H:%M:%SZ" ]] || return 9',
+        "  command date \"$@\"" if clock_available else "  return 7",
+        "}",
+        "setup_log INFO $'early diagnostic\\ncontinued detail'",
+        "setup_status WARN $'late diagnostic\\ncontinued warning'",
+        "setup_log ERROR 'failed diagnostic'",
+        '[[ -z "$(jobs -pr)" ]]',
+        '[[ -z "${_SETUP_PROGRESS_DIR:-}" ]]',
+    ]), encoding="utf-8")
+    result = subprocess.run(
+        ["/bin/bash", str(fixture)], cwd=tmp_path,
+        env=dict(os.environ, TZ="UTC+11"),
+        capture_output=True, text=True, timeout=10,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout == ""
+    lines = log.read_text().splitlines()
+    assert len(lines) == 5
+    stamp = r"\d{2}:\d{2}:\d{2}Z" if clock_available else "time unavailable"
+    bodies = [
+        "running early diagnostic", "running continued detail",
+        "warning late diagnostic", "warning continued warning",
+        "failed failed diagnostic",
+    ]
+    for line, body in zip(lines, bodies, strict=True):
+        assert re.fullmatch(
+            rf"\[{stamp}\] launch {body} \[elapsed unavailable\]", line,
+        )
+    assert result.stderr.splitlines() == (lines[2:4] if interactive else [])
+    assert clock_calls.read_text().splitlines() == ["-u +%H:%M:%SZ"] * 3
+    if clock_available:
+        utc_hour = datetime.now(timezone.utc).hour
+        assert all(int(line[1:3]) in {utc_hour, (utc_hour - 1) % 24} for line in lines)
 
 
 @pytest.mark.parametrize("success_after", [1, 3, None])

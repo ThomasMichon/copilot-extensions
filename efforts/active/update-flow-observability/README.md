@@ -131,9 +131,11 @@ matrix below are _(agent-recommended)_ implementation details.
   observer, retaining the native invocation and existing log destination
   (#7697).
 - [x] Replace routine raw-command echoes with passthrough/pane/direct argument counts
-  and existing timed action labels, preserving native argument values.
-- [ ] Finish the remaining detached/standalone installer and early/late Bash
-  output boundaries through their actual output owners.
+  and existing timed action labels, preserving native argument values (#7708).
+- [x] Make early/late Bash fallback diagnostics UTC-correlated and explicit
+  about unavailable elapsed timing outside finite renderer scopes.
+- [ ] Finish the remaining standalone installer output boundaries through
+  their actual output owners.
 - [ ] Prefix every human-readable install/update line with a wall-clock time;
   suffix it with honestly labeled monotonic elapsed time or completed-step
   duration. Do not represent arbitrary child-line arrival as execution cost.
@@ -239,6 +241,62 @@ Bridge serving-version gap and supervisor framing defect survived that
 bounded source delta inspection.
 
 ## Journal
+
+### 2026-10-21 - Correlate Bash fallback diagnostics without invented timing
+
+- Classified the remaining fallback callsites: argument/recovery/runtime
+  setup before Python is available, background-stage dispatch and resolve
+  before the Picker, and late launch/mux/post-exit diagnostics. These do not
+  share one finite monotonic scope; keep the existing maintenance and preflight
+  clocks local rather than extending a renderer across an interactive wait.
+- Reuse the existing unavailable-timing sink for inactive `setup_log` and
+  `setup_status`. It now reads UTC wall time once per message, frames every
+  physical line and explicitly reports elapsed unavailable. A failed wall
+  clock is labeled time unavailable. Quiet stdout and the status echo gate
+  remain unchanged; no Python, new renderer or timing authority is introduced.
+- Four native regressions failed first against the old local-time grammar.
+  The complete POSIX fallback/preflight, passthrough and maintenance selection
+  then passed 70 cases with 89 platform-specific skips in 47.27 seconds under
+  the original item, group and resource limits. Existing finite-clock and
+  renderer-failure contracts remain in that selection. The synthetic fallback
+  uses a non-UTC timezone and proves three clock reads for three multiline
+  messages, with no active renderer/job. This is not a new speedup claim.
+- The existing native Windows UTC/Stopwatch and gated status contracts passed
+  all eight selected cases on both PowerShell hosts in 9.10 seconds. Python
+  lint, effort structure and the 13-plugin install-contract check passed.
+- Windows already uses native UTC plus its real Stopwatch; its launcher is
+  unchanged. The changed Bash helpers run from fresh isolated log fixtures.
+  Full runtime construction and external installation are not exercised by
+  this output-only correction; promoted installed qualification remains gated
+  by the existing release/deployment holds. The larger timing, presentation
+  and whole-flow measurement goals remain open.
+- Documentation impact: Manager's launch-preparation reference now explains
+  the fallback boundary and its intentionally unavailable duration. This is
+  a below-altitude presentation correction within the reviewed observability
+  plan, not a daemon or lifecycle change. Required review/CI and merge follow.
+
+### 2026-10-21 - Count-only source boundary merged; continue the output audit
+
+- #7708 merged as `9b14d71afdce2b3d85c5917f6e11cfdfea835885` after
+  Copilot approved corrected head `4e36b0386c97ce3a78f1e7cc94a06c896d0d1da2`,
+  the direct-handoff finding was resolved and current-head required CI passed.
+  The missed direct path was reproduced and corrected, not treated as harmless
+  because the initial source slice already had green checks.
+- Re-read the Plan and Validation Plan after the actual merge. Closed only
+  routine command-echo suppression, retained the published tip on a backup and
+  advanced only confirmed merged history. The source effort remains active.
+- Continue tracing the early/late Bash fallback logger and its bounded
+  formatter callers before choosing another presentation change. The fallback
+  still uses local wall time without a monotonic suffix; do not replace it
+  with wall-derived elapsed time, a process per line or a formatter that lives
+  across the Picker or interactive session.
+- #6928 remains open on its original contributor head. The public coordination
+  thread now also has a maintainer request to resume that original change and
+  account for the output-pump seam. Preserve that owner's wait/watchdog scope;
+  no competing context adapter or second coordination request was created.
+- Other output boundaries, banner convergence, equivalent whole-flow costs and
+  promoted installed qualification remain open. No update, runtime repair,
+  activation, deployment hold or ownership state changed.
 
 ### 2026-10-21 - Keep argument values out of routine launch diagnostics
 

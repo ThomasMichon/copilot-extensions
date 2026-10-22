@@ -157,7 +157,14 @@ native UTC formatting. Bash, including Bash 3.2, uses one launch-owned
 command starts, providing the shared formatter's UTC and monotonic clocks
 without a Python or `date` process per line. These durations measure the
 containing action, not individual child lines or a verified serving-state
-postcondition. An in-process clock reader observes native completion records
+postcondition. Outside those finite scopes, Bash's early/late launcher
+diagnostics retain UTC wall-clock correlation at whole-second resolution but
+explicitly report `[elapsed unavailable]`: there is no monotonic scope across
+the Picker or interactive session. Multiline diagnostics share one clock read
+and each physical line carries its severity and envelope. Fallback status
+echoes retain the existing terminal gate and use the same envelope as the log.
+A failed wall-clock read is labeled `[time unavailable]`, never a fabricated
+time or duration. An in-process clock reader observes native completion records
 independently of the presentation sink, so draining queued diagnostics does
 not inflate a completed action's duration. Child output
 continues streaming to the setup log; interactive action summaries use the

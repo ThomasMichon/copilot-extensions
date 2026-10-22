@@ -28,16 +28,17 @@ setup_log() {
         _setup_progress_emit log "$level" "$msg" || _setup_progress_unavailable "$level" "$msg" 0
         return 0
     fi
-    printf '[%s] [%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$level" "$msg" >> "$SETUP_LOG" 2>/dev/null || true
+    _setup_progress_unavailable "$level" "$msg" 0
 }
 
 _setup_progress_unavailable() {
-    local level="$1" msg="$2" echo_line="$3" state=running line
+    local level="$1" msg="$2" echo_line="$3" state=running line stamp
+    stamp="$(date -u '+%H:%M:%SZ' 2>/dev/null)" || stamp="time unavailable"
     case "$level" in WARN) state=warning ;; ERROR) state=failed ;; esac
     while IFS= read -r line; do
-        line="[time unavailable] launch $state $line [elapsed unavailable]"
+        line="[$stamp] launch $state $line [elapsed unavailable]"
         printf '%s\n' "$line" >> "$SETUP_LOG" 2>/dev/null || true
-        [[ "$echo_line" == 1 && "$_SHOW_LAUNCH_STATUS" == 1 ]] && printf '%s\n' "$line" >&2 || true
+        [[ "$echo_line" == 1 && "${_SHOW_LAUNCH_STATUS:-}" == 1 ]] && printf '%s\n' "$line" >&2 || true
     done <<< "$msg"
 }
 
@@ -178,8 +179,7 @@ setup_status() {
         _setup_progress_emit status "$level" "$msg" || _setup_progress_unavailable "$level" "$msg" 1
         return 0
     fi
-    setup_log "$level" "$msg"
-    [[ "$_SHOW_LAUNCH_STATUS" == "1" ]] && printf '  %s\n' "$msg" >&2 || true
+    _setup_progress_unavailable "$level" "$msg" 1
 }
 
 check_update_admission() {
