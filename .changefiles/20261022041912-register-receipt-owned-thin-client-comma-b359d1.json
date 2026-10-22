@@ -1,0 +1,9 @@
+{
+  "comment": "Register receipt-owned thin-client commands with retained execution and stable deny-write Windows artifact reads",
+  "changes": [
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    }
+  ]
+}

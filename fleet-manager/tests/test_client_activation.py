@@ -20,15 +20,20 @@ from test_client_distribution import FLAGS, wheel as wheel  # noqa: F401
 
 
 def activate(root, fixture, staged, trusted, **kwargs):
-    return activation.activate_client_runtime(
-        root, identity(), selection(fixture), staged,
-        current_policy=kwargs.pop("current_policy", lambda: trusted),
-        current_target=kwargs.pop("current_target", lambda: target(fixture)),
-        clock=lambda: 150, **kwargs,
-    )
+    try:
+        return activation.activate_client_runtime(
+            root, identity(), selection(fixture), staged,
+            current_policy=kwargs.pop("current_policy", lambda: trusted),
+            current_target=kwargs.pop("current_target", lambda: target(fixture)),
+            clock=lambda: 150, **kwargs,
+        )
+    except PlanError as error:
+        if error.__context__ is not None:
+            print("CLIENT_ACTIVATION_CAUSE " + str(error.__context__), flush=True)
+        raise
 
 
-def completed_candidate(root, fixture, staged, trusted, primitive):
+def completed_candidate(root, fixture, staged, trusted, primitive, *, prepare=None):
     namespace = construction._namespace(root, identity())
     _, _, binding = construction._request(
         identity(), selection(fixture), staged, lambda: trusted, lambda: target(fixture),
@@ -38,6 +43,8 @@ def completed_candidate(root, fixture, staged, trusted, primitive):
         construction._construction_intent(namespace, slot.name, slot, binding)
         primitive.slot(namespace, slot.name)
         (slot / "candidate-bytes").write_bytes(b"unit candidate, not a real interpreter\n")
+        if prepare is not None:
+            prepare(slot)
         completed = {
             "schema": "fleet-manager.client-constructed", "version": 1,
             "input": binding, "runtime_sha256": construction._tree(primitive, slot),

@@ -32,6 +32,7 @@ COMPANIONS = (
     "versioned_runtime_source.py", "versioned_runtime_publication.py",
 )
 PROCESS_RESOURCES = {
+    "_runtime_launcher.py": Path("installer-engine") / "runtime_launcher.py",
     "_installer_process.py": Path("installer-engine") / "installer_engine_process.py",
     "_construction_procutil.py": Path("agent-procutil") / "src" / "agent_procutil" / "__init__.py",
 }

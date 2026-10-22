@@ -71,6 +71,13 @@ Construction, retention, admission, failed-candidate discard, source fingerprint
 and completion all use the installed canonical `versioned-runtime` resource,
 not a second installer protocol.
 
+Before completion, construction also packages the canonical slot-local
+`runtime_launcher.py` and runtime family in `runtime-bootstrap/`, verified
+against the owning wheel's resource RECORD. The completed fingerprint includes
+these bytes. [Explicit command registration](client-frontdoor.md) uses that
+bootstrap to retain the runtime before site imports; it never patches an
+already completed candidate or implicitly registers a command during construction.
+
 Each candidate's private input receipt lives under `client-runtime/client-inputs`,
 outside the removable slot. It binds installation identity, selected decision
 and decision digest. This placement matters: a failed native removal can

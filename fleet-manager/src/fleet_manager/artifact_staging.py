@@ -12,7 +12,6 @@ import sys
 import threading
 import time
 from types import ModuleType
-from typing import BinaryIO
 import tempfile
 import uuid
 
@@ -22,6 +21,7 @@ from .artifacts import (
     _content_stamp,
     _file_stat,
     _identity,
+    _reader,
     verify_role_artifacts,
 )
 from .client_diagnostics import diagnose_client
@@ -66,18 +66,6 @@ def _directory(path: Path) -> tuple[int, int]:
         return directory_identity(path)
     except OSError:
         raise PlanError("staging directory identity could not be inspected") from None
-
-
-@contextmanager
-def _reader(path: Path) -> Iterator[BinaryIO]:
-    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
-    flags |= getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
-    descriptor = os.open(path, flags)
-    try:
-        with os.fdopen(descriptor, "rb", closefd=False) as incoming:
-            yield incoming
-    finally:
-        os.close(descriptor)
 
 
 def _read_bytes(path: Path, limit: int) -> bytes:
@@ -171,13 +159,14 @@ def _copy_bytes(source: Path, target: Path, expected: str) -> None:
             os.fsync(outgoing.fileno())
         after = os.fstat(incoming.fileno())
         named = _file_stat(source)
-        if (
-            size != opened.st_size or digest.hexdigest() != expected
-            or _content_stamp(after) != _content_stamp(opened)
-            or _identity(named) != _identity(before)
-            or _content_stamp(named) != _content_stamp(before)
-        ):
-            raise PlanError("artifact changed while being frozen")
+        if size != opened.st_size or digest.hexdigest() != expected:
+            raise PlanError("artifact changed while being frozen (content)")
+        if _content_stamp(after) != _content_stamp(opened):
+            raise PlanError("artifact changed while being frozen (descriptor-stamp)")
+        if _identity(named) != _identity(before):
+            raise PlanError("artifact changed while being frozen (named-identity)")
+        if _content_stamp(named) != _content_stamp(before):
+            raise PlanError("artifact changed while being frozen (named-stamp)")
 
 
 def _copy(source: Path, target: Path, expected: str) -> None:

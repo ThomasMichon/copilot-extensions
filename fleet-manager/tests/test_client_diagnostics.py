@@ -30,7 +30,7 @@ def installed(tmp_path, monkeypatch):
         "__init__.py", "_versioned_runtime.py",
         "versioned_runtime_leases.py", "versioned_runtime_construction.py",
         "versioned_runtime_source.py", "versioned_runtime_publication.py",
-        "_installer_process.py", "_construction_procutil.py",
+        "_installer_process.py", "_construction_procutil.py", "_runtime_launcher.py",
     ):
         data = b"resource bytes\n"
         (package / name).write_bytes(data)
@@ -58,7 +58,7 @@ def test_client_evidence_does_not_claim_release_or_controller_readiness(installe
         "__init__.py", "_versioned_runtime.py",
         "versioned_runtime_leases.py", "versioned_runtime_construction.py",
         "versioned_runtime_source.py", "versioned_runtime_publication.py",
-        "_installer_process.py", "_construction_procutil.py",
+        "_installer_process.py", "_construction_procutil.py", "_runtime_launcher.py",
     }
     assert report["runtime_resource_sha256s"]["_versioned_runtime.py"] == report["runtime_resource_sha256"]
 

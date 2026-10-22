@@ -86,7 +86,8 @@ target digest, actual runtime fingerprint, local health, `reused` and
 `mutations_performed`. `frontdoor_registered` and `live_readiness_verified`
 remain `false`; this report is not a retained lease or authorization token.
 
-Attributable frontdoor registration, removal, retained-good rollback policy,
+[Attributable frontdoor registration](client-frontdoor.md) is a separate explicit
+transition; activation does not register or update commands. Removal, retained-good rollback policy,
 identity retirement/reinstall fencing and the complete managed installer remain
 separate obligations. In particular, do not delete admission or publication
 evidence while a retained candidate or registration could be replayed.

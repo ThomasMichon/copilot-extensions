@@ -168,8 +168,10 @@ Implementation sequencing below is **agent-recommended**:
   [Client lifecycle admission](client-lifecycle-admission.md) proposes the next
   serial durable-admission, construction and owned-activation/removal gates;
   durable admission is merged in #7459; construction and compatibility/local
-  health are merged in #7804. Owned activation/removal and a managed installer
-  remain open. Neither admission nor construction authorizes a live rollout.
+  health are merged in #7804; physically attributed local runtime-selector
+  activation and bounded forward retry are merged in #7847. Frontdoor
+  registration, removal, retained-good recovery and a managed installer remain
+  open. None of these local prerequisites authorizes a live rollout.
   [Installation repair conductor](installation-repair-conductor.md) is the
   agent-recommended #6464 setup prerequisite proposal. Its ordinary-owner
   source implementation is merged in #6944; fresh-environment/native acceptance
@@ -823,3 +825,69 @@ These bounded Windows selections are not a new full Windows-suite claim.
   service migration or updater invocation follows from this merge.
 - The campaign and routing foundation remain Active. No broad Phase 2 or
   Validation Plan checkbox is closed by this construction prerequisite alone.
+
+### 2026-10-22 - Owned client runtime selectors merged
+- #7847 merged into `dev` at `2026-10-22T10:18:49Z`, commit
+  `7675c529ace83933c9af01a2cfdbd300525ff708`. Current-head Copilot review
+  `5612639052` approved `087a2e65436c2753194b921b4785831214ecc281`
+  with no open issues; required CI and source attribution succeeded.
+- `client-state activate-runtime` reacquires the existing installation,
+  candidate and publication custody, freshly authenticates the exact admitted
+  selection, checks compatibility and actual completed bytes, and runs installed
+  local health before publishing canonical, physically attributed selectors.
+  Durable intent and complete producer receipts permit bounded forward retry
+  of the same candidate/target; foreign or incomplete evidence refuses.
+  The accepted floor, previous candidate and user configuration are preserved.
+- Native Windows ARM64 passed 57 ownership/recovery/target/diagnostics controls,
+  real independent installed-owner serialization, and the actual installed
+  console lifecycle outside the checkout. The exact published Linux source
+  passed 21 activation, 37 diagnostics, two package-context builds and 40
+  pinned-source controls. Constructor regressions and repository-independent
+  wheel/sdist proofs remain distinct from fresh-OS qualification.
+- The command publishes only local runtime selectors, not a frontdoor, PATH
+  registration, service, controller or fleet role. Frontdoor attribution and
+  owned removal are the next serial client obligations under #6424; retained-good
+  rollback and whole-install identity retirement still need their own supported
+  policy/fencing proof. No shared publisher or installer is replaced.
+- The campaign remains Active with every broader setup, useful-service,
+  persistence and continuity gate retained. Release promotion and authorized
+  installed adoption are unobserved; no updater, live activation, credential
+  change, enrollment or service migration follows from this source merge.
+
+### 2026-10-22 - Owned client commands qualified for review
+- The next #6424 slice implements `client-state register-commands` for an
+  explicit existing private command directory. It requires the exact admitted,
+  completed and physically selected client, fresh policy and compatibility,
+  real local console health and canonical created-file publication custody.
+  POSIX and Windows command families select a fixed candidate and run the
+  canonical slot-local retention bootstrap before site imports. No PATH,
+  profile, service, controller, credential or selector is modified.
+- Registration retains physical producer proofs and an installation-bound
+  receipt. Exact reruns revalidate without rewriting; updates replace only
+  owned commands in the same directory. Foreign same-byte replacements and
+  incomplete evidence refuse. Interrupted publication or acknowledgement keeps
+  pending evidence and reports uncertainty; automatic crash recovery, owned
+  unregister/runtime removal and identity retirement remain separate work.
+- Native qualification reproduced the previously investigated snapshot
+  instability: direct kernel evidence showed Windows read-side metadata-change
+  time advancing while creation time, write time, size and named identity
+  stayed stable. The integrity/staging reader now denies existing and new
+  write/delete handles while permitting readers, checks stable creation/write
+  metadata and retains every byte bound, identity and authenticated hash check.
+  POSIX retains its change-time check. Native controls prove the actual sharing
+  fence, released custody and interrupted descriptor cleanup; no integrity,
+  dependency-age, feed or timeout waiver was used.
+- Final Linux qualification passed 35 artifact controls, 60 staging controls,
+  19 frontdoor tests, 27 construction tests, six native-process/installed-CLI
+  cases, 37 diagnostics, all 27 wheel/sdist/context tests and 40 pinned-source
+  controls, with three explicit platform skips. Native Windows ARM64 passed
+  34 artifact controls, 55 staging controls, 98 combined client safety controls,
+  real independent installed-owner serialization through both Windows launchers
+  and the actual installed command-registration CLI. Native platform/privilege
+  skips were explicit. The shared install-contract check passed all 13 plugins.
+- These are fresh isolated SDK/fixture and native-consumer proofs, not a fresh
+  OS, full fleet or deployed-service claim. Fresh-host qualification remains
+  open under #6424; live fleet activation is not authorized by this source
+  slice. The broader Phase 2 and Validation Plan remain open, and this
+  implementation still needs current-head review, CI and a real merge before
+  it is delivered. Release promotion and authorized rollout remain separate.

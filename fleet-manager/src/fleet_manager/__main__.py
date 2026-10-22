@@ -43,22 +43,24 @@ def main(argv=None):
     profile.add_argument("--service-policy", type=Path)
     hosting.add_argument("--tls-config", type=Path)
     admission = commands.add_parser(
-        "client-state", help="Explicit client admission, construction and owned runtime selectors",
+        "client-state", help="Explicit client admission, construction, runtime selectors and commands",
     )
     state_commands = admission.add_subparsers(dest="state_command", required=True)
-    for operation in ("initialize", "inspect", "admit", "construct", "activate-runtime"):
+    for operation in ("initialize", "inspect", "admit", "construct", "activate-runtime", "register-commands"):
         state = state_commands.add_parser(operation)
         state.add_argument("--root", type=Path, required=True)
         state.add_argument("--identity", type=Path, required=True)
-        if operation in ("admit", "construct", "activate-runtime"):
+        if operation in ("admit", "construct", "activate-runtime", "register-commands"):
             state.add_argument("--selection", type=Path, required=True)
             state.add_argument("--release", type=Path, required=True)
             state.add_argument("--proof", type=Path, required=True)
             state.add_argument("--policy", type=Path, required=True)
             state.add_argument("--sources", type=Path, required=True)
             state.add_argument("--staging-parent", type=Path, required=True)
-        if operation in ("construct", "activate-runtime"):
+        if operation in ("construct", "activate-runtime", "register-commands"):
             state.add_argument("--target", type=Path, required=True)
+        if operation == "register-commands":
+            state.add_argument("--command-directory", type=Path, required=True)
     try:
         args = parser.parse_args(argv)
     except SystemExit as exc:
@@ -114,16 +116,23 @@ def main(argv=None):
                     installation=identity["installation"], role="client",
                     staging_parent=args.staging_parent,
                 ) as staged:
-                    if args.state_command in ("construct", "activate-runtime"):
+                    if args.state_command in ("construct", "activate-runtime", "register-commands"):
                         from .client_activation import activate_client_runtime
                         from .client_construction import construct_client_release
+                        from .client_frontdoor import register_client_frontdoor
 
-                        execute = (construct_client_release if args.state_command == "construct"
-                                   else activate_client_runtime)
+                        execute = {
+                            "construct": construct_client_release,
+                            "activate-runtime": activate_client_runtime,
+                            "register-commands": register_client_frontdoor,
+                        }[args.state_command]
+                        options = ({"command_directory": args.command_directory}
+                                   if args.state_command == "register-commands" else {})
                         result = execute(
                             args.root, identity, selection, staged,
                             current_policy=lambda: local(args.policy),
                             current_target=lambda: local(args.target),
+                            **options,
                         )
                     else:
                         result = admit_client_release(args.root, identity, selection, staged, policy)

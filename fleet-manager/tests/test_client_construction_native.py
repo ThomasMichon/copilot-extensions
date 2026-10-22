@@ -118,9 +118,9 @@ def request(root, fixture, area):
 
 
 @pytest.mark.timeout(110)
-@pytest.mark.parametrize("activate_runtime", [False, True])
+@pytest.mark.parametrize("transition", ["construct", "activate-runtime", "register-commands"])
 def test_actual_installed_console_client_state_transitions(
-    tmp_path, primitive, signed_wheel, activate_runtime,
+    tmp_path, primitive, signed_wheel, transition,
 ):
     fixture = copy.deepcopy(signed_wheel)
     now = int(time.time())
@@ -168,7 +168,7 @@ def test_actual_installed_console_client_state_transitions(
     assert reports[2]["target_digest"] == digest(target(fixture))
     assert reports[2]["admitted"] == reports[1]["admitted"]
     assert not primitive.current_version(root / construction.NAMESPACE)
-    if activate_runtime:
+    if transition != "construct":
         result = subprocess.run(
             [str(console), "client-state", "activate-runtime", *base, *inputs,
              "--target", str(paths["target"])], cwd=tmp_path,
@@ -179,6 +179,21 @@ def test_actual_installed_console_client_state_transitions(
         assert activated["active"] and activated["health"]["status"] == "installed"
         assert not activated["frontdoor_registered"] and not activated["live_readiness_verified"]
         assert primitive.current_version(root / construction.NAMESPACE) == reports[2]["candidate"]
+        if transition == "register-commands":
+            directory = tmp_path / "registered commands"
+            directory.mkdir(mode=0o700)
+            floor = database_bytes(root)
+            result = subprocess.run(
+                [str(console), "client-state", "register-commands", *base, *inputs,
+                 "--target", str(paths["target"]), "--command-directory", str(directory)],
+                cwd=tmp_path, capture_output=True, text=True, timeout=90, **FLAGS,
+            )
+            assert result.returncode == 0, result.stderr
+            registered = json.loads(result.stdout)
+            assert registered["frontdoor_registered"] and not registered["path_modified"]
+            assert not registered["live_readiness_verified"]
+            assert registered["candidate"] == reports[2]["candidate"]
+            assert database_bytes(root) == floor
 
 
 @pytest.mark.timeout(110)

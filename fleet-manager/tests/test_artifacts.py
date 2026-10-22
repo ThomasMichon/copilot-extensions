@@ -1,4 +1,5 @@
 import copy
+import errno
 import hashlib
 import json
 import os
@@ -63,13 +64,13 @@ def test_client_never_opens_unselected_artifacts(tmp_path, monkeypatch):
     sources["components"]["core"] = str(tmp_path / "missing")
     sources["components"]["executor"] = str(tmp_path)
     opened = []
-    original = artifacts.os.open
+    original = artifacts._open_artifact
 
-    def track(path, flags):
+    def track(path):
         opened.append(path.name)
-        return original(path, flags)
+        return original(path)
 
-    monkeypatch.setattr(artifacts.os, "open", track)
+    monkeypatch.setattr(artifacts, "_open_artifact", track)
     artifacts.verify_role_artifacts(release, sources, role="client")
     assert opened == ["cli.artifact"]
     sources["components"] = {"cli": sources["components"]["cli"]}
@@ -150,6 +151,22 @@ def test_path_timestamp_difference_does_not_invent_content_change(tmp_path, monk
     assert artifacts.verify_role_artifacts(release, sources, role="gateway")["status"] == "integrity-match"
 
 
+@pytest.mark.parametrize("platform,version", [("nt", (3, 13)), ("nt", (3, 11)), ("posix", (3, 13))])
+def test_content_stamp_uses_stable_windows_creation_and_posix_change_time(monkeypatch, platform, version):
+    monkeypatch.setattr(artifacts, "os", SimpleNamespace(name=platform))
+    monkeypatch.setattr(artifacts, "sys", SimpleNamespace(version_info=version))
+    info = SimpleNamespace(st_size=10, st_mtime_ns=20, st_ctime_ns=30, st_birthtime_ns=40)
+    baseline = artifacts._content_stamp(info)
+    info.st_ctime_ns += 1
+    assert (artifacts._content_stamp(info) == baseline) == (platform == "nt" and version >= (3, 12))
+    current = artifacts._content_stamp(info)
+    info.st_mtime_ns += 1
+    assert artifacts._content_stamp(info) != current
+    current = artifacts._content_stamp(info)
+    info.st_size += 1
+    assert artifacts._content_stamp(info) != current
+
+
 def test_actual_64_mib_limit_and_bounded_stream_reads(tmp_path, monkeypatch):
     release, sources = inputs(tmp_path)
     path = tmp_path / "cli.artifact"
@@ -181,7 +198,7 @@ def test_actual_64_mib_limit_and_bounded_stream_reads(tmp_path, monkeypatch):
             return self.stream.read(size)
 
     monkeypatch.setattr(artifacts.os, "fdopen",
-                        lambda fd, mode: BoundedReader(original(fd, mode)))
+                        lambda fd, mode, **kwargs: BoundedReader(original(fd, mode, **kwargs)))
     result = artifacts.verify_role_artifacts(release, sources, role="client")
     assert result["total_bytes"] == 64 * 1024 * 1024
     assert max(reads) == 64 * 1024
@@ -209,9 +226,9 @@ def test_native_link_is_refused_before_open(tmp_path, monkeypatch, parent):
 @pytest.mark.parametrize("change", ["replace", "grow", "truncate"])
 def test_file_changed_between_check_and_open_is_refused(tmp_path, monkeypatch, change):
     release, sources = inputs(tmp_path)
-    original = artifacts.os.open
+    original = artifacts._open_artifact
 
-    def race(path, flags):
+    def race(path):
         if change == "replace":
             replacement = path.with_name("replacement")
             replacement.write_bytes(b"replacement")
@@ -221,9 +238,9 @@ def test_file_changed_between_check_and_open_is_refused(tmp_path, monkeypatch, c
                 stream.write(b"additional")
         else:
             path.write_bytes(b"x")
-        return original(path, flags)
+        return original(path)
 
-    monkeypatch.setattr(artifacts.os, "open", race)
+    monkeypatch.setattr(artifacts, "_open_artifact", race)
     with pytest.raises(PlanError, match="changed during preflight"):
         artifacts.verify_role_artifacts(release, sources, role="client")
 
@@ -285,9 +302,34 @@ def test_real_file_mutation_during_streaming_is_refused(tmp_path, monkeypatch, c
             return data
 
     monkeypatch.setattr(artifacts.os, "fdopen",
-                        lambda fd, mode: MutatingReader(original(fd, mode)))
-    with pytest.raises(PlanError, match="changed during preflight|byte bounds"):
+                        lambda fd, mode, **kwargs: MutatingReader(original(fd, mode, **kwargs)))
+    with pytest.raises(PlanError, match="changed during preflight|byte bounds|unchanged ordinary file"):
         artifacts.verify_role_artifacts(release, sources, role="client")
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows read-sharing fence")
+def test_native_reader_fences_writers_and_deletion_but_allows_readers(tmp_path):
+    path = tmp_path / "artifact"
+    path.write_bytes(b"unchanged artifact")
+    with artifacts._reader(path) as reader:
+        with artifacts._reader(path) as second:
+            assert second.read() == b"unchanged artifact"
+        for mutation in (
+            lambda: path.write_bytes(b"foreign"),
+            path.unlink,
+        ):
+            with pytest.raises(OSError) as error:
+                mutation()
+            assert error.value.errno == errno.EACCES
+            assert error.value.winerror in (None, 32)
+        assert reader.read() == b"unchanged artifact"
+    path.write_bytes(b"writer allowed after custody")
+    assert path.read_bytes() == b"writer allowed after custody"
+    with path.open("r+b"):
+        with pytest.raises(PermissionError) as error:
+            with artifacts._reader(path):
+                pytest.fail("an existing writer was admitted")
+        assert error.value.winerror == 32
 
 
 @pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="native FIFO unavailable")

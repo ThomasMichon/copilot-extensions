@@ -15,7 +15,7 @@ from pathlib import Path, PurePosixPath
 PROOF = "tools/clean-room/gateway-role-tunnels/"
 IMAGE = "fleet-manager/containers/gateway/"
 PACKAGE_MODULES = frozenset("""
-__init__ __main__ allocation artifact_staging artifacts client_activation client_admission client_construction client_diagnostics
+__init__ __main__ allocation artifact_staging artifacts client_activation client_admission client_construction client_diagnostics client_frontdoor
 gateway_auth gateway_broker gateway_client gateway_cloudflare gateway_contract gateway_controller
 gateway_identity_provider gateway_index gateway_manifest gateway_reconcile gateway_server
 gateway_service_channel gateway_service_connector gateway_service_context gateway_service_handler
@@ -37,6 +37,7 @@ REQUIRED = frozenset({
     *(f"fleet-manager/src/fleet_manager/{name}.py" for name in PACKAGE_MODULES),
     *(f"libs/versioned-runtime/{name}" for name in RESOURCES),
     "libs/installer-engine/installer_engine_process.py",
+    "libs/installer-engine/runtime_launcher.py",
     "libs/agent-procutil/src/agent_procutil/__init__.py",
     *(PROOF + name for name in RUNNER_FILES),
     IMAGE + "Dockerfile", IMAGE + "Dockerfile.dockerignore",

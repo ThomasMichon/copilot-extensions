@@ -31,6 +31,9 @@ helpers["select_bytes"](
     [selected], "runtime build helper", optional_paths=[included] if canonical else [],
 )
 companions = {
+    "_runtime_launcher.py": (
+        canonical.parent / "installer-engine" / "runtime_launcher.py" if canonical else None
+    ),
     "_installer_process.py": (
         canonical.parent / "installer-engine" / "installer_engine_process.py" if canonical else None
     ),

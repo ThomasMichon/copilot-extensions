@@ -22,6 +22,7 @@ libs/versioned-runtime/**
 !libs/installer-engine/
 libs/installer-engine/**
 !libs/installer-engine/installer_engine_process.py
+!libs/installer-engine/runtime_launcher.py
 !libs/agent-procutil/
 libs/agent-procutil/**
 !libs/agent-procutil/src/

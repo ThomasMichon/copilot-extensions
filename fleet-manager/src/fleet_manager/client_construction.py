@@ -22,6 +22,7 @@ from .release_selection import ReleaseSelection
 NAMESPACE = "client-runtime"
 OWNER = "client-owner.json"
 COMPLETION = "client-constructed.json"
+BOOTSTRAP = "runtime-bootstrap"
 
 
 def _write(path, value):
@@ -187,6 +188,29 @@ def _run(argv, slot, phase, *, descriptor, resource_evidence=None):
 
 def _python(slot):
     return slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+
+
+def _bootstrap(slot, evidence):
+    directory = slot / BOOTSTRAP
+    directory.mkdir(mode=0o700)
+    for source, target in (
+        ("_runtime_launcher.py", "runtime_launcher.py"),
+        ("_versioned_runtime.py", "versioned_runtime.py"),
+        *((name + ".py", name + ".py") for name in (
+            "versioned_runtime_leases", "versioned_runtime_construction",
+            "versioned_runtime_source", "versioned_runtime_publication",
+        )),
+    ):
+        data = artifact_staging._bytes(Path(__file__).absolute().with_name(source), MAX_BYTES)
+        if hashlib.sha256(data).hexdigest() != evidence["runtime_resource_sha256s"][source]:
+            raise PlanError("client launch resource changed after RECORD admission")
+        with (directory / target).open("xb") as stream:
+            os.chmod(directory / target, 0o600)
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+    client_admission._sync_directory(directory)
+    client_admission._sync_directory(slot)
 
 
 def _pip(slot):
@@ -431,6 +455,7 @@ def construct_client_release(root, identity, selection, staged, *,
                                   "--no-index", "--no-deps", "--no-compile", "--no-cache-dir",
                                   wheel], slot, "offline wheel installation",
                                  descriptor=descriptor, resource_evidence=resource_evidence)
+                            _bootstrap(slot, resource_evidence)
                         checkpoint()
                         before_health = _tree(primitive, slot)
                         health = _health(slot, checkpoint, descriptor, resource_evidence)

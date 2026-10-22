@@ -9,10 +9,13 @@ The durable-admission slice merged in #7459. Its actual CLI and state contract
 are documented in [client admission](../../../fleet-manager/docs/client-admission.md).
 Construction and compatibility/local health merged in #7804; their actual
 contract is documented in [client construction](../../../fleet-manager/docs/client-construction.md).
-The next source slice implements only owned runtime-selector activation with
-fresh local health and physically proved, bounded forward retry. Its actual
+Owned runtime-selector activation with fresh local health and physically proved,
+bounded forward retry merged in #7847. Its actual
 contract is documented in [runtime activation](../../../fleet-manager/docs/client-runtime-activation.md).
-Frontdoor registration, removal and the complete managed lifecycle remain serial
+The next owned client slice implements explicit
+[frontdoor registration](../../../fleet-manager/docs/client-frontdoor.md) using
+the shared publication and retained-execution primitives. Its qualification and
+review remain pending; removal and the complete managed lifecycle remain serial
 obligations, not delivered behavior or permission for live activation.
 
 ## Scope and ownership
