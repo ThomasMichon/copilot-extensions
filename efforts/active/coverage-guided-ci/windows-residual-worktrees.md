@@ -101,6 +101,10 @@ in the hook IPC module. Current Dev already uses PowerShell `-Command`
 rather than stdin; that invocation is retained with the resolved executable.
 Bash receives POSIX path arguments and the canonical admission helper,
 without importing an unrelated installer test module.
+The availability precheck preserves the supported canonical Windows Bash
+location even when Bash is absent from PATH. A review-driven regression
+executes this lifecycle fixture with that configuration and proves both
+nonconformant and timed-out admission probes fail rather than skip.
 
 The first bounded run exposed stale assumptions in this same fixture:
 current installers call publication helpers and PowerShell resolves
@@ -115,8 +119,10 @@ comparison now covers all four helpers, followed by the existing deployed
 client/native-source/lifecycle import assertions. Production installers
 are unchanged; no external installer-owner work is absorbed.
 
-Complete native Windows shell-collection and hook-IPC modules: 176 passed,
-zero skips, 28.10 seconds pytest / 31.88 preparation-cleanup inclusive.
+Complete native Windows shell-collection and hook-IPC modules after that
+review fix: 178 passed, zero skips, 31.56 seconds pytest / 37.33
+preparation-cleanup inclusive. The initial passing implementation had 176
+passes; it is not substituted for the final regression run.
 Exactly two work-stealing workers retain the original 30-second item
 watchdog, 240-second diagnostic group and every process/memory/native
 deadline and mark. Initial runs failed honestly on the stale fixture

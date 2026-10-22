@@ -642,7 +642,10 @@ def test_installed_bin_layout_contains_all_lifecycle_helpers(tmp_path, monkeypat
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(scripts.parent / relative, destination)
     if installer.endswith(".sh"):
-        if not shutil.which("bash"):
+        canonical_bash = Path(r"C:\Program Files\Git\bin\bash.exe")
+        if not (
+            sys.platform == "win32" and canonical_bash.is_file()
+        ) and not shutil.which("bash"):
             pytest.skip("Native shell installer requires bash")
         from native_shell_support import admit_native_bash
 
@@ -711,6 +714,39 @@ def test_installed_bin_layout_contains_all_lifecycle_helpers(tmp_path, monkeypat
     assert module._capture_native_source()["version"] == 1
     assert installed / "native_source_context.py" in loaded
     assert module._load_sibling("hook_lifecycle_runtime.py").run_end
+
+
+@pytest.mark.parametrize("failure", ["nonconformant", "timeout"])
+def test_lifecycle_fixture_admits_canonical_bash_without_path(
+    tmp_path, monkeypatch, failure,
+):
+    import native_shell_support as shells
+
+    canonical_bash = Path(r"C:\Program Files\Git\bin\bash.exe")
+    original_is_file = Path.is_file
+    monkeypatch.setattr(
+        Path, "is_file",
+        lambda path: path == canonical_bash or original_is_file(path),
+    )
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.delenv("COPILOT_EXTENSIONS_ALLOW_EXPLICIT_TEST_TIERS", raising=False)
+    monkeypatch.setattr(shutil, "which", lambda *_args, **_kwargs: None)
+    calls = []
+
+    def probe(argv, **kwargs):
+        calls.append(argv)
+        assert argv[0] == str(canonical_bash)
+        assert kwargs["timeout"] == 5
+        if failure == "timeout":
+            raise subprocess.TimeoutExpired(argv, 5)
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(shells, "run_headless", probe)
+    with pytest.raises(shells.ShellUnavailable, match="probe"):
+        test_installed_bin_layout_contains_all_lifecycle_helpers(
+            tmp_path, monkeypatch, "install.sh",
+        )
+    assert len(calls) == 1
 
 
 @pytest.mark.parametrize("runtime_version,returncode,stdout", [
