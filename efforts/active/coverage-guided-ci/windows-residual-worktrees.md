@@ -87,6 +87,50 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Admitted fixture-semantic batches
 
+### N-HTTP-DEADLINE absolute expiry before connection and bounded fixture cleanup
+
+Baseline: the actual #7799 merge. Only
+`test_native_transport_absolute_deadline_bounds_slow_stream` changes in
+`test_azure_pr_observation.py`; its complete function and decorators match
+pinned preserved source. Every other original test/function/class is
+AST-identical. No production transport, authentication or deadline changes.
+
+The real urllib opener/HTTP parser continues to read a plaintext loopback
+fixture through the existing HTTPS-connect substitution. A fixed fixture
+SSL context avoids unrelated platform trust-store initialization. Existing
+fast/slow cases and their node IDs remain, with an expired-before-connect
+case added for each length, chunked and slow-header framing. Delaying
+opener construction consumes the reader's original absolute budget;
+request-arrival events prove those expired readers send no request.
+
+The original 0.15-second slow budget, 2.0-second fast budget and
+0.75-second elapsed assertion remain unchanged. A stop event interrupts
+slow fixture writes during cleanup; the server's formerly unbounded
+accept now has a two-second timeout and the original two-second worker
+join/liveness assertion remains. No connection retry, skip or deadline
+increase is introduced.
+
+Complete native Windows observation module: 74 passed, zero skips,
+10.40 seconds pytest / 22.70 preparation-cleanup inclusive. Exactly two
+work-stealing workers retain the original 30-second item watchdog,
+240-second diagnostic group and all native/process/memory bounds and
+marks. Ruff and thirteen install contracts pass. No reduced selection,
+exclusion or qualification waiver. This is bounded functional evidence,
+not quiet-host, whole-suite, repeated same-head or final qualification.
+
+Documentation impact: this test-only, below-altitude extraction changes
+no operator-facing transport/API. This ledger documents the fixture
+contract. Actual loopback HTTP framing and request-arrival assertions
+provide the simple end-to-end check without contacting an external
+service or changing authentication. Fresh fixture startup is not
+production provisioning; production clean-room and external-venue lanes
+are inapplicable. Other N and production S/F/G/P/R/A residuals remain open.
+
+Prior-slice disposition: #7799 actually merged as
+`fadb6c810fa483635d6b17d0f76aab2d9032b012`.
+Its worktree was finalized, parent claim settled, and the owning source
+effort reread and journaled before this independent slice.
+
 ### N-PANE-DIAGNOSTICS bounded native prompt launch diagnostics
 
 Baseline: the actual #7790 merge. Only `TestPaneWrapperInitialPrompt`

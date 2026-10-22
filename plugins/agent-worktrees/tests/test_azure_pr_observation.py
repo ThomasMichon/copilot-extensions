@@ -649,21 +649,31 @@ def test_native_transport_keeps_real_auth_value_out_of_process_arguments():
 
 
 @pytest.mark.parametrize("framing", ["length", "chunked", "headers"])
-@pytest.mark.parametrize("slow", [False, True])
-def test_native_transport_absolute_deadline_bounds_slow_stream(monkeypatch, framing, slow):
+@pytest.mark.parametrize(
+    ("slow", "preconnect_delay"),
+    [(False, 0), (True, 0), (True, .2)],
+    ids=["False", "True", "expired-before-connect"],
+)
+def test_native_transport_absolute_deadline_bounds_slow_stream(
+    monkeypatch, framing, slow, preconnect_delay,
+):
     import http.client
     import socketserver
+    import ssl
     import threading
     import time
     from urllib.request import ProxyHandler
     from agent_worktrees.providers import azure_observation_reads as reads
 
     body = b'{"value":[' + b" " * 80 + b"]}"
+    received = threading.Event()
+    stop = threading.Event()
 
     class Handler(socketserver.BaseRequestHandler):
         def handle(self):
             self.request.settimeout(2)
             self.request.recv(8192)
+            received.set()
             headers = b"HTTP/1.1 200 OK\r\nx-ms-continuationtoken: next\r\n"
             if framing == "chunked":
                 headers += b"Transfer-Encoding: chunked\r\n\r\n"
@@ -679,17 +689,31 @@ def test_native_transport_absolute_deadline_bounds_slow_stream(monkeypatch, fram
             try:
                 for fragment in fragments:
                     self.request.sendall(fragment)
-                    if slow:
-                        time.sleep(.01)
+                    if slow and stop.wait(.01):
+                        return
             except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
                 return
 
     # Keep the production HTTPS opener/HTTP parser, but use a plaintext loopback
     # fixture so this deadline test needs neither external TLS nor certificates.
     monkeypatch.setattr(http.client.HTTPSConnection, "connect", http.client.HTTPConnection.connect)
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    initialize = reads.HTTPSHandler.__init__
+
+    def initialize_fixture_context(self):
+        initialize(self, context=context)
+
+    monkeypatch.setattr(reads.HTTPSHandler, "__init__", initialize_fixture_context)
     build = reads.build_opener
-    monkeypatch.setattr(reads, "build_opener", lambda *handlers: build(ProxyHandler({}), *handlers))
+
+    def fixture_opener(*handlers):
+        if preconnect_delay:
+            time.sleep(preconnect_delay)
+        return build(ProxyHandler({}), *handlers)
+
+    monkeypatch.setattr(reads, "build_opener", fixture_opener)
     with socketserver.TCPServer(("127.0.0.1", 0), Handler) as server:
+        server.timeout = 2
         worker = threading.Thread(target=server.handle_request)
         worker.start()
         try:
@@ -705,7 +729,9 @@ def test_native_transport_absolute_deadline_bounds_slow_stream(monkeypatch, fram
                 assert time.monotonic() - started < .75
             else:
                 assert reader.json(reader.base) == ({"value": []}, "next")
+            assert received.is_set() is not bool(preconnect_delay)
         finally:
+            stop.set()
             worker.join(timeout=2)
             assert not worker.is_alive()
 
