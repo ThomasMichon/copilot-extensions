@@ -212,8 +212,11 @@ def repair_case(
     def execute_actual_installer(command, **options):
         assert not options.get("start_new_session")
         cwd = options.pop("cwd", home)
+        # Scoped preflight performs the real repeated governance reads before
+        # the fence; its measured native path needs headroom beyond shared admission.
+        timeout = 45 if options.get("env", {}).get("COPILOT_EXTENSIONS_CONTEXT") else 30
         result = REAL_RUN(
-            command, **options, cwd=cwd, capture_output=True, text=True, timeout=30,
+            command, **options, cwd=cwd, capture_output=True, text=True, timeout=timeout,
         )
         calls.append((list(command), result))
         return result

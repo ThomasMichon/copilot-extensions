@@ -59,10 +59,14 @@ def _error(operation: str, source: str, detail: str) -> RuntimeError:
 
 def _registrations(home: Path) -> dict:
     _plain(home)
-    _plain(home / "settings.json")
-    return _settings_document(home / "settings.json", jsonc_header=True).get(
-        "extraKnownMarketplaces", {},
-    )
+    registrations = {}
+    for name in ("settings.json", "settings.local.json"):
+        path = home / name
+        _plain(path)
+        registrations.update(_settings_document(path, jsonc_header=True).get(
+            "extraKnownMarketplaces", {},
+        ))
+    return registrations
 
 
 def _provenance(primitive: Any, home: Path, plugin: str, marketplace: str, definition: Any) -> dict:
@@ -78,7 +82,7 @@ def _provenance(primitive: Any, home: Path, plugin: str, marketplace: str, defin
     }.get(kind)
     if field is None or not isinstance(descriptor.get(field), str) or not descriptor[field].strip():
         raise ValueError("Registered source has no supported native acquisition location")
-    normalized = primitive.normalize_source(descriptor, home)
+    normalized = primitive._get_declarations(marketplace, home, None)[-1]["source"]
     resolved = primitive.source_identity(normalized, marketplace)
     payload = home / "installed-plugins" / marketplace / plugin
     _plain(payload)

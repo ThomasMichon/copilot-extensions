@@ -72,14 +72,40 @@ def test_valid_scoped_update_reaches_only_its_own_construction(
     assert not (case.runtime / "bin").exists()
 
 
+@pytest.mark.parametrize("source_state", ["present", "missing-payload"])
+def test_automatic_cell_selection_is_preserved_without_an_inherited_context(
+    repair_case, monkeypatch, capsys, source_state,
+):
+    case = repair_case
+    root, _durable, _context = _activate_scope(case, monkeypatch)
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT")
+    automatic = case.primitive.resolve_runtime_deployment(
+        payload_root=case.incumbent, plugin_id="agent-worktrees",
+        legacy_root=case.runtime, environment=dict(os.environ),
+    )
+    assert automatic["actualMode"] == "namespaced" and automatic["runtimeRoot"] == str(root)
+    if source_state == "missing-payload":
+        case.incumbent.rename(case.incumbent.with_name("retained-payload"))
+    before = case.manifest.read_bytes()
+    rc = case.update.repair_engine(case.source)
+    assert case.effect.is_file(), f"rc={rc}; {capsys.readouterr().err}"
+    assert str(root) in case.calls[-1][0]
+    assert case.manifest.read_bytes() == before
+    assert not (case.runtime / "bin").exists()
+    assert "COPILOT_EXTENSIONS_CONTEXT" not in os.environ
+
+
 @pytest.mark.parametrize("damage", [
     "foreign-source", "stale-install", "deactivated", "invalid-policy", "foreign-owner",
 ])
+@pytest.mark.parametrize("explicit_context", [True, False], ids=["explicit", "automatic"])
 def test_invalid_scoped_update_never_constructs_or_falls_back(
-    repair_case, monkeypatch, damage,
+    repair_case, monkeypatch, damage, explicit_context,
 ):
     case = repair_case
     root, durable, context = _activate_scope(case, monkeypatch)
+    if not explicit_context:
+        monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT")
     if damage == "foreign-source":
         namespace = root.parent.parent / "namespace.json"
         value = json.loads(namespace.read_text())

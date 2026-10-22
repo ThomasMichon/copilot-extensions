@@ -28,6 +28,7 @@ class _Installation:
 class _RefreshedSource:
     identity: dict[str, Any]
     payload: Path
+    context: str | None = None
 
 
 def prepare_update(rest: list[str]) -> tuple[list[str], bool, int]:
@@ -55,6 +56,22 @@ def _policy_sdk(
     helper = runpy.run_path(str(policy))
     api, primitive = helper["_publication_api"](sdk)
     return fresh_script, sdk, helper, api, primitive
+
+
+def _scope_identity(
+    receipt: dict[str, Any], activation: dict[str, Any], environment: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "owner": {
+            "sourceFingerprint": receipt["sourceFingerprint"], "pluginId": "agent-worktrees",
+            "mode": "namespaced", "runtimeRoot": receipt["pluginRoot"],
+            "environment": environment,
+        },
+        "context": receipt["installReceipt"],
+        "namespaceGeneration": receipt["namespaceGeneration"],
+        "installGeneration": receipt["generation"],
+        "activationGeneration": activation["activationGeneration"],
+    }
 
 
 def _refresh_source(source: Path, environment: dict[str, str]) -> _RefreshedSource:
@@ -91,17 +108,7 @@ def _refresh_source(source: Path, environment: dict[str, str]) -> _RefreshedSour
         fingerprint = receipt["sourceFingerprint"]
         marketplace = receipt["marketplaceId"]
         hint = Path(receipt["payloadRoot"])
-        expected = {
-            "owner": {
-                "sourceFingerprint": fingerprint, "pluginId": "agent-worktrees",
-                "mode": "namespaced", "runtimeRoot": str(root),
-                "environment": current_environment,
-            },
-            "context": str(path.resolve()),
-            "namespaceGeneration": receipt["namespaceGeneration"],
-            "installGeneration": receipt["generation"],
-            "activationGeneration": activation["activationGeneration"],
-        }
+        expected = _scope_identity(receipt, activation, current_environment)
     else:
         root = home / ".agent-worktrees"
         manifest_path = root / "deploy-manifest.json"
@@ -126,19 +133,43 @@ def _refresh_source(source: Path, environment: dict[str, str]) -> _RefreshedSour
         source_fingerprint=fingerprint, marketplace_id=marketplace, payload_hint=payload_hint,
     )
     if not context:
-        wanted = api["_legacy_receipt"](
-            origin.provenance, {"runtimeRoot": str(root), "environment": current_environment},
+        durable = home / ".copilot-extensions"
+        cell_root = (
+            durable / "marketplaces" / origin.provenance["marketplaceId"]
+            / "plugins/agent-worktrees"
         )
-        if {key: value for key, value in previous.items() if key != "payloadRoot"} != {
-            key: value for key, value in wanted.items() if key != "payloadRoot"
-        }:
-            raise RuntimeError("Engine repair source, installation or environment identity differs")
-        expected = _identity(_Installation(root, origin.payload, wanted, _sdk))
+        activation = primitive._activation_result(
+            plugin_root=cell_root, durable_home=durable,
+            marketplace_id=origin.provenance["marketplaceId"], plugin_id="agent-worktrees",
+            current_environment=current_environment, legacy_root=root,
+        )
+        if activation["state"] == "valid" and activation["actualMode"] == "namespaced":
+            context = activation["context"]
+            receipt = primitive.validate_context_receipt(
+                context, durable, expected_plugin_id="agent-worktrees",
+                expected_marketplace_id=origin.provenance["marketplaceId"],
+                expected_payload_root=origin.payload, environment=environment,
+            )
+            if receipt["sourceFingerprint"] != fingerprint:
+                raise RuntimeError("Automatic engine context belongs to another source")
+            expected = _scope_identity(receipt, activation, current_environment)
+            root = Path(receipt["pluginRoot"])
+        else:
+            if activation["state"] not in {"missing", "valid"}:
+                raise RuntimeError("Engine repair automatic activation is stale, invalid or foreign")
+            wanted = api["_legacy_receipt"](
+                origin.provenance, {"runtimeRoot": str(root), "environment": current_environment},
+            )
+            if {key: value for key, value in previous.items() if key != "payloadRoot"} != {
+                key: value for key, value in wanted.items() if key != "payloadRoot"
+            }:
+                raise RuntimeError("Engine repair source, installation or environment identity differs")
+            expected = _identity(_Installation(root, origin.payload, wanted, _sdk))
     helper["_ordinary"](root / "bin")
     if (root / "bin").exists() and not (root / "bin").is_dir():
         raise RuntimeError("Engine runtime bin is not an ordinary directory")
     refresh_registered_origin(primitive, origin, environment=environment)
-    return _RefreshedSource(expected, origin.payload)
+    return _RefreshedSource(expected, origin.payload, context or None)
 
 
 def _scoped_incumbent(
@@ -294,6 +325,8 @@ def repair_engine(source: Path) -> int:
     try:
         refreshed = _refresh_source(source, environment)
         expected = refreshed.identity
+        if refreshed.context is not None:
+            environment["COPILOT_EXTENSIONS_CONTEXT"] = refreshed.context
         selected = _incumbent(source, environment, refreshed.payload)
         if _identity(selected) != expected:
             raise RuntimeError("Engine installation/source identity changed during acquisition")

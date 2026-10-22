@@ -396,6 +396,18 @@ def test_registered_url_alias_preserves_full_definition(case, monkeypatch):
     assert selected.definition == definition == origin_api._registrations(case.home)["fixture"]
 
 
+def test_registered_user_local_origin_remains_in_its_original_scope(case, monkeypatch):
+    local = case.home / "settings.local.json"
+    local.write_text(case.settings.read_text(), encoding="utf-8")
+    case.settings.write_text("{}", encoding="utf-8")
+    before = local.read_bytes(), case.settings.read_bytes()
+    selected = _select(case)
+    _effect(case, monkeypatch)
+    actual = origin_api.refresh_registered_origin(primitive, selected, environment=case.env)
+    assert actual["sourceFingerprint"] == case.identity["fingerprint"]
+    assert (local.read_bytes(), case.settings.read_bytes()) == before
+
+
 @pytest.mark.parametrize("unrelated", [
     {"source": {"source": "npm", "package": "@example/plugins"}},
     {"source": {"source": "git-subdir", "url": "https://example.test/other.git", "path": "sub"}},

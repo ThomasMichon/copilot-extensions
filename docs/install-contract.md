@@ -1248,6 +1248,9 @@ An admitted partial shared installation provisions its missing runtime bin
 before updating. An explicit cell retains its canonical context, actual runtime
 root and publication custody throughout repair; invalid or changed cell
 ownership never falls back to the shared root.
+The same applies when current activation selects that cell automatically:
+recovery captures its canonical context before acquisition and carries it
+through repair without changing the caller's environment.
 Project arguments and the original invocation context cross the bootstrap.
 Installing the Manager alone never counts as suite success: repair failures
 and the eventual update's native exit status
