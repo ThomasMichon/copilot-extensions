@@ -435,6 +435,19 @@ or a reason to create a daemon.
   replace its native mux target. Real hold refresh/pruning and stop-during-
   preparation regressions cover both paths. Current-head review and required
   CI remain prerequisites; no source slice is treated as parent completion.
+- The next exact-head review marked both inline findings resolved but retained
+  a launch/stop concurrency warning in its summary. Three deterministic
+  public-CLI regressions reproduced the warning before any merge: stop could
+  release an actively preparing scope (including attached mode), and a second
+  launch could mutate that scope before the first completed. Launch/recovery
+  and stop now hold one controller-local OS lock for the resolved native scope
+  through cleanup or verified retirement, separate from keeper monitoring.
+  Contenders fail promptly before changing ownership; unrelated scopes remain
+  independent, and interactive attachment is outside the critical section.
+  All 84 focused SSH cases pass with three explicit POSIX-only skips; the new
+  real cross-process test proves same-scope exclusion, other-scope admission
+  and lock release/reacquisition. This uses the existing lock primitive, not
+  a new launcher, broker, global service or distributed-lock claim.
 
 ### 2026-10-22 - Land privileged receiver source and continue the parent
 

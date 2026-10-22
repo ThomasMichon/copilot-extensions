@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import hashlib
 import json
 import os
 import shlex
@@ -299,6 +300,11 @@ def _holds() -> KeeperHoldStore:
     return KeeperHoldStore(_STORE, protocol=_KEEPER_PROTOCOL)
 
 
+def _lifecycle_lock(scope: str):
+    key = "copilot-lifecycle-" + hashlib.sha256(scope.encode("utf-8")).hexdigest()
+    return KeeperHoldStore(_STORE, lock_timeout=0.25, lock_poll=0.025).lock(key)
+
+
 def read_keeper_state(target: str) -> dict[str, Any] | None:
     return _STORE.read(_state_key(target))
 
@@ -585,23 +591,24 @@ def _launch(args, adapter, plan, *, seed, refs=None):
     from . import copilot_delivery, copilot_plugins
 
     copilot_plugins.resolve_launch(adapter, plan)
-    pending = copilot_delivery.read(
-        args.target, plan["scope_id"], requested_workspace=args.workspace,
-        execution_workspace=plan["workspace"],
-    )
-    if pending is not None:
-        adapter.pending_delivery = True
-        return copilot_delivery.recover(adapter, plan, pending)
-    plan["bridge_owned_seed"] = True
-    adapter._launch_pending = True
-    return launch_detached(
-        adapter, plan, seed=seed, driver=args.driver,
-        copilot_args=(
-            _with_caller_model(list(getattr(args, "copilot_args", None) or []))
-            if getattr(args, "detach", False) else []
-        ),
-        ensure_mux=True, register_timeout=float(args.register_timeout), progress=_progress, refs=refs,
-    )
+    with _lifecycle_lock(plan["scope_id"]):
+        pending = copilot_delivery.read(
+            args.target, plan["scope_id"], requested_workspace=args.workspace,
+            execution_workspace=plan["workspace"],
+        )
+        if pending is not None:
+            adapter.pending_delivery = True
+            return copilot_delivery.recover(adapter, plan, pending)
+        plan["bridge_owned_seed"] = True
+        adapter._launch_pending = True
+        return launch_detached(
+            adapter, plan, seed=seed, driver=args.driver,
+            copilot_args=(
+                _with_caller_model(list(getattr(args, "copilot_args", None) or []))
+                if getattr(args, "detach", False) else []
+            ),
+            ensure_mux=True, register_timeout=float(args.register_timeout), progress=_progress, refs=refs,
+        )
 
 
 def cmd_detach(args: argparse.Namespace) -> int:
@@ -654,37 +661,38 @@ def cmd_stop(args: argparse.Namespace) -> int:
         resolve_launch(_SshAdapter(target=args.target, ssh_config=ssh_config), plan)
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
         return _fail(str(exc), plan)
-    held_mux = _holds().hold_mux_or_none(_state_key(args.target), plan["scope_id"])
-    if held_mux:
-        if held_mux.startswith(_ATTACHED_HOLD_PREFIX):
-            return _fail("SSH launch is still preparing this scope; retry stop after it settles", plan)
-        plan["mux_session"] = held_mux
-        plan["venue"]["mux_session_name"] = plan["mux_session"]
     try:
-        pending = copilot_delivery.read(
-            args.target, plan["scope_id"], requested_workspace=args.workspace,
-            execution_workspace=plan["workspace"],
-        )
-        if pending is not None and (
-            pending.get("scope_id") != plan["scope_id"]
-            or pending.get("mux_session") != plan["mux_session"]
-            or pending.get("envelope", {}).get("plugin_context", {}).get("cwd") != plan["workspace"]
-        ):
-            raise RuntimeError("Pending SSH delivery does not match the native stop target")
+        with _lifecycle_lock(plan["scope_id"]):
+            held_mux = _holds().hold_mux_or_none(_state_key(args.target), plan["scope_id"])
+            if held_mux:
+                if held_mux.startswith(_ATTACHED_HOLD_PREFIX):
+                    return _fail("SSH launch is still preparing this scope; retry stop after it settles", plan)
+                plan["mux_session"] = held_mux
+                plan["venue"]["mux_session_name"] = plan["mux_session"]
+            pending = copilot_delivery.read(
+                args.target, plan["scope_id"], requested_workspace=args.workspace,
+                execution_workspace=plan["workspace"],
+            )
+            if pending is not None and (
+                pending.get("scope_id") != plan["scope_id"]
+                or pending.get("mux_session") != plan["mux_session"]
+                or pending.get("envelope", {}).get("plugin_context", {}).get("cwd") != plan["workspace"]
+            ):
+                raise RuntimeError("Pending SSH delivery does not match the native stop target")
+            row = live_session_for(plan["scope_id"])
+            rc, payload = stop_detached(
+                _SshAdapter(target=args.target, ssh_config=ssh_config, hold_id=plan["scope_id"]),
+                plan,
+                session_row=row,
+            )
+            if rc == 0 and pending is not None:
+                try:
+                    copilot_delivery.retire_stopped(args.target, plan, pending)
+                except (OSError, ValueError, RuntimeError) as exc:
+                    return _fail(f"Native session stopped but delivery journal retirement failed: {exc}", plan)
+            return _emit(rc, payload)
     except (OSError, ValueError, RuntimeError) as exc:
         return _fail(str(exc), plan)
-    row = live_session_for(plan["scope_id"])
-    rc, payload = stop_detached(
-        _SshAdapter(target=args.target, ssh_config=ssh_config, hold_id=plan["scope_id"]),
-        plan,
-        session_row=row,
-    )
-    if rc == 0 and pending is not None:
-        try:
-            copilot_delivery.retire_stopped(args.target, plan, pending)
-        except (OSError, ValueError, RuntimeError) as exc:
-            return _fail(f"Native session stopped but delivery journal retirement failed: {exc}", plan)
-    return _emit(rc, payload)
 
 
 def cmd_attached(args: argparse.Namespace) -> int:

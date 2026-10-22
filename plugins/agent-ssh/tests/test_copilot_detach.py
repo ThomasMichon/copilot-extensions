@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pytest
 from ssh_manager import keeper_holds as shared_keeper_holds
+from agent_procutil import no_window_flags
 from venue_copilot import detached as venue_detached
 
 from agent_ssh import copilot_detach as detach
@@ -589,6 +590,57 @@ def test_stop_during_preparation_refuses_pid_hold_without_releasing_native_owner
     monkeypatch.setattr("agent_ssh.copilot_plugins.prepare", prepare)
     assert detach.cmd_detach(_args()) == 0
     assert real_keeper.read("devbox")["holds"]["anchor-repo@devbox"]["mux"] == "wt-anchor-repo"
+
+
+@pytest.mark.parametrize("attached", [False, True])
+def test_active_preparation_excludes_stop_even_without_a_scoped_keeper_hold(seams, monkeypatch, attached):
+    def prepare(*a):
+        assert detach.cmd_stop(_args(stop=True, detach=False)) == 1
+        assert seams.release == [] and seams.deregister == []
+        assert not any("tmux kill-session" in command for command in seams.remote)
+        raise RuntimeError("required plugin unavailable")
+    monkeypatch.setattr("agent_ssh.copilot_plugins.prepare", prepare)
+    args = _args(detach=not attached, copilot_args=[] if attached else ["--no-ask-user"])
+    assert (detach.cmd_attached(args) if attached else detach.cmd_detach(args)) == 1
+
+
+def test_competing_launch_cannot_mutate_an_active_scope(seams, monkeypatch):
+    context = {"version": 1, "cwd": "/workspaces/repo", "plugins": [], "logical_payloads": {}}
+    def prepare(*a):
+        if len(seams.reserve) == 1:
+            assert detach.cmd_detach(_args(seed="competing task")) == 1
+            assert len(seams.reserve) == len(seams.keeper) == 1
+        return dict(context)
+    monkeypatch.setattr("agent_ssh.copilot_plugins.prepare", prepare)
+    assert detach.cmd_detach(_args()) == 0
+
+
+def test_lifecycle_lock_is_cross_process_and_scoped(tmp_path, monkeypatch):
+    monkeypatch.setattr(detach, "_STORE", detach.KeeperStore(tmp_path))
+    program = """
+import sys
+from pathlib import Path
+from agent_ssh import copilot_detach as owner
+owner._STORE = owner.KeeperStore(Path(sys.argv[1]))
+try:
+    with owner._lifecycle_lock(sys.argv[2]):
+        print("ACQUIRED")
+except RuntimeError:
+    print("BUSY")
+    raise SystemExit(3)
+"""
+    def attempt(scope):
+        return subprocess.run(
+            [sys.executable, "-c", program, str(tmp_path), scope],
+            capture_output=True, text=True, timeout=15, creationflags=no_window_flags(),
+        )
+    with detach._lifecycle_lock("anchor-repo@host"):
+        blocked = attempt("anchor-repo@host")
+        assert blocked.returncode == 3 and blocked.stdout.strip() == "BUSY", blocked.stderr
+        other = attempt("anchor-other@host")
+        assert other.returncode == 0 and other.stdout.strip() == "ACQUIRED", other.stderr
+    released = attempt("anchor-repo@host")
+    assert released.returncode == 0 and released.stdout.strip() == "ACQUIRED", released.stderr
 
 
 def test_failed_keeper_handoff_cleans_up_native_session(seams, monkeypatch):
