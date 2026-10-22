@@ -16,7 +16,7 @@ import _winapi
 
 def main():
     sdk, workspace, physical_uv = map(Path, sys.argv[1:4])
-    frontend = sys.argv[4]
+    frontend, _, lookup = sys.argv[4].partition("-")
     kernel = ctypes.WinDLL("kernel32", use_last_error=True)
     kernel.GetProcessMitigationPolicy.argtypes = [
         ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_size_t,
@@ -60,9 +60,13 @@ def main():
     alias = workspace / "uv-link"
     _winapi.CreateJunction(str(physical_uv.parent), str(alias))
     logical_uv = str(alias / physical_uv.name)
+    original_path = os.environ.get("PATH")
+    if lookup == "named":
+        os.environ["PATH"] = str(alias) + os.pathsep + os.environ["PATH"]
+    selected_uv = "uv" if lookup in ("named", "system") else logical_uv
     before = flags()
     requested = ctypes.c_ulong(before | 1)
-    if not kernel.SetProcessMitigationPolicy(16, ctypes.byref(requested), ctypes.sizeof(requested)):
+    if not before & 1 and not kernel.SetProcessMitigationPolicy(16, ctypes.byref(requested), ctypes.sizeof(requested)):
         print(json.dumps({"unsupported_guard": ctypes.get_last_error()}))
         return
     assert flags() == before | 1
@@ -103,7 +107,7 @@ def main():
             inputs = engine.FrozenInputs(
                 project, packages, engine.runtime.fingerprint_source(engine._source_files(packages)),
             )
-            with engine._retained_inputs(inputs, Path(logical_uv), python, refresh=False) as retained:
+            with engine._retained_inputs(inputs, Path(selected_uv), python, refresh=False) as retained:
                 transaction = retained.transaction
                 assert transaction is not None
                 result = observed(
@@ -114,7 +118,7 @@ def main():
         else:
             assert frontend == "policy"
             result = policy.run_uv_install(
-                logical_uv, ["--python", str(python), str(project)],
+                selected_uv, ["--python", str(python), str(project)],
                 cwd=project, env=dict(os.environ), trusted_source_roots=(project,),
                 capture_output=True, text=True, timeout=15,
             )
@@ -130,6 +134,8 @@ def main():
     assert len(commands) == 6
     assert len({command[0] for command in commands}) == 1
     assert os.path.samefile(commands[0][0], physical_uv)
+    if lookup == "system":
+        assert os.environ.get("PATH") == original_path
     for command in (command for command in commands if "--show-settings" not in command):
         assert command[command.index("--exclude-newer") + 1] == "2000-01-01T00:00:00Z"
     print(json.dumps({

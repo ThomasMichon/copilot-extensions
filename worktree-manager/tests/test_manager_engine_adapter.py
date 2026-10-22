@@ -59,6 +59,29 @@ def test_adapter_delegates_construction_health_and_retention_without_selecting(t
         assert options["expected_source_identity"] == {}
 
 
+@pytest.mark.skipif(os.name != "nt", reason="native Windows command discovery")
+def test_default_uv_discovery_uses_the_sdk_before_traversing_the_selected_file(tmp_path, monkeypatch):
+    adapter = si._runtime_installer()
+    payload, root, uv = _source(tmp_path)
+    calls = _capture(adapter, monkeypatch)
+    selected = []
+    original_which = shutil.which
+
+    def which(command, *args, **kwargs):
+        if command == "uv":
+            pytest.fail("Manager performed a traversing UV availability check")
+        return original_which(command, *args, **kwargs)
+
+    monkeypatch.setattr(adapter.shutil, "which", which)
+    monkeypatch.setattr(
+        adapter.engine, "_select_uv_executable",
+        lambda command: selected.append(command) or str(uv),
+    )
+    with adapter.candidate(payload, root, assemble=si._copy_payload):
+        assert calls[0][2]["uv"] == uv
+    assert selected == ["uv"]
+
+
 def _bundled_wheel_source(tmp_path):
     payload, root, _ = _source(tmp_path)
     manager = Path(__file__).resolve().parents[1]

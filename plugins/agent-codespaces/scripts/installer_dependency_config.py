@@ -67,7 +67,25 @@ def physical_executable(path: str) -> str | None:
 
 
 def select_uv_executable(uv, *, error_type):
-    if not _WINDOWS or not Path(uv).is_absolute() or Path(uv).suffix.lower() != ".exe":
+    if not _WINDOWS:
+        return uv
+    if str(uv).lower() in ("uv", "uv.exe"):
+        import ctypes
+
+        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel.SearchPathW.argtypes = [
+            ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_wchar_p,
+            ctypes.c_uint32, ctypes.c_wchar_p, ctypes.c_void_p,
+        ]
+        kernel.SearchPathW.restype = ctypes.c_uint32
+        buffer = ctypes.create_unicode_buffer(32768)
+        length = kernel.SearchPathW(None, str(uv), ".exe", len(buffer), buffer, None)
+        if not length:
+            raise error_type(f"Native Windows UV lookup failed (error {ctypes.get_last_error()})")
+        if length >= len(buffer):
+            raise error_type("Selected UV executable exceeds the native path limit")
+        uv = buffer.value
+    if not Path(uv).is_absolute() or Path(uv).suffix.lower() != ".exe":
         return uv
     selected = physical_executable(uv)
     if selected is None:

@@ -32,7 +32,9 @@ def test_missing_selected_uv_is_not_replaced_by_another_resolver(tmp_path, monke
         policy._select_uv_executable(str(tmp_path / "missing.exe"))
 
 
-@pytest.mark.parametrize("windows,path", [(False, "/selected/uv"), (True, "uv")])
+@pytest.mark.parametrize("windows,path", [
+    (False, "/selected/uv"), (False, "uv"), (True, "relative/uv.exe"), (True, "custom-uv"),
+])
 def test_other_command_resolution_contracts_are_unchanged(monkeypatch, windows, path):
     monkeypatch.setattr(policy._configuration, "_WINDOWS", windows)
     monkeypatch.setattr(
@@ -40,6 +42,68 @@ def test_other_command_resolution_contracts_are_unchanged(monkeypatch, windows, 
         lambda _: pytest.fail("changed an unqualified or non-Windows resolver"),
     )
     assert policy._select_uv_executable(path) == path
+
+
+def _native_lookup(monkeypatch, path, *, result=None, error=0):
+    import ctypes
+    from types import SimpleNamespace
+
+    calls = []
+
+    def search(directory, name, extension, size, buffer, file_part):
+        calls.append((directory, name, extension, size, file_part))
+        if path is not None:
+            buffer.value = path
+        return result if result is not None else len(path or "")
+
+    monkeypatch.setattr(ctypes, "WinDLL", lambda *_args, **_kwargs: SimpleNamespace(SearchPathW=search), raising=False)
+    monkeypatch.setattr(ctypes, "get_last_error", lambda: error, raising=False)
+    monkeypatch.setattr(policy._configuration, "_WINDOWS", True)
+    return calls
+
+
+@pytest.mark.parametrize("name", ["uv", "uv.exe"])
+def test_named_windows_uv_uses_native_lookup_then_the_same_physical_target(tmp_path, monkeypatch, name):
+    logical = str(tmp_path / "selected" / "uv.exe")
+    physical = str(tmp_path / "physical" / "uv.exe")
+    calls = _native_lookup(monkeypatch, logical)
+    selected = []
+    monkeypatch.setattr(
+        policy._configuration, "physical_executable",
+        lambda path: selected.append(path) or physical,
+    )
+    assert policy._select_uv_executable(name) == physical
+    assert calls == [(None, name, ".exe", 32768, None)]
+    assert selected == [logical]
+
+
+@pytest.mark.parametrize("error", [2, 5])
+def test_native_lookup_failure_is_explicit_and_never_selects_another_uv(monkeypatch, error):
+    _native_lookup(monkeypatch, None, error=error)
+    monkeypatch.setattr(
+        policy._configuration, "physical_executable",
+        lambda _: pytest.fail("a failed native lookup substituted another tool"),
+    )
+    with pytest.raises(policy.DependencyPolicyError, match=f"lookup failed \\(error {error}\\)"):
+        policy._select_uv_executable("uv")
+
+
+def test_native_lookup_refuses_an_oversized_path(monkeypatch):
+    _native_lookup(monkeypatch, None, result=32768)
+    with pytest.raises(policy.DependencyPolicyError, match="native path limit"):
+        policy._select_uv_executable("uv")
+
+
+@pytest.mark.parametrize("name", ["uv.cmd", "uv.bat"])
+def test_named_non_native_wrappers_do_not_enter_native_executable_lookup(monkeypatch, name):
+    import ctypes
+
+    monkeypatch.setattr(policy._configuration, "_WINDOWS", True)
+    monkeypatch.setattr(
+        ctypes, "WinDLL", lambda *_args, **_kwargs: pytest.fail("reinterpreted a non-native wrapper"),
+        raising=False,
+    )
+    assert policy._select_uv_executable(name) == name
 
 
 def test_an_absolute_non_native_wrapper_is_not_reinterpreted(tmp_path, monkeypatch):

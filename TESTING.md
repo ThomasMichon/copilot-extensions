@@ -9,6 +9,11 @@ How to run the plugin test suites, the fast gates to run before a push, and the
 
 ## Native file-link prerequisites
 
+`tools/test_dependency_uv_executable_native.py` qualifies both absolute and
+named Windows UV commands through real guarded SDK/Python-owned installs.
+Named controls use an owned child's fixture-only PATH; external `*-system`
+qualification retains the target's actual PATH and verifies it is unchanged.
+
 Repository-tool installer-sync and vendor-guard link controls use the shared
 `native_file_symlink` fixture. Only Windows error 1314, raised by actual file-link
 creation, produces an explicit missing-privilege skip; other failures propagate.

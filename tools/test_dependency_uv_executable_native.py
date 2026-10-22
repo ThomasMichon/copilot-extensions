@@ -36,7 +36,7 @@ def _plain(path):
     return path[len(prefix):] if path.startswith(prefix) else path
 
 
-@pytest.mark.parametrize("frontend", ["policy", "python"])
+@pytest.mark.parametrize("frontend", ["policy", "python", "policy-named", "python-named"])
 def test_cold_sdk_installs_twice_from_a_guarded_caller_without_console_windows(
     tmp_path, record_property, monkeypatch, frontend,
 ):
@@ -51,7 +51,7 @@ def test_cold_sdk_installs_twice_from_a_guarded_caller_without_console_windows(
     sdk.mkdir()
     for name in ("installer_dependency_policy.py", "installer_dependency_config.py"):
         shutil.copyfile(support.PATH.with_name(name), sdk / name)
-    if frontend == "python":
+    if frontend.startswith("python"):
         for name in ("installer_engine.py", "installer_engine_process.py"):
             shutil.copyfile(support.PATH.with_name(name), sdk / name)
         for name in (

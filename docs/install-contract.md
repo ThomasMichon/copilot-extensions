@@ -2752,7 +2752,14 @@ changed. This handles an otherwise usable WinGet UV binary whose link is
 rejected by inherited RedirectionGuard. Missing targets refuse explicitly.
 Python-owned construction applies this same selection before its own strict
 path resolution, so a traversing caller cannot fail before SDK admission.
-Non-Windows, unqualified-command and non-native-wrapper lookup behavior remain unchanged.
+For a named native Windows command (`uv` or `uv.exe`), the SDK uses the
+read-only `SearchPathW` API with the process's existing system search policy,
+then resolves that exact logical result without traversing its links.
+Manager's default availability check uses the same selection before `is_file`;
+`shutil.which` can otherwise hide a guarded but usable WinGet entry.
+No PATH or search-mode setting is changed, and lookup failure never substitutes
+another UV. Non-Windows, explicit relative paths and non-native wrappers retain
+their existing behavior.
 The existing two-file SDK closure includes a generated projection of
 `agent_procutil._interpreter.physical_executable` in the configuration helper.
 Regenerate it with `tools/sync-installer-engine.py`, then fan runtime helpers

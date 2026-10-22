@@ -32,7 +32,10 @@ def base_python() -> Path:
 @contextmanager
 def candidate(payload: Path, root: Path, *, assemble, uv: Path | None = None):
     """Retain a healthy target; never publish selectors during construction."""
-    uv = uv or Path(shutil.which("uv") or "")
+    if os.name == "nt":
+        uv = Path(engine._select_uv_executable(str(uv) if uv is not None else "uv"))
+    else:
+        uv = uv or Path(shutil.which("uv") or "")
     if not uv.is_file():
         raise RuntimeError("uv is required for Manager runtime construction")
     root.mkdir(parents=True, exist_ok=True)
