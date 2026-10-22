@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent reviewed PRs targeting `dev`
 - **Created:** 2026-10-22
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** vision-closing: `visions/picker` (graceful capability scaling,
   render/derive rather than own, headless assertions) and
   `visions/plugins/agent-codespaces` (per-repo identity)
@@ -59,26 +59,26 @@ headless widget/action with mocked authentication and land through review/CI.
 ## Plan
 
 ### Phase 1 - Reviewed contract
-- [ ] Land this proposal before adding an authentication acquisition owner.
+- [x] Land this proposal before adding an authentication acquisition owner.
 
 ### Phase 2 - Provider and Manager
-- [ ] Publish structured `auth_required`, `scope_blocked`, `ready` or probe-error
+- [x] Publish structured `auth_required`, `scope_blocked`, `ready` or probe-error
       status, with selected account and actionable banner, in both one-shot and
       streaming pool results. Never equate probe failure with authenticated empty.
-- [ ] Add a provider-owned explicit authorization command. Reuse vendor `gh`
+- [x] Add a provider-owned explicit authorization command. Reuse vendor `gh`
       OAuth/device authorization and account-selection primitives; isolate its
       configuration from global active-account selection, verify the resulting
       login before using it, retain credentials only on the consuming device,
       and expose only progress/device instructions, never tokens.
-- [ ] Add a declarative pivot-level action usable without a selected row and a
+- [x] Add a declarative pivot-level action usable without a selected row and a
       cancellable, nonblocking Manager modal. Bind action context to the
       provider's account/status, preserve command provenance, refresh on success,
       and show terminal cancellation/error without fake success.
-- [ ] Keep the production UI, preview UI and provider protocols coherent;
+- [x] Keep the production UI, preview UI and provider protocols coherent;
       preserve unrelated plugin pivots and existing pool behavior.
 
 ### Phase 3 - Land and record
-- [ ] Add focused provider and real Textual headless tests; update directly
+- [x] Add focused provider and real Textual headless tests; update directly
       related docs and product changefiles; pass lint and install contracts.
 - [ ] Obtain independent review through the normal Copilot review path, address
       blocking findings, pass required CI and merge the implementation.
@@ -87,15 +87,15 @@ headless widget/action with mocked authentication and land through review/CI.
 
 ## Validation Plan
 
-- [ ] Mock missing credentials, missing scope, unrelated failed accounts,
+- [x] Mock missing credentials, missing scope, unrelated failed accounts,
       indeterminate probes, and account mismatch; prove no read starts OAuth.
-- [ ] Assert actual widget/button/action wiring for blocked empty views, modal
+- [x] Assert actual widget/button/action wiring for blocked empty views, modal
       responsiveness, cancellation, failure, success and provider refresh.
-- [ ] Verify one-shot and streaming authentication fields agree and streaming
+- [x] Verify one-shot and streaming authentication fields agree and streaming
       updates do not retain a stale successful authentication status.
-- [ ] Verify no global account switch, token output or session-environment
+- [x] Verify no global account switch, token output or session-environment
       mutation; test the vendor command/config boundary with synthetic inputs.
-- [ ] Run bounded isolated targeted suites, targeted Ruff, install-contract and
+- [x] Run bounded isolated targeted suites, targeted Ruff, install-contract and
       required publication checks. Do not perform a real OAuth ceremony.
 
 ## Proposal
@@ -110,3 +110,16 @@ requirements, not optional implementation details.
 - Claimed #7793 after checking related account-aware preflight work.
 - Confirmed the canonical banner and distinct production/preview paths.
 - No vendor authorization, credentials or live configuration were changed.
+- Plan PR #7794 merged after a current-head Copilot approval and passing checks.
+  Implementation began only after pulling forward onto the reviewed plan.
+- The vendor ceremony uses isolated `gh` configuration plus login/scope
+  verification; existing per-process account pinning consumes verified results.
+  No reusable authentication broker exists in the provider, so no optional
+  sibling or adopter-private broker is imported.
+- Source validation: 243 provider/CLI/lifecycle tests and 202 Manager
+  contract/production-widget/preview tests pass in isolated bounded runs.
+  Tests drive actual clicks, visible device instructions, cancel/error/success,
+  provider refresh, account mismatch and credential adoption with mocked vendor
+  boundaries. Install and headless-launch contracts pass.
+- Native OAuth and Windows credential-store/focus acceptance remain explicitly
+  operator-run; no real authorization or runtime rollout was performed.

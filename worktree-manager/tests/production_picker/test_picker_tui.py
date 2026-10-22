@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import datetime
 import io
+import json
 from pathlib import Path
 import sys
 import threading
@@ -30,6 +31,102 @@ from worktree_manager.production_picker.picker_tui.engine import (  # noqa: E402
     PickerScreen,
 )
 from worktree_manager.production_picker.picker_tui.selection import ListSelection  # noqa: E402
+
+
+@pytest.mark.parametrize("auth_state,label", [
+    ("auth_required", "Sign in"), ("scope_blocked", "Authorize"),
+], ids=["missing", "scope"])
+@pytest.mark.parametrize("outcome", ["success", "failure", "cancel"])
+def test_codespaces_view_action_actual_click_and_modal(monkeypatch, auth_state, label, outcome):
+    from worktree_manager.pivot_progress import PivotProgressScreen
+    from worktree_manager.production_picker.picker_tui.pivot_manifest import parse_manifest
+
+    root = Path(__file__).resolve().parents[3]
+    reg = parse_manifest(json.loads(
+        (root / "plugins/agent-codespaces/pivots/agent-codespaces.json").read_text("utf-8"),
+    ), name="codespaces-cta", source_path="fixture")
+    release = threading.Event()
+    calls = []
+
+    class Runtime:
+        def __init__(self):
+            self.summary = {"auth_status": auth_state, "auth_account": "example-user",
+                            "banner_text": "Authentication required"}
+            self.invalidated = 0
+            self.refreshed = 0
+
+        def get(self, _scope):
+            return "ready", [], ""
+
+        def get_summary(self, _scope):
+            return self.summary
+
+        def ensure(self, _scope):
+            if self.invalidated:
+                self.refreshed += 1
+                self.summary = {"auth_status": "ready", "auth_account": "example-user"}
+
+        def invalidate(self):
+            self.invalidated += 1
+
+        def close(self):
+            release.set()
+
+        def run_action_stream(self, action, ctx, progress, should_cancel):
+            calls.append((action.label, dict(ctx), action.run))
+            progress(None, "Open https://github.com/login/device\nEnter ABCD-EFGH")
+            while not release.wait(0.01):
+                if should_cancel():
+                    return False, "cancelled"
+            return outcome == "success", "Authorized" if outcome == "success" else "Vendor rejected authorization"
+
+    runtime = Runtime()
+
+    async def run():
+        app = PickerApp(_fixture_source(), live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.pivots.append({"label": reg.label, "kind": "registered", "pivot": reg, "placement": "left"})
+            scr.htabs.append(reg.label)
+            scr._pivot_runtimes[reg.name] = runtime
+            scr.htab = len(scr.pivots) - 1
+            scr.refresh()
+            await pilot.pause()
+            assert scr._task_rows() == []
+            assert scr._pivot_view_actions()[0].label == label
+            assert calls == []
+            assert label in scr.query_one("#nf-buttons").render().plain
+            await pilot.click("#nf-buttons", offset=(4, 1))
+            for _ in range(40):
+                await pilot.pause()
+                if calls:
+                    break
+            assert isinstance(app.screen, PivotProgressScreen)
+            assert calls[0][0] == label and calls[0][1]["auth_account"] == "example-user"
+            assert "--user-initiated" in calls[0][2]
+            assert "ABCD-EFGH" in str(app.screen.query_one("#view-progress").render())
+            if outcome == "cancel":
+                await pilot.press("escape")
+            else:
+                release.set()
+            for _ in range(40):
+                await pilot.pause()
+                if app.screen.finished:
+                    break
+            assert app.screen.finished
+            text = str(app.screen.query_one("#view-progress").render())
+            assert ("Succeeded" if outcome == "success" else
+                    "Failed" if outcome == "failure" else "Cancelled") in text
+            assert bool(runtime.refreshed) == (outcome == "success")
+            await pilot.click("#view-cancel")
+            await pilot.pause()
+            assert not isinstance(app.screen, PivotProgressScreen) and scr.is_mounted
+            assert bool(scr._pivot_view_actions()) == (outcome != "success")
+
+    try:
+        asyncio.run(run())
+    finally:
+        release.set()
 
 
 @pytest.fixture(autouse=True)

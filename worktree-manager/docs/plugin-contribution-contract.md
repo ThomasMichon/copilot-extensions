@@ -52,7 +52,16 @@ Version-1 compatibility also covers the existing declarative fields:
   contract as every peer (at most one enabled contribution should declare it);
 - pivot `actions`, including command, `internal`, `form`, and `card` kinds;
 - pivot `view_actions`, with the same action kinds, for operations that do not
-  target a selected row;
+  target a selected row. Command view actions are displayed above the list,
+  including an empty list; their `when` gates match the provider's current
+  **summary**, and argv placeholders are substituted from that same summary.
+  The provider must publish explicit status rather than using an empty array
+  as a readiness signal. `progress: true` commands use a nonblocking modal with
+  full multiline progress text and Cancel/Close; successful completion refreshes
+  the originating provider. Listing, rendering and changing pivots never invoke
+  these actions. Commands receive the same payload/provenance resolution as row
+  actions. The CodeSpaces contribution uses this for Sign in / Authorize, while
+  credential selection and vendor authentication remain provider-owned;
 - optional action `shortcut`, used by the generic interaction shell to expose
   the action's keyboard affordance without hard-coding a provider's keys;
 - top-level `worktree_actions`;

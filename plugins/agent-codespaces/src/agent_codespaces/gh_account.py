@@ -92,11 +92,15 @@ def _token_for_account(login: str | None) -> str | None:
     """
     if not login or shutil.which("gh") is None:
         return None
+    from .picker_auth import credential_env
+
+    provider_env = credential_env(login)
     try:
         result = subprocess.run(
             ["gh", "auth", "token", "--user", login],
             capture_output=True, text=True, timeout=10,
             creationflags=_creation_flags(),
+            env=provider_env,
         )
     except Exception:
         return None
@@ -120,6 +124,11 @@ def env_for_account(login: str | None, base: dict | None = None) -> dict:
         # GH_TOKEN wins in gh; drop a stale GITHUB_TOKEN so it can't shadow it.
         env["GH_TOKEN"] = token
         env.pop("GITHUB_TOKEN", None)
+    elif login:
+        from .picker_auth import credential_env
+
+        if credential_env(login) is not None:
+            raise RuntimeError(f"CodeSpace credential for {login} is unavailable; authorize again.")
     return env
 
 

@@ -636,7 +636,8 @@ class TasksView:
         """The D1 ``summary`` header line: ``reg.summary_template`` with
         ``{token}``s filled from the provider's summary dict. Missing tokens
         degrade to empty (never raises). ``None`` when there is nothing to show."""
-        if not reg.summary_template or not summary:
+        if (not reg.summary_template or not summary
+                or summary.get("auth_status") not in (None, "ready")):
             return None
 
         class _Default(dict):
@@ -761,7 +762,7 @@ class TasksView:
         eng = self._eng
         add(eng.tab_bar(width, sel == ("M", 0)))
         reg = eng._reg_pivot()
-        if reg is not None and reg.create_action is not None:
+        if reg is not None and eng.button_set():
             add(Text(""))  # breathing room above the button
             add(eng.registered_create_row(reg, width, sel == ("BTN", 0)),
                 stop=("BTN", 0))

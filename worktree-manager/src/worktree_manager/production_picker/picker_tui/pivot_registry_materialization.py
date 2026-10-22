@@ -240,17 +240,17 @@ def _rewrite_manifest_commands(
         data.get("list"), (str, bytes)
     ):
         rewrite(data, "list")
-    for collection in ("actions", "worktree_actions", "config_sections"):
+    for collection in ("actions", "view_actions", "worktree_actions", "config_sections"):
         entries = data.get(collection)
         if not isinstance(entries, list):
             continue
         for item in entries:
             if not isinstance(item, dict) or "run" not in item:
                 continue
-            if collection == "actions" and item.get("kind") in {"internal", "card"}:
+            if collection in {"actions", "view_actions"} and item.get("kind") in {"internal", "card"}:
                 continue
             rewrite(item, "run")
-            if collection == "actions" and "preview" in item:
+            if collection in {"actions", "view_actions"} and "preview" in item:
                 item.pop("_preview_error", None)
                 item["preview"] = list(_as_argv(item["preview"], where="`actions[].preview`"))
                 rewrite(item, "preview", optional=True)

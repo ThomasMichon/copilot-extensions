@@ -407,10 +407,10 @@ class TestPoolScopeBanner:
     def test_scope_missing_emits_banner(self, capsys):
         import agent_codespaces.__main__ as m
         with patch.object(m.pool_mod, "build_pool", return_value=self._empty_pool()), \
-             patch.object(m, "_gh_auth_preflight",
-                          return_value=["gh token is missing the 'codespace' "
-                                        "scope -- run: gh auth refresh -h "
-                                        "github.com -s codespace"]):
+             patch("agent_codespaces.picker_auth.probe", return_value={
+                 "status": "scope_blocked", "account": "example-user",
+                 "message": "Authorize the codespace scope.",
+             }):
             rc = main(["pool", "--picker-json"])
         assert rc == 0
         summary = self._payload(capsys)["summary"]
@@ -420,10 +420,12 @@ class TestPoolScopeBanner:
     def test_scope_ok_emits_no_banner(self, capsys):
         import agent_codespaces.__main__ as m
         with patch.object(m.pool_mod, "build_pool", return_value=self._empty_pool()), \
-             patch.object(m, "_gh_auth_preflight", return_value=[]):
+             patch("agent_codespaces.picker_auth.probe", return_value={
+                 "status": "ready", "account": "example-user", "message": "",
+             }):
             rc = main(["pool", "--picker-json"])
         assert rc == 0
-        assert "banner_text" not in self._payload(capsys)["summary"]
+        assert not self._payload(capsys)["summary"].get("banner_text")
 
 
 class TestCreateScopeGate:

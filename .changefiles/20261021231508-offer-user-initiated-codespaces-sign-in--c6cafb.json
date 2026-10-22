@@ -1,0 +1,13 @@
+{
+  "comment": "Offer user-initiated CodeSpaces sign-in and scope authorization from blocked pivot views",
+  "changes": [
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

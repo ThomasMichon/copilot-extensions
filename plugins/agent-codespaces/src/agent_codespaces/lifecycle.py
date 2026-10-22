@@ -89,6 +89,7 @@ def list_codespaces() -> list[CodespaceInfo]:
     ``gh codespace list`` (today's behavior) -- additive and safe.
     """
     from . import gh_account
+    from .picker_auth import authorized_configs
 
     validate_context()
     try:
@@ -98,7 +99,8 @@ def list_codespaces() -> list[CodespaceInfo]:
     except Exception:
         bound_accounts = ()
     accounts_seen: list[str] = []
-    for login in (*gh_account.mapped_accounts(), *bound_accounts):
+    provider_accounts = authorized_configs()
+    for login in (*gh_account.mapped_accounts(), *bound_accounts, *provider_accounts):
         if login and login not in accounts_seen:
             accounts_seen.append(login)
     accounts = tuple(accounts_seen)
@@ -109,7 +111,12 @@ def list_codespaces() -> list[CodespaceInfo]:
     errors: list[str] = []
     # Each candidate account, then the ambient active account (which may own
     # CodeSpaces under an owner that isn't in the map).
-    for login in (*accounts, None):
+    candidates = (*accounts, None)
+    if provider_accounts:
+        active = gh_account.active_account()
+        if not active or active.casefold() in {login.casefold() for login in accounts}:
+            candidates = accounts
+    for login in candidates:
         try:
             for cs in _list_codespaces_under(login):
                 merged.setdefault(cs.name, cs)

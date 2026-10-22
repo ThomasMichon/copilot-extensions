@@ -462,6 +462,44 @@ for `✓ Authentication complete`. Note `gh auth refresh` targets the **active**
 account (no `-u/--user` on many `gh` builds), so `gh auth switch --user <login>`
 first and restore afterward.
 
+## CodeSpaces pivot authentication
+
+The canonical `pool --picker-json` contribution reports authentication in its
+summary: `auth_status` is `ready`, `auth_required`, `scope_blocked`, or `error`;
+`auth_account` names the selected login, and `auth` includes per-account results.
+These fields accompany both JSON snapshots and streaming summary frames. A
+failed probe or inventory is visible as an error, never an authenticated empty
+pool. Subscriptions recheck authentication rather than retaining a stale banner.
+
+The Manager displays **Sign in** or **Authorize** above a blocked list, even
+when there are no rows. Clicking starts a cancellable progress modal containing
+the vendor browser/device-code instructions. Only that explicit action (or the
+explicit CLI below) starts authentication; listing and rendering never do.
+
+```bash
+agent-codespaces authorize --account <login> --user-initiated
+```
+
+Omit `--account` only when no login has been selected yet. The command runs
+`gh auth login --web --scopes codespace` on the consuming device with an isolated
+provider-owned `GH_CONFIG_DIR`. It does not switch the global `gh` account or
+write to the session environment. Vendor credentials remain in the local `gh`
+secure store (or its local configuration fallback); the provider adopts the
+configuration only after verifying the actual login and granted scope. A wrong
+login, denied scope, failed ceremony or cancellation is not success. The Manager
+refreshes the provider after success. Verified provider credentials participate
+in the existing account-pinned discovery/operation path; unrelated global
+credentials remain unchanged in selection.
+
+No private broker, persistent authentication daemon, PAT or repository opt-out
+is required. A remote terminal without an available browser can still use the
+displayed vendor verification URL/code in a browser. Native authorization and
+operating-system credential-store behavior require an operator-run ceremony;
+headless regression tests mock that boundary and never authorize an account.
+The provider suppresses automatic browser spawning; opening the displayed
+verification URL remains a deliberate user action, and cancelling cannot
+terminate an operator's browser.
+
 ## Credential relay: fail-fast & auth verification
 
 The relay forwards git-credential requests from a CodeSpace back to the host

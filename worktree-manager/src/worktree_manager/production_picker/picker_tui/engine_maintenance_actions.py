@@ -384,6 +384,11 @@ class PickerScreenMaintenanceActionsMixin:
             elif btn == "NC":
                 # A registered pivot's data-driven "New …" affordance (Phase B).
                 self._open_create_action()
+            elif btn and btn.startswith("VA:"):
+                actions = self._pivot_view_actions()
+                index = int(btn.split(":")[1])
+                if index < len(actions):
+                    self._run_view_action(actions[index])
             elif btn == "TH":
                 self.show_hidden = not self.show_hidden
                 n = self._hidden_count()
