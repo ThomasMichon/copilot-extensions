@@ -37,6 +37,8 @@ class RegistryState:
                             registration_id=sub.registration_id, pending=sub.pending,
                             deadline_at=sub.deadline_at,
                         )
+                    if sub.delivery_mode == "pull":
+                        entry["delivery_mode"] = "pull"
                     if key.worktrees_command:
                         entry.update(
                             worktrees_command=key.worktrees_command,
@@ -70,6 +72,7 @@ class RegistryState:
                     or "registration_id" in entry or "deadline_at" in entry
                     or "continuous" in entry or "queued" in entry
                     or "native_baseline" in entry or "worktrees_command" in entry
+                    or "delivery_mode" in entry
                 )
                 try:
                     if not isinstance(entry, dict):
@@ -127,6 +130,12 @@ class RegistryState:
                         baseline=Baseline(**baseline) if baseline is not None else None,
                         acknowledged=opted_in,
                     )
+                    mode = entry.get("delivery_mode", "callback")
+                    if mode not in ("callback", "pull") or (
+                        mode == "pull" and (not opted_in or sub.notify)
+                    ):
+                        raise ValueError("invalid persisted delivery mode")
+                    sub.delivery_mode = mode
                     if "baseline_head_sha" in entry:
                         head = entry["baseline_head_sha"]
                         if (
@@ -169,7 +178,7 @@ class RegistryState:
                             raise ValueError("invalid terminal observation")
                         sub.terminal_observed = entry["terminal_observed"]
                         sub.queued = copy.deepcopy(entry.get("queued"))
-                    if strict:
+                    if strict and mode == "callback":
                         sub.notify = validate_notify(sub.notify, opted_in)
                     if opted_in:
                         if "deadline_at" not in entry:
@@ -185,7 +194,8 @@ class RegistryState:
                         if sub.registration_id in identities:
                             raise ValueError("duplicate registration identity")
                         identities.add(sub.registration_id)
-                        sub.notify = validate_notify(sub.notify, True)
+                        if mode == "callback":
+                            sub.notify = validate_notify(sub.notify, True)
                         sub.pending = copy.deepcopy(entry.get("pending"))
                         if sub.pending is not None:
                             validate_pending(sub.pending, key, sub)

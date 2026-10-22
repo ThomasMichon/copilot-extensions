@@ -273,6 +273,39 @@ callback an implicit credential store.
 
 ## Journal
 
+### 2026-10-21 - Build the bounded PR-owned replay transaction core
+
+- Implemented internal `WatchReplay` request reconciliation, account-separated
+  observation groups, consumer-only bounded reads, exact ACK/cancel identities
+  and compact completed receipts using the existing `WatchRegistry`. Original
+  request timestamps/deadlines survive retries; expired/unknown outcomes report
+  uncertainty. Active events are not evicted to admit another request.
+- The embedding owner must provide authenticated scope, one active writer and
+  atomic persistence of the complete envelope. This source slice does not
+  publish a CLI capability, Gateway route, service role or coordinator consumer.
+  Pull events cannot enter the native callback scheduler, and no remote callback
+  command or URL is introduced.
+- Focused isolated validation passes 138 tests across replay, registry and
+  acknowledged-delivery suites, including real consumer-process restart before
+  and after ACK, actual callback-scheduler separation, pre/post-replacement
+  failures, retention/capacity/batch bounds and foreign/stale identities.
+  Fatal Python lint and install-contract checks pass.
+- Documentation impact: updated the PR-plugin README and added the authoritative
+  [internal replay contract](../../../plugins/agent-pull-requests/docs/watch-replay.md).
+  This realizes part of the PR vision's durable delivery/scope behavior under
+  the existing independent-installation and one-writer patterns; it changes
+  neither standing intent nor native CLI configuration.
+- Validation boundaries: these are domain, persistence and process checks.
+  Fresh host provisioning is unchanged; the clean-room install lane is not
+  applicable to this library. Authenticated serving, Gateway/container,
+  credential renewal, dispatch generation fencing through that remote path and
+  installed lifecycle remain unimplemented acceptance, not inferred from these
+  tests. No shared runtime or deployment is changed or authorized.
+- Next: land the reviewed core, then connect it to the actual scoped serving
+  and consumer boundary. The five contract-delivery items remain unchecked;
+  this groundwork alone does not satisfy any full-stack proof or close the
+  effort. The no-owner-signoff correction landed in #7778.
+
 ### 2026-10-21 - Remove the retained-owner approval deadlock
 
 - The operator rejects retained-owner agreements as a source-work prerequisite.

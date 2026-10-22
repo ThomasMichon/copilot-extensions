@@ -117,6 +117,12 @@ behavior. It must add explicit request reconciliation and remote delivery
 semantics rather than assuming that repeating today's replace-by-subscriber-ID
 registration is an idempotent network retry.
 
+The internal [PR-owned replay core](../../../plugins/agent-pull-requests/docs/watch-replay.md)
+now supplies that source-domain transaction behavior. Its caller-provided scope,
+single-writer custody and commit callback are embedding obligations, not already
+implemented serving/Gateway authority. It adds no production route or dispatch
+consumer; the full delivery checklist remains open.
+
 Delegated dispatch waits retain their existing finite positive timeout
 requirement. This slice does not impose a new mandatory timeout on supported
 native subscriptions that previously allowed no timeout.

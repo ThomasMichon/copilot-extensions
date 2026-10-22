@@ -163,6 +163,20 @@ workers so they cannot stall observation for another subscriber; they still
 receive only one best-effort attempt. The reliable contract is not silently
 enabled for legacy consumers.
 
+## Pull-delivery reconciliation core (internal source library)
+
+[`watch_replay.WatchReplay`](src/agent_pull_requests/watch_replay.py) adds the
+PR-owned, transport-neutral registration/replay transaction core described in
+[the replay contract](docs/watch-replay.md). It reuses `WatchRegistry` transition,
+deadline and stable pending-event behavior, with consumer-scoped reads and exact
+registration/event ACKs instead of a callback executable. Native callback
+scheduling explicitly excludes these pull records.
+
+This is **not a new CLI capability, serving route or deployed fleet service**.
+The embedding adapter still owes authenticated scope, authorized observations,
+one active writer, lifecycle custody and atomic persistence of the complete
+envelope. No Gateway identity or forge credential authority is implied.
+
 ## Native configured observation (source capability)
 
 The existing watch owner also accepts an explicitly attributed Worktrees
