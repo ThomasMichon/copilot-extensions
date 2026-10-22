@@ -33,7 +33,7 @@ def base_python() -> Path:
 def candidate(payload: Path, root: Path, *, assemble, uv: Path | None = None):
     """Retain a healthy target; never publish selectors during construction."""
     if os.name == "nt":
-        uv = Path(engine._select_uv_executable(str(uv) if uv is not None else "uv"))
+        uv = Path(engine._select_uv_executable(os.path.abspath(uv) if uv is not None else "uv"))
     else:
         uv = uv or Path(shutil.which("uv") or "")
     if not uv.is_file():

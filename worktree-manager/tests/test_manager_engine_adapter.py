@@ -82,6 +82,60 @@ def test_default_uv_discovery_uses_the_sdk_before_traversing_the_selected_file(t
     assert selected == ["uv"]
 
 
+@pytest.mark.skipif(os.name != "nt", reason="native Windows command discovery")
+@pytest.mark.parametrize("name", ["uv", "uv.exe"])
+def test_explicit_relative_uv_is_bound_to_its_path_before_sdk_selection(tmp_path, monkeypatch, name):
+    adapter = si._runtime_installer()
+    payload, root, original = _source(tmp_path)
+    selected_file = tmp_path / name
+    if selected_file != original:
+        original.rename(selected_file)
+    monkeypatch.chdir(tmp_path)
+    calls = _capture(adapter, monkeypatch)
+    selected = []
+
+    def select(command):
+        assert Path(command) == selected_file
+        assert Path(command).is_absolute()
+        selected.append(command)
+        return command
+
+    monkeypatch.setattr(adapter.engine, "_select_uv_executable", select)
+    with adapter.candidate(payload, root, assemble=si._copy_payload, uv=Path(name)):
+        assert calls[0][2]["uv"] == selected_file
+    assert selected == [str(selected_file)]
+
+
+@pytest.mark.parametrize("name", ["uv", "uv.exe"])
+@pytest.mark.parametrize("boundary", ["retention", "construction"])
+def test_python_engine_path_arguments_are_not_reinterpreted_as_command_names(
+    tmp_path, monkeypatch, name, boundary,
+):
+    engine = si._runtime_installer().engine
+    payload, root, original = _source(tmp_path)
+    selected_file = tmp_path / name
+    if selected_file != original:
+        original.rename(selected_file)
+    monkeypatch.chdir(tmp_path)
+
+    class SelectedPath(Exception):
+        pass
+
+    def select(command):
+        assert Path(command) == selected_file
+        assert Path(command).is_absolute()
+        raise SelectedPath
+
+    monkeypatch.setattr(engine, "_select_uv_executable", select)
+    with pytest.raises(SelectedPath):
+        if boundary == "retention":
+            inputs = engine.FrozenInputs(payload, (payload,), "")
+            with engine._retained_inputs(inputs, Path(name), Path(sys.executable), refresh=False):
+                pytest.fail("selection witness was not reached")
+        else:
+            engine._construct(None, root, Path(name), Path(sys.executable), -1, 1)
+
+
 def _bundled_wheel_source(tmp_path):
     payload, root, _ = _source(tmp_path)
     manager = Path(__file__).resolve().parents[1]

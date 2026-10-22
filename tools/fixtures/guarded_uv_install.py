@@ -107,7 +107,8 @@ def main():
             inputs = engine.FrozenInputs(
                 project, packages, engine.runtime.fingerprint_source(engine._source_files(packages)),
             )
-            with engine._retained_inputs(inputs, Path(selected_uv), python, refresh=False) as retained:
+            bound_uv = Path(policy._select_uv_executable(selected_uv)) if lookup else Path(selected_uv)
+            with engine._retained_inputs(inputs, bound_uv, python, refresh=False) as retained:
                 transaction = retained.transaction
                 assert transaction is not None
                 result = observed(
