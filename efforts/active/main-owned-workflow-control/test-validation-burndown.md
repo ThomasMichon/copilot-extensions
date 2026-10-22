@@ -258,6 +258,42 @@ Hosted source run `39727829569` executes all 646 nodes successfully in a
 13.666-second packet. Qualified release, the remaining library/plugin census
 and accountable periodic/native repair remain separate parent gates.
 
+### Bounded config-migrate cohort and native-loader residual
+
+All 24 original functions in `libs/config-migrate/tests/test_config_migrate.py`
+retain their parameterization, yielding 29 cases. The original module,
+path-only conftest and four canonical production modules were inspected.
+A separate collection process establishes the original identities; the fresh
+observer process imports production only after observation begins. All 87
+phases pass with zero effects in 2.211 seconds. Every case has actual production
+call coverage; the on-disk cases use only synthetic temporary storage, retaining
+their actual atomic-write, backup, interruption and idempotency assertions.
+
+The adapter `tools/promotion_unit_tests/test_config_migrate.py` re-exports
+those exact functions. Replace only each original node's file prefix with
+the adapter path to obtain its injective release identity. The original test,
+all four production modules and adapter are hash-bound; the three implementation
+modules join coverage targets. The conftest is not executed and no assertion,
+production import, observer, collection root or deadline is rewritten.
+
+Candidate `e8e0ef28ea36d9248c3cc2dd000add0a6c40cccf` retains all 718 prior
+identities in order and all 51 old source hashes. Its canonical 747-node/
+2,241-phase packet passes with zero effects in 53.094 seconds, covering
+57 sources and 32 targets under the same 300-second bound. Its actual
+three-file output independently verifies. Full collection exactly matches
+the manifest and all 24 exported objects retain their original code/global
+origins. Six actual-runner controls refuse missing original-test admission,
+each altered implementation, duplicate identity and omitted original function;
+none emits a passing proof. This is source qualification, not a controlled
+speedup, full-census, Main-release or Windows-whole-packet claim.
+
+The inspected `core-delegation` module remains outside enrollment. Its real
+transport cases use sockets and threads; even selecting only its two proposed
+in-process cases fails fresh observed collection because the canonical import
+performs `ctypes.dlopen`. No production preload, effect exemption or import
+rewrite was used to manufacture eligibility. This is an explicit first-touch
+residual, not two passing cases or permission to delete the original tests.
+
 ### Scheduled execution is real; repair initiation is not yet established
 
 The current Dev and Main snapshots carry byte-identical periodic workflow and

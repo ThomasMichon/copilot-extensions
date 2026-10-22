@@ -390,11 +390,16 @@ authorizes critical main-path acceptance or a bounded administrative change.
   closed source hashes and production-call evidence (#7781). Actual hosted
   source CI executes all 646 admitted cases in 13.666 seconds. This does not
   close the whole census or every-release acceptance.
-- [ ] Map the 72 original worktree-identity cases through exact function
+- [x] Map the 72 original worktree-identity cases through exact function
   objects and unchanged parameterization, preserving the current packet,
-  source closure and production-call evidence. Qualify the canonical packet
-  and refusal controls before publication; full-census and every-release
-  acceptance remain separate.
+  source closure and production-call evidence (#7816). The canonical packet
+  and real refusal controls pass; actual hosted source CI executes all 718
+  admitted cases in 12.126 seconds. Full-census and every-release acceptance
+  remain separate.
+- [ ] Map the 29 original config-migrate cases without copying assertions,
+  retaining synthetic temporary-file operations, unchanged source admission,
+  actual production-call coverage and the 300-second packet bound. Complete
+  source review and actual required CI before closing this bounded item.
 - [x] Land the dev implementation of reviewed, widen-only module-size baseline
   maintenance and remove its obsolete main exception from source (#6438).
 - [x] Verify a covering promotion activates the dev-owned baseline producer on
