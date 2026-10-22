@@ -180,9 +180,16 @@ candidate, completion and physical tree. Files retain identity, mode, size,
 mtime and SHA-256; directories retain identity/mode and exact child names.
 POSIX links retain their own identity and target, never target traversal.
 Windows refuses reparse entries and pins ordinary objects with native
-no-share-delete handles; POSIX traversal is descriptor-relative and no-follow.
-The whole remaining tree is preflighted before effects and each object is
-rechecked at deletion. Completion files are deleted last. New, modified or
+no-share-delete handles. POSIX traversal is descriptor-relative and no-follow;
+the root and each member are first claimed by rename into a private,
+identity-bound `client-runtime-removals/<id>/claims/` namespace, then validated
+and deleted there. An object that wins the source-name race is preserved in
+that namespace if it differs from the receipt, not deleted using an older
+descriptor's proof. Original-name replacements are also preserved. The
+published candidate path can therefore be absent during a partial removal;
+the pending marker and retained claims still own the unfinished transition.
+The whole remaining source/claimed tree is preflighted before effects.
+Completion files are deleted last. New, modified or
 same-byte replacement objects refuse, rather than becoming cleanup authority.
 
 While the marker exists, construction, activation and command registration
@@ -193,6 +200,12 @@ the owner persists its historical outcome and per-candidate outcome pointer
 before clearing the marker. Interrupted outcome writes and acknowledgement
 are retryable. A completed repeat checks retained evidence and reports a no-op;
 unexplained absence is not success.
+Journal writes use one exclusively created, uniquely named temporary per
+attempt, followed by fsync, rename and directory sync. Empty, truncated or
+complete abandoned temporaries remain evidence and do not block a later
+attempt. An unpublished initial marker authorizes no deletion, so a fresh
+attempt may validate the untouched completed candidate and create its own
+intent without overwriting the abandoned attempt.
 
 The version `1` `fleet-manager.client-runtime-removal` report returns the exact
 identity/candidate, `runtime_removed: true`, `reused` and

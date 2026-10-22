@@ -15,7 +15,7 @@ from .planning import PlanError, canonical, digest, record
 
 HISTORY = "client-runtime-removals"
 OUTCOMES = "client-runtime-removed"
-FIELDS = {"identity", "candidate", "removal", "input", "completion", "tree"}
+FIELDS = {"identity", "candidate", "removal", "input", "completion", "tree", "claims"}
 
 
 def _name(name):
@@ -130,7 +130,7 @@ def _inflate(pages, publication):
     return root
 
 
-def _posix_node(parent, name, publication, expected=None, *, remove=False, depth=0):
+def _posix_node(parent, name, publication, expected=None, *, depth=0):
     if depth > 32:
         raise PlanError("client runtime removal tree exceeds its depth bound")
     info = os.stat(name, dir_fd=parent, follow_symlinks=False)
@@ -143,13 +143,6 @@ def _posix_node(parent, name, publication, expected=None, *, remove=False, depth
             "target": os.readlink(name, dir_fd=parent),
         }
         _same(actual, expected)
-        if remove:
-            named = os.stat(name, dir_fd=parent, follow_symlinks=False)
-            fields = ("st_dev", "st_ino", "st_mode", "st_size", "st_mtime_ns")
-            _same(tuple(getattr(named, field) for field in fields),
-                  tuple(getattr(info, field) for field in fields))
-            _same(os.readlink(name, dir_fd=parent), actual["target"])
-            os.unlink(name, dir_fd=parent)
         return actual
     if not (stat.S_ISREG(info.st_mode) or stat.S_ISDIR(info.st_mode)):
         raise PlanError("client runtime removal refuses nonordinary entries")
@@ -176,24 +169,94 @@ def _posix_node(parent, name, publication, expected=None, *, remove=False, depth
                 child: _posix_node(
                     descriptor, child, publication,
                     children[child] if children is not None else None,
-                    remove=remove, depth=depth + 1,
+                    depth=depth + 1,
                 ) for child in _ordered(names)
             }
-            if remove:
-                os.fsync(descriptor)
-        if remove:
-            named = os.stat(name, dir_fd=parent, follow_symlinks=False)
-            _same((named.st_dev, named.st_ino, named.st_mode),
-                  (opened.st_dev, opened.st_ino, opened.st_mode))
-            if stat.S_ISDIR(opened.st_mode):
-                os.rmdir(name, dir_fd=parent)
-            else:
-                # Recheck content through the held descriptor immediately before unlink.
-                _same(asdict(publication.state_fd(descriptor)), actual["state"])
-                os.unlink(name, dir_fd=parent)
         return actual
     finally:
         os.close(descriptor)
+
+
+def _claim_key(path):
+    return digest(path)
+
+
+def _present(parent, name):
+    try:
+        os.stat(name, dir_fd=parent, follow_symlinks=False)
+    except FileNotFoundError:
+        return False
+    return True
+
+
+def _posix_claimed_node(parent, name, publication, expected, claims, path, visited, *, remove=False):
+    key = _claim_key(path)
+    claimed = _present(claims, key)
+    present = _present(parent, name)
+    if claimed and present:
+        raise PlanError("client runtime removal preserves a replacement beside its claimed object")
+    if not (claimed or present):
+        return
+    if remove and not claimed:
+        # The single cleanup owner captures the name into its private receipt
+        # namespace first. A replacement won by this rename is validated there,
+        # never deleted on the strength of an older descriptor.
+        os.rename(name, key, src_dir_fd=parent, dst_dir_fd=claims)
+        os.fsync(parent)
+        os.fsync(claims)
+        claimed = True
+    if claimed:
+        visited.add(key)
+        parent, name = claims, key
+    info = os.stat(name, dir_fd=parent, follow_symlinks=False)
+    if info.st_uid != os.geteuid():
+        raise PlanError("client runtime removal preserves an entry no longer owned by this principal")
+    if expected["kind"] != "directory":
+        _posix_node(parent, name, publication, expected)
+        if remove:
+            os.unlink(name, dir_fd=claims)
+            os.fsync(claims)
+        return
+    if not stat.S_ISDIR(info.st_mode):
+        raise PlanError("client runtime removal preserves a changed claimed directory")
+    descriptor = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+    try:
+        opened = os.fstat(descriptor)
+        _same({"kind": "directory", "identity": [opened.st_dev, opened.st_ino],
+               "mode": opened.st_mode},
+              {field: value for field, value in expected.items() if field != "children"})
+        _children(set(os.listdir(descriptor)), expected["children"])
+        for child in _ordered(expected["children"]):
+            _posix_claimed_node(
+                descriptor, child, publication, expected["children"][child], claims,
+                [*path, child], visited, remove=remove,
+            )
+        if remove:
+            os.fsync(descriptor)
+            os.rmdir(name, dir_fd=claims)
+            os.fsync(claims)
+    finally:
+        os.close(descriptor)
+
+
+def _posix_claimed_tree(slot, publication, expected, claims_path, identity, *, remove=False):
+    artifact_staging._directory(claims_path)
+    with ExitStack() as pinned:
+        parent = os.open(slot.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        pinned.callback(os.close, parent)
+        claims = os.open(claims_path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        pinned.callback(os.close, claims)
+        opened = os.fstat(claims)
+        _same([opened.st_dev, opened.st_ino], identity)
+        if opened.st_uid != os.geteuid() or stat.S_IMODE(opened.st_mode) & 0o077:
+            raise PlanError("client runtime removal claims are not private to the owner")
+        present = set(os.listdir(claims))
+        visited = set()
+        _posix_claimed_node(
+            parent, slot.name, publication, expected, claims, [], visited, remove=remove,
+        )
+        if (not remove and present != visited) or (remove and os.listdir(claims)):
+            raise PlanError("client runtime removal preserves unattributed or orphaned claimed objects")
 
 
 def _windows_node(path, publication, expected=None, *, remove=False, depth=0):
@@ -234,10 +297,9 @@ def _tree(slot, publication, expected=None, *, remove=False):
             return _windows_node(slot, publication, expected, remove=remove)
         parent = os.open(slot.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
         pinned.callback(os.close, parent)
-        value = _posix_node(parent, slot.name, publication, expected, remove=remove)
         if remove:
-            os.fsync(parent)
-        return value
+            raise PlanError("POSIX client deletion requires its private claimed-object namespace")
+        return _posix_node(parent, slot.name, publication, expected)
 
 
 def _quiesced(namespace):
@@ -257,11 +319,22 @@ def _directory(path):
 
 
 def _write(path, value):
-    temporary = path.with_name(path.name + ".tmp")
-    if os.path.lexists(temporary):
-        _same(construction._read(temporary), value)
-        temporary.unlink()
-    construction._write(path, value)
+    # Each attempt owns only its exclusive temporary. An interrupted or
+    # truncated older attempt remains evidence, not a permanent retry blocker.
+    temporary = path.with_name("." + path.name + ".write-" + uuid.uuid4().hex)
+    descriptor = os.open(temporary, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    try:
+        content = canonical(value)
+        while content:
+            written = os.write(descriptor, content)
+            if written <= 0:
+                raise OSError("client removal journal write made no progress")
+            content = content[written:]
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+    os.replace(temporary, path)
+    client_admission._sync_directory(path.parent)
 
 
 def _binding(namespace, identity, candidate, value):
@@ -300,6 +373,11 @@ def _intent(namespace, identity, candidate, publication):
     ):
         raise PlanError("client runtime removal has invalid retained completion evidence")
     _inflate(value["tree"], publication)
+    if os.name == "nt":
+        _same(value["claims"], None)
+    else:
+        claims = directory / "claims"
+        _same(list(artifact_staging._directory(claims)), value["claims"])
     return value
 
 
@@ -373,20 +451,30 @@ def remove_client_runtime(root, identity, *, candidate):
                         "schema": "fleet-manager.client-runtime-removal-intent", "version": 1,
                         "identity": identity, "candidate": candidate, "removal": uuid.uuid4().hex,
                         "input": binding, "completion": completed, "tree": _flatten(snapshot),
+                        "claims": None,
                     }
                     canonical(value)
                     history = _directory(namespace / HISTORY) / value["removal"]
                     history.mkdir(mode=0o700)
                     client_admission._sync_directory(history.parent)
+                    if os.name != "nt":
+                        claims = _directory(history / "claims")
+                        value["claims"] = list(artifact_staging._directory(claims))
                     _write(history / "intent.json", value)
                     _write(namespace / construction.REMOVING, value)
                 removing = True
                 _same(_intent(namespace, identity, candidate, publication), value)
                 _quiesced(namespace)
                 unchanged()
-                if os.path.lexists(slot):
+                expected = _inflate(value["tree"], publication)
+                if os.name != "nt":
+                    claims = namespace / HISTORY / value["removal"] / "claims"
+                    _posix_claimed_tree(slot, publication, expected, claims, value["claims"])
+                    _posix_claimed_tree(
+                        slot, publication, expected, claims, value["claims"], remove=True,
+                    )
+                elif os.path.lexists(slot):
                     # Whole remaining-tree preflight precedes any further effects.
-                    expected = _inflate(value["tree"], publication)
                     _tree(slot, publication, expected)
                     _tree(slot, publication, expected, remove=True)
                 if os.path.lexists(slot):

@@ -1117,3 +1117,20 @@ These bounded Windows selections are not a new full Windows-suite claim.
   companion; the entry point shrinks instead of widening its baseline. Their
   typed operation bindings retain the same canonical leases and protection
   checks. The original failed-construction matrix qualifies that extraction.
+- The first review found a real POSIX name-to-unlink race and crash windows in
+  deterministic temporary journal names. POSIX now claims each object into a
+  private, identity-bound receipt namespace before validation/deletion; a
+  foreign claim winner remains there, and original-name replacements survive.
+  Whole remaining source/claim preflight precedes effects. Journal attempts
+  use unique exclusive temporaries and preserve abandoned empty/truncated or
+  complete attempts. Focused tests cover replacement during the final hash,
+  link and directory validation, partial native outcome writes and the initial
+  marker interrupted before rename. No equally privileged hostile-process
+  isolation or automatic restoration of a foreign claimed name is asserted.
+- The review fixes qualify with 46 Linux removal cases and 42 Windows cases
+  (four POSIX-only skips), plus the actual installed lifecycle, wheel/RECORD
+  and repository-removed sdist controls on both platforms. The Linux closed
+  source runner's 40 cases pass. Module-size ceilings and all 13 install
+  contracts remain unchanged and pass. The prior original failed-construction
+  extraction matrix remains qualified; no shared cleanup semantics changed
+  while fixing consumer claim/publication recovery.

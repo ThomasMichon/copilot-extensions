@@ -57,6 +57,14 @@ def remove(owned, **kwargs):
         raise
 
 
+def remaining(owned):
+    _root, _fixture, _staged, _trusted, namespace, slot = owned
+    if slot.exists() or os.name == "nt":
+        return slot
+    value = construction._read(namespace / construction.REMOVING)
+    return namespace / removal.HISTORY / value["removal"] / "claims" / removal._claim_key([])
+
+
 def test_owned_completed_removal_exact_noop_and_preservation(owned, monkeypatch):
     root, _fixture, _staged, _trusted, namespace, slot = owned
     custom = root / "custom-config"
@@ -156,16 +164,16 @@ def interrupt(owned, monkeypatch, *, crash=None):
 
         monkeypatch.setattr(removal, "_windows_node", fail)
     else:
-        native = os.unlink
+        native = removal._posix_claimed_node
 
-        def fail(name, *args, **kwargs):
-            if name == "b-second" and "dir_fd" in kwargs:
+        def fail(parent, name, publication, expected, claims, path, visited, **kwargs):
+            if path == ["b-second"] and kwargs.get("remove"):
                 if crash:
                     crash()
                 raise OSError("injected partial removal")
-            return native(name, *args, **kwargs)
+            return native(parent, name, publication, expected, claims, path, visited, **kwargs)
 
-        monkeypatch.setattr(os, "unlink", fail)
+        monkeypatch.setattr(removal, "_posix_claimed_node", fail)
 
 
 def test_partial_native_delete_retries_and_blocks_republication(owned, primitive, monkeypatch):
@@ -175,7 +183,7 @@ def test_partial_native_delete_retries_and_blocks_republication(owned, primitive
         interrupt(owned, patch)
         with pytest.raises(PlanError, match="outcome is unknown"):
             remove(owned)
-    assert not (slot / "a-first").exists() and (slot / "b-second").exists()
+    assert not (remaining(owned) / "a-first").exists() and (remaining(owned) / "b-second").exists()
     assert (namespace / construction.REMOVING).is_file()
     for operation in (
         lambda: construct(root, fixture, staged, trusted),
@@ -195,6 +203,7 @@ def test_partial_retry_preserves_replacements_before_any_more_effects(owned, mon
         interrupt(owned, patch)
         with pytest.raises(PlanError):
             remove(owned)
+    slot = remaining(owned)
     if change == "same-byte-file":
         peer = slot / "replacement"
         peer.write_bytes((slot / "b-second").read_bytes())
@@ -264,6 +273,7 @@ def test_partial_retry_never_follows_an_outside_replacement_link(owned, tmp_path
         interrupt(owned, patch)
         with pytest.raises(PlanError):
             remove(owned)
+    slot = remaining(owned)
     outside = tmp_path / "foreign"
     outside.mkdir()
     sentinel = outside / "child"
@@ -289,7 +299,7 @@ def test_owned_activation_withdrawal_then_exact_removal_preserves_activation_his
 @pytest.mark.parametrize("boundary", ["history-outcome", "outcome-pointer", "ack", "temporary"])
 def test_deleted_root_and_interrupted_outcome_settlement_retry(owned, monkeypatch, boundary):
     _root, _fixture, _staged, _trusted, namespace, slot = owned
-    original_write, unlink = construction._write, Path.unlink
+    original_write, unlink = removal._write, Path.unlink
 
     def fail_write(path, value):
         selected = (
@@ -298,7 +308,7 @@ def test_deleted_root_and_interrupted_outcome_settlement_retry(owned, monkeypatc
         )
         if selected:
             if boundary == "temporary":
-                temporary = path.with_name(path.name + ".tmp")
+                temporary = path.with_name("." + path.name + ".write-abandoned")
                 temporary.write_bytes(removal.canonical(value))
                 temporary.chmod(0o600)
             raise OSError("injected durable outcome interruption")
@@ -313,12 +323,125 @@ def test_deleted_root_and_interrupted_outcome_settlement_retry(owned, monkeypatc
         if boundary == "ack":
             patch.setattr(Path, "unlink", fail_ack)
         else:
-            patch.setattr(construction, "_write", fail_write)
+            patch.setattr(removal, "_write", fail_write)
         with pytest.raises(PlanError, match="outcome is unknown"):
             remove(owned)
     assert not slot.exists() and (namespace / construction.REMOVING).is_file()
     assert remove(owned)["runtime_removed"]
     assert remove(owned)["reused"]
+
+
+@pytest.mark.parametrize("partial", [b"", b'{"schema":'])
+def test_empty_or_truncated_native_outcome_write_does_not_poison_retry(owned, monkeypatch, partial):
+    _root, _fixture, _staged, _trusted, namespace, slot = owned
+    original_open, original_write = os.open, os.write
+    writing = set()
+
+    def open_attempt(path, *args, **kwargs):
+        descriptor = original_open(path, *args, **kwargs)
+        if Path(path).name.startswith(".outcome.json.write-"):
+            writing.add(descriptor)
+        return descriptor
+
+    def write_partial(descriptor, content):
+        if descriptor in writing:
+            if partial:
+                original_write(descriptor, partial)
+            raise OSError("injected incomplete outcome write")
+        return original_write(descriptor, content)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "open", open_attempt)
+        patch.setattr(os, "write", write_partial)
+        with pytest.raises(PlanError, match="outcome is unknown"):
+            remove(owned)
+    assert not slot.exists() and (namespace / construction.REMOVING).is_file()
+    abandoned = list((namespace / removal.HISTORY).glob("*/.outcome.json.write-*"))
+    assert len(abandoned) == 1 and abandoned[0].read_bytes() == partial
+    assert remove(owned)["runtime_removed"]
+    assert abandoned[0].read_bytes() == partial and remove(owned)["reused"]
+
+
+def test_unpublished_initial_marker_preserves_old_attempt_and_allows_a_new_owned_attempt(owned, monkeypatch):
+    _root, _fixture, _staged, _trusted, namespace, slot = owned
+    original = os.replace
+
+    def interrupt_marker(source, target, *args, **kwargs):
+        if target == namespace / construction.REMOVING:
+            raise OSError("injected failure before initial marker rename")
+        return original(source, target, *args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "replace", interrupt_marker)
+        with pytest.raises(PlanError):
+            remove(owned)
+    abandoned = list(namespace.glob("." + construction.REMOVING + ".write-*"))
+    assert len(abandoned) == 1 and slot.is_dir()
+    assert not (namespace / construction.REMOVING).exists()
+    before = abandoned[0].read_bytes()
+    assert remove(owned)["runtime_removed"]
+    assert abandoned[0].read_bytes() == before
+    assert len(list((namespace / removal.HISTORY).iterdir())) == 2
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX claim-before-validation deletion contract")
+@pytest.mark.parametrize("kind", ["file", "link", "directory"])
+def test_replacement_during_final_validation_survives_in_the_original_namespace(
+    owned, primitive, monkeypatch, kind,
+):
+    _root, _fixture, _staged, _trusted, namespace, slot = owned
+    publication = primitive._runtime_component("versioned_runtime_publication")
+    logical = {"file": "b-second", "link": "internal-link", "directory": "nested"}[kind]
+    key = removal._claim_key([logical])
+    injected = []
+
+    def replace_original():
+        if injected:
+            return
+        original = remaining(owned) / logical
+        if kind == "directory":
+            original.mkdir()
+            sentinel = original / "foreign"
+        else:
+            sentinel = original
+        sentinel.write_bytes(b"replacement must survive")
+        injected.append(sentinel)
+
+    state_fd, readlink, open_entry = publication.state_fd, os.readlink, os.open
+
+    def hash_then_replace(descriptor, **kwargs):
+        result = state_fd(descriptor, **kwargs)
+        path = Path(readlink(f"/proc/self/fd/{descriptor}"))
+        if path.name == key and path.parent.name == "claims":
+            replace_original()
+        return result
+
+    def readlink_then_replace(name, *args, **kwargs):
+        result = readlink(name, *args, **kwargs)
+        if name == key and "dir_fd" in kwargs:
+            replace_original()
+        return result
+
+    def open_then_replace(name, *args, **kwargs):
+        descriptor = open_entry(name, *args, **kwargs)
+        if name == key and "dir_fd" in kwargs:
+            replace_original()
+        return descriptor
+
+    with monkeypatch.context() as patch:
+        if kind == "file":
+            patch.setattr(publication, "state_fd", hash_then_replace)
+        elif kind == "link":
+            patch.setattr(os, "readlink", readlink_then_replace)
+        else:
+            patch.setattr(os, "open", open_then_replace)
+        with pytest.raises(PlanError):
+            remove(owned)
+    assert len(injected) == 1 and injected[0].read_bytes() == b"replacement must survive"
+    assert (namespace / construction.REMOVING).is_file()
+    with pytest.raises(PlanError):
+        remove(owned)
+    assert injected[0].read_bytes() == b"replacement must survive"
 
 
 def test_corrupt_retained_tree_is_not_resnapshot_permission(owned, monkeypatch):
@@ -335,7 +458,7 @@ def test_corrupt_retained_tree_is_not_resnapshot_permission(owned, monkeypatch):
         namespace / removal.HISTORY / value["removal"] / "intent.json",
     ):
         construction._write(path, value)
-    before = states(path for path in slot.rglob("*") if path.is_file())
+    before = states(path for path in remaining(owned).rglob("*") if path.is_file())
     with pytest.raises(PlanError, match="physical evidence"):
         remove(owned)
     assert states(before) == before
@@ -358,12 +481,12 @@ if request["interrupt"]:
             return native(path,*args,**kwargs)
         removal._windows_node=die
     else:
-        native=os.unlink
-        def die(name,*args,**kwargs):
-            if name=="b-second" and "dir_fd" in kwargs:
+        native=removal._posix_claimed_node
+        def die(parent,name,publication,expected,claims,path,visited,**kwargs):
+            if path==["b-second"] and kwargs.get("remove"):
                 os._exit(47)
-            return native(name,*args,**kwargs)
-        os.unlink=die
+            return native(parent,name,publication,expected,claims,path,visited,**kwargs)
+        removal._posix_claimed_node=die
 print(json.dumps(removal.remove_client_runtime(
     Path(request["root"]),request["identity"],candidate=request["candidate"],
 )),flush=True)
@@ -379,7 +502,8 @@ print(json.dumps(removal.remove_client_runtime(
         if interrupted:
             assert result.returncode == 47, result.stderr
             assert (namespace / construction.REMOVING).is_file()
-            assert not (slot / "a-first").exists() and (slot / "b-second").exists()
+            assert not (remaining(owned) / "a-first").exists()
+            assert (remaining(owned) / "b-second").exists()
         else:
             assert result.returncode == 0, result.stderr
             assert json.loads(result.stdout)["runtime_removed"] and not slot.exists()
