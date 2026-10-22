@@ -9,6 +9,7 @@ from ssh_manager.config_sources import SSHConfig
 import ssh_manager.reverse_candidates as candidate_mod
 from ssh_manager.reverse_candidates import (
     FiniteReverseForward, ReverseEndpoint, ReverseEvidence, ReverseForwardError,
+    ReverseStatus,
 )
 from ssh_manager.relay_channel import SupervisedRelayForward, _SettleResult
 
@@ -114,6 +115,24 @@ async def test_observer_exception_is_redacted_and_latched(monkeypatch):
     assert error.value.__suppress_context__
     assert retired == spawned
     assert await relay._restart_with_backoff("interruption") is False
+    assert len(spawned) == 1
+
+
+async def test_observer_typed_forward_error_is_not_trusted_as_local_control_state(monkeypatch):
+    async def fail(_attempt):
+        raise ReverseForwardError(ReverseStatus(
+            "different-operation", None, "refused", "private-provider-value",
+        ))
+    relay, spawned, retired, _ = fixture_owner(monkeypatch, ["ready"], observer=fail)
+    with pytest.raises(ReverseForwardError) as error:
+        await relay.establish()
+    assert error.value.status.request_id == "operation-a"
+    assert error.value.status.state == "unknown"
+    assert error.value.status.reason == "observer-outcome"
+    assert "private-provider-value" not in str(error.value)
+    assert retired == spawned
+    with pytest.raises(ReverseForwardError):
+        await relay.establish()
     assert len(spawned) == 1
 
 
@@ -260,6 +279,35 @@ async def test_late_confirmed_bind_failure_is_not_lost_after_initial_process_set
     assert relay.reverse_status.state == "ready"
     assert relay.reverse_status.attempt.endpoint.port == 41002
     assert retired == [spawned[0]]
+    await relay.stop()
+
+
+@pytest.mark.parametrize("initial,chunks", [
+    ("remote port for", ["warding failed for listen port 41001\n"]),
+    ("remote port forwarding ", ["failed for listen port 41001\n"]),
+    ("", ["remote port", " forwarding", " failed for listen port 41001\n"]),
+])
+async def test_fragmented_late_failure_preserves_settle_tail_and_read_boundaries(
+    monkeypatch, initial, chunks,
+):
+    relay, spawned, retired, _ = fixture_owner(monkeypatch, ["occupied", "ready"])
+    pending = list(chunks)
+    async def early_settle(self, proc):
+        return _SettleResult(True, initial.strip(), False, initial[-128:])
+    async def read(proc, *, timeout):
+        assert 0 < timeout <= 0.01
+        return pending.pop(0) if pending else ""
+    async def observe(attempt):
+        if attempt.endpoint.port == 41001:
+            spawned[-1].returncode = 255
+            return ReverseEvidence(attempt.attempt_id, "occupied")
+        return ReverseEvidence(attempt.attempt_id, "ready")
+    monkeypatch.setattr(FiniteReverseForward, "_wait_settled", early_settle)
+    monkeypatch.setattr(FiniteReverseForward, "_read_stderr_available", staticmethod(read))
+    relay._observe_candidate = observe
+    await relay.establish()
+    assert relay.reverse_status.attempt.endpoint.port == 41002
+    assert not pending and retired == [spawned[0]]
     await relay.stop()
 
 

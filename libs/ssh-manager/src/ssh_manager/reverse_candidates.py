@@ -20,9 +20,12 @@ from typing import Literal
 from .config_sources import SSHConfig
 from .forward import build_forward_ssh_args
 from .proxy import create_ssh_subprocess
-from .relay_channel import SupervisedRelayForward, _OWNER_ENV, _VenueStopped
+from .relay_channel import (
+    SupervisedRelayForward, _FORWARD_DIAGNOSTIC_TAIL, _OWNER_ENV, _VenueStopped,
+)
 
 MAX_CANDIDATES = 16
+_DIAGNOSTIC_READS = 16
 log = logging.getLogger("ssh-manager.reverse-candidates")
 
 
@@ -304,7 +307,12 @@ class FiniteReverseForward(SupervisedRelayForward):
                     remaining = deadline - loop.time()
                     if remaining <= 0:
                         raise asyncio.TimeoutError
-                    evidence = await asyncio.wait_for(self._observe_candidate(attempt), remaining)
+                    try:
+                        evidence = await asyncio.wait_for(self._observe_candidate(attempt), remaining)
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception:
+                        raise self._fail("unknown", "observer-outcome", attempt) from None
                     if (not isinstance(evidence, ReverseEvidence)
                             or evidence.attempt_id != attempt.attempt_id):
                         raise self._fail("unknown", "uncorrelated-evidence", attempt)
@@ -322,10 +330,24 @@ class FiniteReverseForward(SupervisedRelayForward):
                     forward_failed = settled.remote_forward_failed
                     if (evidence.state == "occupied" and not forward_failed
                             and loop.time() < deadline):
-                        diagnostic = await self._read_stderr_available(
-                            proc, timeout=min(0.01, deadline - loop.time()),
-                        )
-                        forward_failed = self._remote_forward_failed(diagnostic)
+                        diagnostic = (settled.raw_tail or settled.stderr)[-_FORWARD_DIAGNOSTIC_TAIL:]
+                        for _ in range(_DIAGNOSTIC_READS):
+                            if self._remote_forward_failed(diagnostic):
+                                forward_failed = True
+                                break
+                            remaining = deadline - loop.time()
+                            if remaining <= 0:
+                                break
+                            chunk = await self._read_stderr_available(
+                                proc, timeout=min(0.01, remaining),
+                            )
+                            if not chunk:
+                                break
+                            combined = diagnostic + chunk
+                            if self._remote_forward_failed(combined):
+                                forward_failed = True
+                                break
+                            diagnostic = combined[-_FORWARD_DIAGNOSTIC_TAIL:]
                     if evidence.state == "occupied" and forward_failed:
                         await self._retire_process()
                         continue

@@ -114,6 +114,10 @@ permission or a false stopped-venue report. A synchronous target-port resolver
 must supply an immediate local value, not perform blocking I/O.
 The existing fixed-port gate also omits raw provider exception values from its
 warning, without changing that path's routing or retry behavior.
+Late failure parsing retains a hidden, untrimmed 128-character carry and inspects
+at most sixteen additional 4 KiB stderr chunks within the remaining deadline.
+This preserves markers split across settle/read boundaries without logging or
+exposing the raw diagnostic in the result.
 
 `establish()`/`start()` retain their awaitable shape; inspect immutable
 `reverse_status` afterward. `ready` supplies the exact attempt for the existing
@@ -127,7 +131,11 @@ An observer error, timeout, wrong correlation or interruption latches `unknown`
 under the original request. The existing monitor stops rather than allocating
 another candidate; `stop()` cleans owned transports but does not settle that
 unknown. The caller must reconcile through its original operation/authority
-before any replacement request or instance. Interrupted spawn ownership is
+before any replacement request or instance. Every non-cancellation observer
+exception, including a provider-raised `ReverseForwardError`, is normalized to
+the original operation's unknown result rather than trusted as local control
+state. The observer verifies readiness only; fleet publication remains outside
+this callback. Interrupted spawn ownership is
 retained through eventual cleanup, with a separate five-second cleanup wait;
 pending cleanup remains explicitly owned rather than discarded at that wait.
 The operation itself has one finite deadline across all candidates.

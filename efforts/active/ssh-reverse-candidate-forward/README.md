@@ -275,3 +275,10 @@ redacted cause codes rather than raw credential-shaped diagnostics.
   gate without changing its endpoint, retry or return behavior. Its dedicated
   log-capture regression brings focused contained validation to83 passed with
   the same one Linux-only skip.
+- Preserve a bounded untrimmed settle tail and join later diagnostic chunks so
+  fragmented failure markers, including whitespace boundaries, remain usable.
+  Normalize every observer exception before local typed-error handling so a
+  provider-raised `ReverseForwardError` cannot bypass the original correlation's
+  unknown latch or expose a provider reason. Focused contained validation is88
+  passed with the same one Linux-only skip; existing trimmed diagnostic text and
+  equality behavior remain unchanged.
