@@ -4,6 +4,7 @@ import importlib.util
 import base64
 import json
 import os
+import shutil
 import subprocess
 import time
 from pathlib import Path
@@ -204,3 +205,28 @@ def test_native_daemon_rejects_every_partially_qualified_path_before_activation(
     assert len(outcomes) == 8
     assert all("fully qualified" in item["error"] for item in outcomes), outcomes
     assert not (tmp_path / "worker.log").exists()
+
+
+def test_native_daemon_rejects_real_powershell_core_before_initialization():
+    shell = shutil.which("pwsh")
+    if shell is None:
+        pytest.skip("PowerShell Core is not installed for the explicit host-refusal control")
+    base = Path(__file__).resolve().parents[2]
+    helper = base / "agent-procutil" / "src" / "agent_procutil" / "native_daemon.ps1"
+    literal = "'" + str(helper).replace("'", "''") + "'"
+    script = (
+        "$ErrorActionPreference='Stop'; "
+        f"try {{ . {literal}; exit 91 }} catch {{ "
+        "@{error=$_.Exception.Message; "
+        "initialized=($null -ne ('CopilotExtensions.NativeDaemonAdmission' -as [type]))} "
+        "| ConvertTo-Json -Compress }"
+    )
+    encoded = base64.b64encode(script.encode("utf-16le")).decode("ascii")
+    result = subprocess.run(
+        [shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded],
+        capture_output=True, text=True, timeout=30, **pu.no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stderr
+    outcome = json.loads(result.stdout)
+    assert "stock Windows PowerShell 5.1" in outcome["error"]
+    assert outcome["initialized"] is False

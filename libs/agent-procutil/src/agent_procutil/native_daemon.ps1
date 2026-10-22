@@ -1,4 +1,7 @@
 # Python-free counterpart of daemon.py's verified Windows outside-Job admission.
+if ($PSVersionTable.PSEdition -ne 'Desktop' -or $PSVersionTable.PSVersion -lt [version]'5.1') {
+    throw 'Native daemon admission requires stock Windows PowerShell 5.1.'
+}
 if (-not ('CopilotExtensions.NativeDaemonAdmission' -as [type])) {
     Add-Type -TypeDefinition @'
 using System;
@@ -83,7 +86,6 @@ function Start-NativeDaemon {
         throw 'Native daemon diagnostics require a file in an existing directory.'
     }
     $shell = Join-Path $PSHOME 'powershell.exe'
-    if (-not [IO.File]::Exists($shell)) { $shell = Join-Path $PSHOME 'pwsh.exe' }
     if (-not [IO.File]::Exists($shell)) { throw 'Native daemon admission cannot resolve its interpreter.' }
     $contained = $env:COPILOT_EXTENSIONS_TEST_CONTAINED -eq '1'
     $channel = 'ce-native-daemon-' + [Guid]::NewGuid().ToString('N')
@@ -144,6 +146,7 @@ try {
     $connected = $null
     $activated = $false
     $adopted = $false
+    $pinned = $false
     try {
         $connected = $server.BeginWaitForConnection($null, $null)
         if ($contained) {
@@ -194,6 +197,7 @@ try {
         if ($actualPid -ne [BitConverter]::ToInt32($frame, 0)) { throw 'Native daemon client identity changed.' }
         $process = [Diagnostics.Process]::GetProcessById($actualPid)
         [void]$process.Handle
+        $pinned = $true
         if (-not $contained -and [CopilotExtensions.NativeDaemonAdmission]::InJob($process)) {
             throw 'Native daemon broker returned a process inside a Job.'
         }
@@ -207,7 +211,7 @@ try {
         $failure = $_.Exception
         $settled = -not $activated
         $server.Dispose()
-        if (-not $adopted -and $process) {
+        if (-not $adopted -and $pinned) {
             try {
                 if (-not $process.WaitForExit(2000)) { $process.Kill() }
                 $settled = $process.WaitForExit(5000) -and $launcher.WaitForExit(5000)

@@ -23,6 +23,12 @@ its fixed source/recipe, acquire the canonical operation lock, and journal
 its own durable progress and outcome. No current plugin publisher switches
 to these helpers merely because they are present.
 
+The daemon admission helper requires stock Windows PowerShell 5.1 and refuses
+PowerShell Core before compiling its helper or creating a pipe. Its
+current-user ACL constructor is a .NET Framework API; no unsupported
+`pwsh.exe` fallback is advertised. Select the stock host explicitly when
+calling this bootstrap from a Core-based controller.
+
 Dot-source `native_daemon.ps1` from the resolved, attributable payload and use
 `Start-NativeDaemon -Script <absolute-ps1> -Arguments <trusted-string-array>
 -WorkingDirectory <absolute-directory> -LogPath <absolute-diagnostic-file>`.
@@ -69,6 +75,10 @@ descendant settlement and owner death. The explicit
 cycles with a PATH containing neither Python nor uv and the canonical
 console/foreground observer. This is Windows admission evidence, not a
 fresh-host foundation installation or Linux/macOS qualification.
+The cleanup controls also force a verified pre-acknowledgement refusal,
+an untrusted PID frame, and a still-live launcher: only an authenticated,
+successfully handle-pinned worker may be terminated, and both worker and
+launcher exit must be observed before cleanup is confirmed.
 
 ```python
 import subprocess
