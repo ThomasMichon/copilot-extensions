@@ -20,6 +20,7 @@ from typing import Callable, Mapping, Sequence, TextIO
 
 from single_instance_lease.operation import OperationLock, OperationLockedError
 from . import boot
+from ._directory import create_queue_directory
 
 SCHEMA = 2
 STATES = frozenset({"pending", "running", "completed", "interrupted", "blocked"})
@@ -241,7 +242,7 @@ def _database(
     db = None
     try:
         if create:
-            root.mkdir(parents=True, exist_ok=True, mode=0o700)
+            create_queue_directory(root)
         path = root / "queue.sqlite3"
         if path.is_symlink() or (path.exists() and path.resolve() != path):
             raise StateError("queue must be a plain local database")
@@ -424,7 +425,7 @@ def ensure_worker(
         raise InvalidRequestError("worker requires an absolute trusted executable")
     if not math.isfinite(startup_timeout) or startup_timeout <= 0:
         raise InvalidRequestError("startup timeout must be finite and positive")
-    root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    create_queue_directory(root)
     _reconcile_lost_owner(root)
     if any(
         row.state in {"interrupted", "blocked"} and row.settled_at is None
@@ -549,10 +550,15 @@ def drain(
     if re.fullmatch(r"[0-9a-f]{32}", startup):
         # Observation only, never custody: a caller can distinguish import/
         # entrypoint failure from a real worker waiting on OperationLock.
-        with (root / f".worker-started-{startup}").open("xb") as receipt:
-            receipt.write(b"queue-ready\n")
-            receipt.flush()
-            os.fsync(receipt.fileno())
+        pending = root / f".worker-starting-{startup}"
+        try:
+            with pending.open("xb") as receipt:
+                receipt.write(b"queue-ready\n")
+                receipt.flush()
+                os.fsync(receipt.fileno())
+            pending.rename(root / f".worker-started-{startup}")
+        finally:
+            pending.unlink(missing_ok=True)
     lock = OperationLock(root / "execution.lock")
     while True:
         try:

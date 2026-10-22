@@ -3,9 +3,18 @@
 from __future__ import annotations
 
 import pytest
+from pathlib import Path
 from types import SimpleNamespace
 
 from worktree_manager import update_driver_cli as driver
+
+
+@pytest.fixture
+def short_home(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    # Exercise queue ownership, not the platform's AF_UNIX address-length limit.
+    home = tmp_path_factory.mktemp("ud") / "home"
+    home.mkdir()
+    return home
 
 
 def test_default_wait_preserves_canonical_update_arguments():
@@ -15,6 +24,18 @@ def test_default_wait_preserves_canonical_update_arguments():
     assert not options.detach
     assert not options.supervised_debug
     assert options.request_status is None
+
+
+@pytest.mark.parametrize("observer", [[], ["--detach"], ["--supervised-debug"]])
+def test_bootstrap_repair_prefix_survives_durable_observer_normalization(observer):
+    arguments = ["--repair-engine", "/fresh/source with spaces", "--project", "example"]
+    _options, forwarded = driver.parse_options([*observer, *arguments])
+    assert forwarded == arguments
+
+
+def test_bootstrap_repair_cannot_hide_after_ordinary_arguments():
+    with pytest.raises(SystemExit):
+        driver.parse_options(["--force", "--repair-engine", "/fresh/source"])
 
 
 def test_detach_json_is_an_observer_option_not_an_installer_argument():
@@ -142,6 +163,53 @@ def test_ordinary_update_only_enqueues_and_observes_canonical_exit(queued):
     assert "worker" in seen
 
 
+def test_fresh_repair_is_queued_without_running_in_the_observer(queued, monkeypatch):
+    seen, _request = queued
+    monkeypatch.setenv("AGENT_WORKTREES_PAYLOAD_ROOT", "/registered/native/payload")
+    arguments = ["--repair-engine", "/fresh/source with spaces", "--project", "example"]
+    assert driver.cmd_update_request(arguments) == 6
+    assert seen["spec"].argv == tuple(arguments)
+    assert dict(seen["spec"].context)["AGENT_WORKTREES_PAYLOAD_ROOT"] == (
+        "/registered/native/payload"
+    )
+    assert seen["runner"].argv[-len(arguments) - 1:] == ("update", *arguments)
+
+
+def test_borrowed_execution_passes_repair_to_the_canonical_body(queued, monkeypatch, tmp_path):
+    import update_driver
+    from worktree_manager import __main__ as manager
+
+    seen, request = queued
+    request.state = "running"
+    request.spec = SimpleNamespace(
+        backend="manager", source=driver._source_key(),
+        context=(("AGENT_WORKTREES_PAYLOAD_ROOT", "/registered/native/payload"),),
+    )
+
+    class Custody:
+        root = tmp_path
+        request_id = request.id
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            pass
+
+        def assert_owned(self):
+            seen["custody"] = True
+
+    monkeypatch.setattr(update_driver, "borrowed_custody", Custody)
+    monkeypatch.setattr(update_driver, "status", lambda *args, **kwargs: request)
+    monkeypatch.setattr(
+        manager, "_cmd_update", lambda args: seen.update(body=args) or 7,
+    )
+    arguments = ["--repair-engine", "/fresh/source with spaces", "--force"]
+    assert driver.cmd_update_request(arguments) == 7
+    assert seen["custody"] is True and seen["body"] == arguments
+    assert "spec" not in seen
+
+
 def test_detached_receipt_does_not_wait_or_claim_completion(queued, capsys):
     import json
 
@@ -217,7 +285,7 @@ def test_public_manager_route_uses_request_boundary(monkeypatch):
     assert seen == [["--wait"]]
 
 
-def test_real_cli_worker_preserves_exit_and_serializes_processes(tmp_path, monkeypatch):
+def test_real_cli_worker_preserves_exit_and_serializes_processes(tmp_path, monkeypatch, short_home):
     import json
     import sys
     from concurrent.futures import ThreadPoolExecutor
@@ -226,8 +294,7 @@ def test_real_cli_worker_preserves_exit_and_serializes_processes(tmp_path, monke
     from agent_procutil.owned_process import run_owned
     import update_driver
 
-    home = tmp_path / "home"
-    home.mkdir()
+    home = short_home
     events = tmp_path / "events.jsonl"
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("USERPROFILE", str(home))
@@ -251,15 +318,17 @@ def test_real_cli_worker_preserves_exit_and_serializes_processes(tmp_path, monke
     assert all(request.state == "completed" and request.exit_code == 6 for request in requests)
 
 
-def test_actual_queued_manager_keeps_consumed_provider(tmp_path, monkeypatch):
+@pytest.mark.parametrize("fresh_repair", [False, True], ids=["ordinary", "fresh-repair"])
+def test_actual_queued_manager_keeps_consumed_provider(
+    tmp_path, monkeypatch, short_home, fresh_repair,
+):
     import json
     import sys
     from pathlib import Path
     from agent_procutil.owned_process import run_owned
     from worktree_manager import engine_client
 
-    home = tmp_path / "home"
-    home.mkdir()
+    home = short_home
     events = tmp_path / "events.jsonl"
     provider = [sys.executable, str(tmp_path / "selected-provider.py")]
     monkeypatch.setenv("HOME", str(home))
@@ -267,14 +336,20 @@ def test_actual_queued_manager_keeps_consumed_provider(tmp_path, monkeypatch):
     monkeypatch.setenv("UPDATE_DRIVER_TEST_EVENTS", str(events))
     monkeypatch.setenv(engine_client.ENGINE_ARGV_ENV, json.dumps(provider))
     fixture = Path(__file__).parent / "fixtures" / "update_driver_cli.py"
-    result = run_owned([sys.executable, str(fixture), "submit", "--wait"], timeout=20)
+    forwarded = ["--repair-engine", str(tmp_path / "fresh source")] if fresh_repair else []
+    result = run_owned(
+        [sys.executable, str(fixture), "submit", "--wait", *forwarded], timeout=20,
+    )
     assert result.returncode == 6, result.stderr
     records = [json.loads(line) for line in events.read_text().splitlines()]
     assert records[0]["provider"] == provider
     assert records[0]["provider"] != ["synthetic-marker-provider"]
+    assert records[0]["arguments"] == forwarded
 
 
-def test_actual_queued_manager_isolates_explicit_and_absent_engine_overrides(tmp_path, monkeypatch):
+def test_actual_queued_manager_isolates_explicit_and_absent_engine_overrides(
+    tmp_path, monkeypatch, short_home,
+):
     import json
     import sys
     from pathlib import Path
@@ -282,8 +357,7 @@ def test_actual_queued_manager_isolates_explicit_and_absent_engine_overrides(tmp
     from agent_procutil.owned_process import run_owned
     from worktree_manager import engine_client
 
-    home = tmp_path / "home"
-    home.mkdir()
+    home = short_home
     events = tmp_path / "events.jsonl"
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("USERPROFILE", str(home))

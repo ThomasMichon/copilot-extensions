@@ -150,6 +150,9 @@ try {
 } finally {
     Pop-Location
 }
+if ($commandExit -ne 0) {
+    [Console]::Error.WriteLine("Manager runtime command failed ($commandExit).")
+}
 if ($commandExit -eq 0 -and ($env:PATH -split ';') -notcontains $LocalBin) {
     Write-Warning "Add '$LocalBin' to your PATH (uv and the worktree-manager binstub live there), then restart your shell."
 }

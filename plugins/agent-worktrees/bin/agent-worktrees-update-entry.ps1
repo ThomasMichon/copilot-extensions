@@ -13,7 +13,11 @@ if ($_updateArgs.Count -ge 3 -and $_updateArgs[0] -cin @('--project', '-p')) {
     $_updateArgs = @($_updateArgs | Select-Object -Skip 1)
 }
 if ($_updateArgs.Count -eq 0 -or $_updateArgs[0] -cne 'update') { return }
-if (@($_updateArgs | Where-Object { $_ -cin @('--no-manager', '--auth-report', '--help', '-h') }).Count) { return }
+if (@($_updateArgs | Where-Object {
+    $_ -cin @('--no-manager', '--auth-report', '--help', '-h',
+        '--request-status', '--recovery-status', '--recover-after-restart') -or
+    $_.StartsWith('--request-status=')
+}).Count) { return }
 $_awUpdateHandled = $true
 $ErrorActionPreference = 'Stop'
 # The Git-sh handoff disables conversion for this native invocation only.

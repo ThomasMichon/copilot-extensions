@@ -67,6 +67,7 @@ def parse_options(rest: list[str]) -> tuple[argparse.Namespace, list[str]]:
     for name in ("force", "no-anchor-sync", "no-prune-pivots", "recreate-venv", "no-manager"):
         canonical.add_argument("--" + name, action="store_true")
     canonical.add_argument("--project")
+    canonical.add_argument("--repair-engine", help=argparse.SUPPRESS)
     canonical.add_argument("--force-runtime", action="append")
     canonical.add_argument("--skip-modules", nargs="*")
     canonical.add_argument("--auth-report", action="store_true")
@@ -75,6 +76,8 @@ def parse_options(rest: list[str]) -> tuple[argparse.Namespace, list[str]]:
     canonical.add_argument("--auth-non-repository", action="store_true")
     canonical.add_argument("--auth-environment", action="store_true")
     parsed = canonical.parse_args(forwarded)
+    if parsed.repair_engine is not None and forwarded[:1] != ["--repair-engine"]:
+        parser.error("bootstrap repair must precede ordinary update arguments")
     if not parsed.auth_report and (
         parsed.auth_source or parsed.auth_cwd or parsed.auth_non_repository or parsed.auth_environment
     ):

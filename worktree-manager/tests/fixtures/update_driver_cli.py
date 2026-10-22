@@ -37,6 +37,7 @@ def main() -> int:
             stream.write(json.dumps({
                 "phase": "start", "pid": os.getpid(), "time": time.time(),
                 "provider": engine_client.engine_base_command(),
+                "arguments": list(rest),
             }) + "\n")
             stream.flush()
         print("synthetic canonical updater started", file=sys.stderr, flush=True)

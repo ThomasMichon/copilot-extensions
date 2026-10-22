@@ -1178,8 +1178,10 @@ owned Worktrees front door. For `update`, that front door (including the
 payload-local dispatcher) fetches the remote Manager bootstrap **before**
 resolving a runtime, provisioning a venv, importing Python packages, or checking
 an installed Manager's health. CMD reaches the same branch through its
-PowerShell shim. The child remains inside the caller's process/Job containment;
-the entry does not detach or create a new console.
+PowerShell shim. Acquisition and bootstrap children remain caller-contained;
+the entry does not detach or create a new console. Once the fresh host is
+available, normal suite execution uses the existing durable update driver and
+its finite caller-independent worker, not a second execution owner.
 The existing Windows Git-sh front door selects that same native PowerShell
 early entry before parsing registrations, preserving native `C:\...` roots
 instead of interpreting them as POSIX paths. Only the helper filename is
@@ -1260,7 +1262,9 @@ Project arguments and the original invocation context cross the bootstrap.
 Installing the Manager alone never counts as suite success: repair failures
 and the eventual update's native exit status
 propagate to the caller. `--no-manager`, read-only `--auth-report`, update help,
-and non-update commands keep their existing dispatch behavior.
+request inspection, interrupted-request settlement, and non-update commands
+keep their existing dispatch behavior. Inspecting a durable request never
+triggers fresh installation.
 An older global helper need not equal the newly fetched payload: admission
 also accepts exact bytes from the prior installation's revalidated
 `commandBinding` payload or selected source snapshot. The fresh canonical

@@ -44,6 +44,31 @@ def test_readonly_absent(area):
     assert not root.exists()
 
 
+def test_worker_acknowledgement_is_published_only_after_close(area, monkeypatch):
+    from update_driver import core
+
+    root = area / "state"
+    token = "a" * 32
+    published = root / f".worker-started-{token}"
+    pending = root / f".worker-starting-{token}"
+    monkeypatch.setenv("UPDATE_DRIVER_STARTUP", token)
+    fsync = core.os.fsync
+    observed = []
+
+    def inspect_before_close(fd):
+        assert pending.is_file()
+        assert not published.exists()
+        observed.append(True)
+        fsync(fd)
+
+    monkeypatch.setattr(core.os, "fsync", inspect_before_close)
+    assert drain(root=root) == 0
+    assert observed == [True]
+    assert published.read_bytes() == b"queue-ready\n"
+    assert not pending.exists()
+    published.unlink()
+
+
 def test_pending_identity_and_distinct_arguments(area):
     root = area / "state"
     first = sample(area, argv=("--ref", "main"), context=(("repo", "public"),))

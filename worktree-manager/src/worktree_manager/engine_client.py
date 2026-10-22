@@ -27,6 +27,11 @@ from pathlib import Path
 from worktree_identity import parse_machine_identity
 
 from . import agent_plugin_runtime
+from .engine_environment import (
+    _PYTHON_PARENT_ENV as _PYTHON_PARENT_ENV,
+    _engine_environment as _engine_environment,
+    _is_parent_python_variable as _is_parent_python_variable,
+)
 
 #: The engine binstub name (the self-provisioning agent-worktrees tool CLI).
 ENGINE_BIN = "agent-worktrees"
@@ -47,34 +52,6 @@ ENGINE_ARGV_ENV = "WORKTREE_MANAGER_ENGINE_ARGV"
 #: pass can enumerate many worktrees. Kept bounded so the Manager never hangs.
 _DEFAULT_TIMEOUT = 120
 _REMOTE_ADMISSION_TIMEOUT = 240
-_PYTHON_PARENT_ENV = {
-    "PYTHONHOME",
-    "PYTHONPATH",
-    "PYTHONEXECUTABLE",
-    "VIRTUAL_ENV",
-    "UV_INTERNAL__PYTHONHOME",
-    "__PYVENV_LAUNCHER__",
-}
-
-
-def _is_parent_python_variable(name: str, *, windows: bool) -> bool:
-    candidate = name.upper() if windows else name
-    return candidate in _PYTHON_PARENT_ENV
-
-
-def _engine_environment(environment: dict[str, str] | None = None) -> dict[str, str]:
-    """Build a clean environment for the independently installed engine."""
-    windows = os.name == "nt"
-    env = {
-        key: value
-        for key, value in (os.environ if environment is None else environment).items()
-        if not _is_parent_python_variable(key, windows=windows)
-    }
-    env["PYTHONUTF8"] = "1"
-    env["PYTHONSAFEPATH"] = "1"
-    return env
-
-
 class EngineError(RuntimeError):
     """The agent-worktrees engine is absent, failed, or returned no valid JSON.
 
@@ -343,10 +320,11 @@ def run_engine_passthrough(project: str | None, args: list[str], *,
     from .update_driver_cli import handoff_environment, handoff_launch_options
 
     handoff = handoff_environment(args)
+    child_environment = _engine_environment() if environment is None else _engine_environment(environment)
     try:
         return subprocess.run(
             cmd, timeout=timeout, check=False,
-            **handoff_launch_options(_engine_environment(environment), handoff),
+            **handoff_launch_options(child_environment, handoff),
         ).returncode
     except subprocess.TimeoutExpired as e:
         raise EngineError(f"{ENGINE_BIN} {' '.join(args)} timed out") from e

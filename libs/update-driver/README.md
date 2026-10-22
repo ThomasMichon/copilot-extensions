@@ -37,6 +37,13 @@ no environment variable silently replaces that authority. A product worker may
 call `drain(root=...)`, or use the finite `python -m update_driver worker`
 entrypoint. No command/runner submission CLI exists.
 
+New Windows queue directories are created atomically with the actual process
+TokenUser as owner and protected, inheritable FullControl for that account,
+SYSTEM and Administrators. Elevated execution therefore does not leave a
+same-account ordinary caller dependent on administrator or Owner Rights access.
+Existing directories and their permissions are not rewritten; this is
+creation, not an implicit permission migration or a read-only status side effect.
+
 - `RequestSpec(backend, argv=(), project="", cwd="", source="", context=())`
   carries credential-free identity. Context is sorted unique string pairs;
   cwd is normalized, while argument ordering and spelling remain significant.
@@ -79,6 +86,8 @@ entrypoint. No command/runner submission CLI exists.
   queue and validated native boot identity (possibly waiting on its lock),
   not that an update has completed. That immutable boot identity is captured
   once per worker and recorded on every transaction it admits.
+  The receipt is published only after its file is flushed and closed, so a
+  Windows observer cannot race an open writer when consuming it.
   Import failure, early worker exit, and startup timeout remain explicit.
   Failed boot admission records a precise pending error before worker exit
   and never acknowledges startup; the accepted request remains durable.

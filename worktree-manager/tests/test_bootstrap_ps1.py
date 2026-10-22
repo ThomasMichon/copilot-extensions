@@ -102,4 +102,4 @@ def test_successful_uv_succeeds(tmp_path):
 def test_failed_git_fetch_fails_the_bootstrap(tmp_path):
     result = _run(tmp_path, uv_exit=0, ref="no-such-branch")
     assert result.returncode != 0
-    assert "git clone of" in result.stdout + result.stderr
+    assert "git fetch of" in result.stdout + result.stderr

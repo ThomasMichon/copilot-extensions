@@ -42,7 +42,10 @@ _aw_update_entry() (
     [ "${1-}" = update ] || return 0
     shift
     for _arg do
-        case "$_arg" in --no-manager|--auth-report|--help|-h) return 0 ;; esac
+        case "$_arg" in
+            --no-manager|--auth-report|--help|-h|--request-status|--request-status=*|--recovery-status|--recover-after-restart)
+                return 0 ;;
+        esac
     done
     # A selected alternate provider is not authority to install this Manager.
     case "${AGENT_WORKTREES_CONTROL_PLANE_PROVIDER:-worktree-manager}" in
@@ -211,7 +214,10 @@ case "${1-}:${3-}" in
         if [ "$_aw_is_update" = 1 ]; then
             _aw_bypass=0
             for _aw_arg do
-                case "$_aw_arg" in --no-manager|--auth-report|--help|-h) _aw_bypass=1 ;; esac
+                case "$_aw_arg" in
+                    --no-manager|--auth-report|--help|-h|--request-status|--request-status=*|--recovery-status|--recover-after-restart)
+                        _aw_bypass=1 ;;
+                esac
             done
             if [ "$_aw_bypass" = 0 ]; then
                 _aw_update_entry "$@"

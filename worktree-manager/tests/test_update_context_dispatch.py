@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
+from agent_procutil import no_window_kwargs
 import pytest
 from test_update_engine_repair import repair_case as shared_repair_case
 from test_update_engine_scope import _activate_scope
@@ -146,3 +148,41 @@ def test_successful_shared_repair_uses_new_selection_not_inherited_old_argv(
         str(selected[0]), "-m", "agent_worktrees", "update", "--no-manager",
     ]
     assert "COPILOT_EXTENSIONS_CONTEXT" not in calls[0][1]["env"]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native PowerShell update-entry inspection contract")
+@pytest.mark.parametrize("arguments", [
+    ["update", "--request-status", "synthetic-request"],
+    ["update", "--request-status=synthetic-request"],
+    ["update", "--recovery-status"],
+    ["update", "--recover-after-restart"],
+])
+def test_native_inspection_does_not_enter_fresh_installation(
+    repair_case, arguments,
+):
+    case = repair_case
+    shell = shutil.which("pwsh") or shutil.which("powershell.exe")
+    assert shell is not None
+    entry = (
+        Path(__file__).resolve().parents[2]
+        / "plugins/agent-worktrees/bin/agent-worktrees-update-entry.ps1"
+    )
+    quoted_entry = str(entry).replace("'", "''")
+    (case.home / ".worktree-manager/config.toml").write_text(
+        "[source]\nrepo = ???\n", encoding="utf-8",
+    )
+    harness = case.home / "inspection.ps1"
+    harness.write_text(
+        "$ErrorActionPreference = 'Stop'\n"
+        "function Invoke-WebRequest { throw 'inspection attempted acquisition' }\n"
+        f". '{quoted_entry}' @args\n"
+        "if ($_awUpdateHandled) { throw 'inspection was treated as installation' }\n"
+        "[Console]::WriteLine('inspection-returned')\n",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [shell, "-NoProfile", "-NonInteractive", "-File", str(harness), *arguments],
+        capture_output=True, text=True, timeout=15, **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.strip() == "inspection-returned"

@@ -68,7 +68,13 @@ def test_update_entry_git_sh_delegates_before_windows_provider_parsing(
     assert not (tmp / "curl.args").exists()
 
 
-@pytest.mark.parametrize("args", [["status"], ["update", "--no-manager"], ["unknown", "update"]])
+@pytest.mark.parametrize("args", [
+    ["status"], ["update", "--no-manager"], ["unknown", "update"],
+    ["update", "--request-status", "synthetic-request"],
+    ["update", "--request-status=synthetic-request"],
+    ["update", "--recovery-status"],
+    ["update", "--recover-after-restart"],
+])
 def test_update_entry_git_sh_does_not_redirect_other_dispatch(
     update_entry_case, native_bash, monkeypatch, args,
 ) -> None:
