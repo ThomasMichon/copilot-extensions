@@ -87,7 +87,44 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Admitted fixture-semantic batches
 
+### B-CLONE-IDENTITY retain one explicit clone-local identity
+
+Baseline: the actual #7765 merge. `_bare_anchor_from_clone` wrote the
+same local user email/name twice. Remove only the repeated second pair
+and its duplicate explanation. The first checked identity writes remain,
+before `core.bare` is set; a clone still never relies on global identity.
+Every original test function, fixture, decorator and assertion is
+unchanged, and the complete module AST now matches pinned preserved
+source.
+
+The complete native Windows repos module passed 135 tests, zero skips,
+43.50 seconds pytest / 52.36 preparation-cleanup inclusive. This includes
+both actual clone-anchor `commit-tree` consumers: each feeds its result
+to checked `update-ref`, so an empty or invalid commit ID cannot pass.
+This explicit identity probe used private HOME, removed inherited `GIT_*`
+variables, disabled global Git config and ignored system Git config.
+No ambient identity is needed. Exactly two work-stealing workers retained the
+original 30-second item watchdog, 240-second diagnostic group and every
+native/process/memory/mark bound. Ruff and thirteen install contracts
+passed. Functional integration only, not quiet-host, whole-suite or
+repeated same-head qualification.
+
+This below-altitude fixture cleanup changes no production, command,
+configuration, installation or architecture contract. Documentation
+impact is this ledger, correcting the candidate wording to distinguish
+duplicate writes from removal of required identity. Clean-room
+provisioning and external-venue lanes are inapplicable. All other
+residuals and parent qualification/settlement remain open.
+
 ### B-REPOS-CONFIG native config without unrelated commits
+
+Actual disposition: #7765 merged as
+`6477c4c8c38abe5919d34a7bdf1fb6eb1ecd694a`; fresh full Copilot
+review `5609318256` approved exact head
+`de537df007daa7240ed8ac990fa6efcb5ef3263f`.
+All overview/inline/general channels and threads were clear;
+every required check and live authority passed before merge.
+The child is finalized.
 
 Baseline: the actual #7737 merge. `_init_config_repo` initializes real
 Git configuration without identity or commit setup. The twelve named
@@ -3092,7 +3129,7 @@ effects remain per-case and fresh.
 | B-RECONCILE | 4 | `test_reconcile.py::_stage_installation_context`, both staging callers and regression: stage every native `.py`/`.ps1` sibling, preserve fixture override, repair missing guest helper; do not silently replace a current override or omit native dependencies. |
 | B-REGISTRY-ASSERT | 2 | `test_registry_paths.py` standalone missing-receipt case moves into namespaced registration case before valid receipt publication; exact unreadable-identity exception retained. Combined identity must still exercise both refusal and later registration persistence. |
 | B-REPOS-CONFIG | 2 | `test_repos.py::_init_config_repo` plus named backfill/add-repo consumers: real Git config only where consumed, plain directory for preflight-skipped cases; preserve credential host/account/unknown-name refusals. `_init_repo` continues identity/commit setup for real-history tests. Terminal LF has no new behavior. |
-| B-CLONE-IDENTITY | 2 | `test_repos.py::_bare_anchor_from_clone`: remove clone-local user identity only if its actual commit-tree consumers provide their own identity; exact outstanding validation question is whether every such caller still resolves nonempty commits under isolated HOME. Candidate belongs here, not a broad Git batching batch; keep/reinstate identity if that gate fails. |
+| B-CLONE-IDENTITY | 2 | `test_repos.py::_bare_anchor_from_clone`: remove only the repeated second local user identity writes; the first checked email/name writes remain. Both actual commit-tree consumers must still resolve nonempty commits under isolated HOME and pass checked update-ref. Candidate belongs here, not a broad Git batching batch; required identity is not removed. |
 | B-RESOURCE | 2 | `test_resource_producer_finalize.py::_final_owner_seed`, `final_owner`: copy anchor/origin privately, construct fresh tracking/project/install dirs and relocate origin; transitive finalization retains real resource-owner decisions. Depends B-SEED and original `_env` builder, not mutable owner snapshots. |
 | B-TERMINAL | 2 | `test_terminal_conclusion.py::_worker_seed`, `_worker`, copy-isolation regression and remaining 58 consumer/helper hunks (including `TestReciprocalDisposal._harness`): copied template-free Git topology, repaired links and URLs; fresh tracking per copy; actual live/foreign/dirty/claim/finality decisions and reciprocal disposal remain unchanged. Commit/push/removal of first copy leaves seed/second byte-identical. No cached liveness. |
 | B-GENERATION | 5 | `test_independent_execution_spaces.py::test_session_register_deregister_fence_raced_fresh_foreign_record`: documented write-verb generation and required `min_version` both 3, preserving raced-foreign-record fence; not lowering API admission. |

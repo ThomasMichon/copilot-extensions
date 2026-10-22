@@ -1,0 +1,9 @@
+{
+  "comment": "Remove duplicate clone-local Git identity writes while preserving explicit identity for commit-tree fixtures.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
