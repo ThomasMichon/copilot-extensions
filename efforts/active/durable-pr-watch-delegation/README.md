@@ -499,6 +499,11 @@ callback an implicit credential store.
   exact target and provider-result refusal, restart-policy revocation and
   rejection before ACK of a wrongly scoped but validly signed sealed reply.
   Fatal Python lint and all 13 install contracts pass.
+- Review identified that a retained pre-restart client could refuse due to
+  stale nonce/epoch rather than revocation. The corrected regression creates
+  a fresh client with the same principal and keys after restart, proving both
+  successful acquisition without revocation and refusal without provider use
+  when revoked. All 47 PR-credential cases pass after this test-only correction.
 - No installer/bootstrap path changed, so a new clean-room installation lane
   is not applicable. No live provider, production credentials or external
   deployment lane was exercised: this source-only SDK exchange has no

@@ -244,22 +244,27 @@ def test_worker_checks_sealed_target_before_ack_even_with_valid_controller_signa
             assert all(item.state == "DELIVERED" for item in gateway.gateway.broker._items.values())
 
 
-def test_restarted_policy_revocation_refuses_the_same_worker_without_provider_reuse(tmp_path):
+@pytest.mark.parametrize("revoked", [False, True])
+def test_restarted_policy_checks_revocation_for_fresh_client(tmp_path, revoked):
     fixture, parameters = configured(tmp_path)
     source = ScopedProvider()
     with running(build_server(fixture.config, fixture.signer)) as gateway:
         with responding(fixture, gateway, source):
-            consumer = worker(fixture, fixture.client("worker", gateway.server_port))
-            consumer.acquire(parameters)
+            worker(fixture, fixture.client("worker", gateway.server_port)).acquire(parameters)
             port = gateway.server_port
     fixture.value["tls"]["port"] = port
-    fixture.value["revoked"] = ["worker"]
+    fixture.value["revoked"] = ["worker"] if revoked else []
     with running(build_server(fixture.config, fixture.signer)) as gateway:
         with responding(fixture, gateway, source):
-            with pytest.raises(GatewayError):
-                consumer.acquire(parameters)
-            assert len(source.calls) == 1
-            assert gateway.gateway.broker._items == {}
+            fresh = worker(fixture, fixture.client("worker", gateway.server_port))
+            if revoked:
+                with pytest.raises(GatewayError):
+                    fresh.acquire(parameters)
+                assert len(source.calls) == 1
+                assert gateway.gateway.broker._items == {}
+            else:
+                assert fresh.acquire(parameters).forge == forge()
+                assert len(source.calls) == 2
 
 
 @pytest.mark.parametrize("change", [
