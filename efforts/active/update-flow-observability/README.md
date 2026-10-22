@@ -183,6 +183,9 @@ matrix below are _(agent-recommended)_ implementation details.
 - [x] Avoid unused site-package initialization in isolated portable
   installation-mode probes while retaining fresh payload-owned authority
   and complete real-consumer decision parity (#7818).
+- [x] Avoid the extra PowerShell hop in selected-context validation while
+  retaining fresh payload-owned checks, native compatibility and UTF-8 root
+  decoding (#7919).
 - [ ] Implement the reviewed, evidence-backed reductions in repeated planning,
   probing, building or reconciliation, retaining all actual safety gates.
 - [ ] Make unchanged healthy work a genuine no-op; retain fresh, changed,
@@ -265,6 +268,82 @@ Bridge serving-version gap and supervisor framing defect survived that
 bounded source delta inspection.
 
 ## Journal
+
+### 2026-10-22 - Worktrees and Codespaces construction output qualified
+
+- Replaced the actual PowerShell and POSIX construction-action headers with
+  ordinary progress-helper lines. Install, update, dev, stamp and provisioning
+  remain distinct; Worktrees' dev-release and distinct-generation repair retain
+  their qualifications. Codespaces' runtime-only install path identifies itself
+  as provision. Shared status/uninstall emitters and lifecycle decisions are
+  unchanged.
+- Extended the existing batched source-emitter matrix. Real selected PowerShell
+  install/update/provision branches run until a synthetic prerequisite refusal,
+  retaining diagnostic output and exit 23 through the actual parent renderer.
+  These fixtures do not invoke installation, service control or publication.
+- The complete output/materialization regression file passed 67 Windows cases
+  with one POSIX-only skip, and 62 cases on native Linux storage with six
+  unavailable-PowerShell-host skips. Existing 30-second item and 300-second
+  suite bounds were unchanged. Generated declarations, all thirteen plugin
+  install contracts, touched Python lint and native PowerShell parsing passed.
+- The first Linux attempt stopped before collection because its private
+  temporary root no longer existed. Recreating that root with mode 0700 and
+  checking its owner/type/mode restored the existing isolated lane; no test,
+  timeout or source-admission condition was bypassed.
+- The fresh-entry owner independently reproduced Windows process replacement
+  losing the final result and is correcting its contained wait/exit boundary
+  under #7743. That source repair, promotion and newly authorized installed
+  acceptance remain separate from this presentation candidate. Both earlier
+  update allowances remain exhausted; healthy no-op and equivalent whole-planner
+  cost are still open.
+
+### 2026-10-22 - Promoted runtime proof passed; fresh-entry verification refused
+
+- One authorized normal Windows update completed with actual management EOF,
+  exit zero and a `verified_current` run. It changed all thirteen runtime
+  identities; the selected Worktrees, Bridge and Index versions were
+  `1.24.194-dev1`, `0.9.111-dev1` and `0.10.63-dev1`. All thirteen selected,
+  deployment and payload identities matched, retaining Containers' declared
+  provider-exec suffix. Four Worktrees modules, including the selected-context
+  and installation-probe changes, were byte-identical across reviewed source,
+  installed payload and selected runtime. Independent Bridge and Index health
+  reads confirmed the naturally activated versions after management EOF.
+- The [operation audit](audit.md#promoted-update-and-fresh-entry-verification)
+  records the complete phase cost: the Manager run took 2600.233 seconds,
+  including 2017.657 seconds in the three runtime-update phases. This was
+  changed-version construction, not an equivalent healthy no-op or a measured
+  total-planner improvement. The already-running old orchestrator still
+  attributed bulk payload refresh to its old authorization phase.
+- The single authorized verification rerun instead reached the new fresh
+  entry, advanced Manager to `0.6.78-dev1`, and refused engine repair because
+  the legitimate schema-3 incumbent manifest had no `commandBinding`.
+  Its durable request correctly persisted exit one, but the repository front
+  door returned zero and the aggregate status still described the previous
+  successful run. All thirteen plugin identities remained unchanged; the
+  engine never reached its normal update phases. The shorter failed request
+  is not healthy no-op evidence.
+- [Exact sanitized evidence](https://github.com/ThomasMichon/copilot-extensions/issues/7743#issuecomment-6352516328)
+  was sent to the existing fresh-entry owner under #7743, including the later
+  engine ownership predicate and the separate native exit/wait discrepancy.
+  That owner was already correcting legacy-schema admission. No competing
+  bootstrap implementation, invented receipt, queue repair or additional
+  update was performed. Both authorized invocations are exhausted; source
+  correction, reviewed release and newly authorized installed acceptance
+  remain separate gates. This effort and its parent remain Active.
+
+### 2026-10-22 - Selected-context improvement merged; live proof still gated
+
+- #7919 merged after a fresh current-head approval, no open findings or
+  threads and all required checks passing. Upstream durable-launch changes
+  rebased cleanly into separate executor methods; the four context-selection
+  and planning function ASTs were unchanged. The rebased Windows planner plus
+  real Unicode controls passed 166 cases with one platform skip; the exact
+  published source's Linux planner passed all 165.
+- The measured shell-hop reduction is source-qualified, not a claim that
+  deployed failures, serving-state drift or a minute-long live reconciliation
+  are solved. No additional host update or repair was run. Further live
+  observation or rollout must respect the operator's explicit scope,
+  verified promotion and existing ownership restrictions.
 
 ### 2026-10-22 - Portable selected-context consumer qualified
 

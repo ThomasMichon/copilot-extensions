@@ -530,3 +530,80 @@ The measurements cover one synthetic, read-only selected-context consumer.
 They neither time runtime construction nor establish the deployed planner's
 plugin count, repeated-context count or total reconciliation duration. Those
 remain separate evidence gates; no authorized host update or repair was run.
+
+### Promoted update and fresh-entry verification
+
+A later, explicitly authorized Windows field run used the normal repository
+update entry after release promotion. The first invocation completed with
+actual management EOF, exit zero, no event parse errors and a
+`verified_current` run. Its Manager duration was 2600.233 seconds; the outer
+capture, including entry and management closure, measured 2608.984 seconds.
+The initial orchestrator had started before replacing its own payload, so
+the older phase-label defect remained visible during this invocation.
+
+| Reached phase | Duration (s) | Interpretation |
+|---|---:|---|
+| Manager self-update | 164.641 | Changed selected version; active on the next invocation. |
+| Initial marketplace authorization | 7.139 | Read-only authorization reporting. |
+| Anchor authorization | 7.938 | Separate read-only repository authorization reporting. |
+| Worktrees payload refresh | 69.092 | Changed payload; not admitted runtime reuse. |
+| Bulk payload refresh, still labeled authorization by the running old engine | 257.297 | Includes the other registered payload acquisitions, not authorization cost alone. |
+| Runtime preflight | 30.141 | Observed phase interval, not a count of individual probes. |
+| Worktrees runtime update | 327.907 | Changed version; construction and owned monitor cutover. |
+| Bridge runtime update | 286.375 | Changed version; construction and owned serving cutover. |
+| Other runtime reconciliation | 1403.375 | Eleven other changed runtimes, including Index's existing server role. |
+| Anchor synchronization | 5.468 | Safely refused a stale-index fast-forward; not silently repaired. |
+| Pivot pruning | 2.875 | Existing integration work. |
+| Binstub/profile integration | 35.108 | Existing final integration work. |
+
+All thirteen runtime identities changed. The runtime-update phases account
+for 2017.657 seconds, approximately 77.6% of the Manager interval. These
+observations locate the cost of this changed-version run; they do not prove
+that construction, admission or health work can be removed. Nor do they
+establish an equivalent before/after reconciliation speedup.
+
+After management EOF, all thirteen selected, deployment and payload identities
+matched; Containers retained its declared provider-exec runtime suffix.
+Worktrees `1.24.194-dev1` had identical source, payload and selected-runtime
+bytes for `reconcile.py`, `installation_probe.py`, `update_runtime.py` and
+`update_acquisition.py`. Independent health reads confirmed Bridge
+`0.9.111.dev1` ready and not draining, and Index `0.10.63.dev1` serving its
+already-declared role. This proves those installed bytes and serving versions,
+not the successful execution of a later no-op planner.
+
+The single authorized verification invocation exercised the new fresh update
+entry instead. It advanced Manager from `0.6.77-dev1` to `0.6.78-dev1`, then
+its durable request refused engine repair:
+
+```text
+Engine repair refused: Engine repair has no captured incumbent ownership
+```
+
+The actual incumbent deployment manifest had schema 3 and service
+`agent-worktrees`, but no `commandBinding`. The selected Manager's
+`update_bootstrap._legacy_binding` requires that dictionary before origin
+selection in the no-context route. The owning read-only request-status command
+reported a completed request with exit one. Nevertheless, the repository front
+door returned zero; its outer completion appeared before the request refusal
+was streamed. The aggregate update-status document still identified the first
+successful run. Neither that stale document nor caller exit zero proves a
+successful verification.
+
+The failed capture lasted 132.250 seconds and reached no normal engine update
+phases. All thirteen plugin identities and both independently checked serving
+versions remained unchanged. Manager's identity changed, and the requested
+operation failed: this is not an equivalent healthy no-op timing sample.
+
+The existing #7743 owner received the
+[sanitized native evidence](https://github.com/ThomasMichon/copilot-extensions/issues/7743#issuecomment-6352516328),
+including the later engine admission boundary and the separate exit/wait
+discrepancy. The selected `runtime_install.py` uses `os.execv` where the outer
+PowerShell bootstrap expects a completed native-child result; attribution of
+the lost result to that boundary still needs an isolated native regression.
+No receipt was invented, fence cleared or additional update run.
+
+Presentation also remains open: the first capture framed every human line but
+retained Worktrees and Codespaces decoration; the new fresh bootstrap emitted
+unframed progress and a duplicated PowerShell information record in encoded,
+redirected capture. These are actual producer boundaries to qualify, not
+permission to format protocol output or hide the failed request.

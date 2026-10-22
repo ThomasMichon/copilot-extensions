@@ -87,6 +87,7 @@ def test_installer_action_identity_uses_existing_progress_helpers(
         "agent-dispatch", "agent-vault", "agent-pull-requests", "agent-ssh", "budget-guidance",
         "agent-bridge", "agent-index", "agent-logger",
         "agent-containers", "agent-mcp", "agent-machines",
+        "agent-worktrees", "agent-codespaces",
     ):
         initializer = plugin in {"agent-containers", "agent-mcp", "agent-machines"}
         entrypoint = ("init" if initializer else "install") + suffix
@@ -104,13 +105,27 @@ def test_installer_action_identity_uses_existing_progress_helpers(
             } else []
         cases = [(state, f"{plugin} {action}") for action in actions
                  for state in ("running", "done")]
-        if powershell or plugin in {"agent-bridge", "agent-dispatch", "agent-index", "agent-vault"}:
+        if powershell or plugin in {
+            "agent-bridge", "agent-dispatch", "agent-index", "agent-vault",
+            "agent-worktrees", "agent-codespaces",
+        }:
             deferred = "explicit setup" if plugin == "agent-index" else "first use"
             cases.append(("running", f"{plugin} stamp; runtime deferred to {deferred}"))
         if initializer:
             cases.append(("running", f"{plugin} init"))
         if powershell and plugin == "agent-bridge":
             cases.append(("running", f"{plugin} provision"))
+        if plugin in {"agent-worktrees", "agent-codespaces"}:
+            cases.extend(("running", f"{plugin} {action}") for action in ("install", "update"))
+            cases.append(("running", f"{plugin} dev; explicitly claimed runtime"))
+            if plugin == "agent-worktrees":
+                cases.extend(("running", f"{plugin} {detail}") for detail in (
+                    "dev-release; restore before releasing claim",
+                    "repair; distinct runtime generation",
+                    "provision; tools only, no launcher/hooks",
+                ))
+            else:
+                cases.append(("running", f"{plugin} provision"))
         if plugin == "agent-dispatch":
             cases.append(("skipped", "agent-dispatch install (superseded by a newer concurrent build)"))
         for state, message in cases:
@@ -120,14 +135,16 @@ def test_installer_action_identity_uses_existing_progress_helpers(
                 line for line in source_lines if line.startswith(declaration)
             ))
             invocation = re.search(
-                rf"^[ \t]*{re.escape(helper)}[ \t]+(['\"]){re.escape(message)}\1[ \t]*$",
+                rf"^[ \t]*(?:\w+(?:-\w+)*\)[ \t]*)?"
+                rf"(?P<call>{re.escape(helper)}[ \t]+(['\"]){re.escape(message)}\2)"
+                rf"[ \t]*(?:;;)?[ \t]*$",
                 source, re.M,
             )
             assert invocation is not None, (plugin, state, message)
             index = source_lines.index(invocation[0])
             for neighbor in source_lines[max(0, index - 1):index] + source_lines[index + 1:index + 2]:
                 assert neighbor.strip() not in {"Write-Host ''", 'Write-Host ""', "echo ''", 'echo ""'}
-            fragments.append(invocation[0])
+            fragments.append(invocation["call"])
             expected.append(f"  {markers[state]} {message}")
             states.append(f"{state} {message}")
     harness = tmp_path / ("identities" + suffix)
@@ -166,6 +183,92 @@ def test_installer_action_identity_uses_existing_progress_helpers(
             rf"{re.escape(message)} \[elapsed \d+\.\d+s\]", line,
         )
     assert "installers done exit 0 [duration " in lines[-1]
+
+
+@pytest.mark.parametrize("shell", ["pwsh", "powershell"])
+@pytest.mark.parametrize("plugin", ["agent-worktrees", "agent-codespaces"])
+def test_construction_action_progress_precedes_native_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, shell: str, plugin: str,
+) -> None:
+    executable = shutil.which(shell)
+    if not executable:
+        pytest.skip(f"{shell} unavailable")
+    scripts = REPO / "plugins" / plugin / "scripts"
+    installer = scripts / "install.ps1"
+    source = installer.read_text(encoding="utf-8")
+    helper = next(line for line in source.splitlines() if line.startswith("function Write-Step "))
+    if plugin == "agent-worktrees":
+        utilities = (scripts / "service-utils.ps1").read_text(encoding="utf-8")
+        directory_helper = re.search(
+            r"^function Ensure-InstallDir \{.*?^\}", utilities, re.M | re.S,
+        )
+        assert directory_helper is not None
+        helper += "\n" + directory_helper[0]
+    fixture = tmp_path / "action.ps1"
+    fixture.write_text(
+        "$ErrorActionPreference = 'Stop'\n"
+        "$source = $args[0]; $Action = $args[1]\n"
+        "$tokens = $null; $errors = $null\n"
+        "$ast = [Management.Automation.Language.Parser]::ParseFile($source, [ref]$tokens, [ref]$errors)\n"
+        "if ($errors.Count) { throw 'Installer parse failed' }\n"
+        + helper + "\n"
+        "function Resolve-Machine { [Console]::Error.WriteLine('prerequisite refused'); exit 23 }\n"
+        "function Deploy-PythonRuntime { [Console]::Error.WriteLine('prerequisite refused'); exit 23 }\n"
+        "function Deploy-Venv { [Console]::Error.WriteLine('prerequisite refused'); exit 23 }\n"
+        "function git { $global:LASTEXITCODE = 0 }\n"
+        "$InstallDir = $PSScriptRoot; $BinDir = $PSScriptRoot; $LocalBin = $PSScriptRoot\n"
+        "$ContextualInstall = $true\n"
+        "if ($source -like '*agent-codespaces*') {\n"
+        "  foreach ($name in @('Invoke-Install', 'Invoke-Update')) {\n"
+        "    $node = $ast.Find({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] "
+        "-and $n.Name -eq $name}, $true)\n"
+        "    if (-not $node) { throw 'Action function missing' }\n"
+        "    . ([scriptblock]::Create($node.Extent.Text))\n"
+        "  }\n"
+        "  switch ($Action) {\n"
+        "    install { Invoke-Install }\n"
+        "    update { Invoke-Update }\n"
+        "    provision { Invoke-Install -RuntimeOnly }\n"
+        "  }\n"
+        "} else {\n"
+        "  $switches = @($ast.FindAll({param($n) "
+        "$n -is [Management.Automation.Language.SwitchStatementAst] "
+        "-and $n.Condition.Extent.Text -eq '$Action'}, $true))\n"
+        "  $clause = @($switches[-1].Clauses | Where-Object { $_.Item1.Value -eq $Action })\n"
+        "  if ($clause.Count -ne 1) { throw 'Action branch missing' }\n"
+        "  $body = $clause[0].Item2.Extent.Text\n"
+        "  & ([scriptblock]::Create($body.Substring(1, $body.Length - 2)))\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.syspath_prepend(str(REPO / "libs" / "update-telemetry" / "src"))
+    from update_telemetry.human import HumanOperation, native_output
+
+    options = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+    for action in ("install", "update", "provision"):
+        argv = [
+            executable, "-NoProfile", "-NonInteractive", "-File", str(fixture),
+            str(installer), action,
+        ]
+        output = io.StringIO()
+        with HumanOperation("installer", stream=output) as operation:
+            with native_output() as sink:
+                result = subprocess.run(
+                    argv, stdout=sink, stderr=sink, timeout=10, check=False, **options,
+                )
+            operation.complete("failed", f"exit {result.returncode}")
+        assert result.returncode == 23, output.getvalue()
+        lines = output.getvalue().splitlines()
+        assert len(lines) == 4, lines
+        message = f"{plugin} {action}"
+        if plugin == "agent-worktrees" and action == "provision":
+            message += "; tools only, no launcher/hooks"
+        assert re.fullmatch(
+            rf"\[\d{{2}}:\d{{2}}:\d{{2}}\.\d{{3}}Z\] installer running "
+            rf"{re.escape(message)} \[elapsed \d+\.\d+s\]", lines[1],
+        )
+        assert "installer prerequisite refused [elapsed " in lines[2]
+        assert "installer failed exit 23 [duration " in lines[3]
 
 
 def _copy_real_installer_engine(root: Path) -> None:

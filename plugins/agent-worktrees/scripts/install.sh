@@ -1065,6 +1065,7 @@ changed() { echo "  → $*"; }
 skipped() { echo "  ○ $*"; }
 warn()    { echo "  ! $*"; }
 err()     { echo "  ✗ $*" >&2; }
+_step()   { echo "  ...    $*"; }
 header()  { echo ""; echo "═══ $* $(printf '═%.0s' $(seq 1 $((56 - ${#1}))))"; }
 
 _bootstrap_python() {
@@ -3309,12 +3310,15 @@ case "$ACTION" in
             --publication-digest "$RUNTIME_PUBLICATION_DIGEST" || exit 1
         ;;
     dev|dev-release)
-        header "Explicit $SERVICE_NAME runtime mode: $ACTION"
+        case "$ACTION" in
+            dev) _step 'agent-worktrees dev; explicitly claimed runtime' ;;
+            dev-release) _step 'agent-worktrees dev-release; restore before releasing claim' ;;
+        esac
         _deploy_python_runtime || exit $?
         write_deploy_manifest
         ;;
     repair)
-        header "Repairing $SERVICE_NAME in a distinct runtime generation"
+        _step 'agent-worktrees repair; distinct runtime generation'
         _deploy_python_runtime || exit 1
         write_deploy_manifest
         ;;
@@ -3323,7 +3327,7 @@ case "$ACTION" in
         # self-provisioning tool binstub + record the payload dir, deferring the
         # venv build to the binstub's first use. No venv, no uv -- fits a
         # sessionStart hook's grace window. Only the TOOLS half; no launcher.
-        header "Stamping $SERVICE_NAME (defer runtime to first use)"
+        _step 'agent-worktrees stamp; runtime deferred to first use'
         mkdir -p "$INSTALL_DIR" "$LOCAL_BIN"
         if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
             _stamp_source_snapshot || exit 1
@@ -3343,7 +3347,7 @@ case "$ACTION" in
         # binstubs -- those belong to the full launcher `install`, which is out of
         # scope for the confined-host tools half. Invoked by the binstub on first
         # use (see bin/agent-worktrees).
-        header "Provisioning $SERVICE_NAME runtime (lean; tools only, no launcher/hooks)"
+        _step 'agent-worktrees provision; tools only, no launcher/hooks'
         command -v git >/dev/null 2>&1 || { err "Missing prerequisite: git"; exit 1; }
         mkdir -p "$INSTALL_DIR" "$BIN_DIR" "$LOCAL_BIN"
         _deploy_python_runtime || exit 1
@@ -3353,7 +3357,7 @@ case "$ACTION" in
         ;;
 
     install)
-        header "Installing $SERVICE_NAME"
+        _step 'agent-worktrees install'
 
         machine="$(resolve_machine)"
         platform="$(detect_platform)"
@@ -3645,7 +3649,7 @@ case "$ACTION" in
         ;;
 
     update)
-        header "Updating $SERVICE_NAME"
+        _step 'agent-worktrees update'
 
         if $CONTEXTUAL_INSTALL; then
             mkdir -p "$INSTALL_DIR" "$BIN_DIR"

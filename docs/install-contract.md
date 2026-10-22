@@ -2824,7 +2824,8 @@ deadline and deployed-version receipt judgment. Streaming output does not turn
 a zero exit with a missing target receipt, an expired deadline or a failed
 cutover into a successful operation.
 
-Bridge, Dispatch, Vault, Pull Requests, SSH and Budget Guidance emit ordinary
+Bridge, Dispatch, Vault, Pull Requests, SSH, Budget Guidance, Worktrees and
+Codespaces emit ordinary
 progress-helper lines for install/update action identity instead of decorative
 blank/banner blocks. Existing start/completion locations and useful action
 names remain; Dispatch's superseded-install line retains its qualification as
@@ -2839,6 +2840,10 @@ completion banner before cleanup; the admitting parent records the final exit
 only after cleanup. Bridge's provisioning action follows the same convention.
 Status/uninstall presentation and programmatic CLI/protocol streams are
 unchanged.
+Worktrees and Codespaces retain explicit dev claims, distinct repair
+generations and first-use deferral in their construction progress. Codespaces'
+runtime-only provisioning identifies itself as provision rather than install.
+These lines describe the selected action, not completed construction or health.
 
 ### External dependency seasoning
 

@@ -686,7 +686,7 @@ _resolve_dev_slot_owner() {
 
 do_dev() (
     local force_flag="${1:-}"
-    _header "$SERVICE_NAME (dev slot)"
+    _step 'agent-codespaces dev; explicitly claimed runtime'
     if [[ -z "$SRC_VERSION" ]]; then
         _fail "dev mode requires the versioned-runtime layout (no version in pyproject.toml?)"
         return 1
@@ -1008,7 +1008,7 @@ EOF
 }
 
 do_install() {
-    _header "$SERVICE_NAME Install"
+    _step 'agent-codespaces install'
 
     # Create directories
     mkdir -p "$INSTALL_DIR" "$LOCAL_BIN"
@@ -1202,7 +1202,7 @@ do_status() {
 }
 
 do_update() {
-    _header "$SERVICE_NAME Update"
+    _step 'agent-codespaces update'
 
     if [[ ! -d "$INSTALL_DIR" ]]; then
         _warn "Not installed -- running full install"
@@ -1245,7 +1245,7 @@ do_update() {
 # find this installer, and deploy the self-provisioning binstub -- NO venv, NO uv.
 # The runtime then builds itself on the binstub's first use.
 do_stamp() {
-    _header "$SERVICE_NAME Stamp (defer runtime to first use)"
+    _step 'agent-codespaces stamp; runtime deferred to first use'
     mkdir -p "$INSTALL_DIR" "$LOCAL_BIN"
     _assert_source_runtime || return 1
     deploy_binstub || return 1
@@ -1265,7 +1265,7 @@ do_stamp() {
 # rewriting the binstub -- this is what the self-provisioning binstub invokes on
 # first use, so it must not touch the running shim.
 do_provision() {
-    _header "$SERVICE_NAME Provision (runtime)"
+    _step 'agent-codespaces provision'
     mkdir -p "$INSTALL_DIR"
     deploy_venv || return 1
     deploy_package || return 1

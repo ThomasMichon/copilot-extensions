@@ -810,7 +810,7 @@ function Resolve-DevSlotOwner {
 
 function Invoke-Dev {
     <# Editable source stays live; each dependency refresh uses a new generation. #>
-    Write-ServiceHeader "$ServiceName (dev slot)"
+    Write-Step 'agent-codespaces dev; explicitly claimed runtime'
     if (-not $VersionedRuntime) {
         Write-ServiceErr 'dev mode requires the versioned-runtime layout (no version in pyproject.toml?)'
         return $false
@@ -1296,7 +1296,11 @@ function Sync-ConnectionOwnerService {
 
 function Invoke-Install {
     param([switch]$RuntimeOnly)
-    Write-ServiceHeader $ServiceName
+    if ($RuntimeOnly) {
+        Write-Step 'agent-codespaces provision'
+    } else {
+        Write-Step 'agent-codespaces install'
+    }
     # Create directories
     $directories = @($InstallDir)
     if (-not $RuntimeOnly) { $directories += $LocalBin }
@@ -1561,7 +1565,7 @@ function Invoke-Status {
 }
 
 function Invoke-Update {
-    Write-ServiceHeader "$ServiceName Update"
+    Write-Step 'agent-codespaces update'
 
     if (-not (Test-Path $InstallDir)) {
         Write-ServiceWarn "Not installed -- running full install"
@@ -1674,7 +1678,7 @@ function Invoke-Stamp {
     # sessionStart grace window and NEVER holds the marketplace payload open (it
     # copies from the already self-staged $PluginDir, freeing the singleton
     # immediately).
-    Write-ServiceHeader "$ServiceName stamp (defer runtime to first use)"
+    Write-Step 'agent-codespaces stamp; runtime deferred to first use'
     if (-not $SrcVersion) { Write-ServiceErr 'Cannot stamp: no version in pyproject.toml'; exit 1 }
     $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
     foreach ($dir in @($InstallDir, $LocalBin)) {

@@ -795,6 +795,8 @@ if (-not $env:UV_HTTP_TIMEOUT) { $env:UV_HTTP_TIMEOUT = '60' }
 
 . (Join-Path $PSScriptRoot 'service-utils.ps1')
 
+function Write-Step { param([string]$Msg) Write-Host "  ...    $Msg" -ForegroundColor Cyan }
+
 # -- Metadata -------------------------------------------------------------
 
 $ServiceName     = 'Worktree Manager'
@@ -4026,7 +4028,7 @@ function Invoke-Stamp {
     # copilot plugin, per-project binstubs) to a LEAN `provision` on first use. No
     # venv, no uv; never holds the marketplace payload open (copies from the
     # already self-staged $PluginDir). Mirrors the POSIX install.sh `stamp`.
-    Write-ServiceHeader "$ServiceName stamp (defer runtime to first use)"
+    Write-Step 'agent-worktrees stamp; runtime deferred to first use'
     if (-not $SrcVersion) { Write-ServiceErr 'Cannot stamp: no version in pyproject.toml'; exit 1 }
     $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
     foreach ($dir in @($InstallDir, $LocalBin)) { Ensure-InstallDir $dir }
@@ -4112,17 +4114,17 @@ switch ($Action) {
         if ($LASTEXITCODE -ne 0) { throw "Helper publication acknowledgement failed: $nativeError" }
     }
     'dev' {
-        Write-ServiceHeader "Building explicitly claimed $ServiceName dev runtime"
+        Write-Step 'agent-worktrees dev; explicitly claimed runtime'
         Deploy-PythonRuntime
         Write-V3Manifest
     }
     'dev-release' {
-        Write-ServiceHeader "Restoring $ServiceName before releasing its dev claim"
+        Write-Step 'agent-worktrees dev-release; restore before releasing claim'
         Deploy-PythonRuntime
         Write-V3Manifest
     }
     'repair' {
-        Write-ServiceHeader "Repairing $ServiceName in a distinct runtime generation"
+        Write-Step 'agent-worktrees repair; distinct runtime generation'
         Deploy-PythonRuntime
         Write-V3Manifest
     }
@@ -4135,7 +4137,7 @@ switch ($Action) {
         # copilot-plugin/per-project binstubs -- those belong to the full launcher
         # `install`. Invoked by the self-provisioning binstub on first use. Mirrors
         # the POSIX install.sh `provision`.
-        Write-ServiceHeader "Provisioning $ServiceName runtime (lean; tools only, no launcher/hooks)"
+        Write-Step 'agent-worktrees provision; tools only, no launcher/hooks'
         try { git --version 2>&1 | Out-Null } catch {
             Write-ServiceErr 'Missing prerequisite: git'
             exit 1
@@ -4147,7 +4149,7 @@ switch ($Action) {
         Write-ServiceOk "Runtime provisioned (marker -> versions/$SrcVersion); agent-worktrees tools ready."
     }
     'install' {
-        Write-ServiceHeader "Installing $ServiceName"
+        Write-Step 'agent-worktrees install'
 
         $machine = Resolve-Machine
         Write-Host "  Machine: $machine"
@@ -4513,7 +4515,7 @@ switch ($Action) {
     }
 
     'update' {
-        Write-ServiceHeader "Updating $ServiceName"
+        Write-Step 'agent-worktrees update'
 
         if ($ContextualInstall) {
             foreach ($dir in @($InstallDir, $BinDir)) {

@@ -1,0 +1,9 @@
+{
+  "comment": "Use ordinary construction progress instead of installer banners",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
