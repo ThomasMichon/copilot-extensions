@@ -84,11 +84,6 @@ authorization-scheme credentials, GitHub token shapes, and URL user-info are
 redacted from `argv`, `action`, `error` and `details` before anything is
 written.
 
-Registered plugin refresh resumes `payload_refresh` after marketplace
-authorization, including when a separate fallback context needs preparation.
-Marketplace refresh, inventory browsing, plugin acquisition and their summary
-therefore do not extend that authorization report's phase or human scope.
-
 ## Human operation output
 
 `update_telemetry.human.HumanOperation` is the opt-in presentation extension

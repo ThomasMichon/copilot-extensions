@@ -45,6 +45,12 @@ front-door route as the already repo-aware handler. Without an explicit repo,
 ordinary project resolution remains required; the change does not start
 reconciliation or installation merely by resolving the route.
 
+During `update`, registered plugin refresh resumes `payload_refresh` after
+marketplace authorization, including separately prepared fallback contexts.
+Marketplace refresh, inventory browsing, plugin acquisition and their summary
+therefore do not extend the auth report's phase or human scope. These timing
+boundaries do not change authentication, acquisition or failure semantics.
+
 ## How It Works
 
 On Windows, ordinary and passive status-monitor starts bypass the venv Python

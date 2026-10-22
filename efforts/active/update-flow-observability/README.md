@@ -287,6 +287,10 @@ bounded source delta inspection.
   The live update above establishes the failing attribution contract, not
   deployment of this unpromoted candidate; installed validation still belongs
   to the explicitly authorized rollout owner.
+- CI correctly detected that putting this client-specific note in a shared
+  library README would change the Manager's packaged inputs too. Moved the
+  note into the owning Worktrees README instead; the shared library remains
+  unchanged and this correction does not cause an unrelated Manager release.
 - This source correction does not fix publication recovery or claim a faster
   reconcile plan. Safe explicit recovery, component-level cost attribution and
   equivalent before/after measurements remain open, as do promoted-installed
