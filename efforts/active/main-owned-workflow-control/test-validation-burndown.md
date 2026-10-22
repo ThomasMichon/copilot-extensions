@@ -178,6 +178,40 @@ unavailable closure explicit. Review the candidate cohort's actual fixture/
 import/effect closure before admitting it. A nine-module packet or a
 filename/tier label cannot stand in for that census.
 
+### Subsequent bounded shared-library mapping
+
+The fourteen lazy-dispatch cases now have positive native Linux effect/closure
+evidence, rather than only the rejected Windows startup probe. The original
+test bodies pass all 42 phases with zero effects and actual production call
+contexts for every case under the unchanged `UnitRun` observer. Their opened/
+imported local closure is the original test, library production, contract and
+observer; no production preload or observer exemption was used.
+
+The reviewed-source candidate maps those bodies into the existing packet
+through `tools/promotion_unit_tests/test_lazy_dispatch.py`. Its three exported
+classes are the original class/function objects, not copied assertion bodies.
+Replace only the original node's file prefix
+`libs/lazy-cli-dispatch/tests/test_dispatch.py` with the adapter path to obtain
+each exact manifest node. All fourteen class/method suffixes remain unchanged.
+The original test file and library source join the hash-bound import closure,
+and the library joins production coverage. The path-only library conftest is
+unneeded; no collection-root or effect-observer restriction is widened.
+
+The full candidate packet passes **422 nodes**, retaining all original 408
+identities in order, with 1,266 passing phases and zero effects in 13.748 seconds.
+The same 300-second budget covers 40 source files and 25 production targets.
+The canonical three-file packet verifies, including each aliased case's actual
+library call coverage. Removing the original test from the admitted closure
+fails during collection; changing original library bytes fails source
+verification. Neither negative emits a success proof.
+
+These results qualify only this source candidate and its explicit mapping.
+Ordinary review/source CI and actual qualified release remain separate gates.
+The historical census above stays pinned evidence, not a current packet count.
+The complete historical-unit bijection, other library families, Windows
+first-touch and periodic/native acceptance remain open with their existing
+owners; fourteen mapped cases do not complete that broader census.
+
 ### Scheduled execution is real; repair initiation is not yet established
 
 The current Dev and Main snapshots carry byte-identical periodic workflow and

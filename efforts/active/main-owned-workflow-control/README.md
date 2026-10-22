@@ -291,6 +291,11 @@ authorizes critical main-path acceptance or a bounded administrative change.
   pinned input/error handling, every other guard and all required unit evidence.
   Draft validation #7712 proves actual narrative-only omission without
   manufactured unit evidence; it was explicitly closed without merging.
+- [x] Land bounded independent bundle-attestation verification (#7732),
+  retaining serial index/schema/original-admission checks, all exact signer
+  identities, consumer authority, deadlines and joined failures. Existing
+  control selection and comparable live publication timing remain open;
+  this source reduction does not update the trusted helper pin.
 - [ ] Remove redundant release-shaped PR and main-push validation only where
   existing trusted gates and exact-SHA release evidence cover the removed work;
   first prove no generated-output coverage or required context is lost.

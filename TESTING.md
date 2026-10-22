@@ -99,6 +99,16 @@ Real front-door, missing-socket, installed-hook, SDK-forwarding and JavaScript
 delivery counterparts retain their existing periodic ownership. No Python
 classifier assertion is treated as proof of a native or shell boundary.
 
+The shared lazy-dispatch cohort re-exports the three original classes from
+`libs/lazy-cli-dispatch/tests/test_dispatch.py` through
+`tools/promotion_unit_tests/test_lazy_dispatch.py`. Its fourteen class/method
+suffixes map one-to-one to the original identities; no assertion body is copied
+or moved. The adapter loads the canonical library source and original test
+module directly, without its path-only conftest or an installed library.
+All three files are hash-bound in the same manifest and every aliased case must
+contribute actual library call coverage under the unchanged effect observer.
+This bounded mapping does not establish the unfinished full-library census.
+
 ## Tracking-write source guard
 
 The source tracking-write guard still parses every sibling-plugin Python file,

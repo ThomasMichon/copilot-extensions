@@ -408,9 +408,25 @@
     "tools/promotion_unit_tests/test_ci_contract.py::test_actual_source_ast_selector_preserves_non_narrative_and_non_pr_execution[future-event-paths8-True]",
     "tools/promotion_unit_tests/test_ci_contract.py::test_source_ast_selector_errors_never_emit_skipped_success[unavailable]",
     "tools/promotion_unit_tests/test_ci_contract.py::test_source_ast_selector_errors_never_emit_skipped_success[encoding]",
-    "tools/promotion_unit_tests/test_ci_contract.py::test_source_ast_selector_errors_never_emit_skipped_success[path]"
+    "tools/promotion_unit_tests/test_ci_contract.py::test_source_ast_selector_errors_never_emit_skipped_success[path]",
+    "tools/promotion_unit_tests/test_lazy_dispatch.py::TestDispatchLazy::test_dispatches_to_the_table_owned_module_and_handler",
+    "tools/promotion_unit_tests/test_lazy_dispatch.py::TestDispatchLazy::test_loads_cluster_for_a_not_yet_cluster_free_module",
+    "tools/promotion_unit_tests/test_lazy_dispatch.py::TestDispatchLazy::test_cluster_free_module_never_loads_cluster",
+    "tools/promotion_unit_tests/test_lazy_dispatch.py::TestDispatchLazy::test_register_cli_modules_uses_register_cli_instead_of_add_parsers",
+    "tools/promotion_unit_tests/test_lazy_dispatch.py::TestDispatchLazy::test_command_map_override_wins_over_module_handler",
+    "tools/promotion_unit_tests/test_lazy_dispatch.py::TestDispatchLazy::test_scoped_parser_prog_matches_caller",
+    "tools/promotion_unit_tests/test_lazy_dispatch.py::TestDispatchLazy::test_unknown_command_raises_keyerror_not_silently_ignored",
+    "tools/promotion_unit_tests/test_lazy_dispatch.py::TestSelfOverride::test_prefers_a_monkeypatched_global_over_local",
+    "tools/promotion_unit_tests/test_lazy_dispatch.py::TestSelfOverride::test_falls_back_to_local_when_absent",
+    "tools/promotion_unit_tests/test_lazy_dispatch.py::TestSelfOverride::test_falls_back_to_local_when_global_is_identical_to_local",
+    "tools/promotion_unit_tests/test_lazy_dispatch.py::TestSelfOverride::test_ignores_a_non_callable_global",
+    "tools/promotion_unit_tests/test_lazy_dispatch.py::TestCoreHelper::test_prefers_a_bound_attribute_on_core_module_over_local",
+    "tools/promotion_unit_tests/test_lazy_dispatch.py::TestCoreHelper::test_falls_back_to_local_when_core_module_lacks_the_attribute",
+    "tools/promotion_unit_tests/test_lazy_dispatch.py::TestCoreHelper::test_falls_back_to_local_when_core_attribute_is_identical_to_local"
   ],
   "sources": {
+    "libs/lazy-cli-dispatch/src/lazy_cli_dispatch/__init__.py": "3730c088eec04121051bdc6780ad833f5ca32d8142e1593d25e78f4028bf76d6",
+    "libs/lazy-cli-dispatch/tests/test_dispatch.py": "d8e724cd6ff798e1c4b47b02e94953eb2e21480e1308c9fa63e7321f066d5416",
     "plugins/agent-bridge/src/agent_bridge/live_turn_state.py": "7cc256ae9df554f76101c4519c38da6f000408e507ef1edfa6fc971a5b5d013f",
     "plugins/agent-worktrees/scripts/anchor_shell_parser.py": "c6a423ba34a9b4922dc57d2394f7708510cb31c290e41e18172e2c3187939c16",
     "plugins/agent-worktrees/scripts/anchor_write_guard.py": "2a30cb671d5eabc13edba7f1eb682635847a65915f38a0923b6f946736240766",
@@ -437,6 +453,7 @@
     "tools/promotion_unit_tests/test_contract.py": "0c8caa3e87f569af176afe49d5216c1511b4963401144e64f2b7d169a0023413",
     "tools/promotion_unit_tests/test_dispatch.py": "ea6025b25daa8810be340a0f7ad53f453ad5c3667e0a8b245607b7d890dba7ff",
     "tools/promotion_unit_tests/test_effects.py": "b22b7cb72fcc69bfe306288f97b5b7d983f95d9e4636412c1b1d0a4b33f4dd0e",
+    "tools/promotion_unit_tests/test_lazy_dispatch.py": "7a206f98c1f7686b83ad5c8fe11a3f801d93e3939c1b8d75294fe4deef5040dd",
     "tools/promotion_unit_tests/test_lifecycle.py": "b002067cfec30fda962f3a9546371abfe87957dd9f940593264860b52bcbd728",
     "tools/promotion_unit_tests/test_manager_launchers.py": "f31a192e5ad6d54c54964448ecd35579901ec622640ad47684f5733d0cd63707",
     "tools/promotion_unit_tests/test_packet.py": "6357602d5fb57688ee04e9e866dbd1bc66037ff69a3231401e161e03da4cd62e",
@@ -450,6 +467,7 @@
     "tools/verify_promotion_workflows.py": "ca25386904c1337d781fd9b6524701e2278cb6f15be229da8b3252a0faba1990"
   },
   "coverage_targets": [
+    "libs/lazy-cli-dispatch/src/lazy_cli_dispatch/__init__.py",
     "plugins/agent-bridge/src/agent_bridge/live_turn_state.py",
     "plugins/agent-worktrees/scripts/anchor_shell_parser.py",
     "plugins/agent-worktrees/scripts/anchor_write_guard.py",
