@@ -248,6 +248,43 @@ def test_lost_actual_resource_acknowledgement_never_rebinds_or_closes_possibly_p
         occupied.close()
 
 
+@pytest.mark.parametrize("method", ["admit", "reserve", "publish", "discard"])
+def test_actual_asyncio_owner_timeout_retains_correlation_and_never_replays(method):
+    occupied = listener()
+    permitted = permitted_after(occupied)
+    owner = SocketOwner(permitted)
+    if method == "discard":
+        owner.ready = False
+    original = getattr(owner, method)
+
+    async def lose_acknowledgement(*args, **kwargs):
+        await original(*args, **kwargs)
+        await asyncio.wait_for(asyncio.Event().wait(), timeout=0.001)
+
+    setattr(owner, method, lose_acknowledgement)
+    try:
+        selected = selected_request(owner, permitted)
+        first = reserve_reverse_listener(selected, owner=owner)
+        phase = {
+            "admit": "admission", "reserve": "reservation",
+            "publish": "publication", "discard": "discard",
+        }[method]
+        assert (first.state, first.reason) == ("unknown", phase + "-timeout")
+        assert first.reobserve_required and first.correlation == selected.correlation
+        assert len(owner.closed) == (1 if method == "discard" else 0)
+        assert owner.calls.count("discard") == (1 if method == "discard" else 0)
+        setattr(owner, method, original)
+        again = reserve_reverse_listener(selected, owner=owner)
+        expected = {"publish": "published", "discard": "refused"}.get(method, "unknown")
+        assert again.state == expected
+        assert owner.calls.count("reserve") == (0 if method == "admit" else 1)
+        assert len(owner.sockets) == (0 if method in {"admit", "discard"} else 1)
+        assert_original_listener_usable(occupied)
+    finally:
+        owner.close_fixture()
+        occupied.close()
+
+
 def test_concurrent_real_bind_arbitration_and_generation_cas_preserve_the_winner():
     occupied = listener()
     permitted = permitted_after(occupied, 8)

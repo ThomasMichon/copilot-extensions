@@ -100,6 +100,9 @@ a terminal rejection while candidate cleanup is unresolved.
 
 Timeouts, transport errors, malformed receipts, expired admission and lost
 acknowledgements return explicit `unknown` with `reobserve_required: true`.
+This includes Python 3.10's distinct `asyncio.TimeoutError`, not only the
+built-in timeout class. Caller cancellation still propagates with journal
+custody retained; it is not mistaken for a confirmed rejection.
 They retain the original correlation, never start another allocation and never
 speculatively dispose of a possibly published candidate. The existing owner
 must journal dispatch before any effect so caller interruption or an unexpected

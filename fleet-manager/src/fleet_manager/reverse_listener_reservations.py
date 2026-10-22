@@ -7,6 +7,7 @@ and atomically fence its existing effect journal. Parsed values are not authorit
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 import time
 from typing import Literal, Protocol
@@ -300,7 +301,7 @@ async def reserve_reverse_listener(request: ReservationRequest, *, owner: Reserv
         if isinstance(committed, Pending):
             return unknown("owner-reobservation-required")
         return unknown("owner-publication-invalid")
-    except TimeoutError:
+    except (asyncio.TimeoutError, TimeoutError):
         return unknown(stage + "-timeout")
     except OSError:
         return unknown(stage + "-outcome-unknown")

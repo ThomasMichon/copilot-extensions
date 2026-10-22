@@ -307,3 +307,23 @@ No production API or runtime readiness is claimed by this proposal.
   [#6237](https://github.com/ThomasMichon/copilot-extensions/issues/6237#issuecomment-6333519387).
   No observer/manifest exception, skip or altered budget was introduced, and
   the Windows packet is not claimed as passing.
+
+### 2026-10-22 - Review correction for supported Python 3.10 timeouts
+
+- Review found that Python 3.10's `asyncio.TimeoutError` is distinct from
+  built-in `TimeoutError` and could escape the documented unknown-result
+  boundary. A real `asyncio.wait_for` witness on existing CPython 3.10.20
+  failed all three original admission/reservation/publication cases against
+  the prior source. No interpreter or SSH fixture was provisioned.
+- Catch both timeout classes across the shared handler, retaining original
+  operation custody and leaving caller cancellation/programming errors to
+  propagate. Extend the actual event-loop witness to confirmed discard as
+  well; no phase automatically resubmits an uncertain operation.
+- The broad current-source Windows 3.12 and Linux 3.10 runs each passed 77
+  cases, including their actual installed-wheel consumer; two new witness
+  assertions initially used method names instead of the existing bounded
+  phase reason names. Corrected those expectations and reran the complete
+  four-case timeout family on both platforms: all passed. The 79 distinct
+  focused cases are covered across those overlapping runs; no failed case
+  was skipped or a deadline widened. Current-head provider review and CI
+  remain required before merge.
