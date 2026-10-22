@@ -577,6 +577,46 @@ def test_failed_rejoin_preserves_existing_live_mux_hold(real_keeper, monkeypatch
     assert "wt-anchor-repo" in live_muxes and real_keeper.alive("devbox")
 
 
+@pytest.mark.parametrize("failure", ["reservation", "preparation"])
+def test_failed_rejoin_restores_mux_hold_after_indeterminate_probe(real_keeper, monkeypatch, failure):
+    clock = [1000.0]
+    scope = "anchor-repo@devbox"
+    monkeypatch.setattr(shared_keeper_holds.time, "time", lambda: clock[0])
+    detach.ensure_keeper("devbox", venue_port=41234, mux="wt-anchor-repo", hold_id=scope)
+    _state, holds, _live = detach._holds().prune_snapshot("devbox", probe=lambda mux: True)
+    original = dict(holds[scope])
+    clock[0] += 30
+    monkeypatch.setattr(detach, "_mux_exists", lambda *a: None)
+    def refuse(*a, **kw):
+        assert real_keeper.read("devbox")["holds"][scope]["mux"] == detach._attached_hold_mux(os.getpid())
+        raise RuntimeError("required plugin unavailable")
+    monkeypatch.setattr(
+        "venue_copilot.detached.reserve_with_retry" if failure == "reservation"
+        else "agent_ssh.copilot_plugins.prepare", refuse,
+    )
+    assert detach.cmd_detach(_args()) == 1
+    assert real_keeper.read("devbox")["holds"][scope] == original
+    monkeypatch.setattr(detach, "process_identity", lambda pid: None)
+    clock[0] += 400
+    _state, retained, _live = detach._holds().prune_snapshot(
+        "devbox", probe=lambda mux: detach._probe_hold(object(), mux),
+    )
+    assert retained[scope] == original and real_keeper.alive("devbox")
+
+
+def test_original_mux_restoration_cannot_overwrite_a_newer_owner(real_keeper):
+    scope = "anchor-repo@devbox"
+    current = {"mux": "wt-new-owner", "updated_at": 30.0, "confirmed_at": 30.0}
+    real_keeper.write("devbox", {"holds": {scope: current}})
+    adapter = detach._SshAdapter(target="devbox", ssh_config=object(), hold_id=scope)
+    adapter._launch_pending = True
+    adapter._hold_updated_at = 20.0
+    adapter._previous_hold = {"mux": "wt-original", "updated_at": 10.0}
+    with pytest.raises(RuntimeError, match="hold changed"):
+        adapter.restore_keeper_hold()
+    assert real_keeper.read("devbox")["holds"][scope] == current
+
+
 def test_stop_during_preparation_refuses_pid_hold_without_releasing_native_ownership(
     real_keeper, seams, monkeypatch,
 ):

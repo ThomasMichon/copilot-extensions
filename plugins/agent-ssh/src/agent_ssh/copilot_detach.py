@@ -440,6 +440,7 @@ def ensure_keeper(
     with holds_store.lock(_state_key(target)):
         state = read_keeper_state(target)
         holds = holds_store.read_holds(state)
+        previous_hold = holds.get(hold_id)
         prior_mux = holds.get(hold_id, {}).get("mux")
         if preserve_live_mux and prior_mux in live_muxes and not prior_mux.startswith(_ATTACHED_HOLD_PREFIX):
             hold_mux = prior_mux
@@ -461,6 +462,7 @@ def ensure_keeper(
                 "started": False,
                 "hold_added": hold_added,
                 "hold_updated_at": hold_updated_at,
+                "previous_hold": previous_hold,
                 "state": state,
             }
         _STORE.stop(_state_key(target))
@@ -505,6 +507,7 @@ def ensure_keeper(
             "started": True,
             "hold_added": hold_added,
             "hold_updated_at": hold_updated_at,
+            "previous_hold": previous_hold,
             "state": state,
         }
 
@@ -521,6 +524,7 @@ class _SshAdapter:
         self.keeper_hold_acquired = False
         self._hold_updated_at: float | None = None
         self._launch_pending = False
+        self._previous_hold: dict | None = None
 
     def prepare(self, plan: dict) -> dict:
         from .copilot_plugins import prepare
@@ -546,6 +550,25 @@ class _SshAdapter:
         )
         self._launch_pending = False
 
+    def restore_keeper_hold(self) -> None:
+        previous = self._previous_hold
+        if not self._launch_pending or not previous or previous["mux"].startswith(_ATTACHED_HOLD_PREFIX):
+            return
+        holds_store = _holds()
+        with holds_store.lock(_state_key(self.target)):
+            state = read_keeper_state(self.target)
+            holds = holds_store.read_holds(state)
+            current = holds.get(self.hold_id)
+            if not current or current["updated_at"] != self._hold_updated_at:
+                raise RuntimeError("SSH launch hold changed before original mux restoration")
+            if current["mux"] == previous["mux"]:
+                return
+            if current["mux"] != _attached_hold_mux(os.getpid()):
+                raise RuntimeError("SSH launcher ownership changed before original mux restoration")
+            holds[self.hold_id] = dict(previous)
+            _STORE.write(_state_key(self.target), holds_store.state_with_holds(state, holds))
+            self._hold_updated_at = previous["updated_at"]
+
     def run_input(self, command: str, stdin: bytes, *, timeout: float) -> tuple[int, str, str]:
         return _remote_input(self.ssh_config, _bash(command), stdin, timeout=timeout)
 
@@ -560,6 +583,7 @@ class _SshAdapter:
             probe=lambda held_mux: _probe_hold(self.ssh_config, held_mux),
         )
         raw_updated = result.get("hold_updated_at")
+        self._previous_hold = result.pop("previous_hold", None)
         self._hold_updated_at = float(raw_updated) if raw_updated is not None else None
         self.keeper_hold_acquired = bool(result.get("hold_added"))
         return result
@@ -601,14 +625,17 @@ def _launch(args, adapter, plan, *, seed, refs=None):
             return copilot_delivery.recover(adapter, plan, pending)
         plan["bridge_owned_seed"] = True
         adapter._launch_pending = True
-        return launch_detached(
-            adapter, plan, seed=seed, driver=args.driver,
-            copilot_args=(
-                _with_caller_model(list(getattr(args, "copilot_args", None) or []))
-                if getattr(args, "detach", False) else []
-            ),
-            ensure_mux=True, register_timeout=float(args.register_timeout), progress=_progress, refs=refs,
-        )
+        try:
+            return launch_detached(
+                adapter, plan, seed=seed, driver=args.driver,
+                copilot_args=(
+                    _with_caller_model(list(getattr(args, "copilot_args", None) or []))
+                    if getattr(args, "detach", False) else []
+                ),
+                ensure_mux=True, register_timeout=float(args.register_timeout), progress=_progress, refs=refs,
+            )
+        finally:
+            adapter.restore_keeper_hold()
 
 
 def cmd_detach(args: argparse.Namespace) -> int:

@@ -448,6 +448,16 @@ or a reason to create a daemon.
   real cross-process test proves same-scope exclusion, other-scope admission
   and lock release/reacquisition. This uses the existing lock primitive, not
   a new launcher, broker, global service or distributed-lock claim.
+- A further exact-head review identified the indeterminate-probe variant:
+  an existing mux hold retained under the normal unknown-liveness grace was
+  not a positive live probe, so failed acquisition could still leave it
+  PID-backed. Before releasing the lifecycle lock, a pre-handoff failure now
+  restores the captured original mux hold and its original confirmation
+  history, conditionally on the exact launcher PID and update stamp still
+  owning the transition. It never overwrites a newer owner, and successful
+  handoff does not roll back. Both reservation and preparation failures now
+  exercise unknown probes, caller exit and 400-second pruning; the focused
+  suite passes 87 with the same three explicit POSIX-only skips.
 
 ### 2026-10-22 - Land privileged receiver source and continue the parent
 

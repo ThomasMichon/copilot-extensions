@@ -115,6 +115,10 @@ transfers to mux liveness; an attached client subsequently transfers its hold
 to that client's PID and releases the refreshed hold when attach exits.
 An existing, probe-confirmed live mux hold stays mux-backed during rejoin, so
 a failed reservation or preparation cannot leave it tied to an exiting caller.
+If the old mux probe is indeterminate, acquisition may temporarily use the
+launcher PID; a pre-handoff failure restores the exact original mux hold and
+its confirmation history under lock, only while the caller still owns that
+transition. A changed owner is never overwritten.
 Stop refuses a scope that still has a launcher-PID hold rather than treating
 that liveness token as a tmux target or releasing native ownership.
 Launch, recovery and stop also share a controller-local, cross-process lock
