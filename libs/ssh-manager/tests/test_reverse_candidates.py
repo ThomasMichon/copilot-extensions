@@ -363,6 +363,47 @@ async def test_cleanup_failure_is_redacted_and_prevents_another_allocation(monke
     assert len(spawned) == 1
 
 
+async def test_late_attempt_release_cannot_stop_reconnected_successor(monkeypatch):
+    relay, spawned, _, _ = fixture_owner(monkeypatch, ["ready", "ready"])
+    await relay.establish()
+    old_attempt = relay.reverse_status.attempt
+    spawned[0].returncode = 255
+    assert await relay._restart_with_backoff("interruption")
+    current = relay.reverse_status.attempt
+    assert current.attempt_id != old_attempt.attempt_id
+    assert await relay.stop_attempt(old_attempt.attempt_id) is None
+    assert relay.is_alive and relay.reverse_status.attempt == current
+    result = await relay.stop_attempt(current.attempt_id)
+    assert result.state == "stopped" and not relay.is_alive
+
+
+async def test_concurrent_start_cannot_reopen_owner_while_stop_retires_transport(monkeypatch):
+    relay, spawned, _, _ = fixture_owner(monkeypatch, ["ready"])
+    await relay.establish()
+    entered, release = asyncio.Event(), asyncio.Event()
+    async def retire(self, proc):
+        entered.set()
+        await release.wait()
+        proc.returncode = -9
+    monkeypatch.setattr(FiniteReverseForward, "_terminate", retire)
+    stopping = asyncio.create_task(relay.stop())
+    await entered.wait()
+    with pytest.raises(ReverseForwardError):
+        await relay.start()
+    assert relay._stopped
+    release.set()
+    await stopping
+    assert len(spawned) == 1 and relay._stopped and not relay.is_alive
+
+
+async def test_attempt_cleanup_does_not_settle_an_unknown_observation(monkeypatch):
+    relay, _, _, _ = fixture_owner(monkeypatch, ["unknown"])
+    with pytest.raises(ReverseForwardError):
+        await relay.establish()
+    attempt = relay.reverse_status.attempt
+    result = await relay.stop_attempt(attempt.attempt_id)
+    assert result.state == "unknown"
+
 @pytest.mark.parametrize("host,port", [
     ("0.0.0.0", 1234), ("example.com", 1234), ("127.0.0.1", 0),
     ("localhost", True), ("::1", 65536),

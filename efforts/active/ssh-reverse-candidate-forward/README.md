@@ -220,3 +220,11 @@ redacted cause codes rather than raw credential-shaped diagnostics.
   old readiness during a delayed new observer, gate changes after a collision,
   stable local target and redacted cleanup failure. Current source review and
   actual merge are still pending; no release or adoption is claimed.
+- Complete the same lifecycle correction across `start()` and shutdown:
+  a concurrent start cannot reset stop intent while retirement is active.
+  `stop_attempt(attempt_id)` performs matching and owned retirement atomically,
+  making delayed consumer release inert against a reconnected successor while
+  preserving an unknown result. This is a local transport fence, not fleet
+  publication or enrollment authority.
+- The final extended focused suite passes66 cases with the same one
+  Linux-only skip, including stale attempt release and concurrent start/stop.

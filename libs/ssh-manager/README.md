@@ -131,6 +131,12 @@ status; it does not install a replacement during another attempt's cleanup.
 Stored readiness is invalidated before an exited transport is replaced.
 `stop()` cancels an in-flight owner operation and waits for its owned cleanup;
 an interrupted attempt remains unknown, not a fabricated successful release.
+For generation-bound consumer cleanup, use `await stop_attempt(attempt_id)`:
+the match and local retirement share that lifecycle boundary. A stale attempt
+returns `None` without stopping a reconnected successor. A matching attempt
+returns its final `ReverseStatus`, including any still-unknown observation.
+This local fence does not replace the fleet owner's publication/enrollment
+generation checks; unconditional `stop()` remains explicit owner shutdown.
 
 This library supplies no authenticated production observer, enrollment
 projection, fleet publication ledger, installer or adoption. Local socket and

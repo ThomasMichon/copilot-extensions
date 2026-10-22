@@ -128,6 +128,7 @@ class FiniteReverseForward(SupervisedRelayForward):
         self._observe_candidate = observe
         self._selection_lock = asyncio.Lock()
         self._lifecycle_task: asyncio.Task | None = None
+        self._stop_requests = 0
         self._status = ReverseStatus(request_id, None, "unavailable", "not-started")
 
     @property
@@ -302,6 +303,14 @@ class FiniteReverseForward(SupervisedRelayForward):
         async with self._lifecycle():
             return await super()._restart_with_backoff(reason)
 
+    async def start(self) -> None:
+        async with self._lifecycle():
+            if self._stop_requests:
+                raise ReverseForwardError(ReverseStatus(
+                    self._request_id, None, "stopped", "owner-stopping",
+                ))
+            await super().start()
+
     async def _cancel_process(self) -> None:
         async with self._lifecycle():
             await self._retire_process()
@@ -317,12 +326,32 @@ class FiniteReverseForward(SupervisedRelayForward):
             raise ReverseForwardError(self._status) from None
 
     async def stop(self) -> None:
-        self._stopped = True
-        active = self._lifecycle_task
-        if active is not None and active is not asyncio.current_task():
-            active.cancel()
-            await asyncio.gather(active, return_exceptions=True)
-        await super().stop()
+        self._stop_requests += 1
+        try:
+            self._stopped = True
+            active = self._lifecycle_task
+            if active is not None and active is not asyncio.current_task():
+                active.cancel()
+                await asyncio.gather(active, return_exceptions=True)
+            async with self._lifecycle():
+                await super().stop()
+                if self._status.state != "unknown":
+                    self._status = replace(self._status, state="stopped", reason="owner-stopped")
+        finally:
+            self._stop_requests -= 1
+
+    async def stop_attempt(self, attempt_id: str) -> ReverseStatus | None:
+        """Retire only the matching owned attempt; stale release is inert.
+
+        This fences local transport cleanup, not publication or enrollment.
+        A returned unknown status remains unsettled after owned cleanup.
+        """
+        async with self._lifecycle():
+            attempt = self._status.attempt
+            if attempt is None or attempt.attempt_id != attempt_id:
+                return None
+            await self.stop()
+            return self.reverse_status
 
     def stop_nowait(self) -> None:
         if self._status.state == "ready":
