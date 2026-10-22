@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch model:** reviewed proposal, then bounded implementation and qualification.
 - **Created:** 2026-10-22
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** [directional connectivity and credential continuity](../../../visions/machine-fleet/README.md#directional-connectivity-and-credential-continuity),
   [honest reachability and derived profiles](../../../visions/plugins/agent-ssh/README.md#honest-reachability),
   and [collision-free service endpoints](../../../visions/plugin-services/README.md).
@@ -107,34 +107,36 @@ or an already supplied runtime contract.
   Gateway/SSH policy, profile, forwarding and discovery seams.
 - [x] Separate actual OpenSSH permission constraints from local rendezvous
   prior art and explicitly identify missing integration authority.
-- [ ] Review and land the corresponding
+- [x] Review and land the corresponding
   [endpoint vision reconciliation](../../../visions/plugin-services/README.md#minimal-network-exposure),
   preserving ordinary OS-assigned ephemeral defaults and scoped, exclusive,
   temporary ownership for constrained boundary transports.
-- [ ] Review and land the explicit
+- [x] Review and land the explicit
   [constrained reverse-SSH pattern amendment](../../../docs/patterns/service-transport.md#constrained-reverse-ssh-listener-grants),
   or select a conforming approach, before any finite-positive-port engine
   implementation. No forwarding-permission expansion resolves this gate.
-- [ ] Review and land this canonical proposal before engine implementation.
+- [x] Review and land this canonical proposal before engine implementation.
   Keep #7719 open across the source and qualification phases.
 
 ### Phase 2 - Finite supplied-owner source
 
 All steps in this phase are agent-recommended.
-This phase is blocked until the proposal and its governing vision and pattern
-amendments in Phase 1 have actually cleared review and merged.
+The proposal and its governing vision and pattern amendments cleared review
+and merged in #7726. Integration still requires the actual accepted #7720
+provider contract; a coordinator-facing protocol does not assert that the
+transport provider already implements it.
 
-- [ ] Implement the strictly bounded new coordination module described in
+- [x] Implement the strictly bounded new coordination module described in
   [design.md](design.md), with explicit typed conflict, refusal, unavailable
   and unknown outcomes.
 - [ ] Compose the accepted #7720 finite-forward contract without duplicating
   candidate selection or process/reconnect ownership. Keep an unavailable
   production adapter explicit.
-- [ ] Retain the actual successful candidate resource; publish only after
+- [x] Retain the actual successful candidate resource; publish only after
   owner-verified target readiness and generation-checked admission.
-- [ ] Keep ambiguous bind/publication outcomes under their original
+- [x] Keep ambiguous bind/publication outcomes under their original
   correlation and prevent a delayed operation from retiring a successor.
-- [ ] Preserve finite current permission inputs, unrelated established
+- [x] Preserve finite current permission inputs, unrelated established
   connections and explicit exhaustion; never fall back to probing, wildcard
   grants, another registry or unowned cleanup.
 
@@ -142,12 +144,12 @@ amendments in Phase 1 have actually cleared review and merged.
 
 All steps in this phase are agent-recommended.
 
-- [ ] First reproduce the occupied-listener failure with an isolated
+- [x] First reproduce the occupied-listener failure with an isolated
   fixed-tuple control, then qualify candidate recovery and exhaustion using
   real retained loopback resources.
-- [ ] Cover simultaneous allocation, readiness refusal, failure around
+- [x] Cover simultaneous allocation, readiness refusal, failure around
   publication, lost acknowledgement and stale generation/cleanup events.
-- [ ] Qualify the installed, source-independent module/consumer boundary on
+- [x] Qualify the installed, source-independent module/consumer boundary on
   supported native platforms; keep actual SSH and lifecycle proof distinct.
 - [ ] Run the current required admitted unit packet, targeted tests and
   publication guards; obtain current-head review and CI, then merge through
@@ -170,17 +172,17 @@ All steps in this phase are agent-recommended.
 
 All implementation-specific selections are agent-recommended.
 
-- [ ] **Pure contracts:** bounded finite positive loopback tuples, identity/
+- [x] **Pure contracts:** bounded finite positive loopback tuples, identity/
   generation/correlation binding, stale/current comparisons and explicit
   unsupported or exhausted results. Data parsing supplies no authority.
-- [ ] **Real resource regression:** occupied old tuple remains owned and
+- [x] **Real resource regression:** occupied old tuple remains owned and
   usable while a separately permitted candidate is actually bound and
   retained. No probe-close interval, unknown-holder termination or
   opportunistic socket reuse.
-- [ ] **Concurrency and uncertainty:** real bind arbitration, failed
+- [x] **Concurrency and uncertainty:** real bind arbitration, failed
   readiness, stale publication, lost acknowledgement, interrupted caller and
   delayed old renew/release cannot claim or withdraw another generation.
-- [ ] **Installed consumer:** noneditable artifact, no source checkout,
+- [x] **Installed consumer:** noneditable artifact, no source checkout,
   actual callable consumer, separate Windows/Linux outcomes and cleanup
   observed before test containment can mask a leak.
 - [ ] **Actual OpenSSH:** use only an existing isolated fixture and its
@@ -191,7 +193,7 @@ All implementation-specific selections are agent-recommended.
   `permitopen`, authenticated target identity, current direction policy,
   bounded existing-supervisor reconnect and independent connection
   preservation require the real owning adapter, not a fake callback.
-- [ ] **No live effects:** no deployment, key/enrollment provisioning,
+- [x] **No live effects:** no deployment, key/enrollment provisioning,
   permission widening, shared service restart or unowned resource cleanup.
 - [ ] **Publication:** source tests plus required admitted units and ordinary
   metadata/contract/lint checks; exact current review, green CI and actual
@@ -227,3 +229,81 @@ No production API or runtime readiness is claimed by this proposal.
   governing service vision. Reconciled its endpoint intent in place and gated
   implementation on the reviewed vision as well as the pattern, retaining
   ordinary defaults and forbidding widened permissions or unowned reclamation.
+
+### 2026-10-22 - Reviewed intent merged; source slice begins
+
+- Proposal #7726 actually merged as
+  `5935a5d0bd81bb371235e7edf75be677cb5e0ae1`, with current-head Copilot
+  approval and the real required metadata job passing. All three Phase 1
+  review/merge gates are satisfied; this is not source-campaign completion.
+- The independent #7746 npm preparation fix reached trusted Main through
+  #7759. Ordinary PR metadata editing exercised that exact Main in
+  run `39722198978`, job `119637983449`: all six dependencies retained their
+  seven-day admission, npm installation took 506 ms, and source validation
+  completed within the unchanged five-minute job. The managed provider merge
+  then succeeded. #7741 records the complete recovery proof; neither the old
+  cancelled executions nor synthetic same-named checks were misrepresented.
+- Pulled the retained source workspace forward onto the actual reviewed plan.
+  The managed sync refused the already-deleted merged PR ref; a clean-tree,
+  backed rebase dropped only the exact already-merged proposal commits after
+  comparing the merged effort, vision and transport-pattern bytes.
+- Notified the #7720 owner that its governing vision/pattern dependency is
+  satisfied. Its finite selection, actual SSH resource/readiness and reconnect
+  source remains exclusive. The next slice is only the new supplied-owner
+  admission, generation publication and uncertainty contract; no production
+  transport adapter is inferred or claimed.
+
+### 2026-10-22 - Bounded coordinator and isolated native qualification
+
+- Implemented the new stdlib-only coordinator above one explicitly supplied
+  owner. The immutable finite request, exact admission/candidate receipts,
+  original-correlation journal requirements, one absolute operation budget,
+  generation-checked publication and confirmed unpublished-only disposal
+  remain distinct from authentication, actual SSH selection and supervision.
+- The checked source items above refer to this callable contract and its
+  isolated supplied-owner model, not a deployed adapter. The existing owner
+  must independently authenticate identity and both forwarding directions and
+  implement the documented journal/CAS/deadline boundaries. The actual #7720
+  adapter remains pending its accepted callable contract.
+- Windows CPython 3.12 executed all 73 focused cases: 65 pure contracts,
+  seven real loopback resource cases and the source-independent installed
+  wheel consumer. Owned sockets and concurrent callers were closed/joined
+  before outer containment ended. Focused fatal Ruff checks passed.
+- Linux CPython 3.14 executed the same 72 pure/socket cases successfully.
+  Its initial isolated interpreter lacked pip; the missing test tooling was
+  restored through the unchanged canonical configured-feed seasoning helper.
+  An interpreter on a Windows-mounted filesystem then exceeded the existing
+  30-second pip subprocess deadline. Repeating only that failed installed
+  consumer with an ephemeral native-Linux-filesystem interpreter passed in
+  5.17 seconds, retaining the same test and deadlines. The native test
+  environment and package target were removed through their owning test
+  lifecycle; this did not install a runtime or change host configuration.
+- Added the owning API/evidence-boundary documentation and standalone patch
+  changefile. No existing policy, enrollment, profile, shared SSH forwarding,
+  lifecycle, installer, service configuration or forwarding grant changed.
+- Actual OpenSSH, production discovery/journal integration and supervisor
+  qualification remain open. These socket/installed-artifact results do not
+  satisfy those tiers, authorize distribution or retire a predecessor.
+- The existing transport owner then published its concrete #7779 candidate:
+  an asynchronous finite-forward class with 1-16 exact tuples, original
+  request/distinct attempt identity, retained process and an authenticated
+  observer seam. Reconciled this coordinator to asynchronous owner hooks and
+  the same 16-tuple ceiling before publication, without a blocking event-loop
+  shim, grant truncation or guessed production adapter. Added explicit
+  cancellation-custody coverage and documented the remaining-budget and
+  reconnect-gate handoff requirements. That candidate's own review and
+  source/production-owner integration remain separately gated.
+- The aligned asynchronous source passed all 75 focused cases on both
+  Windows CPython 3.12 and native-filesystem Linux CPython 3.14: 67 pure
+  immediate-owner contracts and eight real-loop/socket/installed-artifact
+  cases. Pure fixtures drive only nonsuspending coroutines, while native and
+  installed consumers use the actual event loop. Fatal Ruff checks passed.
+- The unchanged required Linux source-unit packet passed all 434 admitted
+  nodes with coverage at the earlier committed coordinator source; final
+  hosted current-head CI remains a separate publication gate. An additional
+  manual Windows packet was refused by the effect observer on `ctypes.dlopen`,
+  before producing proof. That negative platform result is recorded with the
+  existing controller owner in
+  [#6237](https://github.com/ThomasMichon/copilot-extensions/issues/6237#issuecomment-6333519387).
+  No observer/manifest exception, skip or altered budget was introduced, and
+  the Windows packet is not claimed as passing.

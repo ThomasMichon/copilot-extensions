@@ -138,6 +138,13 @@ Finite internal permits revalidate current policy before lookup/effect/emit;
 they are not serialized backend credentials. The library does not authenticate
 its snapshot source, wire a resident consumer or implement provider renewal.
 
+The optional stdlib-only [reverse-listener coordinator](docs/reverse-listener-reservations.md)
+binds a finite supplied-owner admission to retained candidate custody and
+generation-checked publication, preserving unresolved effects under their
+original correlation. It does not supply a production SSH/policy/discovery
+adapter, choose candidates, change forwarding grants or select a reconnect
+loop. Default commands do not activate it.
+
 ## Thin client artifacts and local diagnostics
 
 `fleet-manager` builds as a dependency-free runtime wheel. Its wheel carries the
