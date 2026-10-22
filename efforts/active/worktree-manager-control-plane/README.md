@@ -1353,7 +1353,107 @@ No provider, AHP, mux, terminal, handoff, process census, claim/head write, remu
 retirement, native test, deployment or new control-plane dependency is authorized or
 performed by this tracker consolidation.
 
+### Exact standalone Picker project switcher from #2427
+
+<!-- backlog-reconciliation:7556:transfer:2427:to:efforts/active/worktree-manager-control-plane/README.md -->
+
+Add directly to this existing Active ROOT Plan and Validation. Preserve all existing
+phases, deferrals and current source/provider/installation/recovery claims. The current
+extracted Manager shell and engine/contribution boundaries are baseline; no bundled
+Picker is restored, no other live claim is closed and no feature is declared complete.
+
+#### Plan
+
+- [ ] Make the visible active-project indicator a usable selector in standalone
+  WorktreeManagerApp. Focused Enter OR a dedicated available binding opens a
+  known-project menu/palette; use the same authoritative registry/catalog as projects
+  listing rather than hardcoded choices.
+- [ ] Selecting a different project changes the current Picker IN PROCESS, without
+  quitting/relaunching: replace project identity, worktree source, context source,
+  contributions/pivots and per-project view state coherently. Preserve correct current
+  provider/project authority and existing process-boundary contracts.
+- [ ] Keep active identity visibly correct; cancel, unavailable/invalid project and
+  failed reload preserve a coherent prior state with explicit feedback. Fence late
+  old-project results/actions so no mutation or launch routes through stale
+  source/context.
+- [ ] Limit this feature to the standalone Manager Picker. The intentionally
+  cross-project agent-worktrees picker verb and the separate wrong-project launch
+  diagnosis are not substitutes, new dependencies or permission to bypass source
+  authority.
+- [ ] Continue through this ROOT's existing Journal and open bounded-source claiming
+  process. Check and coordinate actual overlapping UI/provider edits without a new
+  generic acknowledgement gate; keep current owners/scopes unchanged and do not use a
+  closed umbrella as the live token.
+
+#### Validation
+
+- [ ] Exercise the actual focused Enter/dedicated-key path, registry choices, successful
+  in-process source/context/pivot transition, visible identity, cancellation/error and
+  late-result/action fencing through the current contained UI/consumer test surfaces. A
+  static subtitle, CLI --project, Projects listing or relaunch is not this result.
+- [ ] Preserve the owning engine/contribution/provider boundaries and current supported
+  behavior; qualify this finite interaction without requiring completion of unrelated
+  Manager/native/installer phases.
+- [ ] Before administrative closure, obtain a NEW normal reviewed merge containing this
+  entire direct ROOT Plan/Validation intake and continuing Journal coordination, then
+  read back the CURRENT FULL receiving sections. Old creation644, intake7885, a
+  child-plan link or this proposal is not that receipt.
+
+No TUI/native interaction, process/session/claim action, settings change, runtime
+install/update or implementation is authorized by this intake.
+
+### Direct same-machine Manager AHP createSession case from #2437
+
+<!-- backlog-reconciliation:7556:transfer:2437:to:efforts/active/worktree-manager-control-plane/README.md -->
+
+Receive this finite case under the SAME reviewed Active Manager/provider ROOT and
+existing Journal/open bounded-source coordination, with matching own Validation rows.
+Preserve engine-owned exact worktree/binding/claims, Manager/provider/AHP ownership,
+#5898 presentation and all current source/resource holds. Physical relocation is
+delivered baseline; do not reopen it or conflate remote ACP #566/#2106/#2397 with this
+same-machine AHP operation. All timeout/model/configuration examples here are inert
+evidence, not execution or settings authority.
+
+- [ ] Establish a source-controlled lifecycle default OR evidence-based scaling suitable
+  for measured plugin-heavy same-machine createSession. Preserve the original
+  alternatives; the historically successful local 90-second workaround is not a released
+  default or permission for blanket deadline growth.
+- [ ] Distinguish successful token/connect/authenticate from createSession, explicit
+  host owner-startup timeout from client websocket receive expiry, and real
+  host/protocol failure from a generic login impression. Surface bounded actionable
+  caller-visible method/stage/cause and elapsed evidence.
+- [ ] Define bounded ambiguity-safe createSession retry/recovery covering BOTH explicit
+  host error and client receive timeout. Reconcile whether the exact initial
+  worktree/session was already created before any repeat; do not blindly reuse the
+  current fresh-ID host-timeout retry for a possibly completed client timeout or produce
+  duplicate hosted conversations.
+- [ ] Preserve exact engine-created path, typed execution binding, provider identity,
+  reattach/rollback and live/unknown finalization safeguards. Failed preparation must
+  leave truthful recoverable state and ownership, not a success-shaped binding or lost
+  session.
+- [ ] Retain the expressly LOWER-priority exited-owner reservation symptom: diagnose the
+  stale owner/reservation through actual identity/liveness and safe authoritative
+  release/recovery. Graceful heartbeat/release code and a 300-second lease are partials,
+  not proof abrupt owner death is handled. Age, blank state or a model assertion cannot
+  steal a live lease.
+- [ ] Add exact focused Validation for measured healthy plugin-heavy creation,
+  host-versus-client timeout, late/possibly completed response, idempotent recovery,
+  caller diagnosis and exited-versus-live owner negatives at the original supported
+  tier. Do not require every Manager phase/every host or invent a new native matrix to
+  settle this finite case; no actual test is authorized by this intake.
+
+Before #2437 supersession, a NEW normal reviewed source change must actually merge the
+COMPLETE unchecked case into the existing ROOT Plan AND Validation, preserve all
+incumbent rows/owners/Journal coordination, and receive full CURRENT merged
+Plan/Validation/Coordination readback. Old creation/proposal PRs are not this delivery.
+If full scope or custody is not accepted, retain #2437. No setting, model/account, AHP,
+reservation, host, process or credential action is performed.
+
 ## Validation Plan
+
+- [ ] Complete every directly retained #2437 Plan/Validation clause above at its original evidence tier and bounds; preserve current owners, holds and unfinished acceptance. Tracker consolidation is not implementation.
+
+- [ ] Complete every directly retained #2427 Plan/Validation clause above at its original evidence tier and bounds; preserve current owners, holds and unfinished acceptance. Tracker consolidation is not implementation.
 
 - [ ] Complete every directly retained #2062 Plan/Validation clause above at its original evidence tier and bounds; preserve current owners, holds and accepted deferrals. Administrative supersession is not completion.
 
@@ -1408,6 +1508,11 @@ performed by this tracker consolidation.
 
 ## Coordination
 
+The direct #2427 project-switch and #2437 same-machine AHP timeout lanes continue
+through this existing Journal and eligible open bounded-source coordination. Preserve
+current UI/provider/engine/installation/recovery claims; no relocation slice is reopened
+and no provider/resource custody is transferred by tracker consolidation.
+
 `copilot-extensions` is public and may be driven from more than one private
 control repo. **Stale pointer, corrected 2026-09-25:** this section long named
 [#352](https://github.com/ThomasMichon/copilot-extensions/issues/352) as the
@@ -1437,6 +1542,20 @@ overlapping work before it diverges, rather than relying on issue-comment
 claiming discipline alone.
 
 ## Journal
+
+### 2026-10-22 - Complete retained acceptance from #2437
+
+- Retained the complete #2437 scope directly in the Plan and Validation,
+  without declaring feature completion or transferring source/resource custody.
+  Normal reviewed merge and current full readback precede administrative
+  supersession; all substantive acceptance remains unfinished.
+
+### 2026-10-22 - Complete retained acceptance from #2427
+
+- Retained the complete #2427 scope directly in the Plan and Validation,
+  without declaring feature completion or transferring source/resource custody.
+  Normal reviewed merge and current full readback precede administrative
+  supersession; all substantive acceptance remains unfinished.
 
 ### 2026-10-22 - Complete retained acceptance from #2062
 

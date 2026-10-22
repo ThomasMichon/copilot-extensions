@@ -42,6 +42,13 @@ agent-chat-driven flow).
 
 ## Coordination
 
+The direct #2453 reopened Confirm-delivery lane preserves the SAME currently
+investigating UI/source custodian and explicit original native
+mouse/keyboard-to-correct-coordinator hold. Continue through this root's Plan,
+Validation and Journal plus eligible open bounded source claims; backend #2423/#3681
+owners remain separate. No withdrawal, prior hardening or administrative source closure
+discharges the native hold.
+
 - **Topology:** independent per-phase PRs once the design is approved (each
   Plan phase below is a self-contained, reviewable slice). **Phases 0-3
   landed as one combined PR (#2913)** rather than split retroactively —
@@ -1349,7 +1356,64 @@ land before their UI consumers.
       stale review, double-confirm, timeout-after-commit, cold start, and
       delivery failure through the actual Picker-to-daemon contract.
 
+### Reopened frontend Confirm delivery acceptance from #2453
+
+<!-- backlog-reconciliation:7556:transfer:2453:to:efforts/active/agent-dispatch-tasks-pane-ux-overhaul/README.md -->
+
+Retain this direct ROOT Plan/Validation supplement within the existing reviewed Active
+UI-owning effort, preserving its complete Plan, completed phases, Coordination, Journal
+and backend/UI boundary. The SAME currently investigating UI/source owner and explicit
+native-delivery hold continue here; no resource, implementation or hold is released.
+Existing backend3681/2423 remains separate. If continuing root/open bounded UI claim
+coordination cannot be verified, retain2453 rather than leave a closed live-claim token.
+
+#### Plan
+
+- [ ] Preserve the owner's explicit reopening: click-near-miss, draft-before-dismiss,
+  progress/error reporting and historical CLI workarounds are delivered partial
+  evidence, NOT confirmed cause or full real-UI delivery. Do not use the withdrawn
+  closure as acceptance.
+- [ ] Trace real mouse AND keyboard Confirm through the actual Tasks pivot/card, exact
+  current task/card/incarnation and qualified coordinator to durable accepted
+  steer/event and visible outcome. Classify request never issued, wrong routing and
+  silently failed response without copying private original incident payloads.
+- [ ] Keep Confirm submit, Save unsubmitted draft-only, Reset/cancel/Esc behavior
+  distinct. Save never authorizes an answer/resume. Preserve the exact collected answer
+  through asynchronous failure; clear a draft only after actual acknowledged successful
+  submission.
+- [ ] Expose actionable visible persistence/routing/timeout/stale-card failure and
+  accepted-but-pending versus later delivery state. Preserve bounded off-render-flow
+  work and current input safety; ambiguous retry consumes existing idempotency/effect
+  authority rather than creating duplicate operator answers.
+- [ ] Preserve exact task/owner/card/revision fencing and existing request_input
+  behavior. Native control versus manual hit-testing remains an evidence-backed design
+  question, not a mandated rewrite. Frontend transmission is not2423 application ACK
+  or3681 worker-consumption proof.
+
+#### Validation and continuing custody
+
+- [ ] Qualify the original actual native mouse/Enter/Space-to-correct-coordinator flow
+  with a real requested-input card, accepted event and visible result; cover Save
+  draft-only, failure/retry, stale/wrong endpoint/card and answer recovery. Existing
+  units/draft/argv tests keep their bounded credit and do not waive this native hold.
+- [ ] Preserve current UI/source claimant and continuing ROOT
+  Plan/Validation/Journal/open bounded claim flow, with original
+  native/resource/permission gates unchanged. This finite delivery case does not require
+  the entire future UX/backend programme or reopen unrelated completed menu phases.
+- [ ] Only after normal review, ACTUAL merge and CURRENT FULL direct ROOT
+  Plan/Validation/Coordination/custody/native-hold readback may2453 become historical.
+  Otherwise retain2453. No universal new ACK ceremony, actual UI/coordinator probe or
+  implementation is authorized.
+
+Sources: https://github.com/ThomasMichon/copilot-extensions/issues/2453 ;
+https://github.com/ThomasMichon/copilot-extensions/pull/2499 ;
+https://github.com/ThomasMichon/copilot-extensions/pull/2509 ;
+https://github.com/ThomasMichon/copilot-extensions/pull/2913 ;
+https://github.com/ThomasMichon/copilot-extensions/pull/5744 .
+
 ## Validation Plan
+
+- [ ] Complete every directly retained #2453 Plan/Validation clause above at its original evidence tier and bounds; preserve current owners, holds and unfinished acceptance. Tracker consolidation is not implementation.
 
 - [ ] Complete the shared [task conversation validation matrix](../agent-dispatch-monitor-and-confirmed-state/task-conversation-amendment.md#validation-matrix)
       for the composer/viewer/review/receipt/follow-up UI boundary.
@@ -1395,6 +1459,13 @@ land before their UI consumers.
 _Pending operator review of the Phase 0 previews._
 
 ## Journal
+
+### 2026-10-22 - Complete retained acceptance from #2453
+
+- Retained the complete #2453 scope directly in the Plan and Validation,
+  without declaring feature completion or transferring source/resource custody.
+  Normal reviewed merge and current full readback precede administrative
+  supersession; all substantive acceptance remains unfinished.
 
 ### 2026-09-17 — Kickoff + Phase 0 previews
 - Effort + vision moved upstream from a private knowledge-repo draft into

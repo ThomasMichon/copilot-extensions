@@ -30,6 +30,12 @@ waiters and supported native PR operation remain working alternatives.
 
 ## Coordination
 
+The direct #2700/#2881 checkout-free operation matrix extends the existing #2400
+client/migration lane under the same effort host. Keep #7188 service/consumer, #7051
+conformance and Worktrees publication/resource and credential/provider claims bounded
+and unchanged. Continue through this Plan/Validation/Journal and eligible open bounded
+source claims, not a closed tracker or new generic sign-off rendezvous.
+
 - **Topology:** Serial, independently reviewable PRs against `dev`.
 - **Host (owns PRs):** Delegation driver.
 - **Delegates:** Any bounded implementation delegate receives an exclusive slice; the driver owns integration and completion.
@@ -340,7 +346,78 @@ not silently enlarged into presentation or migration custody.
 No implementation, account/credential use, tests, native/model/host probe, install,
 runtime update, shared-resource operation or deployment is authorized by this checklist.
 
+### Direct checkout-free operation and inherited ADO matrix from #2700/#2881
+
+<!-- backlog-reconciliation:7556:transfer:2700:to:efforts/active/durable-pr-watch-delegation/README.md -->
+
+Add directly to the existing Active ROOT Plan and Validation beside the accepted2400
+client-convergence lane; do not replace any prior row or history. Actual foreign
+creation/watch/merge, explicit status/metadata-only bindings and bounded7850 native
+four-verb composition are credited baseline, not the full reviewer/legacy matrix.
+Preserve7051 conformance,7188 bounded service/consumer, Worktrees publication/resource
+and current credential/provider claims. Prior requests to keep checkout-free coverage
+open remain binding until this entire direct acceptance is actually delivered and read
+back; no feature is declared complete or source custodian changed.
+
+#### Plan
+
+- [ ] Reconcile EVERY relevant existing PR surface: create/track already-pushed remote
+  branches, status/watch, ready/update, merge/complete and supported reviewer
+  diff/comment/review/thread operations. Label each delivered, unsupported, incomplete
+  or unproven entry explicitly, including remaining checkout-free reviewer routes; four
+  verbs or a provider primitive alone are not entrypoint parity.
+- [ ] Address the target by canonical explicit repository/PR identity OR an approved URL
+  binding without a local TARGET checkout. Preserve the caller's own rightful
+  claimant/lifetime where required; never equate target-checkout independence with
+  removing caller completion/resource ownership.
+- [ ] Resolve target provider, hosting endpoint, repository/account identity, branch
+  convention and contribution/review policy from its admitted registered/metadata-only
+  binding. Missing, malformed, ambiguous, unreachable or unauthorized evidence must
+  refuse clearly, never use the caller's provider/config/account or a different target
+  as fallback.
+- [ ] Retain honest structured ADO build validation, applicable policy evaluations,
+  reviewer votes/approval events, active/unresolved threads, mergeability and terminal
+  outcomes through the shared provider-neutral surface. Unknown/unsupported evidence is
+  not a passing gate; votes, policy and human approval remain distinct.
+- [ ] Preserve actual target merge_actor, human-only/maintainer requirements, explicit
+  completion authority and accepted native gates. Author self-review, a self-merge
+  profile or a returned status cannot bypass real policy or grant missing approval.
+- [ ] Preserve already-pushed creation with an already-valid caller-supplied branch OR
+  admitted target convention, attribution, tracked PR identity and reciprocal
+  obligations. Never publish unrelated caller commits to the foreign target or import
+  foreign merged history into caller source merely because the PR is owned or observed.
+- [ ] Reuse established scoped credential-provider/relay/account boundaries without
+  hand-built auth/REST workarounds, ambient identity substitution or a second
+  watcher/client. Wait estimates and polling cadence remain separate from actual
+  provider gate evidence and completion ownership.
+- [ ] Continue this finite client/matrix lane through the existing effort host, direct
+  Plan/Validation/Journal and open bounded source coordination. Related claims keep
+  their scopes; source contributions use normal review/nonblocking consultation and
+  concrete conflict resolution, not a new generic owner-ACK gate. Keep native commands
+  useful before fleet adoption and staged2400 compatibility/deprecation sequencing
+  intact.
+
+#### Validation
+
+- [ ] Cover metadata-only/registered/unregistered/ambiguous target binding, no local
+  target checkout, correct caller/target distinction, ADO policy/build/vote/thread
+  states and multiple-provider parity through real owning front doors and bounded
+  contract fixtures. Credit actual7226/7850 witnesses at their stated limits; identify
+  remaining reviewer routes and missing native lanes rather than converting them into
+  pass or requiring unrelated entire fleet/installer campaigns.
+- [ ] Verify explicit target refusal, no caller/provider/account fallback, no foreign
+  source import/lost obligation, actual authority/role gates and existing
+  credential/observation ownership. No live provider mutation, account/authentication
+  probe or deployment is authorized by the matrix.
+- [ ] Before administrative closure, a NEW normal reviewed merge must accept EVERY
+  original2700 clause and all eight inherited2881 rows directly in this ROOT
+  Plan/Validation, followed by CURRENT FULL readback and live continuing
+  Coordination/Journal. Old2400/7189/7885 intake, a topic link, proposed patch or
+  source7850 alone is not this receipt. If the full intake is not accepted, retain2700.
+
 ## Validation Plan
+
+- [ ] Complete every directly retained #2700 Plan/Validation clause above at its original evidence tier and bounds; preserve current owners, holds and unfinished acceptance. Tracker consolidation is not implementation.
 
 - [ ] Complete every directly retained #2400 Plan/Validation clause above at its original evidence tier and bounds; preserve current owners, holds and accepted deferrals. Administrative supersession is not completion.
 
@@ -378,6 +455,13 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-10-22 - Complete retained acceptance from #2700
+
+- Retained the complete #2700 scope directly in the Plan and Validation,
+  without declaring feature completion or transferring source/resource custody.
+  Normal reviewed merge and current full readback precede administrative
+  supersession; all substantive acceptance remains unfinished.
 
 ### 2026-10-22 - Complete retained acceptance from #2400
 

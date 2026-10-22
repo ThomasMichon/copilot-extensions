@@ -55,6 +55,13 @@ fits.
 
 ## Coordination
 
+The direct #2570 lane is a concrete Phase 5 need under this existing
+base-engine/script-hook owner, not a new verifier loop or completion of generic hooks.
+Existing evaluator/registrar/domain/source custody, #5174 and motivating-consumer
+deferrals remain; exact optional goal-condition semantics receive ordinary reviewed
+implementation through this Plan/Validation/Journal and eligible open bounded source
+claims.
+
 - **Topology:** independent per-phase PRs against `dev`, each phase
   independently reviewable and mergeable (Phase 1 is a prerequisite for
   Phase 2's validation step, which exercises a multi-hop `extends:` chain
@@ -365,7 +372,61 @@ fit an existing archetype.
       need only, the same discipline Phase 2 followed for
       `repository_issue_loop`.
 
+### Concrete optional goal-verification hook from #2570
+
+<!-- backlog-reconciliation:7556:transfer:2570:to:efforts/active/agent-dispatch-recipe-composability/README.md -->
+
+Adopt this explicit ROOT Phase5 Plan/Validation intake under the existing reviewed Active
+base-engine/script-hook owner. It is the concrete motivating need, not speculative
+generic extensibility or completed goal verification. Preserve every existing
+phase/deferral/source claimant and the existing trusted
+evaluator/recipe/registrar/domain owners.
+
+#### Plan
+
+- [ ] Let a goal-driven recipe optionally declare a real-world command/exit-code
+  predicate OR structured verification condition. Worker confidence, model output,
+  completion status/labels or a verification-required boolean cannot substitute for
+  actual goal evidence.
+- [ ] Define the base recipe's automatic condition-to-goal-met/completion versus
+  work/retry/suspend semantics and exact evidence/trigger/result contract. Reconcile the
+  original each-pass intent explicitly with the reviewed submitted/backfill/event-note
+  design; do not revive the removed recurring interval auditor or silently drop recipe
+  integration.
+- [ ] Reuse opaque trusted registered evaluators/owned execution-resource resolution
+  with bounded output/deadline and explicit
+  start/nonzero/timeout/malformed/unknown/unavailable outcomes. Never execute arbitrary
+  untrusted issue/prompt shell data or introduce a second loop/evaluator/authority.
+- [ ] Preserve old no-condition behavior and supported external/manual signals. Optional
+  verification must compose with current submitted-task/domain-confirmation/event
+  semantics and base-owned lifecycle/retry/claim authority, not a new model-routing
+  feature.
+- [ ] Keep existing recursive extension/script-provider/source-location guarantees,5174
+  and consumer deferrals, completed slices and their owners. A general script hook alone
+  does not satisfy this recipe-specific contract.
+
+#### Validation
+
+- [ ] Exercise actual configured true/false/error/unavailable condition outcomes through
+  the relevant base recipe and approved event/work-evaluation trigger, proving correct
+  goal resolution or continued/suspended work. Cover absent condition compatibility,
+  repeat/restart/event dedup and domain authority without false success.
+- [ ] Prove untrusted selectors/resource mismatch, bounded timeout/output and malformed
+  results fail explicitly; static done text, model choice or generic provider
+  serialization is not real-world goal verification. Preserve original finite evidence
+  tier, not a new all-host/native/future-effort gate.
+- [ ] Before duplicate2570 closure, normal review must accept this exact scoped
+  semantics in the ROOT Plan AND Validation/Coordination; obtain ACTUAL merge and
+  CURRENT FULL readback/continuing source custody. Otherwise retain2570. No predicate,
+  test, script, model or runtime action is authorized by this proposal.
+
+Sources: https://github.com/ThomasMichon/copilot-extensions/issues/2570 ;
+https://github.com/ThomasMichon/copilot-extensions/pull/4709 ;
+https://github.com/ThomasMichon/copilot-extensions/pull/4962 .
+
 ## Validation Plan
+
+- [ ] Complete every directly retained #2570 Plan/Validation clause above at its original evidence tier and bounds; preserve current owners, holds and unfinished acceptance. Tracker consolidation is not implementation.
 
 - [x] Full `agent-dispatch` plugin suite green after each phase; every
       existing direct `kind:` declaration and every existing `extends:`
@@ -405,6 +466,13 @@ detailed here once implementation starts, if it grows beyond what the Plan
 items above already specify._
 
 ## Journal
+
+### 2026-10-22 - Complete retained acceptance from #2570
+
+- Retained the complete #2570 scope directly in the Plan and Validation,
+  without declaring feature completion or transferring source/resource custody.
+  Normal reviewed merge and current full readback precede administrative
+  supersession; all substantive acceptance remains unfinished.
 
 ### 2026-10-08 — Phase 4 complete: cross-origin `extends:` addressing
 - Operator ask (post-handoff): make sure one registrar can `extends:`
