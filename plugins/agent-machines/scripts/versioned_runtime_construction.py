@@ -29,6 +29,75 @@ class RuntimeOperations:
     discard_failed_candidate: Callable[..., bool]
 
 
+@dataclass(frozen=True)
+class CleanupOperations:
+    version_dir: Callable[[Path, str], Path]
+    marker_path: Callable[[Path, str], Path]
+    _is_link: Callable[[Path], bool]
+    _cleanup_lease: Callable[..., ContextManager[bool]]
+    _gc_protected_versions: Callable[..., set[str]]
+    _ownership_key: Callable[[Path, str], object]
+    _construction_owners: object
+    _remove_slot: Callable[..., bool]
+
+
+def discard_failed_candidate(runtime: CleanupOperations, root: Path, version: str, *,
+                             link_name: str = "current", validate=None) -> bool:
+    """Delete only an unfinished candidate held by this construction owner.
+
+    ``validate`` can enforce an installation-cell ownership receipt while all
+    cleanup guards are held. It must raise on changed or unowned evidence.
+    This operation never removes completion evidence or recreates an empty slot.
+    """
+    if runtime._ownership_key(root, version) not in getattr(runtime._construction_owners, "keys", ()):
+        raise RuntimeError("failed candidate cleanup requires held construction ownership")
+    with runtime._cleanup_lease(root, version, allow_construction_owner=True) as admitted:
+        if not admitted:
+            raise RuntimeError(f"failed candidate cleanup is busy: {version}")
+        vdir = runtime.version_dir(root, version)
+        if not os.path.lexists(vdir):
+            return False
+        if not vdir.is_dir() or runtime._is_link(vdir):
+            raise RuntimeError(f"failed candidate is not an ordinary directory: {vdir}")
+        # Malformed/linked completion evidence is also immutable evidence, not
+        # permission to reclaim a candidate under a failed-build label.
+        if os.path.lexists(runtime.marker_path(root, version)):
+            raise RuntimeError(f"failed candidate has completion evidence: {version}")
+        if version.lower() in runtime._gc_protected_versions(root, None, True, link_name):
+            raise RuntimeError(f"failed candidate is selected or in use: {version}")
+        if validate is not None:
+            validate(vdir)
+        if not runtime._remove_slot(vdir, label="failed construction"):
+            raise RuntimeError(f"could not remove failed candidate: {vdir}")
+        return True
+
+
+def remove_owned_candidate(runtime: CleanupOperations, root: Path, version: str, *, remove,
+                           link_name: str = "current") -> None:
+    """Run one installation owner's exact-candidate removal under cleanup custody.
+
+    The mandatory callback validates completion and installation authority before
+    first deletion, and retains physical ownership outside the candidate for
+    partial-delete retries. It must refuse changed/new objects, remove only this
+    candidate and raise on incomplete deletion. No raw recursive-delete fallback
+    or completion-marker downgrade is provided here. Absence still reaches the
+    callback so only its durable receipt can authorize a completed retry.
+    """
+    if not callable(remove):
+        raise ValueError("owned candidate removal requires its installation owner")
+    with runtime._cleanup_lease(root, version) as admitted:
+        if not admitted:
+            raise RuntimeError(f"owned candidate removal is busy: {version}")
+        if version.lower() in runtime._gc_protected_versions(root, None, True, link_name):
+            raise RuntimeError(f"owned candidate is selected or in use: {version}")
+        candidate = runtime.version_dir(root, version)
+        if os.path.lexists(candidate) and (runtime._is_link(candidate) or not candidate.is_dir()):
+            raise RuntimeError("owned candidate removal requires an ordinary directory")
+        remove(candidate)
+        if os.path.lexists(candidate):
+            raise RuntimeError("owned candidate removal did not settle")
+
+
 def construction_session(runtime: RuntimeOperations, root: Path, version: str, *, payload_hash: str,
                          link_name: str = "current", dev_owner: str | None = None) -> int:
     """Own one shell constructor through a private, caller-held stdin pipe.

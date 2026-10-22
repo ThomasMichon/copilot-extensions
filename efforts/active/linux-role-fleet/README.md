@@ -1111,3 +1111,9 @@ These bounded Windows selections are not a new full Windows-suite claim.
   installer, controller/node assembly, useful services and all broader
   unresolved fleet Plan/Validation items remain open. The effort stays Active;
   review/merge, release promotion and authorized rollout remain separate.
+- The first source CI caught growth beyond the canonical entry module's
+  shrink-only size ceiling. Both exact owned removal and the existing
+  failed-candidate cleanup are extracted into the already-shipped construction
+  companion; the entry point shrinks instead of widening its baseline. Their
+  typed operation bindings retain the same canonical leases and protection
+  checks. The original failed-construction matrix qualifies that extraction.
