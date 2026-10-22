@@ -32,7 +32,9 @@ Everything else — model/effort/context propagation, in-repo `.ai` + `--plugin-
 resolution, concrete cwd, session/status/coordination, auth/relay bootstrap, the
 relay back-channel — is **shared**, owned by agent-bridge.
 
-## Current divergence (evidence, 2026-08-22)
+## Context
+
+### Current divergence (evidence, 2026-08-22)
 
 - **Size:** agent-codespaces ≈ 14k LOC / 28 modules; agent-containers ≈ 2.5k / 11.
 - **Shared today:** only `libs/credential-relay` + `ssh-manager` and a thin
@@ -65,7 +67,12 @@ Every injection/projection this effort adds MUST be **gated on the fleet's trust
 posture** (`observable-security-posture`) — a restricted fleet is never silently
 upgraded.
 
-## The venue transport contract (target)
+## Request
+
+Realize the existing Guiding Intent through the following venue transport
+contract and workstreams; this structural heading does not revise their scope.
+
+### The venue transport contract (target)
 
 A small, symmetric interface every venue provider implements; agent-bridge drives
 the rest:
@@ -76,7 +83,9 @@ the rest:
 - **token bootstrap** — surface (codespace) or bootstrap (container) a `GITHUB_TOKEN`.
 - **boot semantics** — the wait the core should tolerate (cold-boot vs. start).
 
-## Workstreams
+## Plan
+
+### Workstreams
 
 - **WS1 — launch-parity → agent-bridge core (trusted fleets).** Relocate the
   venue-agnostic launch concerns into agent-bridge's dispatch core so both venues
@@ -115,7 +124,7 @@ the rest:
 - **WS-E — container-as-parity-harness.** Codify "reproduce the venue flow in a
   container" as accepted evidence for a CodeSpace fix.
 
-## Ordered remaining execution (2026-08-25)
+### Ordered remaining execution (2026-08-25)
 
 | Order | Slice | Work | Exit gate |
 |---|---|---|---|
@@ -131,7 +140,7 @@ needs; P1 establishes the final shared launch inputs; P2 freezes those contracts
 as executable evidence before P3/P4 alter lifecycle and failure behavior; P5 is
 last so naming follows the proven abstraction rather than predicting it.
 
-## Deferred Backlog Intake
+### Deferred Backlog Intake
 
 - [ ] Accept venue-parity candidates only through
   [`migration-intake`](../migration-intake/README.md)'s deduplication and
@@ -143,7 +152,69 @@ last so naming follows the proven abstraction rather than predicting it.
   extending this plan before implementation when necessary.
 - [ ] Use synthetic venue identities and redact environment-specific evidence.
 
+### Trusted-container bootstrap and resumable initialization retained from #2476
+
+<!-- backlog-reconciliation:7556:transfer:2476:to:efforts/active/venue-parity/README.md -->
+
+This is the existing P0 credential-consumer and P3 provider-lifecycle intake,
+through the migration-intake contract above, not plugin-staging-only work.
+The following acceptance remains unfinished; this amendment is not an
+implementation or native-completion receipt.
+
+- [ ] Before dependent post-start setup, supply required relay-backed authentication
+  OR explicitly model a recoverable initialization stage. Later dispatch-time
+  helper injection alone is not bootstrap-order proof.
+- [ ] Define one supported generic helper-discovery contract: explicit path
+  override, PATH lookup OR owner-projected home path. Reconcile supported injected
+  relay and home-path consumers without overwriting existing user helpers;
+  preserve credential-relay ownership.
+- [ ] Retain the created member's identity and explicit partial-initialization
+  state when post-start authentication fails after build, clone and dependency
+  installation; do not discard identity before surfacing the failure or report
+  the member as ready.
+- [ ] Provide an explicit retry/resume path that reuses the same owned member and
+  expensive completed work, exposes remaining setup and recovery diagnostics, and
+  does not create a duplicate or silently skip failed required initialization.
+- [ ] Preserve explicit authentication requirements and trusted-only relay
+  projection. Do not copy host credential profiles, require browser/device-code
+  authentication inside the container, upgrade restricted trust posture, or treat
+  this intake as permission to change credentials or running resources.
+
+#### Validation retained from #2476
+
+- [ ] Cover the original Windows-host/Linux-container fresh trusted-member setup
+  and actual dependent post-start authentication boundary in approved disposable
+  coverage; identify the tested platform/recipe and limits.
+- [ ] Demonstrate helper discovery for the supported override/PATH/projected-home
+  alternatives, respecting an existing user helper and the absence of an
+  authenticated in-container credential profile.
+- [ ] Force post-start/relay-auth failure after completed setup, observe the same
+  retained member/partial state, resume it, and observe the actual required
+  readiness transition without duplicate creation or rerunning completed
+  expensive work unnecessarily.
+- [ ] Cover unavailable relay/auth and restricted-trust cases with explicit
+  failure/recovery, no false-ready result, no credential-profile copy and no
+  interactive in-container authentication. Existing helper files, fleet result
+  categories and unit/source inspection alone do not establish the lifecycle
+  effect.
+
+#### Continuing coordination for #2476
+
+Preserve agent-bridge's shared authentication/relay authority,
+agent-containers' lifecycle/readiness responsibility, existing participants,
+open bounded source claims and the live #954 program token. This root's
+Workstreams, Validation Plan and Journal retain this combined slice once,
+through the existing migration-intake contract. No source/resource handoff,
+generic ACK veto or unrelated whole-parent completion gate is introduced.
+Normal review, actual merge and full current root readback precede
+administrative supersession of #2476; afterward it is provenance, not a live
+claim token or proof of completed acceptance.
+
 ## Validation Plan
+
+- [ ] Complete every directly retained #2476 Plan/Validation clause above at
+  its original evidence tier and bounds, preserving current owners, alternatives
+  and holds. Tracker consolidation is not bootstrap or lifecycle completion.
 
 - **Container repro is the acceptance gate.** For each shared-core change, a fleet
   container dispatch must show the venue-agnostic guarantee holding (model
@@ -164,6 +235,13 @@ last so naming follows the proven abstraction rather than predicting it.
   ≥2 plugins (bump every consumer).
 
 ## Journal
+
+- **2026-10-22 — Retained trusted-container initialization acceptance.**
+  Materialized #2476's complete bootstrap-order, helper-discovery, partial-state,
+  same-member retry and native negative coverage in this root. Existing P0/P3,
+  relay/lifecycle owners, migration intake and #954 coordination continue.
+  Normal reviewed merge and current full readback precede source tracker
+  supersession; implementation and qualification remain unfinished.
 
 - **2026-08-23 — WS-A trusted-container SSH dispatch.** Replaced the trusted
   fleet's raw ACP `docker exec` carrier with OpenSSH while preserving the

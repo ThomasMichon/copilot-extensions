@@ -10,7 +10,7 @@
   `live-machine-introspection`
 - **Umbrella issue:** #1418 (closed; historical -- all listed sub-issues are
   also closed, and no successor umbrella has been opened yet). Reviewed Plan,
-  Validation and Journal coordinate the retained #1417/#1437 slices below;
+  Validation and Journal coordinate the retained #1417/#1437/#2684 slices below;
   implementation still needs an eligible open bounded-source claim.
 - **Sub-issues:** #1455 · #1507 · #1529 · #1627 · #1631 · #1721 · #1961
   (all closed)
@@ -41,7 +41,7 @@ actions are derived views rather than separately maintained inventories.
   observable status to the shared control plane.
 - **Public coordination token:** #1418 (closed; historical) for the
   already-delivered relationship-aware package discovery slice; later slices
-  use their own dedicated issues. For the retained #1417/#1437 objectives,
+  use their own dedicated issues. For the retained #1417/#1437/#2684 objectives,
   this reviewed Active effort's Plan, Validation and Journal are the continuing
   coordination record, with the existing schema-host review custody and
   module/provider/parity roles unchanged. Their tracker consolidation creates
@@ -217,6 +217,73 @@ authorizes no reset, test, OS mutation or source handoff.
   partial/interrupted/error paths. Future destructive-feature acceptance is not
   authorization to exercise it on a host.
 
+### Phase 4b - Declared scheduled SSH-mesh convergence retained from #2684
+
+<!-- backlog-reconciliation:7556:transfer:2684:to:efforts/active/agent-machines-declarative-control-plane/README.md -->
+
+This intake belongs to the existing connectivity projection, bounded provider
+reconciliation and drift/recovery phases, through the migration-intake
+contract. Keep the original sweep and/or watchdog OR new declared tier
+alternative. The selected watchdog implementation is substantial delivered
+baseline, not a reason to require every tier or unrelated host.
+
+- [ ] Credit and preserve #2667's native hourly trigger construction and exact
+  nonempty-repeat regression, #2690's live discovery/profile/per-peer mesh refresh,
+  #3036's same-cell optional peer admission and #5382's correct local-host
+  exclusion. Record source delivery separately from actual task registration or
+  scheduled native effect.
+- [ ] Retain all original mesh outcomes: current client discovery/live tunnel IDs
+  within the selected cycle; regeneration of the managed profile including correct
+  self-alias wiring; checks for every declared remote peer with surfaced failures;
+  and existing identity-key/known_hosts-pin presence/currentness. Local launcher
+  liveness alone is not mesh convergence.
+- [ ] Validate missing/unreadable identity files and missing/rotated/conflicting
+  known_hosts pins with attributable alias/source/phase diagnostics. Canonical
+  profile paths/HostKeyAlias and an accept-new boolean probe with suppressed
+  diagnostics are not the complete existing-key/pin audit.
+- [ ] Preserve trusted pins and existing credential/profile authority; do not
+  replace pins, broaden trust/enrollment or restart a healthy host merely to pass
+  a reachability check. Keep local/self exclusion distinct from another fully
+  qualified host, source-cell validation distinct from ambient PATH and absent
+  optional SSH support distinct from malformed/refused context.
+- [ ] Preserve resolved opt-in/opt-out, tier-scoped cadence and reentrancy,
+  explicit unsupported/failure/noop states and existing provider/lifecycle/rollout
+  owners. Source changes do not mean a task is installed, a tier is active or any
+  mesh is currently healthy.
+- [ ] Settle only this original Windows task/selected declared-mesh acceptance.
+  Keep independent POSIX scheduler work and #3115's live-umbrella requirement
+  intact; do not add a new all-platform/all-host or whole-parent completion gate
+  to #2684.
+
+#### Validation retained from #2684
+
+- [ ] Preserve the focused native-parameter regression and, within separately
+  approved original Windows qualification, verify a fresh selected opted-in task
+  has hourly repetition and honest matching status without manual trigger surgery.
+  Record actual installed/source/task facts rather than treating builder source
+  as registration proof.
+- [ ] Exercise selected declared-mesh discovery -> managed profile -> all declared
+  remote-peer checks across a scheduled cycle, including stale tunnel/self-profile,
+  missing/unreadable keys, missing/rotated/conflicting pins, relay/provider/peer
+  failure and explicit negative diagnostics. Prove correct local exclusion without
+  excluding distinct hosts; record exact scope and limits.
+- [ ] Preserve declared opt-out/noop and same-cell absent-versus-refused behavior,
+  retained trusted pins and healthy-host controls. Unit/source/pure-boolean success
+  supplements but does not replace the original actual scheduled/native
+  convergence acceptance.
+
+#### Continuing coordination for #2684
+
+Extend the existing reviewed root Plan/Validation/Journal coordination only to
+this retained slice, preserving schema-host review custody,
+module/provider/parity roles and concrete resource/source/credential/rollout
+owners. Closed #1418 and consolidated sources remain historical, never live
+claim tokens. Before implementation, record an eligible OPEN bounded-source
+claim according to CONTRIBUTING.md; this intake creates none. Preserve #3115's
+separate umbrella condition unchanged. Normal review, actual merge and full
+current root readback precede source tracker supersession; this is not native
+convergence, rollout, a handoff or parent-effort completion.
+
 ### Phase 5 - Reconcile deferred backlog
 
 - [ ] Accept declarative-control-plane candidates only through
@@ -250,6 +317,12 @@ _Correlated via a facility-driven sweep of open `bug`-labeled issues against act
   - A hang during WSL restore's ssh -G validation is directly this effort's control-plane scope.
 
 ## Validation Plan
+
+- [ ] Complete every directly retained Phase 4b/#2684 Plan/Validation clause at
+  its original evidence tier and selected scope, preserving current owners,
+  sweep/watchdog/tier alternatives, trusted pins and #3115's separate gate.
+  Read back the current complete root after reviewed intake merges; tracker
+  consolidation is not scheduled/native convergence or parent completion.
 
 - [ ] Prove Phase 4a receipt classification, preview/apply/only, unknown/
   pre-existing/shared dependencies, prior state, foreign/concurrent changes,
@@ -321,6 +394,18 @@ first, then migrate reconcilers and retire shadow inventories only after
 behavioral parity is demonstrated.
 
 ## Journal
+
+### 2026-10-22 - Retained declared scheduled-mesh acceptance
+
+- Materialized #2684's remaining existing-key/pin audit and original scheduled
+  convergence acceptance in Phase 4b, crediting the delivered trigger,
+  mesh-refresh, same-cell and self-exclusion baseline without claiming native
+  qualification. Every substantive retained row remains unchecked.
+- Extended only the continuing root coordination already used by #1417/#1437,
+  preserving schema/module/provider/parity and concrete resource owners,
+  migration intake and #3115's separate live-umbrella gate. Normal review,
+  actual merge and full current Plan/Validation/Coordination readback precede
+  administrative source consolidation.
 
 ### 2026-10-22 - Retained reset and filtered-prelaunch acceptance
 
