@@ -413,10 +413,11 @@ authorizes critical main-path acceptance or a bounded administrative change.
   Full-census and every-release acceptance remain separate.
 - [x] Land the dev implementation of reviewed, widen-only module-size baseline
   maintenance and remove its obsolete main exception from source (#6438).
-- [ ] Map the nineteen original drop-in registry cases through exact original
+- [x] Map the nineteen original drop-in registry cases through exact original
   function objects, retaining actual temporary-file/link/FIFO assertions,
   source closure, production-call coverage and the existing packet budget.
-  Complete native Linux mapping is not full-census or Windows qualification.
+  #7874 and actual hosted execution prove all 778 admitted cases in 15.166
+  seconds. This bounded Linux mapping is not full-census or Windows qualification.
 - [x] Verify a covering promotion activates the dev-owned baseline producer on
   default main; record authorized runtime adoption separately.
   #6631 and hosted job `115706505844` prove activation of #6438; this

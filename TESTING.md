@@ -179,6 +179,18 @@ the Linux release host without skips. The original platform availability rules
 remain intact: a missing capability cannot become positive packet evidence.
 This bounded mapping does not qualify the complete historical or Windows census.
 
+`tools/promotion_unit_tests/test_plugin_resolve.py` re-exports the 29 original
+local-resolution functions and their unchanged parameterization from
+`libs/plugin-resolve/tests/test_plugin_resolve.py`, mapping 33 cases by replacing
+only the file prefix. The original namespace-import regression starts a real
+subprocess and remains outside this cohort, alongside the separate preparation
+and execution suites. The original module and all five imported package modules
+are hash-bound; every selected case must contribute actual production call
+coverage under the unchanged observer, collection root and budget. No original
+body or production behavior is copied or modified. Linux qualification includes
+the original symlink-escape assertion. This is a bounded mapping, not a completed
+historical or native-platform census.
+
 ## Tracking-write source guard
 
 The source tracking-write guard still parses every sibling-plugin Python file,
