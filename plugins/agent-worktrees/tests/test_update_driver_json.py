@@ -137,6 +137,30 @@ def test_driver_refusal_replaces_previous_success_status(tmp_path, monkeypatch, 
     assert json.loads(capsys.readouterr().out)["ok"] is False
 
 
+@pytest.mark.parametrize("verb", ["stage-update", "reconcile-plugins"])
+def test_status_publication_failure_retains_original_json_error(tmp_path, monkeypatch, capsys, verb):
+    import update_driver
+
+    blocked = tmp_path / "not-a-directory"
+    blocked.write_text("unrelated")
+
+    def refuse():
+        raise update_driver.ParticipantError("synthetic custody refusal")
+
+    monkeypatch.setattr(update_driver, "borrowed_custody", refuse)
+    args = _args(apply=True, json=True, repo=str(tmp_path), status=str(blocked / "status.json"))
+    command = boundary.cmd_stage_request if verb == "stage-update" else boundary.cmd_reconcile_request
+    assert command(args) == 1
+    result = capsys.readouterr()
+    failure = json.loads(result.out)
+    assert failure["reason"] == "update-driver"
+    assert failure["message"] == "synthetic custody refusal"
+    assert failure["status_error"]
+    assert "synthetic custody refusal" in result.err
+    assert "Update failure status could not be written" in result.err
+    assert blocked.read_text() == "unrelated"
+
+
 def test_queued_json_round_trip_returns_original_payload_and_exit(tmp_path, monkeypatch, capsys):
     import update_driver
 
