@@ -1,0 +1,9 @@
+{
+  "comment": "Use shared lifetime brokerage for the Windows supervisor logon launcher",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

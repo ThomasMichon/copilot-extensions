@@ -309,6 +309,23 @@ retirement failures do not authorize a broader second classifier.
 
 ## Enablement and ownership limits
 
+The Windows interactive-logon fallback starts the installed supervisor launcher
+through shared `agent_procutil.spawn_daemon`, retaining its output in
+`supervise-launcher.log` under the installation root. Raw breakaway flags can
+escape an inner installer Job while leaving the launcher inside an outer
+updater Job; shared lifetime brokerage owns that boundary. A failed durable
+launch propagates to the installer, without a success audit or a new logon
+registration. This does not change serve-mode, label or native-disablement
+selection, and a successful spawn is not proof that every pool is healthy.
+
+`tests/test_supervisor_logon_lifetime_native.py` is the separate opt-in Windows
+production-lifetime regression. With `AGENT_DISPATCH_TEST_LOGON_LIFETIME=1`,
+outside the contained test runner, it exercises the extracted installer function
+for two fresh launch/cleanup cycles: close an inner installer Job and the outer
+caller Job, require the bounded control to exit and the fixture resident to
+survive, then retire only pinned fixture processes. Contained runs skip this
+lane rather than disabling test containment.
+
 Fresh eligible supervisors retain the label/serve-mode opt-in gate. Existing
 disabled or masked native supervisors are not automatically re-enabled.
 Runtime-only masks (`masked-runtime`) are also preserved and recorded as such.

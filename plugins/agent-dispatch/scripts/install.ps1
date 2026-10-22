@@ -3179,12 +3179,13 @@ function Start-DispatchDetachedLogonLauncher {
         [string[]]$LauncherArguments = @()
     )
     $spawn = @'
-import subprocess, sys
-from agent_procutil import windowless_daemon_kwargs
-subprocess.Popen(
+import sys
+from pathlib import Path
+from agent_procutil import spawn_daemon
+spawn_daemon(
     sys.argv[2:], cwd=sys.argv[1],
-    stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-    **windowless_daemon_kwargs(breakaway=True),
+    log_path=Path(sys.argv[1]) / 'supervise-launcher.log',
+    console_children=True,
 )
 '@
     & $LinkPython -c $spawn $InstallDir powershell.exe -NoProfile -ExecutionPolicy Bypass `
