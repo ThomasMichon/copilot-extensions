@@ -557,6 +557,19 @@ expected open state. If accidental closure occurs, remove the closing phrase,
 reopen the issue, and record the correction; a null `commit_id` in an issue
 closure event is not by itself evidence that an agent called an issue-close API.
 
+### Performance impact (launch, hook and repeated-work changes)
+
+Include a Performance impact statement for launch/callback/hook/repeated-scan
+or process-producing changes: caller/frequency, workload cardinality, blocking
+stages, process/network/tree/history work, evidence reuse/invalidation and
+reproducible measurement. Follow
+[performance measurement](docs/patterns/performance-measurement.md).
+Pure work-count checks belong in required unit CI; native cold/warm composition
+belongs to an explicitly selected integration lane. Report unavailable
+measurements honestly rather than inferring a pass from unit tests, watchdogs
+or process counts. Diagnostic instrumentation must not add blocking transport
+or per-event process work.
+
 ### Documentation impact (required before opening a PR)
 
 Dependency changes also run `python tools/check-dependency-age.py`: external

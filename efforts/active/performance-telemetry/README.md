@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent reviewed slices targeting `dev`
 - **Created:** 2026-10-22
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** `visions/process-telemetry/README.md`; Picker responsive-by-budget
 - **Umbrella issue:** #7935
 - **Sub-issues:** #5900
@@ -69,8 +69,8 @@ startup/new-resume, then hooks.
 ## Plan
 
 ### Phase 1 — Reviewed interface
-- [ ] Review and merge this plan and interface before implementation.
-- [ ] Publish the stable interface to production owners without editing their
+- [x] Review and merge this plan and interface before implementation.
+- [x] Publish the stable interface to production owners without editing their
   reserved launch/preparation files.
 
 ### Phase 2 — Bounded producer and local qualification
@@ -121,9 +121,9 @@ startup/new-resume, then hooks.
 
 ## Proposal
 
-Review this bounded producer/interface plan first. Source implementation can
-proceed independently of shared collector deployment. Unavailable deployment
-authorization blocks that acceptance item, not pure implementation.
+Plan/interface approved and merged in #7991. Source implementation proceeds
+independently of shared collector deployment. Missing deployment authorization
+blocks that acceptance item, not pure implementation.
 
 ## Journal
 
@@ -134,3 +134,14 @@ authorization blocks that acceptance item, not pure implementation.
 - Public direction capture checked against the accepted constraints; private
   identifiers are omitted, not substituted into public examples.
 - No implementation, collector installation or service startup performed.
+
+### 2026-10-22 — Reviewed interface and first source slice
+
+- #7991 merged after an approving review and successful required checks.
+- Production owners received the interface; their launch/preparation files
+  remain untouched by this slice.
+- Extracted the existing registration/emission seam with both real compatibility
+  consumers, plus opt-in bounded buffering and content-free measurements.
+- The pure offline summary is deliberately not a full native qualification
+  report. Optional SDK/export, native adoption, overhead baselines and
+  collector receive-to-persist proof remain open; no shared deployment occurred.

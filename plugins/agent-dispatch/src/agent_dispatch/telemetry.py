@@ -33,6 +33,8 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
+from process_telemetry import SinkSlot
+
 from .install_paths import install_dir
 
 log = logging.getLogger("agent-dispatch.telemetry")
@@ -59,7 +61,7 @@ CONFIG_FILENAME = "telemetry.json"
 #: out-of-process consumer drains the spool file on its own schedule.
 SPOOL_SINK_SPEC = "agent_dispatch.telemetry:make_spool_sink"
 
-_sink: TelemetrySink | None = None
+_slot = SinkSlot()
 
 
 def _default_config_path() -> Path:
@@ -73,8 +75,7 @@ def _default_config_path() -> Path:
 
 def set_telemetry_sink(sink: TelemetrySink | None) -> None:
     """Register (or clear, with ``None``) the process-wide telemetry sink."""
-    global _sink
-    _sink = sink
+    _slot.set(sink)
 
 
 def clear_telemetry_sink() -> None:
@@ -82,24 +83,23 @@ def clear_telemetry_sink() -> None:
     set_telemetry_sink(None)
 
 
+def set_buffered_telemetry_sink(sink: TelemetrySink, **bounds):
+    """Explicit owner initialization; clear/replacement closes this buffer."""
+    return _slot.set_buffered(sink, **bounds)
+
+
 def has_sink() -> bool:
     """True when a sink is registered (emission will be delivered)."""
-    return _sink is not None
+    return _slot.enabled()
 
 
 def emit(event: dict[str, Any]) -> None:
     """Emit one telemetry event to the registered sink (fail-open).
 
-    No sink registered -> a no-op. A sink that raises is swallowed (logged at
-    debug): telemetry is best-effort and must never perturb the coordinator.
+    No sink registered -> a no-op. A sink that raises is swallowed:
+    telemetry is best-effort and must never perturb the coordinator.
     """
-    sink = _sink
-    if sink is None:
-        return
-    try:
-        sink(event)
-    except Exception:  # telemetry is best-effort, never fatal
-        log.debug("telemetry sink raised; dropping event", exc_info=True)
+    _slot.emit(event)
 
 
 def load_sink_from_spec(spec: str) -> TelemetrySink | None:

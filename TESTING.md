@@ -7,6 +7,18 @@ How to run the plugin test suites, the fast gates to run before a push, and the
 > keeps only a short inline summary; the per-plugin release/versioning rules live
 > in [`docs/pipelines.md`](docs/pipelines.md).
 
+## Optional diagnostic telemetry
+
+The shared `libs/process-telemetry` contract is exercised by its real Bridge
+consumer. Run the bounded runner for `agent-bridge` with
+`--test-file tests/test_process_telemetry.py --test-file tests/test_telemetry.py`
+and for `agent-dispatch` with `--test-file tests/test_telemetry.py`.
+These tests prove bounded producer behavior and compatibility, not native
+startup latency or OpenTelemetry export. Threaded blocked/throwing sink controls
+belong to the on-demand integration portfolio, not required unit-only CI.
+The [reviewed effort](efforts/active/performance-telemetry/README.md) retains
+native boundary, actual SDK/local receiver and overhead qualification.
+
 ## Static SSH plugin preparation
 
 Bridge's `tests/test_ssh_plugin_preparation.py` executes the streamed stdlib

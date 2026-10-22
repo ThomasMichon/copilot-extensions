@@ -40,6 +40,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from process_telemetry import SinkSlot
+
 log = logging.getLogger("agent-bridge.telemetry")
 
 #: A telemetry sink: a callable receiving one structured event dict.
@@ -146,13 +148,12 @@ _TRIGGERS = frozenset(
     {"daemon_restart", "handoff", "interrupt", "resume", "resync"}
 )
 
-_sink: TelemetrySink | None = None
+_slot = SinkSlot()
 
 
 def set_telemetry_sink(sink: TelemetrySink | None) -> None:
     """Register (or clear, with ``None``) the process-wide telemetry sink."""
-    global _sink
-    _sink = sink
+    _slot.set(sink)
 
 
 def clear_telemetry_sink() -> None:
@@ -160,24 +161,23 @@ def clear_telemetry_sink() -> None:
     set_telemetry_sink(None)
 
 
+def set_buffered_telemetry_sink(sink: TelemetrySink, **bounds):
+    """Explicit owner initialization; clear/replacement closes this buffer."""
+    return _slot.set_buffered(sink, **bounds)
+
+
 def has_sink() -> bool:
     """True when a sink is registered (emission will be delivered)."""
-    return _sink is not None
+    return _slot.enabled()
 
 
 def emit(event: dict[str, Any]) -> None:
     """Emit one telemetry event to the registered sink (fail-open).
 
-    No sink registered -> a no-op. A sink that raises is swallowed (logged at
-    debug): telemetry is best-effort and must never perturb the bridge.
+    No sink registered -> a no-op. A sink that raises is swallowed:
+    telemetry is best-effort and must never perturb the bridge.
     """
-    sink = _sink
-    if sink is None:
-        return
-    try:
-        sink(event)
-    except Exception:  # noqa: BLE001 - telemetry is best-effort, never fatal
-        log.debug("telemetry sink raised; dropping event", exc_info=True)
+    _slot.emit(event)
 
 
 def load_sink_from_spec(spec: str) -> TelemetrySink | None:

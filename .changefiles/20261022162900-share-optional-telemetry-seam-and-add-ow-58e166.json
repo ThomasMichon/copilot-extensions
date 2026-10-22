@@ -1,0 +1,13 @@
+{
+  "comment": "Share optional telemetry seam and add owner-bounded diagnostic buffering and measurement contracts",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

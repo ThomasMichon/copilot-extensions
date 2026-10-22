@@ -16,6 +16,25 @@ def test_emit_is_noop_without_sink() -> None:
     telemetry.emit({"kind": "state_transition", "name": "task"})
 
 
+def test_shared_slot_does_not_share_consumer_registration() -> None:
+    from process_telemetry import SinkSlot
+
+    _reset()
+    independent = SinkSlot()
+    independent.set(lambda _: None)
+    assert independent.enabled()
+    assert not telemetry.has_sink()
+    seen = []
+    telemetry.set_telemetry_sink(seen.append)
+    try:
+        event = telemetry.task_lifecycle_event("task.created", {"id": "synthetic", "prompt": "private"})
+        telemetry.emit(event)
+        assert seen == [event]
+        assert "prompt" not in event
+    finally:
+        _reset()
+
+
 def test_registered_sink_receives_events() -> None:
     _reset()
     seen: list[dict] = []

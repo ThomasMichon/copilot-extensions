@@ -144,6 +144,13 @@ specifically when reviewing a pull request, not a replacement for them.
   Require path gating, a focused smoke contract, and a scheduled/manual
   exhaustive lane. Do not recommend pooling where real process boundaries
   are the behavior under test.
+- **Performance impact.** For launch, hook, callback, repeated-scan or
+  process-producing changes, apply CONTRIBUTING.md's Performance impact
+  contract and `docs/patterns/performance-measurement.md`. Check actual blocking
+  work and evidence reuse, not just resident counts or watchdog limits.
+  Instrumentation must not introduce synchronous export or per-event children.
+  Missing native measurements are not a passing budget; do not require private
+  execution artifacts or add effectful matrices to required unit-only CI.
 - **Cross-platform parity.** When a PR edits an installer/launcher `.sh` (or
   `.ps1`), flag a missing matching change to its `.ps1` (or `.sh`)
   counterpart.

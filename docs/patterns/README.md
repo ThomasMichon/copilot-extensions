@@ -38,6 +38,10 @@ Choose the simplest shape that fits; don't impose structure a plugin doesn't nee
 
 ## Design principles
 
+For launch, hook and repeated-work changes, apply
+[performance measurement](performance-measurement.md): explicit caller/work
+budgets, cheap diagnostic emission and honest native qualification.
+
 0. **Architectural change reconciles to the vision.** Before a change that adds
    or alters architecture or behavior, reconcile it to the relevant vision
    (`AGENTS.md` § Visions): it either **closes** a stated vision item (cite it),
