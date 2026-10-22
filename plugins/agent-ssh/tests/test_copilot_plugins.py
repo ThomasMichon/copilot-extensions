@@ -235,12 +235,12 @@ def test_actual_posix_probe_uses_requested_git_checkout(tmp_path):
     assert proof["origin"] == proof["repository"] == ""
 
 
-def _pending():
+def _pending(*, operation="original-operation", note="original seed"):
     context = {"version": 1, "cwd": "/canonical/child", "plugins": []}
     plan = {"scope_id": "anchor-child@host", "mux_session": "wt-child"}
     return {
         **owned_delivery_journal(
-            "native-session", "original seed", context, operation="original-operation", plan=plan,
+            "native-session", note, context, operation=operation, plan=plan,
             reservation_id="original-reservation", creation_receipt=None, daemon_port=41234,
         ), "requested_workspace": "/configured/child",
     }
@@ -290,6 +290,81 @@ def test_unknown_delivery_recovers_original_inputs_without_preparation(tmp_path,
     assert calls[-1] == ("release", {"reservation_id": "original-reservation"})
 
 
+@pytest.mark.parametrize("phase", ["reconcile", "settle"])
+def test_interleaved_recovery_cannot_overwrite_or_remove_newer_delivery(tmp_path, monkeypatch, phase):
+    monkeypatch.setattr(copilot_detach, "_STORE", copilot_detach.KeeperStore(tmp_path))
+    pending = _pending()
+    scope = pending["scope_id"]
+    newer = _pending(operation="new-operation", note="new seed")
+    copilot_delivery.record("host", scope, pending)
+    adapter = SimpleNamespace(
+        target="host", pending_delivery=True,
+        plugin_args=SimpleNamespace(workspace="/configured/child"),
+        ensure_keeper=lambda **kw: None, run_input=lambda *a, **kw: (0, "", ""),
+    )
+    plan = {
+        "identity": "anchor-child", "scope_id": scope, "workspace": "/canonical/child",
+        "venue": {"kind": "ssh", "target": "host"},
+    }
+    monkeypatch.setattr("venue_copilot.detached._bridge_path_ok", lambda *a: True)
+    monkeypatch.setattr("venue_copilot.release_cli_mode", lambda *a, **kw: pytest.fail("must retain ownership"))
+    def replace():
+        copilot_delivery.record("host", scope, None)
+        copilot_delivery.record("host", scope, newer)
+    def reconcile(original):
+        if phase == "reconcile":
+            replace()
+        return owned_result(
+            True, session_id=original["session_id"], operation=original["operation"],
+            note=original["envelope"]["prompt"], context=original["envelope"]["plugin_context"],
+        )
+    def settle(*a):
+        assert phase == "settle"
+        replace()
+        return True
+    monkeypatch.setattr(copilot_delivery, "reconcile_owned_delivery", reconcile)
+    monkeypatch.setattr(copilot_delivery, "settle_deferred_seed", settle)
+    with pytest.raises(RuntimeError, match="ownership changed"):
+        copilot_delivery.recover(adapter, plan, pending)
+    assert adapter.pending_delivery
+    assert copilot_delivery.read("host", scope) == newer
+    assert pending == _pending()
+
+
+def test_stale_recovery_does_not_resurrect_a_cleared_delivery(tmp_path, monkeypatch):
+    monkeypatch.setattr(copilot_detach, "_STORE", copilot_detach.KeeperStore(tmp_path))
+    pending = _pending()
+    copilot_delivery.record("host", pending["scope_id"], pending)
+    copilot_delivery.record("host", pending["scope_id"], None)
+    with pytest.raises(RuntimeError, match="ownership changed"):
+        copilot_delivery.record("host", pending["scope_id"], pending, expected=pending)
+    assert copilot_delivery.read("host", pending["scope_id"]) is None
+
+
+def test_pending_retry_checks_repository_before_recovery(tmp_path, monkeypatch):
+    monkeypatch.setattr(copilot_detach, "_STORE", copilot_detach.KeeperStore(tmp_path))
+    pending = _pending()
+    copilot_delivery.record("host", pending["scope_id"], pending)
+    args = SimpleNamespace(
+        target="host", workspace="/configured/child", expected_repository="example/project",
+    )
+    adapter = SimpleNamespace(
+        target="host", hold_id=pending["scope_id"], plugin_args=args,
+        run=lambda *a, **kw: pytest.fail("repository mismatch must refuse before native resolution"),
+    )
+    monkeypatch.setattr(copilot_plugins, "probe_checkout", lambda *a: {
+        "cwd": "/canonical/child", "root": "/canonical/child", "repository": "other/project",
+    })
+    monkeypatch.setattr(copilot_delivery, "recover", lambda *a: pytest.fail("must not retry original seed"))
+    plan = {
+        "identity": "anchor-child", "scope_id": pending["scope_id"], "workspace": args.workspace,
+        "venue": {"kind": "ssh", "target": "host"},
+    }
+    with pytest.raises(RuntimeError, match="repository changed"):
+        copilot_detach._launch(args, adapter, plan, seed="fresh task")
+    assert copilot_delivery.read("host", pending["scope_id"]) == pending
+
+
 def test_changed_native_identity_does_not_fall_back_to_fresh_session(tmp_path, monkeypatch):
     monkeypatch.setattr(copilot_detach, "_STORE", copilot_detach.KeeperStore(tmp_path))
     copilot_delivery.record("host", "anchor-child@host", _pending())
@@ -304,10 +379,55 @@ def test_changed_native_identity_does_not_fall_back_to_fresh_session(tmp_path, m
 def test_corrupt_delivery_journal_refuses_fresh_launch(tmp_path, monkeypatch):
     monkeypatch.setattr(copilot_detach, "_STORE", copilot_detach.KeeperStore(tmp_path))
     store = copilot_delivery._store()
-    store.state_dir.mkdir(parents=True)
+    store.state_dir.mkdir(parents=True, exist_ok=True)
     store.state_path("host").write_text("not JSON")
     with pytest.raises(RuntimeError, match="unreadable"):
         copilot_delivery.read("host", "scope")
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Requires real POSIX directory permissions")
+@pytest.mark.parametrize("existing", [False, True])
+def test_delivery_journal_is_private_before_access_under_permissive_umask(tmp_path, monkeypatch, existing):
+    import stat
+
+    monkeypatch.setattr(copilot_detach, "_STORE", copilot_detach.KeeperStore(tmp_path))
+    directory = tmp_path / "pending-deliveries"
+    if existing:
+        directory.mkdir(mode=0o755)
+        directory.chmod(0o755)
+        (directory / "host.json").write_text(json.dumps({
+            "version": 1, "pending_deliveries": {"anchor-child@host": _pending()},
+        }))
+    original = copilot_detach.KeeperStore.read
+    def read(store, key):
+        assert stat.S_IMODE(directory.stat().st_mode) == 0o700
+        return original(store, key)
+    monkeypatch.setattr(copilot_detach.KeeperStore, "read", read)
+    before = os.umask(0o022)
+    try:
+        copilot_delivery.record("host", "anchor-child@host", _pending())
+        assert copilot_delivery.read("host", "anchor-child@host") == _pending()
+        assert stat.S_IMODE(directory.stat().st_mode) == 0o700
+    finally:
+        os.umask(before)
+
+
+def test_retirement_preserves_newer_operation_and_other_scopes(tmp_path, monkeypatch):
+    monkeypatch.setattr(copilot_detach, "_STORE", copilot_detach.KeeperStore(tmp_path))
+    pending = _pending()
+    plan = {"scope_id": pending["scope_id"], "mux_session": "wt-child", "workspace": "/canonical/child"}
+    newer = _pending(operation="new-operation", note="new seed")
+    copilot_delivery.record("host", pending["scope_id"], newer)
+    with pytest.raises(RuntimeError, match="ownership changed"):
+        copilot_delivery.retire_stopped("host", plan, pending)
+    assert copilot_delivery.read("host", pending["scope_id"]) == newer
+    copilot_delivery.record("host", "another-scope", {"operation": "unrelated"})
+    copilot_delivery.retire_stopped("host", plan, newer)
+    assert copilot_delivery.read("host", pending["scope_id"]) is None
+    assert copilot_delivery.read("host", "another-scope") == {"operation": "unrelated"}
+    archived = list((copilot_delivery._store().state_dir / "retired").glob("*.json"))
+    assert len(archived) == 1
+    assert json.loads(archived[0].read_text())["delivery"] == newer
 
 
 @pytest.mark.parametrize("matching", [False, True])

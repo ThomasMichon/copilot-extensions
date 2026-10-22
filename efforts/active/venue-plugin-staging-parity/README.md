@@ -398,6 +398,34 @@ or a reason to create a daemon.
   Synchronized the sole remaining checked-in `plugin-resolve` consumer copy
   from the verified canonical extraction; the library-copy, headless and
   publication-closure guards now pass locally.
+- Addressing #7920's five blocking review findings before another review:
+  harden even existing POSIX delivery directories before access; archive the
+  exact unknown operation only after verified stop; match machine-only
+  related entries through full registered remotes; retain the attached PID
+  handoff's new timestamp; and keep the real launcher hold alive beyond the
+  mux startup grace during preparation. The post-launch transfer runs after
+  native creation is recorded so transfer failure still cleans up that
+  session. Original-operation evidence, concurrent ownership guards and
+  unrelated holds remain intact.
+- Focused SSH validation passes 77 with three explicit POSIX-only skips on
+  Windows, including real refresh/release, clock-controlled preparation past
+  300 seconds, stop failure retention and unknown-stop-fresh-launch.
+  CodeSpace and container detached consumers pass 123 and 62 respectively;
+  the optional shared handoff does not change their existing lifecycle.
+  POSIX mode assertions must run on Linux CI; no Windows permission result is
+  presented as POSIX proof. No native inference, elevation or installed
+  rollout was used. Current-head review and required CI still gate merge.
+- A further current-head review added concurrent recovery and pre-recovery
+  repository fencing findings (plus a duplicate of the long-preparation hold).
+  Recovery now conditionally writes and clears the exact original journal
+  entry under lock, preserving a newer operation or an already-cleared entry;
+  deterministic interleavings cover both update and clear. The checkout probe
+  checks the full expected coordinate before native resolution or recovery,
+  retaining the later preparation fence. The complete SSH suite passed 658
+  with 125 explicit skips before these final two fixes; their changed files
+  pass the 77-case focused rerun. Bridge guards pass 351 with eight skips,
+  dispatch/real-selector tests pass 57, and both contracts with all 456 frozen
+  fixtures still pass without packet, provenance or protocol-floor changes.
 
 ### 2026-10-22 - Land privileged receiver source and continue the parent
 

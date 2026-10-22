@@ -148,6 +148,9 @@ def _registry(arguments) -> dict | None:
 def resolve_launch(adapter, plan: dict) -> None:
     """Resolve the existing anchor owner before reserving or preparing it."""
     proof = probe_checkout(adapter, plan["workspace"])
+    expected = getattr(getattr(adapter, "plugin_args", None), "expected_repository", None)
+    if expected is not None and not _repository_equal(expected, proof["repository"]):
+        raise RuntimeError("SSH execution repository changed after controller plugin selection")
     rc, output, error = adapter.run(
         f"cd {shlex.quote(proof['cwd'])} && agent-worktrees embody --anchor --dry-run --json",
         timeout=90,

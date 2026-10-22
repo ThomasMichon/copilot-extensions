@@ -40,6 +40,66 @@ def _ns(**kw):
 
 
 class TestCmdCreateCliDispatch:
+    def test_ssh_ambiguous_registered_remote_refuses_before_native_launch(self, monkeypatch, tmp_path):
+        from types import SimpleNamespace
+        from agent_bridge import related_plugins
+
+        registry = tmp_path / "repos.yaml"
+        registry.write_text(
+            "repos:\n  first: {remote: 'https://github.com/example/project.git'}\n"
+            "  second: {remote: 'git@github.com:example/project.git'}\n",
+        )
+        monkeypatch.setattr(related_plugins, "_REPOS_YAML", registry)
+        monkeypatch.setattr(related_plugins, "control_plane_anchors", lambda: [tmp_path])
+        monkeypatch.setattr(targeting.shutil, "which", lambda name: f"/bin/{name}")
+        calls = []
+        def run(argv, **kwargs):
+            calls.append(argv)
+            return SimpleNamespace(returncode=0, stdout="example/project")
+        monkeypatch.setattr(targeting.subprocess, "run", run)
+        with pytest.raises(RuntimeError, match="multiple registered projects"):
+            targeting._cmd_create_cli("ssh:host", None, None)
+        assert len(calls) == 1 and calls[0][1] == "namespace-target-repo"
+
+    @pytest.mark.parametrize("detach", [False, True])
+    @pytest.mark.parametrize("remote", [
+        "git@github.com:Example/Project.git", "https://github.com/example/project.git",
+        "https://github.com/other/project.git",
+    ])
+    def test_ssh_git_remote_selects_machine_only_registered_project(
+        self, monkeypatch, tmp_path, detach, remote,
+    ):
+        from types import SimpleNamespace
+        from agent_bridge import related_plugins
+
+        registry = tmp_path / "repos.yaml"
+        registry.write_text(f"repos:\n  unique-project-key:\n    remote: {remote}\n")
+        monkeypatch.setattr(related_plugins, "_REPOS_YAML", registry)
+        related = tmp_path / ".agent-worktrees"
+        related.mkdir()
+        (related / "related.yaml").write_text(
+            "related:\n  unique-project-key:\n"
+            "    locus: {preferred: local, machines: [dev6]}\n"
+            "    plugins:\n      - only@mkt\n      - {source: disabled@mkt, enable: false}\n"
+            "  project:\n    locus: {machines: [dev6]}\n    plugins: [wrong@mkt]\n",
+        )
+        monkeypatch.setattr(related_plugins, "control_plane_anchors", lambda: [tmp_path])
+        monkeypatch.setattr(targeting.shutil, "which", lambda name: f"/bin/{name}")
+        calls = []
+        def run(argv, **kwargs):
+            calls.append(argv)
+            return SimpleNamespace(returncode=0, stdout="example/project")
+        monkeypatch.setattr(targeting.subprocess, "run", run)
+        with pytest.raises(SystemExit) as result:
+            targeting._cmd_create_cli("ssh:host", None, None, detach=detach)
+        assert result.value.code == 0
+        launch = calls[1]
+        assert launch[3:5] == ["--expected-repository", "example/project"]
+        assert ("--stage-plugin" in launch) is ("other/project" not in remote)
+        if "other/project" not in remote:
+            assert launch[5:9] == ["--stage-plugin", "only@mkt", "--stage-plugin-disabled", "disabled@mkt"]
+        assert "wrong@mkt" not in launch
+
     @pytest.mark.parametrize("prefix", ["codespace", "container", "ssh"])
     @pytest.mark.parametrize("detach", [False, True])
     def test_related_enablement_reaches_native_provider(self, monkeypatch, prefix, detach):
@@ -51,7 +111,7 @@ class TestCmdCreateCliDispatch:
         monkeypatch.setattr("agent_bridge.related_plugins.control_plane_anchors", lambda: ["/controller"])
         monkeypatch.setattr(
             "agent_bridge.related_plugins.related_plugins_for_repo",
-            lambda repo, anchors=None: [
+            lambda repo, anchors=None, **kw: [
                 PluginRef("disabled@synthetic", enable=False), PluginRef("enabled@synthetic"),
             ],
         )

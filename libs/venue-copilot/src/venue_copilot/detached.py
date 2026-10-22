@@ -317,6 +317,9 @@ def launch_detached(
         if actual_mux and actual_mux != plan["mux_session"]:
             plan["mux_session"] = actual_mux
             plan["venue"]["mux_session_name"] = actual_mux
+        handoff_keeper = getattr(adapter, "handoff_keeper", None)
+        if handoff_keeper is not None:
+            handoff_keeper(plan)
         creation_receipt = None
         operation = reservation["reservation_id"]
         if owned:

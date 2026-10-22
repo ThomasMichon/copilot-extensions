@@ -16,6 +16,7 @@ from ssh_manager import keeper_holds as shared_keeper_holds
 from venue_copilot import detached as venue_detached
 
 from agent_ssh import copilot_detach as detach
+from agent_ssh.copilot_detach import ensure_keeper as real_ensure_keeper, stop_keeper as real_stop_keeper
 from agent_ssh.__main__ import main
 
 
@@ -174,6 +175,38 @@ def test_unknown_seed_admission_retains_session_keeper_and_journal(seams, monkey
     assert pending["status"] == "unknown"
     assert pending["envelope"]["prompt"] == "do the task"
     assert pending["requested_workspace"] == "/workspaces/repo"
+
+
+@pytest.mark.parametrize("stopped", [False, True])
+def test_unknown_delivery_verified_stop_retires_evidence_and_allows_fresh_launch(
+    seams, monkeypatch, stopped,
+):
+    from agent_ssh import copilot_delivery
+
+    monkeypatch.setattr("venue_copilot.refs.deliver_note", lambda *a, **kw: False)
+    assert detach.cmd_detach(_args()) == 75
+    pending = copilot_delivery.read("devbox", "anchor-repo@devbox")
+    remote = detach._remote
+    def stop(_cfg, command, **kwargs):
+        if "tmux kill-session" in command and not stopped:
+            return 3, "STILL_RUNNING", ""
+        return remote(_cfg, command, **kwargs)
+    monkeypatch.setattr(detach, "_remote", stop)
+    assert detach.cmd_stop(_args(stop=True, detach=False)) == (0 if stopped else 1)
+    current = copilot_delivery.read("devbox", "anchor-repo@devbox")
+    archives = list((copilot_delivery._store().state_dir / "retired").glob("*.json"))
+    if not stopped:
+        assert current == pending and archives == []
+        assert seams.release == [] and seams.stop_keeper == [] and seams.deregister == []
+        return
+    assert current is None and len(archives) == 1
+    assert json.loads(archives[0].read_text()) == {
+        "version": 1, "status": "verified_stopped", "target": "devbox", "delivery": pending,
+    }
+    monkeypatch.setattr("venue_copilot.refs.deliver_note", lambda *a, **kw: True)
+    assert detach.cmd_detach(_args(seed="fresh task")) == 0
+    assert len(seams.reserve) == 2
+    assert json.loads(archives[0].read_text())["delivery"] == pending
 
 
 def test_legacy_worktrees_receipt_refuses_unproven_typed_seed(seams, monkeypatch):
@@ -455,6 +488,74 @@ def test_stale_launch_cleanup_does_not_remove_refreshed_keeper_hold(
     assert "anchor-repo@devbox" in state["holds"]
     assert detach._STORE.alive(detach._state_key("devbox")) is True
 
+
+@pytest.fixture
+def real_keeper(seams, monkeypatch):
+    store = detach._STORE
+    monkeypatch.setattr(detach, "ensure_keeper", real_ensure_keeper)
+    monkeypatch.setattr(detach, "stop_keeper", real_stop_keeper)
+    monkeypatch.setattr(detach, "read_keeper_state", lambda target: store.read(target))
+    monkeypatch.setattr(store, "alive", lambda key: store.read(key) is not None)
+    monkeypatch.setattr(store, "stop", lambda key: store.remove(key) or False)
+    monkeypatch.setattr(detach, "process_identity", lambda pid: f"synthetic-{pid}")
+    monkeypatch.setattr(detach, "spawn_keeper", lambda _argv, _env, state, **_kw: {
+        **state, "pid": 99999, "pid_identity": "synthetic-99999",
+    })
+    return store
+
+
+def test_attached_pid_handoff_releases_with_refreshed_timestamp(real_keeper, monkeypatch):
+    stamps = itertools.count(1000.0)
+    monkeypatch.setattr(shared_keeper_holds.time, "time", lambda: next(stamps))
+    monkeypatch.setattr(detach, "_mux_exists", lambda *a: True)
+    monkeypatch.setattr(detach, "_ssh_config", lambda target: types.SimpleNamespace(
+        config_file=None, port=None, identity_file=None, extra_options={}, ssh_target=target,
+    ))
+    seen = {}
+    class Child:
+        pid = 12345
+        def wait(self):
+            state = real_keeper.read("devbox")
+            hold_id, hold = next(iter(state["holds"].items()))
+            seen["hold_id"] = hold_id
+            assert hold["mux"] == detach._attached_hold_mux(self.pid)
+            seen["timestamp"] = hold["updated_at"]
+            return 0
+    monkeypatch.setattr(detach.subprocess, "Popen", lambda *a, **kw: Child())
+    assert detach.cmd_attached(_args(detach=False, copilot_args=[])) == 0
+    assert seen["timestamp"] > 1000.0
+    state = real_keeper.read("devbox")
+    assert state is None or seen["hold_id"] not in state["holds"]
+
+
+def test_launcher_hold_survives_preparation_beyond_mux_startup_grace(real_keeper, monkeypatch):
+    clock = [1000.0]
+    monkeypatch.setattr(shared_keeper_holds.time, "time", lambda: clock[0])
+    monkeypatch.setattr(detach, "_mux_exists", lambda *a: False)
+    def prepare(*a):
+        clock[0] += 400.0  # No mux exists; the real launcher process is still alive.
+        _state, holds, _live = detach._holds().prune_snapshot(
+            "devbox", probe=lambda mux: detach._probe_hold(object(), mux),
+        )
+        hold = holds["anchor-repo@devbox"]
+        assert hold["mux"] == detach._attached_hold_mux(os.getpid())
+        assert real_keeper.alive("devbox")
+        return {"version": 1, "cwd": "/workspaces/repo", "plugins": [], "logical_payloads": {}}
+    monkeypatch.setattr("agent_ssh.copilot_plugins.prepare", prepare)
+    assert detach.cmd_detach(_args()) == 0
+    state = real_keeper.read("devbox")
+    assert state["holds"]["anchor-repo@devbox"]["mux"] == "wt-anchor-repo"
+    assert state["holds"]["anchor-repo@devbox"]["updated_at"] == 1400.0
+
+
+def test_failed_keeper_handoff_cleans_up_native_session(seams, monkeypatch):
+    def fail(*a):
+        raise RuntimeError("keeper handoff failed")
+    monkeypatch.setattr(detach._SshAdapter, "handoff_keeper", fail)
+    assert detach.cmd_detach(_args()) == 1
+    assert any("tmux kill-session" in command for command in seams.remote)
+    assert seams.stop_keeper == [("devbox", "anchor-repo@devbox")]
+    assert seams.release == [("anchor-repo@devbox", "r1")]
 
 def test_stop_uses_detached_hold_mux_when_attached_hold_is_aggregate_mux(
     tmp_path: Path, monkeypatch, capsys,

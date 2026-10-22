@@ -370,17 +370,26 @@ def _probe_hold(ssh_config: Any, mux: str) -> bool | None:
     return _mux_exists(ssh_config, mux)
 
 
-def _update_keeper_hold_pid(target: str, hold_id: str, pid: int) -> None:
-    if read_keeper_state(target) is None:
-        return
+def _update_keeper_hold_mux(
+    target: str, hold_id: str, mux: str, *, expected_updated_at: float | None = None,
+) -> float | None:
     holds_store = _holds()
     with holds_store.lock(_state_key(target)):
         state = read_keeper_state(target)
         holds = holds_store.read_holds(state)
         if not state or hold_id not in holds:
+            if expected_updated_at is not None:
+                raise RuntimeError("SSH launch keeper hold disappeared before handoff")
             return
-        holds = holds_store.refresh_hold(holds, hold_id, _attached_hold_mux(pid), confirmed=True)
+        if expected_updated_at is not None and holds[hold_id]["updated_at"] != expected_updated_at:
+            raise RuntimeError("SSH launch keeper hold changed before handoff")
+        holds = holds_store.refresh_hold(holds, hold_id, mux, confirmed=True)
         _STORE.write(_state_key(target), holds_store.state_with_holds(state, holds))
+        return float(holds[hold_id]["updated_at"])
+
+
+def _update_keeper_hold_pid(target: str, hold_id: str, pid: int) -> float | None:
+    return _update_keeper_hold_mux(target, hold_id, _attached_hold_mux(pid))
 
 
 def _keeper_token_matches(current: dict[str, Any] | None, token: str | None) -> bool:
@@ -501,6 +510,7 @@ class _SshAdapter:
         self.pending_delivery = False
         self.keeper_hold_acquired = False
         self._hold_updated_at: float | None = None
+        self._launch_pending = False
 
     def prepare(self, plan: dict) -> dict:
         from .copilot_plugins import prepare
@@ -519,6 +529,13 @@ class _SshAdapter:
     def launch(self, command: str, *, timeout: float) -> tuple[int, str, str]:
         return self.run(command, timeout=timeout)
 
+    def handoff_keeper(self, plan: dict) -> None:
+        self._hold_updated_at = _update_keeper_hold_mux(
+            self.target, self.hold_id, plan["mux_session"],
+            expected_updated_at=self._hold_updated_at,
+        )
+        self._launch_pending = False
+
     def run_input(self, command: str, stdin: bytes, *, timeout: float) -> tuple[int, str, str]:
         return _remote_input(self.ssh_config, _bash(command), stdin, timeout=timeout)
 
@@ -528,6 +545,7 @@ class _SshAdapter:
             venue_port=venue_port,
             mux=mux,
             hold_id=self.hold_id,
+            hold_pid=os.getpid() if self._launch_pending else None,
             probe=lambda held_mux: _probe_hold(self.ssh_config, held_mux),
         )
         raw_updated = result.get("hold_updated_at")
@@ -570,6 +588,7 @@ def _launch(args, adapter, plan, *, seed, refs=None):
         adapter.pending_delivery = True
         return copilot_delivery.recover(adapter, plan, pending)
     plan["bridge_owned_seed"] = True
+    adapter._launch_pending = True
     return launch_detached(
         adapter, plan, seed=seed, driver=args.driver,
         copilot_args=(
@@ -615,6 +634,7 @@ def cmd_detach(args: argparse.Namespace) -> int:
 
 def cmd_stop(args: argparse.Namespace) -> int:
     from venue_copilot import live_session_for
+    from . import copilot_delivery
 
     if getattr(args, "ttl_seconds", None) is not None:
         print("[FAIL] --ttl-seconds applies only to attached mode, not --stop", file=sys.stderr)
@@ -633,12 +653,30 @@ def cmd_stop(args: argparse.Namespace) -> int:
     if held_mux:
         plan["mux_session"] = held_mux
         plan["venue"]["mux_session_name"] = plan["mux_session"]
+    try:
+        pending = copilot_delivery.read(
+            args.target, plan["scope_id"], requested_workspace=args.workspace,
+            execution_workspace=plan["workspace"],
+        )
+        if pending is not None and (
+            pending.get("scope_id") != plan["scope_id"]
+            or pending.get("mux_session") != plan["mux_session"]
+            or pending.get("envelope", {}).get("plugin_context", {}).get("cwd") != plan["workspace"]
+        ):
+            raise RuntimeError("Pending SSH delivery does not match the native stop target")
+    except (OSError, ValueError, RuntimeError) as exc:
+        return _fail(str(exc), plan)
     row = live_session_for(plan["scope_id"])
     rc, payload = stop_detached(
         _SshAdapter(target=args.target, ssh_config=ssh_config, hold_id=plan["scope_id"]),
         plan,
         session_row=row,
     )
+    if rc == 0 and pending is not None:
+        try:
+            copilot_delivery.retire_stopped(args.target, plan, pending)
+        except (OSError, ValueError, RuntimeError) as exc:
+            return _fail(f"Native session stopped but delivery journal retirement failed: {exc}", plan)
     return _emit(rc, payload)
 
 
@@ -678,7 +716,7 @@ def cmd_attached(args: argparse.Namespace) -> int:
             creationflags=no_window_flags(),
         )
         try:
-            _update_keeper_hold_pid(args.target, adapter.hold_id, proc.pid)
+            adapter._hold_updated_at = _update_keeper_hold_pid(args.target, adapter.hold_id, proc.pid)
         except BaseException:
             _reap_child(proc)
             raise

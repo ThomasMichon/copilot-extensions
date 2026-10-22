@@ -45,6 +45,11 @@ the only thing each provider's own `copilot` command has to own.
   reloaded the conversation in a new extension process, which the bridge can't
   link to the placeholder), reserves again with the same venue so the resumed
   session claims it -- keeping its CLI mode, venue and `supervisor_ref`.
+- Detached adapters may implement `handoff_keeper(plan)` to transfer a live
+  launcher hold to the resolved native mux after successful launch. It runs
+  after the runner records native creation and the actual mux, so a failed
+  handoff follows normal created-session cleanup. Adapters without it keep
+  their existing lifecycle.
 
 ## Vendoring
 

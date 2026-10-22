@@ -494,9 +494,9 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/session_targeting_cli.py",
-          "sha256": "9aeaafbc754a1c69ee0c30c5f6ba2e6e4b521cc5b90a974847d6205e267bbbd8",
+          "sha256": "c126b56d2a1e431c0a66609008a1fd95bda5cafa2207d9eacd32cf12e0d15194",
           "semantic": false,
-          "non_semantic_reason": "CLI-mode SSH dispatch now forwards repository-fenced related plugin selections to the existing agent-ssh owner and refuses its unsupported explicit worktree selector. HTTP request/response fields, keyed admission packets, readiness controls and protocol floors are unchanged; CLI dispatch and shared receiver tests cover the new process-boundary behavior without recapturing HTTP fixtures."
+          "non_semantic_reason": "CLI-mode SSH dispatch now forwards repository-fenced related plugin selections to the existing agent-ssh owner and refuses its unsupported explicit worktree selector. Verified remotes also match machine-only related entries through the authoritative registered project, never an ambiguous basename. HTTP request/response fields, keyed admission packets, readiness controls and protocol floors are unchanged; CLI dispatch and shared receiver tests cover the new process-boundary behavior without recapturing HTTP fixtures."
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/workspace_creation_cli.py",

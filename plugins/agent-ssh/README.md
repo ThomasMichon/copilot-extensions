@@ -102,12 +102,27 @@ work. Keeper replacement does not discard that journal. Older owners without
 the receipt and installed-only payloads without native marketplace origins
 fail explicitly, without an ACP fallback or plugin reload.
 
+On POSIX, the delivery directory is made owner-only before every journal
+access, including existing directories. A verified `--stop` archives the exact
+pending operation under its private `retired` directory before removing its
+active entry; failed stop or changed ownership retains the journal. A later
+launch can start fresh without losing the stopped operation's evidence.
+Recovery updates and clears compare the complete original entry under the
+journal lock, so a concurrent retry cannot overwrite or erase a newer operation.
+The full expected-repository fence runs before recovery as well as preparation.
+The forward stays tied to the live launcher throughout preparation, then
+transfers to mux liveness; an attached client subsequently transfers its hold
+to that client's PID and releases the refreshed hold when attach exits.
+
 `namespace-target-repo <ssh-target>` is the read-only query Bridge uses to
 select related plugins from the actual remote workspace's Git origin; it does
 not infer a repository from the SSH alias. Bridge forwards that selection and
 the controller's current checkout before its fallback roots, and fences the
 launch against a changed repository. SSH CLI remains anchor-only:
 `--worktree-id` is not silently redirected to an anchor.
+Machine-only related entries are matched through the registered project's
+full Git remote, never a basename guess; the full remote coordinate still
+fences launch, and ambiguous project mappings are refused.
 
 `restore-host` exposes transport-owned host setup to declarative orchestrators
 without requiring them to know installed payload paths:

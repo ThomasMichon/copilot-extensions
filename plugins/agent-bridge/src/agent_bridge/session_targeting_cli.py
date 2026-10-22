@@ -701,7 +701,10 @@ def _cmd_create_cli(
             ).stdout.strip()
             if prefix == "ssh" and repository:
                 argv += ["--expected-repository", repository]
-            for plugin in related_plugins_for_repo(repository, anchors=roots) if repository else []:
+            for plugin in related_plugins_for_repo(
+                repository, anchors=roots,
+                **({"match_registered_remote": True} if prefix == "ssh" else {}),
+            ) if repository else []:
                 argv += selection_cli_args({"source": plugin.source, "enable": plugin.enable})
             for root in roots:
                 argv += ["--plugin-root", str(root)]

@@ -170,8 +170,37 @@ def _parse_plugin_items(raw: object) -> list[PluginRef]:
     return list(seen.values())
 
 
+def _registered_project(repository: str) -> str | None:
+    from plugin_activation import normalize_remote
+
+    def identity(remote: str) -> str:
+        if remote.startswith("network:"):
+            key = remote
+        else:
+            if "://" not in remote and ":" not in remote and remote.count("/") == 1:
+                remote = f"https://github.com/{remote}"
+            key = normalize_remote(remote) or ""
+        return key.casefold() if key.startswith("network:github.com/") else key
+
+    target = identity(repository)
+    if not target.startswith("network:"):
+        return None
+    data = _load_yaml(_REPOS_YAML) or {}
+    entries = data.get("repos", data)
+    if not isinstance(entries, dict):
+        raise RuntimeError("Repository registry returned invalid project entries")
+    matches = [
+        name for name, entry in entries.items()
+        if isinstance(name, str) and isinstance(entry, dict)
+        and isinstance(entry.get("remote"), str) and identity(entry["remote"]) == target
+    ]
+    if len(matches) > 1:
+        raise RuntimeError("SSH repository maps to multiple registered projects")
+    return matches[0] if matches else None
+
+
 def related_plugins_for_repo(
-    repo: str | None, anchors: list[Path] | None = None
+    repo: str | None, anchors: list[Path] | None = None, *, match_registered_remote: bool = False,
 ) -> list[PluginRef]:
     """Related-repo plugins the control plane side-loads for ``repo``.
 
@@ -184,11 +213,14 @@ def related_plugins_for_repo(
     entry's own registry key -- the project name itself, which is what a
     local/SSH static target's ``repo`` actually is. The first matching
     entry's ``plugins`` are returned. Fail-safe: unknown repo / missing files
-    -> ``[]``.
+    -> ``[]``. SSH CLI may additionally match a verified Git remote to its
+    authoritative registered project key; an ambiguous mapping is refused.
     """
     if not repo:
         return []
     target = repo.strip().lower()
+    project = _registered_project(repo.strip()) if match_registered_remote else None
+    targets = {target, *([project.lower()] if project else [])}
     for anchor in (anchors if anchors is not None else control_plane_anchors()):
         data = _load_yaml(anchor / _RELATED_REL)
         if not data:
@@ -205,7 +237,7 @@ def related_plugins_for_repo(
             # could create an unintended match, e.g. a repo literally named
             # "42" matching an int key 42) while still avoiding the .lower()
             # crash that would otherwise drop every later entry's plugins.
-            if isinstance(key, str) and key.lower() == target:
+            if isinstance(key, str) and key.lower() in targets:
                 return _parse_plugin_items(entry.get("plugins"))
             if any(r.lower() == target for r in _entry_repos(entry)):
                 return _parse_plugin_items(entry.get("plugins"))

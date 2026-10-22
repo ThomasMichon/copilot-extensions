@@ -2,13 +2,22 @@
 
 from __future__ import annotations
 
+import hashlib
+import os
+
 from ssh_manager.forward_keeper import KeeperStore
 from venue_copilot.refs import reconcile_owned_delivery, settle_deferred_seed
 
 
 def _store():
     from .copilot_detach import _STORE
-    return KeeperStore(_STORE.state_dir / "pending-deliveries")
+    directory = _STORE.state_dir / "pending-deliveries"
+    if directory.is_symlink():
+        raise RuntimeError("SSH delivery journal directory must not be a symlink")
+    directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+    if os.name != "nt":
+        directory.chmod(0o700)
+    return KeeperStore(directory)
 
 
 def read(
@@ -42,10 +51,14 @@ def read(
     return pending
 
 
-def record(target: str, scope: str, pending: dict | None) -> None:
+def record(
+    target: str, scope: str, pending: dict | None, *, expected: dict | None = None,
+) -> None:
     from .copilot_detach import _holds
     with _holds().lock(target):
-        read(target, scope)
+        current = read(target, scope)
+        if expected is not None and current != expected:
+            raise RuntimeError("Pending SSH delivery ownership changed; journal retained")
         data = _store().read(target) or {"version": 1, "pending_deliveries": {}}
         ledger = dict(data["pending_deliveries"])
         if pending is None:
@@ -56,6 +69,41 @@ def record(target: str, scope: str, pending: dict | None) -> None:
             _store().write(target, {**data, "pending_deliveries": ledger})
         else:
             _store().remove(target)
+
+
+def retire_stopped(target: str, plan: dict, pending: dict) -> None:
+    """Archive only the captured operation after its exact native mux was stopped."""
+    from .copilot_detach import _holds
+
+    scope = plan["scope_id"]
+    with _holds().lock(target):
+        current = read(target, scope)
+        if (
+            current != pending or pending.get("scope_id") != scope
+            or pending.get("mux_session") != plan["mux_session"]
+            or pending.get("envelope", {}).get("plugin_context", {}).get("cwd") != plan["workspace"]
+        ):
+            raise RuntimeError("Stopped SSH delivery ownership changed; journal retained")
+        directory = _store().state_dir / "retired"
+        directory.mkdir(mode=0o700, exist_ok=True)
+        if directory.is_symlink():
+            raise RuntimeError("Retired SSH delivery directory must not be a symlink")
+        if os.name != "nt":
+            directory.chmod(0o700)
+        key = hashlib.sha256(
+            f"{target}\0{scope}\0{pending['operation']}".encode("utf-8"),
+        ).hexdigest()
+        KeeperStore(directory).write(key, {
+            "version": 1, "status": "verified_stopped", "target": target, "delivery": pending,
+        })
+        store = _store()
+        data = store.read(target)
+        ledger = dict(data["pending_deliveries"])
+        del ledger[scope]
+        if ledger:
+            store.write(target, {**data, "pending_deliveries": ledger})
+        else:
+            store.remove(target)
 
 
 def recover(adapter, plan, pending) -> tuple[int, dict]:
@@ -81,13 +129,13 @@ def recover(adapter, plan, pending) -> tuple[int, dict]:
     if not _bridge_path_ok(adapter, port):
         raise RuntimeError("The retained SSH session's bridge forward is unavailable")
     result = reconcile_owned_delivery(pending)
-    pending.update(result.recovery())
-    record(adapter.target, plan["scope_id"], pending)
+    updated = {**pending, **result.recovery()}
+    record(adapter.target, plan["scope_id"], updated, expected=pending)
     if result.status == "admitted" and settle_deferred_seed(
         lambda command, stdin: adapter.run_input(command, stdin, timeout=60),
         plan["identity"], plan["workspace"], pending.get("creation_receipt"),
     ):
-        record(adapter.target, plan["scope_id"], None)
+        record(adapter.target, plan["scope_id"], None, expected=updated)
         adapter.pending_delivery = False
         release_cli_mode(plan["scope_id"], reservation_id=pending.get("reservation_id"))
         return 0, {
