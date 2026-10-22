@@ -87,6 +87,49 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Admitted fixture-semantic batches
 
+### N-STAMP independently exercise both Windows stamp-copy hosts
+
+Baseline: the actual #7808 merge. Only
+`test_native_stamp_directory_copy_preserves_complete_tree` changes in
+`test_installer_powershell51.py`; all other original test functions are
+AST-identical. Current Dev already excludes nested bytecode in this
+fixture and already carries M6707's actual production
+`Copy-StampDirectory` exclusion. Neither is republished as new work.
+
+The remaining pinned contract independently parameterizes
+`powershell.exe` and `pwsh`, rather than silently selecting the first
+available host. Both actual hosts execute the same extracted current
+production copy function against a source path containing literal brackets,
+dot-prefixed nested data, an empty directory and metadata. Root and nested
+`__pycache__` directories contain bytecode inputs; exact destination
+membership excludes only those subtrees, and every retained file remains
+byte-identical. Current Dev's existing filtered-payload assertions and
+the original fifteen-second native deadline/headless flag are retained.
+No production installer, copier or external installer-owner work changes.
+
+Complete native Windows PowerShell-compatibility module: 56 passed and
+one unchanged native-POSIX-Bash skip, 52.96 seconds pytest / 65.19
+preparation-cleanup inclusive. Both stamp-copy hosts are available and
+both new parameter nodes pass. Exactly two work-stealing workers retain
+the original 30-second item watchdog, 240-second diagnostic group and
+every native/process/memory bound and mark. Ruff and thirteen install
+contracts pass. No new skip, exclusion, waiver or reduced selection.
+This is bounded functional evidence, not quiet-host, whole-suite,
+repeated same-head or final qualification.
+
+Documentation impact: this below-altitude test-only extraction changes
+no operator-facing command, installation or runtime/API. This ledger
+documents the independently exercised native-host contract. Real
+PowerShell copies into a fresh destination provide the simple
+end-to-end/fixture-first-touch check; that does not qualify production
+provisioning. Production clean-room and external-venue lanes are
+inapplicable. Other N and production S/F/G/P/R/A residuals remain open.
+
+Prior-slice disposition: #7808 actually merged as
+`21d6ca7e130e7aeddb5c06ae15f8b3e075580b46`.
+Its worktree was finalized, parent claim settled, and the owning source
+effort reread and journaled before this independent slice.
+
 ### N-HTTP-DEADLINE absolute expiry before connection and bounded fixture cleanup
 
 Baseline: the actual #7799 merge. Only
