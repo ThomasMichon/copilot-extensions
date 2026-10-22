@@ -24,7 +24,7 @@ class SpawnCompletionMixin:
                 row is None or task is None or task.status not in Status.CONCLUDED
                 or row["startup_revision"] != startup_revision
                 or row["state"] not in {SpawnState.SPAWNED, SpawnState.COLD}
-                or row["state"] == SpawnState.SPAWNED and not row["startup_complete"]
+                or not row["startup_complete"]
             ):
                 raise TaskError("terminal startup changed or remains incomplete")
             if not row["startup_fenced"]:

@@ -108,16 +108,25 @@ class QueueBackedClient:
 
     def record_spawn(self, key, *, session_handle=None, worktree=None, startup_complete=None,
                      startup_revision=None):
-        return asdict(self._q.record_spawn(
-            key, session_handle=session_handle, worktree=worktree,
-            startup_complete=startup_complete, startup_revision=startup_revision,
-        ))
+        try:
+            return asdict(self._q.record_spawn(
+                key, session_handle=session_handle, worktree=worktree,
+                startup_complete=startup_complete, startup_revision=startup_revision,
+            ))
+        except TaskError as exc:
+            raise DispatchError(409, str(exc)) from exc
 
     def fence_spawn_startup(self, key, *, startup_revision):
         try:
             return asdict(self._q.fence_spawn_startup(key, startup_revision=startup_revision))
         except TaskError as exc:
             raise DispatchError(409, str(exc)) from exc
+
+    def get_reservation(self, key):
+        reservation = self._q.get_reservation(key)
+        if reservation is None:
+            raise DispatchError(404, f"no such reservation: {key}")
+        return asdict(reservation)
 
     def record_spawn_worktree(self, key, worktree, **kwargs):
         return asdict(
@@ -193,8 +202,13 @@ class QueueBackedClient:
             )
         )
 
-    def record_cold(self, key, *, release_exclusive=False):
-        return asdict(self._q.record_cold(key, release_exclusive=release_exclusive))
+    def record_cold(self, key, *, release_exclusive=False, startup_revision=None):
+        try:
+            return asdict(self._q.record_cold(
+                key, release_exclusive=release_exclusive, startup_revision=startup_revision,
+            ))
+        except TaskError as exc:
+            raise DispatchError(409, str(exc)) from exc
 
     def settle_spawn(
         self,
@@ -376,8 +390,8 @@ class QueueBackedClient:
         expected_owner_session_id=None,
         expected_generation=None,
     ):
-        return asdict(
-            self._q.resume(
+        try:
+            return asdict(self._q.resume(
                 task_id,
                 worker_id,
                 wake_requested=wake,
@@ -388,8 +402,9 @@ class QueueBackedClient:
                 reuse_session=reuse_session,
                 expected_owner_session_id=expected_owner_session_id,
                 expected_generation=expected_generation,
-            )
-        )
+            ))
+        except TaskError as exc:
+            raise DispatchError(409, str(exc)) from exc
 
     def progress_log(self, task_id):
         return self._q.progress_log(task_id)
@@ -891,7 +906,7 @@ def test_suspended_local_headless_body_is_cooled(q, client):
     task = q.create("dormant review", labels=["review"])
     reservation, _ = q.reserve_spawn(task.id)
     q.record_spawn(
-        reservation.key, session_handle="local-body:bridge-session-1"
+        reservation.key, startup_complete=True, startup_revision=1, session_handle="local-body:bridge-session-1"
     )
     q.claim_one("headless-owner", task_id=task.id)
     q.start(task.id, "headless-owner")
@@ -917,7 +932,7 @@ def test_cli_suspensions_do_not_consume_headless_cooling_budget(q, client):
         task = q.create(f"cli dormant {index}", labels=["review"])
         reservation, _ = q.reserve_spawn(task.id)
         q.record_spawn(
-            reservation.key,
+            reservation.key, startup_complete=True, startup_revision=1,
             session_handle=f"cli-session-{index}",
             worktree=f"wt-{index}",
         )
@@ -927,7 +942,7 @@ def test_cli_suspensions_do_not_consume_headless_cooling_budget(q, client):
     headless = q.create("headless dormant", labels=["review"])
     reservation, _ = q.reserve_spawn(headless.id)
     q.record_spawn(
-        reservation.key, session_handle="local-body:headless-session"
+        reservation.key, startup_complete=True, startup_revision=1, session_handle="local-body:headless-session"
     )
     q.claim_one("headless-owner", task_id=headless.id)
     q.start(headless.id, "headless-owner")
@@ -950,7 +965,7 @@ def test_blocking_card_cools_body_and_frees_process_capacity(q, client):
     blocked = q.create("needs operator", labels=["review"])
     reservation, _ = q.reserve_spawn(blocked.id)
     q.record_spawn(
-        reservation.key, session_handle="local-body:blocked-session"
+        reservation.key, startup_complete=True, startup_revision=1, session_handle="local-body:blocked-session"
     )
     q.claim_one("headless-owner", task_id=blocked.id)
     q.start(blocked.id, "headless-owner")
@@ -982,7 +997,7 @@ def test_stopped_cold_body_does_not_consume_capacity_after_restart(q, client):
     blocked = q.create("waiting", labels=["review"])
     reservation, _ = q.reserve_spawn(blocked.id)
     q.record_spawn(
-        reservation.key,
+        reservation.key, startup_complete=True, startup_revision=1,
         session_handle="local-body:stopped-session",
     )
     q.claim_one("headless-owner", task_id=blocked.id)
@@ -1008,7 +1023,7 @@ def test_cold_steer_resumes_existing_acp_session(q, client):
     blocked = q.create("needs operator", labels=["review"])
     reservation, _ = q.reserve_spawn(blocked.id)
     q.record_spawn(
-        reservation.key, session_handle="local-body:blocked-session"
+        reservation.key, startup_complete=True, startup_revision=1, session_handle="local-body:blocked-session"
     )
     q.claim_one("headless-owner", task_id=blocked.id)
     q.start(blocked.id, "headless-owner")
@@ -1058,7 +1073,7 @@ def test_cold_resume_missing_worktree_preserves_identity_until_cleanup(
     )
     reservation, _ = q.reserve_spawn(blocked.id)
     q.record_spawn(
-        reservation.key,
+        reservation.key, startup_complete=True, startup_revision=1,
         session_handle="local-body:blocked-session",
         worktree="removed-review-worktree",
     )
@@ -1123,7 +1138,7 @@ def test_cold_resume_preserves_unknown_or_present_worktree(
     blocked = q.create("needs operator", labels=["review"])
     reservation, _ = q.reserve_spawn(blocked.id)
     q.record_spawn(
-        reservation.key, session_handle="local-body:blocked-session"
+        reservation.key, startup_complete=True, startup_revision=1, session_handle="local-body:blocked-session"
     )
     q.claim_one("headless-owner", task_id=blocked.id)
     q.start(blocked.id, "headless-owner")
@@ -1155,7 +1170,7 @@ def test_cold_resume_preserves_worktree_on_stat_error(q, client, monkeypatch):
     blocked = q.create("needs operator", labels=["review"])
     reservation, _ = q.reserve_spawn(blocked.id)
     q.record_spawn(
-        reservation.key, session_handle="local-body:blocked-session"
+        reservation.key, startup_complete=True, startup_revision=1, session_handle="local-body:blocked-session"
     )
     q.claim_one("headless-owner", task_id=blocked.id)
     q.start(blocked.id, "headless-owner")
@@ -1192,7 +1207,7 @@ def test_cold_resume_missing_worktree_release_failure_backs_off(
     blocked = q.create("needs operator", labels=["review"])
     reservation, _ = q.reserve_spawn(blocked.id)
     q.record_spawn(
-        reservation.key, session_handle="local-body:blocked-session"
+        reservation.key, startup_complete=True, startup_revision=1, session_handle="local-body:blocked-session"
     )
     q.claim_one("headless-owner", task_id=blocked.id)
     q.start(blocked.id, "headless-owner")
@@ -1251,7 +1266,7 @@ def test_recover_stranded_cold_reservation_releases_confirmed_gone_body(q, clien
     blocked = q.create("needs operator", labels=["review"])
     reservation, _ = q.reserve_spawn(blocked.id)
     q.record_spawn(
-        reservation.key, session_handle="local-body:blocked-session"
+        reservation.key, startup_complete=True, startup_revision=1, session_handle="local-body:blocked-session"
     )
     q.record_cold(reservation.key)
     assert q.get(blocked.id).status == Status.QUEUED
@@ -1281,7 +1296,7 @@ def test_recover_stranded_cold_reservation_ignores_unconfirmed_liveness(q, clien
     blocked = q.create("needs operator", labels=["review"])
     reservation, _ = q.reserve_spawn(blocked.id)
     q.record_spawn(
-        reservation.key, session_handle="local-body:blocked-session"
+        reservation.key, startup_complete=True, startup_revision=1, session_handle="local-body:blocked-session"
     )
     q.record_cold(reservation.key)
 
@@ -1305,7 +1320,7 @@ def test_recover_stranded_cold_reservation_ignores_still_suspended_tasks(q, clie
     blocked = q.create("needs operator", labels=["review"])
     reservation, _ = q.reserve_spawn(blocked.id)
     q.record_spawn(
-        reservation.key, session_handle="local-body:blocked-session"
+        reservation.key, startup_complete=True, startup_revision=1, session_handle="local-body:blocked-session"
     )
     q.claim_one("headless-owner", task_id=blocked.id)
     q.start(blocked.id, "headless-owner")
@@ -1329,7 +1344,7 @@ def test_recover_stranded_cold_reservation_ignores_terminal_tasks(q, client):
     blocked = q.create("needs operator", labels=["review"])
     reservation, _ = q.reserve_spawn(blocked.id)
     q.record_spawn(
-        reservation.key, session_handle="local-body:blocked-session"
+        reservation.key, startup_complete=True, startup_revision=1, session_handle="local-body:blocked-session"
     )
     q.record_cold(reservation.key)
     q.claim_one("headless-owner-2", task_id=blocked.id)
@@ -1378,7 +1393,7 @@ def test_recover_stranded_cold_reservation_never_counts_toward_dead_letter(
         ):
             reservation, _ = q.reserve_spawn(blocked.id)
         q.record_spawn(
-            reservation.key, session_handle=f"local-body:{reservation.key}"
+            reservation.key, startup_complete=True, startup_revision=1, session_handle=f"local-body:{reservation.key}"
         )
         q.record_cold(reservation.key)
         assert sup.recover_stranded_cold_reservations() == 1
@@ -1515,7 +1530,7 @@ def test_reconcile_settles_abandoned_cold_reservation(q, client):
     after liveness-cap exhaustion abandons its task."""
     t = q.create("work")
     stale_reservation, _ = q.reserve_spawn(t.id)
-    q.record_spawn(stale_reservation.key)
+    q.record_spawn(stale_reservation.key, startup_complete=True, startup_revision=1, session_handle="retained-session")
     q.record_cold(stale_reservation.key)
 
     q.abandon(t.id, permitted=True, reason="test")
@@ -1541,7 +1556,7 @@ def test_pool_reservations_transient_transport_error_does_not_abort_cycle(
     """
     blocked = q.create("needs operator", labels=["review"])
     reservation, _ = q.reserve_spawn(blocked.id)
-    q.record_spawn(reservation.key, session_handle="local-body:blocked-session")
+    q.record_spawn(reservation.key, startup_complete=True, startup_revision=1, session_handle="local-body:blocked-session")
     q.claim_one("headless-owner", task_id=blocked.id)
     q.start(blocked.id, "headless-owner")
     q.suspend(blocked.id, "headless-owner", reason="turn ended")
@@ -1636,7 +1651,7 @@ def test_release_requested_legacy_missing_worktree_recovers_from_held_conclusion
     blocked = q.create("needs operator", labels=["review"])
     reservation, _ = q.reserve_spawn(blocked.id)
     q.record_spawn(
-        reservation.key,
+        reservation.key, startup_complete=True, startup_revision=1,
         session_handle="local-body:blocked-session",
         worktree="removed-review-worktree",
     )
@@ -1686,7 +1701,7 @@ def test_release_requested_rechecks_target_after_live_body_teardown(
     blocked = q.create("needs operator", labels=["review"])
     reservation, _ = q.reserve_spawn(blocked.id)
     q.record_spawn(
-        reservation.key,
+        reservation.key, startup_complete=True, startup_revision=1,
         session_handle="local-body:blocked-session",
         worktree="recreated-worktree",
     )
@@ -1729,7 +1744,7 @@ def test_cold_resume_does_not_start_process_before_reservation_transition(
     blocked = q.create("needs operator", labels=["review"])
     reservation, _ = q.reserve_spawn(blocked.id)
     q.record_spawn(
-        reservation.key, session_handle="local-body:blocked-session"
+        reservation.key, startup_complete=True, startup_revision=1, session_handle="local-body:blocked-session"
     )
     q.claim_one("headless-owner", task_id=blocked.id)
     q.start(blocked.id, "headless-owner")
@@ -1764,7 +1779,7 @@ def test_cold_resume_task_failure_is_recoolable(q, client, monkeypatch):
     blocked = q.create("needs operator", labels=["review"])
     reservation, _ = q.reserve_spawn(blocked.id)
     q.record_spawn(
-        reservation.key, session_handle="local-body:blocked-session"
+        reservation.key, startup_complete=True, startup_revision=1, session_handle="local-body:blocked-session"
     )
     q.claim_one("headless-owner", task_id=blocked.id)
     q.start(blocked.id, "headless-owner")
@@ -1799,11 +1814,11 @@ def test_cold_resume_task_failure_is_recoolable(q, client, monkeypatch):
     assert q.get_reservation(reservation.key).state == SpawnState.COLD
 
 
-def test_cold_resume_process_exception_is_recoolable(q, client):
+def test_cold_resume_process_exception_retains_unresolved_startup(q, client):
     blocked = q.create("needs operator", labels=["review"])
     reservation, _ = q.reserve_spawn(blocked.id)
     q.record_spawn(
-        reservation.key, session_handle="local-body:blocked-session"
+        reservation.key, startup_complete=True, startup_revision=1, session_handle="local-body:blocked-session"
     )
     q.claim_one("headless-owner", task_id=blocked.id)
     q.start(blocked.id, "headless-owner")
@@ -1828,16 +1843,17 @@ def test_cold_resume_process_exception_is_recoolable(q, client):
     assert sup.release_resumed_cold_tasks() == 0
     assert q.get_reservation(reservation.key).state == SpawnState.SPAWNED
     assert q.get(blocked.id).status == Status.SUSPENDED
-    assert sup.cool_dormant_bodies() == 1
-    assert stopped == ["blocked-session"]
-    assert q.get_reservation(reservation.key).state == SpawnState.COLD
+    assert sup.cool_dormant_bodies() == 0
+    assert stopped == []
+    assert q.get_reservation(reservation.key).state == SpawnState.SPAWNED
+    assert q.get_reservation(reservation.key).startup_complete is False
 
 
 def test_cold_resume_process_failure_backs_off_before_retry(q, client):
     blocked = q.create("needs operator", labels=["review"])
     reservation, _ = q.reserve_spawn(blocked.id)
     q.record_spawn(
-        reservation.key, session_handle="local-body:blocked-session"
+        reservation.key, startup_complete=True, startup_revision=1, session_handle="local-body:blocked-session"
     )
     q.claim_one("headless-owner", task_id=blocked.id)
     q.start(blocked.id, "headless-owner")
@@ -1861,11 +1877,11 @@ def test_cold_resume_process_failure_backs_off_before_retry(q, client):
     )
 
     assert sup.release_resumed_cold_tasks(now=1000) == 0
-    assert sup.cool_dormant_bodies() == 1
+    assert sup.cool_dormant_bodies() == 0
     assert sup.release_resumed_cold_tasks(now=1299) == 0
     assert attempts == ["blocked-session"]
     assert sup.release_resumed_cold_tasks(now=1300) == 0
-    assert attempts == ["blocked-session", "blocked-session"]
+    assert attempts == ["blocked-session"]
 
 
 def test_idle_confirm_nudge_asks_whether_the_task_is_done(monkeypatch):
@@ -2152,7 +2168,7 @@ def test_supervisor_settles_terminal_cold_reservation(q, client):
     task = q.create("wait for condition", labels=["review"])
     reservation, _ = q.reserve_spawn(task.id)
     q.record_spawn(
-        reservation.key, session_handle="local-body:session-1"
+        reservation.key, startup_complete=True, startup_revision=1, session_handle="local-body:session-1"
     )
     q.claim_one("headless-owner", task_id=task.id)
     q.start(task.id, "headless-owner")
@@ -7257,7 +7273,10 @@ def test_redrive_live_spawned_worker_that_never_claimed(q, client):
     task = q.create("work")
     reservation, acquired = q.reserve_spawn(task.id, reserved_by="supervisor")
     assert acquired is True
-    q.record_spawn(reservation.key, session_handle="wt-wt-1", worktree=None)
+    q.record_spawn(
+        reservation.key, session_handle="wt-wt-1", worktree=None,
+        startup_complete=True, startup_revision=reservation.startup_revision,
+    )
     redriven = []
     spawn = _ok_spawn({"session": "new", "worktree": "new-wt"})
     sup = Supervisor(
@@ -7312,7 +7331,7 @@ def test_redrive_is_once_per_supervisor_process(q, client):
     task = q.create("work")
     reservation, acquired = q.reserve_spawn(task.id, reserved_by="supervisor")
     assert acquired is True
-    q.record_spawn(reservation.key, session_handle="s", worktree="wt-1")
+    q.record_spawn(reservation.key, startup_complete=True, startup_revision=1, session_handle="s", worktree="wt-1")
     redriven = []
     sup = Supervisor(
         client,

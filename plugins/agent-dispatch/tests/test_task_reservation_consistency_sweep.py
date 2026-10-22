@@ -47,7 +47,7 @@ def test_sweep_reports_no_anomalies_for_the_normal_spawned_steady_state(q, clien
 def test_sweep_reports_no_anomalies_for_the_normal_cold_dormant_state(q, client):
     task = q.create("review", labels=["review"])
     reservation, _ = q.reserve_spawn(task.id)
-    q.record_spawn(reservation.key, session_handle="local-body:sess-2")
+    q.record_spawn(reservation.key, startup_complete=True, startup_revision=1, session_handle="local-body:sess-2")
     q.claim_one("owner", task_id=task.id)
     q.start(task.id, "owner")
     q.suspend(task.id, "owner", reason="turn ended")
@@ -76,7 +76,7 @@ def test_sweep_flags_a_known_uncovered_anomaly(q, client):
     this shape."""
     task = q.create("review", labels=["review"])
     reservation, _ = q.reserve_spawn(task.id)
-    q.record_spawn(reservation.key, session_handle="local-body:sess-3")
+    q.record_spawn(reservation.key, startup_complete=True, startup_revision=1, session_handle="local-body:sess-3")
     q.claim_one("owner", task_id=task.id)
     q.start(task.id, "owner")
     q.record_cold(reservation.key)

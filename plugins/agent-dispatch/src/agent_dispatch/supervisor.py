@@ -462,7 +462,7 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
     def _active_reservations(self) -> list[dict]:
         try:
             reservations = self._pool_reservations(
-                state=(f"{SpawnState.RESERVING},{SpawnState.SPAWNED},{SpawnState.RELEASING}"),
+                state=(f"{SpawnState.RESERVING},{SpawnState.SPAWNED},{SpawnState.RELEASING},{SpawnState.COLD}"),
                 strict=True,
             )
         except _ReservationsUnavailable as exc:
@@ -605,6 +605,8 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
         return spawn_snapshot(task, reservation, worktree, prepared, ownership, replaced)
 
     def _reservation_has_live_process(self, reservation: dict, task: dict) -> bool:
+        if reservation.get("state") == SpawnState.COLD:
+            return self._cold_reservation_has_live_process(reservation, task)
         terminal_spawn = (
             task.get("status") in Status.TERMINAL
             and reservation.get("state") == SpawnState.SPAWNED
@@ -721,6 +723,8 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                 continue
             if task.get("status") != Status.SUSPENDED:
                 continue
+            if not self._cooling_snapshot_current(res):
+                continue
             fleet = _parse_fleet_body_handle(res.get("session_handle"))
             local_sid = _parse_local_body_handle(res.get("session_handle"))
             if fleet is None and local_sid is None:
@@ -741,7 +745,9 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
             if stopped:
                 release_exclusive = bool(task.get("awaiting_steer"))
                 try:
-                    self.client.record_cold(key, release_exclusive=release_exclusive)
+                    self.client.record_cold(key, release_exclusive=release_exclusive,
+                        startup_revision=res.get("startup_revision"),
+                    )
                 except DispatchError:
                     log.exception("failed to record cold reservation %s", key)
                     self._cold_retry_after[key] = now + 60.0
@@ -791,6 +797,8 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
         for res in self._pool_reservations(state=SpawnState.COLD, resume_requested=True):
             key = str(res.get("key") or "")
             if not key or now < self._resume_retry_after.get(key, 0.0):
+                continue
+            if res.get("startup_complete") is not True:
                 continue
             try:
                 task = self.client.get(res["task_id"])
@@ -3279,6 +3287,8 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
         for res in self._pool_reservations(state=SpawnState.SPAWNED):
             key = res.get("key")
             if not key or key in self._redriven_spawn_keys:
+                continue
+            if res.get("startup_complete") is not True:
                 continue
             if res.get("release_requested"):
                 continue

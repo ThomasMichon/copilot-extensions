@@ -283,7 +283,7 @@ def test_submission_rejection_spawned_and_cold_reservation_boundary(tmp_path, co
     q = TaskQueue(tmp_path / "tasks.db")
     task = _submitted(q, reserve=True)
     [reservation] = q.list_reservations()
-    q.record_spawn(reservation.key, session_handle="local-body:session-1")
+    q.record_spawn(reservation.key, startup_complete=True, startup_revision=1, session_handle="local-body:session-1")
     q.reopen_completed(task.id, reason="prepare a dormant submission")
     q.claim_one(task.completed_by, task_id=task.id)
     q.start(task.id, task.completed_by, owner_session_id=task.owner_session_id)

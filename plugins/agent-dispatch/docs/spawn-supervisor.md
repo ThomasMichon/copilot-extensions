@@ -71,6 +71,12 @@ Recovery can promote a live body to
 before invoking the backend; changing the recorded handle also invalidates it.
 Beginning a pending startup advances the revision atomically, so a delayed
 completion from an earlier caller cannot close that newer operation.
+Another resume or redelivery requires the predecessor's proven completion;
+recovery promotion alone never authorizes a second caller. Cooling preserves
+that completion and compares the captured revision before publishing `cold`.
+An incomplete startup is neither physically cooled nor made dormant. Historical
+unproven `cold` rows retain capacity and cannot resume or pass terminal cleanup
+until the original startup has been reconciled.
 Historical rows and older clients default to unproven completion, not a backfill.
 This field closes startup accounting, not task execution or effect authority.
 If completion publication is lost, a delivered receipt and later task completion
@@ -272,7 +278,7 @@ POST /spawn-reservations/{key}/release  {detail, disposition}
 POST /spawn-reservations/{key}/retire   {exact_absence, detail, conclusion_state?, conclusion_detail?}
 POST /spawn-reservations/{key}/fail     {detail}
 POST /spawn-reservations/{key}/defer    {detail}
-POST /spawn-reservations/{key}/cold
+POST /spawn-reservations/{key}/cold     {release_exclusive?, startup_revision?}
 POST /spawn-reservations/{key}/settle   {detail, conclusion_state?, conclusion_detail?}
 POST /spawn-reservations/{key}/conclusion {conclusion_state, conclusion_detail, claim_token?}
 POST /spawn-reservations/{key}/conclusion/claim

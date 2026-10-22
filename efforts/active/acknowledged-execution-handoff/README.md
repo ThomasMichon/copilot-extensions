@@ -154,6 +154,20 @@ handoff support.
 
 ## Journal
 
+### 2026-10-22 - Preserve predecessor startup across recovery reentry
+- The pending startup-capacity source correction in #7836 now rejects a second
+  resume or redelivery while the original launch remains unresolved. Recovery
+  promotion does not close that caller or license another operation.
+- Cooling preserves proven completion and compares the captured startup
+  revision. Unproven historical cold rows retain capacity and cannot resume
+  or pass terminal cleanup; stale cold snapshots cannot hide a newer resume.
+- Actual queue/thread regressions cover blocked original launch and cold-resume
+  callbacks, alongside stale publication, cooling and legacy controls.
+  Positive lifecycle fixtures explicitly establish completed startup rather
+  than relying on a legacy inferred value.
+- This remains an in-review source/test prerequisite, not enrollment, sender
+  integration, release, running adoption or completion of Phase 2.
+
 ### 2026-10-21 - Clarify logical-machine and supervisor lifetime boundaries
 - The coordinator, supervisor master and worker-lane supervisor are distinct
   roles within the same local Dispatch deployment. Retain the separate local

@@ -809,11 +809,17 @@ class DispatchClient(CleanupRecoveryClientMixin, CategoryClientMixin, ScheduleCl
             )
         )
 
-    def record_cold(self, key: str, *, release_exclusive: bool = False) -> dict:
+    def record_cold(
+        self, key: str, *, release_exclusive: bool = False,
+        startup_revision: int | None = None,
+    ) -> dict:
         return self._unwrap(
             self._http.post(
                 f"/spawn-reservations/{key}/cold",
-                json={"release_exclusive": release_exclusive},
+                json={
+                    "release_exclusive": release_exclusive,
+                    **({"startup_revision": startup_revision} if startup_revision is not None else {}),
+                },
             )
         )
 

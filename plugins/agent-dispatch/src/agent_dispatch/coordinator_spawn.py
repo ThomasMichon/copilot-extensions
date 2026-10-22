@@ -105,6 +105,7 @@ class DeferSpawnBody(ReservationDetailBody):
 
 class RecordColdBody(BaseModel):
     release_exclusive: bool = False
+    startup_revision: int | None = Field(default=None, ge=1, strict=True)
 
 
 class RequestSpawnReleaseBody(BaseModel):
@@ -497,7 +498,10 @@ def register_spawn_routes(
     @app.post("/spawn-reservations/{key}/cold")
     def record_cold(key: str, body: RecordColdBody = RecordColdBody()) -> dict:
         result = _reservation_guard(
-            lambda: queue.record_cold(key, release_exclusive=body.release_exclusive)
+            lambda: queue.record_cold(
+                key, release_exclusive=body.release_exclusive,
+                startup_revision=body.startup_revision,
+            )
         )
         bus.publish({"type": "spawn.cold", "reservation": result})
         return result

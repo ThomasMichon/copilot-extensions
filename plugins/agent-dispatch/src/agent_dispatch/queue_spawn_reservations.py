@@ -482,6 +482,11 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin):
                 or worktree is not None and worktree != row["worktree"]
             ):
                 raise TaskError("terminal startup is fenced")
+            resuming_cold = row["state"] == SpawnState.COLD and to_state == SpawnState.SPAWNED
+            if (
+                startup_complete is False or to_state == SpawnState.COLD or resuming_cold
+            ) and not row["startup_complete"]:
+                raise TaskError("previous startup remains incomplete")
             if guard is not None:
                 try:
                     guard(row)
@@ -537,17 +542,22 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin):
                     raise TaskError(
                         f"worktree {worktree!r} has in-flight cleanup {cleanup_claim['key']}"
                     )
+            changed_handle = session_handle is not None and session_handle != row["session_handle"]
+            completion = row["startup_complete"]
+            revision = row["startup_revision"]
+            if startup_complete is not None:
+                completion = int(startup_complete)
+            elif to_state == SpawnState.RESERVING or resuming_cold or changed_handle:
+                completion = 0
+            if startup_complete is False or startup_complete is None and (
+                resuming_cold or changed_handle and row["session_handle"] is not None
+            ):
+                revision += 1
             try:
                 conn.execute(
                     "UPDATE spawn_reservations SET state = ?, updated_at = ?, "
                     "session_handle = CASE WHEN ? IS NOT NULL THEN ? ELSE session_handle END, "
-                    "startup_complete = CASE WHEN ? IS NOT NULL THEN ? "
-                    "WHEN ? IN ('reserving','cold') OR (? IS NOT NULL AND ? IS NOT session_handle) "
-                    "THEN 0 ELSE startup_complete END, "
-                    "startup_revision = CASE WHEN ? = 0 OR "
-                    "(? IS NULL AND ? IS NOT NULL AND session_handle IS NOT NULL "
-                    "AND ? IS NOT session_handle) THEN startup_revision + 1 "
-                    "ELSE startup_revision END, "
+                    "startup_complete = ?, startup_revision = ?, "
                     "worktree = CASE WHEN ? IS NOT NULL THEN ? ELSE worktree END, "
                     "inherited_worktree = CASE "
                     "WHEN inherited_worktree IS NOT NULL THEN inherited_worktree "
@@ -565,8 +575,7 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin):
                     "WHERE key = ?",
                     (
                         to_state, ts, session_handle, session_handle,
-                        startup_complete, startup_complete, to_state, session_handle, session_handle,
-                        startup_complete, startup_complete, session_handle, session_handle,
+                        completion, revision,
                         worktree, worktree,
                         detail, conclusion_state, conclusion_state, conclusion_detail,
                         conclusion_detail, claim_token, 1 if release_requested else 0,
@@ -706,17 +715,23 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin):
         return SpawnReservation._from_row(updated)
 
     def record_cold(
-        self, key: str, *, release_exclusive: bool = False, now: float | None = None
+        self, key: str, *, release_exclusive: bool = False,
+        startup_revision: int | None = None, now: float | None = None,
     ) -> SpawnReservation:
         """Mark a spawned headless body intentionally stopped and dormant.
 
         ``release_exclusive`` drops this reservation's ``exclusive_key`` hold
         while cold, so a sibling may spawn; ``record_spawn`` reacquires it.
         """
+        if startup_revision is not None and (
+            type(startup_revision) is not int or startup_revision < 1
+        ):
+            raise TaskError("cold transition requires the current startup revision")
         return self._update_reservation(
             key,
             to_state=SpawnState.COLD,
             allowed_from=frozenset({SpawnState.SPAWNED, SpawnState.COLD}),
+            expected_startup_revision=startup_revision,
             exclusive_released=release_exclusive or None,
             now=now,
         )

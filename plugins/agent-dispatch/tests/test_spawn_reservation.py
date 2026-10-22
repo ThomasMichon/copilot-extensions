@@ -222,7 +222,7 @@ def test_record_cold_release_exclusive_frees_sibling_spawn(q):
     t2 = q.create("review new", exclusive_key="review:repo:42")
 
     r1, ok1 = q.reserve_spawn(t1.id)
-    q.record_spawn(r1.key, session_handle="sess-1", worktree="wt-1")
+    q.record_spawn(r1.key, startup_complete=True, startup_revision=1, session_handle="sess-1", worktree="wt-1")
     q.record_cold(r1.key, release_exclusive=True)
 
     r2, ok2 = q.reserve_spawn(t2.id)
@@ -240,7 +240,7 @@ def test_record_cold_default_still_blocks_sibling_spawn(q):
     t2 = q.create("review new", exclusive_key="review:repo:42")
 
     r1, _ = q.reserve_spawn(t1.id)
-    q.record_spawn(r1.key, session_handle="sess-1", worktree="wt-1")
+    q.record_spawn(r1.key, startup_complete=True, startup_revision=1, session_handle="sess-1", worktree="wt-1")
     q.record_cold(r1.key)
 
     r2, ok2 = q.reserve_spawn(t2.id)
@@ -256,10 +256,10 @@ def test_record_spawn_reacquires_exclusive_key_on_resume(q):
     t2 = q.create("review new", exclusive_key="review:repo:42")
 
     r1, _ = q.reserve_spawn(t1.id)
-    q.record_spawn(r1.key, session_handle="sess-1", worktree="wt-1")
+    q.record_spawn(r1.key, startup_complete=True, startup_revision=1, session_handle="sess-1", worktree="wt-1")
     q.record_cold(r1.key, release_exclusive=True)
 
-    resumed = q.record_spawn(r1.key, session_handle="sess-1", worktree="wt-1")
+    resumed = q.record_spawn(r1.key, startup_complete=True, startup_revision=1, session_handle="sess-1", worktree="wt-1")
     assert resumed.state == SpawnState.SPAWNED
     assert resumed.exclusive_released is False
 
@@ -277,15 +277,15 @@ def test_record_spawn_reacquire_defers_when_sibling_active(q):
     t2 = q.create("review new", exclusive_key="review:repo:42")
 
     r1, _ = q.reserve_spawn(t1.id)
-    q.record_spawn(r1.key, session_handle="sess-1", worktree="wt-1")
+    q.record_spawn(r1.key, startup_complete=True, startup_revision=1, session_handle="sess-1", worktree="wt-1")
     q.record_cold(r1.key, release_exclusive=True)
 
     r2, ok2 = q.reserve_spawn(t2.id)
     assert ok2 is True
-    q.record_spawn(r2.key, session_handle="sess-2", worktree="wt-2")
+    q.record_spawn(r2.key, startup_complete=True, startup_revision=1, session_handle="sess-2", worktree="wt-2")
 
     with pytest.raises(ExclusiveKeyBusyError):
-        q.record_spawn(r1.key, session_handle="sess-1", worktree="wt-1")
+        q.record_spawn(r1.key, startup_complete=True, startup_revision=1, session_handle="sess-1", worktree="wt-1")
 
     # The attempted resume must not have mutated reservation state.
     still_cold = q.get_reservation(r1.key)

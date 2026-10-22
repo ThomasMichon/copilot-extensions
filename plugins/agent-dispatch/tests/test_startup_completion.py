@@ -156,6 +156,10 @@ def test_startup_completion_round_trips_client_api_and_storage(tmp_path):
                 reservation.key, session_handle="local-body:original", startup_complete=True, startup_revision=1,
             )
             assert result["startup_complete"] is True
+            cold = client.record_cold(
+                reservation.key, startup_revision=result["startup_revision"],
+            )
+            assert cold["startup_complete"] is True
             result = client.record_spawn(
                 reservation.key, session_handle="local-body:original", startup_complete=False, startup_revision=1,
             )
@@ -170,7 +174,8 @@ def test_startup_completion_round_trips_client_api_and_storage(tmp_path):
             )
             assert fenced["startup_fenced"] is True
         assert sent[0]["startup_complete"] is True
-        assert sent[1]["startup_complete"] is False
+        assert sent[1]["startup_revision"] == 1
+        assert sent[2]["startup_complete"] is False
         rejected = api.post(
             f"/spawn-reservations/{reservation.key}/spawned",
             json={"session_handle": "local-body:original", "startup_complete": "true"},

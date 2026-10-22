@@ -27,7 +27,7 @@ def test_terminal_capacity_requires_closed_start_and_exact_absence(
     assert acquired
     queue.record_spawn(
         reservation.key, session_handle="local-body:retained", worktree="retained-worktree",
-        startup_complete=startup_complete, startup_revision=1,
+        startup_complete=True if startup_complete else None, startup_revision=1,
     )
     if state == SpawnState.RESERVING:
         # A carried identity can exist before the next startup completes.
@@ -184,7 +184,7 @@ def test_terminal_snapshot_cannot_release_a_newer_pending_startup(tmp_path, phas
     newer = queue.create("Eligible", exclusive_key="resource:newer")
     list_reservations = client.list_reservations
     raced = []
-    target = "reserving,spawned,releasing" if phase == "capacity" else "reserving,spawned,cold"
+    target = "reserving,spawned,releasing,cold" if phase == "capacity" else "reserving,spawned,cold"
 
     def race(**kwargs):
         snapshot = list_reservations(**kwargs)
