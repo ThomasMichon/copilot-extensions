@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent reviewed PRs targeting `dev`
 - **Created:** 2026-10-22
-- **Status:** Active
+- **Status:** Done
 - **Vision:** vision-closing: `visions/picker` (graceful capability scaling,
   render/derive rather than own, headless assertions) and
   `visions/plugins/agent-codespaces` (per-repo identity)
@@ -80,10 +80,13 @@ headless widget/action with mocked authentication and land through review/CI.
 ### Phase 3 - Land and record
 - [x] Add focused provider and real Textual headless tests; update directly
       related docs and product changefiles; pass lint and install contracts.
-- [ ] Obtain independent review through the normal Copilot review path, address
+- [x] Obtain independent review through the normal Copilot review path, address
       blocking findings, pass required CI and merge the implementation.
-- [ ] Journal actual merged results and release state; transfer deployment and
+- [x] Journal actual merged results and release state; transfer deployment and
       native authorization acceptance explicitly to the adopting operator.
+- [x] Deferred to `#7793 (operator-owned native acceptance and rollout)`: actual
+      vendor authorization, native OS credential-store/focus qualification,
+      promoted-release confirmation and authorized adopter rollout.
 
 ## Validation Plan
 
@@ -95,7 +98,7 @@ headless widget/action with mocked authentication and land through review/CI.
       updates do not retain a stale successful authentication status.
 - [x] Verify no global account switch, token output or session-environment
       mutation; test the vendor command/config boundary with synthetic inputs.
-- [ ] Run bounded isolated targeted suites, targeted Ruff, install-contract and
+- [x] Run bounded isolated targeted suites, targeted Ruff, install-contract and
       required publication checks. Do not perform a real OAuth ceremony.
 
 ## Proposal
@@ -154,3 +157,19 @@ requirements, not optional implementation details.
   mixed-type and embedded-NUL argv across list, row, view, worktree and
   configuration surfaces produce isolated invalid-contract findings; a valid
   peer remains available in every regression case.
+
+### 2026-10-22 - Source complete; native acceptance transferred
+- Implementation PR #7797 actually merged to `dev` as
+  `e82757b389e64a54fcd63bc9f50579d68fd03720`. The current-head Copilot verdict
+  explicitly reported no open issues and no inline findings; all reported
+  blockers were resolved and required checks passed. Completion used the
+  repository's owner clean-Comment policy and managed merge operation.
+- Both affected products have a patch changefile. At source-completion
+  inspection, `main` did not yet contain the new device OAuth module:
+  **merged/pending release**, not deployed.
+- #7793 remains open with the operator-owned native acceptance and rollout
+  obligations. The source work made no real OAuth request, approved no native
+  ceremony, modified no installed runtime or user override, and performed no
+  adopter rollout. The broader #4180 create/doctor gate remains separately owned.
+- Only this bounded source effort is Done. No parent campaign or other
+  participant's work is completed by this marker.

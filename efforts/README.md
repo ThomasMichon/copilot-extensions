@@ -13,7 +13,6 @@ that pattern to this repository.
 | [Coordinated Launch Maintenance](active/coordinated-launch-maintenance/README.md) | Draft; nonblocking healthy handoff with coordinated adopted background maintenance | #7694; preserves #6812/#6820/#7667 owners |
 | [Dynamic Reverse Reservations](active/dynamic-reverse-reservations/README.md) | Active; reviewed intent merged, bounded supplied-owner source next; production permission/lifecycle integration retained | #7719; preserves #63/#6681/#5789/#6804/#6240/#6424 owners |
 | [SSH Reverse Candidate Forward](active/ssh-reverse-candidate-forward/README.md) | Draft; existing SSH owner finite-candidate/readiness leaf; governing vision/pattern merge first | #7720; consumes #7726 intent, complements #7719 publication without a second selector |
-| [CodeSpaces Authentication CTA](active/codespaces-authentication-cta/README.md) | Active; proposal reviewed, provider and Manager implementation | #7793; no live authorization or deployment |
 | [Backlog Reconciliation](active/backlog-reconciliation/README.md) | Active; oldest-first evidence and requirement-preserving consolidation, no implementation | #7556; 1,458 baseline, 729 guidance checkpoint |
 | [Feed Construction Release Gate](active/feed-construction-release-gate/README.md) | Draft; complete configured-feed construction and installed-launch qualification before CI/promotion activation | #7529; preserves #3336/#6237 control and #7420/#7446/#7514 repair owners |
 | [Acknowledged Execution Handoff](active/acknowledged-execution-handoff/README.md) | Active; source/test scope assigned, optional effect adapter construction first | #7268; coordinator integration and live adoption remain open |
@@ -130,6 +129,7 @@ that pattern to this repository.
 
 | Effort | Outcome | Coordination |
 |--------|---------|--------------|
+| [CodeSpaces Authentication CTA](2026/10/22%20codespaces-authentication-cta/README.md) | Done; reviewed provider/Manager source merged, no native authorization or rollout | #7793 retains native acceptance and rollout; #4180 remains separate |
 | [RedirectionGuard Adoption](2026/10/20%20redirectionguard-adoption/README.md) | Done; shared interpreter and failed-front-door source repairs merged to Dev and qualified; no rollout | #7445; publication and installed-consumer recovery retained by #7305, construction by #7420 |
 | [Gateway Native Qualification](2026/10/20%20gateway-native-qualification/README.md) | Done; explicit native selection and actual exact-source amd64/ARM64 assembled proofs merged, private evidence/images retained; no rollout | #7257 retains provider/live-edge gates; authentication, lifecycle and adoption owners unchanged |
 | [ADO PR Stewardship](2026/10/20%20ado-pr-stewardship/README.md) | Done; central ADO evidence/configuration/owner integration released, installed worker policy proved, consumer tool forks retired | #7203; separate #3336/#6007/#7051 obligations retained |
