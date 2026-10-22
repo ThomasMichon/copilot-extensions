@@ -1603,7 +1603,7 @@ def _reconcile_pr(
     """Persist one authority-matched provider observation and claim transition."""
     if active is None or active.number is None:
         return
-    if tracking._pr_is_terminal(active) and not any(
+    if tracking._pr_is_terminal(active) and active.state != "closed" and not any(
         c.kind == "pr" and c.ref == _pr_claim_ref(active) and c.is_live
         for c in record.resources
     ):
@@ -1640,10 +1640,11 @@ def _reconcile_pr(
     else:
         resolved = ""
 
+    provider_terminal = resolved in ("merged", "closed")
     # Zombie self-heal (#1375/#1703): the provider says non-terminal, but if the
     # PR's head is already contained in the base branch its content has merged --
     # heal to ``merged``. Definite-only: an unknown/False result leaves it open.
-    if not resolved and pull.head_sha and pull.base_ref:
+    if not resolved and active.state != "closed" and pull.head_sha and pull.base_ref:
         try:
             contained = provider.head_contained_in_base(
                 target_repo, pull.base_ref, pull.head_sha,
@@ -1654,66 +1655,53 @@ def _reconcile_pr(
         if contained is True:
             resolved = "merged"
 
-    if active.state == "merged" and resolved != "merged":
+    if active.state == "merged" and not provider_terminal:
         return
-    if tracking._pr_is_terminal(active) and resolved not in ("merged", "closed"):
+    if active.state != "closed" and tracking._pr_is_terminal(active) and not provider_terminal:
         return
-    if resolved:
-        # Provider I/O may overlap an attribution-only stamp. Apply the terminal
-        # transition to a fresh record, but never to a reassigned publication.
-        with tracking._RecordLock(record.yaml_path, blocking=not best_effort) as lk:
-            if not lk.acquired:
-                return
-            fresh = tracking.load_record(record.yaml_path)
-            current = pr_publish._publication_pr(fresh, active)
-            if current is None or pr_publication_state.authority(current) != pr_publication_state.authority(active):
-                return
-            claim_ref = _pr_claim_ref(active)
-            if not any(claim.ref == claim_ref for claim in fresh.resources):
-                pending_claim = next((claim for claim in record.resources
-                                      if claim.kind == "pr" and claim.ref == claim_ref), None)
-                if pending_claim is not None:
-                    tracking.add_resource_claim(fresh, pending_claim, save=False)
+    if not resolved and state != "open":
+        return
+    with tracking._RecordLock(record.yaml_path, blocking=not best_effort) as lk:
+        if not lk.acquired:
+            return
+        fresh = tracking.load_record(record.yaml_path)
+        current = pr_publish._publication_pr(fresh, active)
+        if current is None or pr_publication_state.authority(current) != pr_publication_state.authority(active):
+            return
+        claim_ref = _pr_claim_ref(active)
+        if not any(claim.ref == claim_ref for claim in fresh.resources):
+            pending_claim = next((claim for claim in record.resources
+                                  if claim.kind == "pr" and claim.ref == claim_ref), None)
+            if pending_claim is not None:
+                tracking.add_resource_claim(fresh, pending_claim, save=False)
+        before = (current.state, current.closed_at, current.head_sha)
+        claimed_ref = released_ref = None
+        if provider_terminal:
+            current.state = "merged" if active.state == "merged" else resolved
+            current.closed_at = current.closed_at or tracking._now_iso()
+            released_ref = _release_pr_claim(fresh, current)
+        elif state == "open":
+            current.state = "open"
+            current.closed_at = ""
+            current.head_sha = current.head_sha or pull.head_sha
+            claimed_ref = _ensure_pr_claim(fresh, current)
+            if resolved == "merged":
+                current.state = resolved
+                current.closed_at = tracking._now_iso()
+        else:
             current.state = resolved
             current.closed_at = current.closed_at or tracking._now_iso()
-            released_ref = _release_pr_claim(fresh, current) if resolved in ("merged", "closed") else None
+        if claimed_ref or released_ref or before != (current.state, current.closed_at, current.head_sha):
             tracking.save_record(fresh)
-            pr_publication_state.copy_pr(active, current)
-            record.resources = fresh.resources
-        if released_ref:
-            claim_history.record_pr_event(
-                released_ref, worktree_id=record.worktree_id, machine=record.execution_machine,
-                event="released", note=resolved, project=record.repo)
-        return
-    else:
-        # Provider confirms the PR is still genuinely open (a real read
-        # succeeded and reported neither merged nor another terminal state)
-        # -- this IS the "successful provider observation of a non-terminal
-        # state" `_ensure_pr_claim` requires, closing the gap an out-of-band
-        # `set-pr` (which persists state with no provider read at all)
-        # leaves open. Idempotent + cheap; only actually writes when
-        # `_ensure_pr_claim` reports a real transition (new OR reactivated
-        # claim) -- never for an already-active no-op.
-        if active.state != "open":
-            active.state = "open"
-        # Backfill a missing head_sha (#5298): adopt the identity-checked `get_pull` read's head.
-        head_backfilled = bool(not active.head_sha and pull.head_sha)
-        active.head_sha = active.head_sha or pull.head_sha
-        claimed_ref = _ensure_pr_claim(record, active)
-        if claimed_ref or head_backfilled:
-            persisted = False
-            if best_effort:
-                with tracking._RecordLock(record.yaml_path, blocking=False) as lk:
-                    if lk.acquired:
-                        tracking.save_record(record)
-                        persisted = True
-            else:
-                tracking.save_record(record)
-                persisted = True
-            if persisted and claimed_ref:
-                claim_history.record_pr_event(
-                    claimed_ref, worktree_id=record.worktree_id,
-                    machine=record.execution_machine, event="claimed", project=record.repo)
+        pr_publication_state.copy_pr(active, current)
+        record.resources = fresh.resources
+    if released_ref or claimed_ref:
+        claim_history.record_pr_event(
+            released_ref or claimed_ref, worktree_id=record.worktree_id,
+            machine=record.execution_machine,
+            event="released" if released_ref else "claimed",
+            note=resolved if released_ref else "", project=record.repo,
+        )
 
 
 def _live_pr_state(

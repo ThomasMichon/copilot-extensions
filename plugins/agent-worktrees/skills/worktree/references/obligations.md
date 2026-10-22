@@ -18,6 +18,8 @@ force-release a claim.
   closed, not merged: its unmerged branch content and any child worktree still
   need their own safe closeout. Provider failure or unknown state retains the
   claim. Closing or abandoning an unmerged PR still requires operator direction.
+  A provider-confirmed reopen restores its active PR claim; source-head
+  containment alone does not settle an open provider resource.
 - **A crashed/gone holder that never settled** --
   `<agent-worktrees catalog argv[0]> claims sweep`
   (dry-run) then `--apply` explicitly reclaims provably-gone-and-safe
