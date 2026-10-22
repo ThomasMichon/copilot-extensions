@@ -1,0 +1,13 @@
+{
+  "comment": "Keep native foundation construction progress and interruption under the existing installation execution fence; preserve schema-2 requests and require explicit boot-confirmed settlement.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

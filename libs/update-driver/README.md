@@ -243,6 +243,54 @@ than silently upgraded into fabricated recovery authority. Malformed state
 also refuses. This new core has not been deployed to live state; these schema
 changes affect only isolated fixtures in this change.
 
+### Native foundation progress and interruption
+
+The earlier Python-free construction boundary has a separate, narrowly scoped
+progress record, **not another request queue or installation owner**:
+`<execution-root>/foundation-operation.json`. It uses
+`copilot-extensions.installation-foundation-operation`, version `1`, and the
+same `<execution-root>/execution.lock`. SQLite remains schema 2; no request
+history is deleted, migrated or moved to another execution root.
+
+`foundation_status(root=...) -> FoundationOperation | None` reads that bounded,
+plain-file record without creating anything. It records only operation/source
+digest identity, native admission boot, state, timestamps, canonical exit status,
+bounded failure reason codes and explicit old-boot settlement. No submitted
+commands, credentials or participant capabilities belong there. A recorded
+`running` state is journal evidence, not proof that its owner remains live.
+Missing progress alongside existing `foundation/` artifacts is a readiness
+error, never permission to fall back to a legacy installer.
+
+Trusted producers use `foundation_state.begin`/`finish` only while holding the
+actual canonical `OperationLock` for this execution root. Acceptance is
+published before mutable foundation staging; writes flush data and use
+write-through replacement on Windows or directory fsync on POSIX. An integer
+outcome certifies the producer's complete cleanup boundary. Unknown settlement
+has no exit status and remains interrupted. A second begin cannot overwrite
+its active or interrupted operation, and completion must match the exact
+admitted record.
+
+Pending plugin requests may be accepted behind a **live** foundation owner,
+but only the kernel custodian can execute. A later free-lock observation changes
+unfinished native progress to `interrupted`, never success or automatic replay.
+Enqueue, worker launch, wait, drain and pending-worker failure observation all
+retain that global fence. An executor that leaves native construction uncertain
+cannot commit its own request as successful.
+
+`recover_foundation_after_restart(root=...)` explicitly settles only a
+different, positively observed native boot on the same platform. It preserves
+the interrupted outcome, source identity, absent exit status and original
+admission identity; it never rebuilds or executes pending work. A live custodian,
+same boot, malformed or lost state, platform mismatch or changed observation
+refuses. Ordinary queue recovery reports `native_foundation_recovery_required`
+instead of pretending the execution space is clear; settle that native record
+first, then separately apply the existing queue recovery when required.
+Deleting control files or rotating roots is not recovery.
+
+This is the producer/core contract and its qualification, not an enabled cold
+bootstrap. No ordinary entry point writes these records yet; standalone bundle
+construction, publication and first-use adapters remain separate work.
+
 Worker queue-startup acknowledgement is not an execution/completion claim.
 A worker failing before queue startup records a visible pending launch error;
 accepted requests are retained for a later supported launch, not silently

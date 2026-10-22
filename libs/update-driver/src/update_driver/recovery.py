@@ -8,9 +8,10 @@ from pathlib import Path
 
 from single_instance_lease.operation import OperationLock, OperationLockedError
 
-from . import boot
+from . import boot, foundation_state
 from .core import (
-    DriverError, Request, StateError, _assert_database_identity, _database, _request, _root, status,
+    DriverError, Request, StateError, _assert_database_identity, _database,
+    _foundation_operation, _request, _root, status,
 )
 
 
@@ -60,6 +61,9 @@ def recovery_status(*, root: Path | None = None) -> RecoveryStatus:
     except Exception as error:
         return RecoveryStatus(None, (), (), f"boot_identity_unavailable:{type(error).__name__}")
     try:
+        foundation = _foundation_operation(_root(root))
+        if foundation is not None and foundation.fenced:
+            return RecoveryStatus(current, (), (), "native_foundation_recovery_required")
         return _assess(status(root=root), current)
     except DriverError as error:
         return RecoveryStatus(current, (), (), f"queue_unavailable:{type(error).__name__}")
@@ -72,6 +76,12 @@ def recover_after_restart(*, root: Path | None = None) -> tuple[Request, ...]:
     pending; the caller must separately request a normal queue drain/update.
     """
     root = _root(root)
+    try:
+        foundation = _foundation_operation(root)
+    except StateError as error:
+        raise RecoveryError(f"foundation recovery state unavailable: {error}") from error
+    if foundation is not None and foundation.fenced:
+        raise RecoveryError("native foundation requires explicit recovery before queue settlement")
     database_path = root / "queue.sqlite3"
     try:
         identity = database_path.lstat()
@@ -121,5 +131,29 @@ def recover_after_restart(*, root: Path | None = None) -> tuple[Request, ...]:
             return settled
     except StateError as error:
         raise RecoveryError(f"recovery state unavailable: {error}") from error
+    finally:
+        lock.release()
+
+
+def recover_foundation_after_restart(*, root: Path | None = None) -> foundation_state.FoundationOperation | None:
+    """Settle only proven old-boot native construction; never repair or replay it."""
+    root = _root(root)
+    try:
+        before = _foundation_operation(root)
+    except StateError as error:
+        raise RecoveryError(f"foundation recovery state unavailable: {error}") from error
+    if before is None:
+        return None
+    lock = OperationLock(root / "execution.lock")
+    try:
+        lock.acquire()
+    except OperationLockedError as error:
+        raise RecoveryError("installation execution is active; foundation recovery refused") from error
+    try:
+        if _foundation_operation(root) != before:
+            raise RecoveryError("foundation recovery state changed during observation")
+        return foundation_state.recover_after_restart(root, lock)
+    except (foundation_state.FoundationStateError, StateError) as error:
+        raise RecoveryError(f"foundation recovery refused: {error}") from error
     finally:
         lock.release()
