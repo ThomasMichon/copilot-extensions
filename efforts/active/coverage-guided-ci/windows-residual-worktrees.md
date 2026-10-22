@@ -87,7 +87,46 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Admitted fixture-semantic batches
 
+### B-LEASE-ASSERT preview, apply and repeated-apply evidence
+
+Baseline: the actual #7695 merge. Extend
+`test_squash_stale_dry_run_reports_without_pushing` after its original
+preview assertions: the real apply reports the released ref and exact old
+and new OIDs; the remote advances to a different OID; the second apply
+returns no changes and leaves the remote stable.
+
+Every existing test identity, fixture dependency, decorator and assertion
+remains. The standalone
+`test_squash_stale_is_idempotent_on_an_already_squashed_ref` is unchanged.
+The historical removal of that case and rename of the preview case are
+proposed for retirement from future extraction, not retirement of their
+tests or contracts. The assertion additions do not need either delta.
+The real force-with-lease race, live-holder checks, lease generations,
+private-copy seed isolation and all retention cases remain unchanged.
+
+Complete native Windows lease-store module: 21 passed, zero skips,
+67.52 seconds pytest / 77.19 preparation-cleanup inclusive. Exactly two
+work-stealing workers retain the original 30-second item watchdog,
+all marks/resource ceilings and the 240-second diagnostic group.
+Functional integration only, not quiet-host, whole-suite or repeated
+same-head qualification.
+
+This below-altitude assertion-only change affects no production,
+command, configuration, installation or architecture contract.
+Documentation impact is this ledger. Clean-room provisioning and
+external-venue lanes are inapplicable; other B/N and S/F/G/P/R/A
+contracts remain separate.
+
 ### B-PROVIDER-ASSERT body and malformed-marker controls
+
+Actual disposition: #7695 merged as
+`08db822fe28f887ced822580a6a0f3fb3c25b609`; full Copilot review
+`5607739203` approved exact head
+`bf315626d899ee9b185769cf7799b1ac70db665c`.
+Overview, inline/general channels and threads had no findings;
+required CI was green and the child worktree is finalized.
+The reviewed removal-delta retirement below is accepted; every
+original test remains.
 
 Baseline: the actual #7691 merge. The default-disabled publication
 case now requires an exact empty body. The explicit disabled-attribution
@@ -102,7 +141,7 @@ removal candidates are not applied: the actual publication tests
 `test_codename_mode_skip_does_not_record_attribution_head` and
 `test_no_attribution_omits_marker` still execute unchanged. The stronger
 record-boundary assertions supplement rather than replace those end-to-end
-cases. Their removal deltas are proposed for retirement from future
+cases. Their removal deltas are retired from future
 extraction, not their tests or contracts; preserving them maintains complete original
 selection under the reviewed wave plan.
 

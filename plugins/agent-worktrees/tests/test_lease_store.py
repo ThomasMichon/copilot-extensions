@@ -541,6 +541,17 @@ def test_squash_stale_dry_run_reports_without_pushing(
     assert report == [{"ref": released.ref, "old_oid": released.oid, "new_oid": ""}]
     assert remote_oid(remote, released.ref) == released.oid
 
+    first = later.squash_stale(retention_days=30)
+    assert len(first) == 1
+    assert first[0]["ref"] == released.ref
+    assert first[0]["old_oid"] == released.oid
+    squashed_oid = remote_oid(remote, released.ref)
+    assert first[0]["new_oid"] == squashed_oid
+    assert squashed_oid != released.oid
+    second = later.squash_stale(retention_days=30)
+    assert second == []
+    assert remote_oid(remote, released.ref) == squashed_oid
+
 
 def test_squash_stale_skips_a_ref_reacquired_mid_sweep(
     released_history,
