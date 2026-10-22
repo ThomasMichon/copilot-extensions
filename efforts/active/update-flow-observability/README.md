@@ -282,6 +282,12 @@ bounded source delta inspection.
   child arguments, source checks, constructor callback, staging/watchdog,
   receipt and lifecycle authority are unchanged. Long-running delegates were
   not replaced by buffered capture wrappers.
+- Required PR CI rejected the six-line growth of the grandfathered lifecycle
+  module. The unchanged CLI parser/JSON-error adapter and requested-writer
+  initializer now live in a private CLI module loaded by the existing absolute
+  loader before SDK imports, with bytecode writes still disabled. The main
+  lifecycle module is 931 lines and the adapter 113; no baseline was widened.
+  AST comparison preserves the original CLI statement body and help description.
 - First-touch fixtures use the original installer, real legacy gate and
   source snapshot under an empty profile, including quoted/non-ASCII paths.
   The format fixture copies its actual script/governance closure rather than
@@ -291,9 +297,9 @@ bounded source delta inspection.
   is claimed. Fixture children now use the existing strict kill-on-close Job
   primitive so timeout cleanup cannot leave descendants holding pipes.
 - The updater/materialization/probe Windows cohort passed 249 cases with
-  seven platform skips. All native/lifecycle runtime cases passed in their
-  bounded qualification cohort; final compact JSON and maintenance controls
-  also passed, including PS5 and PowerShell 7 at both output-request modes.
+  seven platform skips. The full native/lifecycle runtime cohort passed all
+  49 cases after the CLI extraction, including compact JSON on PS5 and
+  PowerShell 7 at both output-request modes and the maintenance-token controls.
   The native Linux five-module cohort passed 238 cases with 56 platform
   skips. Materialization covers all thirteen producers; actual standalone
   entrypoint controls retain optional-helper absence and requested-missing-helper
