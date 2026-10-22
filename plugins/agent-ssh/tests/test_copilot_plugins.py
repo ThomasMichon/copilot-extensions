@@ -459,8 +459,8 @@ def test_retirement_preserves_newer_operation_and_other_scopes(tmp_path, monkeyp
 
 @pytest.mark.parametrize("matching", [False, True])
 def test_native_anchor_resolution_uses_owner_identity_not_directory_basename(monkeypatch, matching):
-    monkeypatch.setattr(copilot_plugins, "probe_checkout", lambda *a: {
-        "cwd": "/selected/child/nested", "root": "/selected/child",
+    monkeypatch.setattr(copilot_plugins, "probe_checkout", lambda _adapter, workspace: {
+        "cwd": workspace, "root": "/selected/child",
     })
     adapter = SimpleNamespace(target="host", hold_id="anchor-nested@host")
     calls = []
@@ -487,3 +487,30 @@ def test_native_anchor_resolution_uses_owner_identity_not_directory_basename(mon
         assert plan["scope_id"] == adapter.hold_id == "anchor-registered-name@host"
         assert plan["mux_session"] == "wt-anchor-registered-name"
     assert "--dry-run --json" in calls[0]
+
+
+@pytest.mark.parametrize("native_directory", ["/selected/child/", "/alias/child"])
+def test_native_anchor_equivalent_directory_spellings_are_resolved_on_target(monkeypatch, native_directory):
+    probes = []
+    def probe(_adapter, workspace):
+        probes.append(workspace)
+        return {
+            "cwd": "/selected/child/nested" if workspace.endswith("/nested") else "/selected/child",
+            "root": "/selected/child", "repository": "example/project",
+        }
+    monkeypatch.setattr(copilot_plugins, "probe_checkout", probe)
+    adapter = SimpleNamespace(
+        target="host", hold_id="anchor-nested@host",
+        run=lambda *a, **kw: (0, json.dumps({
+            "ok": True, "dry_run": True, "anchor": True, "work_dir": native_directory,
+            "worktree_id": "anchor-registered-name", "session": "wt-anchor-registered-name",
+        }), ""),
+    )
+    plan = {
+        "workspace": "/selected/child/nested", "scope_id": "anchor-nested@host",
+        "venue": {"kind": "ssh", "target": "host"},
+    }
+    copilot_plugins.resolve_launch(adapter, plan)
+    assert probes == ["/selected/child/nested", native_directory]
+    assert plan["workspace"] == "/selected/child"
+    assert plan["scope_id"] == "anchor-registered-name@host"

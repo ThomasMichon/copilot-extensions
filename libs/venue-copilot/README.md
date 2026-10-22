@@ -50,6 +50,11 @@ the only thing each provider's own `copilot` command has to own.
   after the runner records native creation and the actual mux, so a failed
   handoff follows normal created-session cleanup. Adapters without it keep
   their existing lifecycle.
+- A detached plan may supply the private `preparation_reservation_budget`
+  allowance, added to its initial ownership lease before upload, launch and
+  registration. SSH derives this from its existing probe/preparation and
+  transport deadlines; plans without it retain their existing lease budget.
+  The field is not part of a printed handle and changes no execution timeout.
 
 ## Vendoring
 

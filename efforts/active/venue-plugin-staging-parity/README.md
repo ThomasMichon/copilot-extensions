@@ -467,6 +467,20 @@ or a reason to create a daemon.
   (three POSIX-only skips). This closes graceful Ctrl+C ownership release, not
   forced termination, a dead host or unknown remote transport failure; those
   native lifecycle acceptance boundaries remain explicit.
+- Requested an explicit full-PR re-review when a subsequent summary named
+  budget/discovery defects without locations. That review supplied two
+  actionable findings: stop now passes its explicit expected repository into
+  the resolving adapter, and differently spelled native anchor paths are
+  canonicalized on the target before checkout comparison. Canonical execution
+  roots are retained; a genuinely different anchor still refuses. The separate
+  reservation-budget observation is also addressed: its original lease now
+  includes the existing 90-second checkout probe, 540-second preparation and
+  both 60-second transport grace periods, rather than silently consuming the
+  native launch's allowance. No execution timeout or default test cap changed.
+  A clock-controlled regression spends the full preparation and supported
+  native launch budgets before claiming the original reservation. All 93
+  focused SSH cases pass with three explicit POSIX-only skips; unchanged
+  CodeSpace/container detached consumers still pass 123/62.
 
 ### 2026-10-22 - Land privileged receiver source and continue the parent
 

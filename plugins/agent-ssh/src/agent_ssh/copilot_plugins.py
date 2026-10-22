@@ -25,6 +25,11 @@ from plugin_resolve.target import github_repository_slug, requires_repository_bi
 from venue_copilot.refs import require_cli_context
 from venue_copilot import last_json
 
+_CHECKOUT_TIMEOUT = 90.0
+_PREPARATION_TIMEOUT = 540.0
+_TRANSPORT_GRACE = 60.0
+PREPARATION_RESERVATION_BUDGET = _CHECKOUT_TIMEOUT + _PREPARATION_TIMEOUT + 2 * _TRANSPORT_GRACE
+
 
 def repository_key(remote: str) -> str:
     slug = github_repository_slug(remote)
@@ -69,7 +74,7 @@ def run_python(adapter, program: str, *, timeout: float):
     def execute():
         try:
             results.append(adapter.run_input(
-                "python3 -I -S -X utf8 -u -", payload.encode("utf-8"), timeout=timeout + 60,
+                "python3 -I -S -X utf8 -u -", payload.encode("utf-8"), timeout=timeout + _TRANSPORT_GRACE,
             ))
         except BaseException as exc:
             failures.append(exc)
@@ -125,7 +130,7 @@ def probe_checkout(adapter, workspace: str) -> dict:
         "    'root':str(pathlib.Path(root.stdout.strip()).resolve(strict=True)),\n"
         "    'origin':origin.stdout.strip()}))\n"
     )
-    rc, output, error = run_python(adapter, program, timeout=90)
+    rc, output, error = run_python(adapter, program, timeout=_CHECKOUT_TIMEOUT)
     if rc:
         raise RuntimeError("SSH execution checkout lookup failed: " + error.strip())
     line = next((line for line in reversed(output.splitlines()) if line.startswith("__SSH_CHECKOUT__")), None)
@@ -176,14 +181,19 @@ def resolve_launch(adapter, plan: dict) -> None:
         or native.get("anchor") is not True
         or not isinstance(native.get("worktree_id"), str) or not native["worktree_id"]
         or not isinstance(native.get("session"), str) or not native["session"]
-        or native.get("work_dir") != proof["root"]
+        or not isinstance(native.get("work_dir"), str)
+        or not native["work_dir"].startswith("/") or "\0" in native["work_dir"]
     ):
         raise RuntimeError(
             "SSH CLI owner did not resolve the configured checkout's native anchor: " + error.strip(),
         )
+    if native["work_dir"] != proof["root"]:
+        native_proof = probe_checkout(adapter, native["work_dir"])
+        if native_proof["cwd"] != proof["root"]:
+            raise RuntimeError("SSH CLI native anchor is not the configured checkout's root")
     old_scope = plan["scope_id"]
     plan.update(
-        workspace=native["work_dir"], identity=native["worktree_id"],
+        workspace=proof["root"], identity=native["worktree_id"],
         scope_id=f"{native['worktree_id']}@{adapter.target}", mux_session=native["session"],
     )
     plan["venue"]["mux_session_name"] = native["session"]
@@ -231,7 +241,7 @@ def prepare(args, adapter, plan: dict) -> dict:
         binding = _binding(proof["repository"])
     producer = build_plan(specs, roots, allow_external=True, **binding)
     program = build_prepare_python(producer, proof["cwd"], include_prepared_context=True)
-    rc, output, error = run_python(adapter, program, timeout=540)
+    rc, output, error = run_python(adapter, program, timeout=_PREPARATION_TIMEOUT)
     if rc:
         raise RuntimeError("Required SSH CLI plugin preparation failed: " + error.strip())
     context = require_cli_context(parse_prepared_context(output, expected_repo=proof["root"]))

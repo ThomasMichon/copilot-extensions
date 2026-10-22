@@ -172,6 +172,8 @@ def _progress(stage: str, detail: str = "") -> None:
 
 
 def plan_for(args: argparse.Namespace) -> dict[str, Any]:
+    from .copilot_plugins import PREPARATION_RESERVATION_BUDGET
+
     workspace = _normalize_workspace(str(args.workspace))
     identity = f"anchor-{os.path.basename(workspace) or args.target}"
     scope = f"{identity}@{args.target}"
@@ -186,6 +188,7 @@ def plan_for(args: argparse.Namespace) -> dict[str, Any]:
         "anchor": True,
         "reservation_ttl": _RESERVATION_TTL,
         "reserve_retry_window": _RESERVE_RETRY_WINDOW,
+        "preparation_reservation_budget": PREPARATION_RESERVATION_BUDGET,
         "registration_error": "could not provision registration credentials on the SSH target",
         "bridge_probe_error": (
             "the SSH target cannot reach the host bridge through the forward "
@@ -686,7 +689,7 @@ def cmd_stop(args: argparse.Namespace) -> int:
     plan = plan_for(args)
     from .copilot_plugins import resolve_launch
     try:
-        resolve_launch(_SshAdapter(target=args.target, ssh_config=ssh_config), plan)
+        resolve_launch(_SshAdapter(target=args.target, ssh_config=ssh_config, plugin_args=args), plan)
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
         return _fail(str(exc), plan)
     try:

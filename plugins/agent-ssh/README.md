@@ -142,6 +142,14 @@ launch against a changed repository. SSH CLI remains anchor-only:
 Machine-only related entries are matched through the registered project's
 full Git remote, never a basename guess; the full remote coordinate still
 fences launch, and ambiguous project mappings are refused.
+An explicit expected-repository fence also applies to stop. The native anchor
+directory is resolved on the target before checkout comparison, so equivalent
+symlink/trailing-slash spellings retain the canonical execution root without
+accepting a genuinely different anchor.
+The original reservation includes the checkout-probe and preparation budgets,
+including both transport grace periods, in addition to upload, native launch
+and registration. This lengthens only the ownership lease, not any execution
+timeout or test cap.
 
 `restore-host` exposes transport-owned host setup to declarative orchestrators
 without requiring them to know installed payload paths:

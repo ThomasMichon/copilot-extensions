@@ -68,6 +68,7 @@ _RUNNER_CONFIG_KEYS = frozenset({
     "missing_agent_worktrees_error", "old_agent_worktrees_error", "reservation_wait",
     "launch_detail",
     "bridge_owned_seed", "plugin_context", "seed_operation",
+    "preparation_reservation_budget",
 })
 
 # Mirrors agent-worktrees' mux seed hard cap. The remote launch timeout must
@@ -232,10 +233,11 @@ def launch_detached(
         # worktree's own pending seed with neither passed here, and wait as long.
         if seed or refs or not bool(plan.get("anchor", True)):
             launch_timeout = max(launch_timeout, _SEEDED_LAUNCH_TIMEOUT)
-        # The reservation must outlive the refs upload, the launch (with its seed
-        # readiness wait) and registration, or a concurrent rejoin could replace it.
+        # Outlive preparation, refs, launch and registration so a concurrent
+        # rejoin cannot replace the reservation during those owned phases.
         ttl = max(float(plan.get("reservation_ttl", 900.0)),
-                  (600.0 if refs else 0.0) + launch_timeout + register_timeout + 120.0)
+                  float(plan.get("preparation_reservation_budget", 0.0))
+                  + (600.0 if refs else 0.0) + launch_timeout + register_timeout + 120.0)
         reservation = reserve_with_retry(
             plan["scope_id"],
             plan["venue"],

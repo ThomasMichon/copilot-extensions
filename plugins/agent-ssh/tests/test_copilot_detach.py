@@ -18,6 +18,7 @@ from venue_copilot import detached as venue_detached
 
 from agent_ssh import copilot_detach as detach
 from agent_ssh.copilot_detach import ensure_keeper as real_ensure_keeper, stop_keeper as real_stop_keeper
+from agent_ssh.copilot_plugins import resolve_launch as real_resolve_launch
 from agent_ssh.__main__ import main
 
 
@@ -162,6 +163,38 @@ def test_streamed_receiver_transport_is_isolated_from_terminal_signals(monkeypat
     assert seen["start_new_session"] is (os.name != "nt")
     assert seen["creationflags"] == no_window_flags()
     assert seen["input"] == b"program"
+
+
+def test_stop_checks_explicit_repository_fence_before_termination(seams, monkeypatch):
+    monkeypatch.setattr("agent_ssh.copilot_plugins.resolve_launch", real_resolve_launch)
+    monkeypatch.setattr("agent_ssh.copilot_plugins.probe_checkout", lambda *a: {
+        "cwd": "/workspaces/repo", "root": "/workspaces/repo", "repository": "other/project",
+    })
+    assert detach.cmd_stop(_args(stop=True, detach=False, expected_repository="example/project")) == 1
+    assert seams.release == [] and seams.deregister == [] and seams.stop_keeper == []
+    assert not any("tmux kill-session" in command for command in seams.remote)
+    assert not any("agent-worktrees embody" in command for command in seams.remote)
+
+
+def test_reservation_covers_preparation_and_supported_native_launch_budgets(seams, monkeypatch, capsys):
+    clock = [1000.0]
+    def prepare(*a):
+        clock[0] += 750.0  # Probe + preparation + both transport grace periods.
+        return {"version": 1, "cwd": "/workspaces/repo", "plugins": [], "logical_payloads": {}}
+    monkeypatch.setattr("agent_ssh.copilot_plugins.prepare", prepare)
+    remote = detach._remote
+    def launch(_cfg, command, **kwargs):
+        if "agent-worktrees embody" in command:
+            clock[0] += venue_detached._SEEDED_LAUNCH_TIMEOUT
+        return remote(_cfg, command, **kwargs)
+    monkeypatch.setattr(detach, "_remote", launch)
+    def claim(*a):
+        assert clock[0] < 1000.0 + seams.reserve[0][2]["ttl_seconds"]
+        return "sid-42"
+    monkeypatch.setattr(venue_detached, "await_claim", claim)
+    assert detach.cmd_detach(_args()) == 0
+    assert seams.reserve[0][2]["ttl_seconds"] >= 750.0 + venue_detached._SEEDED_LAUNCH_TIMEOUT + 120.0
+    assert "preparation_reservation_budget" not in json.loads(capsys.readouterr().out)
 
 
 @pytest.mark.parametrize("attached", [False, True])
