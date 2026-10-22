@@ -43,12 +43,44 @@ def test_failed_original_caller_can_close_only_its_own_revision(tmp_path):
     )
     assert released.startup_fenced is True
     assert released.startup_complete is False
-    with pytest.raises(TaskError, match="not one of"):
+    with pytest.raises(TaskError, match="fenced"):
         queue.record_spawn(
             reservation.key, session_handle="late-native", startup_complete=True,
             startup_revision=reservation.startup_revision,
         )
     assert queue.retire_spawn(reservation.key, exact_absence=True).state == "failed"
+
+
+def test_released_completion_requires_original_revision_and_preserves_release(tmp_path):
+    queue = TaskQueue(tmp_path / "tasks.db")
+    task = queue.create("Released launch")
+    reservation, _ = queue.reserve_spawn(task.id)
+    released = queue.request_spawn_release(
+        reservation.key, detail="Retain release intent", disposition="settled",
+    )
+    for completion, revision in ((None, None), (False, 1), (True, 2)):
+        with pytest.raises(TaskError):
+            queue.record_spawn(
+                reservation.key, session_handle="local-body:original",
+                startup_complete=completion, startup_revision=revision,
+            )
+        assert queue.get_reservation(reservation.key) == released
+    completed = queue.record_spawn(
+        reservation.key, session_handle="local-body:original", startup_complete=True,
+        startup_revision=reservation.startup_revision,
+    )
+    assert completed.state == "releasing"
+    assert completed.release_requested is True
+    assert completed.release_disposition == "settled"
+    assert completed.detail == released.detail
+    assert completed.startup_revision == reservation.startup_revision
+    assert completed.startup_complete is True
+    with pytest.raises(TaskError, match="already completed"):
+        queue.record_spawn(
+            reservation.key, session_handle="local-body:replacement", startup_complete=True,
+            startup_revision=reservation.startup_revision,
+        )
+    assert queue.retire_spawn(reservation.key, exact_absence=True).state == "settled"
 
 
 def test_failed_startup_closure_round_trips_the_client_and_route(tmp_path):
@@ -67,6 +99,33 @@ def test_failed_startup_closure_round_trips_the_client_and_route(tmp_path):
             assert released["startup_fenced"] is True
             assert released["startup_complete"] is False
             assert client.retire_spawn(reservation.key, exact_absence=True)["state"] == "failed"
+
+
+def test_released_completion_round_trips_without_reacquiring_exclusive_resource(tmp_path):
+    queue = TaskQueue(tmp_path / "tasks.db")
+    task = queue.create("Released completed body", exclusive_key="resource:released")
+    reservation, _ = queue.reserve_spawn(task.id)
+    queue.record_spawn(
+        reservation.key, session_handle="local-body:original", startup_complete=True,
+        startup_revision=reservation.startup_revision,
+    )
+    queue.record_cold(reservation.key, release_exclusive=True)
+    queue.request_spawn_release(reservation.key, disposition="settled")
+    with TestClient(create_app(queue)) as api:
+        def forward(request):
+            result = api.post(request.url.path, json=json.loads(request.content))
+            return httpx.Response(result.status_code, json=result.json())
+
+        with DispatchClient("http://testserver", transport=httpx.MockTransport(forward)) as client:
+            completed = client.record_spawn(
+                reservation.key, session_handle="local-body:original", startup_complete=True,
+                startup_revision=reservation.startup_revision,
+            )
+            assert completed["state"] == "releasing"
+            assert completed["startup_complete"] is True
+            assert completed["exclusive_released"] is True
+            assert completed["release_requested"] is True
+            assert completed["release_disposition"] == "settled"
 
 
 def test_pending_resume_revokes_completion_before_callback(tmp_path):

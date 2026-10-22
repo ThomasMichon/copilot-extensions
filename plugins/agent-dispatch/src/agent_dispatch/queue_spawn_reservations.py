@@ -456,6 +456,7 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin):
         claim_token: str | None = None,
         release_requested: bool = False,
         exclusive_released: bool | None = None,
+        preserve_releasing: bool = False,
         guard: Callable[[sqlite3.Row], None] | None = None,
     ) -> SpawnReservation:
         ts = self._now(now)
@@ -496,6 +497,9 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin):
                 except TaskError:
                     conn.execute("COMMIT")
                     raise
+            if preserve_releasing and row["state"] == SpawnState.RELEASING:
+                to_state = SpawnState.RELEASING
+                exclusive_released = None
             if to_state == SpawnState.DEFERRED and row["release_requested"]:
                 conn.execute("COMMIT")
                 raise TaskError(f"reservation {key} has pending release (cannot defer)")

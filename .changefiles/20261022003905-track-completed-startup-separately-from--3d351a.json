@@ -1,5 +1,5 @@
 {
-  "comment": "Fence completed startup and physical cooling/resume with durable coordinator guards; retain unresolved capacity, close per-operation queue connections deterministically, and support strict retained-runtime restoration",
+  "comment": "Fence completed startup and physical cooling/resume with durable coordinator guards; retain unresolved capacity, preserve concurrent release on original-caller completion, close pre-launch governance cancellations and per-operation queue connections deterministically, and support strict retained-runtime restoration",
   "changes": [
     {
       "plugin": "agent-dispatch",

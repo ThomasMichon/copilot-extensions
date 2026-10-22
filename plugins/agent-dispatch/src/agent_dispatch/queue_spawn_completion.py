@@ -63,6 +63,7 @@ class SpawnCompletionMixin(SpawnCoolingMixin):
 
         Only a successful launch return establishes ``startup_complete``;
         recovery promotion alone leaves the original caller unproven.
+        A concurrent release retains its state and intent when that caller returns.
         """
         if startup_complete is not None and type(startup_complete) is not bool:
             raise TaskError("startup_complete must be a boolean")
@@ -74,6 +75,11 @@ class SpawnCompletionMixin(SpawnCoolingMixin):
             raise TaskError("startup completion requires an exact session handle")
 
         def authority_guard(row: sqlite3.Row) -> None:
+            if row["state"] == SpawnState.RELEASING and (
+                row["startup_fenced"]
+                or row["startup_complete"] and session_handle != row["session_handle"]
+            ):
+                raise TaskError("released startup is fenced or already completed")
             if authority_expected is not None:
                 from .ci_repair_spawn import authority_snapshot
 
@@ -85,7 +91,9 @@ class SpawnCompletionMixin(SpawnCoolingMixin):
         return self._update_reservation(
             key,
             to_state=SpawnState.SPAWNED,
-            allowed_from=frozenset({SpawnState.RESERVING, SpawnState.SPAWNED, SpawnState.COLD}),
+            allowed_from=frozenset({SpawnState.RESERVING, SpawnState.SPAWNED, SpawnState.COLD})
+            | (frozenset({SpawnState.RELEASING}) if startup_complete is True else frozenset()),
+            preserve_releasing=startup_complete is True,
             session_handle=session_handle,
             startup_complete=startup_complete,
             expected_startup_revision=startup_revision,

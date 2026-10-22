@@ -25,7 +25,15 @@ that revision and fences further startup without setting `startup_complete`.
 This is not an observer's reconciliation shortcut: lost responses or remote
 operations that can still apply must remain unresolved. The first-party
 failed-create paths supply this closure only for a definitive `not_started`
-outcome. Successful callbacks continue to publish completion normally.
+outcome. A governance cancellation after workspace creation but before launch
+also closes its own startup revision through that failed-caller path.
+
+A successful original callback can publish its exact identity and matching
+completion revision while release is pending. Publication preserves
+`releasing`, the release disposition and exclusive-resource release state;
+it never promotes the reservation back to `spawned`. Revision mismatch,
+fenced startup and replacement of an already completed released identity
+remain errors. Cleanup still requires exact body absence after completion.
 
 Retained native CLI liveness uses the exact session's machine from current
 ownership or durable attachment history. An abandoned task's cleared owner
@@ -63,6 +71,9 @@ body and leave the subsequent task transition incorrectly marked started.
 An error finalizing that transition is not proof that the request cannot
 still apply. It retains incomplete startup and occupied capacity rather than
 automatically recooling a body under an unproven task-resume outcome.
+If the successful process-resume callback instead observes an already
+releasing reservation before task finalization, it publishes only the
+matching startup outcome and leaves task state and release intent unchanged.
 Task start/resume transitions also reject a retained cooling guard. Steering
 during a guarded headless stop remains durable and requests a later resume;
 it does not start the task or enqueue an interactive wake through that guard.

@@ -823,6 +823,15 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                 if not process_resumed:
                     self._resume_retry_after[key] = now + _COLD_RESUME_RETRY_SECONDS
                     continue
+                current = self.client.get_reservation(key)
+                if current.get("state") == SpawnState.RELEASING:
+                    self.client.record_spawn(
+                        key, session_handle=res.get("session_handle"),
+                        worktree=res.get("worktree"), startup_complete=True,
+                        startup_revision=pending.get("startup_revision"),
+                    )
+                    self._resume_retry_after.pop(key, None)
+                    continue
                 self.client.resume(
                     task["id"],
                     owner,
@@ -3673,6 +3682,7 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                                 f"{before_spawn.get('reason')}"
                             ),
                             disposition="failed",
+                            finished_startup_revision=reservation.get("startup_revision"),
                         )
                     else:
                         self.client.fail_spawn(

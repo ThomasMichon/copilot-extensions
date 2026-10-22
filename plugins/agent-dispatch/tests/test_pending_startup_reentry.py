@@ -13,7 +13,8 @@ from tests._helpers import TEST_REPO
 from tests.test_supervisor import OwnerResultQueue, QueueBackedClient
 
 
-def test_recovery_redrive_cannot_close_a_pending_original_start(tmp_path, monkeypatch):
+@pytest.mark.parametrize("release", [False, True])
+def test_recovery_redrive_cannot_close_a_pending_original_start(tmp_path, monkeypatch, release):
     queue = OwnerResultQueue(tmp_path / "tasks.db")
     client = QueueBackedClient(queue)
     task = queue.create("Original startup")
@@ -24,7 +25,7 @@ def test_recovery_redrive_cannot_close_a_pending_original_start(tmp_path, monkey
         entered.set()
         assert finish.wait(5)
         launched.append(task.id)
-        return True, {"session": "original-native", "worktree": "original-worktree"}
+        return True, {"session": "local-body:original-native", "worktree": "original-worktree"}
 
     original = Supervisor(client, spawn_fn=launch, repo=TEST_REPO)
 
@@ -49,8 +50,9 @@ def test_recovery_redrive_cannot_close_a_pending_original_start(tmp_path, monkey
         recovery = Supervisor(
             client, spawn_fn=lambda _: pytest.fail("no second startup"),
             repo=TEST_REPO, verdict_fn=lambda *_: tracking.LIVE,
+            local_end_fn=lambda _: True, local_acp_session_fn=lambda _: None,
             liveness_fn=lambda *_: {
-                "session_id": "original-native", "worktree_id": "original-worktree",
+                "session_id": "local-body:original-native", "worktree_id": "original-worktree",
             },
             redrive_fn=lambda *_: redriven.append(task.id) or True,
         )
@@ -59,6 +61,8 @@ def test_recovery_redrive_cannot_close_a_pending_original_start(tmp_path, monkey
         assert before.state == SpawnState.SPAWNED
         assert before.startup_complete is False
         recovery.redrive_unclaimed_spawns()
+        if release:
+            queue.request_spawn_release(before.key, detail="release during blocked launch")
         queue.abandon(task.id, permitted=True, reason="withdraw while launch is pending")
         recovery.verdict_fn = lambda *_: tracking.GONE
         assert len(recovery._active_reservations()) == 1
@@ -73,6 +77,16 @@ def test_recovery_redrive_cannot_close_a_pending_original_start(tmp_path, monkey
     assert not thread.is_alive()
     assert not errors
     assert launched == [task.id]
+    completed = queue.latest_reservation(task.id)
+    assert completed.startup_complete is True
+    assert completed.session_handle == "local-body:original-native"
+    if release:
+        assert completed.state == SpawnState.RELEASING
+        assert completed.release_requested is True
+        recovery.local_body_verdict_fn = lambda _: tracking.GONE
+        assert recovery.release_requested_bodies() == 1
+        assert queue.latest_reservation(task.id).state == SpawnState.FAILED
+        assert recovery._active_reservations() == []
 
 
 @pytest.mark.parametrize("release", [None, "direct", "suspended"])
@@ -122,6 +136,8 @@ def test_concurrent_cooling_cannot_hide_a_pending_resume(tmp_path, release):
             client, spawn_fn=lambda _: pytest.fail("no second startup"),
             repo=TEST_REPO, labels=["review"],
             local_body_verdict_fn=lambda _: tracking.GONE,
+            local_end_fn=lambda _: True, local_acp_session_fn=lambda _: None,
+            local_body_target_dir_fn=lambda _: None,
             local_cold_fn=lambda _: pytest.fail("pending resume must not be stopped"),
         )
         concurrent.cool_dormant_bodies()
@@ -145,6 +161,16 @@ def test_concurrent_cooling_cannot_hide_a_pending_resume(tmp_path, release):
     assert not thread.is_alive()
     assert not errors
     assert resumed == [task.id]
+    completed = queue.get_reservation(reservation.key)
+    assert completed.startup_complete is (release is not None)
+    if release:
+        assert completed.state == SpawnState.RELEASING
+        assert completed.release_requested is True
+        assert concurrent.release_requested_bodies() == 1
+        assert queue.get_reservation(reservation.key).state == (
+            SpawnState.SETTLED if release == "suspended" else SpawnState.FAILED
+        )
+        assert concurrent._active_reservations() == []
 
 
 def test_pending_start_cannot_be_replaced_or_cooled_in_storage(tmp_path):

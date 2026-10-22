@@ -139,29 +139,51 @@ def test_gc_loop_rechecks_before_reconcile_and_catches_mid_iteration_maintenance
     assert runs == []
 
 
-def test_supervisor_requeues_reserved_task_when_revalidation_fails_before_spawn(monkeypatch, tmp_path):
+@pytest.mark.parametrize("ownership", ["reused", "created"])
+def test_supervisor_requeues_reserved_task_when_revalidation_fails_before_spawn(monkeypatch, tmp_path, ownership):
     queue = TaskQueue(tmp_path / "tasks.db")
     client = QueueBackedClient(queue)
     task = queue.create("work", repo=TEST_REPO)
-    sup = Supervisor(client, spawn_fn=_ok_spawn(), repo=TEST_REPO, max_concurrent=5)
+    spawn = _ok_spawn()
+    cleaned = []
+    sup = Supervisor(
+        client, spawn_fn=spawn, repo=TEST_REPO, max_concurrent=1,
+        verdict_fn=lambda *_: "gone", machine="host-a",
+        worktree_directory_present_fn=lambda *_: False,
+        attempt_conclusion_fn=lambda *args: cleaned.append(args) or {"action": "primed"},
+    )
     governance = _Governance([
         {"status": "ready", "reason": "baseline-established", "baseline": {}},
         {"status": "revalidation-required", "reason": "generation-changed"},
     ])
     sup.set_governance_recheck_fn(governance.recheck)
-    monkeypatch.setattr(
-        sup,
-        "_prepare_spawn_task",
-        lambda task_row, reservation: {
+    def prepare(task_row, reservation):
+        queue.record_spawn_worktree(
+            reservation["key"], "prepared-worktree", ownership=ownership,
+            creating_host="host-a", allocation_project="test",
+            driver="agent-dispatch",
+            worktree_path=str(tmp_path / "prepared-worktree"),
+        )
+        return {
             "id": task_row["id"],
-            "spawn_worktree_ownership": "reused",
-        },
-    )
+            "spawn_worktree_ownership": ownership,
+        }
+
+    monkeypatch.setattr(sup, "_prepare_spawn_task", prepare)
 
     assert sup.poll_once() == []
 
     reservations = client.list_reservations(task_id=task.id)
-    assert reservations[-1]["state"] == "failed"
+    assert spawn.calls == []
+    if ownership == "created":
+        assert reservations[-1]["state"] == "releasing"
+        assert reservations[-1]["startup_fenced"] is True
+        assert reservations[-1]["startup_complete"] is False
+        sup.set_governance_recheck_fn(lambda _: {"status": "ready"})
+        assert sup.release_requested_bodies() == 1
+        assert len(cleaned) == 1
+        assert sup._active_reservations() == []
+    assert queue.latest_reservation(task.id).state == "failed"
     assert queue.get(task.id).status == "queued"
     assert governance.calls == [
         "pre-mutation:reserve-spawn",
