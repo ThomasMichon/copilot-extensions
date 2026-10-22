@@ -46,9 +46,15 @@ def _published_engine_sources(home: Path, engine: Path) -> tuple[Path, ...]:
     ):
         raise RuntimeError("Prior Worktrees publication does not identify this engine")
     receipt = manifest.get("commandBinding")
-    if not isinstance(receipt, dict):
-        return ()
-    candidates = [receipt.get("payloadRoot")]
+    if isinstance(receipt, dict):
+        candidates = [receipt.get("payloadRoot")]
+    elif receipt is None:
+        legacy_source = manifest.get("source")
+        candidates = [legacy_source["path"]] if (
+            isinstance(legacy_source, dict) and legacy_source.get("path")
+        ) else []
+    else:
+        raise RuntimeError("Prior Worktrees command ownership is malformed")
     redirect = root / "payload-dir"
     _ordinary(redirect)
     redirect_before = redirect.read_bytes() if redirect.is_file() else None

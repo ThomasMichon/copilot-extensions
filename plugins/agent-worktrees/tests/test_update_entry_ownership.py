@@ -84,6 +84,53 @@ def test_update_entry_ownership_accepts_older_published_helper(published_engine,
     assert not (home / ".worktree-manager").exists()
 
 
+@pytest.mark.parametrize("name", HELPERS)
+@pytest.mark.parametrize("crlf", [False, True])
+def test_update_entry_ownership_revalidates_legacy_source_locator(
+    published_engine, name, crlf,
+):
+    module, home, runtime, previous, local_bin = published_engine
+    older = _helper(module, previous, local_bin, name, crlf)
+    path = runtime / "deploy-manifest.json"
+    manifest = json.loads(path.read_text())
+    manifest.pop("commandBinding")
+    manifest["source"] = {"kind": "marketplace", "path": str(previous)}
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    before = path.read_bytes()
+    module.validate_manager_ownership(home / ".worktree-manager", REPO / "worktree-manager")
+    assert path.read_bytes() == before
+    assert (local_bin / name).read_bytes().replace(b"\r\n", b"\n") == older
+    assert not (home / ".worktree-manager").exists()
+
+
+@pytest.mark.parametrize("fault", ["unregistered", "relative", "malformed-binding", "foreign-helper"])
+def test_update_entry_ownership_legacy_locator_is_not_ownership_by_itself(
+    published_engine, fault,
+):
+    module, home, runtime, previous, local_bin = published_engine
+    name = HELPERS[0]
+    _helper(module, previous, local_bin, name)
+    path = runtime / "deploy-manifest.json"
+    manifest = json.loads(path.read_text())
+    manifest.pop("commandBinding")
+    manifest["source"] = {"kind": "marketplace", "path": str(previous)}
+    if fault == "unregistered":
+        (home / ".copilot/settings.json").write_text("{}", encoding="utf-8")
+    elif fault == "relative":
+        manifest["source"]["path"] = "relative/payload"
+    elif fault == "malformed-binding":
+        manifest["commandBinding"] = []
+    else:
+        (local_bin / name).write_bytes(b"unrelated user command\n")
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    before = path.read_bytes()
+    command = (local_bin / name).read_bytes()
+    with pytest.raises(RuntimeError):
+        module.validate_manager_ownership(home / ".worktree-manager", REPO / "worktree-manager")
+    assert path.read_bytes() == before
+    assert (local_bin / name).read_bytes() == command
+
+
 def test_update_entry_ownership_accepts_selected_snapshot_after_payload_refresh(published_engine):
     module, home, runtime, previous, local_bin = published_engine
     name = HELPERS[0]
@@ -212,6 +259,7 @@ def test_update_entry_ownership_cannot_adopt_unsupported_evidence(published_engi
     manifest = json.loads(manifest_path.read_text())
     if fault == "unbound":
         manifest.pop("commandBinding")
+        manifest.pop("source", None)
     elif fault == "foreign-owner":
         manifest["commandBinding"]["sourceFingerprint"] = "sha256:" + "0" * 64
     elif fault == "incomplete":

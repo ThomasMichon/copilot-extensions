@@ -1273,6 +1273,9 @@ also accepts exact bytes from the prior installation's revalidated
 `commandBinding` payload or selected source snapshot. The fresh canonical
 ownership reader/builder validates that existing source/installation owner
 without importing the installed application or writing a new receipt.
+For an older schema-3 manifest without `commandBinding`, its existing
+`source.path` is a candidate locator, not ownership by itself: the same
+canonical source/mode validation and exact helper-byte comparison still apply.
 Unrelated bytes, missing ownership, indirect files, and inconsistent ownership records
 remain refusals; helper evolution does not require a growing release-hash list.
 
