@@ -87,7 +87,44 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Admitted fixture-semantic batches
 
+### B-LEASE-CLI renewal assertions with original cases retained
+
+Baseline: the actual #7718 merge. Extend the explicit-disposition acquire
+case with a plain renewal that must preserve `at-rest`. Extend the
+default acquire case with flagged renewal and a real inspect proving
+durable `at-rest` settlement. Both resulting bodies match pinned
+preserved source, retaining their original test names.
+
+Every original name, fixture dependency, decorator and assertion remains;
+the standalone `test_renew_advances_disposition_to_at_rest` and
+`test_renew_without_flags_preserves_existing_disposition` are unchanged.
+The historical removal of those two cases and rename of the acquire
+cases are proposed for retirement from future extraction, not retirement
+of tests or contracts. Keeping them preserves the original selection
+without preventing the combined acquire/renew assertions.
+
+Complete native Windows lease CLI module: nine passed, zero skips,
+25.32 seconds pytest / 42.11 preparation-cleanup inclusive. Exactly
+two work-stealing workers retain the original 30-second item watchdog,
+all marks/resource ceilings and the 240-second diagnostic group.
+Functional integration only, not quiet-host, whole-suite or repeated
+same-head qualification.
+
+This below-altitude assertion-only extraction changes no production,
+command, configuration, installation or architecture contract.
+Documentation impact is this ledger; no adopter guide changes.
+Clean-room provisioning and external-venue lanes are inapplicable
+to this native test-only change. Other B/N and production S/F/G/P/R/A
+contracts and parent qualification remain open.
+
 ### N-STAT native stat fields in nonregular-input simulation
+
+Actual disposition: #7718 merged as
+`1e4fb226350f0448d4e0aa8af664998bc38c345a`; full Copilot review
+`5608376973` approved exact head
+`438523cc25d3846274b68f79c01312e4da6ac865`.
+Overview, inline/general channels and threads had no findings;
+required CI was green and the child worktree is finalized.
 
 Baseline: the actual #7710 merge. The simulated FIFO now copies every
 actual `st_*` attribute from the native stat result into a
