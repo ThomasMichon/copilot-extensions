@@ -87,7 +87,46 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Admitted fixture-semantic batches
 
+### B-REPOS-CONFIG native config without unrelated commits
+
+Baseline: the actual #7737 merge. `_init_config_repo` initializes real
+Git configuration without identity or commit setup. The twelve named
+backfill/add-repo tests use that helper where local credential config
+is consumed, or a plain existing directory where account/remote
+preflight must refuse before pinning. Host-derived credential readback,
+account clarification, unknown-name refusal and all original assertions
+remain. `_init_repo` still supplies identity and commits for every
+real-history consumer. `_bare_anchor_from_clone` is unchanged;
+B-CLONE-IDENTITY remains a separate, unaccepted contract.
+
+All fourteen changed/new function ASTs exactly match pinned preserved
+source. Every original test identity, decorator, fixture and assertion
+outside those setup substitutions remains unchanged. The complete
+native Windows repos module passed 135 tests, zero skips, in 35.84
+seconds pytest / 49.52 preparation-cleanup inclusive. Exactly two
+work-stealing workers retained the original 30-second item watchdog,
+240-second diagnostic group and all native/process/memory bounds.
+Ruff and all thirteen install contracts passed. Functional integration
+only, not quiet-host, whole-suite or repeated same-head qualification.
+
+This below-altitude fixture-only change alters no production, command,
+configuration, installation or architecture contract. Documentation
+impact is this ledger; real Git config consumption is exercised, not
+mocked away. Clean-room provisioning and external-venue lanes are
+inapplicable. Other B/N, production S/F/G/P/R/A and parent qualification
+remain open.
+
 ### B-CLI-USAGE current pr-watch command family
+
+Actual disposition: #7737 merged as
+`a4677aafbc4443007ca3da0384cb94869207e5c7`; fresh full Copilot
+review `5608742047` approved exact head
+`66bf96c6cb8f75ef3ec9eafd894feb14f59b58fe`.
+All overview/inline/general channels and threads were clear.
+After confirmed npm recovery, the actual required attribution job
+`119635311301` in run `39713519004` succeeded; all required checks
+and live authority passed before merge. No gate was bypassed for the
+outage. The child is finalized.
 
 Baseline: the actual #7730 merge. The no-argument `pr-watch`
 module-invocation regression now expects the actual current

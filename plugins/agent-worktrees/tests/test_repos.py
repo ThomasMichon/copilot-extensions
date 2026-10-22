@@ -25,9 +25,14 @@ def _git(path: Path, *args: str) -> None:
                    capture_output=True, text=True)
 
 
-def _init_repo(path: Path, branch: str = "main") -> None:
+def _init_config_repo(path: Path, branch: str = "main") -> None:
+    """Initialize real Git config without unrelated identity or commit setup."""
     path.mkdir(parents=True, exist_ok=True)
     _git(path, "init", "-b", branch)
+
+
+def _init_repo(path: Path, branch: str = "main") -> None:
+    _init_config_repo(path, branch)
     _git(path, "config", "user.email", "t@example.com")
     _git(path, "config", "user.name", "Test")
     (path / "README.md").write_text("hi\n")
@@ -727,7 +732,7 @@ def test_add_repo_persists_account(home: Path):
 
 def test_backfill_pins_a_resolvable_repo(home: Path, tmp_path: Path):
     work = tmp_path / "pin-me"
-    _init_repo(work, branch="main")
+    _init_config_repo(work)
     repos.add_repo(
         "pin-me", str(work), repo_class="worktree",
         remote="https://github.com/example-operator/pin-me.git", plat="windows",
@@ -752,8 +757,8 @@ def test_backfill_pins_a_resolvable_repo(home: Path, tmp_path: Path):
 def test_backfill_restricts_to_named_repo(home: Path, tmp_path: Path):
     work_a = tmp_path / "a"
     work_b = tmp_path / "b"
-    _init_repo(work_a, branch="main")
-    _init_repo(work_b, branch="main")
+    _init_config_repo(work_a)
+    _init_config_repo(work_b)
     repos.add_repo("a", str(work_a), repo_class="worktree",
                     remote="https://github.com/example-operator/a.git", plat="windows")
     repos.add_repo("b", str(work_b), repo_class="worktree",
@@ -767,7 +772,7 @@ def test_backfill_restricts_to_named_repo(home: Path, tmp_path: Path):
 
 def test_backfill_skips_org_owner_needing_clarify(home: Path, tmp_path: Path):
     work = tmp_path / "org-owned"
-    _init_repo(work, branch="main")
+    work.mkdir()
     repos.add_repo(
         "org-owned", str(work), repo_class="worktree",
         remote="https://github.com/github/org-owned.git", plat="windows",
@@ -781,7 +786,7 @@ def test_backfill_skips_org_owner_needing_clarify(home: Path, tmp_path: Path):
 
 def test_backfill_skips_non_github_remote(home: Path, tmp_path: Path):
     work = tmp_path / "ado-repo"
-    _init_repo(work, branch="main")
+    work.mkdir()
     repos.add_repo(
         "ado-repo", str(work), repo_class="worktree",
         remote="https://my-org.visualstudio.com/x/_git/ado-repo", plat="windows",
@@ -804,7 +809,7 @@ def test_backfill_skips_ssh_remote(home: Path, tmp_path: Path):
     transport never consults -- treating it as pinned would be a false
     positive that reports success while changing nothing."""
     work = tmp_path / "ssh-repo"
-    _init_repo(work, branch="main")
+    work.mkdir()
     repos.add_repo(
         "ssh-repo", str(work), repo_class="worktree",
         remote="git@github.com:example-operator/ssh-repo.git", plat="windows",
@@ -834,7 +839,7 @@ def test_backfill_distinguishes_http_from_ssh_remote(home: Path, tmp_path: Path)
     backfill report must never claim 'SSH remote' for an unencrypted HTTP
     checkout -- distinguish the two skip reasons."""
     work = tmp_path / "http-repo"
-    _init_repo(work, branch="main")
+    work.mkdir()
     repos.add_repo(
         "http-repo", str(work), repo_class="worktree",
         remote="http://github.com/example-operator/http-repo.git", plat="windows",
@@ -848,7 +853,7 @@ def test_backfill_pins_with_derived_host_not_hardcoded_github_com(home: Path, tm
     www.github.com, not the hardcoded 'github.com' default -- git's
     credential store matches by literal hostname."""
     work = tmp_path / "www-repo"
-    _init_repo(work, branch="main")
+    _init_config_repo(work)
     repos.add_repo(
         "www-repo", str(work), repo_class="worktree",
         remote="https://www.github.com/example-operator/www-repo.git", plat="windows",
@@ -871,7 +876,7 @@ def test_backfill_unknown_name_never_falls_back_to_all(home: Path, tmp_path: Pat
     """A typo in the requested name must report 'not found', never silently
     expand to every registered repo."""
     work = tmp_path / "real-one"
-    _init_repo(work, branch="main")
+    _init_config_repo(work)
     repos.add_repo(
         "real-one", str(work), repo_class="worktree",
         remote="https://github.com/example-operator/real-one.git", plat="windows",
@@ -890,7 +895,7 @@ def test_add_repo_pins_credential_for_a_resolvable_owner(home: Path, tmp_path: P
     project-entry registration -- gets the pin, not only the CLI paths that
     separately call _clarify_registration_account."""
     work = tmp_path / "auto-pin"
-    _init_repo(work, branch="main")
+    _init_config_repo(work)
     with patch("agent_worktrees.git_ops.gh_token_for_account", side_effect=_fake_token), \
          patch("agent_worktrees.repos.shutil.which", return_value="gh"), \
          patch("agent_worktrees.git_ops.shutil.which", return_value="gh"):
@@ -911,7 +916,7 @@ def test_add_repo_does_not_pin_when_account_needs_clarify(home: Path, tmp_path: 
     pin is written until an operator resolves it (repos account set /
     the interactive _clarify_registration_account flow)."""
     work = tmp_path / "org-owned-auto"
-    _init_repo(work, branch="main")
+    _init_config_repo(work)
     with patch("agent_worktrees.git_ops.gh_token_for_account", side_effect=_fake_token), \
          patch("agent_worktrees.repos.shutil.which", return_value="gh"):
         repos.add_repo(
@@ -930,7 +935,7 @@ def test_add_repo_does_not_pin_ssh_remote(home: Path, tmp_path: Path):
     """An SSH remote's registration must not attempt (and falsely report) a
     pin that credential.https://... can never affect."""
     work = tmp_path / "ssh-auto"
-    _init_repo(work, branch="main")
+    _init_config_repo(work)
     with patch("agent_worktrees.git_ops.gh_token_for_account", side_effect=_fake_token), \
          patch("agent_worktrees.repos.shutil.which", return_value="gh"), \
          patch("agent_worktrees.git_ops.shutil.which", return_value="gh"):
@@ -952,7 +957,7 @@ def test_add_repo_pin_expands_home_relative_path(home: Path, tmp_path: Path, mon
     rather than the raw caller-supplied path string, or a home-relative
     registration would silently never get pinned."""
     work = tmp_path / "home-rel"
-    _init_repo(work, branch="main")
+    _init_config_repo(work)
     monkeypatch.setattr(
         repos.os.path, "expanduser",
         lambda p: str(work) if p == "~/home-rel" else os.path.expanduser(p),

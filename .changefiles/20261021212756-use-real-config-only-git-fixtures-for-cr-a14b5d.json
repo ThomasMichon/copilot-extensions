@@ -1,0 +1,9 @@
+{
+  "comment": "Use real config-only Git fixtures for credential pin and preflight regressions without unrelated commits.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
