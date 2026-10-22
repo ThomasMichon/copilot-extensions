@@ -228,3 +228,14 @@ redacted cause codes rather than raw credential-shaped diagnostics.
   publication or enrollment authority.
 - The final extended focused suite passes66 cases with the same one
   Linux-only skip, including stale attempt release and concurrent start/stop.
+- A subsequent source review found the same ownership class in detached
+  cleanup: interrupted refusal retirement and `stop_nowait()` could outlive
+  lifecycle ownership, and failed late-spawn termination lost the process
+  reference. Track one captured-process retirement task, block admission while
+  any cleanup is pending, latch interrupted uncertainty and keep uncleaned
+  process custody for later explicit stop. Cleanup never unconditionally clears
+  a replacement handle.
+- Add dedicated interrupted-refusal, delayed-nowait and failed-late-spawn
+  cleanup regressions. The native fixture now enables `SO_REUSEADDR` only on
+  POSIX for TIME_WAIT reconnects; Windows retains its occupied-listener
+  semantics. Native Linux execution is still not claimed from Windows tests.

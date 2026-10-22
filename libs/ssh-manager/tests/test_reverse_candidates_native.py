@@ -19,6 +19,8 @@ from ssh_manager.reverse_candidates import FiniteReverseForward, ReverseEndpoint
 CHILD = """
 import os, socket, sys
 s = socket.socket()
+if os.name != 'nt':
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 try:
     s.bind(('127.0.0.1', int(sys.argv[1])))
 except OSError:

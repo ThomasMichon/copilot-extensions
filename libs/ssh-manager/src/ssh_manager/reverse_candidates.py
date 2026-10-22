@@ -129,6 +129,8 @@ class FiniteReverseForward(SupervisedRelayForward):
         self._selection_lock = asyncio.Lock()
         self._lifecycle_task: asyncio.Task | None = None
         self._stop_requests = 0
+        self._retiring_process = None
+        self._retirement_task: asyncio.Task | None = None
         self._status = ReverseStatus(request_id, None, "unavailable", "not-started")
 
     @property
@@ -199,16 +201,23 @@ class FiniteReverseForward(SupervisedRelayForward):
         except Exception:
             log.warning("Interrupted reverse spawn failed before ownership was returned")
             return
+        self._proc = proc
         try:
-            await self._terminate(proc)
-        except Exception:
-            self._status = replace(self._status, state="unknown", reason="spawn-cleanup-failed")
-            log.error("Reverse forward owned spawn cleanup failed")
+            await self._retire_process()
+        except ReverseForwardError:
+            log.error("Interrupted reverse spawn retains uncleaned process custody")
+
+    def _ensure_cleanup_settled(self) -> None:
+        if any(not task.done() for task in self._cleanup_tasks):
+            raise ReverseForwardError(ReverseStatus(
+                self._request_id, self._status.attempt, "unavailable", "cleanup-pending",
+            ))
 
     async def establish(self) -> None:
         async with self._lifecycle():
             if self._status.state == "unknown":
                 raise ReverseForwardError(self._status)
+            self._ensure_cleanup_settled()
             if self._stopped:
                 raise self._fail("stopped", "owner-stopped", self._status.attempt)
             if self.is_alive:
@@ -241,11 +250,11 @@ class FiniteReverseForward(SupervisedRelayForward):
                     proc = await self._spawn_owned(args, remaining)
                 except (OSError, asyncio.TimeoutError):
                     raise self._fail("unknown", "spawn-outcome") from None
-                if self._stopped:
-                    await asyncio.shield(self._terminate(proc))
-                    raise self._fail("stopped", "owner-stopped")
                 self._proc = proc
                 self._notify_pid_change()
+                if self._stopped:
+                    await self._retire_process()
+                    raise self._fail("stopped", "owner-stopped")
                 attempt = ReverseAttempt(
                     self._request_id, uuid.uuid4().hex, endpoint, host_port, proc.pid, False,
                 )
@@ -285,14 +294,14 @@ class FiniteReverseForward(SupervisedRelayForward):
                     self._status = ReverseStatus(
                         self._request_id, attempt, "unknown", "interrupted-attempt",
                     )
-                    await asyncio.shield(self._retire_process())
+                    await self._retire_process()
                     raise
                 except ReverseForwardError:
-                    await asyncio.shield(self._retire_process())
+                    await self._retire_process()
                     raise
                 except Exception:
                     error = self._fail("unknown", "observer-outcome", attempt)
-                    await asyncio.shield(self._retire_process())
+                    await self._retire_process()
                     raise error from None
             raise self._fail("unavailable", "candidates-exhausted")
 
@@ -305,6 +314,7 @@ class FiniteReverseForward(SupervisedRelayForward):
 
     async def start(self) -> None:
         async with self._lifecycle():
+            self._ensure_cleanup_settled()
             if self._stop_requests:
                 raise ReverseForwardError(ReverseStatus(
                     self._request_id, None, "stopped", "owner-stopping",
@@ -318,12 +328,46 @@ class FiniteReverseForward(SupervisedRelayForward):
     async def _retire_process(self) -> None:
         if self._status.state == "ready":
             self._status = replace(self._status, state="unavailable", reason="transport-retired")
+        proc = self._proc
+        if proc is None:
+            return
+        cleanup = self._queue_retirement(proc)
         try:
-            await super()._cancel_process()
+            retired = await asyncio.shield(cleanup)
+        except asyncio.CancelledError:
+            self._status = replace(self._status, state="unknown", reason="interrupted-cleanup")
+            raise
+        if not retired:
+            raise ReverseForwardError(self._status)
+
+    def _queue_retirement(self, proc) -> asyncio.Task:
+        task = self._retirement_task
+        if task is not None and not task.done():
+            if self._retiring_process is not proc:
+                raise self._fail("unknown", "cleanup-custody-conflict")
+            return task
+        task = asyncio.create_task(self._retire_captured(proc))
+        self._retiring_process = proc
+        self._retirement_task = task
+        self._cleanup_tasks.add(task)
+        task.add_done_callback(self._cleanup_tasks.discard)
+        return task
+
+    async def _retire_captured(self, proc) -> bool:
+        try:
+            await self._terminate(proc)
+        except asyncio.CancelledError:
+            self._status = replace(self._status, state="unknown", reason="interrupted-cleanup")
+            log.error("Reverse forward process cleanup was interrupted; custody retained")
+            return False
         except Exception:
             self._status = replace(self._status, state="unknown", reason="cleanup-failed")
             log.error("Reverse forward owned process cleanup failed")
-            raise ReverseForwardError(self._status) from None
+            return False
+        if self._proc is proc:
+            self._proc = None
+            self._notify_pid_change()
+        return True
 
     async def stop(self) -> None:
         self._stop_requests += 1
@@ -356,4 +400,25 @@ class FiniteReverseForward(SupervisedRelayForward):
     def stop_nowait(self) -> None:
         if self._status.state == "ready":
             self._status = replace(self._status, state="stopped", reason="owner-stopped")
-        super().stop_nowait()
+        self._stopped = True
+        monitor = self._monitor_task
+        self._monitor_task = None
+        if monitor is not None and not monitor.done():
+            monitor.cancel()
+        active = self._lifecycle_task
+        try:
+            current = asyncio.current_task()
+        except RuntimeError:
+            current = None
+        if active is not None and active is not current:
+            active.cancel()
+        proc = self._proc
+        if proc is not None:
+            self._kill_tree_nowait(proc)
+            try:
+                asyncio.get_running_loop()
+            except RuntimeError:
+                self._status = replace(self._status, state="unknown", reason="cleanup-unavailable")
+                log.warning("Reverse forward cleanup requires its asynchronous owner")
+            else:
+                self._queue_retirement(proc)

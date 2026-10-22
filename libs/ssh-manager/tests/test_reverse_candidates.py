@@ -404,6 +404,92 @@ async def test_attempt_cleanup_does_not_settle_an_unknown_observation(monkeypatc
     result = await relay.stop_attempt(attempt.attempt_id)
     assert result.state == "unknown"
 
+
+async def test_interrupted_refusal_cleanup_holds_admission_and_retains_exact_process(monkeypatch):
+    relay, spawned, retired, _ = fixture_owner(monkeypatch, ["refused", "ready"])
+    entered, release = asyncio.Event(), asyncio.Event()
+    async def retire(self, proc):
+        entered.set()
+        await release.wait()
+        retired.append(proc)
+        proc.returncode = -9
+    monkeypatch.setattr(FiniteReverseForward, "_terminate", retire)
+    establishing = asyncio.create_task(relay.establish())
+    await entered.wait()
+    stopping = asyncio.create_task(relay.stop())
+    await asyncio.sleep(0)
+    with pytest.raises(ReverseForwardError):
+        await relay.start()
+    assert len(spawned) == 1
+    release.set()
+    await stopping
+    with pytest.raises(asyncio.CancelledError):
+        await establishing
+    assert retired == spawned and relay._proc is None
+    assert relay.reverse_status.state == "unknown"
+    with pytest.raises(ReverseForwardError):
+        await relay.start()
+    assert len(spawned) == 1
+
+
+async def test_nowait_cleanup_cannot_sweep_a_replacement_before_it_finishes(monkeypatch):
+    relay, spawned, retired, _ = fixture_owner(monkeypatch, ["ready", "ready"])
+    await relay.establish()
+    old = spawned[0]
+    entered, release = asyncio.Event(), asyncio.Event()
+    async def retire(self, proc):
+        if proc is old:
+            entered.set()
+            await release.wait()
+        retired.append(proc)
+        proc.returncode = -9
+    def kill(self, proc):
+        proc.returncode = -9
+    monkeypatch.setattr(FiniteReverseForward, "_terminate", retire)
+    monkeypatch.setattr(FiniteReverseForward, "_kill_tree_nowait", kill)
+    relay.stop_nowait()
+    await entered.wait()
+    with pytest.raises(ReverseForwardError, match="cleanup-pending"):
+        await relay.start()
+    assert len(spawned) == 1
+    release.set()
+    await asyncio.gather(*tuple(relay._cleanup_tasks))
+    await relay.start()
+    assert len(spawned) == 2 and relay._proc is spawned[1]
+    assert retired == [old] and spawned[1].returncode is None
+    await relay.stop()
+
+
+async def test_failed_late_spawn_cleanup_keeps_process_for_explicit_retry(monkeypatch):
+    relay, spawned, retired, _ = fixture_owner(monkeypatch, ["ready"])
+    entered, release = asyncio.Event(), asyncio.Event()
+    async def late(*_args, **_kwargs):
+        proc = Process(123)
+        spawned.append(proc)
+        entered.set()
+        await release.wait()
+        return proc
+    calls = []
+    async def retire(self, proc):
+        calls.append(proc)
+        if len(calls) == 1:
+            raise OSError("private cleanup detail")
+        proc.returncode = -9
+        retired.append(proc)
+    monkeypatch.setattr(candidate_mod, "create_ssh_subprocess", late)
+    monkeypatch.setattr(FiniteReverseForward, "_terminate", retire)
+    task = asyncio.create_task(relay.establish())
+    await entered.wait()
+    task.cancel()
+    release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert relay._proc is spawned[0] and spawned[0].returncode is None
+    await relay.stop()
+    assert calls == [spawned[0], spawned[0]]
+    assert retired == spawned and relay._proc is None
+    assert relay.reverse_status.state == "unknown"
+
 @pytest.mark.parametrize("host,port", [
     ("0.0.0.0", 1234), ("example.com", 1234), ("127.0.0.1", 0),
     ("localhost", True), ("::1", 65536),
@@ -425,6 +511,15 @@ def test_candidates_and_observer_must_be_explicit_and_bounded():
         FiniteReverseForward(
             SSHConfig(host_alias="fixture"), (candidate,), request_id="op", observe=None,
         )
+
+
+def test_nowait_stop_without_an_event_loop_is_explicit_and_inert_before_spawn():
+    relay = FiniteReverseForward(
+        SSHConfig(host_alias="fixture"), (ReverseEndpoint("localhost", 41001),),
+        request_id="op", observe=lambda _: None,
+    )
+    relay.stop_nowait()
+    assert relay._stopped and relay._proc is None
 
 
 @pytest.mark.parametrize("reason", ["authentication", "host-key", "permission", "transport"])

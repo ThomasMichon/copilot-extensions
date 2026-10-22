@@ -137,6 +137,12 @@ returns `None` without stopping a reconnected successor. A matching attempt
 returns its final `ReverseStatus`, including any still-unknown observation.
 This local fence does not replace the fleet owner's publication/enrollment
 generation checks; unconditional `stop()` remains explicit owner shutdown.
+All detached cleanup stays tracked until it finishes. A `stop_nowait()` followed
+by `start()` is refused with `cleanup-pending` while old retirement could still
+sweep descendants. Cancellation during refusal cleanup latches unknown, and a
+late-spawn process whose termination fails remains referenced so a later explicit
+stop can retry its owned cleanup. Completing that cleanup does not settle an
+unknown remote observation or publication.
 
 This library supplies no authenticated production observer, enrollment
 projection, fleet publication ledger, installer or adoption. Local socket and
