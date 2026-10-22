@@ -747,7 +747,7 @@ class TestPaneWrapperInitialPrompt:
         receipt.unlink(missing_ok=True)
         try:
             result = subprocess.run(
-                cmd, env=env, capture_output=True, text=True, timeout=15,
+                cmd, env=env, capture_output=True, text=False, timeout=15,
                 creationflags=(
                     subprocess.CREATE_NO_WINDOW if platform.system() == "Windows" else 0
                 ),
@@ -828,6 +828,41 @@ class TestPaneWrapperInitialPrompt:
         assert ("child_args='absent'" in message) == (stage != "after-child")
         assert "last wrapper statement" in message
         assert "child stderr" in message
+        assert f"stdout_tail={stdout[-4096:]!r}" in message
+        assert f"stderr_tail={stderr[-4096:]!r}" in message
+        assert "discarded stdout prefix" not in message
+        assert "discarded stderr prefix" not in message
+
+    def test_wrapper_timeout_bounds_real_child_streams(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(shutil, "which", lambda *_args: "diagnostic-shell")
+        stdout = b"discarded stdout prefix" + b"\xc3\xa9" * 4096 + b"stdout-end"
+        stderr = b"discarded stderr prefix" + b"\xe2\x82\xac" * 4096 + b"stderr-end"
+        child = (
+            "import os,time\n"
+            "os.write(1, b'discarded stdout prefix' + b'\\xc3\\xa9' * 4096 + b'stdout-end')\n"
+            "os.write(2, b'discarded stderr prefix' + b'\\xe2\\x82\\xac' * 4096 + b'stderr-end')\n"
+            "time.sleep(30)\n"
+        )
+        original_run = subprocess.run
+        calls = []
+
+        def run(cmd, **kwargs):
+            calls.append(cmd)
+            assert kwargs["timeout"] == 15
+            assert kwargs["text"] is False
+            try:
+                return original_run([sys.executable, "-c", child], **kwargs)
+            except subprocess.TimeoutExpired as exc:
+                assert isinstance(exc.stdout, bytes)
+                assert isinstance(exc.stderr, bytes)
+                raise
+
+        monkeypatch.setattr(subprocess, "run", run)
+        with pytest.raises(pytest.fail.Exception) as failure:
+            self.test_wrapper_appends_native_interactive_prompt(tmp_path)
+        message = str(failure.value)
+        assert len(calls) == 1
+        assert "receipt='absent'; child_args='absent'" in message
         assert f"stdout_tail={stdout[-4096:]!r}" in message
         assert f"stderr_tail={stderr[-4096:]!r}" in message
         assert "discarded stdout prefix" not in message

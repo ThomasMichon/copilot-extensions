@@ -99,22 +99,30 @@ then invokes the quoted launcher/manifest suffix through the resolved
 PowerShell command boundary. It retains the real interactive prompt,
 blank lines, paths with spaces, receipt and child-argument assertions.
 The child invocation is headless with the unchanged fifteen-second
-deadline. Timeout failure identifies before-receipt, before-child and
+deadline. Binary capture preserves original stream bytes rather than
+depending on platform-specific text-mode timeout results. Timeout failure
+identifies before-receipt, before-child and
 after-child states, preserving exactly the last 4,096 bytes of each
 captured output stream. No retry or deadline increase is introduced.
 
 Fixture-only PowerShell tracing is enabled only by `PROFILE_DURATIONS=true`
 or `RUNNER_DEBUG=1`; the default copied wrapper remains byte-identical.
-The two added test functions cover all three trace-policy configurations
+Three added test functions cover all three trace-policy configurations
 and all three timeout stages. Unlike the pinned candidate's new
 Windows-only skip, the mocked trace-policy test models Windows on any
 host; mocked shell discovery prevents diagnostic cases from acquiring
 a native-shell prerequisite. The original real native round trip keeps
 its existing prerequisite checks. Oversized synthetic output verifies
 the exact 4,096-byte tails and absence of discarded prefixes.
+A real Python child writes oversized multibyte stdout/stderr and reaches
+the same fifteen-second timeout. Its actual timeout streams must be bytes,
+and the fixture's final failure message must contain the exact byte tails.
+This distinguishes a byte bound from a character bound. Text-mode capture
+failed that native regression; binary capture resolves the discrepancy
+without decoding, retrying or changing the deadline.
 
-Complete native Windows handoff-cutover module: 146 passed, zero skips,
-11.28 seconds pytest / 15.02 preparation-cleanup inclusive. Exactly two
+Complete native Windows handoff-cutover module: 147 passed, zero skips,
+24.48 seconds pytest / 28.66 preparation-cleanup inclusive. Exactly two
 work-stealing workers retain the original 30-second item watchdog,
 240-second diagnostic group and all native/process/memory bounds and
 marks. Ruff and thirteen install contracts pass. No new skip, exclusion,
