@@ -1,0 +1,9 @@
+{
+  "comment": "Cover canonical revalidation of older helper publications in the Worktrees ownership regression portfolio",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
