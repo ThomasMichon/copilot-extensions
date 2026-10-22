@@ -107,6 +107,13 @@ remote listener changes; a failing/invalid explicit resolver is refused rather
 than silently forwarding to another candidate port. Every monitor-driven
 candidate rechecks the reconnect gate. A stopped venue retires the owner;
 an inconclusive gate defers connection through the existing backoff.
+The finite owner bounds each gate wait by the available operation budget,
+accepts only actual boolean results and redacts provider exceptions in its
+diagnostics. Invalid gate data remains unknown rather than becoming a truthy
+permission or a false stopped-venue report. A synchronous target-port resolver
+must supply an immediate local value, not perform blocking I/O.
+The existing fixed-port gate also omits raw provider exception values from its
+warning, without changing that path's routing or retry behavior.
 
 `establish()`/`start()` retain their awaitable shape; inspect immutable
 `reverse_status` afterward. `ready` supplies the exact attempt for the existing

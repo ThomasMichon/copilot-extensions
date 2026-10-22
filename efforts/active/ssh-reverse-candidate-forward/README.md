@@ -260,3 +260,18 @@ redacted cause codes rather than raw credential-shaped diagnostics.
   actual child-bound tuple; only one succeeds, and loser cleanup preserves
   the winner. Focused contained validation passes76 cases with the same one
   Linux-only skip. This still does not qualify OpenSSH or deployed recovery.
+- Investigated the later nonspecific diagnostic/correctness concern rather
+  than treating its zero displayed count as a clean verdict. The inherited
+  reconnect-gate path could log raw provider exceptions, coerce invalid data
+  and wait beyond the finite operation budget. The opt-in owner now bounds and
+  redacts that callback, treats invalid data as unknown and checks stop intent
+  again after it returns. Positive finite monitor intervals and callable owner
+  hooks refuse invalid configuration before starting.
+- Focused contained validation now passes82 cases with the same one
+  Linux-only skip, including a synthetic private provider error absent from
+  captured logs, bounded gate timeout, malformed result handling and no spawn
+  after stop intent changes. Fixed-port legacy behavior remains unchanged.
+- Apply the same narrow provider-exception redaction to the existing fixed-port
+  gate without changing its endpoint, retry or return behavior. Its dedicated
+  log-capture regression brings focused contained validation to83 passed with
+  the same one Linux-only skip.

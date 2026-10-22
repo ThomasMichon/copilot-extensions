@@ -444,12 +444,11 @@ class SupervisedRelayForward:
             return bool(await gate())
         except asyncio.CancelledError:
             raise
-        except Exception as exc:
+        except Exception:
             log.warning(
                 "Credential relay reconnect gate for %s was inconclusive; "
-                "not reconnecting this attempt: %s",
+                "not reconnecting this attempt",
                 self._config.ssh_target,
-                exc,
             )
             return None
 

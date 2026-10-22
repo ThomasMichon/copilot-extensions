@@ -155,6 +155,16 @@ async def test_monitor_without_gate_still_reconnects(monkeypatch):
     await relay.stop()
 
 
+async def test_reconnect_gate_fault_does_not_log_raw_provider_exception(monkeypatch, caplog):
+    async def gate():
+        raise RuntimeError("private-provider-value")
+    relay, spawned = _supervised(monkeypatch, gate=gate)
+    assert await relay._reconnect_allowed() is None
+    assert not spawned
+    assert "inconclusive" in caplog.text
+    assert "private-provider-value" not in caplog.text
+
+
 async def test_stop_nowait_cancels_monitor_and_kills_owned_tree(monkeypatch):
     relay, spawned = _supervised(monkeypatch)
     await relay.start()

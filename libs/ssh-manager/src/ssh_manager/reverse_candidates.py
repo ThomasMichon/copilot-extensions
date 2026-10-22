@@ -117,6 +117,12 @@ class FiniteReverseForward(SupervisedRelayForward):
         if (type(ready_timeout) not in (int, float) or not math.isfinite(ready_timeout)
                 or not 0 < ready_timeout <= 300):
             raise ValueError("reverse operation timeout must be finite and bounded")
+        if (type(monitor_interval) not in (int, float) or not math.isfinite(monitor_interval)
+                or monitor_interval <= 0):
+            raise ValueError("reverse monitor interval must be positive and finite")
+        if ((host_port_resolver is not None and not callable(host_port_resolver))
+                or (reconnect_gate is not None and not callable(reconnect_gate))):
+            raise ValueError("reverse owner hooks must be callable")
         super().__init__(
             config, candidates[0].port, ready_timeout=ready_timeout,
             monitor_interval=monitor_interval, host_port_resolver=host_port_resolver,
@@ -155,6 +161,27 @@ class FiniteReverseForward(SupervisedRelayForward):
             raise ValueError("reverse target-port resolver unavailable") from None
         if type(value) is not int or not 1 <= value <= 65535:
             raise ValueError("reverse target-port resolver returned an invalid port")
+        return value
+
+    async def _reconnect_allowed(self, *, timeout: float | None = None) -> bool | None:
+        if self._stopped:
+            return False
+        gate = self._reconnect_gate
+        if gate is None:
+            return True
+        budget = self._ready_timeout if timeout is None else min(timeout, self._ready_timeout)
+        try:
+            value = await asyncio.wait_for(gate(), max(0.0, budget))
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.warning("Reverse reconnect gate inconclusive; no connection attempted")
+            return None
+        if self._stopped:
+            return False
+        if type(value) is not bool:
+            log.warning("Reverse reconnect gate returned an invalid result; no connection attempted")
+            return None
         return value
 
     @asynccontextmanager
@@ -237,8 +264,11 @@ class FiniteReverseForward(SupervisedRelayForward):
             for endpoint in self._candidates:
                 if self._stopped:
                     raise self._fail("stopped", "owner-stopped")
+                remaining = deadline - loop.time()
+                if remaining <= 0:
+                    raise self._fail("unavailable", "operation-deadline")
                 if self._gated_establish:
-                    allowed = await self._reconnect_allowed()
+                    allowed = await self._reconnect_allowed(timeout=remaining)
                     if allowed is not True:
                         if allowed is False:
                             raise _VenueStopped("reverse reconnect gate stopped")

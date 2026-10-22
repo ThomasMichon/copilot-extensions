@@ -360,6 +360,66 @@ async def test_inconclusive_candidate_gate_defers_before_any_further_spawn(monke
     await relay.stop()
 
 
+async def test_gate_provider_fault_is_redacted_in_diagnostics(monkeypatch, caplog):
+    relay, spawned, _, _ = fixture_owner(monkeypatch, ["ready"])
+    async def gate():
+        raise RuntimeError("private-provider-value")
+    relay._reconnect_gate = gate
+    assert await relay._reconnect_allowed() is None
+    assert "private-provider-value" not in caplog.text
+    assert "inconclusive" in caplog.text
+    assert not spawned
+
+
+async def test_candidate_gate_wait_is_bounded_by_remaining_operation_budget(monkeypatch):
+    relay, spawned, _, _ = fixture_owner(monkeypatch, ["ready"], timeout=0.02)
+    async def gate():
+        await asyncio.Event().wait()
+    relay._reconnect_gate = gate
+    relay._gated_establish = True
+    with pytest.raises(ConnectionError, match="inconclusive"):
+        await asyncio.wait_for(relay.establish(), 1)
+    assert not spawned
+
+
+async def test_invalid_gate_data_is_unknown_not_truthy_permission_or_stopped_venue(monkeypatch):
+    relay, spawned, _, _ = fixture_owner(monkeypatch, ["ready"])
+    for value in (None, "false", 1):
+        async def gate(answer=value):
+            return answer
+        relay._reconnect_gate = gate
+        assert await relay._reconnect_allowed() is None
+    assert not spawned and not relay.retired
+
+
+async def test_stop_intent_changed_during_gate_cannot_be_returned_as_permission(monkeypatch):
+    relay, spawned, _, _ = fixture_owner(monkeypatch, ["ready"])
+    async def gate():
+        relay._stopped = True
+        return True
+    relay._reconnect_gate = gate
+    assert await relay._reconnect_allowed() is False
+    assert not spawned
+
+
+def test_monitor_interval_must_be_positive_finite_data():
+    for value in (0, -1, True, float("nan"), float("inf")):
+        with pytest.raises(ValueError):
+            FiniteReverseForward(
+                SSHConfig(host_alias="fixture"), (ReverseEndpoint("localhost", 41001),),
+                request_id="op", observe=lambda _: None, monitor_interval=value,
+            )
+
+
+def test_optional_owner_hooks_refuse_noncallable_configuration():
+    for changes in ({"reconnect_gate": False}, {"host_port_resolver": 123}):
+        with pytest.raises(ValueError):
+            FiniteReverseForward(
+                SSHConfig(host_alias="fixture"), (ReverseEndpoint("localhost", 41001),),
+                request_id="op", observe=lambda _: None, **changes,
+            )
+
+
 async def test_failed_target_resolver_never_silently_forwards_to_a_candidate_port(monkeypatch):
     relay, spawned, _, _ = fixture_owner(monkeypatch, ["ready"])
     def fail():
