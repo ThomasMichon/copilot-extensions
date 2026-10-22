@@ -103,7 +103,7 @@ that pattern to this repository.
 | [Native-Construct Convergence](active/native-construct-convergence/README.md) | Active | #985 |
 | [Tiered Payload Provisioning](active/tiered-payload-provisioning/README.md) | Draft | See effort |
 | [Governed Python Artifact Promotion](active/governed-python-artifact-promotion/README.md) | Active | #4876 |
-| [Progressive Context Disclosure](active/progressive-context-disclosure/README.md) | Active | #1612 |
+| [Progressive Context Disclosure](active/progressive-context-disclosure/README.md) | Active | #1612 original; reviewed Plan/Validation/Journal, unchanged lanes and open bounded-source claims |
 | [Restricted Venue Targets](active/restricted-venue-targets/README.md) | Draft | #1188 |
 | [Test Portfolio Rationalization](active/test-portfolio-rationalization/README.md) | Active | #1303 |
 | [Terminal Worktree Reclamation](active/terminal-worktree-reclamation/README.md) | Draft | #1488 |

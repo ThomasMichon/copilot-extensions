@@ -14,8 +14,11 @@
   `references-carry-applicability`,
   `composition-preserves-owner-boundaries`, and
   `deferral-is-evidence-calibrated`
-- **Umbrella issue:** #1612
-- **Sub-issues:** #1615 · #1616 · #1617 · #1618 · #1619
+- **Original umbrella:** #1612; complete retained acceptance below
+- **Historical phase trackers:** #1615 · #1616 · #1617 · #1618 · #1619;
+  their unfinished acceptance remains directly in this Plan and Validation
+- **Continuing coordination:** reviewed Plan, Validation and Journal, with
+  eligible open bounded-source claims before implementation
 
 ## Guiding Intent
 
@@ -53,8 +56,18 @@ upfront context and unnecessary exploration.
   blocking reviewer enforcement begins only after the contributor contract and
   representative authority implementation are reviewed.
 - **Handoff:** each phase updates this effort, its extracted design document,
-  machine-readable evidence summaries, and the relevant sub-issue before the
-  next phase begins.
+  machine-readable evidence summaries, and its eligible OPEN bounded-source
+  claim before the next phase begins. This reviewed Active effort is the
+  continuing tracking record for the original #1612 and inherited phase
+  acceptance below; the historical umbrella and phase issues are not live
+  claim tokens after verified consolidation.
+- **Custody:** the architecture, clean-room evaluation, and authoring/review
+  lanes retain their original roles, evidence, nonexpiring claims and holds.
+  The #7101 claimant owns only its bounded archival slice, not the program.
+  Tracker consolidation releases no source/resource obligation or activation
+  hold. Future implementation uses normal public source-claim policy, not
+  permission inferred from issue age or closure. If a concrete existing claim
+  requires #1612 to remain open, retain that issue rather than abandon it.
 
 ## Context
 
@@ -241,7 +254,170 @@ prompts the primary context channel.
   plan before implementation when necessary.
 - [ ] Keep fixtures synthetic and evidence public-safe.
 
+### Complete retained acceptance from #1612 and inherited #1615-#1619
+
+<!-- backlog-reconciliation:7556:transfer:1612:to:efforts/active/progressive-context-disclosure/README.md -->
+
+This is direct, unresolved Plan/Validation acceptance, not completion of the
+program or selection of a disclosure standard. Normal reviewed merge and
+current full-section/coordination readback precede administrative consolidation.
+Preserve all existing checked and unchecked items, frozen evidence and journals.
+The three lanes and bounded archival custody above remain; #2173 current
+delivery/custom-authority retirement, #2256 static/dynamic conformance and
+#1508 resume-generation recovery remain separately owned.
+
+#### Kernel, calibration and inherited #1615
+
+- [ ] Select an evidence-calibrated short, stable, immediately actionable
+  critical kernel plus attributable, applicability-cued on-demand grounding.
+  Never defer rules needed before safe exploration; detailed overarching
+  grounding is distinct from a task-triggered skill.
+- [ ] Preserve the frozen contributor inventory, synthetic corpus, eleven task
+  cells, baseline renders, counts-only schema and literal-mode rubric.
+  Modernize onto current per-owner delivery without reviving the aggregator;
+  version changed stimuli/protocols. Keep private canaries out of committed data.
+- [ ] Complete inline versus kernel/index, per-topic and minimal-locator
+  comparisons over satisfiable task-local controls. Compare real Markdown,
+  backtick relative/contained applicable absolute paths, bare paths, HTML-comment
+  locators and structured references; optional/conditional/imperative/safety-
+  gated wording. Use one-axis comparisons, not one successful cell.
+- [ ] Retain independent repetitions and source/model/venue attribution;
+  measure first-turn correctness, critical/required-grounding failures, eager
+  versus agent-read guides, required/irrelevant/repeated reads, provenance,
+  path failures, latency/tool counts and bytes/tokens against the same baseline.
+- [ ] Separate INVALID setup/transport from behavior. Preserve early epoch-1
+  multi-guide eliminations as CONFUNDED; later non-unanimous multi-guide/
+  conflict controls do not eliminate deferred variants wholesale. Keep valid
+  decision-independent observations distinct from selection evidence.
+- [ ] Credit the valid capability-guide boundary: unanimous F0 and rejected
+  F1/F2/F3 at their actual scope. Resolve F4 OR record an explicit named tracked
+  decision before concluding that boundary; do not infer a universal standard.
+- [ ] Run primary cells in at least three independently generated fresh
+  sessions at frozen task-local coordinates. Eliminate critical-rule/required-
+  grounding failures; repeat finalists on a second model and supported
+  boundaries. Exercise actual fresh/resume/compaction/interactive/ACP
+  transitions where supported, not relabeled fresh runs.
+- [ ] Qualify no-/one-/multi-guide tasks: critical rules before exploration,
+  no unnecessary reads, correct owner selection and necessary multi-owner
+  grounding in task-appropriate order without losing interacting boundaries.
+- [ ] Test missing/malformed/untrusted/escaping/inapplicable references with
+  bounded fail-closed diagnostics and no invented paths. Define relative
+  bases/absolute containment; test Markdown auto-loading and faux-link/comment
+  discoverability rather than assuming safe behavior.
+- [ ] Publish rejected/confounded/invalid/surviving results and selection OR
+  explicit "no standard yet" before normative authoring. Accept context
+  reduction only without correctness regression and with materially less
+  irrelevant exploration; retain actual partial evidence.
+
+#### Structured design and inherited #1616
+
+- [ ] Compare flat fragments, stronger labels, generated indexes, semantic
+  zones and hierarchy on the same corpus. Measure navigation/grounding,
+  deterministic rendering, overhead, review precision and migration cost;
+  choose the least expressive justified form OR explicitly retain flat.
+- [ ] Preserve exact contributor text, source-qualified ownership/provenance,
+  stable IDs/order, attributable references, contained resolution bases and
+  size accounting. Grouping/headings never paraphrase policy, invent conflict
+  resolution or centralize independently owned semantics.
+- [ ] Diagnose missing sections, duplicate IDs, heading collisions,
+  incompatible schemas, ambiguous/conflicting ownership, malformed structure
+  and budgets. Prove arbitrary subsets, absent optional plugins, older/flat
+  compatibility, partial upgrades and Windows/POSIX determinism without losing
+  required guidance; version metadata only after reviewed design.
+- [ ] Implement owner-local rendering under current exact-session/static/
+  local-first delivery only: no custom cross-plugin aggregator, centralized
+  policy owner, service or eager guide loading/execution. Preserve declared-
+  source inclusion and advisory budgets; review is not runtime content scoring.
+- [ ] Hold native multi-hook `additionalContext` activation for released
+  supported-version and real launch-boundary proof. #7101's five snapshots
+  remain inert non-executable historical DATA with activation, invocation/
+  cardinality, repetition and safety limitations, not a scenario, PASS,
+  model-admission witness or permission to extract/execute.
+- [ ] Require separately reviewed containment/activation for runnable native
+  proof, with independent invocation-completeness, configured-count,
+  composition, exact-run and no-tool evidence over the supported matrix.
+  Three fresh ACP runs or an old archive predicate are not that matrix or
+  supported resume proof.
+
+#### Authoring and inherited #1617
+
+- [ ] Review calibration and structured-design decisions before standardizing
+  criticality, deferral, link syntax or emphasis. Existing prose and a single
+  successful cell do not make that decision.
+- [ ] Update existing authoring-skills/review references and session/worktree
+  guidance patterns, preserving repo/plugin authority and per-owner delivery;
+  do not recreate retired injection instructions or a second review owner.
+- [ ] Provide paired unsafe-dump, insufficient-pointer, critical-kernel and
+  applicability-cued/conditional-reference examples; structured examples only
+  if adopted. Require attributable ownership, applicability/base, stable IDs,
+  contained targets and critical rules before exploration.
+- [ ] Explain exact-session replacement, source selection, supported skew and
+  #1508 recovery without repeatedly duplicating full guidance. Pilot policy,
+  command-catalog and environment/routing writers before broad migration,
+  preserving fallback, trust/source qualification and platform behavior.
+
+#### Advisory review and inherited #1618
+
+- [ ] Inventory critical inline/reference/potential-deferred bytes, unknown
+  dynamic output, ownership/applicability/containment and supported structure
+  without printing bodies or running hooks as a static-review shortcut.
+  Unavailable evidence is not a pass.
+- [ ] After reviewed contracts/pilots, diagnose unsupported/malformed
+  references/structure, missing/escaping targets, ambiguous ownership,
+  oversized/unclassified kernels and inline procedures with actionable,
+  source-attributable findings.
+- [ ] Calibrate advisory/blocking severity experimentally; do not infer
+  criticality from keywords, reject experimental fields prematurely or trade
+  correctness for byte reduction. Existing safety/ownership/containment guards
+  remain authoritative.
+- [ ] Keep external-marketplace findings advisory with upstream ownership
+  and owned-suite checks source-attributable. File delivery is not model
+  admission; existing independent opt-in dynamic capture is not retroactively
+  blocked on unfinished behavioral calibration.
+
+#### Rendering, migration and inherited #1619
+
+- [ ] Approve the complete contributor/kernel/deferred-reference contract
+  before normative migration or blocking enforcement, retaining exact
+  ownership, applicability, source/trust/containment, compatibility and
+  bounded diagnostics.
+- [ ] Deliver deterministic owner-local Windows/POSIX rendering/references
+  with reviewed static fallback and no implicit execution/eager guide loading.
+  Complete policy/catalog/environment pilots before remaining owned writers.
+- [ ] Compare complete-stack behavior, not just small fragments: selected
+  flat/hierarchical form across platforms, plugin subsets/order, fresh start,
+  actual resume/compaction/ACP, exact-session replacement and skew, retaining
+  exact owner text, provenance and critical coverage.
+- [ ] Complete literal frozen no-/one-/multi-guide and negative-reference
+  acceptance with original repeated-primary/second-model-finalist evidence,
+  same baseline metrics, no correctness regression and materially less
+  unnecessary exploration. Native activation remains held for its own supported-
+  host proof; archived data is not proof.
+- [ ] After reviewed pilots, migrate remaining owned contributors, update
+  architecture/reality and run established customization/generated/marketplace/
+  clean-room guards under current bounded portfolio policy. Calibration-
+  dependent checks stay advisory until their gate clears; do not restore
+  obsolete required integration matrices or weaken assertions/deadlines.
+- [ ] Resolve or explicitly transfer every own Plan AND Validation item before
+  Done/archive. Preserve journals, frozen evidence, current claims and separate
+  owners; historical source closure is not phase completion, claim release or
+  activation authority.
+
+This tracking-only intake must preserve continuing public coordination and all
+custody before #1612 can be superseded. Read back this entire merged section
+and the full Plan/Validation/Coordination; if an existing claim requires the
+public umbrella or closure could release a resource, keep it open. This changes
+no implementation driver, runtime/native/activation/model-selection authority
+and creates no replacement umbrella or competing effort.
+
 ## Validation Plan
+
+- [ ] Qualify every retained original/inherited row above at its exact
+  source/model/venue/boundary. Existing baseline/runner/accounting or archival
+  delivery is partial evidence, not general calibration or native acceptance.
+- [ ] Preserve the three continuing lanes and every source/resource hold
+  through tracking consolidation. Verify actual reviewed merge and full
+  current readback before source closure; leave the effort Active.
 
 - [ ] The baseline records inline bytes/tokens, first-turn task correctness,
   grounding latency, guide-read count, irrelevant-read count, path-resolution
@@ -288,6 +464,17 @@ reviewed decision record. Then update authoring guidance and reviewer
 enforcement before migrating the complete contributor stack.
 
 ## Journal
+
+### 2026-10-22 - Complete original and inherited acceptance retained
+
+- Materialized #1612 and all #1615-#1619 residuals directly in the Plan and
+  Validation, preserving partial/confounded/invalid evidence and native holds.
+  No disclosure standard, phase completion or runtime activation is declared.
+- The reviewed Plan/Validation/Journal retain continuing coordination, with
+  normal eligible open bounded-source claims before implementation and all
+  three lane owners unchanged. Bounded archive custody remains bounded;
+  #2173/#2256/#1508 stay separate. Actual merge and current full readback precede
+  any administrative tracker supersession.
 
 ### 2026-10-16 - Native hook composition exploration preserved
 
