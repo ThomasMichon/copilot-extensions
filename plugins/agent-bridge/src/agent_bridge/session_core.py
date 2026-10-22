@@ -239,6 +239,10 @@ class _SessionCoreMixin(_SessionDrainGateMixin):
     def _route_acp_event(self, session: Session, event_type: str, data: dict[str, Any]) -> None:
         if session.event_log:
             session.event_log.append(event_type, data)
+        if event_type == "preference_selected":
+            from .privileged_plugins import remember_host_preferences
+
+            remember_host_preferences(self._db, session)
         self._capture_progress(session, event_type, data)
         if event_type == "usage_update":
             self._handle_usage_update(session, data)

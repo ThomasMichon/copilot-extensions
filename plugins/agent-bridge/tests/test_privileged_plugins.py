@@ -445,6 +445,148 @@ async def test_receiver_cold_resume_keeps_binding_through_real_manager(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("startup_reattach,preference_source,missing_proof", [
+    (False, "caller-settings", False), (True, "caller-settings", False),
+    (False, "target-settings", False), (True, "target-settings", False),
+    (False, "target-settings", True),
+])
+async def test_receiver_restart_recovers_same_surviving_host_without_preparation(
+    tmp_path, monkeypatch, receiver, session_manager, startup_reattach, preference_source, missing_proof,
+):
+    from agent_bridge import session_manager as core
+    from agent_bridge.session_host import acp_adapter
+    from agent_bridge.session_host.client import SessionHostClient
+    from agent_bridge.session_host.host_index import HostRecord
+
+    root = checkout(tmp_path / "receiver")
+    marketplace(root)
+    bound = context(
+        controller_cwd=str(root), controller_origin="explicit",
+        env={SOURCE_ENV: preference_source},
+    )
+    target = target_for(root)
+    target.elevated = True
+    target = module.apply_context(target, bound)
+    original_client = await verified_preferences() if preference_source == "target-settings" else AcpClient()
+    original_client._acp_session_id = "native"
+    hosts = []
+
+    async def connect(target, **kwargs):
+        await transport.resolve_local_launch(target)
+        host = HostRecord(
+            session_id=kwargs["session_id"], port=1234, host_pid=2345, child_pid=3456,
+            nonce="synthetic-same-host",
+        )
+        hosts.append(host)
+        session_manager._host_index.register(host)
+        module.remember_host_launch(session_manager.db, target, original_client, host, "native")
+        return original_client, "native"
+
+    monkeypatch.setattr(session_manager, "_connect_via_session_host", AsyncMock(side_effect=connect))
+    session = await session_manager.start_session(target, agent_name="worker")
+    if preference_source == "target-settings":
+        original_client._on_event = lambda kind, data: session_manager._route_acp_event(session, kind, data)
+        original_client._emit("preference_selected", dict(original_client.confirmed_preferences))
+        options = copy.deepcopy(original_client._verified_options)
+        options[0]["currentValue"] = "native"
+        original_client._remember_preferences(options)
+        assert original_client.confirmed_preferences["model"] == "native"
+    session_manager.db.flush()
+    restarted = SessionManager(session_manager.db)
+    current = restarted.get_session(session.session_id)
+    assert current.target.prepared_plugins is None and current.status == SessionStatus.STOPPED
+    resolve = AsyncMock(side_effect=AssertionError("surviving child must not be prepared or replaced"))
+    monkeypatch.setattr(transport, "resolve_local_launch", resolve)
+    monkeypatch.setattr(core, "spawn", resolve)
+    monkeypatch.setattr(restarted, "_ensure_forward", AsyncMock())
+    sock = SimpleNamespace(attach=AsyncMock(), close=AsyncMock())
+    streams = SimpleNamespace(
+        reader=object(), writer=object(), child_exit_code=None, aclose=AsyncMock(),
+    )
+    monkeypatch.setattr(SessionHostClient, "connect", AsyncMock(return_value=sock))
+    monkeypatch.setattr(acp_adapter, "open_acp_streams", AsyncMock(return_value=streams))
+    clients = []
+
+    def client_factory(**kwargs):
+        client = AcpClient(**kwargs)
+        client.start_streams = AsyncMock()
+        client.new_session = AsyncMock(side_effect=AssertionError("must not create a conversation"))
+        client.load_session = AsyncMock(side_effect=AssertionError("must not reload a running child"))
+        clients.append(client)
+        return client
+
+    monkeypatch.setattr(core, "AcpClient", client_factory)
+
+    async def reattach(current):
+        return await restarted._reattach_one(hosts[0], current, new_status=SessionStatus.IDLE)
+
+    monkeypatch.setattr(restarted, "_try_reattach_live_host", reattach)
+    agent = BridgeAgent(restarted, default_agent="worker")
+    if missing_proof:
+        current.target.venue[module.CONTEXT_KEY].pop("prepared_launch")
+        with pytest.raises(module.PrivilegedLaunchRefused, match="evidence"):
+            await agent.load_session(
+                str(root), current.session_id, **{module.META_KEY: bound.model_dump()},
+            )
+        assert current.status == SessionStatus.STOPPED and current.target.prepared_plugins is None
+        assert current.acp_session_id == "native"
+        assert restarted._host_index.get(current.session_id) is not None
+        resolve.assert_not_awaited()
+        clients[0].new_session.assert_not_awaited()
+        clients[0].load_session.assert_not_awaited()
+        return
+    if startup_reattach:
+        assert await reattach(current)
+    result = await agent.load_session(
+        str(root), current.session_id, **{module.META_KEY: bound.model_dump()},
+    )
+    assert current.status == SessionStatus.IDLE and current.acp_session_id == "native"
+    assert result.field_meta == module.receipt(current, bound)
+    assert current.target.prepared_plugins["execution_cwd"] == str(root)
+    assert restarted.db.get_session(current.session_id)["acp_session_id"] == "native"
+    assert len(clients) == 1
+    sock.attach.assert_awaited_once_with(0, nonce=b"synthetic-same-host")
+    resolve.assert_not_awaited()
+    clients[0].new_session.assert_not_awaited()
+    clients[0].load_session.assert_not_awaited()
+    if preference_source == "target-settings":
+        assert clients[0].confirmed_preferences == {"model": "native", "reasoning_effort": "high"}
+        assert module.preference_options(current, bound) is not None
+    await restarted.stop_session(current.session_id)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mismatch", ["host", "conversation", "digest", "missing"])
+async def test_surviving_host_evidence_never_authorizes_another_launch(
+    tmp_path, monkeypatch, receiver, session_manager, mismatch,
+):
+    from agent_bridge.session_host.host_index import HostRecord
+
+    root = checkout(tmp_path / "receiver")
+    bound = context(controller_cwd=str(root), controller_origin="explicit")
+    target = target_for(root)
+    target.elevated = True
+    target = module.apply_context(target, bound)
+    await transport.resolve_local_launch(target)
+    session_manager.db.create_session("owned", "test", "worker", str(root), "local", "stopped", 1)
+    host = HostRecord(session_id="owned", port=1, host_pid=2, child_pid=3, nonce="original")
+    module.remember_host_launch(session_manager.db, target, None, host, "native")
+    restored = SpawnTarget.from_json(target.to_json())
+    session = SimpleNamespace(target=restored, acp_session_id="native")
+    if mismatch == "host":
+        host.nonce = "different"
+    elif mismatch == "conversation":
+        session.acp_session_id = "different"
+    elif mismatch == "digest":
+        restored.venue[module.CONTEXT_KEY]["digest"] = "different"
+    else:
+        restored.venue[module.CONTEXT_KEY].pop("prepared_launch")
+    with pytest.raises(module.PrivilegedLaunchRefused, match="evidence"):
+        module.restore_host_launch(session, host, None)
+    assert restored.prepared_plugins is None
+
+
+@pytest.mark.asyncio
 async def test_legacy_incumbent_is_refused_before_resume(receiver, tmp_path):
     target = target_for(tmp_path)
     target.elevated = True

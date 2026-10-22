@@ -345,6 +345,15 @@ or a reason to create a daemon.
   missing native ID refuses before spawn. The focused receiver/session suite
   passes 247 cases, including 40 privileged cases; ordinary opt-in fallback
   remains covered by existing session tests.
+- The third review's body also identified surviving-host recovery, despite
+  reporting no open inline threads. The receiver now retains launch evidence
+  paired to the actual host/child, nonce fingerprint and native conversation,
+  refreshes verified preference changes, and restores it only after matching
+  authenticated reattachment. Startup and stopped-load recovery do not
+  re-prepare, reload or replace the child. Focused privileged controls pass 49
+  cases; the combined host/preference/privileged set passes 234 with four
+  existing optional skips. Mismatched host, conversation, digest or missing
+  evidence refuses explicitly. Review and publication remain pending.
 - Published source candidate #7899 for review. Its managed rebase includes no
   intervening Bridge or shared-library changes; the qualified implementation
   is unchanged. Required CI, review, merge and subsequent publication remain

@@ -164,6 +164,16 @@ Old callers without the metadata keep their
 existing ACP shape; already-elevated static launches can prepare their own
 receiver-native selection.
 
+After successful Session Host launch, the receiver persists preparation and
+verified preference evidence in its session's extensible binding metadata,
+paired with that exact host/child identity, nonce fingerprint and native
+conversation ID. Verified selection updates refresh the same witness.
+Following frontend rehydration, authenticated reattachment to that same
+surviving child restores the witness without re-preparing, reloading or
+replacing the running child. Missing or mismatched evidence refuses rather
+than falling through to another launch. The host transport index retains its
+existing addressing-only contract.
+
 Source tests exercise SDK metadata and real registration with a simulated
 elevation predicate. They do not prove a live Windows admin token, a second
 account's access, installed rollout or native privileged skill acceptance.

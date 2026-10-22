@@ -212,9 +212,9 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/session_core.py",
-          "sha256": "1a91bf2e3e9bd28560a5c38a4197500ae0f0e5e4cd65883a8ca7c2ab0f569eb5",
+          "sha256": "7a35c617f01ed3789ab4887006b54d12ee99d968c803c354bb43351d2a623323",
           "semantic": false,
-          "non_semantic_reason": "Restore internal model/effort inputs from existing session configuration and keep separately negotiated privileged binding metadata out of namespace-provider refresh classification. HTTP-45 request/response schemas and negotiation floors are unchanged; full frontend rehydration and static receiver cold-resume regressions cover these internal continuity repairs without recapturing frozen HTTP packets."
+          "non_semantic_reason": "Restore internal model/effort inputs, exclude privileged binding metadata from namespace-provider classification, and retain verified preference updates in the original host-bound privileged launch witness. HTTP-45 schemas, event payloads and negotiation floors are unchanged; full frontend rehydration, cold resume and authenticated same-host reattachment regressions cover internal continuity without recapturing frozen packets."
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/routes/worktrees.py",

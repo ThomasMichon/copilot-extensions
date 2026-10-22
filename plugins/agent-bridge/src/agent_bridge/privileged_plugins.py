@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, Literal
@@ -244,20 +245,26 @@ def receipt(session: Any, context: PrivilegedContext) -> dict[str, Any]:
     return {META_KEY: result}
 
 
-def preference_options(session: Any, context: PrivilegedContext) -> Any:
+def preference_options(session: Any, context: PrivilegedContext) -> list[Any] | None:
     """Expose only the receiver's completed target-settings readback."""
-    from .acp_preferences import AcpPreferencesMixin
     from .session_preferences import SOURCE_ENV
 
     if context.env.get(SOURCE_ENV) != "target-settings":
         return None
-    client = session.client
+    return _verified_receiver_options(session.client)
+
+
+def _verified_receiver_options(client: Any) -> list[Any]:
+    from .acp_preferences import AcpPreferencesMixin
+
     if (
         client is None or client.preference_source != "target-settings"
         or client._preferences_ready is not True
     ):
         raise PrivilegedLaunchRefused("Privileged receiver preferences are not verified")
     options = client._verified_options
+    if not isinstance(options, list):
+        raise PrivilegedLaunchRefused("Privileged receiver preference readback is incomplete")
     selected = AcpPreferencesMixin._selected_preferences(options)
     if not selected.get("model") or selected != client.confirmed_preferences:
         raise PrivilegedLaunchRefused("Privileged receiver preference readback is incomplete")
@@ -270,3 +277,81 @@ def require_bound_session(session: Any, context: PrivilegedContext) -> None:
     bound = (session.target.venue or {}).get(CONTEXT_KEY, {})
     if bound.get("digest") != context.digest():
         raise PrivilegedLaunchRefused("Privileged session belongs to a different or legacy launch context")
+
+
+def _host_identity(host: Any) -> dict[str, Any]:
+    return {
+        "session_id": host.session_id, "host_pid": host.host_pid, "child_pid": host.child_pid,
+        "nonce_sha256": hashlib.sha256(host.nonce.encode()).hexdigest(),
+    }
+
+
+def _wire_options(client: Any) -> list[dict[str, Any]]:
+    return [
+        option.model_dump(mode="json", by_alias=True) if isinstance(option, BaseModel) else deepcopy(option)
+        for option in _verified_receiver_options(client)
+    ]
+
+
+def remember_host_launch(db: Any, target: SpawnTarget, client: Any, host: Any, acp_id: str) -> None:
+    """Retain prior launch evidence, bound to the host that actually started."""
+    from .session_preferences import SOURCE_ENV
+
+    bound = (target.venue or {}).get(CONTEXT_KEY)
+    if bound is None:
+        return
+    require_local_receiver(target)
+    if not host.nonce or host.boundary != "local" or not isinstance(target.prepared_plugins, dict):
+        raise PrivilegedLaunchRefused("Privileged host launch evidence is unavailable")
+    bound["prepared_launch"] = {
+        "digest": bound["digest"], "host": _host_identity(host), "acp_session_id": acp_id,
+        "prepared": deepcopy(target.prepared_plugins),
+        "config_options": _wire_options(client) if target.env.get(SOURCE_ENV) == "target-settings" else None,
+    }
+    db.update_session_target(host.session_id, target.to_json(), target.cwd)
+
+
+def remember_host_preferences(db: Any, session: Any) -> None:
+    """Keep the host witness in step with actual verified selection updates."""
+    from .session_preferences import SOURCE_ENV
+
+    bound = (session.target.venue or {}).get(CONTEXT_KEY, {})
+    evidence = bound.get("prepared_launch")
+    if (
+        not isinstance(evidence, dict) or session.client is None
+        or session.target.env.get(SOURCE_ENV) != "target-settings"
+        or evidence.get("acp_session_id") != session.acp_session_id
+    ):
+        return
+    evidence["config_options"] = _wire_options(session.client)
+    db.update_session_target(session.session_id, session.target.to_json(), session.target.cwd)
+
+
+def restore_host_launch(session: Any, host: Any, client: Any) -> None:
+    """Recover evidence only after authenticated reattachment to that same child."""
+    from .acp_preferences import AcpPreferencesMixin
+    from .session_preferences import SOURCE_ENV
+
+    bound = (session.target.venue or {}).get(CONTEXT_KEY)
+    if bound is None:
+        return
+    require_local_receiver(session.target)
+    evidence = bound.get("prepared_launch")
+    if (
+        not isinstance(evidence, dict) or evidence.get("digest") != bound.get("digest")
+        or host.boundary != "local" or not host.nonce or evidence.get("host") != _host_identity(host)
+        or evidence.get("acp_session_id") != session.acp_session_id
+        or not isinstance(evidence.get("prepared"), dict)
+        or evidence["prepared"].get("execution_cwd") != session.target.cwd
+    ):
+        raise PrivilegedLaunchRefused("Surviving privileged host has no matching preparation evidence")
+    if session.target.env.get(SOURCE_ENV) == "target-settings":
+        options = evidence.get("config_options")
+        if not isinstance(options, list):
+            raise PrivilegedLaunchRefused("Surviving privileged host preference evidence is incomplete")
+        selected = AcpPreferencesMixin._selected_preferences(options)
+        if not selected.get("model") or selected != client.confirmed_preferences:
+            raise PrivilegedLaunchRefused("Surviving privileged host has no matching preference evidence")
+        client._verified_options = deepcopy(options)
+        client._preferences_ready = True
+    session.target.prepared_plugins = deepcopy(evidence["prepared"])

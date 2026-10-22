@@ -327,7 +327,7 @@ class _SessionHostConnectionMixin:
                     raise
 
         if self._host_index is not None:
-            self._host_index.register(HostRecord(
+            record = HostRecord(
                 session_id=session_id,
                 port=spawned.local_port,
                 host_pid=spawned.host_pid,
@@ -348,7 +348,11 @@ class _SessionHostConnectionMixin:
                 extra={
                     "remote_authority_v2": spawned.boundary != "local",
                 },
-            ))
+            )
+            self._host_index.register(record)
+            from .privileged_plugins import remember_host_launch
+
+            remember_host_launch(self._db, target, client, record, acp_sid)
         # #4272 bridge-lock: mark this bridge-owned session's liveness as a
         # lattice file the picker reads cheaply, so a bare/bridge Copilot
         # (cwd=home) still shows ACTIVE (#1416). LOCAL boundary only -- a remote
@@ -699,6 +703,9 @@ class _SessionHostConnectionMixin:
                 _settle_dead_child(streams.child_exit_code)
                 return False
             client.adopt_session(session.acp_session_id)
+            from .privileged_plugins import restore_host_launch
+
+            restore_host_launch(session, rec, client)
             session.client = client
             session.status = new_status
             self._db.update_session_status(
@@ -712,11 +719,13 @@ class _SessionHostConnectionMixin:
             await _close_partial_reattach()
             raise
         except Exception as exc:
+            from .privileged_plugins import PrivilegedLaunchRefused
+
             child_exit_code = (
                 streams.child_exit_code if streams is not None else None
             )
             await _close_partial_reattach()
-            if isinstance(exc, CredentialRelayReadinessError):
+            if isinstance(exc, (CredentialRelayReadinessError, PrivilegedLaunchRefused)):
                 raise
             if child_exit_code is not None:
                 session.client = client
