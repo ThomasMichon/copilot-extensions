@@ -33,6 +33,7 @@ from seasoned_uv import _bundled_dbus_next
 from standalone_consumers import local_dependency_source
 
 MIN_AGE_SECONDS = DEFAULT_MIN_AGE_DAYS * 86400
+_SourceTrees = dict[Path, tuple[str, ast.Module]]
 
 
 class DeclarationError(ValueError):
@@ -221,11 +222,26 @@ def _literal_repo_source(node: ast.AST) -> tuple[str, ...] | None:
     return None
 
 
-def _plugin_contract_sources(path: Path, root: Path) -> list[Path]:
+def _source_tree(path: Path, root: Path, trees: _SourceTrees | None) -> ast.Module:
+    """Keep every source read; reuse only identical text within the caller's audit."""
+    path = contained_path(path, root)
+    source = path.read_text(encoding="utf-8")
+    previous = trees.get(path) if trees is not None else None
+    if previous is not None and previous[0] == source:
+        return previous[1]
+    tree = ast.parse(source)
+    if trees is not None:
+        trees[path] = (source, tree)
+    return tree
+
+
+def _plugin_contract_sources(
+    path: Path, root: Path, *, source_trees: _SourceTrees | None = None,
+) -> list[Path]:
     runner = root / "tools" / "run-plugin-tests.py"
     if not runner.is_file():
         return []
-    tree = ast.parse(contained_path(runner, root).read_text(encoding="utf-8"))
+    tree = _source_tree(runner, root, source_trees)
     prepare = next((node for node in tree.body
                     if isinstance(node, ast.FunctionDef) and node.name == "_ensure_venv"), None)
     sources = []
@@ -251,7 +267,10 @@ def _plugin_contract_sources(path: Path, root: Path) -> list[Path]:
     return sources
 
 
-def contract_source(req: Requirement, path: Path, projects: dict[Path, dict], root: Path) -> Path | None:
+def contract_source(
+    req: Requirement, path: Path, projects: dict[Path, dict], root: Path, *,
+    source_trees: _SourceTrees | None = None,
+) -> Path | None:
     """Attribute existing first-party source installs without changing UV packaging.
 
     Test runners explicitly supply canonical path sources where published
@@ -266,16 +285,16 @@ def contract_source(req: Requirement, path: Path, projects: dict[Path, dict], ro
     consumer = path.parent.relative_to(root).as_posix()
     runner = root / "tools" / "run-standalone-tests.py"
     registry = root / "tools" / "standalone_consumers.py"
-    sources = _plugin_contract_sources(path, root)
+    sources = _plugin_contract_sources(path, root, source_trees=source_trees)
     if runner.is_file() and registry.is_file():
-        registry_tree = ast.parse(contained_path(registry, root).read_text(encoding="utf-8"))
+        registry_tree = _source_tree(registry, root, source_trees)
         consumers = next((
             ast.literal_eval(node.value) for node in registry_tree.body
             if isinstance(node, ast.Assign)
             and any(isinstance(target, ast.Name) and target.id == "STANDALONE_CONSUMERS" for target in node.targets)
         ), ())
         if consumer in consumers:
-            tree = ast.parse(contained_path(runner, root).read_text(encoding="utf-8"))
+            tree = _source_tree(runner, root, source_trees)
             prepare = next((node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "prepare"), None)
             for branch in ast.walk(prepare) if prepare is not None else ():
                 condition = branch.test if isinstance(branch, ast.If) else None
@@ -345,7 +364,10 @@ def contract_source(req: Requirement, path: Path, projects: dict[Path, dict], ro
     return None
 
 
-def local_source(req: Requirement, path: Path, projects: dict[Path, dict], root: Path) -> bool:
+def local_source(
+    req: Requirement, path: Path, projects: dict[Path, dict], root: Path, *,
+    source_trees: _SourceTrees | None = None,
+) -> bool:
     """Only attributable repository path sources/self-extra references are exempt."""
     data = projects[path]
     own_name = data.get("project", {}).get("name", "")
@@ -360,7 +382,9 @@ def local_source(req: Requirement, path: Path, projects: dict[Path, dict], root:
     sources = data.get("tool", {}).get("uv", {}).get("sources", {})
     source = next((v for k, v in sources.items() if canonicalize_name(k) == canonicalize_name(req.name)), None)
     if source is None:
-        return contract_source(req, path, projects, root) is not None
+        return contract_source(
+            req, path, projects, root, source_trees=source_trees,
+        ) is not None
     if not isinstance(source, dict) or set(source) - {"path", "editable"} or not isinstance(source.get("path"), str):
         raise DeclarationError("non-path source override lacks public release-age evidence")
     target = contained_path(path.parent / source["path"], root)
@@ -650,6 +674,7 @@ def audit(root: Path, *, fetch=fetch_release_metadata, now: datetime | None = No
     if ecosystem != "all":
         declarations = [d for d in declarations if d.ecosystem == ecosystem]
     cache, errors = {}, []
+    source_trees: _SourceTrees = {}
     if ecosystem != "npm":
         for path, data in projects.items():
             try:
@@ -663,7 +688,9 @@ def audit(root: Path, *, fetch=fetch_release_metadata, now: datetime | None = No
             if declaration.ecosystem == "python":
                 req = Requirement(declaration.requirement)
                 name = canonicalize_name(req.name)
-                if declaration.path in projects and local_source(req, declaration.path, projects, root):
+                if declaration.path in projects and local_source(
+                    req, declaration.path, projects, root, source_trees=source_trees,
+                ):
                     continue
                 if req.url:
                     raise DeclarationError("direct URL dependencies lack public release-age evidence")

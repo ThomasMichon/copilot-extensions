@@ -301,6 +301,10 @@ authorizes critical main-path acceptance or a bounded administrative change.
   diagnostics and bounded step/child execution (#7768). Actual source CI
   retains every scanner and completes the group in 25 seconds. Local paired
   timing is not controlled hosted whole-flow acceptance or a CPU-work reduction.
+- [ ] Land bounded, invocation-local dependency source-tree reuse, retaining
+  every evidence read, changed-input reparse, path/identity/closure check and
+  failure. Prove equivalent attribution and actual required CI; keep local
+  attribution timing separate from full live metadata and pipeline timing.
 - [ ] Remove redundant release-shaped PR and main-push validation only where
   existing trusted gates and exact-SHA release evidence cover the removed work;
   first prove no generated-output coverage or required context is lost.
@@ -396,10 +400,11 @@ authorizes critical main-path acceptance or a bounded administrative change.
   and real refusal controls pass; actual hosted source CI executes all 718
   admitted cases in 12.126 seconds. Full-census and every-release acceptance
   remain separate.
-- [ ] Map the 29 original config-migrate cases without copying assertions,
+- [x] Map the 29 original config-migrate cases without copying assertions,
   retaining synthetic temporary-file operations, unchanged source admission,
-  actual production-call coverage and the 300-second packet bound. Complete
-  source review and actual required CI before closing this bounded item.
+  actual production-call coverage and the 300-second packet bound (#7831).
+  Actual source CI executes all 747 admitted cases in 11.369 seconds.
+  Full-census and every-release acceptance remain separate.
 - [x] Land the dev implementation of reviewed, widen-only module-size baseline
   maintenance and remove its obsolete main exception from source (#6438).
 - [x] Verify a covering promotion activates the dev-owned baseline producer on

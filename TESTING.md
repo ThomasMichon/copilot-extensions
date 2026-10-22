@@ -1441,6 +1441,14 @@ changing declarations, run `python tools/check-dependency-age.py`; its explicit
 `--ecosystem` lanes are diagnostics, not a replacement for the all-ecosystem CI
 gate.
 
+The dependency-age audit retains every source-contract read and reuses an AST
+only when its decoded source text is identical within that audit. Changed
+evidence is reparsed; containment, read, encoding and syntax failures are not
+cached away. Each invocation owns fresh tree storage, with no persistent cache
+or change to declaration inventory, metadata requests or age policy.
+`tools/test_dependency_age.py` covers parse reuse, mid-audit evidence changes
+and failures, and revocation observed by a later audit.
+
 The automatically selected `tools/test_installer_dependency_policy.py` suite
 also exercises the deny-local CLI mode without product discovery. Its native
 bootstrap fixture runs the real materializer,
