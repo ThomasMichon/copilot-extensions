@@ -89,6 +89,17 @@ def test_retained_preparation_builds_actual_standalone_resource_hooks(
             "versioned_runtime_publication.py": "versioned_runtime_publication.py",
         }.items()
     }
+    companions = {}
+    if component == "fleet-manager":
+        companions = {
+            "_installer_process.py": Path("libs/installer-engine/installer_engine_process.py"),
+            "_construction_procutil.py": Path("libs/agent-procutil/src/agent_procutil/__init__.py"),
+        }
+        for destination, relative in companions.items():
+            target = checkout / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(SCRIPT.parent.parent / relative, target)
+            expected[destination] = target.read_bytes()
     output = tmp_path / "artifacts"
     output.mkdir()
     actual_run = subprocess.run
@@ -106,7 +117,12 @@ def test_retained_preparation_builds_actual_standalone_resource_hooks(
                      "versioned_runtime_leases.py", "versioned_runtime_construction.py",
                      "versioned_runtime_source.py", "versioned_runtime_publication.py"):
             (resources / name).write_text("raise RuntimeError('mutable original reopened')\n")
-        candidate = Path(next(argument for argument in command if argument.endswith(str(Path(component)))))
+        for relative in companions.values():
+            (checkout / relative).write_text("raise RuntimeError('mutable companion reopened')\n")
+        candidate = Path(next(
+            argument.partition("[")[0] for argument in command
+            if argument.partition("[")[0].endswith(str(Path(component)))
+        ))
         result = actual_run(
             [sys.executable, "-I", "-c",
              "from setuptools.build_meta import build_wheel; "
@@ -118,10 +134,14 @@ def test_retained_preparation_builds_actual_standalone_resource_hooks(
         return result
 
     monkeypatch.setattr(runner.subprocess, "run", uv)
-    runner.run_uv_install(
-        "uv", ["--no-config", "--python", sys.executable, str(project)],
-        cwd=checkout, trusted_source_roots=(checkout,), retained_resource_roots=(resources,),
-    )
+    if component == "fleet-manager":
+        monkeypatch.setattr(runner, "REPO", checkout)
+        runner.prepare(component, Path(sys.executable))
+    else:
+        runner.run_uv_install(
+            "uv", ["--no-config", "--python", sys.executable, str(project)],
+            cwd=checkout, trusted_source_roots=(checkout,), retained_resource_roots=(resources,),
+        )
     assert len(retained) == 1 and not retained[0].exists()
     with zipfile.ZipFile(next(output.glob("*.whl"))) as wheel:
         for name, data in expected.items():
@@ -251,6 +271,9 @@ def test_fresh_preparation_attributes_complete_local_graph(tmp_path, monkeypatch
             'agent-procutil = {path="../../libs/agent-procutil", editable=true}\n',
         )
     (tmp_path / "libs" / "versioned-runtime").mkdir()
+    if component == "fleet-manager":
+        (tmp_path / "libs" / "installer-engine").mkdir()
+        (tmp_path / "libs" / "agent-procutil" / "src" / "agent_procutil").mkdir()
     monkeypatch.setattr(runner, "REPO", tmp_path)
     python = runner.default_python(component)
     python.parent.parent.mkdir(parents=True)
@@ -260,7 +283,13 @@ def test_fresh_preparation_attributes_complete_local_graph(tmp_path, monkeypatch
 
     def prepare(uv, arguments, **kwargs):
         assert kwargs["trusted_source_roots"] == (tmp_path,)
-        assert kwargs["retained_resource_roots"] == (tmp_path / "libs" / "versioned-runtime",)
+        expected_resources = (tmp_path / "libs" / "versioned-runtime",)
+        if component == "fleet-manager":
+            expected_resources += (
+                tmp_path / "libs" / "installer-engine",
+                tmp_path / "libs" / "agent-procutil" / "src" / "agent_procutil",
+            )
+        assert kwargs["retained_resource_roots"] == expected_resources
         return admitted(uv, arguments, **kwargs)
 
     def command(arguments, **kwargs):

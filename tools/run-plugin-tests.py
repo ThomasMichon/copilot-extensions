@@ -63,6 +63,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from seasoned_uv import run_uv_install
+from standalone_consumers import standalone_build_resources
 # Preserve the runner's existing public map as an explicit re-export.
 from plugin_test_selection import EXTERNAL_TEST_ROOTS as EXTERNAL_TEST_ROOTS
 from plugin_test_selection import (
@@ -373,7 +374,8 @@ def _ensure_venv(name: str, uv: str, *, reinstall: bool) -> Path:
             run_uv_install(
                 uv, cmd[3:], cwd=_plugin_dir(name), trusted_source_roots=(REPO,), check=True,
                 retained_resource_roots=(
-                    (REPO / "libs" / "versioned-runtime",) if name == "agent-index" else ()
+                    standalone_build_resources("fleet-manager", source_root=REPO)
+                    if name == "agent-index" else ()
                 ),
             )
         else:

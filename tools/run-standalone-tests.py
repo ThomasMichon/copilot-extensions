@@ -26,7 +26,9 @@ from plugin_test_containment import (
     isolated_environment,
     run_contained,
 )
-from standalone_consumers import STANDALONE_CONSUMERS, local_dependency_source
+from standalone_consumers import (
+    STANDALONE_CONSUMERS, local_dependency_source, standalone_build_resources,
+)
 from seasoned_uv import run_uv_install
 
 REPO = Path(__file__).resolve().parent.parent
@@ -208,7 +210,7 @@ def prepare(component: str, python: Path, *, smoke: bool = False) -> None:
         run_uv_install(
             "uv", ["--python", str(python), *overrides, *sources],
             trusted_source_roots=(REPO,),
-            retained_resource_roots=(REPO / "libs" / "versioned-runtime",),
+            retained_resource_roots=standalone_build_resources(component, source_root=REPO),
             cwd=REPO,
             check=True,
             capture_output=True,

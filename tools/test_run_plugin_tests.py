@@ -567,7 +567,11 @@ def test_index_preparation_selects_same_checkout_fleet_dependency(tmp_path, monk
         "-e", str(fleet) + "[auth]", *runner.RUNNER_DEPENDENCIES,
     ]
     assert not any("http" in argument for argument in install)
-    assert retained == [(tmp_path / "libs" / "versioned-runtime",)]
+    assert retained == [(
+        tmp_path / "libs" / "versioned-runtime",
+        tmp_path / "libs" / "installer-engine",
+        tmp_path / "libs" / "agent-procutil" / "src" / "agent_procutil",
+    )]
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="native Windows editable staging contract")

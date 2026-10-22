@@ -141,7 +141,8 @@ def _retained_windows(argv, *, cwd, env, timeout, procutil, root, version, runti
                      "--timeout", str(timeout), "--", *argv],
                     cwd=cwd, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace",
-                    startupinfo=startup, close_fds=True, **procutil.no_window_kwargs(),
+                    startupinfo=startup, close_fds=True, executable=sys.executable,
+                    **procutil.no_window_kwargs(),
                 )
             except OSError as error:
                 raise ChildLaunchError(f"Installer guardian could not start: {error}") from error

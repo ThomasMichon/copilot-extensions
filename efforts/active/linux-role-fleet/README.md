@@ -785,3 +785,18 @@ These bounded Windows selections are not a new full Windows-suite claim.
   cycles each. Native window/focus observation found no visible or Default
   Terminal windows and no foreground transitions; process handles and cleanup
   custody prove settlement. This remains outside the fast required lane.
+- A further review found two missed consumer boundaries: normal standalone
+  preparation omitted the process companions, and the guardian omitted the
+  explicit Windows application path. Both failures were reproduced before
+  correction. The preparation regression now exercises the actual entry point
+  and retained wheel bytes after original-input mutation; the interpreter
+  regression executes from an owning venv beyond `MAX_PATH`.
+- Complete native guardian/preparation regression membership passed 79 cases
+  with seven platform skips; guardian plus real windowless cases passed 14
+  with one POSIX skip. The refreshed installed CLI and caller-death consumer
+  cases passed. Normal full Windows x64 SDK preparation and 35 diagnostics
+  passed; default native ARM64 full-development preparation still requires
+  OpenSSL for its selected cryptography source build. That broader prerequisite
+  remains under #6424; targeted native binary qualification is not a full
+  fresh-platform readiness claim. No toolchain or dependency-policy override
+  was installed to conceal it.

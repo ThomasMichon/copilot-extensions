@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 from pathlib import Path
 import subprocess
 import sys
 from types import SimpleNamespace
+import venv
 
 import pytest
 import agent_procutil
@@ -134,3 +136,45 @@ def test_retained_windows_child_preserves_outcome_and_releases_custody(
                 assert caught.value.returncode == 23
         with runtime._cleanup_lease(root, "probe", allow_construction_owner=True) as admitted:
             assert admitted
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows executable-token limit")
+@pytest.mark.timeout(30)
+def test_retained_windows_guardian_accepts_a_long_owning_interpreter(guardian, tmp_path):
+    environment = tmp_path / "owner"
+    while len(str(environment / "Scripts" / "python.exe")) <= 270:
+        environment /= "interpreter-" + "x" * 30
+    venv.EnvBuilder(with_pip=False, symlinks=False).create(environment)
+    python = environment / "Scripts" / "python.exe"
+    repo = Path(__file__).resolve().parents[3]
+    code = """
+import importlib.util,json,sys
+from pathlib import Path
+s=importlib.util.spec_from_file_location("long_owner_guardian",sys.argv[1])
+guardian=importlib.util.module_from_spec(s);s.loader.exec_module(guardian)
+runtime=guardian._load_resource("long_owner_runtime",sys.argv[2])
+procutil=guardian._load_resource("long_owner_procutil",sys.argv[3])
+root=Path(sys.argv[4]);root.mkdir();slot=runtime.slot(root,"probe")
+assert len(sys.executable)>260
+with runtime.construction_lease(root,"probe") as descriptor:
+    result=guardian.run_owned(
+        [sys._base_executable,"-I","-c","print('owned')"],
+        cwd=slot,env=dict(__import__("os").environ),timeout=3,
+        procutil=procutil,construction_fd=descriptor,
+        runtime_root=root,runtime_version="probe",runtime_path=Path(sys.argv[2]),
+    )
+    with runtime._cleanup_lease(root,"probe",allow_construction_owner=True) as admitted:
+        assert admitted
+print(json.dumps({"owner":sys.executable,"output":result.stdout}))
+"""
+    result = subprocess.run(
+        [str(python), "-I", "-B", "-c", code, guardian.__file__,
+         str(repo / "libs" / "versioned-runtime" / "versioned_runtime.py"),
+         str(repo / "libs" / "agent-procutil" / "src" / "agent_procutil" / "__init__.py"),
+         str(tmp_path / "runtime")],
+        executable=str(python), cwd=tmp_path, capture_output=True, text=True, timeout=20,
+        **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    report = json.loads(result.stdout)
+    assert Path(report["owner"]) == python and report["output"] == "owned\n"

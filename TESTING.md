@@ -288,6 +288,15 @@ The existing `test_python_installer_engine.py` teardown-fault regression injects
 its first accounting failure inside the guardian, not through parent-only
 monkeypatches. It checks frozen inputs, construction/retention exclusion,
 descendant settlement and refusal to publish after the recovered teardown.
+`test_installer_guardian.py` also launches from a real owning interpreter beyond
+Windows' executable-token `MAX_PATH` limit.
+
+Normal Fleet preparation retains its canonical runtime and both process-build
+companions. `tools/test_run_standalone_tests.py` exercises that actual preparation
+entry point while changing the original resources, then verifies the retained
+wheel's exact bytes. The full development extra remains broader than the
+dependency-free client; selected source distributions can still require a
+platform's native build prerequisites.
 
 ## The turn-key runner
 
