@@ -1,0 +1,9 @@
+{
+  "comment": "Reuse isolated backed-recovery topology while preserving checkpoint evidence and specialized setup contracts",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

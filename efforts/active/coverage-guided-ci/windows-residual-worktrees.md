@@ -87,6 +87,63 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Admitted narrow batches
 
+### B-BACKED private copies preserve prior-publication evidence
+
+Two session seeds prepare the existing backed publication, with and without
+a saved base, through `_published_seed_environment` and `_seed_directory`.
+The seeds contain the real sync checkpoint, retained objects, prior remote
+publication and newer unpublished commit. `_copy_backed_pr` relocates this
+state through the existing recovered-copy helper without regenerating,
+rebinding or weakening checkpoint evidence. Each consumer still makes fresh
+remote observations and performs its own preview, confirmation, refusal,
+settlement or publication.
+
+The public `backed_publication(pr_repo, monkeypatch, with_base=...)` helper
+retains its four-field input and seven-field return contract. A small
+internal helper accepts an already-recovered six-field input so seed building
+does not repeat recovery setup. Existing routine-recovery direct imports and
+its specialized legacy `head_identity` setup remain compatible. Its common
+`owned_publication` fixture now copies the backed-with-base seed, capturing
+the real transport validator before applying the copy's synthetic slug
+adapter. This does not bypass destination validation.
+
+Advanced-head backed consumers and all three imperfect-evidence consumers
+use private fixtures. Two native isolation cases retain byte-identical
+checkpoint evidence and association across both base variants, preserve an
+absent rewrite identity, and prove first-copy commit/ref/remote/record/
+checkpoint mutations cannot reach a second copy or the immutable seed.
+A real successful settlement also verifies all seed bytes remain unchanged.
+Specialized fresh construction remains real; no production code, assertions,
+marks, skips, deadlines or runner groups change.
+
+The new two-case isolation control passed in 33.20 seconds including
+preparation and cleanup. Complete unpartitioned advanced-head and
+imperfect-evidence modules passed 25 and 15 nodes without skips:
+152.81 seconds for the advanced group (within a 397.62-second combined
+diagnostic that subsequently failed on routine recovery), and 131.09 seconds
+inclusive for imperfect evidence. Exactly two workers and all native,
+process and memory bounds remain unchanged.
+
+**Routine recovery is not qualified.** Its unpartitioned 57-node module
+hit the unchanged 240-second limit before and after the fixture conversion;
+the final verbose diagnostic completed 31 nodes before termination.
+There is no passing full-module result. Complementary functional-only
+partitions subsequently passed all 57 nodes without skips: 38 cases in
+154.66 seconds, six specialized cases in 103.66 seconds, and the other
+13 cases in 158.06 seconds (the latter two total 263.70 seconds including
+shared preparation/cleanup). A preceding 19-case partition timed out after
+18 cases and receives no pass credit. These partitions do not replace the
+normal group or establish a plugin result. The #5694/#5682 normal-group and
+repeated complete same-head qualification gates remain open; this slice
+must not be described as resolving the routine-recovery budget.
+
+Documentation impact is this census and the owning effort journal.
+This is below-altitude test-fixture reuse; no runtime command or public
+configuration changes. Real temporary Git repositories exercise its
+consumer contracts. Installation, first-provision, external development
+venue and rollout lanes are inapplicable. Other residual ownership remains
+as recorded below.
+
 ### B-RECOVERED private copies of prepared divergent PR topology
 
 The recovered-PR session seed performs the existing publish/rebase/association

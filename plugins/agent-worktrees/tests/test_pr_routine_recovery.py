@@ -9,6 +9,9 @@ from pathlib import Path
 import pytest
 from test_pr_rebase import _advance, _prepare
 from test_pr_recovery_advanced_head import backed_publication, git, metadata, record
+from test_pr_recovery_advanced_head import _backed_pr_with_base_seed as _backed_pr_with_base_seed
+from test_pr_recovery_advanced_head import _copy_backed_pr
+from test_pr_recovery_advanced_head import _recovered_pr_seed as _recovered_pr_seed
 
 from agent_worktrees import (
     finalize,
@@ -29,9 +32,9 @@ pytestmark = [
 ]
 
 @pytest.fixture
-def owned_publication(pr_repo, monkeypatch):
+def owned_publication(tmp_path, monkeypatch, _backed_pr_with_base_seed):
     real_slug = pr_publish.push_slug
-    publication = backed_publication(pr_repo, monkeypatch, with_base=True)
+    publication = _copy_backed_pr(_backed_pr_with_base_seed, tmp_path, monkeypatch)
     _config, wid, wt, _remote, _saved, branch, _published = publication
     monkeypatch.setattr(git_ops, "slug_from_url", lambda *a: "example/project")
     monkeypatch.setattr(pr_publish, "push_slug", real_slug)

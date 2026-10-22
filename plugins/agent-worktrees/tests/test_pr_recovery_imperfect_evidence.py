@@ -8,7 +8,10 @@ from pathlib import Path
 import pytest
 
 from agent_worktrees import finalize, git_ops, pr_rebase, pr_recovery
-from test_pr_recovery_advanced_head import REASON, PrRepo, backed_publication, git, metadata, preview, record
+from test_pr_break_glass import _recovered_pr_seed as _recovered_pr_seed
+from test_pr_recovery_advanced_head import _backed_pr_seed as _backed_pr_seed
+from test_pr_recovery_advanced_head import backed_pr as backed_pr
+from test_pr_recovery_advanced_head import REASON, BackedPR, git, metadata, preview, record
 
 pytestmark = [pytest.mark.timeout(120)]
 
@@ -18,10 +21,10 @@ pytestmark = [pytest.mark.timeout(120)]
     "null-ref", "surrogate-ref", "spawn", "synced-encoding",
 ])
 def test_unusable_checkpoint_produces_bound_rewrite_preview_and_confirmed_rewrite(
-    pr_repo: PrRepo, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str],
+    backed_pr: BackedPR, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str],
     defect: str,
 ) -> None:
-    config, wid, wt, remote, saved, branch, published = backed_publication(pr_repo, monkeypatch)
+    config, wid, wt, remote, saved, branch, published = backed_pr
     checkpoint = pr_recovery._path(str(wt))
     read_original_bytes = Path.read_bytes
     original = checkpoint.read_bytes()
@@ -110,9 +113,9 @@ def test_unusable_checkpoint_produces_bound_rewrite_preview_and_confirmed_rewrit
 
 @pytest.mark.parametrize("change", ["broken-bytes", "repaired-proof", "other-retained-ref"])
 def test_changed_imperfect_evidence_invalidates_confirmation(
-    pr_repo: PrRepo, monkeypatch: pytest.MonkeyPatch, change: str,
+    backed_pr: BackedPR, change: str,
 ) -> None:
-    config, wid, wt, _remote, _saved, _branch, _published = backed_publication(pr_repo, monkeypatch)
+    config, wid, wt, _remote, _saved, _branch, _published = backed_pr
     checkpoint = pr_recovery._path(str(wt))
     original = checkpoint.read_bytes()
     point = json.loads(original)
@@ -136,9 +139,9 @@ def test_changed_imperfect_evidence_invalidates_confirmation(
 
 @pytest.mark.parametrize("kind", ["blob", "tree", "tag"])
 def test_recreated_non_commit_evidence_ref_requires_fresh_confirmation(
-    pr_repo: PrRepo, monkeypatch: pytest.MonkeyPatch, kind: str,
+    backed_pr: BackedPR, kind: str,
 ) -> None:
-    config, wid, wt, _remote, saved, _branch, _published = backed_publication(pr_repo, monkeypatch)
+    config, wid, wt, _remote, saved, _branch, _published = backed_pr
     collection = json.loads(pr_recovery._path(str(wt)).read_bytes())
     point = collection["checkpoints"][collection["latest"]]
     git("update-ref", "-d", point["local_ref"], point["local_head"], cwd=wt)
