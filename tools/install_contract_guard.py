@@ -59,55 +59,56 @@ def _without_canonical_adapter(text: str) -> str:
     return text[:start] + ("\n" * text[start:end].count("\n")) + text[end:]
 
 
-def _without_comments(text: str, *, mask_strings: bool = False) -> str:
-    result = list(text)
+def _lexical_views(text: str) -> tuple[str, str]:
+    """Return comment-free source and its string-masked call-search view."""
+    source = list(text)
+    calls = list(text)
     index = 0
+    length = len(text)
     quote: str | None = None
     block_comment = False
-    while index < len(text):
+    while index < length:
+        char = text[index]
         if block_comment:
-            if text.startswith("#>", index):
-                result[index : index + 2] = "  "
+            if char == "#" and text[index : index + 2] == "#>":
+                source[index : index + 2] = calls[index : index + 2] = "  "
                 block_comment = False
                 index += 2
             else:
-                if text[index] != "\n":
-                    result[index] = " "
+                if char != "\n":
+                    source[index] = calls[index] = " "
                 index += 1
             continue
         if quote:
-            if quote == "'" and text[index] == "'" and text[index : index + 2] == "''":
-                if mask_strings:
-                    result[index : index + 2] = "  "
+            if quote == "'" and char == "'" and text[index : index + 2] == "''":
+                calls[index : index + 2] = "  "
                 index += 2
                 continue
-            if text[index] == "`" and quote == '"':
-                if mask_strings:
-                    result[index : index + 2] = "  "
+            if char == "`" and quote == '"':
+                calls[index : index + 2] = "  "
                 index += 2
                 continue
-            if text[index] == quote:
+            if char == quote:
                 quote = None
-            if mask_strings and text[index] != "\n":
-                result[index] = " "
+            if char != "\n":
+                calls[index] = " "
             index += 1
             continue
-        if text.startswith("<#", index):
-            result[index : index + 2] = "  "
+        if char == "<" and text[index : index + 2] == "<#":
+            source[index : index + 2] = calls[index : index + 2] = "  "
             block_comment = True
             index += 2
             continue
-        if text[index] == "#":
-            while index < len(text) and text[index] != "\n":
-                result[index] = " "
+        if char == "#":
+            while index < length and text[index] != "\n":
+                source[index] = calls[index] = " "
                 index += 1
             continue
-        if text[index] in {"'", '"'}:
-            quote = text[index]
-            if mask_strings:
-                result[index] = " "
+        if char in {"'", '"'}:
+            quote = char
+            calls[index] = " "
         index += 1
-    return "".join(result)
+    return "".join(source), "".join(calls)
 
 
 def _call_arguments(text: str, open_paren: int) -> tuple[str | None, int]:
@@ -210,11 +211,7 @@ def is_ignored_scan_path(path) -> bool:
 
 def persistent_environment_violations(text: str) -> list[str]:
     """Return direct persistent Windows environment access outside the adapter."""
-    source = _without_comments(_without_canonical_adapter(text))
-    call_scan = _without_comments(
-        _without_canonical_adapter(text),
-        mask_strings=True,
-    )
+    source, call_scan = _lexical_views(_without_canonical_adapter(text))
     violations: list[str] = []
     for match in _ENV_CALL.finditer(call_scan):
         arguments, _ = _call_arguments(source, match.end() - 1)

@@ -281,6 +281,12 @@ authorizes critical main-path acceptance or a bounded administrative change.
   Natural source/push CI and the closed, unmerged narrative validation #7663
   prove the actual conditional outcomes and retained push diagnostic.
   This does not close the whole-flow measurement and release-cycle items.
+- [x] Omit the checkout-only unit job before runner allocation on pushes,
+  preserving source guards, PR outcome checks, manual/unknown-event behavior
+  and promotion's independent full unit execution (#7953). Actual source PR
+  CI runs all 877 admitted cases; natural post-merge push CI succeeds with
+  the unit job skipped, no runner and zero steps. This removes one no-test
+  allocation per push, not a workflow invocation or guard critical path.
 - [x] Land bounded same-release upload batching and four-way independent raw
   readback in the source helpers (#7679), preserving qualification, signer,
   metadata, source/tag identity and receipt gates. Existing-control selection

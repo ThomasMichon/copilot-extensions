@@ -7,6 +7,7 @@ import pytest
 from tools.install_contract_guard import (
     PERSISTENT_ENV_END,
     PERSISTENT_ENV_START,
+    _lexical_views,
     is_ignored_scan_path,
     persistent_environment_violations,
 )
@@ -106,3 +107,68 @@ def test_ignores_generated_and_vendored_scan_paths(path):
 )
 def test_allows_tracked_source_scan_paths(path):
     assert not is_ignored_scan_path(path)
+
+
+@pytest.mark.parametrize(
+    ("text", "source", "calls"),
+    [
+        ("", "", ""),
+        ("a\nb\r\n", "a\nb\r\n", "a\nb\r\n"),
+        ("a#x\r\nb", "a   \nb", "a   \nb"),
+        ("<#x\n#>a", "   \n  a", "   \n  a"),
+        ("<#'<#\n", "     \n", "     \n"),
+        ("#'\"<#`", "      ", "      "),
+        ("'a#b'", "'a#b'", "     "),
+        ('"a<#b"', '"a<#b"', "      "),
+        ("'a''b'#x", "'a''b'  ", "        "),
+        ('"a`"b"#x', '"a`"b"  ', "        "),
+        ("'a\nb'", "'a\nb'", "  \n  "),
+        ('"a\nb"', '"a\nb"', "  \n  "),
+        ('"a`\nb"', '"a`\nb"', "      "),
+        ("'a`'#x", "'a`'  ", "      "),
+        ('"a`', '"a`', "    "),
+        ("'a", "'a", "  "),
+        ('"a`"\n#x', '"a`"\n#x', "    \n  "),
+    ],
+)
+def test_lexical_views_preserve_masking_and_escape_positions(text, source, calls):
+    assert _lexical_views(text) == (source, calls)
+
+
+def test_violations_keep_category_order_line_numbers_and_arguments():
+    text = """# [Environment]::GetEnvironmentVariable('hidden', 'User')
+$key = 'HKCU:\\Environment'
+[Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment')
+[Environment]::SetEnvironmentVariable(
+    'Path', $(Get-Value 'a,b'), <# ignored target #> 'User'
+)
+[Environment]::GetEnvironmentVariable('Path', 'Process')
+[Environment]::GetEnvironmentVariable(
+"""
+    assert persistent_environment_violations(text) == [
+        "line 4: direct .NET environment target \"'User'\"",
+        "line 8: unterminated .NET environment call",
+        "line 2: direct persistent environment registry path",
+        "line 3: direct CurrentUser environment registry API",
+    ]
+
+
+def test_adapter_removal_keeps_following_line_numbers():
+    text = f"""before
+{PERSISTENT_ENV_START}
+[Environment]::GetEnvironmentVariable('inside', 'User')
+{PERSISTENT_ENV_END}
+[Environment]::GetEnvironmentVariable('after', 'Machine')
+"""
+    assert persistent_environment_violations(text) == [
+        "line 5: direct .NET environment target \"'Machine'\"",
+    ]
+
+
+def test_unterminated_adapter_does_not_hide_persistent_access():
+    text = f"""{PERSISTENT_ENV_START}
+[Environment]::GetEnvironmentVariable('Path', 'User')
+"""
+    assert persistent_environment_violations(text) == [
+        "line 2: direct .NET environment target \"'User'\"",
+    ]
