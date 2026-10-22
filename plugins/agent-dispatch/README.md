@@ -50,6 +50,11 @@ is unchanged, and health attestation must honor configured coordinator auth.
 
 ## Task categories
 
+For opt-in user-level tracing of the existing ordinary Bridge CLI launch
+boundary and exact-prefix manual diagnosis, see
+[launch debugging](docs/launch-debugging.md). Tracing defaults off and never
+changes launch or task ownership behavior.
+
 Task purpose is an orthogonal [work/maintenance category](docs/task-categories.md):
 compatible creation defaults, before-limit selection, independent Tasks and
 Maintenance tasks pivots, full evidence inspection and preview-first historical

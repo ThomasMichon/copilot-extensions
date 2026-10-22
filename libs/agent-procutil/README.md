@@ -4,6 +4,15 @@ Shared **Windows-headless / detached / bounded-owned** process primitives for
 Copilot CLI plugins. One vendored helper keeps launch flags and finite child
 containment consistent instead of reimplementing them in each consumer.
 
+`agent_procutil.diagnostics` also supplies the pure, bounded subprocess
+diagnostic parser/redactor originally owned by Bridge's resolver. Bridge retains
+its compatibility exports and retry policy; Dispatch can use
+`safe_diagnostic_text` and `structured_diagnostic_fields` without importing a
+sibling plugin. Error/message/stage/code/reason strings are selected, not opaque
+launch envelopes. Redaction handles known credential forms and supplied known
+values after control normalization; it is best-effort, not a guarantee about
+arbitrary third-party output.
+
 ```python
 import subprocess
 import sys

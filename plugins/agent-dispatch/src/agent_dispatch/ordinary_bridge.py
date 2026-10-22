@@ -245,8 +245,18 @@ def start(
             raise CreatedAgentUnrecorded(str(exc)) from exc
 
     def run(argv: list[str], *, prompt_input: str | None = None) -> subprocess.CompletedProcess[str]:
-        return subprocess.run([*prefix, *argv], input=prompt_input, capture_output=True,
-                              text=True, encoding="utf-8", check=False, timeout=timeout, **no_window_kwargs())
+        from .launch_debug import begin
+        trace = begin(prefix, argv, prompt_input=prompt_input, input_reference=key, timeout=timeout)
+        try:
+            result = subprocess.run([*prefix, *argv], input=prompt_input, capture_output=True,
+                                    text=True, encoding="utf-8", check=False, timeout=timeout, **no_window_kwargs())
+        except (subprocess.TimeoutExpired, OSError) as exc:
+            if trace:
+                trace.finish(error=exc)
+            raise
+        if trace:
+            trace.finish(result=result)
+        return result
 
     def resumed_info(session_id: str) -> dict:
         result = run(["--json", "status", session_id, "--full"])

@@ -120,6 +120,68 @@ def test_create_store_send_order_and_readable_identity(startup):
     assert queue.get(task["id"]).status == "queued"
 
 
+@pytest.mark.parametrize("mode", ["off", "on", "invalid", "sink-error"])
+def test_launch_debug_preserves_real_boundary_contract(startup, monkeypatch, tmp_path, mode):
+    queue, task, client, calls = startup
+    root = tmp_path / "debug-install"
+    root.mkdir()
+    monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(root))
+    monkeypatch.delenv("AGENT_DISPATCH_BRIDGE_CLI_TRACE", raising=False)
+    config = root / "launch-debug.json"
+    config.write_text("{" if mode == "invalid" else json.dumps({"bridge_cli_trace": mode != "off"}))
+    if mode == "sink-error":
+        (root / "logs").write_text("not a directory")
+    result = ordinary_bridge.start(
+        task, client=client, agent="local", project="example",
+        charter="reviewer", prompt="assigned task",
+    )
+    assert result["session"] == "local-body:bridge-a"
+    assert result["session_info"]["outcome"] == "delivered"
+    assert [call[0] for call in calls] == ["create", "store", "store", "send"]
+    for call in (calls[0], calls[-1]):
+        assert call[2] == {
+            "input": None if call[0] == "create" else calls[-1][2]["input"],
+            "capture_output": True, "text": True, "encoding": "utf-8",
+            "check": False, "timeout": 180, **ordinary_bridge.no_window_kwargs(),
+        }
+    assert queue.get(task["id"]).status == "queued"
+    traces = list((root / "logs" / "bridge-cli").glob("*.jsonl")) if mode != "sink-error" else []
+    assert len(traces) == (2 if mode == "on" else 0)
+    if traces:
+        rows = [json.loads(line) for file in traces for line in file.read_text().splitlines()]
+        assert sum(row["event"] == "finished" for row in rows) == 2
+        assert "assigned task" not in json.dumps(rows)
+
+
+def test_launch_debug_timeout_keeps_original_exception_and_no_replay(startup, monkeypatch, tmp_path):
+    queue, task, client, calls = startup
+    root = tmp_path / "trace-install"
+    monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(root))
+    monkeypatch.setenv("AGENT_DISPATCH_BRIDGE_CLI_TRACE", "1")
+    original = ordinary_bridge.subprocess.run
+    interruption = subprocess.TimeoutExpired(["bridge"], 180, output=b"opaque", stderr=b"timed out")
+
+    def interrupted(argv, **kwargs):
+        if argv[2] == "send":
+            calls.append(("interrupted-send", argv, kwargs))
+            raise interruption
+        return original(argv, **kwargs)
+
+    monkeypatch.setattr(ordinary_bridge.subprocess, "run", interrupted)
+    with pytest.raises(bridge.BridgeCarriedSessionBusy) as caught:
+        ordinary_bridge.start(
+            task, client=client, agent="local", project="example",
+            charter="reviewer", prompt="assigned task",
+        )
+    assert caught.value.__cause__ is interruption
+    assert [call[0] for call in calls] == ["create", "store", "store", "interrupted-send"]
+    assert queue.get(task["id"]).status == "queued"
+    assert queue.get_reservation(task["spawn_reservation_key"]).session_handle == "local-body:bridge-a"
+    rows = [json.loads(line) for file in (root / "logs" / "bridge-cli").glob("*.jsonl")
+            for line in file.read_text().splitlines()]
+    assert any(row.get("outcome") == "unknown_timeout" and row["returncode"] is None for row in rows)
+
+
 def test_assigned_scope_precedes_generic_worker_seed(startup):
     _, task, client, calls = startup
     task["prompt"] = "Read the trusted named identity and rubric before claiming."
