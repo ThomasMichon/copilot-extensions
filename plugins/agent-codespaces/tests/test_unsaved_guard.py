@@ -8,6 +8,7 @@ from pathlib import Path
 import shlex
 import shutil
 import subprocess
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -132,25 +133,39 @@ def _repo(path, remotes):
     _git("push", "-q", "origin", "main", cwd=path)
 
 
-def _bash_runs() -> bool:
-    # Windows keeps the WSL launcher (System32\bash.exe) on PATH even when no
-    # distribution is installed; it then fails every script instead of running it.
-    bash = shutil.which("bash")
-    if bash is None:
-        return False
+def _prints_ok(argv) -> bool:
+    # Bytes, not text: an unusable WSL launcher writes a (possibly localized)
+    # UTF-16 diagnostic, and decoding it must not break module collection.
     try:
         probe = subprocess.run(
-            [bash, "-c", "echo ok"], capture_output=True, text=True,
+            argv, capture_output=True,
             timeout=60, creationflags=no_window_flags(),
         )
     except (OSError, subprocess.TimeoutExpired):
         return False
-    return probe.returncode == 0 and probe.stdout.strip() == "ok"
+    return probe.returncode == 0 and probe.stdout.strip() == b"ok"
+
+
+def _bash_runs() -> bool:
+    # Windows keeps the WSL launcher (System32\bash.exe) on PATH even when no
+    # distribution is installed; it then fails every script instead of running it.
+    bash = shutil.which("bash")
+    return bash is not None and _prints_ok([bash, "-c", "echo ok"])
 
 
 needs_git_and_bash = pytest.mark.skipif(
     not (shutil.which("git") and _bash_runs()), reason="needs git + a working bash",
 )
+
+
+def test_bash_probe_rejects_failing_launcher_with_utf16_diagnostic():
+    diagnostic = (
+        "import sys; sys.stdout.buffer.write("
+        "'Le Sous-syst\\u00e8me Windows pour Linux \\u8bca\\u65ad'.encode('utf-16-le')); "
+        "sys.exit(1)"
+    )
+    assert not _prints_ok([sys.executable, "-c", diagnostic])
+    assert _prints_ok([sys.executable, "-c", "print('ok')"])
 
 
 def _run_audit(root, extra=()):
