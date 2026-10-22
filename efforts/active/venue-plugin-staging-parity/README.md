@@ -253,6 +253,12 @@ release or authorized-rollout gates.
   and launches an independent consumer rather than mocking past registration.
 - [ ] Trusted container proof: headed and headless agents enumerate the
   expected skills from the reflected payloads.
+- [ ] Complete the #1146 acceptance now inherited by #5286: an eligible
+  target-user-enabled plugin and a staged repository plugin are both usable in
+  the same executing ACP child and supported headed CLI, in a Codespace and the
+  trusted-container control. Retain explicit disables and target-local
+  precedence, correlate source/cwd/settings/readiness, and leave global
+  preferences unchanged; separate single-plugin proofs do not close this row.
 - [x] Codespace proof: the same narrow discovery check succeeds for both launch
   modes, with effective paths/settings and launch version recorded.
 - [ ] Static local, SSH, and privileged lanes have equivalent acceptance
