@@ -2733,6 +2733,8 @@ use the same physical target of that selected command; another UV on PATH is
 not substituted, and no PATH, mitigation, index or seasoning setting is
 changed. This handles an otherwise usable WinGet UV binary whose link is
 rejected by inherited RedirectionGuard. Missing targets refuse explicitly.
+Python-owned construction applies this same selection before its own strict
+path resolution, so a traversing caller cannot fail before SDK admission.
 Non-Windows, unqualified-command and non-native-wrapper lookup behavior remain unchanged.
 The existing two-file SDK closure includes a generated projection of
 `agent_procutil._interpreter.physical_executable` in the configuration helper.

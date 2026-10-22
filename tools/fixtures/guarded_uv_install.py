@@ -15,7 +15,8 @@ import _winapi
 
 
 def main():
-    sdk, workspace, physical_uv = map(Path, sys.argv[1:])
+    sdk, workspace, physical_uv = map(Path, sys.argv[1:4])
+    frontend = sys.argv[4]
     kernel = ctypes.WinDLL("kernel32", use_last_error=True)
     kernel.GetProcessMitigationPolicy.argtypes = [
         ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_size_t,
@@ -94,11 +95,29 @@ def main():
             assert error.winerror in (2, 448)
         else:
             raise AssertionError("unguarded logical UV control unexpectedly started")
-        result = policy.run_uv_install(
-            logical_uv, ["--python", str(python), str(project)],
-            cwd=project, env=dict(os.environ), trusted_source_roots=(project,),
-            capture_output=True, text=True, timeout=15,
-        )
+        if frontend == "python":
+            sys.path.insert(0, str(sdk))
+            import installer_engine as engine
+
+            packages = (project,)
+            inputs = engine.FrozenInputs(
+                project, packages, engine.runtime.fingerprint_source(engine._source_files(packages)),
+            )
+            with engine._retained_inputs(inputs, Path(logical_uv), python, refresh=False) as retained:
+                transaction = retained.transaction
+                assert transaction is not None
+                result = observed(
+                    list(transaction.argv), cwd=transaction.cwd, env=transaction.environment,
+                    capture_output=True, text=True, timeout=15,
+                    creationflags=subprocess.CREATE_NO_WINDOW,
+                )
+        else:
+            assert frontend == "policy"
+            result = policy.run_uv_install(
+                logical_uv, ["--python", str(python), str(project)],
+                cwd=project, env=dict(os.environ), trusted_source_roots=(project,),
+                capture_output=True, text=True, timeout=15,
+            )
         assert result.returncode == 0, result.stderr
         installed = actual(
             [str(python), "-I", "-B", "-c",

@@ -21,7 +21,8 @@ import tomllib
 import versioned_runtime as runtime
 import versioned_runtime_source as runtime_source
 from installer_dependency_policy import (
-    DependencyPolicyError, RetainedUVInstall, _bundled_dbus_next, _contained, retain_uv_install,
+    DependencyPolicyError, RetainedUVInstall, _bundled_dbus_next, _contained,
+    _select_uv_executable, retain_uv_install,
 )
 from installer_engine_process import ChildLaunchError, ChildTimeoutExpired, run_owned
 
@@ -194,7 +195,7 @@ def _retained_inputs(inputs: FrozenInputs, uv: Path, python: Path, *, refresh: b
     for name in ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV"):
         environment.pop(name, None)
     with retain_uv_install(
-        str(uv.resolve(strict=True)),
+        str(Path(_select_uv_executable(str(uv))).resolve(strict=True)),
         ["--python", str(python), "--no-editable", "--link-mode", "copy",
          *(["--reinstall"] if refresh else []),
          *(argument for package in inputs.packages
@@ -346,7 +347,7 @@ def _construct(
     inputs: FrozenInputs, slot: Path, uv: Path, base_python: Path,
     descriptor: int, timeout: float, *, refresh: bool = False,
 ) -> Path:
-    uv = uv.resolve(strict=True)
+    uv = Path(_select_uv_executable(str(uv))).resolve(strict=True)
     base_python = base_python.resolve(strict=True)
     python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     if not refresh or not python.is_file() or not (slot / "pyvenv.cfg").is_file():

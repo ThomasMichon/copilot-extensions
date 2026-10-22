@@ -36,8 +36,9 @@ def _plain(path):
     return path[len(prefix):] if path.startswith(prefix) else path
 
 
+@pytest.mark.parametrize("frontend", ["policy", "python"])
 def test_cold_sdk_installs_twice_from_a_guarded_caller_without_console_windows(
-    tmp_path, record_property, monkeypatch,
+    tmp_path, record_property, monkeypatch, frontend,
 ):
     before = _guard_flags()
     physical = support.policy._configuration.physical_executable
@@ -50,6 +51,14 @@ def test_cold_sdk_installs_twice_from_a_guarded_caller_without_console_windows(
     sdk.mkdir()
     for name in ("installer_dependency_policy.py", "installer_dependency_config.py"):
         shutil.copyfile(support.PATH.with_name(name), sdk / name)
+    if frontend == "python":
+        for name in ("installer_engine.py", "installer_engine_process.py"):
+            shutil.copyfile(support.PATH.with_name(name), sdk / name)
+        for name in (
+            "versioned_runtime.py", "versioned_runtime_leases.py", "versioned_runtime_construction.py",
+            "versioned_runtime_source.py", "versioned_runtime_publication.py",
+        ):
+            shutil.copyfile(REPO / "libs" / "versioned-runtime" / name, sdk / name)
     script = tmp_path / "guarded.py"
     shutil.copyfile(REPO / "tools" / "fixtures" / "guarded_uv_install.py", script)
     with monkeypatch.context() as imports:
@@ -64,7 +73,7 @@ def test_cold_sdk_installs_twice_from_a_guarded_caller_without_console_windows(
         environment.pop(name, None)
     with _WindowObserver(*_configure_win32()) as windows:
         result = subprocess.run(
-            [_plain(base), "-I", "-B", str(script), str(sdk), str(tmp_path), _plain(selected)],
+            [_plain(base), "-I", "-B", str(script), str(sdk), str(tmp_path), _plain(selected), frontend],
             capture_output=True, text=True, timeout=25, env=environment,
             creationflags=subprocess.CREATE_NO_WINDOW,
         )
