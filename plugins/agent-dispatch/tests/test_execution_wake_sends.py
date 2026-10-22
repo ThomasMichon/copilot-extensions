@@ -425,8 +425,10 @@ def test_shared_key_refusal_preserves_unsent_wake_retry_budget(
     assert _finish(queue, current, delivered=True).status == "delivered"
 
 
-def _next_shared_wake(queue: TaskQueue, kind: str) -> Wake:
-    task = queue.create("next", repo=REPO, exclusive_key="blocked-lane")
+def _next_shared_wake(
+    queue: TaskQueue, kind: str, *, exclusive_key: str | None = "blocked-lane",
+) -> Wake:
+    task = queue.create("next", repo=REPO, exclusive_key=exclusive_key)
     queue.claim_one("host/next", task_id=task.id)
     queue.start(task.id, "host/next", owner_session_id="session-next")
     queue.suspend(task.id, "host/next", reason="external")

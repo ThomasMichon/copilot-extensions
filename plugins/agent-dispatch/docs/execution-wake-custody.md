@@ -34,7 +34,14 @@ task or shared exclusive execution key; new reservations retain the existing
 logical-workspace lineage check across task IDs. Repository/dedup identity
 matches directly claimed tasks even when no reservation was ever created.
 Both selectors defer conflicting task/key/logical-workspace wakes before
-leasing them. If unresolved custody appears after a lease but before final
+leasing them, including conflicts with reservation-bound sends. A blocked oldest
+wake cannot monopolize a drainer and starve unrelated due work.
+Final reservation-send admission also rechecks unresolved wake custody, so
+obtaining a reservation before a wake sends does not bypass the barrier.
+Exact reservation-send replay remains observation, not fresh permission.
+Delivery-lease time is sampled after acquiring the queue write lock, not before
+a potentially blocking connection/lock wait.
+If unresolved custody appears after a lease but before final
 admission, the drainer returns that unsent wake to pending without spending
 its transport retry budget; settlement makes it eligible again.
 Reconciliation requires the original retained send identity and actual transport

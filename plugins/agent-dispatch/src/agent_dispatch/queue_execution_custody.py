@@ -9,6 +9,7 @@ from typing import Literal
 
 from .execution_effect_adapter import ExecutionScope, _token
 from .queue_execution_handoff import _scope_key, require_execution_admission
+from .queue_execution_lineage import execution_lineage_match_sql
 from .queue_records import TaskError
 
 SendKind = Literal["launch", "resume", "deliver", "redrive"]
@@ -93,14 +94,13 @@ def require_custody_scope(conn: sqlite3.Connection, key: str, repo: str, source:
         raise TaskError("execution custody conflicts with the qualified producer scope")
 
 
-def require_execution_send_reconciliation(
+def require_execution_wake_reconciliation(
     conn: sqlite3.Connection,
     task_id: str,
     *,
     exclusive_key: str | None,
     creation_prefix: str | None = None,
 ) -> None:
-    """Do not turn terminal reservation bookkeeping into transport absence."""
     from .queue_execution_wakes import unresolved_wake_send
 
     wake = unresolved_wake_send(
@@ -111,12 +111,28 @@ def require_execution_send_reconciliation(
             f"unresolved execution wake send {wake['id']!r} has unresolved transport custody;"
             " reconcile its transport outcome"
         )
+
+
+def require_execution_send_reconciliation(
+    conn: sqlite3.Connection,
+    task_id: str,
+    *,
+    exclusive_key: str | None,
+    creation_prefix: str | None = None,
+) -> None:
+    """Do not turn terminal reservation bookkeeping into transport absence."""
+    require_execution_wake_reconciliation(
+        conn, task_id, exclusive_key=exclusive_key, creation_prefix=creation_prefix
+    )
     row = conn.execute(
         "SELECT c.send_id, c.state, c.reservation_key"
         " FROM execution_send_custody c"
         " JOIN spawn_reservations r ON r.key = c.reservation_key"
+        " JOIN tasks retained ON retained.id = c.task_id"
+        " JOIN tasks current ON current.id = ?"
         " WHERE c.state IN ('pending', 'unknown')"
-        " AND (c.task_id = ? OR r.exclusive_key = ?"
+        " AND (" + execution_lineage_match_sql("retained", "current")
+        + " OR r.exclusive_key = ?"
         " OR (? IS NOT NULL AND r.creation_key LIKE ?))"
         " LIMIT 1",
         (
@@ -216,6 +232,13 @@ class QueueExecutionCustodyMixin:
             ):
                 raise TaskError("execution send requires the current retained reservation")
             require_execution_admission(conn, reservation["task_id"])
+            require_execution_wake_reconciliation(
+                conn, reservation["task_id"], exclusive_key=reservation["exclusive_key"],
+                creation_prefix=(
+                    reservation["creation_key"].rsplit(":", 1)[0] + ":"
+                    if reservation["creation_key"] is not None else None
+                ),
+            )
             prior = conn.execute(
                 "SELECT send_id FROM execution_send_custody"
                 " WHERE reservation_key = ? AND task_generation = ? AND kind = ?",

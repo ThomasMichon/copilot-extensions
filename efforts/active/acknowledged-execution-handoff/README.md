@@ -160,6 +160,9 @@ handoff support.
 - Review follow-through retains repository/dedup lineage for directly claimed
   tasks without reservations. Both selectors defer shared-lineage conflicts,
   and a late custody refusal preserves the unsent wake's transport retry budget.
+- Final reservation-send admission rechecks wake custody even for an earlier
+  reservation. Wake selectors also defer reservation-send conflicts without
+  starving unrelated work, and final lease checks sample time after locking.
 - This advances Phase 2 only. Supervisor enrollment and other senders, legacy
   qualification, adopter effects, acknowledgement and handback remain open.
   Source/test work does not establish release, installation or running adoption.

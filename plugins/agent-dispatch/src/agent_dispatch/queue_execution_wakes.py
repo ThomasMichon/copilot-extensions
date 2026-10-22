@@ -12,6 +12,7 @@ from .queue_execution_custody import (
     require_execution_send_reconciliation,
 )
 from .queue_execution_handoff import _scope_key, require_execution_admission
+from .queue_execution_lineage import execution_lineage_match_sql
 from .queue_execution_scopes import ExecutionScopeBinding
 from .queue_records import TaskError
 from .queue_run_waiter_transition_cleanup import CLAIM_RELEASE_SENDER
@@ -34,27 +35,26 @@ class WakeSendAdmission:
     send_required: bool
 
 
-def _wake_lineage_match(retained: str, current: str) -> str:
-    # Queue identity is common; repository/dedup define workspace identity even
-    # for directly claimed tasks that never had a spawn reservation.
-    return (
-        f"({retained}.id = {current}.id"
-        f" OR {retained}.exclusive_key = {current}.exclusive_key"
-        f" OR ({retained}.repo = {current}.repo"
-        f" AND {retained}.dedup_key = {current}.dedup_key))"
-    )
-
-
 def wake_custody_clear_sql(outbox: str) -> str:
     if outbox not in TABLES:
         raise TaskError("unknown execution wake outbox")
-    return " AND ".join(
+    wake_clear = " AND ".join(
         f"NOT EXISTS (SELECT 1 FROM {table} w"
         " JOIN tasks retained ON retained.id = w.task_id"
         f" JOIN tasks current ON current.id = {outbox}.task_id"
         " WHERE w.execution_send_state IN ('pending', 'unknown') AND "
-        + _wake_lineage_match("retained", "current") + ")"
+        + execution_lineage_match_sql("retained", "current") + ")"
         for table in TABLES
+    )
+    return (
+        wake_clear
+        + " AND NOT EXISTS (SELECT 1 FROM execution_send_custody c"
+        " JOIN spawn_reservations r ON r.key = c.reservation_key"
+        " JOIN tasks retained ON retained.id = c.task_id"
+        f" JOIN tasks current ON current.id = {outbox}.task_id"
+        " WHERE c.state IN ('pending', 'unknown') AND ("
+        + execution_lineage_match_sql("retained", "current")
+        + " OR r.exclusive_key = current.exclusive_key))"
     )
 
 
@@ -69,7 +69,7 @@ def unresolved_wake_send(
             " JOIN tasks current ON current.id = ?"
             " LEFT JOIN spawn_reservations r ON r.task_id = t.id"
             " WHERE w.execution_send_state IN ('pending', 'unknown')"
-            " AND (" + _wake_lineage_match("t", "current") + " OR t.exclusive_key = ?"
+            " AND (" + execution_lineage_match_sql("t", "current") + " OR t.exclusive_key = ?"
             " OR (? IS NOT NULL AND r.creation_key LIKE ?)) LIMIT 1",
             (
                 task_id, exclusive_key, creation_prefix,
@@ -131,9 +131,9 @@ class QueueExecutionWakesMixin:
     ) -> WakeSendAdmission:
         """Only fresh admission permits transport; settled acceptance permits cleanup."""
         table = wake_table(wake)
-        ts = self._now(now)
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
+            ts = self._now(now)
             row = conn.execute(f"SELECT * FROM {table} WHERE id = ?", (wake.id,)).fetchone()
             if (
                 row is None or row["status"] != "delivering"
