@@ -599,7 +599,10 @@ continue below.
 - [ ] Qualify actual FILE fallback Windows arguments/Unicode/environment isolation and
   supported POSIX storage, not only mocked logical calls. Optional coordinator failure
   cannot block independent file storage. Distinguish resolver failure from actual file
-  absence.
+  absence. Retain the explicit failure-validation matrix: unavailable coordinator,
+  missing/hostile PATH, missing sibling commands, failed provisioning/resolution,
+  filesystem failure and retry, preserving the full prompt and prior valid baton
+  without exposing secrets or full continuation text in diagnostics.
 - [ ] On TOTAL storage failure preserve the full composed prompt in an explicitly
   reported safe artifact/equivalent with a real exact owned recovery invocation; never
   claim storage or invent a token when nothing was written. Preserve prior valid baton,
