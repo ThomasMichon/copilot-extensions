@@ -306,6 +306,67 @@ def test_valid_registry_passes(repo: Path) -> None:
     assert "OK (2 contracts, 2 fixtures)" in result.stdout
 
 
+def test_ci_checks_registry_once_and_keeps_pr_source_coverage() -> None:
+    import yaml
+
+    workflow = yaml.safe_load(
+        (SCRIPT.parent.parent / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+    )
+    steps = [
+        step for step in workflow["jobs"]["checks"]["steps"]
+        if SCRIPT.name in step.get("run", "")
+    ]
+    assert len(steps) == 2
+    commands = {step.get("if"): step["run"] for step in steps}
+    assert commands == {
+        "github.event_name != 'pull_request'": "python tools/check-agent-bridge-contracts.py",
+        "github.event_name == 'pull_request'": (
+            "python tools/check-agent-bridge-contracts.py "
+            "--base ${{ github.event.pull_request.base.sha }}"
+        ),
+    }
+    for event in ("pull_request", "push", "workflow_dispatch", "future_event", ""):
+        selected = [
+            command for condition, command in commands.items()
+            if (
+                condition == "github.event_name == 'pull_request'"
+                and event == "pull_request"
+            ) or (
+                condition == "github.event_name != 'pull_request'"
+                and event != "pull_request"
+            )
+        ]
+        assert len(selected) == 1
+        assert ("--base " in selected[0]) is (event == "pull_request")
+
+
+@pytest.mark.parametrize("corruption", ["schema", "fixture", "provenance"])
+def test_diff_mode_retains_full_registry_validation(repo: Path, corruption: str) -> None:
+    if corruption == "schema":
+        _mutate_registry(repo, lambda data: data.update(schema_version=2))
+    elif corruption == "fixture":
+        _write(repo, FIXTURE, {"corrupted": True})
+    else:
+        _mutate_registry(
+            repo,
+            lambda data: data["contracts"][0]["provenance"][0].update(
+                plugin_version="9.9.9"
+            ),
+        )
+    full = _run(repo)
+    diff = _run(repo, "--base", "HEAD")
+    assert full.returncode == diff.returncode == 1
+    assert full.stderr == diff.stderr
+    assert full.stdout == diff.stdout == ""
+
+
+@pytest.mark.parametrize("base", ["", "missing-contract-base"])
+def test_diff_mode_rejects_unavailable_base(repo: Path, base: str) -> None:
+    result = _run(repo, "--base", base)
+    assert result.returncode == 1
+    assert "diff:" in result.stderr
+
+
 def test_unresolvable_commit_does_not_fail_validation(repo: Path) -> None:
     """Regression test for copilot-extensions#5050 (recurrence of #2230): a
     squash-merge discards every intermediate commit on a feature branch, so a

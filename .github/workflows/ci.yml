@@ -118,6 +118,7 @@ jobs:
       if: github.event_name != 'pull_request'
       run: python tools/check-marketplace-isolation.py
     - name: Agent Bridge contract registry
+      if: github.event_name != 'pull_request'
       run: python tools/check-agent-bridge-contracts.py
     - name: Agent Bridge contract source coverage (PR diff only)
       if: github.event_name == 'pull_request'

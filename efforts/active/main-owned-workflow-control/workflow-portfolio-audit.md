@@ -193,6 +193,75 @@ census, that every periodic family passed, or that queues/review throughput
 are now solved. Required provider contexts remain the PR aggregate, lockdown
 and source attribution; the removed planning job is not independently required.
 
+### October 22 comparable-event follow-up
+
+The run-creation windows below are each twelve hours. Enumerate each in four
+disjoint three-hour partitions, paginate every partition at 100 records per
+page, and require unique run IDs to match each API-reported total. This avoids
+the provider's 1,000-result query cap rather than silently truncating the
+larger population.
+
+| Creation window (UTC, inclusive) | Partition populations | Pages | Distinct runs |
+|---|---|---:|---:|
+| October 21, 06:00:00–17:59:59 | 315 / 249 / 131 / 193 | 11 | 888 |
+| October 22, 09:50:00–21:49:59 | 354 / 154 / 257 / 357 | 13 | 1,122 |
+
+The earlier window matches the preceding run-ID population; current conclusions
+can change after capture or a rerun, so do not overwrite its dated outcomes.
+The later window contains 272 CI runs (199 PR, 73 push), 271 promote-trigger
+runs, 211 ordinary lockdown runs, 130 departure refreshes, 141 managed-review
+runs, 35 promotions and 27 base reminders, plus separately titled promotion
+checks and distinct maintenance/native lanes. **Total invocations increased**;
+these unequal activity populations do not demonstrate fewer workflow runs.
+
+For job comparison, take the first twenty chronological successful
+`pull_request` CI runs in each window, ordered by creation time then run ID,
+and read all jobs from each run's recorded attempt. These are bounded,
+event-matched samples, not random samples or full-population queue percentiles.
+Each sample contains eighteen actual selected-unit executions and two
+narrative omissions.
+
+| Observed CI boundary | Earlier sample | Later sample |
+|---|---:|---:|
+| Allocated runner jobs, twenty PR runs | 78 | 60 |
+| Selected-unit PR allocation, eighteen runs | 4 each | 3 each |
+| Narrative PR allocation, two runs | 3 each | 3 each |
+| Allocated-job created-to-start median | 3 seconds, 78 jobs | 3 seconds, 60 jobs |
+| Allocated-job created-to-start range | 2–8 seconds | 2–4 seconds |
+| Guards execution median, twenty jobs | 160.5 seconds | 63.5 seconds |
+| Unit-job execution median | 20.5 seconds, eighteen jobs | 32 seconds, twenty jobs |
+
+This demonstrates eighteen fewer allocations per twenty observed PR events:
+the separate planner disappears for selected-unit PRs, while narrative
+selection moves into the remaining unit job. The new unit job includes
+selection, and the packet/source changed between windows; its duration is not
+an equivalent-work regression or speedup measurement. Guard reductions overlap
+several reviewed changes and varying inputs, so their observed wall times are
+not a controlled attribution to any one patch. The first/last sampled CI runs
+are `39552923955`/`39560024329` and `39759654174`/`39765561570`.
+
+Run creation precedes first allocated-job creation by as much as 132 seconds
+in the earlier sample and 62 in the later sample. Keep that admission,
+concurrency or platform interval separate from the two-to-eight-second runner
+pickup interval. A long run-level wait does not by itself justify more runner
+capacity.
+
+Separately select the first ten chronological **completed**
+`Running Copilot Code Review` runs in each window, using their actual dynamic
+workflow identity rather than the checked-in setup workflow. All ten in each
+sample report success. Hosted review pickup medians are **four seconds in both
+samples** (ranges 4–5 and 4–6); run-to-job-creation medians are 1.5 and two
+seconds. Execution medians are 235.5 and 246.5 seconds. First/last sampled
+review runs are `39553009791`/`39558168499` and
+`39760202452`/`39765387242`.
+
+Neither these samples nor the 102/141 review runs created in the windows prove
+improved review throughput, request-to-run latency, reduced inference
+throttling or service quotas. The request/grace interval is not measured here.
+The supported conclusion is narrower: fewer source-CI allocations per
+selected PR with retained actual units, but no observed median runner-queue
+improvement and no demonstrated reduction in total workflow invocations.
+
 ### Enforcement snapshot
 
 At the October 18 capture, the Dev ruleset checks were `workflow-lockdown-guard` and

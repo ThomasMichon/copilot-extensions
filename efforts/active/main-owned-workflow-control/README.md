@@ -319,6 +319,11 @@ authorizes critical main-path acceptance or a bounded administrative change.
   failure (#7845). Equivalent attribution and current required CI pass; the
   actual all-ecosystem guard audits 332 declarations with zero violations.
   Local phase timing is not full live metadata or pipeline timing.
+- [x] Land and observe shared install-contract lexical scanning (#7967),
+  retaining both exact views, all 286 PowerShell files and ordered violations.
+  Native/Linux differential and attributed complete-guard comparisons pass;
+  actual PR and natural push guards pass for all thirteen installer plugins.
+  This bounded CPU reduction is not controlled hosted or release latency.
 - [ ] Remove redundant release-shaped PR and main-push validation only where
   existing trusted gates and exact-SHA release evidence cover the removed work;
   first prove no generated-output coverage or required context is lost.
