@@ -402,6 +402,8 @@ def _spawn_worker_for(args: argparse.Namespace, task: dict) -> None:
                         key,
                         session_handle=handle.get("session"),
                         worktree=handle.get("worktree"),
+                        startup_complete=True,
+                        startup_revision=reservation.get("startup_revision"),
                     )
     except DispatchError:
         # Best-effort bookkeeping -- the spawn itself already ran and was
@@ -542,7 +544,8 @@ def _spawn_ordinary_worker(args, task, reservation, client, *, route: str) -> No
             print(f"agent-dispatch: ordinary spawn failed; reservation {key}: {result.stderr}", file=sys.stderr)
         else:
             client.record_spawn(key, session_handle=handle["session"], worktree=handle["worktree"],
-                                session_info=handle["session_info"])
+                                session_info=handle["session_info"], startup_complete=True,
+                                startup_revision=reservation.get("startup_revision"))
             published = True
             if not args.run_async:
                 observation = ordinary_bridge.observe(handle)

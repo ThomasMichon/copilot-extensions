@@ -661,11 +661,15 @@ class DispatchClient(CleanupRecoveryClientMixin, CategoryClientMixin, ScheduleCl
         session_handle: str | None = None,
         worktree: str | None = None,
         session_info: dict | None = None,
+        startup_complete: bool | None = None,
+        startup_revision: int | None = None,
     ) -> dict:
         return self._unwrap(
             self._http.post(
                 f"/spawn-reservations/{key}/spawned",
                 json={"session_handle": session_handle, "worktree": worktree,
+                      **({"startup_complete": startup_complete} if startup_complete is not None else {}),
+                      **({"startup_revision": startup_revision} if startup_revision is not None else {}),
                       **({"session_info": session_info} if session_info is not None else {})},
             )
         )

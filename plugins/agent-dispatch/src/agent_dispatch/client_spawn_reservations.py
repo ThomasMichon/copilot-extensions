@@ -22,6 +22,13 @@ class SpawnReservationClientMixin:
     _http: Any
     _unwrap: Callable[[Any], Any]
 
+    def fence_spawn_startup(self, key: str, *, startup_revision: int) -> dict:
+        """Close completed startup admission while retaining resource ownership."""
+        return self._unwrap(self._http.post(
+            f"/spawn-reservations/{key}/startup-fence",
+            json={"startup_revision": startup_revision},
+        ))
+
     def record_spawn_allocation(self, key: str, project: str) -> dict:
         """Persist the selected execution repository before allocation effects."""
         return self._unwrap(self._http.post(

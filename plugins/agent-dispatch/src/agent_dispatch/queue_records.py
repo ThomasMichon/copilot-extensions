@@ -228,6 +228,9 @@ class SpawnReservation:
     state: str
     reserved_by: str | None = None
     session_handle: str | None = None
+    startup_complete: bool = False
+    startup_revision: int = 1
+    startup_fenced: bool = False
     worktree: str | None = None
     inherited_worktree: str | None = None
     worktree_ownership: str | None = None
@@ -261,6 +264,10 @@ class SpawnReservation:
             state=row["state"],
             reserved_by=row["reserved_by"],
             session_handle=row["session_handle"],
+            startup_complete=bool(row["startup_complete"])
+            if "startup_complete" in row.keys() else False,
+            startup_revision=row["startup_revision"] if "startup_revision" in row.keys() else 1,
+            startup_fenced=bool(row["startup_fenced"]) if "startup_fenced" in row.keys() else False,
             worktree=row["worktree"],
             inherited_worktree=row["inherited_worktree"],
             worktree_ownership=row["worktree_ownership"],

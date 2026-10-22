@@ -1790,10 +1790,15 @@ class _QueueBackedClient:
 
         return {"reserved": ok, "reservation": asdict(res)}
 
-    def record_spawn(self, key, *, session_handle=None, worktree=None):
+    def record_spawn(self, key, *, session_handle=None, worktree=None, startup_complete=None,
+                     startup_revision=None):
         from dataclasses import asdict
 
-        return asdict(self._q.record_spawn(key, session_handle=session_handle, worktree=worktree))
+        return asdict(self._q.record_spawn(
+            key, session_handle=session_handle, worktree=worktree,
+            startup_complete=startup_complete,
+            startup_revision=startup_revision,
+        ))
 
     def record_spawn_worktree(self, key, worktree, **kwargs):
         from dataclasses import asdict

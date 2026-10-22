@@ -443,6 +443,16 @@ def test_terminal_transition_during_send_does_not_strand_lane_capacity(
     rig.supervisor.local_body_verdict_fn = lambda _sid: "gone"
     rig.supervisor.local_body_target_dir_fn = lambda _sid: None
     rig.supervisor.reconcile()
+    if lost_publication:
+        pending = reservation(rig)
+        assert pending["state"] == "spawned"
+        assert pending["startup_complete"] is False
+        assert len(rig.supervisor._active_reservations()) == 1
+        rig.queue.record_spawn(
+            pending["key"], session_handle=pending["session_handle"],
+            startup_complete=True, startup_revision=pending["startup_revision"],
+        )
+        rig.supervisor.reconcile()
     assert reservation(rig)["state"] == "settled"
     assert rig.supervisor._active_reservations() == []
     assert sum("send" in argv for argv, _ in rig.calls) == 1
@@ -475,7 +485,9 @@ def test_terminal_ack_cannot_adopt_a_reclaimed_generation(rig, monkeypatch):
     assert "delivered" not in reservation(rig)["agent_info"]
 
 
-def test_later_completion_after_lost_spawn_publication_can_reconcile(rig, monkeypatch):
+def test_later_completion_after_lost_spawn_publication_requires_startup_reconciliation(
+    rig, monkeypatch,
+):
     monkeypatch.setattr(
         rig.client, "record_spawn",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(DispatchError(503, "lost publication")),
@@ -493,6 +505,15 @@ def test_later_completion_after_lost_spawn_publication_can_reconcile(rig, monkey
     ).status_code == 200
     rig.supervisor.local_body_verdict_fn = lambda _sid: "gone"
     rig.supervisor.local_body_target_dir_fn = lambda _sid: None
+    rig.supervisor.reconcile()
+    pending = reservation(rig)
+    assert pending["state"] == "spawned"
+    assert pending["startup_complete"] is False
+    assert len(rig.supervisor._active_reservations()) == 1
+    rig.queue.record_spawn(
+        pending["key"], session_handle=pending["session_handle"],
+        startup_complete=True, startup_revision=pending["startup_revision"],
+    )
     rig.supervisor.reconcile()
     assert reservation(rig)["state"] == "settled"
     assert rig.supervisor._active_reservations() == []

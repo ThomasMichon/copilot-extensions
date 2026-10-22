@@ -53,9 +53,15 @@ def test_seed_read_failure_defers_actual_caller_then_recovers(
             calls.append(("store", facts))
             return asdict(ordinary_bridge.record_created_agent(queue, key, **facts))
 
-        def record_spawn(self, key, *, session_handle=None, worktree=None, session_info=None):
+        def record_spawn(
+            self, key, *, session_handle=None, worktree=None, session_info=None,
+            startup_complete=None, startup_revision=None,
+        ):
             ordinary_bridge.record_session_info(queue, key, session_info)
-            return super().record_spawn(key, session_handle=session_handle, worktree=worktree)
+            return super().record_spawn(
+                key, session_handle=session_handle, worktree=worktree,
+                startup_complete=startup_complete, startup_revision=startup_revision,
+            )
 
     client = Client(queue)
     args = argparse.Namespace(spawn_backend="bridge", spawn_agent="local",

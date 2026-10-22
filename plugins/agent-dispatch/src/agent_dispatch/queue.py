@@ -32,6 +32,7 @@ import sqlite3
 import time
 from collections.abc import Callable
 from pathlib import Path
+from types import TracebackType
 
 from .identity import canonical_reviewer_target, canonicalize_remote  # noqa: F401 -- compatibility re-export
 from .payload import PayloadStore, is_blob_ref  # noqa: F401 -- compatibility re-export
@@ -141,6 +142,21 @@ from .routing_provenance import (  # noqa: F401 -- re-exported for existing call
 )
 
 
+class _ClosingConnection(sqlite3.Connection):
+    """Retain SQLite transaction handling, then release the operation's handle."""
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> bool:
+        try:
+            return super().__exit__(exc_type, exc_value, traceback)
+        finally:
+            self.close()
+
+
 class TaskQueue(
     QueueExecutionWakesMixin,
     QueueExecutionRuntimesMixin,
@@ -225,20 +241,26 @@ class TaskQueue(
     # -- connection / schema -------------------------------------------------
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path, timeout=_BUSY_TIMEOUT_MS / 1000, isolation_level=None)
-        conn.row_factory = sqlite3.Row
-        conn.execute(f"PRAGMA busy_timeout={_BUSY_TIMEOUT_MS}")
-        deadline = time.monotonic() + (_BUSY_TIMEOUT_MS / 1000)
-        while True:
-            try:
-                conn.execute("PRAGMA journal_mode=WAL")
-                break
-            except sqlite3.OperationalError as exc:
-                if "locked" not in str(exc).lower() or time.monotonic() >= deadline:
-                    conn.close()
-                    raise
-                time.sleep(0.05)
-        conn.execute("PRAGMA foreign_keys=ON")
+        conn = sqlite3.connect(
+            self.db_path, timeout=_BUSY_TIMEOUT_MS / 1000, isolation_level=None,
+            factory=_ClosingConnection,
+        )
+        try:
+            conn.row_factory = sqlite3.Row
+            conn.execute(f"PRAGMA busy_timeout={_BUSY_TIMEOUT_MS}")
+            deadline = time.monotonic() + (_BUSY_TIMEOUT_MS / 1000)
+            while True:
+                try:
+                    conn.execute("PRAGMA journal_mode=WAL")
+                    break
+                except sqlite3.OperationalError as exc:
+                    if "locked" not in str(exc).lower() or time.monotonic() >= deadline:
+                        raise
+                    time.sleep(0.05)
+            conn.execute("PRAGMA foreign_keys=ON")
+        except BaseException:
+            conn.close()
+            raise
         return conn
 
     def _migrate(self) -> None:

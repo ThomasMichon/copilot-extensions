@@ -647,11 +647,16 @@ def test_supervisor_poll_reserves_creates_stores_sends_and_records(startup, monk
             calls.append(("store", facts))
             return asdict(ordinary_bridge.record_created_agent(queue, key, **facts))
 
-        def record_spawn(self, key, *, session_handle=None, worktree=None, session_info=None):
+        def record_spawn(self, key, *, session_handle=None, worktree=None, session_info=None,
+                         startup_complete=None, startup_revision=None):
             assert session_info["session_id"] == "bridge-a"
             ordinary_bridge.record_session_info(queue, key, session_info)
             calls.append(("record",))
-            return asdict(queue.record_spawn(key, session_handle=session_handle, worktree=worktree))
+            return asdict(queue.record_spawn(
+                key, session_handle=session_handle, worktree=worktree,
+                startup_complete=startup_complete,
+                startup_revision=startup_revision,
+            ))
 
     original = ordinary_bridge.start
     monkeypatch.setattr(ordinary_bridge, "start", lambda snapshot, **kw:

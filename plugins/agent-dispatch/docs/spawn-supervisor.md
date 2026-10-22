@@ -57,6 +57,42 @@ coordinator or coordinator-to-coordinator federation. Container composition,
 authenticated supervisor execution enrollment and running adoption must be
 qualified separately; this description does not install or activate them.
 
+## Retained startup and process capacity
+
+Task completion does not prove that an admitted startup has finished. A terminal
+task's `reserving` reservation remains a visible recovery blocker: neither an old
+timestamp nor a momentary absence observation permits its retirement. A delayed
+launch could still finish after that observation.
+
+Successful launch callers publish `startup_complete=true` with their exact
+session handle and captured `startup_revision` only after startup returns.
+Recovery can promote a live body to
+`spawned` without asserting this fact. Pending resume or redelivery clears it
+before invoking the backend; changing the recorded handle also invalidates it.
+Beginning a pending startup advances the revision atomically, so a delayed
+completion from an earlier caller cannot close that newer operation.
+Historical rows and older clients default to unproven completion, not a backfill.
+This field closes startup accounting, not task execution or effect authority.
+If completion publication is lost, a delivered receipt and later task completion
+still do not close startup. Capacity remains occupied until the original launch
+completion is authoritatively reconciled for its captured revision; a body-gone
+observation alone cannot supply that fact.
+
+A completed or abandoned task's confirmed startup consumes no process slot only
+after its exact recorded body is positively gone. Before terminal cleanup or
+discounting capacity, the coordinator atomically checks the captured completed
+revision and closes further startup admission in that reservation. A concurrent
+newer startup refuses this fence; a successful fence refuses subsequent startup
+and identity replacement. Live, unknown, failed or missing-identity observations
+still occupy capacity. This control fence does not release the reservation,
+exclusive key, task hold, workspace history or retained cleanup obligations.
+Those keep their existing lifecycle owners; a separate eligible
+task may use the freed process slot without inheriting the held resource.
+An unresolved startup is logged and requires explicit reconciliation, not
+automatic replacement or a second allocation. Unsupported receiver capabilities
+remain unproven. Rollout must qualify the launcher cohort; source support is not
+permission to operate older launchers that bypass startup admission.
+
 ## Ordinary ACP startup invocation
 
 The ordinary Bridge backend freezes a versioned startup invocation with ready
@@ -230,7 +266,8 @@ POST /spawn-reservations               {task_id, reserved_by} -> {reserved, rese
 POST /spawn-reservations/{key}/routing-assignment {purpose, selected_model, eligibility_state, selection_reason, execution_surface, decision_ref, ...}
 POST /routing-assignments/{assignment_id}/transition {event_type, actor_role, ...}
 POST /spawn-reservations/{key}/worktree {worktree, ownership, creating_host, driver}
-POST /spawn-reservations/{key}/spawned  {session_handle, worktree}
+POST /spawn-reservations/{key}/spawned  {session_handle, worktree, startup_complete?, startup_revision?}
+POST /spawn-reservations/{key}/startup-fence {startup_revision}
 POST /spawn-reservations/{key}/release  {detail, disposition}
 POST /spawn-reservations/{key}/retire   {exact_absence, detail, conclusion_state?, conclusion_detail?}
 POST /spawn-reservations/{key}/fail     {detail}

@@ -126,6 +126,7 @@ from .supervisor_conclusion import (  # noqa: F401 -- re-exported for existing c
     _retired_cleanup_plan,
 )
 from .supervisor_identity import RestrictedStartupMixin
+from .supervisor_startup_fence import TerminalStartupMixin
 
 log = logging.getLogger("agent-dispatch.supervisor")
 _GOVERNANCE_BACKOFF_SECONDS = 10.0
@@ -149,7 +150,7 @@ _MIN_RESERVING_TIMEOUT_SECONDS = 600
 class _ReservationsUnavailable(Exception):
     """The coordinator couldn't be reached to list reservations."""
 
-class Supervisor(RestrictedStartupMixin):
+class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
     """Reserve -> spawn -> record, with terminal-state reconciliation.
 
     ``max_concurrent`` caps in-flight spawns. ``max_attempts`` bounds failed spawn
@@ -392,6 +393,7 @@ class Supervisor(RestrictedStartupMixin):
         #: Last compact dead-letter signature emitted by this process. Unchanged
         #: task ids, failed counts, and caps stay quiet across poll cycles.
         self._dead_letter_signature: tuple[tuple[str, int, int], ...] = ()
+        self._terminal_startup_blocks: set[str] = set()
         self._governance = LoopGovernance()
 
     def set_governance_recheck_fn(
@@ -603,7 +605,19 @@ class Supervisor(RestrictedStartupMixin):
         return spawn_snapshot(task, reservation, worktree, prepared, ownership, replaced)
 
     def _reservation_has_live_process(self, reservation: dict, task: dict) -> bool:
-        if reservation.get("state") == SpawnState.RELEASING:
+        terminal_spawn = (
+            task.get("status") in Status.TERMINAL
+            and reservation.get("state") == SpawnState.SPAWNED
+        )
+        if terminal_spawn and (
+            not reservation.get("session_handle")
+            or reservation.get("session_handle") == f"wt-{reservation.get('worktree')}"
+        ):
+            self._retain_terminal_startup(reservation, task, "exact body identity unproven")
+            return True
+        if terminal_spawn and not self._fence_terminal_startup(reservation, task):
+            return True
+        if reservation.get("state") == SpawnState.RELEASING or terminal_spawn:
             # Release state retains resource ownership independently of process
             # capacity. A process slot is released only after exact absence is
             # proven; unknown or failed probes remain conservatively occupied.
@@ -630,14 +644,17 @@ class Supervisor(RestrictedStartupMixin):
                 reservation,
                 task.get("owner"),
             )
+            if terminal_spawn and not (worktree and reservation.get("session_handle")):
+                return True
             if not worktree:
                 return bool(reservation.get("session_handle"))
             try:
                 return (
                     self.verdict_fn(
                         worktree,
-                        _machine_from_owner(task.get("owner")),
-                        task.get("owner_session_id"),
+                        _machine_from_owner(task.get("completed_by") or task.get("owner"))
+                        if terminal_spawn else _machine_from_owner(task.get("owner")),
+                        reservation["session_handle"] if terminal_spawn else task.get("owner_session_id"),
                     )
                     != _tracking().GONE
                 )
@@ -841,10 +858,12 @@ class Supervisor(RestrictedStartupMixin):
                 "Do not create a replacement task or worktree."
             )
             try:
-                self.client.record_spawn(
+                pending = self.client.record_spawn(
                     res["key"],
                     session_handle=res.get("session_handle"),
                     worktree=res.get("worktree"),
+                    startup_complete=False,
+                    startup_revision=res.get("startup_revision"),
                 )
                 self._cooled_reservations.discard(str(res["key"]))
                 self._cold_retry_after.pop(str(res["key"]), None)
@@ -861,6 +880,11 @@ class Supervisor(RestrictedStartupMixin):
                 if not process_resumed:
                     self._resume_retry_after[key] = now + _COLD_RESUME_RETRY_SECONDS
                     continue
+                self.client.record_spawn(
+                    res["key"], session_handle=res.get("session_handle"),
+                    worktree=res.get("worktree"), startup_complete=True,
+                    startup_revision=pending.get("startup_revision"),
+                )
                 self.client.resume(
                     task["id"],
                     owner,
@@ -1015,6 +1039,11 @@ class Supervisor(RestrictedStartupMixin):
             except DispatchError:
                 continue
             if not self._matches_pool(task):
+                continue
+            if task.get("status") in _TERMINAL:
+                # Absence before a pending launch finishes is not a closed
+                # startup. Keep both capacity and resource custody reserved.
+                self._retain_terminal_startup(res, task)
                 continue
             if res.get("driver") == "restricted-bridge":
                 reconciled += self._reconcile_restricted_start(res, task)
@@ -2045,6 +2074,8 @@ class Supervisor(RestrictedStartupMixin):
 
     def _refresh_terminal_session(self, reservation: dict, task: dict) -> dict:
         """Capture an exact live session id before releasing the reservation."""
+        if reservation.get("startup_complete") is not True:
+            return reservation
         worktree = reservation.get("worktree")
         if not isinstance(worktree, str) or not worktree:
             return reservation
@@ -2067,18 +2098,16 @@ class Supervisor(RestrictedStartupMixin):
             if isinstance(raw_completed_by, str) and raw_completed_by.startswith("headless-"):
                 session_handle = f"{_LOCAL_BODY_PREFIX}{durable_session}"
             try:
-                self.client.record_spawn(
+                updated = self.client.record_spawn(
                     reservation["key"],
                     session_handle=session_handle,
                     worktree=worktree,
+                    startup_complete=True,
+                    startup_revision=reservation.get("startup_revision"),
                 )
             except DispatchError:
                 return reservation
-            return {
-                **reservation,
-                "session_handle": session_handle,
-                "worktree": worktree,
-            }
+            return updated
         try:
             session = self.liveness_fn(worktree, None)
         except Exception:
@@ -2092,18 +2121,16 @@ class Supervisor(RestrictedStartupMixin):
         if not isinstance(exact_worktree, str) or not exact_worktree:
             exact_worktree = worktree
         try:
-            self.client.record_spawn(
+            updated = self.client.record_spawn(
                 reservation["key"],
                 session_handle=session_id,
                 worktree=exact_worktree,
+                startup_complete=True,
+                startup_revision=reservation.get("startup_revision"),
             )
         except DispatchError:
             return reservation
-        return {
-            **reservation,
-            "session_handle": session_id,
-            "worktree": exact_worktree,
-        }
+        return updated
 
     # -- pure terminal-conclusion classification helpers, extracted to
     # -- supervisor_conclusion.py; re-exposed for existing call sites -------
@@ -2329,11 +2356,16 @@ class Supervisor(RestrictedStartupMixin):
                 continue  # task vanished; leave the reservation for a human
             terminal = _TERMINAL - {Status.SUBMITTED} if task.get("require_verification") else _TERMINAL
             if task.get("status") in terminal:
+                if res.get("state") == SpawnState.RESERVING:
+                    self._retain_terminal_startup(res, task)
+                    continue
                 conclusion_claim_token: str | None = None
                 if (
                     res.get("worktree_ownership") == "created"
                     and res.get("state") != SpawnState.SETTLED
                 ):
+                    if not self._fence_terminal_startup(res, task):
+                        continue
                     try:
                         if res.get("state") != SpawnState.RELEASING:
                             self.client.request_spawn_release(
@@ -2349,8 +2381,6 @@ class Supervisor(RestrictedStartupMixin):
                     continue
                 prior_attempts = 0
                 exclusive = bool(res.get("exclusive_key"))
-                if res.get("state") == SpawnState.RESERVING and not exclusive:
-                    continue
                 policy_applies = bool(
                     self.disposable_cli_labels.intersection(task.get("labels") or [])
                 )
@@ -2380,6 +2410,10 @@ class Supervisor(RestrictedStartupMixin):
                         continue
                 if policy_applies and res.get("state") != SpawnState.SETTLED:
                     res = self._refresh_terminal_session(res, task)
+                if res.get("state") in {SpawnState.SPAWNED, SpawnState.COLD} and not (
+                    self._fence_terminal_startup(res, task)
+                ):
+                    continue
                 local_sid = _parse_local_body_handle(res.get("session_handle"))
                 if (
                     policy_applies
@@ -3271,15 +3305,24 @@ class Supervisor(RestrictedStartupMixin):
             if not session:
                 continue
             try:
-                self.client.record_spawn(
+                pending = self.client.record_spawn(
                     key,
                     session_handle=session.get("session_id"),
                     worktree=session.get("worktree_id") or worktree,
+                    startup_complete=False,
+                    startup_revision=res.get("startup_revision"),
                 )
             except DispatchError:
-                pass
+                log.exception("could not fence redrive startup for %s", key)
+                continue
             try:
                 if self.redrive_fn(worktree, machine, task, session, res):
+                    self.client.record_spawn(
+                        key, session_handle=session.get("session_id"),
+                        worktree=session.get("worktree_id") or worktree,
+                        startup_complete=True,
+                        startup_revision=pending.get("startup_revision"),
+                    )
                     self._redriven_spawn_keys.add(key)
                     redriven += 1
                     if self.publish_activity:
@@ -3714,6 +3757,8 @@ class Supervisor(RestrictedStartupMixin):
                         key,
                         session_handle=handle.get("session"),
                         worktree=handle.get("worktree"),
+                        startup_complete=True,
+                        startup_revision=reservation.get("startup_revision"),
                         **({"session_info": handle["session_info"]} if "session_info" in handle else {}),
                     )
                     if self.publish_activity:

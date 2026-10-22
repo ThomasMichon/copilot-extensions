@@ -119,7 +119,9 @@ class _Client(Protocol):
     def record_spawn_allocation(self, key: str, project: str) -> dict: ...
 
     def record_spawn(
-        self, key: str, *, session_handle: str | None = None, worktree: str | None = None
+        self, key: str, *, session_handle: str | None = None, worktree: str | None = None,
+        startup_complete: bool | None = None,
+        startup_revision: int | None = None,
     ) -> dict: ...
 
     def fail_spawn(self, key: str, *, detail: str | None = None) -> dict: ...
@@ -345,7 +347,9 @@ def launch_interactive_embodiment(
         raise InteractiveEmbodimentError("embody launched but returned no session id")
 
     client.record_spawn(
-        key, session_handle=session_id, worktree=handle.get("worktree") or worktree_id
+        key, session_handle=session_id, worktree=handle.get("worktree") or worktree_id,
+        startup_complete=True,
+        startup_revision=reservation.get("startup_revision"),
     )
 
     try:

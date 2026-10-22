@@ -61,6 +61,13 @@ class RecordSpawnBody(BaseModel):
     session_handle: str | None = None
     worktree: str | None = None
     session_info: dict | None = None
+    startup_complete: bool | None = Field(default=None, strict=True)
+    startup_revision: int | None = Field(default=None, ge=1, strict=True)
+
+class FenceSpawnStartupBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    startup_revision: int = Field(ge=1, strict=True)
 
 
 class RecordSpawnWorktreeBody(BaseModel):
@@ -276,6 +283,10 @@ def register_spawn_routes(
                     queue.request_spawn_release(reservation.key, detail=delivery_error)
                     return {"reserved": False, "reservation": _reservation_dict(queue.get_reservation(reservation.key)),
                             "coordinator_launch": {"ok": False, "error": delivery_error}}
+                queue.record_spawn(
+                    reservation.key, session_handle=handle["session"], startup_complete=True,
+                    startup_revision=reservation.startup_revision,
+                )
             else:
                 if handle.get("session"):
                     queue.request_spawn_release(
@@ -390,10 +401,20 @@ def register_spawn_routes(
                     raise HTTPException(status_code=403, detail="CI repair spawned identity not independently verified")
         result = _reservation_guard(
             lambda: queue.record_spawn(
-                key, session_handle=body.session_handle, worktree=body.worktree
+                key, session_handle=body.session_handle, worktree=body.worktree,
+                startup_complete=body.startup_complete,
+                startup_revision=body.startup_revision,
             )
         )
         bus.publish({"type": "spawn.spawned", "reservation": result})
+        return result
+
+    @app.post("/spawn-reservations/{key}/startup-fence")
+    def fence_spawn_startup(key: str, body: FenceSpawnStartupBody) -> dict:
+        result = _reservation_guard(
+            lambda: queue.fence_spawn_startup(key, startup_revision=body.startup_revision)
+        )
+        bus.publish({"type": "spawn.startup_fenced", "reservation": result})
         return result
 
     from .ordinary_bridge import register_routes

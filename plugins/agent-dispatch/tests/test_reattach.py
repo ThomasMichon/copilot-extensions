@@ -89,7 +89,7 @@ class _FakeClient:
         self._progress = progress or []
         self._steers = steers or []
         self._reserve_result = reserve_result or {
-            "reserved": True, "reservation": {"key": "resv-1"},
+            "reserved": True, "reservation": {"key": "resv-1", "startup_revision": 1},
         }
         # A claimed task by default; pass claim_result=None explicitly to
         # simulate a failed claim (the sentinel default distinguishes "no
@@ -101,6 +101,7 @@ class _FakeClient:
         self.create_calls = []
         self.reserve_calls = []
         self.record_spawn_calls = []
+        self.startup_completion_calls = []
         self.claim_calls = []
         self.fail_spawn_calls = []
 
@@ -127,8 +128,11 @@ class _FakeClient:
         self.reserve_calls.append((task_id, reserved_by))
         return self._reserve_result
 
-    def record_spawn(self, key, *, session_handle=None, worktree=None):
+    def record_spawn(self, key, *, session_handle=None, worktree=None,
+                     startup_complete=None, startup_revision=None):
         self.record_spawn_calls.append((key, session_handle, worktree))
+        if startup_complete is not None:
+            self.startup_completion_calls.append((key, startup_complete, startup_revision))
         return {"key": key, "state": "spawned"}
 
     def claim(self, *, worker_id=None, capabilities=(), repo=None, machine=None,
@@ -448,7 +452,8 @@ def test_reattach_happy_path_local():
     # worker, closing the create->reserve_spawn->claim race window (#2889).
     assert create_kwargs["target_worktree"] == worker_id
     assert client.reserve_calls == [("t-2", worker_id)]
-    assert client.record_spawn_calls == [("resv-1", worker_id, None)]
+    assert client.record_spawn_calls == [("resv-1", worker_id, None)] * 2
+    assert client.startup_completion_calls == [("resv-1", True, 1)]
     assert client.claim_calls == [
         {
             "worker_id": worker_id, "capabilities": ["cap-a"], "repo": "repo",
@@ -476,7 +481,8 @@ def test_reattach_forwards_category_and_keeps_session_associations(category):
         "work" if category == "legacy-absent" else category
     )
     assert client.bind_calls == [("t-2", "local-body:sess-1", "sess-1")]
-    assert client.record_spawn_calls == [("resv-1", "local-body:sess-1", None)]
+    assert client.record_spawn_calls == [("resv-1", "local-body:sess-1", None)] * 2
+    assert client.startup_completion_calls == [("resv-1", True, 1)]
     assert result.task_id == "t-2" and result.session_id == "sess-1"
     assert old == before
 
@@ -604,6 +610,31 @@ def test_reattach_no_resume_skips_delivery():
     )
     assert result.resumed is False
     assert not called
+    assert client.startup_completion_calls == [("resv-1", True, 1)]
+
+
+@pytest.mark.parametrize("failure", ["declined", "exception"])
+def test_reattach_failed_resume_does_not_close_startup(failure):
+    client = _FakeClient(get_task=_task(status="abandoned"))
+
+    def fail(*args, **kwargs):
+        assert not client.startup_completion_calls
+        if failure == "exception":
+            raise OSError("Synthetic resume transport unavailable")
+        return False
+
+    if failure == "exception":
+        with pytest.raises(OSError, match="resume transport"):
+            reattach.reattach(
+                client, "t-1", "sess-1", local_session_verdict=lambda _: "live",
+                resume_fn=fail,
+            )
+    else:
+        assert not reattach.reattach(
+            client, "t-1", "sess-1", local_session_verdict=lambda _: "live",
+            resume_fn=fail,
+        ).resumed
+    assert not client.startup_completion_calls
 
 
 # -- CLI ---------------------------------------------------------------

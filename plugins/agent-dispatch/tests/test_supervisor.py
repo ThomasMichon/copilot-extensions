@@ -106,8 +106,18 @@ class QueueBackedClient:
         )
         return {"reserved": ok, "reservation": asdict(res)}
 
-    def record_spawn(self, key, *, session_handle=None, worktree=None):
-        return asdict(self._q.record_spawn(key, session_handle=session_handle, worktree=worktree))
+    def record_spawn(self, key, *, session_handle=None, worktree=None, startup_complete=None,
+                     startup_revision=None):
+        return asdict(self._q.record_spawn(
+            key, session_handle=session_handle, worktree=worktree,
+            startup_complete=startup_complete, startup_revision=startup_revision,
+        ))
+
+    def fence_spawn_startup(self, key, *, startup_revision):
+        try:
+            return asdict(self._q.fence_spawn_startup(key, startup_revision=startup_revision))
+        except TaskError as exc:
+            raise DispatchError(409, str(exc)) from exc
 
     def record_spawn_worktree(self, key, worktree, **kwargs):
         return asdict(
@@ -1479,7 +1489,7 @@ def test_reconcile_settles_reservation_once_task_is_confirmed(q, client):
     introduced)."""
     t = q.create("work")
     reservation, _ = q.reserve_spawn(t.id)
-    q.record_spawn(reservation.key, session_handle="local-body:sess")
+    q.record_spawn(reservation.key, startup_complete=True, startup_revision=1, session_handle="local-body:sess")
     q.claim_one("owner", task_id=t.id)
     q.start(t.id, "owner")
     q.complete(t.id, "owner", result_ref="done")
@@ -2122,7 +2132,7 @@ def test_supervisor_settles_suspended_task_completed_by_resolver(q, client):
     task = q.create("wait for condition")
     reservation, _ = q.reserve_spawn(task.id)
     q.record_spawn(
-        reservation.key, session_handle="session-1", worktree="wt-1"
+        reservation.key, startup_complete=True, startup_revision=1, session_handle="session-1", worktree="wt-1"
     )
     q.claim_one("host-a/wt-1", task_id=task.id)
     q.start(task.id, "host-a/wt-1")
@@ -2176,7 +2186,7 @@ def test_terminal_conclusion_uses_exact_reservation_identity(q, client):
     task = q.create("review", labels=["review"])
     reservation, _ = q.reserve_spawn(task.id)
     q.record_spawn(
-        reservation.key,
+        reservation.key, startup_complete=True, startup_revision=1,
         session_handle="session-exact",
         worktree="worktree-exact",
     )
@@ -2219,7 +2229,7 @@ def test_terminal_refresh_does_not_replace_exact_reserved_session(q, client):
     task = q.create("review", labels=["review"])
     reservation, _ = q.reserve_spawn(task.id)
     q.record_spawn(
-        reservation.key,
+        reservation.key, startup_complete=True, startup_revision=1,
         session_handle="original-session",
         worktree="worktree-exact",
     )
@@ -2256,7 +2266,7 @@ def test_terminal_refresh_uses_durable_owner_session_for_mux_placeholder(
     task = q.create("review", labels=["review"])
     reservation, _ = q.reserve_spawn(task.id)
     q.record_spawn(
-        reservation.key,
+        reservation.key, startup_complete=True, startup_revision=1,
         session_handle="wt-worktree-exact",
         worktree="worktree-exact",
     )
@@ -2294,7 +2304,7 @@ def test_terminal_refresh_preserves_headless_session_type_before_end(q, client):
     )
     reservation, _ = q.reserve_spawn(task.id)
     q.record_spawn(
-        reservation.key,
+        reservation.key, startup_complete=True, startup_revision=1,
         session_handle="wt-worktree-exact",
         worktree="worktree-exact",
     )
@@ -2338,7 +2348,7 @@ def test_terminal_conclusion_is_opt_in_only(q, client):
     task = q.create("ordinary", labels=["ordinary"])
     reservation, _ = q.reserve_spawn(task.id)
     q.record_spawn(
-        reservation.key,
+        reservation.key, startup_complete=True, startup_revision=1,
         session_handle="session-exact",
         worktree="worktree-exact",
     )
@@ -2383,7 +2393,7 @@ def test_terminal_conclusion_failure_does_not_block_settlement(q, client):
     task = q.create("review", labels=["review"])
     reservation, _ = q.reserve_spawn(task.id)
     q.record_spawn(
-        reservation.key,
+        reservation.key, startup_complete=True, startup_revision=1,
         session_handle="session-exact",
         worktree="worktree-exact",
     )
@@ -2409,7 +2419,7 @@ def test_terminal_conclusion_reconcile_is_idempotent(q, client):
     task = q.create("review", labels=["review"])
     reservation, _ = q.reserve_spawn(task.id)
     q.record_spawn(
-        reservation.key,
+        reservation.key, startup_complete=True, startup_revision=1,
         session_handle="session-exact",
         worktree="worktree-exact",
     )
@@ -2439,7 +2449,7 @@ def test_live_terminal_conclusion_retries_after_settlement(q, client):
     task = q.create("review", labels=["review"])
     reservation, _ = q.reserve_spawn(task.id)
     q.record_spawn(
-        reservation.key,
+        reservation.key, startup_complete=True, startup_revision=1,
         session_handle="session-exact",
         worktree="worktree-exact",
     )
@@ -2494,7 +2504,7 @@ def test_nonexclusive_disposable_idle_body_ends_before_conclusion(q, client):
     )
     reservation, _ = q.reserve_spawn(task.id)
     q.record_spawn(
-        reservation.key,
+        reservation.key, startup_complete=True, startup_revision=1,
         session_handle="local-body:session-exact",
         worktree="worktree-exact",
     )
@@ -2539,7 +2549,7 @@ def test_idle_disposable_end_failure_keeps_exclusive_fence(q, client):
     )
     reservation, _ = q.reserve_spawn(task.id)
     q.record_spawn(
-        reservation.key,
+        reservation.key, startup_complete=True, startup_revision=1,
         session_handle="local-body:session-exact",
         worktree="worktree-exact",
     )
@@ -2578,7 +2588,7 @@ def test_failed_disposable_body_ends_reach_durable_held_bound(q, client):
     )
     reservation, _ = q.reserve_spawn(task.id)
     q.record_spawn(
-        reservation.key,
+        reservation.key, startup_complete=True, startup_revision=1,
         session_handle="local-body:session-exact",
         worktree="worktree-exact",
     )
@@ -2629,7 +2639,7 @@ def test_successful_disposable_body_end_runs_conclusion(q, client):
     )
     reservation, _ = q.reserve_spawn(task.id)
     q.record_spawn(
-        reservation.key,
+        reservation.key, startup_complete=True, startup_revision=1,
         session_handle="local-body:session-exact",
         worktree="worktree-exact",
     )
@@ -2667,7 +2677,7 @@ def test_end_failure_counts_after_legacy_pending_attempts(q, client):
     )
     reservation, _ = q.reserve_spawn(task.id)
     q.record_spawn(
-        reservation.key,
+        reservation.key, startup_complete=True, startup_revision=1,
         session_handle="local-body:session-exact",
         worktree="worktree-exact",
     )
@@ -2823,7 +2833,7 @@ def test_terminal_conclusion_retries_are_bounded(q, client):
     task = q.create("review", labels=["review"])
     reservation, _ = q.reserve_spawn(task.id)
     q.record_spawn(
-        reservation.key,
+        reservation.key, startup_complete=True, startup_revision=1,
         session_handle="session-exact",
         worktree="worktree-exact",
     )
@@ -3150,7 +3160,7 @@ def test_gone_terminal_retry_preserves_terminal_cleanup_envelope(q, client):
     )
     reservation, _ = q.reserve_spawn(task.id)
     q.record_spawn(
-        reservation.key,
+        reservation.key, startup_complete=True, startup_revision=1,
         session_handle="local-body:brg-disposable",
         worktree="worktree-disposable",
     )
@@ -4789,7 +4799,7 @@ def test_reconcile_settles_terminal_script_body_and_cleans_task_file(q, client, 
         + str(task_file).replace("\\", "\\\\")
         + '","worker_id":"script-1"}'
     ).join(("script-body:", ""))
-    q.record_spawn(reservation.key, session_handle=handle, worktree=None)
+    q.record_spawn(reservation.key, startup_complete=True, startup_revision=1, session_handle=handle, worktree=None)
     q.claim_one("script-1", repo=TEST_REPO, task_id=task.id)
     q.start(task.id, "script-1")
     q.complete(task.id, "script-1")
@@ -4811,7 +4821,7 @@ def test_superseded_task_does_not_release_exclusive_live_reservation(
     old = q.create("old", exclusive_key="review:repo:42")
     reservation, _ = q.reserve_spawn(old.id)
     q.record_spawn(
-        reservation.key,
+        reservation.key, startup_complete=True, startup_revision=1,
         session_handle="local-body:session-old",
         worktree="wt-review",
     )
@@ -4843,7 +4853,7 @@ def test_confirmed_gone_superseded_body_releases_exclusive_key(q, client):
     old = q.create("old", exclusive_key="review:repo:42")
     reservation, _ = q.reserve_spawn(old.id)
     q.record_spawn(
-        reservation.key,
+        reservation.key, startup_complete=True, startup_revision=1,
         session_handle="local-body:session-old",
         worktree="wt-review",
     )
@@ -4872,7 +4882,7 @@ def test_explicit_end_releases_live_exclusive_body(q, client):
     task = q.create("work", exclusive_key="review:repo:42")
     reservation, _ = q.reserve_spawn(task.id)
     q.record_spawn(
-        reservation.key,
+        reservation.key, startup_complete=True, startup_revision=1,
         session_handle="local-body:session-live",
         worktree="wt-review",
     )
@@ -6498,7 +6508,7 @@ def test_terminal_created_worktree_uses_attempt_cleanup_without_label(
         driver="agent-dispatch",
     )
     q.record_spawn(
-        reservation.key,
+        reservation.key, startup_complete=True, startup_revision=1,
         session_handle="local-body:bridge-1",
         worktree="wt-created",
     )
@@ -6605,7 +6615,7 @@ def test_completed_idle_exclusive_body_is_carried_to_next_episode(q, client):
     task = q.create("old", exclusive_key="review:repo:42")
     reservation, _ = q.reserve_spawn(task.id)
     q.record_spawn(
-        reservation.key,
+        reservation.key, startup_complete=True, startup_revision=1,
         session_handle="local-body:session-idle",
         worktree="wt-review",
     )
@@ -6638,7 +6648,7 @@ def test_completed_live_exclusive_fleet_body_is_ended_before_release(
     task = q.create("old", exclusive_key="review:repo:42")
     reservation, _ = q.reserve_spawn(task.id)
     q.record_spawn(
-        reservation.key,
+        reservation.key, startup_complete=True, startup_revision=1,
         session_handle="fleet-body:worker-host:session-live",
     )
     q.claim_one("fleet-owner", task_id=task.id)

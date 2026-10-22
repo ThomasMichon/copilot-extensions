@@ -13,6 +13,11 @@ control of an agent, or the decision to delegate a bounded subtask. Use
 agent-bridge for live cross-boundary conversation and steering, and
 `delegation-guidance:delegating-work` for runtime task decomposition.
 
+Each queue operation owns a short-lived SQLite connection. Leaving its context
+commits or rolls back the transaction and closes the connection immediately,
+including on commit failure. Setup failures also close the connection; resource
+release does not depend on garbage collection.
+
 Held housekeeping on a completed task has a separate preview-first
 [`reservations retry-cleanup` recovery flow](docs/cleanup-recovery.md).
 It preserves failure and attachment history and never rearms completed work.

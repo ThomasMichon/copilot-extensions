@@ -40,7 +40,10 @@ class RestrictedStartupMixin:
             log.error("restricted startup %s retained: %s", reservation["key"], handle.get("error"))
             return 0
         try:
-            self.client.record_spawn(reservation["key"], session_handle=handle["session"])
+            self.client.record_spawn(
+                reservation["key"], session_handle=handle["session"], startup_complete=True,
+                startup_revision=reservation.get("startup_revision"),
+            )
         except DispatchError:
             log.exception("could not publish retained restricted startup %s", reservation["key"])
             return 0

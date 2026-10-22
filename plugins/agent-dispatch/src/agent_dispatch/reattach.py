@@ -388,6 +388,11 @@ def reattach(
             session_id, prompt or _reattach_prompt(new_task_id, worker_id),
             host=normalized_host,
         )
+    if not resume or resumed:
+        client.record_spawn(
+            reservation_key, session_handle=worker_id, startup_complete=True,
+            startup_revision=reservation["reservation"].get("startup_revision"),
+        )
     return ReattachResult(
         task_id=new_task_id, worker_id=worker_id, session_id=session_id, resumed=resumed,
     )
