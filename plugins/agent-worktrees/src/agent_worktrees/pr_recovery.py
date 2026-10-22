@@ -45,10 +45,21 @@ def _commits(refs: tuple[str, ...], cwd: str) -> tuple[str, ...]:
 
     if not refs or any(not isinstance(ref, str) or not ref or "\0" in ref for ref in refs):
         raise ValueError("Recovery commit refs must be nonempty and NUL-free")
-    output = _git_bytes(
-        "cat-file", "--batch-check=%(objectname) %(objecttype)", "-z", cwd=cwd,
-        stdin=b"".join(f"{ref}^{{commit}}\0".encode() for ref in refs),
-    )
+    requests = tuple(f"{ref}^{{commit}}".encode() for ref in refs)
+    command = ("cat-file", "--batch-check=%(objectname) %(objecttype)")
+    try:
+        output = _git_bytes(
+            *command, "-z", cwd=cwd, stdin=b"\0".join(requests) + b"\0",
+        )
+    except git_ops.GitError as exc:
+        # Older Git supports batch input but not its NUL-input option.
+        if exc.returncode != 129:
+            raise
+        if any("\r" in ref or "\n" in ref for ref in refs):
+            raise ValueError("Legacy Git recovery commit refs must be CR/LF-free") from exc
+        output = _git_bytes(
+            *command, cwd=cwd, stdin=b"\n".join(requests) + b"\n",
+        )
     rows = output.split(b"\n")
     if len(rows) != len(refs) + 1 or rows[-1] != b"" or any(
         re.fullmatch(rb"(?:[0-9a-f]{40}|[0-9a-f]{64}) commit", row) is None
@@ -128,7 +139,7 @@ def _retain_refs(point: RecoveryPoint, *, cwd: str) -> None:
     if updates:
         _git_bytes(
             "update-ref", "--stdin", "-z", cwd=cwd,
-            stdin=b"start\0" + b"".join(updates) + b"prepare\0commit\0",
+            stdin=b"".join(updates),
         )
 
 

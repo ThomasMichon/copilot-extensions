@@ -74,7 +74,8 @@ def test_recovery_commit_batch_accepts_complete_object_ids(monkeypatch, width):
 
 
 @pytest.mark.parametrize("object_format", ["sha1", "sha256"])
-def test_recovery_batch_uses_native_object_format(tmp_path, object_format):
+@pytest.mark.parametrize("legacy", [False, True])
+def test_recovery_batch_uses_native_object_format(tmp_path, monkeypatch, object_format, legacy):
     git_ops.git(
         "init", "--template=", f"--object-format={object_format}", "-b", "main",
         str(tmp_path),
@@ -91,8 +92,26 @@ def test_recovery_batch_uses_native_object_format(tmp_path, object_format):
         version=1, worktree_id="task", branch="main", local_head=head,
         local_ref="refs/recovery-test/native", target_head=head,
     )
+    calls = []
+    original = pr_rebase._git_bytes
+
+    def compatible(*args, **kwargs):
+        calls.append((args, kwargs["stdin"]))
+        if legacy and args[:1] == ("cat-file",) and args[-1] == "-z":
+            raise git_ops.GitError(["git", *args], 129, "unsupported -z")
+        if args[:1] == ("update-ref",):
+            assert kwargs["stdin"] == f"create {point.local_ref}\0{head}\0".encode()
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(pr_rebase, "_git_bytes", compatible)
     pr_recovery._retain_refs(point, cwd=str(tmp_path))
     assert pr_recovery._commits(("HEAD", point.local_ref), str(tmp_path)) == (head, head)
+    assert len(calls) == (3 if legacy else 2)
+    if legacy:
+        assert calls[-1] == (
+            ("cat-file", "--batch-check=%(objectname) %(objecttype)"),
+            f"HEAD^{{commit}}\n{point.local_ref}^{{commit}}\n".encode(),
+        )
 
 
 @pytest.mark.parametrize("collision", ["", "local", "published", "lineage"])
@@ -190,3 +209,50 @@ def test_prepare_reads_and_retains_each_decision_once(pr_repo, monkeypatch):
         b"HEAD^{commit}\0refs/recovery-test/target^{commit}\0"
     )
     assert git_ops.git("rev-parse", "HEAD", cwd=path).stdout.strip() == head
+
+
+@pytest.mark.parametrize("returncode", [1, 124, 128])
+def test_recovery_batch_never_retries_operational_failures(monkeypatch, returncode):
+    calls = []
+
+    def failed(*args, **kwargs):
+        calls.append(args)
+        raise git_ops.GitError(["git", *args], returncode, "evidence unavailable")
+
+    monkeypatch.setattr(pr_rebase, "_git_bytes", failed)
+    with pytest.raises(git_ops.GitError, match="evidence unavailable"):
+        pr_recovery._commits(("HEAD",), ".")
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("ref", ["HEAD\nHEAD", "HEAD\rHEAD"])
+def test_legacy_recovery_batch_refuses_line_framing_injection(monkeypatch, ref):
+    calls = []
+
+    def unsupported(*args, **kwargs):
+        calls.append(args)
+        raise git_ops.GitError(["git", *args], 129, "unsupported -z")
+
+    monkeypatch.setattr(pr_rebase, "_git_bytes", unsupported)
+    with pytest.raises(ValueError, match="CR/LF-free"):
+        pr_recovery._commits((ref,), ".")
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("output", [
+    b"", b"a" * 40 + b" tree\n", b"a" * 41 + b" commit\n",
+    b"a" * 40 + b" commit", b"a" * 40 + b" commit\nextra\n",
+])
+def test_legacy_recovery_batch_keeps_strict_output_validation(monkeypatch, output):
+    calls = []
+
+    def compatible(*args, **kwargs):
+        calls.append(args)
+        if args[-1] == "-z":
+            raise git_ops.GitError(["git", *args], 129, "unsupported -z")
+        return output
+
+    monkeypatch.setattr(pr_rebase, "_git_bytes", compatible)
+    with pytest.raises(ValueError, match="missing, non-commit, or malformed"):
+        pr_recovery._commits(("HEAD",), ".")
+    assert len(calls) == 2

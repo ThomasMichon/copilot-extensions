@@ -96,8 +96,13 @@ refs. Exactly one complete SHA-1/SHA-256 commit ID per input is required;
 missing, noncommit, malformed or truncated rows refuse evidence.
 Inherited foreign repository selectors and replacement objects cannot
 substitute objects. There is no cross-decision cache.
+On an older Git's usage rejection (129), CR/LF-free requests use its
+newline-input batch with identical output validation. Framing-unsafe
+inputs and operational failures still refuse; the modern NUL-input path
+is unchanged.
 
-`_retain_refs` sends one create-only `update-ref` transaction. All selected
+`_retain_refs` sends one create-only implicit `update-ref` stdin transaction,
+supported by Git 2.15 without newer start/prepare/commit commands. All selected
 refs are retained or none are: collisions at the first, middle or last ref
 and invalid names cannot leave a partial recovery set. Existing refs are
 never overwritten. A failed backup still prevents rebase and checkpoint
@@ -110,28 +115,33 @@ once and retains the existing refusal/confirmation/audit assertions.
 No B-RECOVERED/B-BACKED fixture conversion, remote authority, replay
 permission, assertion retirement, mark or normal-group change is bundled.
 
-The final focused native Windows run passed all 28 nodes in 50.55 seconds
-including preparation and cleanup, using exactly two workers. The
-unpartitioned routine-recovery module passed all 21 nodes without skips
-in 126.08 seconds inclusive. All item, native, process and memory bounds
-remain intact. These checks do not qualify the complete plugin or its
-repeated same-head performance gate.
+The final focused native Windows run passed all 40 nodes in 53.62 seconds
+including preparation and cleanup, using exactly two workers. Native
+SHA-1/SHA-256 controls exercise both input paths with an unsupported-option
+adapter, then use real Git for the compatible query and implicit transaction.
+This is compatibility-protocol coverage, not a run of an old Git binary.
+Additional cases prove legacy framing/row refusal and propagation of
+operational errors without retry.
 
-Documentation impact: the plugin README describes transactional retention.
-This below-altitude change optimizes existing local recovery evidence;
-real temporary Git histories exercise the consumer contract. No
-installer, bootstrap or first-provision behavior changes, so production
-clean-room and external development-venue lanes are inapplicable.
-The unpartitioned imperfect-evidence, advanced-head and break-glass modules
-also passed all 15/23/55 nodes without skips in sequential groups taking
-174.50/184.97/212.94 seconds. Their combined run took 579.45 seconds
-including shared preparation and cleanup, within the intact 900-second
-budget. Every group plus that entire shared overhead remains below
-240 seconds. These are consumer diagnostics, not a full-plugin run.
+The unpartitioned routine-recovery, imperfect-evidence, advanced-head and
+break-glass modules passed all 21/15/23/55 nodes without skips in sequential
+groups taking 128.81/181.95/222.03/194.59 seconds. Their combined run took
+734.11 seconds including shared preparation and cleanup, within the intact
+900-second budget. Every group plus that entire shared overhead remains
+below 240 seconds. All item, native, process and memory bounds remain
+intact. These are consumer diagnostics, not a full-plugin or repeated
+same-head qualification.
 Ruff and all thirteen install contracts pass. The additional
 prepare-consumer regression observes one commit read and
 one transaction per decision and a fresh changed target on the next call.
 Parent qualification remains open.
+
+Documentation impact: the plugin README describes transactional retention
+and the compatible old-Git protocol without raising the runtime prerequisite.
+This below-altitude change optimizes existing local recovery evidence;
+real temporary Git histories exercise the consumer contract. No
+installer, bootstrap or first-provision behavior changes, so production
+clean-room and external development-venue lanes are inapplicable.
 
 ### R fresh pinned replay ranges and raw trees
 
