@@ -110,6 +110,15 @@ so both deletion failures run on Windows as well as POSIX. Both reproduced
 false landing before the correction; the warning and unchanged refs are
 part of the regression contract.
 
+A second full review reproduced false landing with inherited
+`GIT_LITERAL_PATHSPECS=1`: it disables the helper's literal-magic pathspec
+interpretation. Before object lookups, F now conservatively refuses any
+configured `GIT_LITERAL_PATHSPECS`, `GIT_GLOB_PATHSPECS`,
+`GIT_NOGLOB_PATHSPECS` or `GIT_ICASE_PATHSPECS`. This includes disabled
+values rather than attempting to reinterpret Git's environment-boolean
+syntax. Four real-Git deletion cases require refusal, a warning and
+unchanged refs. No environment variable is rewritten or cleared.
+
 The original mixed `test_finalize_blob_comparison.py:1` hunk is partitioned
 by symbol, not copied wholesale. F owns `_change`, its landing-seed
 aliases/`env` fixture, and these four test functions:
@@ -121,6 +130,8 @@ The failed-evidence test additionally exercises successful commands with
 malformed output through this consumer, retaining its warning assertion.
 The new `test_lossy_path_evidence_never_certifies_an_unpublished_deletion`
 belongs only to F's review correction, not to the preserved mixed hunk.
+The same is true of
+`test_inherited_pathspec_modes_never_certify_an_unpublished_deletion`.
 
 G retains the other five original test functions:
 `test_a_tracked_ref_cannot_have_commits_beyond_the_identical_current_ref`,

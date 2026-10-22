@@ -143,3 +143,20 @@ def test_lossy_path_evidence_never_certifies_an_unpublished_deletion(env, capsys
     assert not finalize_ref._blobs_on_upstream(branch, "upstream", str(env.clone))
     assert "Cannot verify changed files on upstream" in capsys.readouterr().out
     assert _git("show-ref", cwd=env.clone) == refs
+
+
+@pytest.mark.parametrize(
+    "setting",
+    ["GIT_LITERAL_PATHSPECS", "GIT_GLOB_PATHSPECS", "GIT_NOGLOB_PATHSPECS", "GIT_ICASE_PATHSPECS"],
+)
+def test_inherited_pathspec_modes_never_certify_an_unpublished_deletion(
+    env, monkeypatch, capsys, setting,
+):
+    branch = f"worktree/{env.worktree_id}"
+    _change(env.clone, "delete")
+    refs = _git("show-ref", cwd=env.clone)
+    monkeypatch.setenv(setting, "1")
+
+    assert not finalize_ref._blobs_on_upstream(branch, "origin/main", str(env.clone))
+    assert "Cannot verify changed files on upstream" in capsys.readouterr().out
+    assert _git("show-ref", cwd=env.clone) == refs
