@@ -619,8 +619,9 @@ class TestReconcileActivePrSelfHeal:
         assert tracking.load_record(rec.yaml_path).resources[0].state == "active"
         assert claim_history.history_for_ref("o/r#7") == []
 
+    @pytest.mark.parametrize("intervening_state", [None, "", "unknown", "pending"])
     def test_provider_reopen_reactivates_released_claim_and_backup_gate(
-        self, tmp_path, monkeypatch,
+        self, tmp_path, monkeypatch, intervening_state,
     ):
         from agent_worktrees.finalize_open_pr_gate import assert_no_live_pr
         from agent_worktrees.providers import PullResult
@@ -647,6 +648,12 @@ class TestReconcileActivePrSelfHeal:
         self._patch(monkeypatch, provider)
         pr_ops._reconcile_active_pr(rec, self._config())
         assert tracking.load_record(rec.yaml_path).resources[0].state == "released"
+        if intervening_state is not None:
+            before = rec.yaml_path.read_bytes()
+            provider.state = intervening_state
+            pr_ops._reconcile_active_pr(tracking.load_record(rec.yaml_path), self._config())
+            assert rec.yaml_path.read_bytes() == before
+            assert tracking.load_record(rec.yaml_path).active_pr().state == "closed"
         provider.state = "open"
         fresh = tracking.load_record(rec.yaml_path)
         assert assert_no_live_pr(fresh, self._config(), rec.worktree_id) is False

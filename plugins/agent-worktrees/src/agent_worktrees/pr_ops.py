@@ -1640,10 +1640,12 @@ def _reconcile_pr(
     # pull-forward recommendation in :func:`pr_status`.
     if pull.merged:
         resolved = "merged"
-    elif state and state not in tracking._PR_NON_TERMINAL:
+    elif state in ("merged", "closed"):
         resolved = state
-    else:
+    elif state == "open":
         resolved = ""
+    else:
+        return
 
     provider_terminal = resolved in ("merged", "closed")
     # Zombie self-heal (#1375/#1703): the provider says non-terminal, but if the
@@ -1661,10 +1663,6 @@ def _reconcile_pr(
             resolved = "merged"
 
     if active.state == "merged" and not provider_terminal:
-        return
-    if active.state != "closed" and tracking._pr_is_terminal(active) and not provider_terminal:
-        return
-    if not resolved and state != "open":
         return
     with tracking._RecordLock(record.yaml_path, blocking=not best_effort) as lk:
         if not lk.acquired:
@@ -1693,9 +1691,6 @@ def _reconcile_pr(
             if resolved == "merged":
                 current.state = resolved
                 current.closed_at = tracking._now_iso()
-        else:
-            current.state = resolved
-            current.closed_at = current.closed_at or tracking._now_iso()
         if claimed_ref or released_ref or before != (current.state, current.closed_at, current.head_sha):
             tracking.save_record(fresh)
         pr_publication_state.copy_pr(active, current)
