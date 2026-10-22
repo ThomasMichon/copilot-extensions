@@ -7,8 +7,13 @@ staging prerequisite merged in #6569. Product release authority remains with
 
 The durable-admission slice merged in #7459. Its actual CLI and state contract
 are documented in [client admission](../../../fleet-manager/docs/client-admission.md).
-The construction, compatibility/health, activation and removal sections below
-remain the next serial obligations, not delivered lifecycle behavior.
+Construction and compatibility/local health merged in #7804; their actual
+contract is documented in [client construction](../../../fleet-manager/docs/client-construction.md).
+The next source slice implements only owned runtime-selector activation with
+fresh local health and physically proved, bounded forward retry. Its actual
+contract is documented in [runtime activation](../../../fleet-manager/docs/client-runtime-activation.md).
+Frontdoor registration, removal and the complete managed lifecycle remain serial
+obligations, not delivered behavior or permission for live activation.
 
 ## Scope and ownership
 

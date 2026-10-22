@@ -3,7 +3,7 @@
 Standalone fleet system home and thin CLI. **Current scope: offline configuration/
 capacity planning, explicit release-snapshot inspection, installed-client
 resource diagnostics, explicitly authenticated artifact staging and an explicit
-admitted-client construction/health transition, a local current-observation
+admitted-client construction/health and owned runtime-selector transitions, a local current-observation
 storage API, and an opt-in authenticated NEW
 Gateway/SDK/subscribed-controller boundary.**
 The [resident boundary](docs/gateway-runtime.md) is a first bounded slice:
@@ -117,6 +117,10 @@ real installed console. Construction rechecks current policy and explicit
 API/config/retained-data compatibility, preserves failed-candidate ownership for
 retry, and never publishes an active selector. These prerequisites do not
 complete managed install/update/uninstall or establish fleet readiness.
+The separate [owned runtime activation](docs/client-runtime-activation.md)
+transition freshly revalidates that candidate before publishing physically
+attributed local selectors. It supports bounded, proven forward retries, not
+frontdoor registration, rollback, removal or a live fleet rollout.
 
 The [current-observation storage API](docs/current-observations.md) provides
 separate explicit SQLite current slots, origin-generation comparison, atomic
@@ -228,12 +232,14 @@ boundary. It reuses immutable-runtime primitives without activating one.
 
 ## Release roles and snapshot inspection
 
-`fleet-manager client-state` supplies the first durable client-admission
-boundary: explicit initialization, read-only inspection and freshly authenticated
-admission of the exact selected release. It does not construct, execute or
-activate artifacts, select a release, install a hosting role or authorize a
-rollout. See [Client release admission](docs/client-admission.md) for trusted
-inputs, monotonic state, privacy/ownership checks, retry and uncertainty.
+`fleet-manager client-state` supplies separate explicit initialization,
+read-only inspection, freshly authenticated admission, construction and owned
+runtime-selector activation operations. None implicitly performs another
+transition, selects a release, registers a frontdoor, installs a hosting role or
+authorizes rollout. See [Client release admission](docs/client-admission.md) for
+trusted inputs and monotonic state, [construction](docs/client-construction.md)
+for candidate health, and [runtime activation](docs/client-runtime-activation.md)
+for physical selector ownership, retries and uncertainty.
 
 ```text
 fleet-manager inspect --release release.json --observation observation.json --role client --authority example --installation local-example

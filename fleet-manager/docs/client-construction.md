@@ -122,7 +122,8 @@ candidate. `active`, `activation_authorized` and `live_readiness_verified`
 remain `false`. A failure exits nonzero; partial owned files can remain.
 The report does not convey a live retention lease or execution/activation grant.
 
-Activation must separately reacquire ownership, revalidate current policy,
-selection and compatibility, and publish attributed selectors/registrations.
-Removal, retained-good recovery, identity retirement, controller/node assembly,
+[Owned runtime activation](client-runtime-activation.md) separately reacquires
+ownership, revalidates current policy, selection, compatibility and health, and
+publishes physically attributed local selectors. Frontdoor registration,
+removal, retained-good recovery, identity retirement, controller/node assembly,
 artifact publication and authorized rollout remain separate gates.

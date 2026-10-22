@@ -167,9 +167,9 @@ Implementation sequencing below is **agent-recommended**:
   The common authenticated byte-stage prerequisite is merged in #6569.
   [Client lifecycle admission](client-lifecycle-admission.md) proposes the next
   serial durable-admission, construction and owned-activation/removal gates;
-  durable admission is merged in #7459. Construction, compatibility/health,
-  owned activation/removal and a managed installer remain open; the admission
-  receipt does not authorize execution or a live rollout.
+  durable admission is merged in #7459; construction and compatibility/local
+  health are merged in #7804. Owned activation/removal and a managed installer
+  remain open. Neither admission nor construction authorizes a live rollout.
   [Installation repair conductor](installation-repair-conductor.md) is the
   agent-recommended #6464 setup prerequisite proposal. Its ordinary-owner
   source implementation is merged in #6944; fresh-environment/native acceptance
@@ -800,3 +800,26 @@ These bounded Windows selections are not a new full Windows-suite claim.
   remains under #6424; targeted native binary qualification is not a full
   fresh-platform readiness claim. No toolchain or dependency-policy override
   was installed to conceal it.
+
+### 2026-10-22 - Admitted client construction merged
+- #7804 merged into `dev` at `2026-10-22T08:48:10Z`, commit
+  `668d96fbb4f7d4db309dbd04c05a35d534ae97e5`. Current-head Copilot review
+  `5611508962` reported no open issues on
+  `5ef1bd7ce2183180f4554fe9cb9d94ed4c5edff9`; all four concrete findings
+  were fixed and resolved, and required CI/source attribution succeeded.
+- The delivered slice constructs only the supplied durably admitted portable
+  client, freshly checks compatibility and local installed health, and binds
+  immutable completion to actual bytes. Canonical Windows child retention,
+  explicit long-path execution and complete retained build-resource closure
+  are included; this is not selector activation or a full installer.
+- Normal standalone and Index test preparation share the same declared build
+  resource closure. Native Windows and Linux qualification, windowless/caller
+  death and retained-source mutation witnesses remain distinct from full
+  fresh-platform, release and installed-adoption readiness.
+- The next serial source obligation is owned client activation/removal under
+  the reviewed lifecycle plan: reacquire canonical ownership, revalidate current
+  selection/policy/compatibility and preserve foreign registrations, retained
+  state and the accepted floor. No live client activation, enrollment, signing,
+  service migration or updater invocation follows from this merge.
+- The campaign and routing foundation remain Active. No broad Phase 2 or
+  Validation Plan checkbox is closed by this construction prerequisite alone.

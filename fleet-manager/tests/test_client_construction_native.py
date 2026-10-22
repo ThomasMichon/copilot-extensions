@@ -118,8 +118,9 @@ def request(root, fixture, area):
 
 
 @pytest.mark.timeout(110)
-def test_actual_installed_console_initializes_admits_and_constructs_without_activation(
-    tmp_path, primitive, signed_wheel,
+@pytest.mark.parametrize("activate_runtime", [False, True])
+def test_actual_installed_console_client_state_transitions(
+    tmp_path, primitive, signed_wheel, activate_runtime,
 ):
     fixture = copy.deepcopy(signed_wheel)
     now = int(time.time())
@@ -167,6 +168,17 @@ def test_actual_installed_console_initializes_admits_and_constructs_without_acti
     assert reports[2]["target_digest"] == digest(target(fixture))
     assert reports[2]["admitted"] == reports[1]["admitted"]
     assert not primitive.current_version(root / construction.NAMESPACE)
+    if activate_runtime:
+        result = subprocess.run(
+            [str(console), "client-state", "activate-runtime", *base, *inputs,
+             "--target", str(paths["target"])], cwd=tmp_path,
+            capture_output=True, text=True, timeout=90, **FLAGS,
+        )
+        assert result.returncode == 0, result.stderr
+        activated = json.loads(result.stdout)
+        assert activated["active"] and activated["health"]["status"] == "installed"
+        assert not activated["frontdoor_registered"] and not activated["live_readiness_verified"]
+        assert primitive.current_version(root / construction.NAMESPACE) == reports[2]["candidate"]
 
 
 @pytest.mark.timeout(110)

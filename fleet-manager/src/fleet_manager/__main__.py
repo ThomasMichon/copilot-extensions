@@ -43,21 +43,21 @@ def main(argv=None):
     profile.add_argument("--service-policy", type=Path)
     hosting.add_argument("--tls-config", type=Path)
     admission = commands.add_parser(
-        "client-state", help="Explicit client admission and construction; never activate a runtime",
+        "client-state", help="Explicit client admission, construction and owned runtime selectors",
     )
     state_commands = admission.add_subparsers(dest="state_command", required=True)
-    for operation in ("initialize", "inspect", "admit", "construct"):
+    for operation in ("initialize", "inspect", "admit", "construct", "activate-runtime"):
         state = state_commands.add_parser(operation)
         state.add_argument("--root", type=Path, required=True)
         state.add_argument("--identity", type=Path, required=True)
-        if operation in ("admit", "construct"):
+        if operation in ("admit", "construct", "activate-runtime"):
             state.add_argument("--selection", type=Path, required=True)
             state.add_argument("--release", type=Path, required=True)
             state.add_argument("--proof", type=Path, required=True)
             state.add_argument("--policy", type=Path, required=True)
             state.add_argument("--sources", type=Path, required=True)
             state.add_argument("--staging-parent", type=Path, required=True)
-        if operation == "construct":
+        if operation in ("construct", "activate-runtime"):
             state.add_argument("--target", type=Path, required=True)
     try:
         args = parser.parse_args(argv)
@@ -114,10 +114,13 @@ def main(argv=None):
                     installation=identity["installation"], role="client",
                     staging_parent=args.staging_parent,
                 ) as staged:
-                    if args.state_command == "construct":
+                    if args.state_command in ("construct", "activate-runtime"):
+                        from .client_activation import activate_client_runtime
                         from .client_construction import construct_client_release
 
-                        result = construct_client_release(
+                        execute = (construct_client_release if args.state_command == "construct"
+                                   else activate_client_runtime)
+                        result = execute(
                             args.root, identity, selection, staged,
                             current_policy=lambda: local(args.policy),
                             current_target=lambda: local(args.target),

@@ -119,6 +119,7 @@ def _primitive() -> Iterator[ModuleType]:
     companions = {}
     for component in (
         "versioned_runtime_leases", "versioned_runtime_construction", "versioned_runtime_source",
+        "versioned_runtime_publication",
     ):
         member = component + ".py"
         retained = _bytes(resource.with_name(member), MAX_BYTES)
@@ -137,6 +138,9 @@ def _primitive() -> Iterator[ModuleType]:
             sys.modules[child.__name__] = child
             exec(compile(retained, child.__file__, "exec"), child.__dict__)
             module._retained_runtime_components[component] = child
+        module._retained_runtime_components["versioned_runtime_publication"]._leases = (
+            module._retained_runtime_components["versioned_runtime_leases"]
+        )
         exec(compile(content, str(resource), "exec"), module.__dict__)
         yield module
     finally:

@@ -286,9 +286,7 @@ def _discard(primitive, namespace, version, intent, binding):
     )
 
 
-def construct_client_release(root, identity, selection, staged, *,
-                             current_policy, current_target, clock=lambda: int(time.time())):
-    """Build the supplied admitted client; current trusted inputs are supplied by its owner."""
+def _request(identity, selection, staged, current_policy, current_target):
     identity = client_admission._identity(identity)
     selection = client_admission._selection(selection, identity)
     if not isinstance(staged, artifact_staging.StagedArtifacts):
@@ -301,17 +299,64 @@ def construct_client_release(root, identity, selection, staged, *,
         raise PlanError("client construction currently requires one portable fleet-manager wheel")
     if not callable(current_policy) or not callable(current_target):
         raise PlanError("client construction requires current trusted policy and target suppliers")
+    binding = {
+        "schema": "fleet-manager.client-construction-input", "version": 1,
+        "identity": identity, "selection": selection,
+        "selection_digest": ReleaseSelection.from_dict(selection).selection_digest,
+    }
+    return identity, selection, binding
+
+
+def _checkpoint(connection, identity, selection, binding, staged, current_policy,
+                current_target, clock, unchanged):
+    unchanged()
+    admitted = client_admission._read_state(connection, identity)
+    if not admitted or admitted["selection_digest"] != binding["selection_digest"]:
+        raise PlanError("client construction requires the exact durably admitted selection")
+    policy = decode(canonical(current_policy()))
+    evidence = staged.reverify(policy, clock=clock)
+    if (
+        evidence["release_digest"] != selection["release_digest"]
+        or evidence["sequence"] != selection["sequence"]
+        or sorted(staged.artifacts) != selection["components"]
+    ):
+        raise PlanError("client construction release differs from its admitted selection")
+    manifest = validate_release(decode(staged.read_manifest(policy, clock=clock)))
+    target = _compatible(manifest, current_target(), identity)
+    unchanged()
+    return policy, target, admitted
+
+
+def _completion(primitive, namespace, version, binding):
+    _completed_intent(namespace, version, binding)
+    slot = primitive.version_dir(namespace, version)
+    completion = _read(slot / COMPLETION)
+    record(completion, "fleet-manager.client-constructed", {"input", "runtime_sha256"})
+    if (
+        set(completion) != {"schema", "version", "input", "runtime_sha256"}
+        or completion["schema"] != "fleet-manager.client-constructed"
+        or completion["version"] != 1 or completion["input"] != binding
+        or primitive.check_admission(
+            namespace, version, payload_hash=digest(completion),
+        ) != primitive.ADMIT_REUSE
+        or _tree(primitive, slot) != completion["runtime_sha256"]
+    ):
+        raise PlanError("completed client candidate differs; distinct-generation repair is required")
+    return completion
+
+
+def construct_client_release(root, identity, selection, staged, *,
+                             current_policy, current_target, clock=lambda: int(time.time())):
+    """Build the supplied admitted client; current trusted inputs are supplied by its owner."""
+    identity, selection, binding = _request(
+        identity, selection, staged, current_policy, current_target,
+    )
     try:
         metadata.distribution("pip")
     except metadata.PackageNotFoundError:
         raise PlanError("client construction requires the construction extra in its owning client") from None
     except (OSError, ValueError):
         raise PlanError("client construction toolchain metadata could not be read") from None
-    binding = {
-        "schema": "fleet-manager.client-construction-input", "version": 1,
-        "identity": identity, "selection": selection,
-        "selection_digest": ReleaseSelection.from_dict(selection).selection_digest,
-    }
     resource_evidence = artifact_staging.diagnose_client()
     try:
         with (
@@ -323,22 +368,10 @@ def construct_client_release(root, identity, selection, staged, *,
             connection.execute("BEGIN IMMEDIATE")
 
             def checkpoint():
-                unchanged()
-                admitted = client_admission._read_state(connection, identity)
-                if not admitted or admitted["selection_digest"] != binding["selection_digest"]:
-                    raise PlanError("client construction requires the exact durably admitted selection")
-                policy = decode(canonical(current_policy()))
-                evidence = staged.reverify(policy, clock=clock)
-                if (
-                    evidence["release_digest"] != selection["release_digest"]
-                    or evidence["sequence"] != selection["sequence"]
-                    or sorted(staged.artifacts) != selection["components"]
-                ):
-                    raise PlanError("client construction release differs from its admitted selection")
-                manifest = validate_release(decode(staged.read_manifest(policy, clock=clock)))
-                target = _compatible(manifest, current_target(), identity)
-                unchanged()
-                return policy, target, admitted
+                return _checkpoint(
+                    connection, identity, selection, binding, staged,
+                    current_policy, current_target, clock, unchanged,
+                )
 
             policy, _, _ = checkpoint()
             filename, content = _wheel(staged, staged.read_artifacts(policy, clock=clock))
@@ -358,20 +391,7 @@ def construct_client_release(root, identity, selection, staged, *,
                     slot = primitive.version_dir(namespace, version)
                     reused = False
                     if os.path.lexists(primitive.marker_path(namespace, version)):
-                        _completed_intent(namespace, version, binding)
-                        completion = _read(slot / COMPLETION)
-                        record(completion, "fleet-manager.client-constructed",
-                               {"input", "runtime_sha256"})
-                        if (
-                            set(completion) != {"schema", "version", "input", "runtime_sha256"}
-                            or completion["schema"] != "fleet-manager.client-constructed"
-                            or completion["version"] != 1 or completion["input"] != binding
-                            or primitive.check_admission(
-                                namespace, version, payload_hash=digest(completion),
-                            ) != primitive.ADMIT_REUSE
-                            or _tree(primitive, slot) != completion["runtime_sha256"]
-                        ):
-                            raise PlanError("completed client candidate differs; distinct-generation repair is required")
+                        completion = _completion(primitive, namespace, version, binding)
                         retained.enter_context(primitive.retention_lease(
                             namespace, version, payload_hash=digest(completion),
                         ))

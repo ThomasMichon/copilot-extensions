@@ -1,0 +1,9 @@
+{
+  "comment": "Activate admitted client runtime selectors with physical ownership proofs and bounded forward recovery",
+  "changes": [
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    }
+  ]
+}
