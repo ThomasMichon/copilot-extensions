@@ -20,7 +20,10 @@ path/kind/marketplace/plugin and bind repair to the inspection's
 `<lock>.recovery-<id>/lock`, with a prepared/completed `recovery.json`.
 `--inactive-owner-evidence` is required for every repair, not only malformed
 receipts. `--allow-incomplete` inspection adds a manual path for missing/malformed
-owners. The evidence text is the authorized repairer's assertion, not automatic
+owners, including an empty or invalid ownership token. Supplied scope fields
+must still match, and a recorded live or foreign owner remains protected.
+Clean owner release is rechecked under the mutation guard before a contender
+reports stale residue. The evidence text is the authorized repairer's assertion, not automatic
 proof. It cannot override a valid live/foreign/unknown owner or
 unsafe/changed contents. See
 [`recovering-operational-locks`](../../plugins/agent-conduct-guidance/skills/recovering-operational-locks/SKILL.md)

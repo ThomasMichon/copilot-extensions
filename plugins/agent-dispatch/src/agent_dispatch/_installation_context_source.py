@@ -177,13 +177,24 @@ class _DirectoryLock(AbstractContextManager["_DirectoryLock"]):
                 owner_pid = _property(owner, "pid")
                 if owner_host == self.host:
                     if _lock_owner_state(owner) == "stale":
-                        _fail(
-                            f"Installation lock '{self.path}' has a stale owner; "
-                            "the owner's descendants must be independently confirmed inactive. "
-                            "Use installation_context.py lock-inspect, then lock-repair with "
-                            "--expected-evidence and --inactive-owner-evidence; "
-                            "see recovering-operational-locks."
-                        )
+                        with _lock_mutation_guard(self.path, deadline=deadline):
+                            try:
+                                current_owner = self._owner()
+                            except _FileIdentityChanged:
+                                continue
+                            except InstallationContextError:
+                                if not self.path.exists() or not self.owner_path.exists():
+                                    continue
+                                raise
+                            if current_owner != owner or _lock_owner_state(current_owner) != "stale":
+                                continue
+                            _fail(
+                                f"Installation lock '{self.path}' has a stale owner; "
+                                "the owner's descendants must be independently confirmed inactive. "
+                                "Use installation_context.py lock-inspect, then lock-repair with "
+                                "--expected-evidence and --inactive-owner-evidence; "
+                                "see recovering-operational-locks."
+                            )
                     if time.monotonic() >= deadline:
                         _fail(f"Installation lock '{self.path}' remained busy.")
                     time.sleep(LOCK_POLL_SECONDS)

@@ -192,6 +192,43 @@ def test_manual_evidence_does_not_override_a_live_owner(module, tmp_path):
         lock.release()
 
 
+@pytest.mark.parametrize("token", ["", None, 123])
+@pytest.mark.parametrize("state", ["stale", "live", "foreign", "wrong-scope"])
+def test_manual_recovery_of_invalid_token_preserves_owner_guards(
+    module, tmp_path, token, state,
+):
+    lock = _orphan(module, tmp_path / "publication.lock")
+    owner = lock._owner()
+    owner["token"] = token
+    if state == "live":
+        owner["pid"] = os.getpid()
+    elif state == "foreign":
+        owner["host"] = "another-host"
+    elif state == "wrong-scope":
+        owner["marketplaceId"] = "another-marketplace"
+    module._atomic_write_json(lock.owner_path, owner)
+    original = lock.owner_path.read_bytes()
+    with pytest.raises(module.InstallationContextError, match="incomplete"):
+        module.inspect_installation_lock(lock.path, **ARGS)
+    if state != "stale":
+        with pytest.raises(module.InstallationContextError, match="live owner|foreign|scope"):
+            module.inspect_installation_lock(lock.path, **ARGS, allow_incomplete=True)
+        assert lock.owner_path.read_bytes() == original
+        return
+    inspection = module.inspect_installation_lock(lock.path, **ARGS, allow_incomplete=True)
+    assert inspection["state"] == "manual-assessment-required"
+    with pytest.raises(module.InstallationContextError, match="inactivity assessment"):
+        module.repair_installation_lock(
+            lock.path, **ARGS, expected_evidence=inspection["expectedEvidence"],
+        )
+    result = module.repair_installation_lock(
+        lock.path, **ARGS, expected_evidence=inspection["expectedEvidence"],
+        inactive_owner_evidence=ASSESSMENT,
+    )
+    assert result["state"] == "quarantined"
+    assert Path(result["backupPath"], "owner.json").read_bytes() == original
+
+
 def test_changed_directory_identity_refuses_quarantine(module, tmp_path, monkeypatch):
     lock = _orphan(module, tmp_path / "publication.lock")
     expected, _owner = module._lock_snapshot(lock)

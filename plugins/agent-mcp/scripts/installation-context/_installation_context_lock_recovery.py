@@ -123,11 +123,17 @@ def _lock_snapshot(
         parsed = None
     incomplete = not isinstance(parsed, dict) or not {
         "schema", "version", "kind", "marketplaceId", "pluginId", "token", "host", "pid",
-    }.issubset(parsed)
+    }.issubset(parsed) or not isinstance(parsed.get("token"), str) or not parsed["token"]
     if incomplete:
         if not allow_incomplete:
             _fail(f"Installation lock '{path}' has an incomplete owner; approved manual recovery is required.")
         if isinstance(parsed, dict):
+            scope = {
+                "schema": LOCK_SCHEMA, "version": LOCK_VERSION, "kind": lock.kind,
+                "marketplaceId": lock.marketplace_id, "pluginId": lock.plugin_id or "",
+            }
+            if any(key in parsed and parsed[key] != value for key, value in scope.items()):
+                _fail("An incomplete installation lock has invalid scope.")
             if parsed.get("host", lock.host) != lock.host:
                 _fail("An incomplete foreign installation lock may not be bypassed.")
             if "pid" in parsed and (
