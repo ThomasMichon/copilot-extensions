@@ -811,7 +811,36 @@
     "tools/promotion_unit_tests/test_plugin_resolve.py::test_local_registration_manifest_mapping_is_exact[17]",
     "tools/promotion_unit_tests/test_plugin_resolve.py::test_stable_id_alone_does_not_bypass_manifest_identity",
     "tools/promotion_unit_tests/test_plugin_resolve.py::test_resolve_repo_plugins_remote_is_unresolved",
-    "tools/promotion_unit_tests/test_plugin_resolve.py::test_resolve_repo_plugins_disabled_skipped"
+    "tools/promotion_unit_tests/test_plugin_resolve.py::test_resolve_repo_plugins_disabled_skipped",
+    "tools/promotion_unit_tests/test_docs_consistency.py::test_local_paths_and_anchors",
+    "tools/promotion_unit_tests/test_docs_consistency.py::test_missing_page",
+    "tools/promotion_unit_tests/test_docs_consistency.py::test_missing_path_and_anchor",
+    "tools/promotion_unit_tests/test_docs_consistency.py::test_missing_reading_edge",
+    "tools/promotion_unit_tests/test_docs_consistency.py::test_exact_case_even_on_windows",
+    "tools/promotion_unit_tests/test_docs_consistency.py::test_fences_comments_and_external_links_are_not_local_navigation",
+    "tools/promotion_unit_tests/test_docs_consistency.py::test_duplicate_headings_and_explicit_anchors",
+    "tools/promotion_unit_tests/test_docs_consistency.py::test_reference_links_html_and_encoded_paths",
+    "tools/promotion_unit_tests/test_docs_consistency.py::test_outside_repo_is_rejected_before_read",
+    "tools/promotion_unit_tests/test_docs_consistency.py::test_shortcut_reference_checks_its_actual_destination",
+    "tools/promotion_unit_tests/test_docs_consistency.py::test_unused_definitions_and_full_inline_labels_are_not_shortcuts",
+    "tools/promotion_unit_tests/test_docs_consistency.py::test_collapsed_and_shortcut_reference_labels_share_normalization",
+    "tools/promotion_unit_tests/test_docs_consistency.py::test_four_space_literals_do_not_open_a_fence",
+    "tools/promotion_unit_tests/test_docs_consistency.py::test_fence_info_cannot_close_an_open_fence",
+    "tools/promotion_unit_tests/test_docs_consistency.py::test_images_do_not_satisfy_reading_edges",
+    "tools/promotion_unit_tests/test_docs_consistency.py::test_resolved_escape_is_rejected_without_reading",
+    "tools/promotion_unit_tests/test_docs_consistency.py::test_real_symlink_and_directory_readme_escape",
+    "tools/promotion_unit_tests/test_docs_consistency.py::test_commented_fences_do_not_hide_rendered_links",
+    "tools/promotion_unit_tests/test_docs_consistency.py::test_comment_openers_inside_real_fences_remain_literal",
+    "tools/promotion_unit_tests/test_docs_consistency.py::test_inline_code_comment_openers_do_not_hide_navigation",
+    "tools/promotion_unit_tests/test_docs_consistency.py::test_angle_destinations_preserve_spaces_inline_and_reference",
+    "tools/promotion_unit_tests/test_docs_consistency.py::test_first_normalized_reference_definition_wins",
+    "tools/promotion_unit_tests/test_docs_consistency.py::test_multiline_code_span_comments_cannot_hide_rendered_navigation",
+    "tools/promotion_unit_tests/test_docs_consistency.py::test_all_sequential_waypoints_are_required",
+    "tools/promotion_unit_tests/test_docs_consistency.py::test_html_attributes_use_real_names_spacing_and_first_value",
+    "tools/promotion_unit_tests/test_docs_consistency.py::test_html_data_attributes_are_not_edges_and_spaced_real_targets_are_checked",
+    "tools/promotion_unit_tests/test_docs_consistency.py::test_primary_page_directory_is_reported_without_reading",
+    "tools/promotion_unit_tests/test_docs_consistency.py::test_directory_readme_anchor_target_is_not_read",
+    "tools/promotion_unit_tests/test_docs_consistency.py::test_legacy_readers_also_report_markdown_directories"
   ],
   "sources": {
     "libs/config-migrate/src/config_migrate/__init__.py": "b5ea92049705890fe244b494af00955592e56337a71d981a24d419f25a34f0dc",
@@ -883,7 +912,10 @@
     "tools/qualify_promotion_candidate.py": "2e636eb5e52536650d95df489248cf4cea74ddbb08989c322a4958b842cace98",
     "tools/run-promotion-unit-tests.py": "5b95e6a0319e2739f34521d232792c4d7d0ef09c5bdf301e6d4695c46d8e9aaa",
     "tools/validate_materialized_candidate.py": "d840c5a4755f5b2be4fb528588f2065f554e466e8c2b9ade7cd66270d2fb7cea",
-    "tools/verify_promotion_workflows.py": "ca25386904c1337d781fd9b6524701e2278cb6f15be229da8b3252a0faba1990"
+    "tools/verify_promotion_workflows.py": "ca25386904c1337d781fd9b6524701e2278cb6f15be229da8b3252a0faba1990",
+    "tools/test_check_docs_consistency.py": "93e98d39b006c98ef84eb228c49eceaf7cf8802140c7692e8cf8872086b2e042",
+    "tools/check-docs-consistency.py": "1255167b324de56316c03fd993c92c8ed5f0290effb9792fc5a892445954e939",
+    "tools/promotion_unit_tests/test_docs_consistency.py": "31465b360de2868c645223f6d2f15ddd200ac43e15bd315d2fe854fa8dd840d8"
   },
   "coverage_targets": [
     "libs/config-migrate/src/config_migrate/core.py",
@@ -925,7 +957,8 @@
     "tools/qualify_promotion_candidate.py",
     "tools/run-promotion-unit-tests.py",
     "tools/validate_materialized_candidate.py",
-    "tools/verify_promotion_workflows.py"
+    "tools/verify_promotion_workflows.py",
+    "tools/check-docs-consistency.py"
   ],
   "max_seconds": 300
 }

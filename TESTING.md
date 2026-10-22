@@ -214,6 +214,16 @@ body or production behavior is copied or modified. Linux qualification includes
 the original symlink-escape assertion. This is a bounded mapping, not a completed
 historical or native-platform census.
 
+`tools/promotion_unit_tests/test_docs_consistency.py` re-exports all 29 original
+functions from `tools/test_check_docs_consistency.py`, replacing only the file
+prefix for release identities. The original test and production guard remain
+hash-bound; every case must reach an actual production call context under the
+unchanged observer, root and budget. Paths, exact casing, headings, reference/
+HTML links, file-versus-directory and real symlink-escape assertions execute
+against synthetic temporary trees. No Markdown parser, count regex, original
+test body or platform rule changes. This Linux mapping does not qualify the
+whole historical census, native Windows or the separate metadata/Git portfolio.
+
 ## Tracking-write source guard
 
 The source tracking-write guard still parses every sibling-plugin Python file,
