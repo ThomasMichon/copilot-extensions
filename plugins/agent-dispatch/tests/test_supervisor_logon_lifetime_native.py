@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import ctypes
-from ctypes import wintypes
 import json
 import os
 from pathlib import Path
@@ -42,17 +41,16 @@ def _wait_file(path: Path, caller: subprocess.Popen) -> None:
         time.sleep(0.05)
 
 
-def _kernel():
-    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
-    for name, arguments, result in (
-        ("OpenProcess", [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD], wintypes.HANDLE),
-        ("WaitForSingleObject", [wintypes.HANDLE, wintypes.DWORD], wintypes.DWORD),
-        ("TerminateProcess", [wintypes.HANDLE, wintypes.UINT], wintypes.BOOL),
-        ("CloseHandle", [wintypes.HANDLE], wintypes.BOOL),
-    ):
-        function = getattr(kernel, name)
-        function.argtypes, function.restype = arguments, result
-    return kernel
+def _pin_process(kernel, record, birth):
+    handle = kernel.OpenProcess(0x100000 | 0x1000 | 1, False, record["pid"])
+    if not handle:
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        assert birth(kernel, handle) == record["birth"], "fixture process identity changed"
+    except BaseException:
+        kernel.CloseHandle(handle)
+        raise
+    return handle
 
 
 @pytest.mark.skipif(
@@ -62,8 +60,10 @@ def _kernel():
     reason="explicit Windows production-lifetime lane, separate from contained tests",
 )
 def test_logon_launcher_survives_nested_caller_jobs(tmp_path):
+    from . import windows_durable_launch_fixture as fixture
+
     pu = _procutil()
-    kernel = _kernel()
+    kernel = fixture.kernel()
     source = INSTALLER.read_text(encoding="utf-8-sig")
     start = source.index("function Start-DispatchDetachedLogonLauncher {")
     function = source[start:source.index("\nfunction ", start + 1)]
@@ -82,7 +82,8 @@ def test_logon_launcher_survives_nested_caller_jobs(tmp_path):
         launcher.write_text(
             "$ErrorActionPreference='Stop'\n"
             + publisher
-            + "Write-FixtureRecord (Join-Path $PSScriptRoot 'resident.json') @{pid=$PID}\n"
+            + "Write-FixtureRecord (Join-Path $PSScriptRoot 'resident.json') "
+            "@{pid=$PID;birth=([Diagnostics.Process]::GetCurrentProcess().StartTime.ToFileTimeUtc())}\n"
             "for($i=1;$i -le 2;$i++){"
             "Write-FixtureRecord (Join-Path $PSScriptRoot \"heartbeat-$i.json\") @{iteration=$i};"
             "Start-Sleep -Milliseconds 100}\n"
@@ -100,7 +101,8 @@ def test_logon_launcher_survives_nested_caller_jobs(tmp_path):
             "$psi.UseShellExecute=$false;$psi.CreateNoWindow=$true;"
             "$psi.RedirectStandardOutput=$true;$psi.RedirectStandardError=$true\n"
             "$control=[Diagnostics.Process]::Start($psi)\n"
-            "Write-FixtureRecord (Join-Path $PSScriptRoot 'bounded.json') @{pid=$control.Id}\n"
+            "Write-FixtureRecord (Join-Path $PSScriptRoot 'bounded.json') "
+            "@{pid=$control.Id;birth=$control.StartTime.ToFileTimeUtc()}\n"
             "Start-DispatchDetachedLogonLauncher "
             "-Launcher (Join-Path $PSScriptRoot 'fixture launcher.ps1')\n"
             "$deadline=[DateTime]::UtcNow.AddSeconds(30)\n"
@@ -121,11 +123,9 @@ def test_logon_launcher_survives_nested_caller_jobs(tmp_path):
                 for name in ("bounded", "resident"):
                     record = root / f"{name}.json"
                     _wait_file(record, caller)
-                    pid = json.loads(record.read_text(encoding="utf-8-sig"))["pid"]
-                    handle = kernel.OpenProcess(0x100000 | 0x1000 | 1, False, pid)
-                    if not handle:
-                        raise ctypes.WinError(ctypes.get_last_error())
-                    handles[name] = handle
+                    handles[name] = _pin_process(
+                        kernel, json.loads(record.read_text(encoding="utf-8-sig")), fixture.birth,
+                    )
                 _wait_file(root / "heartbeat-2.json", caller)
                 (root / "release").touch()
                 assert caller.wait(timeout=15) == 0, (root / "caller.log").read_text()

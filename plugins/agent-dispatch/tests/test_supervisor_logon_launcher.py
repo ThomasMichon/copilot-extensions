@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import sys
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 
 import pytest
 
@@ -61,3 +61,30 @@ def test_logon_launcher_does_not_hide_failed_escape(monkeypatch, tmp_path):
         exec(compile(_bootstrap(), str(INSTALLER), "exec"), {})
 
     assert caught.value is failure
+
+
+@pytest.mark.parametrize("observation", ["matching", "reused", "lookup-failed"])
+def test_native_fixture_rejects_unverified_cleanup_handles(observation):
+    from .test_supervisor_logon_lifetime_native import _pin_process
+
+    closed = []
+    kernel = SimpleNamespace(
+        OpenProcess=lambda *args: "fixture-handle",
+        CloseHandle=closed.append,
+    )
+
+    def birth(api, handle):
+        assert api is kernel
+        assert handle == "fixture-handle"
+        if observation == "lookup-failed":
+            raise OSError("fixture creation-time lookup failed")
+        return 456 if observation == "matching" else 789
+
+    record = {"pid": 123, "birth": 456}
+    if observation == "matching":
+        assert _pin_process(kernel, record, birth) == "fixture-handle"
+        assert closed == []
+    else:
+        with pytest.raises((AssertionError, OSError)):
+            _pin_process(kernel, record, birth)
+        assert closed == ["fixture-handle"]

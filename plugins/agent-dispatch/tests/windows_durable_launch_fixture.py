@@ -147,24 +147,25 @@ def caller(root, site):
             from agent_dispatch import __main__ as main, procutil
 
             procutil.resolve_own_runtime_python = lambda: sys.executable
-            real_popen = subprocess.Popen
+            real_spawn = procutil.spawn_dispatch_daemon
 
             def fake_payload(argv, **kwargs):
                 # Replace ONLY the backend payload, never the launch options:
-                # production _spawn_coordinator_process still constructs them.
+                # production _spawn_coordinator_process and the shared daemon
+                # wrapper still construct every launch option and broker call.
                 assert argv == [sys.executable, "-m", "agent_dispatch", "serve"]
-                child = real_popen(
+                child = real_spawn(
                     [sys.executable, __file__, "service", str(root)], **kwargs,
                 )
                 escaped.append(child)
                 publish(root / "spawned.json", identity(child.pid))
                 return child
 
-            subprocess.Popen = fake_payload
+            procutil.spawn_dispatch_daemon = fake_payload
             try:
                 main._spawn_coordinator_process()
             finally:
-                subprocess.Popen = real_popen
+                procutil.spawn_dispatch_daemon = real_spawn
         else:
             result = subprocess.run(
                 ["powershell.exe", "-NoProfile", "-File", str(root / "caller.ps1")],
@@ -184,7 +185,7 @@ def caller(root, site):
             (root / "stop").touch()
             for child in escaped:
                 if child.poll() is None:
-                    child.kill()
+                    child.terminate()
                 child.wait(timeout=3)
         # Ordinary descendants intentionally remain alive until the owner Job
         # closes; retained Popen identity prevents PID-based cleanup on failure.
