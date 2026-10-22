@@ -174,7 +174,7 @@ def _registered_project(repository: str) -> str | None:
     from plugin_activation import normalize_remote
 
     def identity(remote: str) -> str:
-        if remote.startswith("network:"):
+        if remote.startswith(("network:", "filesystem:")):
             key = remote
         else:
             if "://" not in remote and ":" not in remote and remote.count("/") == 1:

@@ -336,6 +336,30 @@ or a reason to create a daemon.
 
 ## Journal
 
+### 2026-10-22 - Coordinate discovery deadlines and canonical network keys
+
+- Full review's remaining summary concerns were reproducible: discovery
+  repeated checkout/anchor resolution beyond its caller deadline, and userless
+  SCP remotes were parsed as URI schemes. Discovery now uses one receiver
+  with 60 seconds for its work and 20 seconds for transport/cleanup, below
+  Bridge's unchanged 90-second limit. Native anchor validation remains at
+  launch; no caller, preparation, test or runtime cap was widened.
+- SSH and Bridge activation now share the existing network identity parser,
+  moved to the lower-level plugin-resolution library with the activation
+  import retained as a compatibility export. SCP parsing precedes URI scheme
+  interpretation except for file URIs. URL path decoding and path case agree
+  across both consumers, and typed filesystem keys cannot become network
+  hostnames. No new dependency or version override was introduced.
+- Validation: SSH discovery/recovery 112 passed with three explicit POSIX
+  skips; Bridge dispatch/namespace/own-plugin consumers 128 passed; existing
+  activation library contracts 82 passed. The isolated first-touch Windows
+  snapshot test also passes in 89 seconds after removing the original source
+  and dependency trees; it explicitly imports the installed SSH module and
+  executes the installed shared parser, not a cached source substitute.
+  Vendoring, install closure, module caps, lint and the unchanged protocol
+  fixtures pass. Live SSH/native acceptance and authorized rollout remain
+  unperformed, and the parent remains Active.
+
 ### 2026-10-22 - Correct configured remote identity and attached recovery
 
 - Full review identified two distinct repository identity defects. The SSH

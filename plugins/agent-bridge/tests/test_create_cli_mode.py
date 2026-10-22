@@ -65,6 +65,7 @@ class TestCmdCreateCliDispatch:
     @pytest.mark.parametrize("remote", [
         "git@github.com:Example/Project.git", "https://github.com/example/project.git",
         "https://github.com/other/project.git",
+        "github.com:example/project.git", "ssh://operator@github.com/example/project.git",
     ])
     def test_ssh_git_remote_selects_machine_only_registered_project(
         self, monkeypatch, tmp_path, detach, remote,
@@ -99,6 +100,14 @@ class TestCmdCreateCliDispatch:
         if "other/project" not in remote:
             assert launch[5:9] == ["--stage-plugin", "only@mkt", "--stage-plugin-disabled", "disabled@mkt"]
         assert "wrong@mkt" not in launch
+
+    def test_filesystem_key_is_not_reparsed_as_a_network_host(self, monkeypatch):
+        from agent_bridge import related_plugins
+
+        monkeypatch.setattr(
+            related_plugins, "_load_yaml", lambda *a: pytest.fail("filesystem key is not a network coordinate"),
+        )
+        assert related_plugins._registered_project("filesystem:example/project") is None
 
     @pytest.mark.parametrize("prefix", ["codespace", "container", "ssh"])
     @pytest.mark.parametrize("detach", [False, True])

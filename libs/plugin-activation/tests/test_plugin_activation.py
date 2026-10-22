@@ -345,6 +345,7 @@ def test_remote_normalization_for_network_forms():
     expected = "network:github.com/example/repo"
     assert normalize_remote("https://github.com/example/repo.git") == expected
     assert normalize_remote("git@github.com:example/repo.git") == expected
+    assert normalize_remote("github.com:example/repo.git") == expected
     assert normalize_remote("ssh://git@github.com/example/repo.git") == expected
     assert normalize_remote("https://GITHUB.COM/example/repo/") == expected
     assert normalize_remote("https://github.com/Example/repo.git") != expected

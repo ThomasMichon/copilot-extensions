@@ -37,6 +37,12 @@ convention, `settings.local.json` overrides `settings.json`.
 
 ## API
 
+`plugin_resolve.remote_identity.normalize_remote` owns the shared network/local
+Git remote parser. Plugin activation retains its existing compatibility export;
+SSH discovery uses the same network normalization without introducing another
+runtime dependency. Network keys preserve path case and decode URL paths;
+SCP remotes with or without a user are recognized before URI scheme parsing.
+
 ```python
 from plugin_resolve import (
     read_repo_settings,     # repo dir -> RepoPluginSettings(enabled, marketplaces)

@@ -160,6 +160,14 @@ including both transport grace periods, in addition to upload, native launch
 and registration. This lengthens only the ownership lease, not any execution
 timeout or test cap.
 
+Repository discovery uses one bounded receiver, not the launch-time native
+anchor resolution or a second checkout probe. Its 60-second receiver budget
+and 20-second transport/cleanup allowance fit within Bridge's unchanged
+90-second discovery deadline. Launch still independently resolves and fences
+the actual native anchor before reservation and preparation. Network remote
+keys reuse the same parser as Bridge's plugin activation, including userless
+SCP notation and URL path decoding; filesystem keys remain type-distinct.
+
 `restore-host` exposes transport-owned host setup to declarative orchestrators
 without requiring them to know installed payload paths:
 

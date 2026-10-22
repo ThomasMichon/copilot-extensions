@@ -181,6 +181,10 @@ def _assert_snapshot_transport_install(root: Path, env: dict[str, str]) -> None:
         [
             str(python), "-I", "-c",
             "import pathlib, machine_transport, agent_ssh, yaml; "
+            "from agent_ssh.copilot_plugins import repository_key; "
+            "from plugin_resolve import remote_identity; "
+            "assert pathlib.Path(remote_identity.__file__).is_relative_to(pathlib.Path(__import__('sys').prefix)); "
+            "assert repository_key('code.example:Org/Repo.git') == 'network:code.example/Org/Repo'; "
             "from machine_transport import parse_machines_yaml, resolve_ssh_target; "
             "assert pathlib.Path(machine_transport.__file__).is_relative_to(pathlib.Path(__import__('sys').prefix)); "
             "entries = parse_machines_yaml(yaml.safe_load('machines:\\n  snapshot-host:\\n    hostname: snapshot.invalid\\n')); "

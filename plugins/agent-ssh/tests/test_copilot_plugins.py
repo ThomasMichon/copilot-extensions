@@ -180,6 +180,46 @@ def test_filesystem_repository_keys_cannot_alias_github_or_fold_path_case():
     assert copilot_plugins.repository_key("") == ""
 
 
+@pytest.mark.parametrize("remote,expected", [
+    ("code.example:Org/Repo.git", "network:code.example/Org/Repo"),
+    ("git@code.example:Org/Repo.git", "network:code.example/Org/Repo"),
+    ("ssh://git@code.example/Org/Repo.git", "network:code.example/Org/Repo"),
+    ("https://code.example/Org/Some%20Repo.git", "network:code.example/Org/Some Repo"),
+    ("github.com:Example/Project.git", "Example/Project"),
+    ("ssh://operator@github.com/Example/Project.git", "Example/Project"),
+    ("file://localhost/Org/Repo.git", "filesystem:file://localhost/Org/Repo.git"),
+    ("./mirror:repo", "filesystem:./mirror:repo"),
+])
+def test_repository_keys_share_network_normalization_with_bridge(remote, expected):
+    from plugin_resolve.remote_identity import normalize_remote
+
+    assert copilot_plugins.repository_key(remote) == expected
+    if expected.startswith("network:"):
+        assert normalize_remote(remote) == expected
+    elif not expected.startswith("filesystem:"):
+        assert normalize_remote(remote) == "network:github.com/" + expected
+
+
+def test_namespace_discovery_has_one_receiver_within_existing_bridge_deadline(monkeypatch, capsys):
+    monkeypatch.setattr(copilot_detach, "_ssh_config", lambda target: object())
+    monkeypatch.setattr(copilot_detach, "_ensure_posix", lambda *a: pytest.fail("extra SSH discovery"))
+    monkeypatch.setattr(copilot_detach, "plan_for", lambda args: {"workspace": args.workspace})
+    monkeypatch.setattr(copilot_plugins, "resolve_launch", lambda *a: pytest.fail("discovery is not launch"))
+    calls = []
+    def receive(_config, _command, stdin, *, timeout):
+        calls.append(timeout)
+        assert b",60.0)\n" in stdin
+        return 0, '__SSH_CHECKOUT__' + json.dumps({
+            "requested": "/child", "cwd": "/child", "root": "/child",
+            "origin": "https://github.com/example/project.git",
+        }), ""
+    monkeypatch.setattr(copilot_detach, "_remote_input", receive)
+    assert copilot_plugins.target_repo(SimpleNamespace(target="host", workspace="/child")) == 0
+    assert capsys.readouterr().out.strip() == "example/project"
+    assert calls == [80.0]
+    assert calls[0] < 90.0
+
+
 @pytest.mark.parametrize("remote", ["origin", "upstream"])
 def test_probe_queries_native_owner_selected_remote(tmp_path, monkeypatch, capsys, remote):
     child = tmp_path / "child"
@@ -218,7 +258,7 @@ def test_probe_queries_native_owner_selected_remote(tmp_path, monkeypatch, capsy
     before = Path.cwd()
     try:
         proof = copilot_plugins.probe_checkout(object(), str(child))
-        monkeypatch.setattr(copilot_detach, "_prepare_ssh_and_workspace", lambda args: object())
+        monkeypatch.setattr(copilot_detach, "_prepare_ssh_and_workspace", lambda args, **kw: object())
         monkeypatch.setattr(copilot_detach, "plan_for", lambda args: {"workspace": args.workspace})
         monkeypatch.setattr(copilot_plugins, "resolve_launch", lambda *a: None)
         assert copilot_plugins.target_repo(SimpleNamespace(target="host", workspace=str(child))) == 0

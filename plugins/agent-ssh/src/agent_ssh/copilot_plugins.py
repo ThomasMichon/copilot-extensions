@@ -11,42 +11,35 @@ import shlex
 import signal
 import threading
 from pathlib import Path
-from urllib.parse import urlsplit
 
 from agent_procutil import no_window_flags
 from plugin_resolve.payload import is_harness_only
+from plugin_resolve.remote_identity import normalize_remote
 from plugin_resolve.reflection import (
     build_plan,
     build_prepare_python,
     parse_prepared_context,
     selection_spec,
 )
-from plugin_resolve.target import github_repository_slug, requires_repository_binding
+from plugin_resolve.target import requires_repository_binding
 from venue_copilot.refs import require_cli_context
 from venue_copilot import last_json
 
 _CHECKOUT_TIMEOUT = 90.0
 _PREPARATION_TIMEOUT = 540.0
 _TRANSPORT_GRACE = 60.0
+_DISCOVERY_TIMEOUT = 60.0
+_DISCOVERY_TRANSPORT_GRACE = 20.0
 PREPARATION_RESERVATION_BUDGET = _CHECKOUT_TIMEOUT + _PREPARATION_TIMEOUT + 2 * _TRANSPORT_GRACE
 
 
 def repository_key(remote: str) -> str:
-    slug = github_repository_slug(remote)
-    if slug:
-        return slug
-    if "://" in remote:
-        parsed = urlsplit(remote)
-        if parsed.hostname:
-            host = parsed.hostname.lower()
-            if ":" in host:
-                host = f"[{host}]"
-            if parsed.port is not None:
-                host += f":{parsed.port}"
-            return f"network:{host}/{parsed.path.strip('/').removesuffix('.git')}"
-    if "@" in remote and ":" in remote:
-        host, path = remote.split("@", 1)[1].split(":", 1)
-        return f"network:{host.lower()}/{path.strip('/').removesuffix('.git')}"
+    normalized = normalize_remote(remote)
+    if normalized and normalized.startswith("network:"):
+        github = normalized.removeprefix("network:github.com/")
+        return github if github != normalized and github.count("/") == 1 else normalized
+    if remote and normalized is None:
+        raise ValueError("SSH checkout has an invalid Git remote identity")
     return f"filesystem:{remote}" if remote else ""
 
 
@@ -56,7 +49,7 @@ def _repository_equal(left: str, right: str) -> bool:
     return left == right
 
 
-def run_python(adapter, program: str, *, timeout: float):
+def run_python(adapter, program: str, *, timeout: float, transport_grace: float = _TRANSPORT_GRACE):
     from plugin_resolve import receiver
 
     source = Path(receiver.__file__).read_text(encoding="utf-8")
@@ -74,7 +67,7 @@ def run_python(adapter, program: str, *, timeout: float):
     def execute():
         try:
             results.append(adapter.run_input(
-                "python3 -I -S -X utf8 -u -", payload.encode("utf-8"), timeout=timeout + _TRANSPORT_GRACE,
+                "python3 -I -S -X utf8 -u -", payload.encode("utf-8"), timeout=timeout + transport_grace,
             ))
         except BaseException as exc:
             failures.append(exc)
@@ -109,7 +102,10 @@ def run_python(adapter, program: str, *, timeout: float):
     return results[0]
 
 
-def probe_checkout(adapter, workspace: str) -> dict:
+def probe_checkout(
+    adapter, workspace: str, *, timeout: float = _CHECKOUT_TIMEOUT,
+    transport_grace: float = _TRANSPORT_GRACE,
+) -> dict:
     program = (
         "import json,os,pathlib,shutil,subprocess\n"
         f"requested={workspace!r}\n"
@@ -137,7 +133,7 @@ def probe_checkout(adapter, workspace: str) -> dict:
         "    'root':str(pathlib.Path(root.stdout.strip()).resolve(strict=True)),\n"
         "    'origin':origin.stdout.strip()}))\n"
     )
-    rc, output, error = run_python(adapter, program, timeout=_CHECKOUT_TIMEOUT)
+    rc, output, error = run_python(adapter, program, timeout=timeout, transport_grace=transport_grace)
     if rc:
         raise RuntimeError("SSH execution checkout lookup failed: " + error.strip())
     line = next((line for line in reversed(output.splitlines()) if line.startswith("__SSH_CHECKOUT__")), None)
@@ -263,11 +259,13 @@ def target_repo(args) -> int:
     from .copilot_detach import _SshAdapter, _prepare_ssh_and_workspace, plan_for
 
     try:
-        config = _prepare_ssh_and_workspace(args)
+        config = _prepare_ssh_and_workspace(args, dry_run=True)
         adapter = _SshAdapter(target=args.target, ssh_config=config)
         plan = plan_for(args)
-        resolve_launch(adapter, plan)
-        proof = probe_checkout(adapter, plan["workspace"])
+        proof = probe_checkout(
+            adapter, plan["workspace"], timeout=_DISCOVERY_TIMEOUT,
+            transport_grace=_DISCOVERY_TRANSPORT_GRACE,
+        )
         print(proof["repository"])
         return 0
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
