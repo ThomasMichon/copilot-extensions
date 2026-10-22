@@ -5,6 +5,7 @@ Split out of ``finalize.py`` (module-size guard) -- see ``resolve_finalize_ref``
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 from . import git_ops, output
@@ -54,14 +55,20 @@ def squash_landed(branch: str, upstream: str, cwd: str) -> bool | None:
     comparison decides that). Writes one unreferenced probe commit object (no ref
     moves; ``git gc`` collects it)."""
     base = git_ops.git("merge-base", upstream, branch, cwd=cwd, check=False)
-    tree = git_ops.git("rev-parse", f"{branch}^{{tree}}", cwd=cwd, check=False)
-    if base.returncode != 0 or tree.returncode != 0:
+    base_sha = base.stdout.strip()
+    if base.returncode != 0 or not base_sha:
         return None
-    base_sha, tree_sha = base.stdout.strip(), tree.stdout.strip()
-    base_tree = git_ops.git("rev-parse", f"{base_sha}^{{tree}}", cwd=cwd, check=False)
-    if base_tree.returncode != 0 or not base_sha or not tree_sha:
+    trees = git_ops.git(
+        "rev-parse", "--revs-only", "--end-of-options", f"{branch}^{{tree}}", f"{base_sha}^{{tree}}",
+        cwd=cwd, check=False,
+    )
+    tree_ids = trees.stdout.splitlines()
+    if trees.returncode != 0 or len(tree_ids) != 2 or not all(
+        re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", value) for value in tree_ids
+    ):
         return None
-    if base_tree.stdout.strip() == tree_sha:
+    tree_sha, base_tree_sha = tree_ids
+    if base_tree_sha == tree_sha:
         return None
     probe = git_ops.git(*_PROBE_IDENTITY, "commit-tree", "--no-gpg-sign", tree_sha,
                         "-p", base_sha, "-m", "agent-worktrees landing probe",

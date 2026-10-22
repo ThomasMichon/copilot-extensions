@@ -224,13 +224,81 @@ def test_a_multi_commit_squash_later_edited_upstream_is_landed(env):
     assert not _git("for-each-ref", "refs/heads/pr", cwd=env.clone)  # the head branch is gone
 
 
-def test_the_probe_moves_no_ref(env):
+def test_the_probe_moves_no_ref(env, monkeypatch):
     tip = _two_commit_change(env.clone)
     _squash_onto(env.seed, "main", SQUASHED)
     _git("fetch", "-q", "origin", cwd=env.clone)
     refs = _git("for-each-ref", "--format=%(refname) %(objectname)", cwd=env.clone)
+    git = finalize_ref.git_ops.git
+    tree_reads = []
+
+    def observe(*args, **kwargs):
+        if args[0] == "rev-parse":
+            tree_reads.append(args)
+        return git(*args, **kwargs)
+
+    monkeypatch.setattr(finalize_ref.git_ops, "git", observe)
     assert finalize_ref.squash_landed(tip, "origin/main", str(env.clone)) is True
+    base = _git("merge-base", "origin/main", tip, cwd=env.clone)
+    assert tree_reads == [(
+        "rev-parse", "--revs-only", "--end-of-options", f"{tip}^{{tree}}", f"{base}^{{tree}}",
+    )]
     assert _git("for-each-ref", "--format=%(refname) %(objectname)", cwd=env.clone) == refs
+
+
+@pytest.mark.parametrize("width", [40, 64])
+def test_squash_probe_uses_both_complete_ordered_tree_ids(monkeypatch, width):
+    base, tree, base_tree, probe = (char * width for char in "abcd")
+    commands = []
+
+    def git(*args, **kwargs):
+        commands.append((args, kwargs))
+        outputs = {
+            "merge-base": base + "\n",
+            "rev-parse": tree + "\n" + base_tree + "\n",
+            "-c": probe + "\n",
+            "cherry": "- " + probe + "\n",
+        }
+        return subprocess.CompletedProcess(args, 0, stdout=outputs[args[0]], stderr="")
+
+    monkeypatch.setattr(finalize_ref.git_ops, "git", git)
+    assert finalize_ref.squash_landed("topic", "upstream", "repo") is True
+    assert commands == [
+        (("merge-base", "upstream", "topic"), {"cwd": "repo", "check": False}),
+        (("rev-parse", "--revs-only", "--end-of-options",
+          "topic^{tree}", f"{base}^{{tree}}"), {"cwd": "repo", "check": False}),
+        ((*finalize_ref._PROBE_IDENTITY, "commit-tree", "--no-gpg-sign", tree,
+          "-p", base, "-m", "agent-worktrees landing probe"), {"cwd": "repo", "check": False}),
+        (("cherry", "upstream", probe), {"cwd": "repo", "check": False}),
+    ]
+
+
+@pytest.mark.parametrize("base_result,tree_result,expected_calls", [
+    ((1, ""), (0, ""), 1),
+    ((0, ""), (0, ""), 1),
+    ((0, "a" * 40), (1, "b" * 40 + "\n" + "c" * 40), 2),
+    ((0, "a" * 40), (0, ""), 2),
+    ((0, "a" * 40), (0, "b" * 40), 2),
+    ((0, "a" * 40), (0, "b" * 40 + "\n" + "c" * 40 + "\n" + "d" * 40), 2),
+    ((0, "a" * 40), (0, "b" * 39 + "\n" + "c" * 40), 2),
+    ((0, "a" * 40), (0, "b" * 40 + "\n" + "g" * 40), 2),
+    ((0, "a" * 40), (0, "b" * 40 + "\n " + "c" * 40), 2),
+    ((0, "a" * 40), (0, "b" * 40 + "\n" + "b" * 40), 2),
+])
+def test_squash_probe_refuses_unreadable_malformed_or_unchanged_trees(
+    monkeypatch, base_result, tree_result, expected_calls,
+):
+    commands = []
+
+    def git(*args, **kwargs):
+        commands.append(args)
+        assert args[0] in ("merge-base", "rev-parse"), "must not create a probe commit"
+        code, value = base_result if args[0] == "merge-base" else tree_result
+        return subprocess.CompletedProcess(args, code, stdout=value, stderr="")
+
+    monkeypatch.setattr(finalize_ref.git_ops, "git", git)
+    assert finalize_ref.squash_landed("topic", "upstream", "repo") is None
+    assert len(commands) == expected_calls
 
 
 def test_a_different_change_is_not_squash_landed(env):

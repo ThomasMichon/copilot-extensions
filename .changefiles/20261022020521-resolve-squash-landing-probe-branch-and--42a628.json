@@ -1,0 +1,9 @@
+{
+  "comment": "Resolve squash landing probe branch and base trees in one ordered validated Git read.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

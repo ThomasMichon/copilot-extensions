@@ -54,7 +54,7 @@ Retained means candidate ownership, not reviewed, passing or already landed.
 | Y | 3 / safe YAML loader | `config.py` and `test_config.py:1`: C safe loader when available, safe Python fallback, scalar/non-map/error returns unchanged. Excludes committed-ref candidate selection. |
 | H | 3 / one hook protection decision | `hooks.py` and `test_hooks.py`: one in-repo read per decision including empty mappings; retain machine-local > committed > registry priority; later calls re-read. No persistent authority cache. |
 | C | 3 / committed-config absence probe | `inrepo_config_source.py`, `test_config.py:2`: literal NUL `ls-tree` candidate probe, no unsafe path globbing; absent candidates avoid blob reads; failure retains bounded ordered reads, deadline, precedence and diagnostics. Separate from Y/H. |
-| S | 3 / squash tree object reads | `finalize_ref.py:2`: one ordered two-tree probe; require exactly two complete SHA-1/SHA-256 IDs; empty base/no change/error retain refusal. Focused regression still needs extraction from finalization tests. |
+| S | 3 / squash tree object reads | `finalize_ref.py:2`: one ordered two-tree probe; require exactly two complete SHA-1/SHA-256 IDs; empty base/no change/error retain refusal. Focused regression ownership is the existing real-Git no-ref-movement case plus ordered-read unit cases in `test_finalize_landing.py`, detailed below. |
 | F | 3 / upstream blob comparison | `finalize_ref.py:5`, `test_finalize_blob_comparison.py`: raw tree diff and exact object maps include deletion/type/path cases, malformed reads fail closed with warning. Requires actual `git_tree_diff` consumer availability, not an inferred filename match. |
 | G | 3 / creation-point gating | `finalize_open_pr_gate.py`, `finalize_ref.py:3-4`: skip unnecessary creation inference only after fresh zero-ahead proof; malformed counts/unknown creation remain conservative; local source shadowing, remote tips/reflogs and subsequent reset history still constrain publication. Separate from S/F; regression extraction unresolved. |
 | P | 3 / publication transport evidence | `README.md`, `pr_publish.py`, `pr_rewrite.py`, `test_pr_remote_evidence.py`: one fresh fetch/push snapshot per decision; same slug on another host refused; literal remote-key regex, NUL framing, repeated/multiline/valueless settings and order retained; read errors prevent push; pinning, leases and later mutation checks remain real. |
@@ -85,7 +85,54 @@ bodies nor claims #6909's installer work.
 No hunk is assigned to a catch-all wave-6 implementation batch. Wave 6 is
 the still-open #5694/#5682 qualification and residual-settlement obligation.
 
-## Admitted fixture-semantic batches
+## Admitted narrow batches
+
+### S ordered squash-probe tree reads
+
+Only `finalize_ref.py::squash_landed` and its `re` import are extracted
+from the pinned production residual. After a successful nonempty merge-base
+read, one ordered `rev-parse --revs-only --end-of-options` resolves the
+branch tree followed by the base tree. Exactly two full lowercase SHA-1
+or SHA-256 object IDs are required. Unreadable, missing, extra, malformed
+or unchanged tree results return the existing unknown verdict before a
+probe commit is written. Probe identity, parent, message, no-signing flag,
+cherry comparison and all native deadlines remain unchanged.
+
+Regression ownership is now explicit in `test_finalize_landing.py`.
+The existing real-Git no-ref-movement case observes exactly one ordered
+two-tree query while preserving its genuine squash-landing assertion.
+Cheap unit cases cover both object-ID widths, exact downstream probe
+arguments and failed/empty/truncated/extra/invalid/unchanged results.
+The original real-Git squash, unreadable-upstream and different-change
+cases remain. No F blob comparison, G creation-point inference, P/R/A,
+or whitespace-retirement hunk is included.
+
+The complete module has 59 collected nodes. One unpartitioned functional
+run exceeded the unchanged 240-second diagnostic group limit; it is not
+a pass. All 59 nodes then passed without skips in three exhaustive,
+disjoint functional groups of 20/20/19 nodes, retaining exactly two
+workers, the original 30-second item watchdog and all native/resource
+bounds. Group wall times were 47.34, 151.17 and 122.53 seconds;
+329.95 seconds includes collection, preparation and cleanup. A checked
+node-list bijection establishes no omitted or duplicated case.
+This is complete functional coverage only: it neither changes the runner's
+normal file grouping nor qualifies that grouping, the complete plugin,
+quiet-host execution or repeated same-head performance.
+
+Documentation impact: this below-altitude internal optimization preserves
+the existing landing interface and no-ref-mutation guarantee; this ledger
+records its ordered-read contract and regression ownership. Actual Git
+squash detection supplies the simple integration check. No installer or
+first-provision behavior changes, so production clean-room and external
+development-venue lanes are inapplicable. The normal-group performance
+blocker and parent qualification remain open without a waiver.
+
+Prior native dispositions: #7821 actually merged N-UTF8-LAUNCH as
+`b55d6811210ff472006db72e78abda7b459ae203`; #7823 actually merged
+N-UTF8-AUTHORITY as `ecd9213ba1fb353a6eda1bd0ef7bdfd75bbca41a`.
+Both received fresh full exact-head review, and their worktrees were
+finalized and parent claims settled after the owning source effort was
+reread and journaled. Neither merged test slice completes #5694/#5682.
 
 ### N-STAMP independently exercise both Windows stamp-copy hosts
 
