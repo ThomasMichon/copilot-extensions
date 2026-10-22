@@ -724,15 +724,28 @@ def test_target_selection_precedes_acquisition_and_self_refresh_is_not_repeated(
     assert calls == ["collect", "engine", "registered"]
 
 
+@pytest.mark.parametrize(("diagnostic", "exit_code", "outcome", "attempts"), [
+    ("", 1, ut.COMMAND_FAILED, 1),
+    ("[WinError 32]", 5, ut.BLOCKED_BY_LOCK, 2),
+    ("[WinError 33]", 5, ut.BLOCKED_BY_LOCK, 2),
+    ("[Errno 5]", 1, ut.COMMAND_FAILED, 1),
+])
 def test_real_failed_acquisition_process_never_enters_runtime_stage(
-    monkeypatch, tmp_path, _update_home,
+    monkeypatch, tmp_path, _update_home, diagnostic, exit_code, outcome, attempts,
 ):
+    from agent_worktrees import update_acquisition
+
     marker = tmp_path / "acquired"
+    detail = diagnostic + "\n" + "trailing context " * 80
     (tmp_path / "plugin").write_text(
+        "import sys\n"
         "from pathlib import Path\n"
-        "Path('acquired').write_text('attempted')\n"
+        "with Path('acquired').open('a', encoding='utf-8') as stream:\n"
+        "    stream.write('attempted')\n"
+        f"print({detail!r}, file=sys.stderr)\n"
         "raise SystemExit(1)\n", encoding="utf-8",
     )
+    monkeypatch.setattr(update_acquisition, "sleep", lambda seconds: None)
     monkeypatch.setattr(m, "_resolve_copilot", lambda: sys.executable)
     monkeypatch.setattr(m, "_invocation_update_context", lambda: tmp_path)
     monkeypatch.setattr(m, "_registered_plugin_targets", lambda: {})
@@ -741,9 +754,9 @@ def test_real_failed_acquisition_process_never_enters_runtime_stage(
         m, "_find_installed_plugin_dir",
         lambda: pytest.fail("Real acquisition failure reached runtime planning"),
     )
-    assert m.cmd_update(_args()) == 1
-    assert marker.read_text(encoding="utf-8") == "attempted"
-    assert _status(_update_home)["run"]["outcome"] == ut.COMMAND_FAILED
+    assert m.cmd_update(_args()) == exit_code
+    assert marker.read_text(encoding="utf-8") == "attempted" * attempts
+    assert _status(_update_home)["run"]["outcome"] == outcome
 
 
 def test_auth_required_exit_4(_update_home):
@@ -996,6 +1009,60 @@ def test_recovered_payload_preserves_attempt_history_without_failing_run(
     assert len(events) == 2
     assert events[0]["details"]["required"] is False
     assert events[1]["details"]["required"] is True
+
+
+@pytest.mark.parametrize(("diagnostic", "windows", "outcome", "code", "retryable"), [
+    ("[WinError 32]", False, ut.BLOCKED_BY_LOCK, ut.SHARING_VIOLATION, True),
+    ("[WinError 33]", True, ut.BLOCKED_BY_LOCK, "lock_violation", True),
+    ("(os error 32)", True, ut.BLOCKED_BY_LOCK, ut.SHARING_VIOLATION, True),
+    ("(os error 33)", True, ut.BLOCKED_BY_LOCK, "lock_violation", True),
+    ("[WinError 5]", True, ut.COMMAND_FAILED, ut.PERMISSION_DENIED, False),
+    ("[Errno 13]", False, ut.COMMAND_FAILED, ut.PERMISSION_DENIED, False),
+    ("[Errno 5]", False, ut.COMMAND_FAILED, ut.IO_ERROR, False),
+    ("(os error 5)", False, ut.COMMAND_FAILED, ut.IO_ERROR, False),
+])
+@pytest.mark.parametrize("recover", [False, True])
+def test_long_payload_diagnostic_keeps_failure_class_and_attempt_history(
+    monkeypatch, _update_home, diagnostic, windows, outcome, code, retryable, recover,
+):
+    from agent_worktrees import update_acquisition
+
+    monkeypatch.setattr(reconcile, "core_installed_payload_dir", lambda name: Path("/payload"))
+    monkeypatch.setattr(update_events, "_WINDOWS", windows)
+    monkeypatch.setattr(update_acquisition, "sleep", lambda seconds: None)
+    attempts = []
+    detail = diagnostic + " localized diagnostic\n" + "trailing context " * 80
+
+    def run(argv, **kwargs):
+        attempts.append(list(argv))
+        rc = 0 if recover and len(attempts) == 2 else 1
+        return subprocess.CompletedProcess(argv, rc, "", detail)
+
+    monkeypatch.setattr(subprocess, "run", run)
+    update_events.start("engine")
+    update_events.enter("payload_refresh")
+    status = update_acquisition.acquire("agent-example", "copilot-extensions", "copilot")
+    update_events.record("payload_refresh", "agent-example@copilot-extensions", status)
+    recovered = recover and retryable
+    assert status.startswith("OK") is recovered
+    assert len(attempts) == (2 if retryable else 1)
+    assert {argv[2] for argv in attempts} == {"update"}
+    assert len(status) < 300
+    assert update_events.finish(0 if recovered else 1) == (
+        0 if recovered else 5 if outcome == ut.BLOCKED_BY_LOCK else 1
+    )
+    events = [event for event in _events(_update_home)
+              if event["component"] == "agent-example@copilot-extensions"]
+    assert len(events) == len(attempts)
+    for event in events[:1] if recovered else events:
+        assert event["outcome"] == outcome
+        assert event["error"]["code"] == code
+    assert events[-1]["details"]["required"] is True
+    if retryable:
+        assert events[0]["details"]["required"] is False
+    assert _status(_update_home)["run"]["outcome"] == (
+        ut.VERIFIED_CURRENT if recovered else outcome
+    )
 
 
 def test_missing_engine_installer_is_configuration_exit_3(wired, tmp_path, _update_home):

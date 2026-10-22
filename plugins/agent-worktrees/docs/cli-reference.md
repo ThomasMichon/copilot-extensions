@@ -988,6 +988,12 @@ refreshed payloads remain available for a retry; the error names the cause and
 asks the caller to resolve it and retry `update`. Inactive inventory failures
 remain advisory.
 
+Payload failure summaries retain a recognized native sharing/lock violation or
+I/O/permission cause before shortening the child output to a redacted tail.
+Both failed-attempt history and the final result keep that classification;
+a successful bounded retry remains advisory history rather than a failed run.
+The classification identifies an error class, not the process holding a file.
+
 The engine collects the logical target selection before acquisition, refreshes
 its own payload once, and attempts required registered payloads before inactive
 inventory. A required failure stops remaining payload attempts immediately;

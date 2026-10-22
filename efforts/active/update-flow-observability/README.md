@@ -164,6 +164,9 @@ matrix below are _(agent-recommended)_ implementation details.
 - [ ] Verify #6598's existing Codespaces admitted-construction reuse after
   promotion instead of reimplementing it; attribute any remaining
   package/completion/activation failure with the new phase outcomes.
+- [x] Avoid unused site-package initialization in isolated portable
+  installation-mode probes while retaining fresh payload-owned authority
+  and complete real-consumer decision parity (#7818).
 - [ ] Implement the reviewed, evidence-backed reductions in repeated planning,
   probing, building or reconciliation, retaining all actual safety gates.
 - [ ] Make unchanged healthy work a genuine no-op; retain fresh, changed,
@@ -246,6 +249,58 @@ Bridge serving-version gap and supervisor framing defect survived that
 bounded source delta inspection.
 
 ## Journal
+
+### 2026-10-22 - Retain native payload failure classifications before truncation
+
+- A failed-first regression reproduced loss of an early sharing/lock
+  violation from a long child diagnostic: retry admission used complete
+  output, but the advisory/final status retained only its tail. The latter
+  could lose the specific event code and change a final contention exit
+  from 5 to 1. Native I/O refusal wording also lost its recognized class
+  once the numeric marker was outside that tail.
+- Preserve an evidenced Windows sharing/lock marker in the status reason
+  before the existing redacted, bounded tail. Use the existing recognized
+  I/O-error wording. Host-aware numeric admission, refusal precedence,
+  retry count/backoff/budget, activation preservation and timeout settlement
+  are unchanged. This is error reporting, not identification or repair of
+  a file-handle owner.
+- The focused regression first failed twelve cases and passed four controls.
+  The complete affected Windows acquisition/telemetry suites then passed
+  213 cases with two platform skips, including real failed child commands,
+  exact attempt counts, final exit classification and the runtime-mutation
+  barrier. The same frozen candidate passed 184 cases with 31 platform skips
+  on native Linux. Install-contract, lint and documentation checks passed.
+  No test limit or runtime dependency changed.
+- Validation tiers: unit and real-subprocess failure paths passed on both
+  native platforms. Fresh runtime construction is not changed, so a complete
+  clean-room installation was not repeated for this reporting-only slice.
+  Live deployment of this source is not authorized; the ongoing diagnostic
+  update cannot install an unpromoted change and is not its rollout proof.
+- The live diagnostic update remains separately owned and cannot be treated
+  as validation of this unpromoted source change. Equivalent whole-flow cost,
+  remaining standalone boundaries, authorized rollout and parent #6600 stay
+  open.
+
+### 2026-10-22 - Probe invocation optimization merged; continue measured diagnosis
+
+- #7818 merged as `3517f2af3db876e546fb1f24854bd8f08b0c57a9` after
+  Copilot approved exact head `c1d28cd9cb0f3dd56bd82be9aa9d4573a76f3f76`,
+  its actual review reported no open findings, discussion threads were empty
+  and every current-head required check passed.
+- The publication rebase preserved the qualified probe code, tests and
+  directly related canonical helper/procutil closure byte-for-byte. Retained
+  the approved tip on a backup and advanced only confirmed merged history.
+  Re-read this effort's Plan and Validation Plan and closed only the specific
+  unused-site work item; whole-flow cost and rollout remain open.
+- The one authorized ARM64 recovery/update is complete and its selected
+  services were independently checked. No additional update on another host
+  is implied. Other observed sharing errors still lack handle-owner evidence;
+  old native installer failures cannot be diagnosed from final exit codes alone.
+- Next diagnosis must retain complete attempt output and distinguish final
+  required failures from recovered advisory attempts. The source currently
+  bounds failed payload diagnostics to a short tail; a source-supported
+  classification-loss hypothesis is not proof of the other host's lock holder.
+  Keep #7117's independent source recovery owner and the existing rollout holds.
 
 ### 2026-10-22 - Isolate repeated probe startup before changing its invocation
 
