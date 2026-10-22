@@ -1163,6 +1163,33 @@ def test_failed_real_install_never_publishes_settings(tmp_path, monkeypatch):
     assert not (target / ".github" / "copilot" / "settings.local.json").exists()
 
 
+def test_copied_alias_with_explicit_manifest_name_resolves(tmp_path):
+    """A settings alias whose local catalog has a different ``manifestName``.
+
+    Copy mode stages the catalog under the alias, so the copied declaration must
+    not keep the authored ``manifestName``; otherwise every plugin in that
+    marketplace fails to resolve after staging.
+    """
+    host, target = tmp_path / "host", tmp_path / "target"
+    local_plan(host, marketplace="harness")
+    atomic_json(host / ".github" / "copilot" / "settings.json", {
+        "enabledPlugins": {"sample@harness-local": True},
+        "extraKnownMarketplaces": {"harness-local": {"source": {
+            "source": "directory", "path": "./.ai", "manifestName": "harness",
+        }}},
+    })
+    init_checkout(target)
+    plan = build_plan([{"source": "sample@harness-local"}], [host])
+    assert plan["plugins"][0]["local_source"]["definition"]["source"]["manifestName"] == "harness"
+    request = {"repo": str(target), **plan}
+    result = prepare(request)
+    assert set(result) == {"sample@harness-local"}
+    assert prepare(request) == result
+    declared = read_repo_settings(target).marketplaces["harness-local"]["source"]
+    staged = json.loads((Path(declared["path"]) / "marketplace.json").read_text(encoding="utf-8"))
+    assert declared.get("manifestName", "harness-local") == staged["name"]
+    assert resolve_repo_plugins(target).resolved == {"sample@harness-local": Path(result["sample@harness-local"])}
+
 def test_same_named_plugins_remain_marketplace_qualified(tmp_path):
     first = local_plan(tmp_path / "first", marketplace="first")
     second = local_plan(tmp_path / "second", marketplace="second")

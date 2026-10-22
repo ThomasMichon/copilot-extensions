@@ -316,7 +316,10 @@ def register_prepared(
                 local_definition = details.get("local_source", {}).get("definition", {})
                 definition = {
                     **local_definition, "source": {
-                        **local_definition.get("source", {}),
+                        # The staged catalog is renamed to this registration key, so an
+                        # authored manifestName no longer describes it.
+                        **{key: value for key, value in local_definition.get("source", {}).items()
+                           if key != "manifestName"},
                         "source": local_definition.get("source", {}).get("source", "directory"),
                         "path": str(root),
                         **({"manifestName": metadata["name"]} if metadata["name"] != marketplace else {}),
