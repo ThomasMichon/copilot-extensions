@@ -1,0 +1,9 @@
+{
+  "comment": "Unsaved-guard audit tests skip on Windows hosts whose only bash is the WSL launcher without an installed distribution.",
+  "changes": [
+    {
+      "plugin": "agent-codespaces",
+      "type": "dev"
+    }
+  ]
+}
