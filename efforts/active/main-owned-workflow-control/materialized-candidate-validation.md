@@ -1,5 +1,11 @@
 # Materialized candidate consumer validation
 
+**Historical proposal:** #7255 superseded this generated/native integration
+matrix as a promotion prerequisite. The reviewed
+[unit-only release contract](../dev-branch-release-pipeline/promotion-burndown.md)
+governs current admission; retained integration source, evidence and owners
+belong to the periodic portfolio, not a restored release gate.
+
 Supporting slice of [Main-Owned Workflow Control](README.md), implementing the
 reviewed final-composition and exact-input validation items in Phases 3 and 5.
 This document proposes the bounded execution contract, not an enabled gate or
