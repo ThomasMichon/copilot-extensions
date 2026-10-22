@@ -3,6 +3,7 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-10-22 - Batches sixty-nine and seventy, seventeen lossless consolidations](<journal/2026/10.22 batches-69-70.md>)
 - [2026-10-22 - Batches sixty-seven and sixty-eight, eight lossless consolidations](<journal/2026/10.22 batches-67-68.md>)
 - [2026-10-22 - Batches sixty-five and sixty-six, 1,291 original issues reviewed](<journal/2026/10.22 batches-65-66.md>)
 - [2026-10-22 - Batches sixty-three and sixty-four, 1,265 original issues reviewed](<journal/2026/10.22 batches-63-64.md>)
