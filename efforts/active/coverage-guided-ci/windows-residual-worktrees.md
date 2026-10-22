@@ -87,6 +87,53 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Admitted fixture-semantic batches
 
+### N-PANE-DIAGNOSTICS bounded native prompt launch diagnostics
+
+Baseline: the actual #7790 merge. Only `TestPaneWrapperInitialPrompt`
+changes in `test_handoff_cutover.py`; every original test is retained and
+all other top-level functions/classes are AST-identical. No production
+wrapper, launcher, argument transport or W4-PANE implementation changes.
+
+The real Windows fixture verifies the exact generated PowerShell prefix,
+then invokes the quoted launcher/manifest suffix through the resolved
+PowerShell command boundary. It retains the real interactive prompt,
+blank lines, paths with spaces, receipt and child-argument assertions.
+The child invocation is headless with the unchanged fifteen-second
+deadline. Timeout failure identifies before-receipt, before-child and
+after-child states, preserving exactly the last 4,096 bytes of each
+captured output stream. No retry or deadline increase is introduced.
+
+Fixture-only PowerShell tracing is enabled only by `PROFILE_DURATIONS=true`
+or `RUNNER_DEBUG=1`; the default copied wrapper remains byte-identical.
+The two added test functions cover all three trace-policy configurations
+and all three timeout stages. Unlike the pinned candidate's new
+Windows-only skip, the mocked trace-policy test models Windows on any
+host; mocked shell discovery prevents diagnostic cases from acquiring
+a native-shell prerequisite. The original real native round trip keeps
+its existing prerequisite checks. Oversized synthetic output verifies
+the exact 4,096-byte tails and absence of discarded prefixes.
+
+Complete native Windows handoff-cutover module: 146 passed, zero skips,
+11.28 seconds pytest / 15.02 preparation-cleanup inclusive. Exactly two
+work-stealing workers retain the original 30-second item watchdog,
+240-second diagnostic group and all native/process/memory bounds and
+marks. Ruff and thirteen install contracts pass. No new skip, exclusion,
+waiver or reduced selection. This is bounded functional evidence, not
+quiet-host, whole-suite, repeated same-head or final qualification.
+
+Documentation impact: this test-only, below-altitude fixture extraction
+changes no operator-facing runtime/API. This ledger documents the test
+contract and the deliberate portable-policy-test adaptation. The real
+PowerShell/launcher/wrapper/child prompt round trip supplies the simple
+end-to-end check; fixture first touch is not production provisioning.
+Production clean-room and external-venue lanes are inapplicable.
+Other N and production S/F/G/P/R/A residuals remain open.
+
+Prior-slice disposition: #7790 actually merged as
+`4eca45b48cecfa860b909086a88b1980d65ddd2b`.
+Its worktree was finalized, parent claim settled, and the owning source
+effort reread and journaled before this independent slice.
+
 ### N-SHELL ordinary host admission and current lifecycle publication
 
 Baseline: the actual #7783 merge. The native shell helper and complete

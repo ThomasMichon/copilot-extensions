@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve native pane prompt invocation and bounded launch-stage timeout diagnostics.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
