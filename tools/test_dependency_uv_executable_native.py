@@ -37,7 +37,7 @@ def _plain(path):
 
 
 def test_cold_sdk_installs_twice_from_a_guarded_caller_without_console_windows(
-    tmp_path, record_property,
+    tmp_path, record_property, monkeypatch,
 ):
     before = _guard_flags()
     physical = support.policy._configuration.physical_executable
@@ -52,11 +52,10 @@ def test_cold_sdk_installs_twice_from_a_guarded_caller_without_console_windows(
         shutil.copyfile(support.PATH.with_name(name), sdk / name)
     script = tmp_path / "guarded.py"
     shutil.copyfile(REPO / "tools" / "fixtures" / "guarded_uv_install.py", script)
-    sys.path.insert(0, str(REPO / "libs" / "agent-procutil" / "tests"))
-    try:
+    with monkeypatch.context() as imports:
+        imports.syspath_prepend(str(REPO / "libs" / "agent-procutil" / "src"))
+        imports.syspath_prepend(str(REPO / "libs" / "agent-procutil" / "tests"))
         from test_spawn_daemon_windows_integration import _WindowObserver, _configure_win32
-    finally:
-        sys.path.pop(0)
     environment = dict(os.environ)
     for name in (
         "__PYVENV_LAUNCHER__", "PYTHONHOME", "UV_INTERNAL__PYTHONHOME",
