@@ -178,7 +178,7 @@ def _as_argv(value: object, *, where: str) -> tuple[str, ...]:
         raise ContractError(f"{where} must be a non-empty array of strings")
     if not value:
         raise ContractError(f"{where} must be a non-empty array of strings")
-    if any(not isinstance(item, str) or not item for item in value):
+    if any(not isinstance(item, str) or not item or "\x00" in item for item in value):
         raise ContractError(f"{where} must contain only non-empty strings")
     return tuple(value)
 
@@ -547,6 +547,9 @@ def _probe_commands(
                 if shutil.which(command) is None:
                     available = False
                     missing.append(f"view action {action.key}: {command}")
+            if action.preview and (action.preview_error or shutil.which(action.preview[0]) is None):
+                available = False
+                missing.append(f"view action {action.key} preview: {action.preview[0]}")
             view_actions.append(replace(action, available=available))
         pivot = replace(pivot, view_actions=tuple(view_actions))
 
@@ -639,6 +642,19 @@ def discover_contracts(
         enabled_payloads.setdefault(path.name, []).append(path)
         try:
             raw = json.loads(path.read_text("utf-8"))
+            if not isinstance(raw, Mapping):
+                raise ContractError("manifest root must be an object")
+            from .production_picker.picker_tui.pivot_registry_materialization import (
+                _rewrite_manifest_commands,
+            )
+            from .production_picker.picker_tui.pivot_actions import ManifestError
+
+            try:
+                raw = _rewrite_manifest_commands(
+                    raw, root=path.parents[1].resolve(), require_targets=False, reject_unusable=True,
+                )
+            except (ManifestError, ValueError) as exc:
+                raise ContractError(str(exc)) from exc
             contribution = parse_manifest(
                 raw,
                 name=path.stem,

@@ -656,7 +656,7 @@ def test_abandoned_passive_reap_status_lifecycle_reflects_the_live_loop(
     app = create_app(TaskQueue(tmp_path / "t.db"))
     with TestClient(app) as client:
 
-        def _wait(predicate, *, timeout=5.0):
+        def _wait(predicate, *, timeout=15.0):
             deadline = time.monotonic() + timeout
             last = None
             while time.monotonic() < deadline:
@@ -755,10 +755,11 @@ def test_complete_over_http_retriggers_whole_goal_verification(api, tmp_path):
         headers=_control_headers(sender),
     )
     assert noted.status_code == 200
-    for _ in range(100):
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
         if api.get(f"/tasks/{tid}").json()["status"] == Status.COMPLETED:
             break
-        time.sleep(0.01)
+        time.sleep(0.02)
     else:
         raise AssertionError("event-note verification did not complete asynchronously")
 

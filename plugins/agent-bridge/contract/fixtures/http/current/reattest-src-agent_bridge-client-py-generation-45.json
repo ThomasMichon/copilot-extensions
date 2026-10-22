@@ -1,0 +1,45 @@
+{
+  "captured_from": {
+    "commit": "c9c688139f8582496a83c1c7632f3d426fa7b855",
+    "plugin_version": "0.4.1-dev3",
+    "source_path": "plugins/agent-bridge/src/agent_bridge/client.py",
+    "source_git_blob": "0db7713059acae0b1f3f829b4b5f0d124aeea971",
+    "protocol_generation": 45,
+    "source_sha256": "2d2aa5f346c3b4ed54f6db9cc9d19a0541cede902f77aae67183d833939131b7"
+  },
+  "response": {
+    "protocol_version": 45,
+    "min_protocol_version": 1
+  },
+  "capability": {
+    "required_protocol_version": 40,
+    "native_history_replacement": false,
+    "owner_native_admission_version": 1
+  },
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/worktrees/example-worktree/resume/{mode}",
+    "modes": [
+      "acp",
+      "cli"
+    ]
+  },
+  "identity": {
+    "durable_session_id": "native-example-head",
+    "acp_session_id": "native-example-head"
+  },
+  "refusals": [
+    "head_unavailable",
+    "live_holder",
+    "owner_capability_missing"
+  ],
+  "singleton": {
+    "mode": "acp",
+    "first_initialization_only_without_history": true,
+    "strict_refuses_initialization": true
+  },
+  "reattested_from": {
+    "path": "plugins/agent-bridge/contract/fixtures/http/current/native-worktree-resume-client-generation-44.json",
+    "sha256": "ed288282bef157cf76f21f47ab4f132d41fe6cba874dd6991fca9958eaee373a"
+  }
+}

@@ -97,6 +97,12 @@ def test_isolated_probe_process_does_not_echo_rejected_credentials():
     assert value not in result.stdout + result.stderr
 
 
+def test_missing_executable_through_real_owned_wrapper_remains_missing(tmp_path):
+    result = process.run([str(tmp_path / "missing-auth-tool")], env=os.environ)
+    assert result.missing is True and result.status is None
+    assert not result.timed_out
+
+
 def test_timed_out_native_identity_never_proves_account_or_contents():
     calls = []
 

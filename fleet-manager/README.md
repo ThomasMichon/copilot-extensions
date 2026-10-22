@@ -3,12 +3,18 @@
 Standalone fleet system home and thin CLI. **Current scope: offline configuration/
 capacity planning, explicit release-snapshot inspection, installed-client
 resource diagnostics, explicitly authenticated artifact staging and an explicit
-local current-observation storage API, and an opt-in authenticated NEW
+admitted-client construction/health and owned runtime-selector transitions, a local current-observation
+storage API, and an opt-in authenticated NEW
 Gateway/SDK/subscribed-controller boundary.**
 The [resident boundary](docs/gateway-runtime.md) is a first bounded slice:
 no production Gateway/index offload or managed install/update/uninstall,
 telemetry sink or fleet resource mutation is claimed.
 Broader fleet delivery remains the [canonical effort](../efforts/active/linux-role-fleet/README.md).
+
+The opt-in [service Gateway SDK](docs/gateway-service-profile.md) accepts a
+code-registered provider-neutral public-trust adapter. Vendor implementation,
+login and trust acquisition stay downstream; the existing `jwt-pop-v1` request
+verifier and ordinary CLI/default identity behavior remain unchanged.
 
 ```text
 fleet-manager plan --template recommended.json --config adopter.json --inventory live.json --fleet-id example --machine-limit 5
@@ -49,6 +55,13 @@ This is an aggregate machine-capacity proposal, **not** service placement,
 memory/CPU admission or proof all roles fit on one host. Deployment must still
 resolve service budgets, storage, credentials and host roles before activation.
 No host is retired to free capacity; insufficient capacity remains blocked.
+
+The explicit installed-package [role/provider compiler](docs/role-deployment-plans.md)
+joins selected role bindings with this same planner and code-registered provider
+contracts. Its Komodo projection names resources and independent bootstrap
+requirements without contacting Core, installing a manager or authorizing
+effects. Default planning preserves its optional configuration namespace without
+selecting it; actual managed lifecycle and production readiness remain separate.
 
 ## Output and safety
 
@@ -97,6 +110,30 @@ sequence, scope and role closure. It does not choose or authenticate a decision,
 persist admission, execute artifacts or grant activation. Signed or
 higher-sequence releases are not automatically selected.
 
+The separate [client admission](docs/client-admission.md) and
+[construction](docs/client-construction.md) transitions persist an explicitly
+selected release before building its client-only candidate and checking its
+real installed console. Construction rechecks current policy and explicit
+API/config/retained-data compatibility, preserves failed-candidate ownership for
+retry, and never publishes an active selector. These prerequisites do not
+complete managed install/update/uninstall or establish fleet readiness.
+The separate [owned runtime activation](docs/client-runtime-activation.md)
+transition freshly revalidates that candidate before publishing physically
+attributed local selectors. It supports bounded, proven forward retries, not
+frontdoor registration, rollback, removal or a live fleet rollout.
+The separate [owned client command registration](docs/client-frontdoor.md)
+transition publishes physically attributed, version-pinned commands into an
+explicit private directory. Its separate `unregister-commands` transition
+withdraws physically proved registered/pending commands with owned interruption
+retry; it does not restore an older executable or remove runtimes. Neither
+operation edits PATH/profiles or retires an installation.
+After command withdrawal, the separate `deactivate-runtime` transition
+[withdraws owned runtime selectors](docs/client-runtime-activation.md#owned-selector-withdrawal),
+including a proved pending activation. Durable interruption retry preserves
+foreign replacements, all candidate/rollback bytes, historical proofs and the
+admitted floor. It does not delete runtimes, stop running clients or retire an
+installation.
+
 The [current-observation storage API](docs/current-observations.md) provides
 separate explicit SQLite current slots, origin-generation comparison, atomic
 accepted-update positions and bounded scoped replay/queries. It is a trusted
@@ -116,6 +153,9 @@ The explicitly selected [outbound service profile](docs/gateway-service-profile.
 adds coherent live service policy and actual TLS HTTP/UX/response-stream routing
 over authenticated outbound connectors. Its optional `service-gateway` extra
 does not change default client dependencies or the legacy serving profile.
+An explicitly selected in-process handler can consume channel-derived caller
+context without forwarding identity headers to an HTTP backend; account and
+resource authorization remain the embedding service's responsibility.
 Container, protected-proxy/provider and production adoption remain separate gates.
 
 The explicit [runtime identity verifier](docs/runtime-authentication.md) adds
@@ -130,6 +170,13 @@ snapshot to exact observation branches or existing operation-intent grants.
 Finite internal permits revalidate current policy before lookup/effect/emit;
 they are not serialized backend credentials. The library does not authenticate
 its snapshot source, wire a resident consumer or implement provider renewal.
+
+The optional stdlib-only [reverse-listener coordinator](docs/reverse-listener-reservations.md)
+binds a finite supplied-owner admission to retained candidate custody and
+generation-checked publication, preserving unresolved effects under their
+original correlation. It does not supply a production SSH/policy/discovery
+adapter, choose candidates, change forwarding grants or select a reconnect
+loop. Default commands do not activate it.
 
 ## Thin client artifacts and local diagnostics
 
@@ -197,6 +244,17 @@ boundary. It reuses immutable-runtime primitives without activating one.
 
 ## Release roles and snapshot inspection
 
+`fleet-manager client-state` supplies separate explicit initialization,
+read-only inspection, freshly authenticated admission, construction and owned
+runtime-selector activation, command registration and owned command withdrawal.
+None implicitly selects a release, edits PATH, installs a hosting role or
+authorizes rollout. See [Client release admission](docs/client-admission.md) for
+trusted inputs and monotonic state, [construction](docs/client-construction.md)
+for candidate health, and [runtime activation](docs/client-runtime-activation.md)
+for physical selector ownership, retries and uncertainty. See
+[client commands](docs/client-frontdoor.md) for explicit registration, retained
+execution, owned withdrawal/retry and unknown-outcome refusal.
+
 ```text
 fleet-manager inspect --release release.json --observation observation.json --role client --authority example --installation local-example
 ```
@@ -232,6 +290,12 @@ the opt-in source Gateway runtime is not a released deployment.
 A manifest is explicit input, not a generated product release or proof of
 artifact availability. Role closures must be stated directly; there is no
 dependency resolver, artifact URL, executable path or apply operation.
+
+The explicit [artifact-to-release assembly API](docs/release-assembly.md)
+produces that same canonical manifest from supplied component contracts, role
+closures and actual bounded local artifact bytes. It is an unprivileged
+producer, not signing, publication, retained staging or installation; normal
+client commands do not invoke it.
 
 The strict schema-v1 `fleet-manager.installation-observation` declares
 `authority`, `installation`, canonical `release_digest`, finite epoch

@@ -25,12 +25,15 @@ import subprocess
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from agent_procutil import no_window_kwargs
 
 from agent_logger.sync.detritus import rsync_exclude
 from agent_logger.sync.log_archive_readback import ProcessLogReadback
+
+if TYPE_CHECKING:
+    from agent_logger.sync.protection import ProtectionSettings
 
 # On Windows, child processes (rsync, ssh) launched from a windowless parent --
 # e.g. pythonw.exe under a Scheduled Task -- each allocate a fresh console
@@ -265,6 +268,17 @@ class PushResult:
     index_deferred: bool = False
     #: Positive process-log publication completion, not a generic transport no-op.
     process_logs_complete: bool = False
+    #: Files not published this pass while protection is on (see
+    #: :mod:`agent_logger.sync.protection`) -- locked or changing sources and
+    #: deferred protected copies -- as source-relative POSIX paths. Each keeps
+    #: its previously published destination copy (or none); its session is
+    #: also listed in ``deferred_sessions`` so it is retried.
+    deferred_files: tuple[str, ...] = ()
+    #: Files intentionally not published under redaction (databases, binaries
+    #: holding a token shape), as sanitized relative names.
+    withheld_files: tuple[str, ...] = ()
+    #: Bounded, metadata-only protection summary (``None`` when protection is off).
+    protection_summary: dict | None = None
 
 
 @dataclass
@@ -424,6 +438,12 @@ class Target(ABC):
     name: str = "base"
     #: Whether filtered rescue publication enforces destination-side ordering.
     rescue_compare_and_set: bool = False
+    #: Opt-in content protection set by the engine; only the targets in
+    #: :data:`agent_logger.sync.protection.PROTECTED_TARGETS` honor it.
+    protection: ProtectionSettings | None = None
+    #: Machine subpath the engine sets before :meth:`doctor`, so a target can
+    #: inspect what it already published for this machine.
+    doctor_machine: str | None = None
 
     def __init__(self, options: dict | None = None) -> None:
         self.options = options or {}

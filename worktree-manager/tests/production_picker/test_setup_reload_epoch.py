@@ -233,6 +233,37 @@ class _SetupRaceScreen(
         return True
 
 
+def test_setup_completion_wait_follows_a_superseding_epoch():
+    from worktree_manager.production_picker.picker_tui.capture import (
+        _wait_for_initial_setup,
+    )
+
+    screen = _SetupRaceScreen()
+    assert screen._next_setup_epoch() == 1
+    first = screen._setup_completion_event
+
+    async def run():
+        async def complete():
+            await asyncio.sleep(0)
+            assert screen._next_setup_epoch() == 2
+            assert first.is_set()
+            assert screen._setup_completion_event is not first
+            assert not screen._setup_completion_event.is_set()
+            await asyncio.sleep(0)
+            screen._setup_applied_epoch = 2
+            screen._setup_completion_event.set()
+
+        completion = asyncio.create_task(complete())
+        try:
+            await _wait_for_initial_setup(screen, None)
+            assert screen._setup_applied_epoch == 2
+            assert screen._setup_completion_event.is_set()
+        finally:
+            await completion
+
+    asyncio.run(run())
+
+
 def _install_setup_race(screen, *, first_tag: str, second_tag: str) -> dict[str, object]:
     first_release = threading.Event()
     first_started = threading.Event()
@@ -963,6 +994,9 @@ def test_sync_setup_disposes_payload_when_apply_raises():
         screen.setup_sync_for_tests()
 
     assert disposed.is_set()
+    assert screen._setup_completion_event.is_set()
+    assert screen._setup_failed_epoch == screen._setup_epoch
+    assert "apply blew up" in screen.debug
 
 
 def test_setup_sync_keeps_current_roster_free_of_local_reconcile():
@@ -1292,6 +1326,7 @@ def test_non_live_mount_paints_skeleton_before_blocked_load_returns(
 
             assert screen._setup_epoch == 1
             assert screen._setup_applied_epoch == 0
+            assert not screen._setup_completion_event.is_set()
             assert screen._busy_label == "Loading…"
             assert screen.loader is None
             assert screen.data == []
@@ -1304,6 +1339,7 @@ def test_non_live_mount_paints_skeleton_before_blocked_load_returns(
             release_load.set()
             await wait_for_current_setup_epoch_applied(pilot, screen)
 
+            assert screen._setup_completion_event.is_set()
             assert screen._busy_label is None
             assert tuple(screen.htabs) == ("Loaded Tasks",)
             assert screen.data[0]["title"] == "loaded"

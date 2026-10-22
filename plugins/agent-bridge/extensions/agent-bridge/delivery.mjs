@@ -2,6 +2,7 @@
 // message into a Copilot CLI session. Split out of extension.mjs (which does
 // a top-level `await joinSession(...)` and so cannot be imported directly by
 // a test) so this logic is unit-testable without the Copilot SDK.
+import { observePluginReadiness, readinessContextMatches } from "./plugin-readiness.mjs";
 
 // Render an incoming envelope as an ATTRIBUTED, ANSWERABLE agent-message. The
 // wrapper mirrors the runtime's own system markers (<system_reminder> /
@@ -198,7 +199,20 @@ export const SESSION_MODES = ["interactive", "plan", "autopilot"];
 // What to do for one control row: {action: "set-mode", mode} for a mode change
 // the CLI knows, else {action: "skip", reason} (acked so it doesn't loop).
 export function controlPlan(msg) {
+  if (msg?.kind === "control:plugin-readiness") return { action: "plugin-readiness" };
   if (msg?.kind === "control:replay-history") return { action: "replay-history" };
+  if (msg?.kind === "control:set-mode-ready") {
+    let payload;
+    try {
+      payload = JSON.parse(msg.body);
+    } catch {
+      return { action: "skip", reason: "invalid readiness-bound mode control" };
+    }
+    if (!payload || !SESSION_MODES.includes(payload.mode) || !payload.plugin_readiness) {
+      return { action: "skip", reason: "invalid readiness-bound mode control" };
+    }
+    return { action: "set-mode", mode: payload.mode, pluginReadiness: payload.plugin_readiness };
+  }
   if (msg?.kind !== "control:set-mode") {
     return { action: "skip", reason: `unknown control ${msg?.kind}` };
   }
@@ -341,16 +355,40 @@ export function serializedRegister(
 //
 // ``mainTurn`` (a MainTurn) says whether an interrupt has a main turn to abort;
 // without one, every interrupt aborts first (the historical behavior).
-export async function drainInbox(sid, { getJson, post, session, inFlight, mainTurn, log = () => {} }) {
+export async function drainInbox(sid, { getJson, post, session, inFlight, mainTurn,
+  pluginReadiness = false, isCurrent = () => true, log = () => {} }) {
   const base = `/api/v1/live-sessions/${encodeURIComponent(sid)}`;
-  const data = await getJson(`${base}/messages`);
+  const inbox = `${base}/messages${pluginReadiness ? "?plugin_readiness=true" : ""}`;
+  const data = await getJson(inbox);
   const messages = data?.messages;
   if (!Array.isArray(messages) || messages.length === 0) return [];
   const delivered = [];
   let interrupted = false;
-  for (const msg of messages) {
+  for (const incoming of messages) {
+    let msg = incoming;
     if (!msg || typeof msg.id !== "number") continue;
     try {
+      if (String(msg.kind || "").startsWith("startup:prompt:")) {
+        if (!pluginReadiness || !msg.plugin_readiness) {
+          log(`startup message ${msg.id} held: readiness context unavailable`);
+          continue;
+        }
+        const observed = await observePluginReadiness(session, msg.plugin_readiness, {
+          isCurrent, waitForReady: false,
+        });
+        if (observed.status !== "ready") {
+          log(`startup message ${msg.id} held: ${observed.reason}`);
+          continue;
+        }
+        const retained = await getJson(inbox);
+        if (!isCurrent() || !retained?.messages?.some((row) => row.id === msg.id)) continue;
+        const context = await session.rpc.metadata.snapshot();
+        if (!isCurrent() || !readinessContextMatches(context, msg.plugin_readiness)) {
+          log(`startup message ${msg.id} held: native context changed before delivery`);
+          continue;
+        }
+        msg = { ...msg, kind: "prompt" };
+      }
       const plan = deliveryPlan(msg, { mainTurnRunning: mainTurn ? mainTurn.running : true });
       // One interrupt per batch: a second interrupt in the same batch must not
       // cancel the turn the first one just started.
@@ -387,7 +425,8 @@ export async function drainInbox(sid, { getJson, post, session, inFlight, mainTu
 // outcome -- applied or rejected -- so the bridge's ``POST /mode`` reports what
 // really happened; acked under ``sid``, the id it was claimed under (see
 // ``drainInbox``). An older bridge without /controls answers 404 (null).
-export async function drainControls(sid, { getJson, post, session, replayHistory = null, log = () => {} }) {
+export async function drainControls(sid, { getJson, post, session, replayHistory = null,
+  isCurrent = () => true, readinessTasks = null, log = () => {} }) {
   const base = `/api/v1/live-sessions/${encodeURIComponent(sid)}`;
   const data = await getJson(`${base}/controls`);
   const controls = data?.messages;
@@ -397,6 +436,36 @@ export async function drainControls(sid, { getJson, post, session, replayHistory
   for (const c of controls) {
     if (!c || typeof c.id !== "number") continue;
     const plan = controlPlan(c);
+    if (plan.action === "plugin-readiness") {
+      let request;
+      try {
+        request = JSON.parse(c.body);
+      } catch {
+        rejected.push(c.id);
+        continue;
+      }
+      const observe = async (signal) => {
+        const result = await observePluginReadiness(session, request, { isCurrent, signal });
+        await post("POST", `${base}/controls/ack`, {
+          ids: [c.id], applied: result.status === "ready", plugin_readiness: result,
+        });
+      };
+      if (readinessTasks) {
+        if (readinessTasks.size >= 8) {
+          log(`readiness control ${c.id} rejected: observation capacity reached`);
+          rejected.push(c.id);
+          continue;
+        }
+        const controller = new AbortController();
+        const task = observe(controller.signal)
+          .catch(() => log(`readiness control ${c.id}: acknowledgment failed`))
+          .finally(() => readinessTasks.delete(c.id));
+        readinessTasks.set(c.id, { controller, task });
+      } else {
+        await observe();
+      }
+      continue;
+    }
     if (plan.action === "skip") {
       log(`control ${c.id} rejected: ${plan.reason}`);
       rejected.push(c.id);
@@ -409,6 +478,22 @@ export async function drainControls(sid, { getJson, post, session, replayHistory
       continue;
     }
     try {
+      if (plan.pluginReadiness) {
+        const observed = await observePluginReadiness(session, plan.pluginReadiness, {
+          isCurrent, waitForReady: false,
+        });
+        if (observed.status !== "ready") {
+          log(`control ${c.id} rejected: ${observed.reason}`);
+          rejected.push(c.id);
+          continue;
+        }
+        const context = await session.rpc.metadata.snapshot();
+        if (!isCurrent() || !readinessContextMatches(context, plan.pluginReadiness)) {
+          log(`control ${c.id} rejected: native context changed before mode application`);
+          rejected.push(c.id);
+          continue;
+        }
+      }
       const result = await session.rpc.mode.set({ mode: plan.mode });
       if (modeApplied(result)) {
         log(`control ${c.id}: mode set to ${plan.mode} (from ${c.sender || "bridge"})`);

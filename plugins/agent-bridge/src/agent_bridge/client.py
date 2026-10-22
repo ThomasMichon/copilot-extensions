@@ -758,6 +758,7 @@ class BridgeClient(AnswerClientMixin, SessionStartClientMixin, CliModeClientMixi
         wait: bool = False, wait_timeout: float | None = None,
         idempotency_key: str | None = None,
         expected_session_id: str | None = None,
+        plugin_readiness: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """POST /api/v1/live-sessions/{id}/messages -- deliver into a live session.
 
@@ -781,6 +782,13 @@ class BridgeClient(AnswerClientMixin, SessionStartClientMixin, CliModeClientMixi
             payload["expected_session_id"] = expected_session_id
         request = self._request
         request_timeout = None
+        if plugin_readiness is not None:
+            from .client_protocol_floor import protocol_floored_request
+            from .protocol import PLUGIN_READINESS_PROTOCOL_VERSION
+
+            request = protocol_floored_request(self, PLUGIN_READINESS_PROTOCOL_VERSION)
+            payload["plugin_readiness"] = plugin_readiness
+            request_timeout = float(plugin_readiness.get("timeout_seconds", 120)) + 15
         if wait:
             from .client_protocol_floor import protocol_floored_request
             from .live_message_models import validate_live_reply_timeout
@@ -791,12 +799,17 @@ class BridgeClient(AnswerClientMixin, SessionStartClientMixin, CliModeClientMixi
             except ValueError as exc:
                 raise BridgeClientError(422, f"wait_timeout {exc}") from exc
             self._require_live_message_receipts()
-            request = protocol_floored_request(self, LIVE_MESSAGE_RECEIPT_PROTOCOL_VERSION)
+            request = protocol_floored_request(
+                self, max(LIVE_MESSAGE_RECEIPT_PROTOCOL_VERSION,
+                          PLUGIN_READINESS_PROTOCOL_VERSION if plugin_readiness is not None else 0),
+            )
             payload["wait"] = True
             if wait_timeout is not None:
                 payload["wait_timeout"] = seconds
             # Give the HTTP read a margin beyond the server-side reply wait.
-            request_timeout = seconds + 15.0
+            request_timeout = seconds + 15.0 + (
+                float(plugin_readiness.get("timeout_seconds", 120)) if plugin_readiness is not None else 0
+            )
         return request(
             "POST", f"/api/v1/live-sessions/{session_id}/messages", payload,
             request_timeout=request_timeout,

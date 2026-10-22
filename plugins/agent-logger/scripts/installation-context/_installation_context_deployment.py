@@ -20,7 +20,11 @@ def _deployment_owner(
         },
     )
     if (
-        resolution["status"] != "ready"
+        not (
+            resolution["status"] == "ready"
+            or (resolution["status"] == "deactivation-required"
+                and resolution["actualMode"] == "namespaced")
+        )
         or resolution["actualMode"] not in {"legacy", "namespaced"}
         or provenance["marketplaceId"] != resolution["marketplaceId"]
         or provenance["pluginId"] != resolution["pluginId"]

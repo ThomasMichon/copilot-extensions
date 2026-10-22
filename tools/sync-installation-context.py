@@ -32,6 +32,7 @@ FILES = (
     "_installation_context_base.py",
     "_installation_context_files.py",
     "_installation_context_source.py",
+    "_installation_context_lock_recovery.py",
     "_installation_context_receipts.py",
     "_installation_context_snapshot.py",
     "_installation_context_runtime_slot_ownership.py",
@@ -45,9 +46,12 @@ FILES = (
     "_installation_context_maintenance.py",
     "_installation_context_mode_cli.py",
     "_installation_context_deployment.py",
+    "_installation_context_publication.py",
     "installation_context.py",
     "installation-context.sh",
     "installation-context.ps1",
+    "plugin-publication-probe.ps1",
+    "plugin-publication-probe.sh",
     "guest-environment.ps1",
     "guest-environment.sh",
     "json-query.awk",
@@ -69,6 +73,7 @@ ADOPTERS = (
     "agent-ssh",
     "agent-vault",
     "agent-worktrees",
+    "budget-guidance",
 )
 LEGACY_ENTRYPOINT_ADOPTERS = ("agent-machines", "agent-index")
 

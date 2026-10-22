@@ -21,6 +21,129 @@ LOCAL_BIN="${HOME}/.local/bin"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
+# Staging itself writes installation state, so publication admission precedes it.
+case "$ACTION" in
+    install|update|stamp|provision)
+        # Preserve the existing Windows shell readiness check before rerooting.
+        case "${OSTYPE:-}:$PWD" in
+            msys*:*/.copilot/installed-plugins/*|cygwin*:*/.copilot/installed-plugins/*)
+                printf 'self-stage failed: Windows shell launch CWD pins the payload; launch from HOME or use install.ps1\n' >&2
+                exit 1
+                ;;
+        esac
+        __publication_project="${COPILOT_PROJECT_DIR:-$PWD}"
+        if [[ -n "${COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT:-}" &&
+              ( -n "${COPILOT_EXTENSIONS_COMMAND_LIFECYCLE:-}" ||
+                ( -n "${COPILOT_PLUGIN_INSTALL_STAGED:-}" && "$SCRIPT_DIR" == */.install-stage/* ) ) ]]; then
+            __publication_project="$COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT"
+        fi
+        __publication_project="$(cd -P -- "$__publication_project" && pwd)" || exit 1
+        export COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT="$__publication_project"
+        __publication_args=("$@")
+        __publication_root="$INSTALL_DIR"
+        for ((__publication_i=1; __publication_i<${#__publication_args[@]}; __publication_i++)); do
+            if [[ "${__publication_args[__publication_i]}" == --install-dir ]]; then
+                __publication_i=$((__publication_i + 1))
+                __publication_root="${__publication_args[__publication_i]:?--install-dir requires a directory}"
+            fi
+        done
+        [[ "$__publication_root" == /* ]] || __publication_root="$PWD/$__publication_root"
+        for ((__publication_i=1; __publication_i<${#__publication_args[@]}; __publication_i++)); do
+            if [[ "${__publication_args[__publication_i]}" == --install-dir ]]; then
+                __publication_i=$((__publication_i + 1))
+                __publication_args[__publication_i]="$__publication_root"
+            fi
+        done
+        set -- "${__publication_args[@]}"
+        __publication_payload="$PLUGIN_DIR"
+        if [[ -n "${COPILOT_EXTENSIONS_COMMAND_LIFECYCLE:-}" &&
+              -n "${COPILOT_PLUGIN_STAGED_FROM:-}" &&
+              "$PLUGIN_DIR" != */.copilot/installed-plugins/* ]]; then
+            __publication_payload="$COPILOT_PLUGIN_STAGED_FROM"
+        fi
+        __publication_python=""
+        while IFS= read -r __publication_candidate; do
+            [[ -f "$__publication_candidate" && -x "$__publication_candidate" ]] || continue
+            case "$__publication_candidate" in */Microsoft/WindowsApps/*) continue ;; esac
+            __publication_candidate="$(cd -P -- "$(dirname -- "$__publication_candidate")" &&
+                printf '%s/%s\n' "$PWD" "$(basename -- "$__publication_candidate")")" || exit 1
+            "$__publication_candidate" -I -B -c 'import sys; assert sys.version_info >= (3,10)' \
+                >/dev/null 2>&1 || continue
+            __publication_python="$__publication_candidate"
+            break
+        done < <(type -ap python3 python)
+        if [[ -n "$__publication_python" && -z "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
+            __publication_binding=(
+                -I -B -X utf8 "$SCRIPT_DIR/command_binding.py"
+                --payload-root "$PLUGIN_DIR" --plugin-id agent-logger
+                --legacy-root "$__publication_root" --source-payload-root "$__publication_payload"
+                --project-root "$__publication_project"
+            )
+            if [[ -n "${COPILOT_EXTENSIONS_COMMAND_LIFECYCLE:-}" ]]; then
+                "$__publication_python" "${__publication_binding[@]}" \
+                    --check-lifecycle --lifecycle-operation publish || exit $?
+            else
+                unset COPILOT_PLUGIN_STAGED_FROM
+                [[ "$ACTION" != stamp ]] || __publication_binding+=(--deferred-runtime)
+                __publication_bash="$(type -P bash)" || exit 1
+                __publication_bash="$(cd -P -- "$(dirname -- "$__publication_bash")" &&
+                    printf '%s/%s\n' "$PWD" "$(basename -- "$__publication_bash")")" || exit 1
+                cd "$HOME" || exit 1
+                # MSYS may retain a native-exec parent; close its script descriptor first.
+                exec "$__publication_bash" -c 'exec "$@"' bash \
+                    "$__publication_python" "${__publication_binding[@]}" --run-lifecycle -- \
+                    "$__publication_bash" "$SCRIPT_DIR/install.sh" "$@"
+            fi
+        elif [[ -n "${COPILOT_EXTENSIONS_COMMAND_LIFECYCLE:-}" ]]; then
+            printf '%s\n' 'Runtime publication refused: lifecycle custody requires an existing Python 3.10+ executable.' >&2
+            exit 3
+        fi
+        if [[ -z "$__publication_python" || -n "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
+            __publication_helper="$SCRIPT_DIR/installation-context/installation-context.sh"
+            __publication_query="$SCRIPT_DIR/installation-context/json-query.awk"
+            [[ -f "$__publication_helper" && -f "$__publication_query" ]] || {
+                printf '%s\n' 'Runtime publication refused: installation helper is unavailable.' >&2
+                exit 3
+            }
+            __publication_native_payload="$__publication_payload"
+            if [[ -n "${COPILOT_PLUGIN_INSTALL_STAGED:-}" &&
+                  -n "${COPILOT_PLUGIN_STAGED_FROM:-}" &&
+                  "$PLUGIN_DIR" != */.copilot/installed-plugins/* ]]; then
+                __publication_native_payload="$COPILOT_PLUGIN_STAGED_FROM"
+            fi
+            __publication_code=0
+            __publication_json="$(bash "$__publication_helper" probe-plugin-publication \
+                --payload-root "$__publication_native_payload" --plugin-id agent-logger \
+                --legacy-root "$__publication_root" --project-root "$__publication_project")" || __publication_code=$?
+            __publication_allowed="$(LC_ALL=C awk -f "$__publication_query" -v mode=get \
+                -v query_path=$'deployment\034allowPluginPublication' <<<"$__publication_json")" || exit 3
+            __publication_type="$(LC_ALL=C awk -f "$__publication_query" -v mode=type \
+                -v query_path=$'deployment\034allowPluginPublication' <<<"$__publication_json")" || exit 3
+            __publication_root_query=$'legacy\034root'
+            [[ -z "${COPILOT_EXTENSIONS_CONTEXT:-}" ]] || __publication_root_query=runtimeRoot
+            __publication_actual="$(LC_ALL=C awk -f "$__publication_query" -v mode=get \
+                -v "query_path=$__publication_root_query" <<<"$__publication_json")" || exit 3
+            __publication_path="$(LC_ALL=C awk -f "$__publication_query" -v mode=get \
+                -v query_path=$'deployment\034path' <<<"$__publication_json")" || exit 3
+            if [[ "$__publication_code" != 0 || "$__publication_type" != boolean ||
+                  "$__publication_allowed" != true || "$__publication_actual" != /* ||
+                  "$__publication_path" != "$__publication_actual/runtime-deployment.json" ||
+                  ( -n "${COPILOT_EXTENSIONS_CONTEXT:-}" && "$__publication_actual" != "$__publication_root" ) ]]; then
+                printf 'Runtime publication refused: %s Use explicit installation management to install or repair this runtime.\n' "$__publication_json" >&2
+                exit 3
+            fi
+            for ((__publication_i=1; __publication_i<${#__publication_args[@]}; __publication_i++)); do
+                if [[ "${__publication_args[__publication_i]}" == --install-dir ]]; then
+                    __publication_i=$((__publication_i + 1))
+                    __publication_args[__publication_i]="$__publication_actual"
+                fi
+            done
+            set -- "${__publication_args[@]}"
+            __publication_payload="$__publication_native_payload"
+        fi
+        ;;
+esac
+
 # === install-contract:v4 self-stage -- keep byte-identical across plugins ===
 # dotfiles #935: a plugin installer reads its own payload (src/, libs/,
 # pyproject.toml) to build the venv, so while it runs -- especially if it wedges
@@ -638,25 +761,44 @@ export PYTHONUTF8=1
 _name="agent-logger"
 _root="$HOME/.$_name"
 _resolver="$_root/bin/resolve-runtime.sh"
+if [ ! -f "$_resolver" ] ||
+   ! grep -Fq '# Trace contract: normal/read-only/ready-v1' "$_resolver"; then
+    printf '%s\n' "[$_name] read-only runtime resolver is unavailable. Re-enable/update the plugin, then retry." >&2
+    exit 126
+fi
 _resolve() {
     AGENT_RT_PY=""
     if [ -f "$_resolver" ]; then
         AGENT_RT_ROOT="$_root"
+        local AGENT_RT_RESOLVE_TRACE_MODE="${1:-ready}"
         . "$_resolver"
     fi
 }
 _resolve
 [ -n "$AGENT_RT_PY" ] && exec "$AGENT_RT_PY" -m agent_logger "$@"
-mkdir -p "$_root"
-_status="$_root/.provision-status"
-printf '%s\n' "[$_name] runtime not provisioned -- provisioning on first use (may take ~30-120s: acquires uv + builds a venv). Do not kill; extend your timeout." >&2
-printf '::agent-provisioning:: plugin=%s eta_seconds=120 reason=first-use status=%s\n' "$_name" "$_status" >&2
+if [ -n "${AGENT_LOGGER_NO_SELFPROVISION:-}" ]; then
+    printf '%s\n' "[$_name] runtime not provisioned (AGENT_LOGGER_NO_SELFPROVISION set)." >&2
+    exit 1
+fi
 _install="$(cat "$_root/payload-dir" 2>/dev/null)/scripts/install.sh"
 [ -f "$_install" ] || _install="$(ls "$HOME"/.copilot/installed-plugins/*/"$_name"/scripts/install.sh 2>/dev/null | head -n1)"
 if [ ! -f "$_install" ]; then
     printf '%s\n' "[$_name] cannot self-provision: installer not found in plugin payload. Ensure the plugin is enabled, then retry." >&2
     exit 127
 fi
+_payload="${_install%/scripts/install.sh}"
+_probe="$_payload/scripts/installation-context/plugin-publication-probe.sh"
+if [ ! -f "$_probe" ]; then
+    printf '%s\n' "[$_name] Runtime publication refused: snapshot admission helper is unavailable. Re-enable/update the plugin, then retry." >&2
+    exit 126
+fi
+bash "$_probe" "$_payload" "$_name" "$_root" || exit $?
+_resolve normal
+[ -n "$AGENT_RT_PY" ] && exec "$AGENT_RT_PY" -m agent_logger "$@"
+mkdir -p "$_root"
+_status="$_root/.provision-status"
+printf '%s\n' "[$_name] runtime not provisioned -- provisioning on first use (may take ~30-120s: acquires uv + builds a venv). Do not kill; extend your timeout." >&2
+printf '::agent-provisioning:: plugin=%s eta_seconds=120 reason=first-use status=%s\n' "$_name" "$_status" >&2
 _lock="$_root/.provision.lock"
 exec 9>"$_lock"
 command -v flock >/dev/null 2>&1 && flock 9 2>/dev/null
@@ -890,6 +1032,11 @@ _materialize_snapshot_libs() {
     done
 }
 
+_publish_snapshot_source() {
+    publish_legacy_snapshot_source "$1" "$SCRIPT_DIR" "$__publication_payload" \
+        agent-logger "$INSTALL_DIR" "$__publication_project"
+}
+
 publish_payload_snapshot() {
     _assert_source_runtime || return 1
     mkdir -p "${INSTALL_DIR}/snapshots" || {
@@ -898,6 +1045,7 @@ publish_payload_snapshot() {
     local snapshot_dir="${INSTALL_DIR}/snapshots/${SRC_VERSION}"
     if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
         snapshot_dir="$(_publish_source_snapshot)" || return 1
+        _publish_snapshot_source "$snapshot_dir" || return 1
         local py
         py="$(_bootstrap_python)" || return 1
         _prepare_source_manifest_context || return 1
@@ -922,6 +1070,7 @@ publish_payload_snapshot() {
                 "$snapshot_dir" >&2
             return 1
         fi
+        _publish_snapshot_source "$snapshot_dir" || return 1
     else
         local snapshot_tmp="${snapshot_dir}.tmp.$$"
         rm -rf "$snapshot_tmp" || {
@@ -950,6 +1099,7 @@ publish_payload_snapshot() {
             }
         _materialize_snapshot_libs "$snapshot_tmp" || return 1
         _materialize_snapshot_engine "$snapshot_tmp" || return 1
+        _publish_snapshot_source "$snapshot_tmp" || return 1
         mv "$snapshot_tmp" "$snapshot_dir" || {
             _fail "Snapshot publication failed: $snapshot_dir"; return 1;
         }

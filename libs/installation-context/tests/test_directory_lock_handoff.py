@@ -123,6 +123,39 @@ def test_changing_owner_retries_remain_bounded_without_releasing_the_owner(
         owner.release()
 
 
+@pytest.mark.parametrize("replacement", [False, True])
+def test_stale_observation_after_clean_release_retries(module, tmp_path, monkeypatch, replacement):
+    arguments = {"kind": "genesis", "marketplace_id": "example", "timeout_seconds": 2}
+    first, second, third = [
+        module._DirectoryLock(tmp_path / "lock", **arguments) for _ in range(3)
+    ]
+    first.acquire()
+    owner_state = module._lock_owner_state
+    changed = False
+
+    def released_owner(owner):
+        nonlocal changed
+        if not changed:
+            changed = True
+            first.release()
+            if replacement:
+                third.acquire()
+            return "stale"
+        if third.acquired:
+            third.release()
+            return "stale"
+        return owner_state(owner)
+
+    monkeypatch.setattr(module, "_lock_owner_state", released_owner)
+    try:
+        second.acquire()
+        assert changed and second.acquired and not first.acquired and not third.acquired
+    finally:
+        for owner in (first, second, third):
+            if owner.acquired:
+                owner.release()
+
+
 @pytest.mark.parametrize("failure", ["malformed", "permission"])
 def test_lock_contender_still_refuses_stable_invalid_or_unreadable_owner(
     module, tmp_path, monkeypatch, failure,

@@ -20,6 +20,19 @@ sync:
                                  # knowledge repo) must commit
                                  # .copilot-extensions/agent-logger/config.yaml
                                  # with `sync: {opt_in: true}` -- see SKILL.md
+  # Protected publication (opt-in; local/onedrive targets only -- ssh,
+  # ssh-tunnel and ingest refuse to run with either setting on). See SKILL.md's
+  # "Protected publication" section. Changing either setting forces one full
+  # reconcile that replaces differing selected files of sessions still synced
+  # and removes no copy: unselected, withheld and no-longer-synced copies stay
+  # as published (NOT retroactively protected); `session-sync doctor` warns.
+  redact_secrets: false         # true => [REDACTED] known secret shapes in
+                                 # each pushed copy (source bytes untouched);
+                                 # unreadable JSONL is deferred, never raw
+  session_files: all            # all | essential (events.jsonl, workspace.yaml,
+                                 # origin.json, context.json,
+                                 # agent-worktrees.json, checkpoints/index.md,
+                                 # review-annotations.json only)
   # Cold-session compaction (opt-in). Archive very old, inactive sessions into
   # a compressed store to reclaim space. Run by `session-sync compact` (local)
   # and `session-sync compact-hub` (the OneDrive/local hub backlog); with

@@ -37,13 +37,25 @@ class PickerScreenModelMixin:
             # manifest declares a pivot-level `create_action` (most pivots
             # don't -- their rows are read-only, discovered state).
             reg = self._reg_pivot()
-            return ["NC"] if reg is not None and reg.create_action is not None else []
+            return (
+                (["NC"] if reg is not None and reg.create_action is not None else [])
+                + [f"VA:{index}" for index, _action in enumerate(self._pivot_view_actions())]
+            )
         return BUTTON_SETS.get(kind, [])
     def active_button(self):
         bset = self.button_set()
         if not bset:
             return None
         return bset[self.btn_idx % len(bset)]
+    def _pivot_view_actions(self):
+        from .pivot_actions import entry_matches
+
+        reg = self._reg_pivot()
+        summary = self._task_summary() if reg is not None else {}
+        return [
+            action for action in getattr(reg, "view_actions", ())
+            if entry_matches(action.when, summary)
+        ]
     def grid_dirty(self):
         return self.profiles_view.grid_dirty()
     def pending_count(self):

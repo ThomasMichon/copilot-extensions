@@ -1,0 +1,9 @@
+{
+  "comment": "Gate native bootstrap and early first-use runtime publication on installation-owned deployment policy.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

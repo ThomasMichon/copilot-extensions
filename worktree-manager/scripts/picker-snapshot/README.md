@@ -56,6 +56,12 @@ strong digest through npm's script-disabled tarball verification.
 The installer runs npm against a private snapshot of the admitted manifests
 and local npm configuration, then publishes only health-checked dependencies.
 Failures or concurrent input changes preserve an existing dependency tree.
+Locked installation explicitly disables npm's implicit advisory audit requests:
+an unavailable advisory endpoint must not delay dependency preparation.
+Configured-registry release-age and strong-integrity admission, disabled
+lifecycle scripts, strict peer checks and selected-module health checks remain
+required. Advisory auditing is a separate operation, not this installer's
+success signal.
 
 Then, end-to-end (needs a Python env with `textual` / `rich` / `pyyaml`):
 

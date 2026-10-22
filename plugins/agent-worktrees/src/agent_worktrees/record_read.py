@@ -6,14 +6,14 @@ import json
 import re
 from dataclasses import dataclass
 from datetime import date
-from pathlib import PurePosixPath, PureWindowsPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import get_args
 
 import yaml
 
 from . import config as cfg
 from . import tracking
-from .record_config import configured_repositories
+from .record_config import configured_repositories, configured_repository_paths, metadata_project
 from .record_io import read_record_mapping
 
 
@@ -96,7 +96,7 @@ def _validate_head_ledger(data: dict) -> None:
             raise ValueError("Head transition handoff_ordinal must be a positive integer or null")
 
 
-def read_exact_record(worktree_id: str) -> dict[str, object]:
+def read_exact_record(worktree_id: str, *, include_workspace: bool = False) -> dict[str, object]:
     """Read only the selected project's exact record; never authorize launch."""
     if (
         not isinstance(worktree_id, str)
@@ -199,6 +199,13 @@ def read_exact_record(worktree_id: str) -> dict[str, object]:
             "last_session_id": record.resolved_head_session,
             "execution_leg": leg.to_dict() if leg is not None else record.execution_leg_raw,
             "execution_leg_opaque": record.execution_leg_opaque,
+            # Same liveness rule as the roster row, so exact-record readers can
+            # judge a just-created worktree before the roster republishes.
+            "execution_leg_live": bool(
+                record.execution_leg_opaque
+                or record.session_backend_opaque
+                or (leg is not None and leg.state in {"active", "unknown"})
+            ),
             "session_backend": (
                 record.session_backend.to_dict()
                 if record.session_backend is not None
@@ -226,8 +233,74 @@ def read_exact_record(worktree_id: str) -> dict[str, object]:
             worktree[key] = data.get(key)
         if record.machine_identity is not None:
             worktree.update(record.machine_fields)
+        if include_workspace:
+            head = record.resolved_head_session
+            entry = record.session_entry(head) if head else None
+            transition = record.replayed_head_transition
+            worktree["codename"] = record.codename
+            worktree["head"] = {
+                "version": 1, "worktree_id": worktree_id, "tracked": True,
+                "head_session": head, "active": head is not None,
+                "state": entry.state if entry is not None else None,
+                "head_revision": transition.revision if transition is not None else 0,
+                "pending_handoffs": [
+                    {"ordinal": handoff.ordinal} for handoff in record.pending_handoffs
+                ],
+            }
         return json.loads(json.dumps(_json_value(worktree), allow_nan=False))
     except RecordReadError:
         raise
     except (yaml.YAMLError, ValueError, TypeError, KeyError, AttributeError, OverflowError) as exc:
         raise RecordReadError("record-malformed", str(exc)) from exc
+
+
+def read_workspace_record(cwd: str) -> dict[str, object]:
+    """Resolve only existing project metadata, without adoption or resident reads."""
+    try:
+        directory = Path(cwd)
+        if not directory.is_absolute():
+            raise ValueError("Expected an absolute initialization directory")
+        directory = directory.resolve(strict=True)
+        if not directory.is_dir():
+            raise ValueError("Initialization directory is not a directory")
+        project = cfg.project_name()
+        if metadata_project(None, cwd=directory) != project:
+            raise RecordReadError("repository-mismatch", "Initialization belongs to another project")
+        anchor = configured_repository_paths(project)[project]
+        root = next((
+            candidate for candidate in (directory, *directory.parents)
+            if (candidate / ".git").exists()
+            or ((candidate / "HEAD").is_file() and (candidate / "objects").is_dir())
+        ), None)
+        if root is None:
+            raise RecordReadError("workspace-unresolved", "Initialization is outside a Git checkout")
+        context = {
+            "schema": "agent-worktrees.workspace-context", "version": 1,
+            "project": project, "anchor": str(anchor), "root": str(root),
+            "identity": None, "worktree": None,
+        }
+        if root == anchor:
+            from .execution_identity_read import read_execution_identity
+
+            context["identity"] = read_execution_identity()
+            return context
+        matches = [
+            record.worktree_id
+            for record in tracking.list_records(
+                cfg.tracking_dir(project), repo_filter=project, copy_records=False,
+            )
+            if record.worktree_path and Path(record.worktree_path).resolve() == root
+        ]
+        if not matches:
+            raise RecordReadError("workspace-untracked", "Checkout has no record in this project")
+        if len(matches) != 1:
+            raise RecordReadError("workspace-ambiguous", "Checkout has multiple records in this project")
+        worktree = read_exact_record(matches[0], include_workspace=True)
+        if worktree["repo"] != project or Path(worktree["path"]).resolve(strict=True) != root:
+            raise RecordReadError("workspace-mismatch", "Recorded checkout does not match initialization")
+        context["worktree"] = worktree
+        return context
+    except RecordReadError:
+        raise
+    except (OSError, ValueError, RuntimeError, KeyError, TypeError, yaml.YAMLError) as exc:
+        raise RecordReadError("workspace-unresolved", str(exc)) from exc

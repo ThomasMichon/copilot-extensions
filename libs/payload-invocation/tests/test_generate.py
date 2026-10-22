@@ -160,6 +160,33 @@ def test_binding_human_assets_do_not_require_worktrees_source(tmp_path, monkeypa
         ).read_text(encoding="utf-8")
 
 
+def test_installer_lifecycle_does_not_change_command_catalog(tmp_path: Path) -> None:
+    manifest = _required_context_multi_manifest(tmp_path)
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    before = generator.expected_files(manifest)
+    primitive = manifest.parent / "scripts/installation-context/installation_context.py"
+    primitive.parent.mkdir()
+    primitive.write_text("# fixture\n", encoding="utf-8")
+    data["installerLifecycle"] = True
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+    after = generator.expected_files(manifest)
+    assert all(after[path] == value for path, value in before.items())
+    for name in ("command_binding.py", "command_lifecycle.py"):
+        path = manifest.parent / "scripts" / name
+        assert after[path] == (SCRIPT.parent / name).read_text(encoding="utf-8")
+    assert len(after) == len(before) + 5
+
+
+@pytest.mark.parametrize("value", [1, "true", [], {}])
+def test_installer_lifecycle_requires_boolean(tmp_path: Path, value: object) -> None:
+    manifest = _required_context_manifest(tmp_path)
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["installerLifecycle"] = value
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+    with pytest.raises(ValueError, match="installerLifecycle must be a boolean"):
+        generator.load_manifest(manifest)
+
+
 def _write_runtime_completion(slot: Path, version: str) -> None:
     (slot / ".install-complete.json").write_text(
         json.dumps(
@@ -171,6 +198,43 @@ def _write_runtime_completion(slot: Path, version: str) -> None:
         ),
         encoding="utf-8",
     )
+
+
+def test_object_pipeline_forwarding_is_explicit_and_default_false(tmp_path: Path) -> None:
+    manifest = _required_context_manifest(tmp_path)
+    default = generator.expected_files(manifest)
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["powershellPipelineInput"] = False
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+    assert generator.expected_files(manifest) == default
+    data["powershellPipelineInput"] = True
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+    selected = generator.expected_files(manifest)
+    changed = [path for path in default if default[path] != selected[path]]
+    assert changed == [manifest.parent / "bin" / "agent-machines.ps1"]
+    body = selected[changed[0]]
+    assert "$MyInvocation.ExpectingInput -and $MyInvocation.Line" in body
+    assert "(Get-Variable input -ValueOnly) | & $_payloadDispatcher @args" in body
+    assert "$input" not in body
+
+
+@pytest.mark.parametrize("value", ["true", 1, None])
+def test_object_pipeline_forwarding_requires_boolean(tmp_path: Path, value) -> None:
+    manifest = _required_context_manifest(tmp_path)
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["powershellPipelineInput"] = value
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+    with pytest.raises(ValueError, match="powershellPipelineInput must be a boolean"):
+        generator.load_manifest(manifest)
+
+
+def test_object_pipeline_forwarding_requires_dispatcher(tmp_path: Path) -> None:
+    manifest = _manifest(tmp_path)
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["powershellPipelineInput"] = True
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+    with pytest.raises(ValueError, match="powershellPipelineInput requires a payloadDispatcher"):
+        generator.load_manifest(manifest)
 
 
 def _read_jsonl(path: Path) -> list[dict[str, object]]:
@@ -917,7 +981,7 @@ def test_worktrees_releases_provision_lock_before_runtime_dispatch(
     ]
     assert [event["path"] for event in dispatch] == [branch]
     callers = status_callers.read_text(encoding="utf-8").splitlines()
-    assert len(callers) == (2 if branch == "locked-fast" else 3)
+    assert len(callers) == (3 if branch == "locked-fast" else 5)
     assert set(callers) == {str(dispatch[0]["pid"])}
 
 
@@ -1477,6 +1541,13 @@ def test_agent_worktrees_posix_interrupt_reaps_provisioner_before_unlock(
     mode_runner = payload / "scripts" / "installation-context" / "installation-context.sh"
     mode_runner.write_text(
         "#!/usr/bin/env bash\n"
+        "if [ \"${1:-}\" = probe-plugin-publication ]; then\n"
+        "  printf '%s\\n' "
+        f"'{{\"actualMode\":\"namespaced\",\"deployment\":{{"
+        f"\"path\":\"{plugin_root}/runtime-deployment.json\","
+        "\"allowPluginPublication\":true}}'\n"
+        "  exit 0\n"
+        "fi\n"
         "printf '%s\\n' "
         f"'{{\"status\":\"ready\",\"reason\":\"namespaced-active\","
         f"\"actualMode\":\"namespaced\",\"desiredMode\":\"namespaced\","
@@ -1557,6 +1628,13 @@ def test_agent_worktrees_posix_revalidates_after_provisioning(
     mode_runner = payload / "scripts" / "installation-context" / "installation-context.sh"
     mode_runner.write_text(
         "#!/usr/bin/env bash\n"
+        "if [ \"${1:-}\" = probe-plugin-publication ]; then\n"
+        "  printf '%s\\n' "
+        f"'{{\"actualMode\":\"namespaced\",\"deployment\":{{"
+        f"\"path\":\"{plugin_root}/runtime-deployment.json\","
+        "\"allowPluginPublication\":true}}'\n"
+        "  exit 0\n"
+        "fi\n"
         "if [ \"${1:-}\" = validate ]; then\n"
         "  printf '%s\\n' '{\"namespaceGeneration\":1,\"generation\":1}'\n"
         "  exit 0\n"

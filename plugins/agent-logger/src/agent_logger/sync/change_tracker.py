@@ -31,7 +31,7 @@ from __future__ import annotations
 import hashlib
 import sqlite3
 import time
-from collections.abc import Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
@@ -105,6 +105,7 @@ def compute_signature(
     session_dir: Path,
     provenance_file: Path | None = None,
     excluded_roots: tuple[Path, ...] = (),
+    member_filter: Callable[[str], bool] | None = None,
 ) -> str:
     """Cheap content signature: sha256 over every file's sorted (relpath,
     size, mtime_ns), plus *provenance_file*'s own stat when it exists.
@@ -123,6 +124,10 @@ def compute_signature(
     venvs...) the transport never sends -- without this, churn inside an
     excluded subtree would mark the session "changed" and trigger a
     wasted push of content that gets filtered right back out.
+    *member_filter*, when given, keeps only the session-relative POSIX
+    paths it accepts -- the same filter the target applies to what it
+    publishes (``sync.session_files``), so a file that is never published
+    never marks its session changed.
     """
     hasher = hashlib.sha256()
     entries: list[tuple[str, int, int]] = []
@@ -131,11 +136,13 @@ def compute_signature(
             continue
         if not path.is_file():
             continue
+        rel = path.relative_to(session_dir).as_posix()
+        if member_filter is not None and not member_filter(rel):
+            continue
         try:
             stat_result = path.stat()
         except OSError:
             continue
-        rel = path.relative_to(session_dir).as_posix()
         entries.append((rel, stat_result.st_size, stat_result.st_mtime_ns))
     if provenance_file is not None:
         try:
@@ -199,10 +206,31 @@ def resolve_db_path(db_path_setting: str | None, home: Path) -> Path:
 
 
 class ChangeTracker:
-    """Per-target durable record of each session's last-synced signature."""
+    """Per-target durable record of each session's last-synced signature.
 
-    def __init__(self, db_path: Path) -> None:
+    *member_filter* and *include_provenance* narrow every signature to what
+    the target actually publishes (see :func:`compute_signature`); the
+    defaults consider every session file plus its provenance sidecar.
+    """
+
+    def __init__(
+        self,
+        db_path: Path,
+        *,
+        member_filter: Callable[[str], bool] | None = None,
+        include_provenance: bool = True,
+    ) -> None:
         self.db_path = db_path
+        self.member_filter = member_filter
+        self.include_provenance = include_provenance
+
+    def _signature(self, session_dir: Path, provenance_dir: Path) -> str:
+        return compute_signature(
+            session_dir,
+            provenance_dir / f"{session_dir.name}.json" if self.include_provenance else None,
+            discover_session_tree_detritus(session_dir).roots,
+            self.member_filter,
+        )
 
     def changed_sessions(
         self, source: Path, session_ids: Iterable[str] | None = None
@@ -228,11 +256,7 @@ class ChangeTracker:
             for candidate in candidates:
                 if not candidate.is_dir():
                     continue
-                signature = compute_signature(
-                    candidate,
-                    provenance_dir / f"{candidate.name}.json",
-                    discover_session_tree_detritus(candidate).roots,
-                )
+                signature = self._signature(candidate, provenance_dir)
                 row = conn.execute(
                     "SELECT signature FROM session_signatures WHERE session_id = ?",
                     (candidate.name,),
@@ -270,11 +294,7 @@ class ChangeTracker:
             session_dir = session_state / session_id
             if not session_dir.is_dir():
                 continue
-            signatures[session_id] = compute_signature(
-                session_dir,
-                provenance_dir / f"{session_id}.json",
-                discover_session_tree_detritus(session_dir).roots,
-            )
+            signatures[session_id] = self._signature(session_dir, provenance_dir)
         return signatures
 
     def record_signatures(self, signatures: dict[str, str]) -> None:

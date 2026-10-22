@@ -699,6 +699,8 @@ _SH_FUNCTIONS = (
     ("_install_slot_build", True),
     ("_install_lock_timeout", True),
     ("_exit_install_lock", True),
+    ("_lifecycle_emit", False),
+    ("_lifecycle_finish", False),
     ("_require_install_lock", True),
     ("_update_core", False),
     ("do_install", False),
@@ -716,6 +718,36 @@ _SH_SETUP = {
     "conflict-inactive": "slot_python; mark stale-payload-hash\n",
     "malformed": "slot_python; printf '{not json' > \"$VENV_DIR/.install-complete.json\"\n",
 }
+
+
+@pytest.mark.skipif(_bash() is None or os.name == "nt", reason="POSIX bash required")
+@pytest.mark.parametrize("action", ["do_install", "do_update"])
+@pytest.mark.parametrize("scenario", ["match-active", "absent"])
+def test_actual_installer_admission_records_lifecycle_outcome(
+    tmp_path: Path, action: str, scenario: str
+) -> None:
+    lifecycle_action = action.removeprefix("do_")
+    script = _sh_harness(
+        tmp_path, scenario,
+        f'_LIFECYCLE_ACTION={lifecycle_action}\n'
+        'trap \'_lifecycle_finish "$?"\' EXIT\n'
+        f'_lifecycle_emit begin\n{action}',
+    )
+    recorder = tmp_path / "repo" / "plugins" / "plugin" / "libs" / "zdd" / "src" / "zdd" / "lifecycle.py"
+    recorder.parent.mkdir(parents=True)
+    canonical = _PLUGIN_ROOT.parents[1] / "libs" / "zdd" / "src" / "zdd" / "lifecycle.py"
+    shutil.copyfile(canonical, recorder)
+    result = _run_sh(script)
+    expected = _NOOP if scenario == "match-active" else _PROCEED
+    _assert_outcome(tmp_path, result, expected)
+    events = [
+        json.loads(line)
+        for line in (tmp_path / "install" / "lifecycle.log").read_text(encoding="utf-8").splitlines()
+    ]
+    assert [(event["action"], event["outcome"]) for event in events] == [
+        (lifecycle_action, "begin"),
+        (lifecycle_action, "ok" if scenario == "match-active" else "fail"),
+    ]
 
 
 def _sh_runtime_scripts(tmp_path: Path) -> Path:
@@ -1148,7 +1180,7 @@ def test_slot_preparation_refusal_is_propagated_by_every_caller() -> None:
         boundary = "_install_slot_build\n" if name == "do_install" else '_update_lifecycle_drain_stop "'
         assert body.index("_versioned_slot_clean || exit 1") < body.index(boundary)
     update = _extract_sh("do_update", sh)
-    assert update.index("trap '_clear_update_marker; _exit_install_lock' EXIT") < update.index(
+    assert update.index('trap \'_lifecycle_finish "$?"; _clear_update_marker; _exit_install_lock\' EXIT') < update.index(
         "_versioned_slot_clean || exit 1"
     )
 

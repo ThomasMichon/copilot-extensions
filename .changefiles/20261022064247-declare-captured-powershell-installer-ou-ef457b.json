@@ -1,0 +1,9 @@
+{
+  "comment": "Declare captured PowerShell installer output and retain native construction diagnostics through the producer text writer.",
+  "changes": [
+    {
+      "plugin": "budget-guidance",
+      "type": "patch"
+    }
+  ]
+}

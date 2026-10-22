@@ -249,6 +249,21 @@ def run_queue_schema_migrations(conn: sqlite3.Connection, *, now_fn) -> None:
     ")"
     )
     run_waiter_columns = {r["name"] for r in conn.execute("PRAGMA table_info(run_waiters)")}
+    for name, declaration in (
+        ("kind", "TEXT NOT NULL DEFAULT 'process'"),
+        ("delegation_json", "TEXT"),
+        ("event_id", "TEXT"),
+    ):
+        if name not in run_waiter_columns:
+            try:
+                conn.execute(f"ALTER TABLE run_waiters ADD COLUMN {name} {declaration}")
+            except sqlite3.OperationalError as exc:
+                if "duplicate column name" not in str(exc).lower():
+                    raise
+    conn.execute("CREATE TABLE IF NOT EXISTS run_waiter_identity ("
+                 "singleton INTEGER PRIMARY KEY CHECK(singleton = 1), id TEXT NOT NULL)")
+    import uuid
+    conn.execute("INSERT OR IGNORE INTO run_waiter_identity VALUES (1, ?)", (uuid.uuid4().hex,))
     if "task_generation" not in run_waiter_columns:
         conn.execute(
             "ALTER TABLE run_waiters ADD COLUMN task_generation INTEGER NOT NULL DEFAULT 0"

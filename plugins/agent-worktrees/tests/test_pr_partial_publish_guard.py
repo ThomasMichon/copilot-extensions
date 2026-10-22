@@ -28,8 +28,6 @@ def test_initial_stale_publication_dispatches_only_proven_recovery(monkeypatch, 
     pushes, replays = [], []
     monkeypatch.setattr(pr_publish, "_pr_for", lambda *_: pr)
     monkeypatch.setattr(pr_publish, "publish_lock", lambda *_a, **_k: nullcontext())
-    monkeypatch.setattr(pr_publish, "push_slug", lambda *_a, **_k: "owner/repo")
-    monkeypatch.setattr(pr_publish, "push_identity", lambda *_a, **_k: "github.com/owner/repo")
     monkeypatch.setattr(pr_publish, "_tip", lambda *_: tip)
     monkeypatch.setattr(git_ops, "is_commit_ancestor", lambda *_a, **_k: ancestor)
     def git(*args, **kwargs):
@@ -37,17 +35,9 @@ def test_initial_stale_publication_dispatches_only_proven_recovery(monkeypatch, 
             return SimpleNamespace(
                 returncode=0, stdout="https://github.com/owner/repo.git\n", stderr=""
             )
-        if args[:3] == ("config", "--null", "--get-all"):
+        if args[:3] == ("config", "--null", "--get-regexp"):
             return SimpleNamespace(returncode=1, stdout="", stderr="")
         pytest.fail(f"unexpected fixture Git command: {args!r}")
-
-    monkeypatch.setattr(git_ops, "git", git)
-
-    def git(*args, **kwargs):
-        if args[:2] == ("remote", "get-url"):
-            return SimpleNamespace(returncode=0, stdout="https://github.com/owner/repo.git\n")
-        assert args[0] == "config"
-        return SimpleNamespace(returncode=1, stdout="", stderr="")
 
     monkeypatch.setattr(git_ops, "git", git)
 

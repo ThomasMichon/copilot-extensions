@@ -66,6 +66,7 @@ composition; content integrity does not reduce to trusting a source marker.
 |-------------|---------------------|-------------|
 | Operator + driving agent | Design, build tooling, drive phases | `copilot-extensions` worktree on this machine |
 | Baseline prevention driver | Historical Phase 8 proposal/evidence; remaining activation transferred to the canonical campaign | #6430 / main-owned-workflow-control Phase 5 |
+| Regression admission contributor | First bounded contributor-regression unit cohort; existing broad periodic ownership retained | Managed source `chugging-wrench`; #3336 |
 
 _Expand this table if/when work is split across additional participants
 (e.g. a dedicated worktree for the CI pipeline vs. one for CONTRIBUTING/AGENTS.md
@@ -77,7 +78,8 @@ rewrite)._
   (no branch split needed yet); Phase 2 onward requires care since it changes
   the repo's fundamental branch topology.
 - **Host (owns PRs):** the participant above, until split further.
-- **Delegates:** none yet.
+- **Delegates:** bounded read-only evidence tracks may classify the Phase 9b
+  regression cohort; production changes and PR ownership remain with the host.
 - **Handoff:** journal every phase transition here before ending a session;
   Phase 2 (branch cutover) must not start until Phase 1 tooling is merged and
   proven idempotent against current `main`.
@@ -107,6 +109,16 @@ rewrite)._
   agents will keep following stale guidance after the split ships.
 
 ## Request
+
+**2026-10-21 captured regression-led capacity request (verbatim):**
+
+> Well, release is definitely happening quickly. Taking only 12 minutes or so. Means we have room to stuff more tests back in, especially ones which resulted in regressions filed by other people. See bugs filed by mikedelgaudio, jamesyu5421, and others.
+
+**Settled execution summary:** use the stable release's measured headroom for
+more valuable contributor-regression coverage. The bounded first cohort below
+is **agent-recommended**. It preserves the current unit-only/effect and
+coverage contract, fixed unit budget and under-thirty-minute delivery gate;
+real platform/process counterparts are not relabeled as units.
 
 **2026-10-19 unit-only burndown policy — summary:**
 
@@ -832,9 +844,11 @@ _(Agent-recommended implementation and validation decomposition of the
       collect unit coverage once under a distinct profile. Update compact
       qualification and required aggregates coherently, without accepting
       skipped integration jobs as unit proof.
-- [ ] _(Operator-required.)_ After stable operation, use a validation tournament
-      to replace lesser-value units with more valuable units inside the budget,
-      rather than accumulating tests. Integration contenders remain periodic.
+- [ ] _(Operator continuation captured 2026-10-21.)_ After stable operation,
+      prioritize contributor-reported product regressions in the validation
+      tournament. Restore valuable eligible units using measured headroom;
+      retire redundant cases only with stronger evidence. The unit budget does
+      not grow with the case count, and integration contenders remain periodic.
 - [ ] _(Agent-recommended mechanism.)_ Prove existing publication/event
       authority reliably delivers the required Main gate and a nonadministrator
       exact-head merge. Missing checks, API ambiguity, moved Main, unqualified
@@ -863,6 +877,33 @@ _(Agent-recommended implementation and validation decomposition of the
 - [ ] Prove normal release and client compatibility, journal the result and
       retain responsibility for unresolved acceptance. A contract PR, source
       merge, tag, or green wrapper alone does not complete this phase.
+
+### Phase 9b - Regression-led unit admission
+
+_(Agent-recommended bounded execution of the latest operator request; existing
+periodic corpus and broader tournament ownership remain intact.)_
+
+- [x] Measure the existing admitted packet and a successful release attempt:
+      236 passing units in 8.355 seconds locally; the sampled release unit job
+      takes 21 seconds and attempt 1 completes in 14m27s including queueing.
+- [x] Review the [first admission cohort](promotion-burndown.md#first-regression-led-unit-admission-cohort)
+      before changing production helpers or the positive manifest.
+- [x] Add genuine runtime-decision regressions for the first eligible cohort,
+      with a narrow #5610 front-door routing repair where the new test exposes
+      the still-present defect. Preserve existing APIs and behavior outside
+      the reported contract.
+- [x] Enroll the exact tests, complete import/fixture/source closure and
+      production coverage targets. Every test must call relevant production
+      code, pass all phases and attempt no prohibited effects.
+- [x] Measure marginal execution, coverage, defect detection and maintenance
+      cost while preserving the 300-second packet cap and existing deadlines.
+      Do not remove valid release safeguards merely to keep the old case count.
+- [x] Reconcile real shell/native/Git/process counterparts with the existing
+      periodic inventory and failure ownership; unexecuted capacity remains
+      visibly unproven and cannot become a promotion dependency.
+- [x] Pass required impact-conditional Source CI and current-head review,
+      then verify an ordinary promotion reuses the exact expanded unit proof
+      and remains under thirty minutes through publication, merge and tag.
 
 ## Validation Plan
 
@@ -1003,6 +1044,14 @@ governs test routing. Production integrity assertions below are exercised by
 units and enforced by production operations; actual-Git, native and end-to-end
 test witnesses run periodically and cannot hold promotion.
 
+- [x] The Phase 9b cohort maps real contributor failure modes to relevant
+      production assertions, not merely passing counts or mocks past the
+      faulty decision. Exact-node/effect/source/coverage guards and the
+      300-second unit ceiling remain unchanged.
+- [x] Source fixes already claimed by reporters retain their owner; coverage
+      awaiting a fix or canonical contract is explicit rather than admitted as
+      a skip, xfail, assumed resolution or false passing reproduction.
+
 - [ ] An ordinary PR that breaks producer/verifier agreement fails before merge.
       Prove the impact selector covers the relevant unit decision rules.
       Root/nested attribute, materializer and real platform/checkout integration
@@ -1077,6 +1126,73 @@ The separately governed control-preservation policy is not changed by this
 proposal.
 
 ## Journal
+
+### 2026-10-21 - Expanded first cohort released in 12m12s
+- Source #7554 merged as
+  `a1f431264eede9764c1e051112b0869b0351d88a` after exact-head approval
+  of `a4639c6115d51dd288be3fd3c8528d7f6bc48add`, no open findings and
+  passing required CI. The source repair and 86 admitted runtime cases are
+  complete; no budget, effect or source-admission safeguard was weakened.
+- Natural promotion `39570244030`, attempt 1, qualified that exact Dev source.
+  Its actual downloaded packet verifies canonically: 322 nodes, 966 passing
+  phases, 23 production coverage files, zero prohibited effects, 7.034 seconds
+  in execution. The original source-unit job took 24 seconds including setup.
+- The immutable-candidate `source-units-v2` receipt binds original job
+  `119122527247`, artifact `12331392769`, its provider archive digest and all
+  three packet byte digests. The candidate gate reused that proof; it did not
+  rerun the packet or substitute metadata-only Main CI.
+- Main PR #7558 merged candidate
+  `67a3182cff7cc1579ac8aebe180733add8a4ef25` as
+  `2b39ea86eead1c24eccee4b547a0c084301721c1`; provider trees match
+  `332527049d0c379e77a3052fb1839405fcf62ca9`. Main's recorded Dev source
+  and source-named annotated tag both bind the same release.
+- The exact `python-artifacts-<Dev source>` release owns 13 payload assets plus
+  its read-back index. Publication/readback preceded Main merge; the completed
+  workflow ran from 08:34:03Z to 08:46:15Z, **12m12s including queueing**.
+- Phase 9b's first bounded cohort is complete. The broader portfolio,
+  explicitly unenrolled real-boundary cases, source-owner holds, installed
+  acceptance and the retained gated tuple-producer objective remain open.
+
+### 2026-10-21 - First runtime cohort detects the routing regression
+- The reviewed cohort plan merged in #7543 after its additive-policy closure
+  wording was reconciled. Its scope remains genuine in-process units within
+  the existing budget, with the original reporter and periodic ownership kept.
+- Moving the existing project-routing and live turn-folding definitions into
+  closed-import leaves preserved their AST bodies/constants before the fix.
+  Original import/facade paths remain exports of the same implementations.
+- The actual pre-fix cohort produced four failing explicit-repo reconciliation
+  assertions and 82 passing controls. The canonical effect-fenced packet then
+  passed its 236 existing cases and rejected the first new regression, rather
+  than accepting an enrollment-only or mocked passing reproduction.
+- The narrow #5610 predicate repair accepts explicit `--repo` argument forms
+  while preserving missing-repo and other routing. The candidate adds 86
+  runtime cases: 322 units, 966 passing phases, 23 production coverage files
+  and no prohibited effects in 8.603 seconds mechanically, versus 8.355 for
+  the baseline. Immutable committed-source qualification remains separate.
+- Affected contained compatibility portfolios passed 645 Worktrees tests with
+  two conditional skips and 131 Bridge tests with one conditional skip,
+  including real front-door dispatch from a neutral cwd and facade identity.
+  No installed/native acceptance or completed periodic repair is inferred.
+
+### 2026-10-21 - First contributor-regression admission cohort proposed
+- The operator requested more tests using the now-short release flow,
+  particularly regressions reported by `mikedelgaudio`, `jamesyu5421` and
+  other contributors. The positive packet currently covers release machinery,
+  not these runtime failure families.
+- The exact committed baseline passed 236 units with coverage in 8.355 seconds.
+  Successful release `39553184584`, attempt 1, completed in 14m27s including
+  queueing; its unit job took 21 seconds. Build, attestation, promotion and
+  publication remain separate costs, not a free unit-test allowance.
+- The proposed first cohort targets project-independent routing, empty-mux
+  decisions, read-only Git command guarding and parent/sub-agent event folding.
+  Narrow leaf extraction is allowed only to preserve a closed import boundary
+  and actual production wiring; copied implementations and effect waivers are not.
+- #7500 explicitly retains its reporter's source-fix claim. Shell callback,
+  launcher contract, real Git-lock, PowerShell payload identity and fresh
+  session/reservation gaps remain mapped to their existing issues and periodic
+  or prerequisite owners; the cohort does not claim their native acceptance.
+- This is a reviewed-plan boundary before implementation, not an enrollment
+  claim or permission to revive the held full-corpus proposal.
 
 ### 2026-10-19 - Reviewed unit-only controls landed; real canary qualified
 

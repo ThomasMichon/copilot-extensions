@@ -1,0 +1,9 @@
+{
+  "comment": "Reuse private terminal-worker topology copies across lifecycle and reciprocal-disposal tests.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

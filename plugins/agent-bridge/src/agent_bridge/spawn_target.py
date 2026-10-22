@@ -6,6 +6,15 @@ import json
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
+from typing_extensions import TypedDict
+
+REQUEST_OVERRIDES_KEY = "_agent_bridge_request_overrides"
+
+
+class StaticPluginArgs(TypedDict):
+    base: list[str]
+    automatic: list[str]
+
 
 @dataclass
 class PluginRef:
@@ -43,23 +52,46 @@ class SpawnTarget:
     remote_acp: dict[str, Any] | None = None
     remote_acp_capabilities: dict[str, Any] | None = None
     native_resume_id: str | None = None
+    static_plugin_args: StaticPluginArgs | None = None
+    local_plugin_preparation: bool = False
+    prepared_plugins: dict | None = None
+    plugin_preparation_request: dict | None = None
 
     def to_json(self) -> str:
-        """Keep runtime-only native admission out of persisted target metadata.
-
-        The resume lifecycle rederives it from the persisted ACP identity, so
-        old target readers never encounter a new serialized launch field.
-        """
-        return json.dumps({
+        """Persist preparation provenance inside prior readers' extensible metadata."""
+        data = {
             key: value for key, value in asdict(self).items()
-            if key != "native_resume_id"
+            if key not in {
+                "native_resume_id", "static_plugin_args", "local_plugin_preparation",
+                "prepared_plugins", "plugin_preparation_request",
+            }
             and (
                 key not in {"execution_space_key", "remote_acp", "remote_acp_capabilities"}
                 or value is not None
             )
-        })
+        }
+        venue = data["venue"] or {}
+        overrides = venue.get(REQUEST_OVERRIDES_KEY, {})
+        overrides.pop("plugin_preparation", None)
+        if self.static_plugin_args is not None or self.local_plugin_preparation:
+            overrides["plugin_preparation"] = {
+                "static_plugin_args": self.static_plugin_args,
+                "local_plugin_preparation": self.local_plugin_preparation,
+            }
+        if overrides or REQUEST_OVERRIDES_KEY in venue:
+            venue[REQUEST_OVERRIDES_KEY] = overrides
+            data["venue"] = venue
+        return json.dumps(data)
 
     @classmethod
     def from_json(cls, raw: str) -> SpawnTarget:
         data: dict[str, Any] = json.loads(raw)
+        overrides = (data.get("venue") or {}).get(REQUEST_OVERRIDES_KEY, {})
+        preparation = overrides.get("plugin_preparation")
+        if preparation is not None:
+            if not isinstance(preparation, dict):
+                raise ValueError("Invalid persisted plugin preparation metadata")
+            for key in ("static_plugin_args", "local_plugin_preparation"):
+                if key in preparation:
+                    data.setdefault(key, preparation[key])
         return cls(**data)

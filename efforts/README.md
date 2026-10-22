@@ -10,24 +10,28 @@ that pattern to this repository.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
-| [RedirectionGuard Adoption](active/redirectionguard-adoption/README.md) | Draft; audit and bounded repair proposal before implementation | #7445; preserves #7420/#7410 and #7305 consumer-recovery owners |
-| [Acknowledged Execution Handoff](active/acknowledged-execution-handoff/README.md) | Blocked; generic contract reviewed and merged, implementation authorization and owner assignment next | #7268; no runtime implementation or adoption |
+| [Coordinated Launch Maintenance](active/coordinated-launch-maintenance/README.md) | Draft; nonblocking healthy handoff with coordinated adopted background maintenance | #7694; preserves #6812/#6820/#7667 owners |
+| [Dynamic Reverse Reservations](active/dynamic-reverse-reservations/README.md) | Active; coordinator/finite-forward source merged, opt-in SSH consumer qualification; production integration retained | #7719; preserves #63/#6681/#5789/#6804/#6240/#6424 owners |
+| [SSH Reverse Candidate Forward](active/ssh-reverse-candidate-forward/README.md) | Active; reviewed intent merged; finite SSH owner candidate and lifecycle review corrections in progress | #7720; complements #7719 publication without a second selector; actual OpenSSH/adoption remain separate |
+| [Backlog Reconciliation](active/backlog-reconciliation/README.md) | Active; oldest-first evidence and requirement-preserving consolidation, no implementation | #7556; 1,458 baseline, 729 guidance checkpoint |
+| [Feed Construction Release Gate](active/feed-construction-release-gate/README.md) | Draft; complete configured-feed construction and installed-launch qualification before CI/promotion activation | #7529; preserves #3336/#6237 control and #7420/#7446/#7514 repair owners |
+| [Acknowledged Execution Handoff](active/acknowledged-execution-handoff/README.md) | Active; source/test scope assigned, optional effect adapter construction first | #7268; coordinator integration and live adoption remain open |
 | [Remote ACP Host Ownership](active/remote-acp-host-ownership/README.md) | Active; proposal and target-contribution prerequisite merged, qualified relationship claim integration next | #7237; existing session, claims and dispatch owners retained |
 | [Agent Chat Graduation](active/agent-chat-graduation/README.md) | Draft; one vision/architecture/plugin/service/lifecycle proposal before implementation | #7238; existing fleet, service and session-host owners retained |
 | [Conventional Fleet Connectivity](active/conventional-fleet-connectivity/README.md) | Active; plan reviewed, conventional source discovery first; direct refresh and Bridge derivation pending | #7206 under #63; preserves identity, profile and listing owners |
 | [Dispatch Extension Catalog](active/dispatch-extension-catalog/README.md) | Active; execution authorized, amended-plan review precedes templates, mapped sources and client semantic parity | #7091; preserves #6379/#4959/#6283 owners |
 | [Trusted Linux CI Offload](active/trusted-linux-ci-offload/README.md) | Active; pure existing-row backend selector/tests implemented; CI integration after #7164 and qualification/activation pending | #7122; preserves #6237/#3336/#1303 owners |
 | [Bridge Derived Execution Identity](active/bridge-derived-execution-identity/README.md) | Draft; reviewed derivation contract before implementation | #7069; preserves #6987/#5839/#7057 owners |
-| [Venue Plugin Staging and Registration Parity](active/venue-plugin-staging-parity/README.md) | Active; trusted-provider registration merged, static local/SSH/privileged parity and release acceptance open | #5286, #5072; sub-effort of #954 |
+| [Venue Plugin Staging and Registration Parity](active/venue-plugin-staging-parity/README.md) | Active; source-preserving local CLI/ACP and owned startup gate merged; SSH/privileged, live-container and release acceptance open | #5286, #5072; sub-effort of #954 |
 | [Source-Managed Runtime Installs](active/source-managed-runtime-installs/README.md) | Active; thirteen merged-source installers qualified; deployment policy/Manager integration open, recurring maintenance intent proposed | #7028; #3905, #7029, #7030; future plugin-source switch #7031 |
 | [PR Lifecycle Conformance](active/pr-lifecycle-conformance/README.md) | Active; Phase 1 evidence and contract proposed, adapter implementation and acceptance open | #7051; existing #2357 lifecycle ownership retained |
-| [Machine Alias Compatibility and Locality](active/machine-alias-compatibility-and-locality/README.md) | Active; alias/locality repair, empty-mux readiness and installed Windows/WSL acceptance open | #5674 · #6739; original identity repair retained, wider transport convergence remains separately owned |
+| [Machine Alias Compatibility and Locality](active/machine-alias-compatibility-and-locality/README.md) | Active; shared identity readers merged; full producer implementation authorized with defaults/rollout gated; installed Windows/WSL acceptance open | #5674 · #6739; original identity repair retained, wider transport convergence remains separately owned |
 | [Manual Task Session Resume](active/manual-task-session-resume/README.md) | Draft; manual exit pause and explicit local CLI/mux resume, planning only | #6677; existing lifecycle/recovery owners retained |
 | [Artifact Publication Boundary Hardening](active/artifact-publication-boundary-hardening/README.md) | Blocked; proposal merged, containing primary repairs and attested hosted publication still required | #6639; #6535/#6632 owners retained |
 | [Continuous Worktree Reclamation](active/continuous-worktree-reclamation/README.md) | Draft; vision and implementation/performance plan only, execution separately authorized | #6620; preserves #1488/#1918/#3114, #6060 and #6471 |
-| [Installer Transaction Admission Repair](active/installer-transaction-admission-repair/README.md) | Active; local repair validated, review/landing/released-source proof pending | #6463 |
+| [Installer Transaction Admission Repair](active/installer-transaction-admission-repair/README.md) | Done; actual reviewed repair and all four released protocols verified, pending archive; no host rollout | #6463 |
 | [Seasoned Dependencies and Transactional Installs](active/seasoned-dependencies-and-transactional-installs/README.md) | Draft; seven-day declarations/resolution and failed-build cleanup | #6476 |
-| [Dispatch Fleet Reliability and Recovery](active/dispatch-fleet-reliability-recovery/README.md) | Active; maintenance categories, bounded supervision and registry-rooted recovery | #6466, #6467, #6470, #6471; existing #6407/#6421 repair owner retained |
+| [Dispatch Fleet Reliability and Recovery](active/dispatch-fleet-reliability-recovery/README.md) | Active; bounded supervision, exact recovery and retained maintenance acceptance | #6467, #6470, #6471 and Plan/Validation/Journal; #6466 is historical category work; existing #6407/#6421 repair owner retained |
 | [Runtime Operational Contracts](active/review-pipeline-operational-contracts/README.md) | Active; proposal/prerequisites merged, activation/readiness/Windows contracts and adoption open | #6274; existing Windows regression #6266 |
 | [Configuration Backstage and Worker Instances](active/configuration-backstage-and-worker-instances/README.md) | Active; proposal reviewed, section and instance contracts | #6379 |
 | [Main-Owned Workflow Control](active/main-owned-workflow-control/README.md) | Active; shared consolidation roadmap and owner-only local-provider review rescue proposed, gated implementation open | #6237; canonical audit/coordination lead, existing release/runner/portfolio owners retained |
@@ -41,7 +45,7 @@ that pattern to this repository.
 | [Worktree Conclusion Tidier](active/worktree-conclusion-tidier/README.md) | Draft; audit capability released/installed, live pilot gated | #6060 |
 | [Native Context Handoff Compatibility](active/native-context-handoff-compatibility/README.md) | Active; capability-contract investigation | #6028 |
 | [Linux Role Fleet](active/linux-role-fleet/README.md) | Active; reviewed Komodo-first plan and isolated adoption proof | #6030, #5861 |
-| [Gateway and SSH Fleet Onboarding](active/gateway-ssh-fleet-onboarding/README.md) | Active; pure policy/runtime leaves, ordered setup integration pending | #6681 / #5861; existing lifecycle/auth/ledger owners retained |
+| [Gateway and SSH Fleet Onboarding](active/gateway-ssh-fleet-onboarding/README.md) | Active; bounded artifact-assembly source qualified and merged, proof/publication and ordered setup/adoption remain open | #6681 / #5861; closing source responsibility returns to tracked integration backlog |
 | [Durable PR-Watch Delegation](active/durable-pr-watch-delegation/README.md) | Active; first-class PR service/fleet plan reviewed; runtime, owner and dispatch gates retained | #6007, #6286, #7188 |
 | [Versioned Singleton Manager](active/versioned-singleton-manager/README.md) | Active | #5655 |
 | [Status-monitor singleton correctness](active/status-monitor-singleton-correctness/README.md) | Draft; planning only, cold-start prerequisite satisfied | #5512 (restart), then #5453 (replacement and promotion/cutover) |
@@ -69,7 +73,7 @@ that pattern to this repository.
 | [Worktree/Effort Railroad Binding](active/worktree-effort-railroad-binding/README.md) | Draft | #3581 |
 | [Worktree Head-Succession Hardening](active/worktree-head-succession-hardening/README.md) | Draft | #3584 |
 | [Picker Creature Comforts](active/picker-creature-comforts/README.md) | Draft | #3586 |
-| [Dev/Main Release Pipeline](active/dev-branch-release-pipeline/README.md) | Active (Phases 7 and 9) | #3336 |
+| [Dev/Main Release Pipeline](active/dev-branch-release-pipeline/README.md) | Active (Phases 7 and 9); first contributor-regression cohort released: 322 units, natural 12m12s cycle | #3336 |
 | [Promotion-Failure Reactive Fix Agent](active/promotion-failure-reactive-fix-agent/README.md) | Active | _TBD_ |
 | [Agent-Process Self-Report Registry](active/agent-process-self-report-registry/README.md) | Draft | #5559 |
 | [Full-Harness Startup Reliability](active/full-harness-startup-reliability/README.md) | Active | #3303 |
@@ -80,26 +84,26 @@ that pattern to this repository.
 | [Context-Handoff Overhaul](active/context-handoff-overhaul/README.md) | Draft | #2594 |
 | [Custom Context Aggregator Retirement](active/custom-context-aggregator-retirement/README.md) | Draft | #2173 |
 | [SessionStart Static/Dynamic Content Conformance](active/sessionstart-static-dynamic-conformance/README.md) | Active | #2256 |
-| [agent-logger Aggregate Configuration](active/agent-logger-aggregate-configuration/README.md) | Active | #1817 |
-| [Balanced Profile Assignment](active/balanced-profile-assignment/README.md) | Active | #1564 |
-| [Budget-Aware Model Routing](active/budget-aware-model-routing/README.md) | Active; posture, session delivery, routing, and personal provider reports implemented; entitlement/account proof and adoption open | #2137 |
-| [Evidence-Calibrated Model Routing](active/evidence-calibrated-model-routing/README.md) | Active | #2014 |
+| [agent-logger Aggregate Configuration](active/agent-logger-aggregate-configuration/README.md) | Active; complete aggregate authorization and adoption acceptance retained | Plan/Validation/Journal plus open bounded source issues; #1817 is historical after complete reviewed intake |
+| [Balanced Profile Assignment](active/balanced-profile-assignment/README.md) | Active; implementation merged, deployment acceptance unverified; default-off semantics retained | #1564; usage/deprecation decision remains #4871 |
+| [Budget-Aware Model Routing](active/budget-aware-model-routing/README.md) | Active; posture, session delivery, routing, and personal provider reports implemented; entitlement/account proof and adoption open | Plan/Validation/Journal plus open bounded source issues; historical #2137 after reviewed intake |
+| [Evidence-Calibrated Model Routing](active/evidence-calibrated-model-routing/README.md) | Active | Plan/Validation/Journal plus open bounded source issues; historical #2014 after reviewed intake |
 | [agent-bridge Contract Evolution](active/agent-bridge-contract-evolution/README.md) | Draft | #1460 |
 | [agent-bridge AHP Convergence](active/agent-bridge-ahp-convergence/README.md) | Draft | #1266, #1308 |
-| [agent-bridge Delegation Convergence](active/agent-bridge-delegation-convergence/README.md) | Active | #1448 |
+| [agent-bridge Delegation Convergence](active/agent-bridge-delegation-convergence/README.md) | Active | #1448 original; reviewed Plan/Validation/Journal with independent source claims and assigned #1266 preserved |
 | [agent-bridge Session Discovery](active/agent-bridge-session-discovery/README.md) | Draft | #2530 |
 | [agent-bridge CLI-Mode Sessions](active/agent-bridge-cli-mode-sessions/README.md) | Active | See effort |
 | [Proposed Alignment/Convergence of Observable agent-bridge CLI Sessions](active/agent-bridge-cli-session-alignment/README.md) | Active | See effort |
 | [CLI-Default Bridging](active/cli-default-bridging/README.md) | Active; Phase 6 research complete, SDK prompt fix merged to dev, arbitration next | #6647, #5930 |
 | [Migration Intake](active/migration-intake/README.md) | Draft | See effort |
 | [Account-Aware Operations](active/account-aware-operations/README.md) | Draft | See effort |
-| [Agent Machines Declarative Control Plane](active/agent-machines-declarative-control-plane/README.md) | Active | #1418 (closed; historical, no live umbrella) |
+| [Agent Machines Declarative Control Plane](active/agent-machines-declarative-control-plane/README.md) | Active | #1418 historical; retained reset/prelaunch use reviewed Plan/Validation/Journal and open per-slice claims |
 | [Review Automation Reliability](active/review-automation-reliability/README.md) | Draft | See effort |
 | [Marketplace-Scoped Installations](active/marketplace-scoped-installations/README.md) | Active | #1096 |
 | [Native-Construct Convergence](active/native-construct-convergence/README.md) | Active | #985 |
 | [Tiered Payload Provisioning](active/tiered-payload-provisioning/README.md) | Draft | See effort |
 | [Governed Python Artifact Promotion](active/governed-python-artifact-promotion/README.md) | Active | #4876 |
-| [Progressive Context Disclosure](active/progressive-context-disclosure/README.md) | Active | #1612 |
+| [Progressive Context Disclosure](active/progressive-context-disclosure/README.md) | Active | #1612 original; reviewed Plan/Validation/Journal, unchanged lanes and open bounded-source claims |
 | [Restricted Venue Targets](active/restricted-venue-targets/README.md) | Draft | #1188 |
 | [Test Portfolio Rationalization](active/test-portfolio-rationalization/README.md) | Active | #1303 |
 | [Terminal Worktree Reclamation](active/terminal-worktree-reclamation/README.md) | Draft | #1488 |
@@ -125,6 +129,8 @@ that pattern to this repository.
 
 | Effort | Outcome | Coordination |
 |--------|---------|--------------|
+| [CodeSpaces Authentication CTA](2026/10/22%20codespaces-authentication-cta/README.md) | Done; reviewed provider/Manager source merged, no native authorization or rollout | #7793 retains native acceptance and rollout; #4180 remains separate |
+| [RedirectionGuard Adoption](2026/10/20%20redirectionguard-adoption/README.md) | Done; shared interpreter and failed-front-door source repairs merged to Dev and qualified; no rollout | #7445; publication and installed-consumer recovery retained by #7305, construction by #7420 |
 | [Gateway Native Qualification](2026/10/20%20gateway-native-qualification/README.md) | Done; explicit native selection and actual exact-source amd64/ARM64 assembled proofs merged, private evidence/images retained; no rollout | #7257 retains provider/live-edge gates; authentication, lifecycle and adoption owners unchanged |
 | [ADO PR Stewardship](2026/10/20%20ado-pr-stewardship/README.md) | Done; central ADO evidence/configuration/owner integration released, installed worker policy proved, consumer tool forks retired | #7203; separate #3336/#6007/#7051 obligations retained |
 | [Gateway Role Tunnels](2026/10/19%20gateway-role-tunnels/README.md) | Done; reusable runtime/image and generic ingress merged, native amd64 isolated proof and readiness record; no rollout | #7257 retains native ARM64/live edge/provider gates; broader #6236/#6030 remain open |

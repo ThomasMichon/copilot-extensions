@@ -2997,6 +2997,86 @@ def test_python_output_free_contract_distinguishes_stderr_diagnostics(tmp_path):
         assert scan._script_has_output_free_contract(script) is expected, statement
 
 
+@pytest.mark.parametrize("suffix", [".sh", ".ps1"])
+@pytest.mark.parametrize(
+    "failure", [None, "stdout", "uncaptured-selector", "missing-legacy", "legacy-stdout", "different-delegate"],
+)
+def test_native_bootstrap_admission_preserves_verified_output_free_contract(
+    tmp_path, suffix, failure,
+):
+    repo = tmp_path / "repo"
+    plugin = _session_plugin(repo, "plugins", "native-admission")
+    bodies = {
+        ".sh": """#!/usr/bin/env bash
+set -euo pipefail
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if ! mode="$(bash "$here/payload-mode.sh")"; then
+    printf '{}'
+    exit 126
+fi
+if [[ "$mode" == legacy ]]; then exec bash "$here/bootstrap-check.sh"; fi
+[[ "$mode" == cell ]] || { printf '%s\\n' 'Unknown native installation mode' >&2; exit 126; }
+printf '{}'
+""",
+        ".ps1": """$ErrorActionPreference = 'Stop'
+try {
+    $mode = & (Join-Path $PSScriptRoot 'payload-mode.ps1')
+} catch {
+    [Console]::Error.WriteLine("Bootstrap admission refused: $($_.Exception.Message)")
+    [Console]::Out.Write('{}')
+    exit 126
+}
+if ($mode -ceq 'legacy') {
+    & (Join-Path $PSScriptRoot 'bootstrap-check.ps1')
+    exit $LASTEXITCODE
+}
+if ($mode -cne 'cell') { throw 'Native installation admission returned an unknown mode' }
+[Console]::Out.Write('{}')
+""",
+    }
+    for extension, body in bodies.items():
+        (plugin / "scripts" / f"bootstrap-check-admission{extension}").write_text(
+            body, encoding="utf-8",
+        )
+    hooks = json.loads((plugin / "hooks.json").read_text())
+    for platform in ("bash", "powershell"):
+        entry = hooks["hooks"]["sessionStart"][0]
+        entry[platform] = entry[platform].replace("bootstrap-check.", "bootstrap-check-admission.")
+    (plugin / "hooks.json").write_text(json.dumps(hooks), encoding="utf-8")
+    wrapper = plugin / "scripts" / f"bootstrap-check-admission{suffix}"
+    legacy = plugin / "scripts" / f"bootstrap-check{suffix}"
+    if failure == "stdout":
+        with wrapper.open("a", encoding="utf-8") as stream:
+            stream.write("\necho context\n" if suffix == ".sh" else "\nWrite-Output 'context'\n")
+    elif failure == "uncaptured-selector":
+        text = wrapper.read_text()
+        text = text.replace('mode="$(bash "$here/payload-mode.sh")"', 'bash "$here/payload-mode.sh"')
+        wrapper.write_text(text.replace("$mode = &", "&"), encoding="utf-8")
+    elif failure == "missing-legacy":
+        legacy.unlink()
+    elif failure == "legacy-stdout":
+        statement = "echo 'context'" if suffix == ".sh" else "Write-Output 'context'"
+        legacy.write_text(
+            legacy.read_text().replace("exit 0", statement + "\nexit 0"),
+            encoding="utf-8",
+        )
+    elif failure == "different-delegate":
+        wrapper.write_text(
+            wrapper.read_text().replace(f"bootstrap-check{suffix}", f"other{suffix}"),
+            encoding="utf-8",
+        )
+    source = scan.PluginSource(
+        skills_root=plugin / "skills", origin="copilot-extensions/native-admission", controlled=True,
+    )
+    inventory = scan.scan_session_context(repo, [source], scan.Report())
+    expected = failure is None
+    assert scan._session_start_is_structurally_output_free(plugin) is expected
+    assert inventory["plugins"][0]["possible_non_empty"] == ("no" if expected else "yes")
+    assert inventory["plugins"][0]["role"] == (
+        "proven-output-free" if expected else "legacy-direct-or-unknown"
+    )
+
+
 def test_suite_session_start_stack_is_output_free_without_authority():
     root = Path(__file__).resolve().parents[5]
     sources = []

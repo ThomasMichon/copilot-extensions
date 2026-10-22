@@ -130,9 +130,9 @@ def _find_any_symlink(tree: Path) -> Path | None:
     return None
 
 
-def _copy_payload(payload_dir: Path, slot: Path) -> None:
+def _copy_payload(payload_dir: Path, slot: Path, *, mark_complete: bool = True) -> None:
     try:
-        _copy_payload_unsafe(payload_dir, slot)
+        _copy_payload_unsafe(payload_dir, slot, mark_complete=mark_complete)
     except RuntimeError:
         # Already our one normalized, self_install()-caught boundary type --
         # re-raise as-is (don't re-wrap).
@@ -154,7 +154,7 @@ def _copy_payload(payload_dir: Path, slot: Path) -> None:
         raise RuntimeError(f"copying payload into {slot} failed: {e}") from e
 
 
-def _copy_payload_unsafe(payload_dir: Path, slot: Path) -> None:
+def _copy_payload_unsafe(payload_dir: Path, slot: Path, *, mark_complete: bool = True) -> None:
     # Deferred to avoid a module-load-time circular import: self_install.py
     # imports this module for _copy_payload/_copy_payload_unsafe, so these
     # names are only resolvable once self_install.py has finished defining
@@ -225,7 +225,8 @@ def _copy_payload_unsafe(payload_dir: Path, slot: Path) -> None:
         # Published only here, as proof the STAGED copy is complete --
         # strictly before it is swapped into `slot` below, so the swap only
         # ever publishes an already-proven-complete replacement.
-        _mark_slot_complete(staging)
+        if mark_complete:
+            _mark_slot_complete(staging)
         _swap_in_staged_slot(staging, slot)
     except BaseException:
         shutil.rmtree(staging, ignore_errors=True)

@@ -103,6 +103,8 @@ _HTTP_CAPABILITY_CONSTANTS = {
     "agent_roster_cache": "AGENT_ROSTER_CACHE_PROTOCOL_VERSION",
     "events_before_paging": "EVENTS_BEFORE_PAGING_PROTOCOL_VERSION",
     "caller_session_id": "CALLER_SESSION_ID_PROTOCOL_VERSION",
+    "plugin_readiness": "PLUGIN_READINESS_PROTOCOL_VERSION",
+    "keyed_native_prompt": "KEYED_NATIVE_PROMPT_PROTOCOL_VERSION",
 }
 
 # Git-evidence resolution (commit/blob lookups, opportunistic across a
@@ -713,6 +715,20 @@ def _validate_contract(
                             "source provenance"
                         )
             fixture_count += 1
+
+    if (contract["id"] == "agent-bridge.http-wire" and type(current) is int
+            and current >= 45 and isinstance(fixtures, list)):
+        from bridge_http45_evidence import validate_families
+        loaded = {}
+        for fixture in fixtures:
+            if (not isinstance(fixture, dict) or not isinstance(fixture.get("path"), str)
+                    or "sha256" not in fixture):
+                continue
+            path = _safe_file(fixture["path"], CONTRACT_DIR, errors, label)
+            data = _load_json(path, errors, label) if path is not None else None
+            if isinstance(data, dict):
+                loaded[fixture["path"]] = (fixture["sha256"], data)
+        validate_families(fixtures, loaded, errors)
 
     missing_generations = sorted(evidence_generations - fixture_generations)
     if missing_generations:

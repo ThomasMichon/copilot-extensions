@@ -11,13 +11,31 @@ of — link here rather than restating any of it.
 
 ## Standalone PR job admission
 
-Source CI now contains four jobs: operational `checks`, `unit-plan`,
-`unit-tests` and the fixed-name `PR gate (required check)`. The plan reads the
-actual PR base/head diff. Known narrative-only changes may skip testing; unknown,
-code or configuration impact runs only the positively admitted unit packet.
+Source CI contains three jobs: operational `checks`, combined impact/execution
+in `unit-tests`, and the fixed-name `PR gate (required check)`. The unit job
+reads the actual PR base/head diff before installing test tooling or executing
+tests. Known narrative-only changes may skip testing; unknown, code or
+configuration impact runs only the positively admitted unit packet.
 It never falls back to standalone services, fleet, native or general plugin
-suites. The aggregate requires successful guards and impact admission, and
-actual unit success whenever selected.
+suites. Guards and the unit job remain independent and parallel. Combining
+impact and execution removes the separate planning runner and duplicate
+checkout without placing unit execution behind guards. The aggregate requires
+both jobs to succeed, a valid selection, and the actual test step's `success`
+or explicit `skipped` outcome matching that selection. Job success alone is
+not unit-execution evidence.
+
+The nonblocking marketplace-isolation inventory runs on pushes and manual CI,
+not again on each PR update. Admitted Dev-push executions retain that diagnostic;
+strict source guards and required validation remain in PR CI. A cancelled or
+superseded execution is not diagnostic or test evidence.
+
+The checks job independently reuses the same pinned-diff narrative classifier
+for its tracking-write, headless-launch and asyncio-timeout AST scans. Only
+known Markdown-only PRs omit these three scans, whose inputs exclude those
+files. Non-narrative/unknown PR inputs retain complete scans; push, manual and
+other events always run them. Invalid or unavailable diff evidence fails the
+job, not a success-shaped skip. All other guards remain unchanged, and the
+ungated trusted-CI guard binds the selector and exact scan commands.
 
 Push CI performs source-policy admission without repeating promotion's unit
 execution. Manual CI runs the same admitted packet, not the old full portfolio.
@@ -26,18 +44,17 @@ native execution is explicitly unenrolled pending a container route.
 
 See [the unit packet reference](../TESTING.md#unit-only-promotion-packet).
 The [reviewed burndown](../efforts/active/dev-branch-release-pipeline/promotion-burndown.md)
-owns the migration and completion gate. Source CI implementation does not
-activate Main's separately reviewed controller: Main remains paused until the
-unit-reuse control is reviewed, qualified, published and resumed. Historical
-full-candidate descriptions below are not instructions to reactivate those
-integration gates.
+owns the migration and completion gate. Source CI changes do not activate,
+resume or bypass Main's separately governed controller. Inspect its actual
+state and qualification rather than inferring either pause or activation from
+the source-CI layout. Historical full-candidate descriptions below are not
+instructions to reactivate those integration gates.
 
 ### Source-unit promotion receipt
 
-The Source promotion declaration now mirrors an eleven-job controller proposal.
-It is not activated on Main merely by merging this source declaration. The
-independently reviewed Main transaction must pin the reviewed helpers and retain
-the pause until real qualification succeeds.
+The source promotion declaration owns its independent source-unit transaction.
+Its governed Main control must pin reviewed helpers and qualification evidence;
+combining source-CI jobs changes neither that transaction nor its authority.
 
 After source admission, `source-units` runs the full admitted packet once with
 coverage while the credential-free artifact build proceeds independently.
@@ -295,6 +312,11 @@ and a GitHub-hosted runner. Verification uses the read-only workflow token,
 not the release PAT. `publish_python_artifacts.py`
 verifies the index first, then validates its exact bundle set before checking
 those bundles' attestations; unrelated or missing files fail closed.
+Index authentication, bundle-set validation and any original Main admission
+verification remain serial. Only the independent bundle attestations use up
+to four concurrent verifications, with the same pinned identities, read-only
+token and per-subject deadline. Every verification must pass and all workers
+are joined before the caller can publish or emit a success receipt.
 `promote_release.py --python-artifacts-dir <dir>`
 recomputes composition and refuses missing/corrupt/mis-targeted artifacts
 before pushing a candidate, including repeating the archive-content checks.
@@ -333,7 +355,20 @@ the **read-only** workflow token to verify their actual bytes. An upload result
 or a release-writer-only view is not availability proof. Authentication,
 publication, incomplete-set and byte-integrity failures fail the promotion job
 before any PR merge is attempted. A retry may fill missing assets but cannot replace
-existing bytes. The generated PR links its ready set, and merge authorization
+existing bytes.
+
+Missing assets in the same readiness release share one `gh release upload`
+invocation, without `--clobber`. After complete metadata validation, readiness
+and final-publication raw readback use at most four concurrent downloads, each
+with the same consumer token and 120-second deadline. Every download must
+finish and pass its exact digest check before a success receipt is emitted;
+worker failures propagate and all owned workers are joined. Release/tag/source
+validation remains serial; signer identity checks remain mandatory as described
+above.
+These source helpers take effect only when the independently governed control
+selects a reviewed helper revision; a Dev merge alone does not change its pin.
+
+The generated PR links its ready set, and merge authorization
 and the merge waiter retain the SHA appended directly by the trusted promoter
 to the step's GitHub output file. A remote branch lookup never selects that
 identity: both the lookup and fetched ref must equal the promoter's SHA before
@@ -1370,6 +1405,10 @@ whatever changefiles are pending; nothing here is hand-edited directly.
 > change does (`python tools/changefile.py add --plugin worktree-manager
 > --type patch --comment "..."` — the `--plugin` flag name is historical;
 > it accepts any recognized consumer identifier).
+> Registered standalone consumers such as **`fleet-manager`** follow this
+> same release-metadata rule: changes to their shipped content require a
+> pending changefile naming that consumer. Use its registered name with
+> `--plugin`; absence from the marketplace plugin roster is not an exemption.
 >
 > **Before editing a shared lib, find every consumer first — two commands,
 > not one.** `python tools/check-vendored-libs-sync.py --list` enumerates

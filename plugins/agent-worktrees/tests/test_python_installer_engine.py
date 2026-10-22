@@ -61,6 +61,53 @@ def test_child_failure_preserves_unicode_diagnostic_and_original_error(engine, m
     assert b"\\u2502 build failed" in stream.getvalue()
 
 
+@pytest.mark.timeout(120)
+@pytest.mark.parametrize("primary", [
+    subprocess.CalledProcessError(17, ["uv"], output="child output", stderr="child failure"),
+    OSError("child could not start"),
+])
+def test_candidate_failure_survives_retained_cleanup(
+    engine, tmp_path, build_inputs, monkeypatch, capsys, primary,
+):
+    plugin, uv = build_inputs
+    root = tmp_path / "runtime"
+    policy = sys.modules[engine.retain_uv_install.__module__]
+    temporary_directory = policy.tempfile.TemporaryDirectory
+    cleanup_attempts = []
+
+    class CleanupFailure:
+        def __init__(self, **kwargs):
+            self.temporary = temporary_directory(**kwargs)
+            self.name = self.temporary.name
+
+        def cleanup(self):
+            cleanup_attempts.append(self.name)
+            self.temporary.name = self.name
+            self.temporary.cleanup()
+            raise PermissionError("injected retained cleanup failure")
+
+    def fail(*args, **kwargs):
+        raise primary
+
+    monkeypatch.setattr(policy.tempfile, "TemporaryDirectory", CleanupFailure)
+    monkeypatch.setattr(engine, "_construct", fail)
+    with pytest.raises(type(primary)) as caught:
+        with engine.numbered_candidate(
+            root, "1.0.0", plugin=plugin, uv=uv, base_python=Path(sys.executable),
+            health_module="example_module",
+        ):
+            pytest.fail("a failed construction cannot yield a ready candidate")
+    assert caught.value is primary
+    assert len(cleanup_attempts) == 1
+    assert not Path(cleanup_attempts[0]).exists()
+    assert not engine.runtime.marker_path(root, "1.0.0").exists()
+    with engine.runtime.construction_lease(root, "1.0.0", timeout=0):
+        pass
+    diagnostic = capsys.readouterr().err
+    assert diagnostic.count("retained-input-cleanup:") == 1
+    assert "injected retained cleanup failure" in diagnostic
+
+
 def test_child_timeout_surfaces_captured_backend_diagnostic(engine, monkeypatch, capsys):
     failure = subprocess.TimeoutExpired(
         ["uv"], 1, output="building example\n", stderr="backend stalled\n",
@@ -92,6 +139,54 @@ def test_child_preserves_canonical_transaction_environment_and_cwd(engine, monke
         [sys.executable], inputs=None, descriptor=0, timeout=1,
         environment=environment, cwd=tmp_path,
     )
+
+
+def test_frozen_procutil_imports_its_siblings_without_cross_root_reuse(engine, tmp_path):
+    loaded = []
+    for name in ("first", "second"):
+        root = _package(tmp_path / name, "agent-procutil")
+        package = root / "src" / "agent_procutil"
+        package.mkdir()
+        (package / "__init__.py").write_text("from .sibling import VALUE\n", encoding="utf-8")
+        (package / "sibling.py").write_text(f"VALUE = {name!r}\n", encoding="utf-8")
+        module = engine._procutil(engine.FrozenInputs(root, (root,), "unused"))
+        assert module.VALUE == name
+        sibling = sys.modules[module.__name__ + ".sibling"]
+        assert Path(sibling.__file__).is_relative_to(root)
+        loaded.append(module.__name__)
+    assert loaded[0] != loaded[1]
+
+
+@pytest.mark.parametrize("windows", [False, True])
+def test_process_creation_failure_has_a_distinct_os_error_type(procutil, monkeypatch, windows):
+    failure = OSError(193, "not an executable", "broken-python")
+    monkeypatch.setattr(procutil, "_is_windows", lambda: windows)
+
+    def failed(*args, **kwargs):
+        raise failure
+
+    monkeypatch.setattr(procutil.subprocess, "Popen", failed)
+    with pytest.raises(procutil.SyncProcessLaunchError) as caught:
+        procutil.spawn_sync_in_kill_on_close_job(["broken-python"], require_job=True)
+    assert isinstance(caught.value, OSError)
+    assert caught.value.errno == failure.errno and caught.value.filename == failure.filename
+    assert caught.value.__cause__ is failure
+
+
+def test_post_creation_job_failure_is_not_a_launch_error(procutil, monkeypatch):
+    from types import SimpleNamespace
+
+    failure = OSError("Job assignment accounting unavailable")
+    monkeypatch.setattr(procutil, "_is_windows", lambda: True)
+    monkeypatch.setattr(procutil.subprocess, "Popen", lambda *args, **kwargs: SimpleNamespace(pid=1))
+
+    def failed(*args, **kwargs):
+        raise failure
+
+    monkeypatch.setattr(procutil, "_assign_suspended_to_kill_on_close_job", failed)
+    with pytest.raises(OSError) as caught:
+        procutil.spawn_sync_in_kill_on_close_job(["python"], require_job=True)
+    assert caught.value is failure and not isinstance(caught.value, procutil.SyncProcessLaunchError)
 
 
 def test_freeze_closes_transitive_external_paths_without_editing_source(engine, tmp_path):
@@ -240,7 +335,7 @@ def test_freeze_real_worktrees_graph_is_self_contained(engine, tmp_path):
 @pytest.fixture
 def procutil(engine):
     root = Path(__file__).resolve().parents[3]
-    package = root / "plugins" / "agent-worktrees" / "libs" / "agent-procutil"
+    package = root / "libs" / "agent-procutil"
     return engine._procutil(engine.FrozenInputs(package, (package,), "unused"))
 
 
@@ -381,7 +476,7 @@ def test_owned_child_hard_owner_death_reaps_writer_tree(engine, procutil, tmp_pa
         f"sys.path[:0]=[{str(root / 'libs' / 'installer-engine')!r},"
         f"{str(root / 'plugins' / 'agent-worktrees' / 'scripts')!r}]\n"
         "import installer_engine as engine\n"
-        f"package=pathlib.Path({str(root / 'plugins' / 'agent-worktrees' / 'libs' / 'agent-procutil')!r})\n"
+        f"package=pathlib.Path({str(root / 'libs' / 'agent-procutil')!r})\n"
         "procutil=engine._procutil(engine.FrozenInputs(package,(package,),'unused'))\n"
         f"root=pathlib.Path({str(tmp_path)!r})\n"
         "with engine.runtime.construction_lease(root,'1.0') as descriptor:\n"
@@ -470,10 +565,9 @@ def build_inputs(tmp_path, monkeypatch):
         (package / "src" / "module.py").unlink()
         if name == "agent-procutil":
             target = package / "src" / module
-            target.mkdir()
-            shutil.copyfile(
-                root / "libs" / "agent-procutil" / "src" / "agent_procutil" / "__init__.py",
-                target / "__init__.py",
+            shutil.copytree(
+                root / "libs" / "agent-procutil" / "src" / "agent_procutil", target,
+                ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
             )
         else:
             (package / "src" / f"{module}.py").write_text(
@@ -797,50 +891,93 @@ def test_reuse_failed_direct_health_preserves_published_identity(engine, tmp_pat
     assert selectors == {name: (root / name).read_bytes() for name in selectors}
 
 
+@pytest.mark.parametrize("failure", ["unexecutable", "timeout"])
+def test_completed_runtime_launch_failure_requests_distinct_repair(
+    engine, tmp_path, build_inputs, failure,
+):
+    plugin, uv = build_inputs
+    root = tmp_path / "runtime"
+    arguments = dict(plugin=plugin, uv=uv, base_python=Path(sys.executable), health_module="example_module")
+    with engine.numbered_candidate(root, "1.0.0", **arguments) as candidate:
+        slot = candidate.slot
+    engine.runtime.activate(root, "1.0.0", link_free=True)
+    if failure == "unexecutable":
+        engine.runtime.slot_python(root, "1.0.0").write_bytes(b"not an executable")
+    else:
+        next(slot.glob("**/site-packages/example_module.py")).write_text(
+            "import time\ntime.sleep(60)\n", encoding="utf-8",
+        )
+    before = {path: path.read_bytes() for path in slot.rglob("*") if path.is_file()}
+    selectors = {name: (root / name).read_bytes() for name in ("current-version", "last-known-good")}
+    with pytest.raises(engine.HealthRepairRequired):
+        with engine.numbered_candidate(root, "1.0.0", child_timeout=1, **arguments):
+            pytest.fail("broken completed health cannot license an in-place rebuild")
+    assert before == {path: path.read_bytes() for path in slot.rglob("*") if path.is_file()}
+    assert selectors == {name: (root / name).read_bytes() for name in selectors}
+
+
+@pytest.mark.parametrize("failure", [
+    OSError("cleanup accounting failed"),
+    subprocess.TimeoutExpired(["cleanup"], 1),
+    RuntimeError("ownership refused"),
+])
+def test_reused_health_does_not_classify_cleanup_or_ownership_failure_as_repair(
+    engine, tmp_path, monkeypatch, failure,
+):
+    monkeypatch.setattr(engine, "_input_origins", lambda inputs: {})
+
+    def failed(*args, **kwargs):
+        raise failure
+
+    monkeypatch.setattr(engine, "_child", failed)
+    with pytest.raises(type(failure)) as caught:
+        engine._verify_installed(
+            None, tmp_path, tmp_path / "python", "example", 0, 1, require_frozen_origin=False,
+        )
+    assert caught.value is failure
+
+
 @pytest.mark.skipif(os.name != "nt", reason="native Windows Job accounting failure")
 def test_unsettled_job_teardown_keeps_frozen_inputs_and_construction_custody(
     engine, procutil, tmp_path, build_inputs, monkeypatch,
 ):
+    from types import SimpleNamespace
+    from native_installer_guardian_teardown import write_procutil
+
     plugin, uv = build_inputs
     root = tmp_path / "runtime"
-    attempts = 0
-    original = procutil.JobHandle.terminate_and_wait
-    original_spawn = procutil.spawn_sync_in_kill_on_close_job
-    failure = OSError("Job accounting temporarily unavailable")
     marker = tmp_path / "writers"
+    observations = tmp_path / "teardown.json"
+    injected = tmp_path / "guardian_procutil.py"
     observed_inputs = []
+    original = engine._procutil
 
-    def spawn(argv, **kwargs):
-        return original_spawn([sys.executable, "-c", _writer_tree(marker)], **kwargs)
+    def instrument(inputs):
+        observed_inputs.append(inputs)
+        owned = original(inputs)
+        write_procutil(
+            injected, procutil=Path(owned.__file__), runtime=Path(engine.runtime.__file__),
+            root=root, frozen=inputs.plugin, marker=marker, observations=observations,
+            writer=_writer_tree(marker),
+        )
+        return SimpleNamespace(__file__=injected, no_window_kwargs=owned.no_window_kwargs)
 
-    def terminate_and_wait(job, timeout):
-        nonlocal attempts
-        attempts += 1
-        assert observed_inputs and (observed_inputs[0].plugin / "pyproject.toml").is_file()
-        with pytest.raises(engine.runtime.ConstructionTimeout):
-            with engine.runtime.construction_lease(root, "1.0.0", timeout=0):
-                pytest.fail("unsettled child must retain construction custody")
-        assert not engine.runtime.marker_path(root, "1.0.0").exists()
-        if attempts == 1:
-            assert all(engine.runtime._pid_alive(pid) for pid in _wait_for_writer(marker))
-            raise failure
-        original(job, timeout)
-        assert job.handle is None
-
-    monkeypatch.setattr(procutil.JobHandle, "terminate_and_wait", terminate_and_wait)
-    monkeypatch.setattr(procutil, "spawn_sync_in_kill_on_close_job", spawn)
-    monkeypatch.setattr(
-        engine, "_procutil", lambda inputs: (observed_inputs.append(inputs) or procutil),
-    )
-    with pytest.raises(OSError) as raised:
+    monkeypatch.setattr(engine, "_procutil", instrument)
+    with pytest.raises(RuntimeError, match="guardian did not confirm settlement"):
         with engine.numbered_candidate(
             root, "1.0.0", plugin=plugin, uv=uv, base_python=Path(sys.executable),
             health_module="example_module", child_timeout=2,
         ):
             pytest.fail("a teardown failure cannot publish a candidate")
-    assert raised.value is failure and attempts == 2
-    _assert_writers_dead(engine, _wait_for_writer(marker))
+    entries = json.loads(observations.read_text())
+    assert len(entries) == 2 and entries[0]["writers_live"] and entries[1]["writers_settled"]
+    assert all(entry["frozen"] and entry["construction_blocked"]
+               and entry["retention_blocked"] and entry["cleanup_blocked"]
+               and not entry["complete"] for entry in entries)
+    _assert_writers_dead(engine, entries[1]["pids"])
+    assert not engine.runtime.marker_path(root, "1.0.0").exists()
     assert not list((root / ".installer-inputs").iterdir())
     assert not observed_inputs[0].plugin.exists()
     with engine.runtime.construction_lease(root, "1.0.0", timeout=0):
-        pass
+        with engine.runtime._cleanup_lease(root, "1.0.0", allow_construction_owner=True) as admitted:
+            assert admitted

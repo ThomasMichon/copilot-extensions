@@ -240,6 +240,11 @@ def push_venue(
     selected: list[RescuedSession],
 ) -> PushResult:
     """Project one venue to canonical source shape, push, then remove it."""
+    configured = getattr(target, "protection", None)
+    if cfg.sync_protection.enabled or (configured is not None and configured.enabled):
+        raise RescueSourceError(
+            "rescue publication is not supported while session protection is enabled"
+        )
     with tempfile.TemporaryDirectory(prefix="projection-", dir=_stage_root(cfg)) as tmp:
         projection = Path(tmp)
         for session in selected:

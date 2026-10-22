@@ -65,6 +65,11 @@ class PRWorkflowSetup:
         """A live PR published to a fork (recorded), under a config that no
         longer forks, with a new commit for create-pr to re-squash."""
         config, wid, wt_path, remote_dir = pr_repo
+        rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        fork_dir = remote_dir.parent / "fork.git"
+        if rec.pr is not None and rec.pr.remote == "fork" and fork_dir.is_dir():
+            assert (wt_path / "c.txt").read_text() == "feedback\n"
+            return config, wid, wt_path, fork_dir, rec.pr.branch
         pr_ops.create_pr(wid, config, title="Add feature")
         rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
         fork_dir = self._move_head_to_fork(wt_path, remote_dir, rec.pr.branch, rec)
@@ -104,4 +109,3 @@ class PRWorkflowSetup:
                 ),
             )},
         )
-

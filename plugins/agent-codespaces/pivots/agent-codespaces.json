@@ -24,6 +24,22 @@
     {"key": "claims_summary", "header": "claims", "width": 18, "priority": 4}
   ],
   "summary": "{spent_cores}/{total_cores} cores in use \u00b7 {headroom_cores} free \u00b7 {running_count}/{total_count} running   {note}",
+  "view_actions": [
+    {
+      "key": "sign-in",
+      "label": "Sign in",
+      "run": ["agent-codespaces", "authorize", "--account", "{auth_account}", "--user-initiated"],
+      "when": {"auth_status": "auth_required"},
+      "progress": true
+    },
+    {
+      "key": "authorize",
+      "label": "Authorize",
+      "run": ["agent-codespaces", "authorize", "--account", "{auth_account}", "--user-initiated"],
+      "when": {"auth_status": "scope_blocked"},
+      "progress": true
+    }
+  ],
   "actions": [
     {
       "label": "Open",

@@ -459,6 +459,7 @@ def test_production_capture_uses_read_only_prepare(monkeypatch):
     from worktree_manager.production_picker.picker_tui import capture as picker_capture
 
     calls = []
+    capture_options = []
     monkeypatch.setattr(
         runner,
         "_prepare",
@@ -467,7 +468,7 @@ def test_production_capture_uses_read_only_prepare(monkeypatch):
     monkeypatch.setattr(
         picker_capture,
         "capture",
-        lambda source, **kwargs: {
+        lambda source, **kwargs: capture_options.append(kwargs) or {
             "text": "GRID\n",
             "ansi": "ANSI\n",
             "svg": "<svg />",
@@ -476,6 +477,12 @@ def test_production_capture_uses_read_only_prepare(monkeypatch):
 
     assert runner.capture("demo")["text"] == "GRID\n"
     assert calls == [("demo", False)]
+    assert capture_options == [{
+        "live": False,
+        "setup_timeout": 120,
+        "pivot": None,
+        "wait_pivot": 0.0,
+    }]
 
 
 def test_manager_acts_on_production_picker_new_decision(monkeypatch):

@@ -2,10 +2,10 @@ guest_is_wsl() {
     local release cgroup=""
     [[ -f /.dockerenv || -f /run/.containerenv ]] && return 1
     if [[ -r /proc/1/cgroup ]]; then cgroup="$(</proc/1/cgroup)"; fi
-    [[ "$cgroup" =~ /docker|/kubepods|containerd|/lxc|libpod ]] && return 1
+    matches "$cgroup" '/docker|/kubepods|containerd|/lxc|libpod' && return 1
     [[ -r /proc/sys/kernel/osrelease ]] || return 1
     release="$(</proc/sys/kernel/osrelease)"
-    [[ "${release,,}" == *microsoft* ]]
+    [[ "$(lowercase "$release")" == *microsoft* ]]
 }
 
 guest_machine_id() {
@@ -17,7 +17,7 @@ guest_machine_id() {
     identity="${identity%"${identity##*[![:space:]]}"}"
     [[ "$identity" =~ ^[0-9a-fA-F]{32}$ && ! "$identity" =~ ^0{32}$ ]] ||
         fail "guest-identity-unavailable: the operating-system machine identity is invalid."
-    GUEST_MACHINE_ID="${identity,,}"
+    GUEST_MACHINE_ID="$(lowercase "$identity")"
 }
 
 guest_distribution_name() {
@@ -28,7 +28,7 @@ guest_distribution_name() {
 
 guest_distribution_key() {
     local LC_ALL=C
-    GUEST_DISTRIBUTION_KEY="${1,,}"
+    GUEST_DISTRIBUTION_KEY="$(lowercase "$1")"
 }
 
 guest_read_environment() {

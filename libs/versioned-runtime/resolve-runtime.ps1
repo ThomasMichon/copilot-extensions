@@ -13,9 +13,13 @@
 # a PATH python -- $AgentRtPy is $null when no runtime is installed, so the
 # caller degrades deliberately (self-provision) instead of silently binding the
 # system interpreter. Compatible with PowerShell 5.1+ and pwsh 7+.
+# Trace contract: normal/read-only/ready-v1
+param([ValidateSet('normal', 'read-only', 'ready')][string]$TraceMode = 'normal')
+
 $AgentRtPy = $null
 $_rtRoot = $env:AGENT_RT_ROOT
 if ($_rtRoot) {
+  $_rtDeferredTrace = [System.Collections.Generic.List[string]]::new()
   $_rtTraceSource = ''
   $_rtTraceVersion = ''
   $_rtBootTracePlugin = if ($env:COPILOT_EXTENSIONS_BOOT_TRACE_PLUGIN) {
@@ -45,6 +49,7 @@ if ($_rtRoot) {
     [string]$result = '',
     [string]$version = ''
   ) {
+    if ($TraceMode -eq 'read-only') { return }
     if (-not $_rtBootTraceLogPath) { return }
     # Never create the runtime root purely to log a resolve phase: this
     # resolver is read-only and never provisions anything itself.
@@ -55,7 +60,6 @@ if ($_rtRoot) {
     # a side effect of logging, breaking that read-only invariant.
     if (-not (Test-Path -LiteralPath $_rtRoot -PathType Container)) { return }
     try {
-      [IO.Directory]::CreateDirectory((Split-Path -Parent $_rtBootTraceLogPath)) | Out-Null
       $parts = [System.Collections.Generic.List[string]]::new()
       [void]$parts.Add('"ts":"' + (_Rt-EscapeBootTraceJson (_Rt-BootTraceIsoTimestamp)) + '"')
       [void]$parts.Add('"event":"boot_trace"')
@@ -78,6 +82,11 @@ if ($_rtRoot) {
         [void]$parts.Add('"version":"' + (_Rt-EscapeBootTraceJson $version) + '"')
       }
       $line = '{' + ($parts -join ',') + '}'
+      if ($TraceMode -eq 'ready') {
+        $_rtDeferredTrace.Add($line)
+        return
+      }
+      [IO.Directory]::CreateDirectory((Split-Path -Parent $_rtBootTraceLogPath)) | Out-Null
       # See `powershell-shim.tmpl`'s own identical `AppendAllText` comment
       # for the full synchronous-write-latency rationale (Copilot review,
       # PR #3310): a real, bounded tradeoff, never a fire-and-forget
@@ -205,5 +214,15 @@ if ($_rtRoot) {
     _Rt-WriteBootTrace 'resolver-slot-result' $_rtTraceSource 'resolved' $_rtTraceVersion
   } else {
     _Rt-WriteBootTrace 'resolver-slot-result' 'none' 'miss'
+  }
+  if ($TraceMode -eq 'ready' -and $AgentRtPy -and $_rtDeferredTrace.Count) {
+    try {
+      [IO.Directory]::CreateDirectory((Split-Path -Parent $_rtBootTraceLogPath)) | Out-Null
+      [IO.File]::AppendAllText(
+        $_rtBootTraceLogPath,
+        ($_rtDeferredTrace -join [Environment]::NewLine) + [Environment]::NewLine,
+        [Text.UTF8Encoding]::new($false)
+      )
+    } catch {}
   }
 }

@@ -33,6 +33,11 @@ def _is_wsl_launcher(candidate: str) -> bool:
 
 def resolve_native_bash() -> str:
     require_native_tier()
+    return admit_native_bash()
+
+
+def admit_native_bash() -> str:
+    """Validate a shell without opting an ordinary test into optional tiers."""
     windows = sys.platform == "win32"
     git_bash = Path(r"C:\Program Files\Git\bin\bash.exe")
     if windows and git_bash.is_file():

@@ -8,10 +8,20 @@ daemon and CLI land in a subsequent slice.
 
 from __future__ import annotations
 
-from agent_dispatch.queue import Status, Task, TaskError, TaskQueue, worker_id_for
 from .source_build import effective_runtime_version
 
 __all__ = ["Status", "Task", "TaskError", "TaskQueue", "worker_id_for"]
+
+
+def __getattr__(name: str):
+    # Bounded notification callbacks need only config/HTTP, not the queue's
+    # complete coordinator/registrar dependency graph on every cold launch.
+    if name in __all__:
+        from . import queue
+        value = getattr(queue, name)
+        globals()[name] = value
+        return value
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def _resolve_version() -> str:

@@ -733,6 +733,172 @@ def test_signed_python_probe_continues_after_unavailable_candidate(tmp_path):
     assert result.returncode == 0, result.stderr
 
 
+@pytest.fixture(scope="module")
+def native_docker_probe(tmp_path_factory):
+    if os.name != "nt":
+        pytest.skip("Windows native executable output contract")
+    compiler = Path(os.environ["SystemRoot"]) / (
+        "Microsoft.NET/Framework64/v4.0.30319/csc.exe"
+    )
+    if not compiler.is_file():
+        pytest.skip("Framework C# compiler unavailable")
+    directory = tmp_path_factory.mktemp("native-docker-probe")
+    source = directory / "docker.cs"
+    source.write_text(
+        r"""
+using System;
+using System.IO;
+using System.Text;
+class DockerProbe {
+    static int Main(string[] args) {
+        File.WriteAllLines(Environment.GetEnvironmentVariable("PROBE_ARGV"), args);
+        var encoding = Encoding.GetEncoding(1252);
+        var stdout = encoding.GetBytes("Docker version caf\u00e9\n");
+        Console.OpenStandardOutput().Write(stdout, 0, stdout.Length);
+        var stderr = Console.OpenStandardError();
+        var diagnostic = encoding.GetBytes("native diagnostic caf\u00e9\n");
+        var count = int.Parse(Environment.GetEnvironmentVariable("PROBE_LINES"));
+        for (var i = 0; i < count; i++) {
+            stderr.Write(diagnostic, 0, diagnostic.Length);
+        }
+        return int.Parse(Environment.GetEnvironmentVariable("PROBE_EXIT"));
+    }
+}
+""",
+        encoding="ascii",
+    )
+    executable = directory / "docker.exe"
+    result = subprocess.run(
+        [str(compiler), "/nologo", f"/out:{executable}", str(source)],
+        capture_output=True, timeout=15, creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    return executable
+
+
+@pytest.mark.parametrize("shell_name", ["pwsh", "powershell"])
+@pytest.mark.parametrize("human_utf8", [False, True], ids=["legacy", "human"])
+@pytest.mark.parametrize("exit_code", [0, 23], ids=["success", "failure"])
+@pytest.mark.parametrize("lines", [1, 4096], ids=["small", "pipe-capacity"])
+def test_docker_preflight_preserves_native_diagnostics_and_outcome(
+    tmp_path, native_docker_probe, shell_name, human_utf8, exit_code, lines,
+):
+    shell = shutil.which(shell_name)
+    if shell is None:
+        pytest.skip(f"{shell_name} unavailable")
+    source = (SCRIPTS / "init.ps1").read_text(encoding="utf-8")
+    start = source.index("if (Get-Command docker -ErrorAction SilentlyContinue) {")
+    end = source.index("\n# Check for uv", start)
+    helpers = "\n".join(
+        line for line in source.splitlines()
+        if line.startswith(("function Write-Ok ", "function Write-Warn ", "function Write-Step "))
+    )
+    for name in ("installer-human-output.ps1", "versioned_runtime_native.ps1"):
+        shutil.copyfile(SCRIPTS / name, tmp_path / name)
+    setup_start = source.index("Set-StrictMode -Version 2.0")
+    setup_end = source.index("\nif ($InstallDir) {", setup_start)
+    harness = tmp_path / "docker-preflight.ps1"
+    harness.write_text(
+        "[Console]::OutputEncoding = [Text.Encoding]::GetEncoding(1252)\n"
+        "$OutputEncoding = [Text.ASCIIEncoding]::new()\n"
+        + source[setup_start:setup_end] + "\n"
+        + helpers + "\n"
+        + "function Get-Command { [pscustomobject]@{Source=$env:PROBE_DOCKER} }\n"
+        + source[start:end] + "\n"
+        + "if ([Console]::OutputEncoding.CodePage -ne 1252 -or "
+        "$OutputEncoding.CodePage -ne 20127) { throw 'native encodings changed' }\n"
+        + "[Console]::Out.WriteLine('continued')\n",
+        encoding="ascii",
+    )
+    receipt = tmp_path / "argv.txt"
+    env = {
+        **os.environ,
+        "PROBE_DOCKER": str(native_docker_probe),
+        "PROBE_ARGV": str(receipt),
+        "PROBE_EXIT": str(exit_code),
+        "PROBE_LINES": str(lines),
+        "COPILOT_EXTENSIONS_HUMAN_UTF8": "1" if human_utf8 else "0",
+    }
+    result = subprocess.run(
+        [shell, "-NoProfile", "-NonInteractive", "-File", str(harness)],
+        env=env, capture_output=True, timeout=10, creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert receipt.read_text(encoding="utf-8-sig").splitlines() == ["--version"]
+    encoding = "utf-8" if human_utf8 else "cp1252"
+    assert result.stderr.decode(encoding) == "native diagnostic caf\u00e9\n" * lines
+    output = result.stdout.decode(encoding).replace("\r\n", "\n")
+    assert output.endswith("continued\n")
+    if exit_code == 0:
+        assert "[OK]   Docker: Docker version caf\u00e9\n" in output
+        assert "[WARN]" not in output
+    else:
+        assert "[OK]" not in output
+        assert "Docker: Docker version caf\u00e9\n" in output
+        assert "[WARN]" in output
+        assert "docker --version failed (exit 23)" in output
+        assert "non-fatal" in output
+
+
+@pytest.mark.skipif(os.name == "nt", reason="native POSIX installer boundary")
+@pytest.mark.parametrize("exit_code", [0, 23], ids=["success", "failure"])
+@pytest.mark.parametrize("lines", [1, 4096], ids=["small", "pipe-capacity"])
+def test_posix_docker_preflight_preserves_diagnostics_and_outcome(tmp_path, exit_code, lines):
+    shell = shutil.which("bash")
+    if shell is None:
+        pytest.skip("Bash unavailable")
+    source = (SCRIPTS / "init.sh").read_text(encoding="utf-8")
+    start = source.index("if command -v docker >/dev/null 2>&1; then")
+    end = source.index("\n_ensure_uv_index", start)
+    helpers = "\n".join(
+        line for line in source.splitlines()
+        if line.startswith(("_ok()", "_warn()", "_step()"))
+    )
+    commands = tmp_path / "commands"
+    commands.mkdir()
+    docker = commands / "docker"
+    docker.write_text(
+        "#!/bin/sh\n"
+        'printf "%s\\n" "$@" > "$PROBE_ARGV"\n'
+        "printf 'Docker version caf\\303\\251\\n'\n"
+        "i=0\n"
+        'while [ "$i" -lt "$PROBE_LINES" ]; do\n'
+        "    printf 'native diagnostic caf\\303\\251\\n' >&2\n"
+        "    i=$((i + 1))\n"
+        "done\n"
+        'exit "$PROBE_EXIT"\n',
+        encoding="ascii",
+    )
+    docker.chmod(0o700)
+    harness = tmp_path / "preflight.sh"
+    harness.write_text(
+        "set -euo pipefail\n" + helpers + "\n" + source[start:end]
+        + "\nprintf 'continued\\n'\n", encoding="ascii",
+    )
+    receipt = tmp_path / "argv.txt"
+    result = subprocess.run(
+        [shell, str(harness)], capture_output=True, timeout=10,
+        env={
+            **os.environ, "PATH": str(commands) + os.pathsep + os.environ.get("PATH", ""),
+            "PROBE_ARGV": str(receipt), "PROBE_EXIT": str(exit_code), "PROBE_LINES": str(lines),
+        },
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert receipt.read_text(encoding="utf-8").splitlines() == ["--version"]
+    output = result.stdout.decode("utf-8")
+    error = result.stderr.decode("utf-8")
+    assert error.count("native diagnostic caf\u00e9\n") == lines
+    assert output.endswith("continued\n")
+    if exit_code == 0:
+        assert "[OK]   Docker: Docker version caf\u00e9\n" in output
+        assert "[WARN]" not in error
+    else:
+        assert "[OK]" not in output
+        assert "Docker: Docker version caf\u00e9\n" in error
+        assert "docker --version failed (exit 23)" in error
+        assert "non-fatal" in error
+
+
 @pytest.mark.parametrize("extension", ["ps1", "sh"])
 def test_marketplace_self_stage_preserves_caller_relative_root_and_profile(tmp_path, extension):
     if extension == "ps1":

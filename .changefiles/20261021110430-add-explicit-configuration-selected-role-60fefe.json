@@ -1,0 +1,9 @@
+{
+  "comment": "Add explicit configuration-selected role/provider planning and Komodo reference projection without lifecycle effects",
+  "changes": [
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    }
+  ]
+}

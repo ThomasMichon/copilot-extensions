@@ -1,0 +1,9 @@
+{
+  "comment": "Reuse private published setup in finalization consumer tests.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

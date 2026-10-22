@@ -112,6 +112,7 @@ import re
 import sys
 import tokenize
 from collections import Counter
+from collections.abc import Callable
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
@@ -191,7 +192,22 @@ def _program_name(value: str) -> str | None:
     return name if name in _CONSOLE_PROGRAMS else None
 
 
-class _SpawnFinder(ast.NodeVisitor):
+class _LaunchVisitor(ast.NodeVisitor):
+    """Reuse bound visitor dispatch methods within one file's analysis."""
+
+    def __init__(self) -> None:
+        self._dispatch: dict[type[ast.AST], Callable[[ast.AST], None]] = {}
+
+    def visit(self, node: ast.AST) -> None:
+        kind = type(node)
+        visitor = self._dispatch.get(kind)
+        if visitor is None:
+            visitor = getattr(self, "visit_" + kind.__name__, self.generic_visit)
+            self._dispatch[kind] = visitor
+        return visitor(node)
+
+
+class _SpawnFinder(_LaunchVisitor):
     """Collect (lineno, program) for an unsuppressed console-program spawn.
 
     Only a **literal, resolvable** argv[0] -- a string constant, or a
@@ -201,6 +217,7 @@ class _SpawnFinder(ast.NodeVisitor):
     """
 
     def __init__(self, text: str) -> None:
+        super().__init__()
         self.hits: list[tuple[int, str]] = []
         self._text = text
         self._spawn_aliases: dict[str, str] = {}
@@ -346,10 +363,11 @@ def _calls_detach_helper(node: ast.AST, helpers: frozenset[str] = _DETACH_HELPER
     return False
 
 
-class _DetachedSpawnFinder(ast.NodeVisitor):
+class _DetachedSpawnFinder(_LaunchVisitor):
     """Collect (lineno, qualname) for a raw ``Popen`` that detaches itself."""
 
     def __init__(self, tree: ast.AST) -> None:
+        super().__init__()
         self.hits: list[tuple[int, str]] = []
         self._names: list[str] = []
         self._funcs: list[ast.AST] = []
@@ -605,10 +623,11 @@ def _production_src_roots() -> list[Path]:
     return roots
 
 
-class _FlagFinder(ast.NodeVisitor):
+class _FlagFinder(_LaunchVisitor):
     """Collect line numbers where a raw process-creation flag is referenced in code."""
 
     def __init__(self) -> None:
+        super().__init__()
         self.hits: list[tuple[int, str]] = []
         self.aliases: dict[str, str] = {}
 
@@ -709,6 +728,12 @@ def verify() -> list[str]:
     cache: dict[Path, tuple[str, list[tuple[int, str]], list[tuple[int, str]]]] = {}
     detached: dict[Path, list[tuple[int, str]]] = {}
     parse_failures: set[Path] = set()
+    adopting_plugins = _adopting_plugins()
+    daemon_sources = {
+        f
+        for plugin in adopting_plugins
+        for f in _iter_py(plugin / "src")
+    }
 
     def scan(f: Path) -> tuple[str, list[tuple[int, str]], list[tuple[int, str]]]:
         if f in cache:
@@ -720,9 +745,10 @@ def verify() -> list[str]:
             flags.visit(tree)
             spawns = _SpawnFinder(text)
             spawns.visit(tree)
-            daemons = _DetachedSpawnFinder(tree)
-            daemons.visit(tree)
-            detached[f] = sorted(daemons.hits)  # one hit per launch, even on one line
+            if f in daemon_sources:
+                daemons = _DetachedSpawnFinder(tree)
+                daemons.visit(tree)
+                detached[f] = sorted(daemons.hits)  # one hit per launch, even on one line
             result = (text, sorted(set(flags.hits)), sorted(set(spawns.hits)))
         except SyntaxError as exc:
             result = (text, [], [])
@@ -755,7 +781,7 @@ def verify() -> list[str]:
                     f"{line.strip()}"
                 )
 
-    for plugin in _adopting_plugins():
+    for plugin in adopting_plugins:
         src = plugin / "src"
         if not src.is_dir():
             continue
@@ -828,7 +854,7 @@ def verify() -> list[str]:
     # docstring); tools/daemon-spawn.allow is a shrink-only baseline.
     daemon_allow = _load_daemon_spawn_allowlist(problems)
     unmatched = Counter(daemon_allow)
-    for plugin in _adopting_plugins():
+    for plugin in adopting_plugins:
         src = plugin / "src"
         if not src.is_dir():
             continue

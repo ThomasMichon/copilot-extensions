@@ -37,8 +37,10 @@ agent-single-instance-lease = { path = "../../libs/single-instance-lease", edita
 agent-zdd = { path = "../../libs/zdd", editable = true }
 
 [project.optional-dependencies]
+fleet = ["fleet-manager[service-gateway]>=0.1.0.dev1"]
 dev = [
     "pytest>=9.1.1",
+    "agent-pull-requests[fleet]",
 ]
 
 [project.scripts]

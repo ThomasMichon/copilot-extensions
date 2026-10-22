@@ -257,10 +257,8 @@ class TestCreatePR:
         assert rec.pr.branch == "feature/add-feature-aaaa"
         assert rec.pr.provider == "gitea"
 
-    def test_idempotent_rerun(self, pr_repo):
-        config, wid, wt_path, _ = pr_repo
-        first = pr_ops.create_pr(wid, config, title="Add feature")
-        assert first["success"]
+    def test_idempotent_rerun(self, published_pr_repo):
+        config, wid, wt_path, _ = published_pr_repo
         # A successful create-pr leaves HEAD on the worktree branch at the
         # squashed commit (#1804); worktree/<id> sits 1 ahead of master.
         assert _git("rev-parse", "--abbrev-ref", "HEAD", cwd=wt_path) == \
@@ -280,10 +278,8 @@ class TestCreatePR:
         rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
         assert len(rec.prs) == 1
 
-    def test_reused_open_pr_keeps_incremental_commits_unsquashed(self, pr_repo):
-        config, wid, wt_path, _ = pr_repo
-        first = pr_ops.create_pr(wid, config, title="Add feature")
-        assert first["success"], first
+    def test_reused_open_pr_keeps_incremental_commits_unsquashed(self, published_pr_repo):
+        config, wid, wt_path, _ = published_pr_repo
         original_pr_head = _git("rev-parse", "origin/feature/add-feature-aaaa", cwd=wt_path)
 
         anchor = Path(config.repos["ext"].anchor)
@@ -322,10 +318,8 @@ class TestCreatePR:
         ).splitlines()
         assert subjects == ["address feedback 2", "address feedback 1", "Add feature"]
 
-    def test_reused_open_pr_with_empty_base_sha_still_records_patch_id(self, pr_repo):
-        config, wid, wt_path, _ = pr_repo
-        first = pr_ops.create_pr(wid, config, title="Add feature")
-        assert first["success"], first
+    def test_reused_open_pr_with_empty_base_sha_still_records_patch_id(self, published_pr_repo):
+        config, wid, wt_path, _ = published_pr_repo
 
         rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
         rec.pr.base_sha = ""
@@ -344,16 +338,14 @@ class TestCreatePR:
         rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
         assert rec.pr.patch_id
 
-    def test_reused_open_pr_refuses_reuse_push_with_no_persisted_head_sha(self, pr_repo):
+    def test_reused_open_pr_refuses_reuse_push_with_no_persisted_head_sha(self, published_pr_repo):
         """#5298 follow-up: a legacy/manually-registered (`set-pr`) record can
         have no persisted `head_sha` at all. Falling back to a plain bool
         `--force-with-lease` there would adopt whatever this call's own
         just-completed fetch recorded as the remote tip and force past it --
         the same live-requery flaw the reuse-lease guard exists to close,
         just one step removed. Refuse instead of guessing."""
-        config, wid, wt_path, _ = pr_repo
-        first = pr_ops.create_pr(wid, config, title="Add feature")
-        assert first["success"], first
+        config, wid, wt_path, _ = published_pr_repo
 
         rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
         rec.pr.head_sha = ""
@@ -369,10 +361,8 @@ class TestCreatePR:
         assert rerun["success"] is False
         assert "No persisted expected tip" in rerun["error"]
 
-    def test_reused_open_pr_refuses_to_overwrite_divergent_remote_head(self, pr_repo):
-        config, wid, wt_path, remote_dir = pr_repo
-        first = pr_ops.create_pr(wid, config, title="Add feature")
-        assert first["success"], first
+    def test_reused_open_pr_refuses_to_overwrite_divergent_remote_head(self, published_pr_repo):
+        config, wid, wt_path, remote_dir = published_pr_repo
 
         other = remote_dir.parent / "other-clone"
         _git("clone", str(remote_dir), str(other), cwd=remote_dir.parent)
@@ -399,7 +389,7 @@ class TestCreatePR:
         assert "another actor updating the remote branch" in rerun["error"]
         assert _git("rev-parse", "origin/feature/add-feature-aaaa", cwd=wt_path) == remote_head
 
-    def test_reused_open_pr_refuses_to_resurrect_deleted_remote_head(self, pr_repo, monkeypatch):
+    def test_reused_open_pr_refuses_to_resurrect_deleted_remote_head(self, published_pr_repo, monkeypatch):
         """#5298: a concurrently merged+auto-pruned PR branch must not be
         silently recreated by a later create-pr call that still believes the
         PR is open. A plain push would read "ref absent" as "create a new
@@ -413,9 +403,7 @@ class TestCreatePR:
         "present" so the test actually exercises the lease guard this PR adds,
         with the real deletion still in place for the push itself to hit.
         """
-        config, wid, wt_path, remote_dir = pr_repo
-        first = pr_ops.create_pr(wid, config, title="Add feature")
-        assert first["success"], first
+        config, wid, wt_path, remote_dir = published_pr_repo
 
         # Simulate an external merge + auto-prune: the PR branch is deleted
         # from the bare remote directly (as a host does on merge), while this

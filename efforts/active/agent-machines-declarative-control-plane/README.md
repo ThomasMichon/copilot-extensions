@@ -9,7 +9,9 @@
   `declared-mesh-adoption`, `derived-agent-roster`, and
   `live-machine-introspection`
 - **Umbrella issue:** #1418 (closed; historical -- all listed sub-issues are
-  also closed, and no successor umbrella has been opened yet)
+  also closed, and no successor umbrella has been opened yet). Reviewed Plan,
+  Validation and Journal coordinate the retained #1417/#1437 slices below;
+  implementation still needs an eligible open bounded-source claim.
 - **Sub-issues:** #1455 · #1507 · #1529 · #1627 · #1631 · #1721 · #1961
   (all closed)
 
@@ -39,8 +41,16 @@ actions are derived views rather than separately maintained inventories.
   observable status to the shared control plane.
 - **Public coordination token:** #1418 (closed; historical) for the
   already-delivered relationship-aware package discovery slice; later slices
-  use their own dedicated issues, and this effort currently has no live
-  umbrella/coordination token for new work until one is opened.
+  use their own dedicated issues. For the retained #1417/#1437 objectives,
+  this reviewed Active effort's Plan, Validation and Journal are the continuing
+  coordination record, with the existing schema-host review custody and
+  module/provider/parity roles unchanged. Their tracker consolidation creates
+  no implementation assignee or resource authority. Before code work, record
+  the exact bounded slice under an eligible OPEN public source claim according
+  to CONTRIBUTING.md and preserve existing source/resource/rollout holds.
+  Closed #1418 and consolidated source issues are history, not live claim
+  tokens. This narrow amendment does not dispose of #3115's separate umbrella
+  requirement or any other objective.
 
 ## Context
 
@@ -133,6 +143,35 @@ fleet, topology, or operating environment.
 - [ ] Fail loudly on unsupported platforms, unavailable prerequisites, and
   unsafe mutations.
 
+### Phase 3a - Bounded filtered prelaunch retained from #1437
+
+<!-- backlog-reconciliation:7556:transfer:1437:to:efforts/active/agent-machines-declarative-control-plane/README.md -->
+
+These are unresolved orchestration outcomes, not a hang diagnosis or completed
+repair. Normal review, actual merge and current full readback precede source
+consolidation. Existing source/resource owners and the Coordination contract
+above continue; #1438's WSL/SSH validation report remains distinct.
+
+- [ ] Attribute the actual pre-module blocked operation with bounded evidence;
+  retain unknown cause until proved. Direct module success or a current PATH
+  resource does not prove bounded orchestration.
+- [ ] Make filtered apply start the selected module OR return bounded
+  actionable setup/orchestration failure under a declared budget. An already-
+  spawned child timeout does not bound prelaunch; do not hide hangs by raising
+  limits.
+- [ ] Emit useful live discovery/package-union/validation/planning/launch/
+  blocked-phase progress before waits complete, preserving JSON/quiet/native
+  contracts and sanitized diagnostics.
+- [ ] Bound/cancel subprocess, stdio and coordination waits; settle only owned
+  descendants/readers and expose incomplete cleanup or uncertainty rather than
+  conflicting retries or false success.
+- [ ] Preserve only-filter scope, machine/platform/package authority,
+  validation, owner/process guards and restore/dry-run semantics. Never execute
+  unselected modules or bypass governance.
+- [ ] Qualify actual native Windows filtered-apply/setup/module boundaries and
+  supported counterparts with exact source/recipe/phase/exit/cleanup evidence.
+  Missing capacity and child-only success are not orchestration proof.
+
 ### Phase 4 - Observe drift and recovery
 
 - [ ] Report desired, observed, planned, applied, blocked, and drifted states in
@@ -140,6 +179,43 @@ fleet, topology, or operating environment.
 - [ ] Provide dry-run, targeted repair, rollback guidance, and partial-failure
   recovery without hiding failed resources.
 - [ ] Validate representative resource modules on Windows and POSIX hosts.
+
+### Phase 4a - Owned diagnostic reversal retained from #1417
+
+<!-- backlog-reconciliation:7556:transfer:1417:to:efforts/active/agent-machines-declarative-control-plane/README.md -->
+
+These are the original unresolved reset outcomes, not implemented reversal.
+Normal review, actual merge and full current Plan/Validation/Coordination
+readback precede administrative source consolidation. Preserve schema host,
+module/provider/parity and all concrete resource/rollout owners. This section
+authorizes no reset, test, OS mutation or source handoff.
+
+- [ ] Persist per-application receipts distinguishing newly installed, updated,
+  operator-pre-existing and unchanged resources, with source/resource/
+  application identity and captured prior state. Desired presence, backups/
+  markers and runtime provenance are not historical introduction ownership.
+- [ ] Make diagnostic preview the default, with explicit apply and targeted-only
+  selection. Reset command spelling is illustrative; preserve destructive
+  confirmation, privilege and process guards, not normal convergence uninstall.
+- [ ] Remove packages only when receipts prove this restore introduced them.
+  Preserve shared/pre-existing dependencies, unknown ownership and foreign/
+  concurrent changes; presence never establishes permission.
+- [ ] Restore captured file/registry/config prior state where safe and report
+  irreversibility. Preserve production convergence and source/package/authority
+  boundaries instead of disabling handlers globally.
+- [ ] Reverse resources/modules in dependency order, distinguishing updated
+  from new state, with interruption/retry idempotence. Preserve durable partial,
+  blocked, uncertain and failed results across later retries.
+- [ ] Stage a bounded Windows PowerShell finalizer while the runtime is alive,
+  then execute outside it. Remove owned agent-machines, active venv, uv and
+  Python LAST, with proven introduction and explicit authority; preserve shared
+  tools and never execute from resources being removed.
+- [ ] Persist source-bound clean-room result/recovery logs without secrets,
+  retaining primary/secondary failures and finalizer/child cleanup outcomes.
+- [ ] Prove isolated seed -> restore -> owned reset -> base-state equivalence,
+  protecting pre-existing/unchanged/shared/unknown resources and recording
+  partial/interrupted/error paths. Future destructive-feature acceptance is not
+  authorization to exercise it on a host.
 
 ### Phase 5 - Reconcile deferred backlog
 
@@ -168,11 +244,31 @@ fleet, topology, or operating environment.
 _Correlated via a facility-driven sweep of open `bug`-labeled issues against active efforts (VEI + direct review). Not yet triaged into a numbered phase — listed here as upcoming work for whoever picks this effort back up._
 
 - [ ] **#1437** agent-machines: Filtered apply hangs before module launch
-  - A hang before module launch during a filtered apply is directly this effort's reconcile-engine scope.
+  - Full retained acceptance is Phase 3a above, not just this bug-title link;
+    the objective remains unresolved after administrative consolidation.
 - [ ] **#1438** agent-machines: WSL restore hangs in ssh -G validation
   - A hang during WSL restore's ssh -G validation is directly this effort's control-plane scope.
 
 ## Validation Plan
+
+- [ ] Prove Phase 4a receipt classification, preview/apply/only, unknown/
+  pre-existing/shared dependencies, prior state, foreign/concurrent changes,
+  dependency order and repeat/interruption outcomes.
+- [ ] Prove bounded external-runtime Windows finalizer ordering/exit/process
+  behavior with safe synthetic owned tools before separately authorized
+  destructive adoption.
+- [ ] Prove durable reset/recovery evidence and isolated base equivalence with
+  partial/failure/uncertain negatives and no host effects.
+- [ ] Exercise Phase 3a prelaunch separately from children, including filtered
+  selection, live phase diagnostics, native cancellation/reader cleanup and
+  actionable failure at declared bounds.
+- [ ] Preserve source/platform/protocol identity and meaningful negative tests;
+  source-only, title-link, collected/skipped or broad unrelated passes cannot
+  complete either retained objective.
+- [ ] After the reviewed intake merges, read back every existing Plan and
+  Validation row plus both retained sections and continuing Coordination.
+  Keep this effort Active until actual effect proof or explicit named tracked
+  transfer resolves its complete Plan and Validation.
 
 - [ ] Invalid schemas, dependency cycles, duplicate ownership, and unknown
   resource types fail before mutation.
@@ -225,6 +321,17 @@ first, then migrate reconcilers and retire shadow inventories only after
 behavioral parity is demonstrated.
 
 ## Journal
+
+### 2026-10-22 - Retained reset and filtered-prelaunch acceptance
+
+- Materialized #1417's owned diagnostic reversal in Phase 4a and #1437's bounded
+  prelaunch in Phase 3a, with their full safety, native and negative validation
+  obligations unchecked. This is planning intake, not implementation.
+- Recorded continuing coordination in the reviewed Plan/Validation/Journal,
+  preserving schema/module/provider/parity roles and eligible open source
+  claims before code work. Closed #1418 is history; #3115's distinct umbrella
+  gate is unchanged. Actual merge and current readback precede any source
+  tracker supersession.
 
 ### 2026-08-29 - Kickoff
 

@@ -221,7 +221,53 @@ _Correlated via a facility-driven sweep of open `bug`-labeled issues against act
 - [ ] **#1946** diagnostics: Transient CLI resume stalls after plugin reconciliation drains
   - A CLI resume stall after plugin reconciliation is this effort's session-start conformance scope.
 
+### Direct unresolved post-reconciliation resume case from #1946
+
+<!-- backlog-reconciliation:7556:transfer:1946:to:efforts/active/sessionstart-static-dynamic-conformance/README.md -->
+
+Retain the existing #1946 correlation as its own bounded Plan/Validation lane under this
+reviewed Active effort and existing open #2256 umbrella. Preserve all prior
+content/native/inherited acceptance and original startup/conformance ownership. Host-CLI
+readiness and Bridge registration/takeover remain separate attributed domains; this
+grants neither vendor authority nor takeover/termination permission.
+
+- [ ] Classify the actual resumed interactive failure after session.resume/model
+  warmup/session.info, ready extensions, completed MCP/skill inventory and drained
+  reconciliation. Preserve failed and successful-retry evidence with exact source/CLI
+  version/session/process attribution; do not conflate it with an earlier
+  extension-generation race or infer cause from retry success.
+- [ ] Reach interactivity OR emit a bounded actionable failure naming the still-pending
+  readiness/barrier participants. Add/preserve useful participant/lifecycle diagnostics
+  while Loading/Resuming; queue drain, ready receipts and a diagnostic skill alone are
+  not the readiness outcome.
+- [ ] Separate actual host-CLI barrier responsibility from Bridge
+  registration/null-worktree takeover behavior. Obtain actual failure-boundary evidence
+  and route any externally owned runtime correction under its real authority rather than
+  pretending a plugin procedure implements it. Keep unresolved external obligations
+  explicit and tracked.
+- [ ] Preserve live-session/process and worktree custody. Never force takeover,
+  terminate/recreate a session or discard the persisted state simply to get a passing
+  observation; existing explicit authorization and recovery semantics remain.
+- [ ] Qualify the finite repair through actual supported resumed-session behavior,
+  including bounded diagnostic/refusal outcomes and successful retry without losing
+  identity. Existing diagnostic docs, source availability and a one-off
+  termination/retry are partials, not newly observed or installed proof. Do not require
+  every unrelated parent/native item to finish this case.
+- [ ] Add matching own Validation rows for participant attribution, the exact
+  interactivity-OR-actionable-failure outcome, independent host/Bridge responsibility
+  and unchanged custody. Preserve current nonblocking per-owner guidance delivery,
+  #2173/#2256/#1508 boundaries and all incoming native acceptance; do not revive custom
+  aggregation or weaken authorization gates.
+
+Receiving gate: normal reviewed source publication must actually merge this complete
+unchecked lane into the existing effort's own Plan AND Validation. Read back the merged
+current full Plan/Validation/Coordination and retain the existing open umbrella before
+superseding #1946. If full scope or custody is not accepted, keep #1946 open. This is
+not behavioral completion, a new driver or permission to execute a native probe.
+
 ## Validation Plan
+
+- [ ] Complete every directly retained #1946 Plan/Validation clause above at its original evidence tier and bounds; preserve current owners, holds and unfinished acceptance. Tracker consolidation is not implementation.
 
 - [ ] Every plugin in the Phase 0 roster has a recorded classification in
   `sweep-findings.md` — no plugin left unaudited.
@@ -246,6 +292,13 @@ _Pending — to be filled in during Phase 0/1 once the umbrella issue and
 initial sweep exist._
 
 ## Journal
+
+### 2026-10-22 - Complete retained acceptance from #1946
+
+- Retained the complete #1946 scope directly in the Plan and Validation,
+  without declaring feature completion or transferring source/resource custody.
+  Normal reviewed merge and current full readback precede administrative
+  supersession; all substantive acceptance remains unfinished.
 
 ### 2026-09-08 — Kickoff
 

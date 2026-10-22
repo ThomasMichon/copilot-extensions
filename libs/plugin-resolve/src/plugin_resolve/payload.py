@@ -20,8 +20,8 @@ def report_diagnostic(item: dict) -> None:
     logger = logging.getLogger("plugin-resolve")
     if item["status"] == "native-origin-preserved":
         logger.warning(
-            "%s localized from target-native remote origin; original %s declaration "
-            "retained in Git-local ownership receipt",
+            "%s prepared from target-native remote origin; original %s declaration "
+            "preserved in repository settings",
             item["source"], item["marketplace"],
         )
     else:

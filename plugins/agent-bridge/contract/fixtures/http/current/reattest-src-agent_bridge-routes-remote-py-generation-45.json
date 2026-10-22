@@ -1,0 +1,46 @@
+{
+  "captured_from": {
+    "commit": "c9c688139f8582496a83c1c7632f3d426fa7b855",
+    "plugin_version": "0.4.1-dev3",
+    "source_path": "plugins/agent-bridge/src/agent_bridge/routes/remote.py",
+    "source_git_blob": "32ab059aad4fbc3eded6f9df0d80b35cfd3d2b3d",
+    "protocol_generation": 45,
+    "source_sha256": "916d4687bab944aa33ab395e70d506535e4d3e180ab59b6f3d3cd3d195ee83c3"
+  },
+  "capability": {
+    "required_protocol_version": 39,
+    "required_operation_version": 5
+  },
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/remote/host-b/live-sessions/live:host-b:project-a:wt-b/messages",
+    "json": {
+      "qualified_peer": true,
+      "sender": "peer",
+      "message": "hello",
+      "wait": true,
+      "wait_timeout": 0.0,
+      "timeout": 20.0
+    }
+  },
+  "response": {
+    "ok": true,
+    "session_id": "recipient",
+    "message_id": 1,
+    "duplicate": false,
+    "receipt_current": true,
+    "reply_correlation": "post_consumption_turn",
+    "replied": false,
+    "reply": null,
+    "stop_reason": null
+  },
+  "reply_wait_bounds": {
+    "minimum": 0.0,
+    "maximum": 600.0,
+    "finite": true
+  },
+  "reattested_from": {
+    "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-zero-reply-generation-44.json",
+    "sha256": "d1c593fe5ff183aa33404ab1ff97535137058583afbcf69e493de3b5f0d7c15f"
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "comment": "Recognize exact historical reset tips on qualified same-remote landing bases without counting later local work as published.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

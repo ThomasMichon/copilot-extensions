@@ -152,6 +152,9 @@ def test_required_runtime_failure_makes_update_fail(wired, monkeypatch):
 
 @pytest.mark.parametrize("deployed", ["1.5.3-dev9", "1.5.3-dev8", None])
 def test_local_finishing_runs_once_after_runtime_work(wired, monkeypatch, deployed):
+    from agent_worktrees import manager_recovery
+
+    monkeypatch.setattr(manager_recovery, "recover", lambda: {"status": "current"})
     monkeypatch.setattr(reconcile, "payload_version", lambda d: "1.5.3-dev9")
     monkeypatch.setattr(reconcile, "runtime_deployed_version", lambda *a, **k: deployed)
     monkeypatch.setattr(cfg, "detect_platform", lambda: "windows")
@@ -585,6 +588,9 @@ def test_skip_still_reconciles_terminal_state_on_windows(wired, monkeypatch):
     reconcile live Windows Terminal state -- that drift is independent of our
     version, so gating it behind the skip would leave the dropdown broken
     (Test Chamber hidden / orphan cruft) forever."""
+    from agent_worktrees import manager_recovery
+
+    monkeypatch.setattr(manager_recovery, "recover", lambda: {"status": "current"})
     monkeypatch.setattr(reconcile, "payload_version", lambda d: "1.5.3-dev9")
     monkeypatch.setattr(reconcile, "runtime_deployed_version",
                         lambda name, home=None, **kwargs: "1.5.3-dev9")

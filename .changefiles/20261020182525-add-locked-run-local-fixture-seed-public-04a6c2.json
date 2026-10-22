@@ -1,0 +1,9 @@
+{
+  "comment": "Add locked run-local fixture seed publication with exact readiness and interruption coverage",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

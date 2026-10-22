@@ -1,0 +1,9 @@
+{
+  "comment": "Use function-private persisted-record fixtures for metadata-only PR contracts while retaining real publication tests.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

@@ -128,7 +128,10 @@ fi
 cd "$payload_parent/worktree-manager"
 # Version-install the fetched payload (idempotent, version-gated): publishes the
 # versions/<ver> slot + current-version marker + ~/.local/bin binstub.
-uv run --quiet python -m worktree_manager self-install --apply
+if ! PYTHON="$(uv python find --no-project '>=3.11' 2>/dev/null)"; then
+    uv python install 3.11
+    PYTHON="$(uv python find --no-project '>=3.11')"
+fi
 
 case ":$PATH:" in
     *":$LOCAL_BIN:"*) : ;;
@@ -136,4 +139,4 @@ case ":$PATH:" in
 esac
 
 # Then run whatever the caller asked for through the freshly-installed app.
-exec uv run --quiet python -m worktree_manager "$@"
+exec "$PYTHON" -I -S -B -X utf8 scripts/runtime_install.py --root "$ROOT" --payload "$PWD" -- "$@"

@@ -37,7 +37,43 @@ physical association never authorizes access to a sibling's ledger.
 Identity probes refuse an invalid explicit registered source rather than
 advertising the physical host or another platform's key.
 
+`reconcile-plugins --repo <checkout> --peek` and `--apply` select their own
+repository and do not require the caller's current directory to resolve an
+adopted project. Both `--repo <checkout>` and `--repo=<checkout>` are accepted.
+This keeps detached provisioning from a neutral/HOME directory on the same
+front-door route as the already repo-aware handler. Without an explicit repo,
+ordinary project resolution remains required; the change does not start
+reconciliation or installation merely by resolving the route.
+
+Portable installation-mode probes run the selected Python with `-I -S` and
+explicit UTF-8 output. Their payload-owned helper uses only the standard
+library, so repeated probes need neither site-package initialization nor
+editable-package path expansion. The helper still resolves every requested
+payload, policy, receipt, environment and runtime root independently; this is
+not an authority cache or an interpreter choice for runtime construction.
+Python versions before 3.14 report their base prefix under `-S`; the probe
+does not use that prefix to select installation identity or roots.
+
+During `update`, registered plugin refresh resumes `payload_refresh` after
+marketplace authorization, including separately prepared fallback contexts.
+Marketplace refresh, inventory browsing, plugin acquisition and their summary
+therefore do not extend the auth report's phase or human scope. These timing
+boundaries do not change authentication, acquisition or failure semantics.
+
 ## How It Works
+
+The public `update` command submits to the shared durable execution driver
+before choosing Manager or standalone execution. Default `--wait` observes the
+recorded result; `--detach --json` returns an acceptance receipt, and
+`--request-status <id> --json` is a read-only query that works without a project.
+`--recovery-status` inspects restart-proven settlement availability, and
+`--recover-after-restart` settles only old-boot interruptions without replaying
+them; neither requires a project.
+`--no-manager` selects the standalone updater but still queues it.
+`--supervised-debug` uses the same exclusive authority under foreground
+supervision, never a second installation writer.
+The [Manager's update reference](../../worktree-manager/README.md#durable-update-execution)
+owns the shared request/lifetime contract and its current migration boundary.
 
 On Windows, ordinary and passive status-monitor starts bypass the venv Python
 redirector and use the real base **console** interpreter, preserving the venv
@@ -79,6 +115,28 @@ ownership, not invented readiness. See the
 [shared binding contract](../../libs/payload-invocation/README.md#source-qualified-command-binding)
 for selection/refusal semantics and consumer compatibility.
 
+The installation-owned runtime deployment policy also gates native bootstrap
+stamping, legacy lib-copy reconciliation and payload-local first-use
+provisioning. These paths use the canonical deployment probe before publication;
+first use repeats admission under its existing provision lock. A refusal leaves
+the hook's other components and healthy runtime dispatch usable and reports
+explicit installation-management recovery. Absent policy retains standalone
+behavior through the existing canonical legacy-admission fallback, including an
+unattributed payload when that fallback permits it. Preliminary resolution
+suppresses durable traces on a miss; healthy dispatch retains its resolver
+trace phases. This protects these native entrypoints, not every installer or launcher
+publication path. The [canonical deployment policy contract](../../libs/installation-context/README.md)
+owns the policy schema and decision semantics.
+
+Cell installers also check before self-staging and runtime-input writes. The
+Python lifecycle repeats admission at entry, under the existing genesis/install
+locks, on candidate handover and in helper callbacks, including when invoked
+directly from a retained runtime. Legacy management requires an authenticated
+live lifecycle lease with management/publication purpose. Explicit managed-cell
+installation is not yet supported; a context or staging environment flag does
+not authorize it. Ordinary standalone cells retain their existing installer
+path. Other plugins and launcher-executed plans still need caller integration.
+
 Project launchers are attributable global entry points with ownership receipts
 under `~/.agent-worktrees/binstub-receipts/`. Legacy launchers delegate to the
 installed user-side `agent-worktrees` command in their resolved local-bin
@@ -115,6 +173,17 @@ These OS-only checks do not require Windows WMI; home overrides, installation
 context selection and WSL detection keep their existing precedence.
 Front-door Git discovery also uses the shared headless process helper for
 windowless callers.
+
+Bare interactive launch distinguishes an absent Manager from a registered
+provider whose health check fails. First-run installation guidance remains a
+successful onboarding result. A failed registered provider reports its bounded,
+credential-redacted startup stderr and returns nonzero when no fallback runs;
+it does not imply a stale launcher or promise an unavailable bundled Picker.
+An unknown explicit provider selection or an ambiguous registry is also a
+failure, not first-run absence. Showing help without launching a fallback
+does not turn a failed provider into a successful launch.
+Headless projects and invocations without an attached terminal retain their
+worktree-list/help behavior.
 
 Unified update performs local command/profile reconciliation once after
 runtime reconciliation and anchor synchronization. It binds command repair to
@@ -171,6 +240,20 @@ For deliberate historical label normalization, see
 report-first doctor scope preserves same-machine alias relationships and requires
 independent registration/namespace proof for removed checkouts. Ordinary doctor
 fixes never rebind ownership.
+
+## Fresh publication evidence
+
+Each publication captures fresh fetch and complete push URLs under its existing
+lock and derives authority from those exact transport destinations. Known remote
+transport settings are read in one NUL-framed query, preserving repeated values,
+multiline values and valueless settings. This is invocation-local evidence, not
+a cache: later publications re-read configuration, and URL pinning, hooks,
+ownership, leases and bounded child cleanup remain enforced.
+
+Verified source replays reuse fresh pinned range rows within one decision and
+read the corresponding raw commit trees in one ordered probe. Tree evidence
+does not replace parent reconstruction, raw author/message comparison, explicit
+conflict-continuation proof or the existing upstream-empty-commit checks.
 
 ## Captured child ownership
 
@@ -471,6 +554,15 @@ standalone-behavior changes.
 | `preToolUse` | Tool calls | Runs statelessness, cross-repo, and anchor-write guards from `~/.agent-worktrees/bin/` when deployed |
 | `sessionStart` | Every session | Emits worktree/account/machine context, reload guidance, runtime bootstrap hints, repo-plugin provisioning, project hooks, session registration, anchor hygiene, and provision checks. When cwd/env identity is absent, registration recovers the exact binding from the session lock PID -> process ancestry -> owning `wt-<id>` mux pane/session |
 | `sessionEnd` | Session end | Uses original source evidence to close the matching activation, not a replacement; legacy unqualified records retain their prior behavior. Ending an interval does not conclude the resumable session |
+
+Session registration defaults to the hook's 1.5-second request budget with
+zero daemon boot-wait. Explicit `bind-session` selects the existing normal
+tracking-write request budget of 8 seconds instead; deregistration is unchanged.
+This selects the caller's acknowledgement budget, not new execution authority
+or a retry policy. A sent request may still commit after the client times out:
+post-send uncertainty remains ambiguous and must not trigger a direct retry.
+Receiving-side authorization, version-3 registration and lifecycle-source
+qualification remain required.
 
 Native Linux/WSL lifecycle hooks capture bounded original ancestor PID/birth and
 boot/environment metadata before contacting the resident monitor. Registration

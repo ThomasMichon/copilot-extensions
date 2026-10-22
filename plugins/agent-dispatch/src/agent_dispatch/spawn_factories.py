@@ -655,16 +655,12 @@ def make_headless_spawn(
     from . import bridge, embody, ordinary_bridge
 
     def spawn(task: dict) -> tuple[bool, dict]:
-        worker_id = f"dispatch-{task.get('spawn_reservation_key')}"
-        seed = embody.autopilot_worker_prompt(
-            task["id"],
-            worker_id=worker_id,
-            route=route,
-            repo=None if all_repos else task.get("repo"),
-            all_repos=all_repos,
-            explicit_worker_identity=False,
-        )
+        client = task.get("_spawn_client")
+        if not callable(getattr(client, "get_reservation", None)):
+            return False, {"error": "ordinary coordinator reservation read-back is unavailable"}
+        from .ordinary_invocation import startup_seed
         try:
+            seed = startup_seed(task, client, route=route, all_repos=all_repos)
             if no_pair:
                 raise bridge.BridgeUnavailable("ordinary Bridge create cannot express the no-pair allocation override")
             handle = ordinary_bridge.start(

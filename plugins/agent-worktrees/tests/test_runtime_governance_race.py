@@ -65,20 +65,22 @@ if stage=="governance":
 elif stage=="cutover":
     from agent_worktrees import status_monitor_cutover as cutover
     authority=lifecycle.Governance(root,plugin)
-    guard=cutover._acquire_cutover_lock(root/"status-monitor-routing",timeout_s=480)
-    try:
-        mark("cutover-owned")
-        wait("release-cutover")
-        data=json.loads((signals/"original.json").read_text(encoding="utf-8"))
-        result=lifecycle.settle_candidate(
-            root,data["version"],payload=plugin,payload_hash=data["payload_hash"],
-            expected_governance=authority.signature(),previous="serving-baseline",
-            cutover_guard=guard,package_version=data["package_version"],
-            force_monitor_transition=True,wait_timeout=480,
-        )
-        (signals/"cutover-result.json").write_text(json.dumps(result),encoding="utf-8")
-    finally:
-        guard.release()
+    with authority.held(timeout=480):
+        guard=cutover._acquire_cutover_lock(root/"status-monitor-routing",timeout_s=480)
+        try:
+            mark("cutover-owned")
+            wait("release-cutover")
+            data=json.loads((signals/"original.json").read_text(encoding="utf-8"))
+            result=lifecycle.settle_candidate(
+                root,data["version"],payload=plugin,payload_hash=data["payload_hash"],
+                expected_governance=authority.signature(),previous="serving-baseline",
+                cutover_guard=guard,package_version=data["package_version"],
+                force_monitor_transition=True,wait_timeout=480,governance=authority,
+            )
+            (signals/"cutover-result.json").write_text(json.dumps(result),encoding="utf-8")
+        finally:
+            guard.release()
+    mark("cutover-complete")
 else:
     if stage=="ordinary":
         from contextlib import contextmanager
@@ -96,6 +98,13 @@ else:
             wait("release-build")
             return construct(*args,**kwargs)
         lifecycle.engine._construct=paused_construct
+        popen=lifecycle.subprocess.Popen
+        class PausedSettlement(popen):
+            def __init__(self,argv,*args,**kwargs):
+                if "--settle-slot" in argv:
+                    wait("cutover-complete")
+                super().__init__(argv,*args,**kwargs)
+        lifecycle.subprocess.Popen=PausedSettlement
     arguments=[
         "--root",str(root),"--plugin",str(plugin),"--payload",str(plugin),
         "--uv",str(uv),"--base-python",sys.executable,
@@ -128,6 +137,7 @@ def test_account_profile_isolation_changes_only_copied_os_lookups(
         Path("scripts") / "installation-context" / "_installation_context_resolution.py",
         Path("src") / "agent_worktrees" / "_installation_context_resolution.py",
         Path("scripts") / "installation-context" / "installation-context.sh",
+        Path("scripts") / "installation-context" / "installation-context.ps1",
     )
     originals = {path: (PLUGIN / path).read_bytes() for path in paths}
     for path, source in originals.items():
@@ -146,11 +156,15 @@ def test_account_profile_isolation_changes_only_copied_os_lookups(
             ast.parse(isolated)
             assert f"profile_value = Path({str(home)!r})" in isolated
             assert "profile_value = Path(pwd.getpwuid(os.getuid()).pw_dir)" not in isolated
-        else:
+        elif path.suffix == ".sh":
             import shlex
 
             assert f'CURRENT_PROFILE_HOME="$(canonical_path {shlex.quote(str(home))} true)"' in isolated
             assert 'CURRENT_PROFILE_HOME="$(canonical_path "$home_path" true)"' not in isolated
+        else:
+            quoted = "'" + str(home).replace("'", "''") + "'"
+            assert "$passwdHome = " + quoted in isolated
+            assert "$passwdHome = [CePosixAccount]::Home()" not in isolated
 
 
 def test_fixture_worktree_deletion_handles_readonly_git_objects(tmp_path):
@@ -173,6 +187,7 @@ def test_governance_forwards_the_callers_lock_budget(monkeypatch, tmp_path):
     owner = object.__new__(driver.Governance)
     owner.durable_home = tmp_path
     owner.initial = ({}, {"marketplaceId": "test", "cellRoot": str(tmp_path / "cell")})
+    owner.publication_locks = ()
     observed = []
 
     class Lock:
@@ -185,7 +200,9 @@ def test_governance_forwards_the_callers_lock_budget(monkeypatch, tmp_path):
         def __exit__(self, *_args):
             pass
 
-    owner.helper = SimpleNamespace(_DirectoryLock=Lock)
+    owner.helper = SimpleNamespace(
+        _DirectoryLock=Lock, RUNTIME_PUBLICATION_ENV="COPILOT_EXTENSIONS_RUNTIME_PUBLICATION",
+    )
     owner.recheck = lambda: None
     moments = iter((100, 101, 104))
     monkeypatch.setattr(driver.time, "monotonic", lambda: next(moments))
@@ -196,7 +213,7 @@ def test_governance_forwards_the_callers_lock_budget(monkeypatch, tmp_path):
 
 @pytest.mark.timeout(1000)
 def test_real_namespaced_build_repair_cutover_and_governance_do_not_invert(
-    tmp_path, monkeypatch,
+    tmp_path, tmp_path_factory, monkeypatch,
 ):
     uv = shutil.which("uv")
     if uv is None:
@@ -207,7 +224,8 @@ def test_real_namespaced_build_repair_cutover_and_governance_do_not_invert(
         PLUGIN / "scripts" / "installation-context" / "installation_context.py",
         "race_installation_context",
     )
-    home, signals = tmp_path / "home", tmp_path / "signals"
+    # Leave room for nested control/candidate native subprocess paths.
+    home, signals = tmp_path_factory.mktemp("c") / "h", tmp_path / "signals"
     home.mkdir()
     signals.mkdir()
     environment = dict(os.environ, HOME=str(home), USERPROFILE=str(home), AGENT_HOME=str(home))
@@ -379,11 +397,6 @@ def test_real_namespaced_build_repair_cutover_and_governance_do_not_invert(
                 lambda: routing.read_active_endpoint(root / "status-monitor-routing"),
                 timeout=60, message="baseline did not publish its control route",
             )
-            cutover_process = launch("cutover", driver.runtime.slot_python(root, old_version))
-            _wait_for(
-                lambda: (signals / "cutover-owned").exists(),
-                timeout=60, message="cutover did not take authority",
-            )
             ordinary = launch("ordinary")
             _wait_for(
                 lambda: (signals / "ordinary-construction").exists(),
@@ -392,7 +405,13 @@ def test_real_namespaced_build_repair_cutover_and_governance_do_not_invert(
             with pytest.raises(driver.runtime.ConstructionTimeout):
                 with driver.runtime.construction_lease(root, version, timeout=0):
                     pytest.fail("actual ordinary construction lost its lease")
+            cutover_process = launch("cutover", driver.runtime.slot_python(root, old_version))
             repair, governance = launch("repair"), launch("governance")
+            for stage in ("cutover", "repair", "governance"):
+                _wait_for(
+                    lambda stage=stage: (signals / f"{stage}-governance-wait").exists(),
+                    timeout=60, message=f"{stage} did not attempt namespace admission",
+                )
             (signals / "release-cutover").write_text("continue", encoding="utf-8")
             time.sleep(7)  # Deliberately exceed the helper's old five-second lock budget.
             assert cutover_process.poll() is repair.poll() is governance.poll() is None, logs()
@@ -437,7 +456,7 @@ def test_real_namespaced_build_repair_cutover_and_governance_do_not_invert(
             record = locks.read_lock(root / "status-monitor.lock")
             assert locks.lock_is_live(record)
             assert record["runtime_generation"] == manifest["runtime_generation"]
-            assert record["version"] == version and record["runtime_slot"] == selected
+            assert record["version"] == selected and record["runtime_slot"] == selected
             endpoint = routing.read_active_endpoint(root / "status-monitor-routing")
             health = ControlClient(
                 endpoint.base_url,
@@ -445,7 +464,7 @@ def test_real_namespaced_build_repair_cutover_and_governance_do_not_invert(
             ).health()
             assert health["published"] is True and health["status"] == "ready"
             assert health["runtime_generation"] == record["runtime_generation"]
-            assert health["version"] == version and health["runtime_slot"] == selected
+            assert health["version"] == selected and health["runtime_slot"] == selected
             assert not demand_errors, demand_errors
             for slot in (old_version, baseline.name, version, repaired):
                 with driver.runtime.construction_lease(root, slot, timeout=0):

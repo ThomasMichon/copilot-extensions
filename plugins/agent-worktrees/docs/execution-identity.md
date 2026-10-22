@@ -87,9 +87,92 @@ retain the full tuple while reciprocal references use the execution owner.
 The `run` JSON recognizer also uses that owner; invalid explicit tuple output
 is reported and leaves the pending resource claim unsettled.
 
-**Producer gate:** ordinary create, anchor admission and externally adopted
-checkout producers still emit legacy records. The optional typed factory input
-and tuple-aware retained-pair handling prepare those boundaries, but are not a
-producer rollout. Cross-plugin adapters, prospective creation and retained
-request replay must be integrated before changing that default. No historical
-ID, path, stored reference or session is rewritten.
+### Source-only producer opt-in
+
+`_create_worktree_core` has an internal `identity_mode="tuple-v1"` opt-in;
+omitting it retains `legacy`. It derives the physical/environment/owner tuple
+from the existing receiving registry and actual platform, then revalidates it
+before allocation. Missing or conflicting local execution evidence refuses.
+Callers cannot supply arbitrary tuple metadata through this mode.
+
+New session and bridge names use the selected physical machine and environment;
+a physical name ending in a platform-like suffix is not truncated. Names
+that cannot form a portable path and Git-reference component refuse before
+allocation reservation or carving, including path separators, drive qualifiers,
+traversal and invalid characters. The tuple codec also rejects NUL/control-line
+metadata. Identity metadata is not permission to create a nested ID. System IDs
+keep their existing `sys-...` form. Tracking, JSON and paired worktree records
+share the typed tuple; qualified companion references use its execution owner,
+including anchor companions. Completed creation-key replay retains its stored
+representation even if the caller selects the other supported mode. The
+authoritative creation path validates the retained record against the receiving
+execution space before returning it; a sibling environment cannot reuse the key
+to obtain an allocation owned by the other environment.
+
+`launch_request.execute` exposes the same internal legacy-default opt-in.
+Its existing locked admission writer derives and retains a complete allocation:
+the exact ID, branch, checkout, project namespace and original owner
+representation. The core consumes that value rather than reformatting a
+timestamp/suffix using current defaults, and revalidates it under the allocation
+lock. New launch receipts also retain the record's creation nonce and original
+owner/pair evidence. Retry and status refuse a replaced, retired, missing or
+conflicting allocation; an already-started creation never automatically carves
+again. Writer protocol version 6 prevents older handlers from consuming this
+new evidence. Receipt owner metadata is either fully versioned or wholly
+legacy: partial tuple fields refuse rather than invoking a legacy fallback.
+Old receipt formats remain readable and are not backfilled.
+
+New creation-key receipts retain the same original owner/pair evidence alongside
+their existing nonce. Completed replay preserves the original result and refuses
+changed relationships; legacy receipts retain their prior nonce and identity
+checks without being rewritten. Explicit creation-tail repair uses the retained
+tuple and exact pair stub, not a fresh allocation. A proven compatible legacy
+registry alias keeps its original record and reciprocal-reference spelling.
+Replacement of the retained nonce or owner during repair refuses.
+
+`load_or_create_anchor_record` and `_adopt_linked_worktree` expose the same
+internal opt-in for genuinely new records. The existing if-absent record lock
+selects the winner before deriving a tuple. Derivation checks the receiving
+project, tracking namespace and execution configuration; anchor admission also
+checks the configured anchor, and external adoption keeps Git's actual anchor,
+linked-checkout path, ID and branch as authority. It does not rename an externally
+created checkout to match prospective naming. Opt-in derivation errors propagate
+instead of falling back to a legacy write. Existing records, including a
+competing creation winner, return with their original identity and bytes and
+without requesting a new tuple from the registry. Newly created records retain
+their supplied tracking destination for subsequent path-implicit saves,
+including legacy anchor callers using a nondefault tracking directory.
+
+The timestamp/suffix-only `allocation` input still cannot admit a new tuple;
+the complete admitted value is required. These source APIs are not CLI flags,
+settings or rollout switches. Ordinary create, anchor admission and externally
+adopted checkout producers still emit legacy records. Installed one-term
+equivalence and reader acceptance stay gated
+before ordinary-default activation. No historical ID, path, stored reference
+or session is rewritten.
+
+### Source addressing equivalence
+
+The JSON `resolve` entry point uses the same declared selection for `--new`,
+read-only `--worktree-id ... --dry-run` lookup and ordinary resume. A declared
+`<machine>-wsl` shorthand, physical machine plus `--environment wsl`, exact
+custom execution key and configured alias select the same local guest where
+the registry permits them. The selector does not change `Config.machine`:
+tuple creation still derives from the registered current execution owner,
+and resume independently checks the retained record's authority.
+
+Exact registered keys retain precedence over an inferred legacy spelling,
+including when the key names a foreign target that must produce a remote plan.
+Ambiguous declared aliases, invalid topology collisions and conflicting
+environments refuse before local allocation or resume writes. A physical-host
+match never makes a sibling environment's retained record mutable.
+Linux has no inferred legacy `-linux` address: such a spelling must itself be
+declared as a key or compatibility alias. A generated worktree ID ending in
+`-linux-...` is not execution authority.
+
+`test_tuple_resolve_equivalence.py` drives these actual source entry points,
+injecting the existing opt-in only at the new-producer call boundary. It checks
+tracking YAML, JSON, short-ID lookup, read-only preview, resume mutation,
+retained nonce/identity and remote plans across Windows/WSL/Linux metadata
+fixtures. It does not activate ordinary tuple creation or claim installed or
+native-platform acceptance.

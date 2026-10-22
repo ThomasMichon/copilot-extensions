@@ -1572,7 +1572,9 @@ def main(argv: list[str] | None = None) -> int:
         print("  source                 show the self-update source (git repo + ref/branch)")
         print("  source set [--repo URL] [--ref BRANCH]   track a fork / canary branch for updates")
         print("  source reset [--repo] [--ref]            clear the source override(s)")
-        print("  update                 self-update the Manager, then update the harness plugins/runtimes")
+        print("  update [--wait|--detach|--supervised-debug]  submit and observe a durable suite update")
+        print("  update --request-status ID [--json]        read a durable request without installing")
+        print("  update --recovery-status|--recover-after-restart [--json]  inspect/settle interrupted work")
         print("  plugins                list the plugins the installer knows about")
         print("  plugins <name>         show one plugin's prereqs / config / steps")
         print("  plugins --prereqs      the de-duplicated union of all prerequisites")
@@ -1639,7 +1641,8 @@ def main(argv: list[str] | None = None) -> int:
     if args and args[0] == "source":
         return _cmd_source(args[1:])
     if args and args[0] == "update":
-        return _cmd_update(args[1:])
+        from .update_driver_cli import cmd_update_request
+        return cmd_update_request(args[1:])
     if args and args[0] == "--project":
         if len(args) != 2 or not args[1]:
             print("error: --project needs exactly one project name")

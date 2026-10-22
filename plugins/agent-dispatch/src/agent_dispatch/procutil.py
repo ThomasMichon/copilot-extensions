@@ -263,6 +263,18 @@ def agent_bridge_launch_prefix() -> list[str] | None:
     )
 
 
+def agent_pull_requests_launch_prefix() -> list[str] | None:
+    """Optional PR owner: attributable runtime/cell only, never ambient PATH."""
+    explicit_context = os.environ.get("COPILOT_EXTENSIONS_CONTEXT", "")
+    if explicit_context:
+        if sibling_absent("agent-pull-requests"):
+            return None
+        from .peer_launch import launch_prefix
+        return launch_prefix("agent-dispatch", install_dir(), explicit_context, "agent-pull-requests")
+    python = resolve_runtime_python(Path.home() / ".agent-pull-requests")
+    return [str(python), "-I", "-m", "agent_pull_requests"] if python is not None else None
+
+
 def sibling_absent(plugin_id: str) -> bool:
     """Whether an optional sibling is genuinely not installed in this explicit
     installation cell.

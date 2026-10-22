@@ -3643,15 +3643,21 @@ def _status_arguments(tmp_path: Path, legacy: Path) -> list[str]:
     ]
 
 
+STATUS_BASH_RUNNERS = (
+    BASH,
+    *((os.environ["INSTALLATION_CONTEXT_BASH32"],) if os.environ.get("INSTALLATION_CONTEXT_BASH32") else ()),
+)
+
+
 def _run_posix_status_on_bsd_userland(
-    tmp_path: Path, legacy: Path
+    tmp_path: Path, legacy: Path, bash: str,
 ) -> subprocess.CompletedProcess[str]:
     environment = os.environ.copy()
     environment.pop("COPILOT_EXTENSIONS_CONTEXT", None)
     environment.pop("COPILOT_PLUGIN_ROOT", None)
     environment["PATH"] = _bsd_userland_path(tmp_path)
     return subprocess.run(
-        _runner_command("posix", _status_arguments(tmp_path, legacy)),
+        [bash, str(POSIX_SCRIPT), *_status_arguments(tmp_path, legacy)],
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -3662,16 +3668,17 @@ def _run_posix_status_on_bsd_userland(
 
 @pytest.mark.installation_context_smoke
 @pytest.mark.skipif(os.name == "nt", reason="POSIX adapter only")
+@pytest.mark.parametrize("bash", STATUS_BASH_RUNNERS)
 def test_posix_status_resolves_when_userland_cannot_canonicalize_missing_paths(
-    tmp_path: Path,
+    tmp_path: Path, bash: str,
 ) -> None:
     """Legacy mode derives a cell path that does not exist; canonicalizing it
     must not need GNU coreutils, or every payload invocation on macOS aborts."""
-    if BASH is None:
+    if bash is None:
         pytest.skip("Bash runner is unavailable")
     legacy = tmp_path / "legacy"
     legacy.mkdir()
-    result = _run_posix_status_on_bsd_userland(tmp_path, legacy)
+    result = _run_posix_status_on_bsd_userland(tmp_path, legacy, bash)
     assert result.returncode == 0, result.stderr
     assert "Cannot resolve path" not in result.stderr
     value = json.loads(result.stdout)
@@ -3711,8 +3718,9 @@ def _canonicalization_cases(root: Path) -> list[tuple[str, Path]]:
 
 @pytest.mark.installation_context_smoke
 @pytest.mark.skipif(os.name == "nt", reason="POSIX adapter only")
+@pytest.mark.parametrize("bash", STATUS_BASH_RUNNERS)
 def test_posix_missing_path_canonicalization_matches_the_reference_adapter(
-    tmp_path: Path,
+    tmp_path: Path, bash: str,
 ) -> None:
     """The shell fallback must agree with the reference resolver, component for
     component.
@@ -3723,7 +3731,7 @@ def test_posix_missing_path_canonicalization_matches_the_reference_adapter(
     a real parity break, and the symlink cases are exactly where a divergence
     lets a containment check accept a path that resolves somewhere else.
     """
-    if BASH is None:
+    if bash is None:
         pytest.skip("Bash runner is unavailable")
     root = tmp_path / "corpus"
     root.mkdir()
@@ -3731,7 +3739,7 @@ def test_posix_missing_path_canonicalization_matches_the_reference_adapter(
     for name, candidate in _canonicalization_cases(root):
         expected = Path(candidate).resolve(strict=False)
         result = _run_posix_status_on_bsd_userland(
-            tmp_path / f"case-{name}", candidate
+            tmp_path / f"case-{name}", candidate, bash,
         )
         if result.returncode != 0:
             mismatches.append(f"{name}: adapter failed: {result.stderr.strip()}")
@@ -3746,12 +3754,13 @@ def test_posix_missing_path_canonicalization_matches_the_reference_adapter(
 
 @pytest.mark.installation_context_smoke
 @pytest.mark.skipif(os.name == "nt", reason="POSIX adapter only")
-def test_posix_missing_path_fallback_reports_a_symlink_loop(tmp_path: Path) -> None:
+@pytest.mark.parametrize("bash", STATUS_BASH_RUNNERS)
+def test_posix_missing_path_fallback_reports_a_symlink_loop(tmp_path: Path, bash: str) -> None:
     """A symlink cycle must be reported, not followed until the shell dies."""
-    if BASH is None:
+    if bash is None:
         pytest.skip("Bash runner is unavailable")
     loop = tmp_path / "loop"
     loop.symlink_to(tmp_path / "loop")
-    result = _run_posix_status_on_bsd_userland(tmp_path, loop / "child")
+    result = _run_posix_status_on_bsd_userland(tmp_path, loop / "child", bash)
     assert result.returncode != 0
     assert "Too many levels of symbolic links" in result.stderr

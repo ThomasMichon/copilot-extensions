@@ -1,0 +1,9 @@
+{
+  "comment": "Verify landing probe ref stability while retaining standalone integration cases",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

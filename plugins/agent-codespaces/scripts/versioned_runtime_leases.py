@@ -15,7 +15,203 @@ from typing import Callable
 _construction_owners = threading.local()
 
 
-def windows_owned_file(fd: int) -> bool:
+def _legacy_windows_lease_acl(value: str, *, directory: bool) -> bool:
+    """Recognize only the administrator-owned ACL emitted by mkdir(0700)."""
+    prefix = "O:BAD:P" if directory else "O:BAD:"
+    if not value.startswith(prefix):
+        return False
+    entries = re.findall(r"\(([^()]+)\)", value[len(prefix):])
+    flags = "OICI" if directory else "ID"
+    expected = {f"A;{flags};FA;;;{sid}" for sid in ("OW", "SY", "BA")}
+    return (
+        len(entries) == 3 and set(entries) == expected
+        and value[len(prefix):] == "".join(f"({entry})" for entry in entries)
+    )
+
+
+def _windows_private_lease_file(root: Path, directory: Path, name: str) -> int:
+    """Bind new lease state to TokenUser, not an elevated token's default owner."""
+    import ctypes as c
+    from ctypes import wintypes as w
+    import json
+    import msvcrt
+    import sys
+    import uuid
+
+    class Attributes(c.Structure):
+        _fields_ = [("length", w.DWORD), ("descriptor", w.LPVOID), ("inherit", w.BOOL)]
+
+    class SidAttributes(c.Structure):
+        _fields_ = [("sid", w.LPVOID), ("attributes", w.DWORD)]
+
+    kernel = c.WinDLL("kernel32", use_last_error=True)
+    security = c.WinDLL("advapi32", use_last_error=True)
+    signatures = (
+        (kernel, "GetCurrentProcess", [], w.HANDLE),
+        (kernel, "CloseHandle", [w.HANDLE], w.BOOL),
+        (kernel, "LocalFree", [w.LPVOID], w.LPVOID),
+        (kernel, "CreateDirectoryW", [w.LPCWSTR, c.POINTER(Attributes)], w.BOOL),
+        (kernel, "CreateFileW",
+         [w.LPCWSTR, w.DWORD, w.DWORD, c.POINTER(Attributes), w.DWORD, w.DWORD, w.HANDLE], w.HANDLE),
+        (security, "OpenProcessToken", [w.HANDLE, w.DWORD, c.POINTER(w.HANDLE)], w.BOOL),
+        (security, "GetTokenInformation",
+         [w.HANDLE, c.c_int, w.LPVOID, w.DWORD, c.POINTER(w.DWORD)], w.BOOL),
+        (security, "ConvertSidToStringSidW", [w.LPVOID, c.POINTER(w.LPWSTR)], w.BOOL),
+        (security, "GetNamedSecurityInfoW",
+         [w.LPWSTR, c.c_int, w.DWORD, w.LPVOID, w.LPVOID, w.LPVOID, w.LPVOID,
+          c.POINTER(w.LPVOID)], w.DWORD),
+        (security, "ConvertSecurityDescriptorToStringSecurityDescriptorW",
+         [w.LPVOID, w.DWORD, w.DWORD, c.POINTER(w.LPWSTR), w.LPVOID], w.BOOL),
+        (security, "ConvertStringSecurityDescriptorToSecurityDescriptorW",
+         [w.LPCWSTR, w.DWORD, c.POINTER(w.LPVOID), w.LPVOID], w.BOOL),
+        (security, "SetFileSecurityW", [w.LPCWSTR, w.DWORD, w.LPVOID], w.BOOL),
+    )
+    for dll, function, arguments, result in signatures:
+        native = getattr(dll, function)
+        native.argtypes, native.restype = arguments, result
+
+    def descriptor_text(path: Path, information: int = 5) -> str:
+        descriptor, text = w.LPVOID(), w.LPWSTR()
+        code = security.GetNamedSecurityInfoW(
+            str(path), 1, information, None, None, None, None, c.byref(descriptor),
+        )
+        if code:
+            raise c.WinError(code)
+        try:
+            if not security.ConvertSecurityDescriptorToStringSecurityDescriptorW(
+                descriptor, 1, information, c.byref(text), None,
+            ):
+                raise c.WinError(c.get_last_error())
+            return text.value
+        finally:
+            if text:
+                kernel.LocalFree(c.cast(text, w.LPVOID))
+            kernel.LocalFree(descriptor)
+
+    token, text, descriptor = w.HANDLE(), w.LPWSTR(), w.LPVOID()
+    if not security.OpenProcessToken(kernel.GetCurrentProcess(), 8, c.byref(token)):
+        raise c.WinError(c.get_last_error())
+    try:
+        size = w.DWORD()
+        security.GetTokenInformation(token, 1, None, 0, c.byref(size))
+        if c.get_last_error() != 122 or not 0 < size.value <= 65536:
+            raise c.WinError(c.get_last_error())
+        user = c.create_string_buffer(size.value)
+        if not security.GetTokenInformation(token, 1, user, size, c.byref(size)):
+            raise c.WinError(c.get_last_error())
+        sid = c.cast(user, c.POINTER(SidAttributes)).contents.sid
+        if not security.ConvertSidToStringSidW(sid, c.byref(text)):
+            raise c.WinError(c.get_last_error())
+        account = text.value
+        sddl = f"O:{account}D:P(A;OICI;FA;;;{account})(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)"
+        if not security.ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            sddl, 1, c.byref(descriptor), None,
+        ):
+            raise c.WinError(c.get_last_error())
+        attributes = Attributes(c.sizeof(Attributes), descriptor, False)
+        root.mkdir(parents=True, exist_ok=True)
+        if not kernel.CreateDirectoryW(str(directory), c.byref(attributes)):
+            if c.get_last_error() != 183:
+                raise c.WinError(c.get_last_error())
+            metadata = directory.lstat()
+            if not stat.S_ISDIR(metadata.st_mode) or getattr(metadata, "st_file_attributes", 0) & 0x400:
+                raise OSError("runtime lease directory is not an ordinary directory")
+            previous = descriptor_text(directory)
+            if _legacy_windows_lease_acl(previous, directory=True):
+                root_metadata = root.lstat()
+                if (
+                    not stat.S_ISDIR(root_metadata.st_mode)
+                    or getattr(root_metadata, "st_file_attributes", 0) & 0x400
+                ):
+                    raise PermissionError("Runtime lease repair requires an ordinary user-owned root")
+                root_handle = kernel.CreateFileW(str(root), 0x20000, 3, None, 3, 0x2200000, None)
+                if root_handle == c.c_void_p(-1).value:
+                    raise c.WinError(c.get_last_error())
+                try:
+                    root_fd = msvcrt.open_osfhandle(root_handle, os.O_RDONLY)
+                except BaseException:
+                    kernel.CloseHandle(root_handle)
+                    raise
+                try:
+                    if not windows_owned_file(root_fd, require_user_access=True):
+                        raise PermissionError(
+                            f"Runtime lease repair refuses a public or foreign root, or one "
+                            f"without full access for this account: {root}"
+                        )
+                finally:
+                    os.close(root_fd)
+                repairs = []
+                for child in directory.iterdir():
+                    item = child.lstat()
+                    if (
+                        re.fullmatch(r"[0-9a-f]{64}\.lock", child.name) is None
+                        or not stat.S_ISREG(item.st_mode) or item.st_nlink != 1
+                        or getattr(item, "st_file_attributes", 0) & 0x400
+                    ):
+                        raise PermissionError("Legacy runtime lease directory contains an unowned entry")
+                    old = descriptor_text(child)
+                    if old == sddl:
+                        continue  # Resume a caught, partially applied repair without rewriting it.
+                    if not _legacy_windows_lease_acl(old, directory=False):
+                        raise PermissionError("Legacy runtime lease file has unrecognized permissions")
+                    repairs.append((child, item, old))
+                # Protect files before updating their inheritable parent ACL.
+                repairs.append((directory, metadata, previous))
+                audit = root / f".lease-access-repair-{uuid.uuid4().hex}.json"
+                with audit.open("x", encoding="utf-8") as stream:
+                    json.dump({
+                        "schema": "versioned-runtime.lease-access-repair", "version": 1,
+                        "directory": directory.name,
+                        "entries": [
+                            {"path": str(path.relative_to(root)), "descriptor": old,
+                             "device": item.st_dev, "inode": item.st_ino}
+                            for path, item, old in repairs
+                        ],
+                    }, stream, indent=2)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                for path, item, old in repairs:
+                    current = path.lstat()
+                    if (current.st_dev, current.st_ino) != (item.st_dev, item.st_ino):
+                        raise OSError("Runtime lease identity changed before repair")
+                    observed = descriptor_text(path)
+                    if observed == sddl:
+                        continue
+                    if observed != old:
+                        raise OSError("Runtime lease permissions changed before repair")
+                    if not security.SetFileSecurityW(str(path), 0x80000005, descriptor):
+                        raise c.WinError(c.get_last_error())
+                    after = path.lstat()
+                    if (after.st_dev, after.st_ino) != (item.st_dev, item.st_ino):
+                        raise OSError("Runtime lease identity changed during permission repair")
+                print(
+                    f"[versioned-runtime] repaired {directory.name} user access in place; "
+                    f"lock identities retained; audit: {audit.name}",
+                    file=sys.stderr, flush=True,
+                )
+        handle = kernel.CreateFileW(
+            str(directory / name), 0xC0000000, 3, c.byref(attributes), 4, 0x200080, None,
+        )
+        if handle == c.c_void_p(-1).value:
+            raise c.WinError(c.get_last_error())
+        try:
+            return msvcrt.open_osfhandle(handle, os.O_RDWR | os.O_BINARY)
+        except BaseException:
+            kernel.CloseHandle(handle)
+            raise
+    finally:
+        if descriptor:
+            kernel.LocalFree(descriptor)
+        if text:
+            kernel.LocalFree(c.cast(text, w.LPVOID))
+        kernel.CloseHandle(token)
+
+
+def _windows_account_full_control(kind: int, flags: int, mask: int, sid: str, account: str) -> bool:
+    return kind == 0 and not flags & 8 and mask & 0x1F01FF == 0x1F01FF and sid == account
+
+
+def windows_owned_file(fd: int, *, require_user_access: bool = False) -> bool:
     """Admit the current user/enabled owner groups and a non-public write DACL."""
     import ctypes
     from ctypes import wintypes
@@ -80,7 +276,8 @@ def windows_owned_file(fd: int) -> bool:
             return value
 
         user, groups = token_info(1), token_info(2)
-        owners = {sid_string(ctypes.cast(user, ctypes.POINTER(SidAttributes)).contents.sid)}
+        account = sid_string(ctypes.cast(user, ctypes.POINTER(SidAttributes)).contents.sid)
+        owners = {account}
         count = ctypes.cast(groups, ctypes.POINTER(Groups)).contents.count
         entries = (SidAttributes * count).from_buffer(groups, Groups.entries.offset)
         owners.update(sid_string(entry.sid) for entry in entries
@@ -97,16 +294,19 @@ def windows_owned_file(fd: int) -> bool:
         if not security.GetAclInformation(dacl, ctypes.byref(size), ctypes.sizeof(size), 2):
             raise ctypes.WinError(ctypes.get_last_error())
         trusted = owners | {"S-1-5-18", "S-1-5-32-544", "S-1-3-4"}
+        user_access = False
         for index in range(size.count):
             pointer = wintypes.LPVOID()
             if not security.GetAce(dacl, index, ctypes.byref(pointer)):
                 raise ctypes.WinError(ctypes.get_last_error())
             ace = ctypes.cast(pointer, ctypes.POINTER(Ace)).contents
+            sid = sid_string(pointer.value + Ace.sid.offset) if ace.kind == 0 else ""
+            user_access |= _windows_account_full_control(ace.kind, ace.flags, ace.mask, sid, account)
             if ace.flags & 8 or ace.kind == 1:
                 continue
-            if ace.kind != 0 or (ace.mask & 0x500D0156 and sid_string(pointer.value + Ace.sid.offset) not in trusted):
+            if ace.kind != 0 or (ace.mask & 0x500D0156 and sid not in trusted):
                 return False
-        return True
+        return user_access or not require_user_access
     finally:
         if descriptor:
             kernel.LocalFree(descriptor)
@@ -200,9 +400,12 @@ def _kernel_lease(root: Path, version: str, *, kind: str, shared: bool,
     lock_dir = root / f".{kind}-leases"
     lock_path = lock_dir / (key + ".lock")
     if open_lock is None:
-        lock_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
-        flags = os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0)
-        fd = os.open(lock_path, flags, 0o600)
+        if os.name == "nt":
+            fd = _windows_private_lease_file(root, lock_dir, lock_path.name)
+        else:
+            lock_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+            flags = os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0)
+            fd = os.open(lock_path, flags, 0o600)
     else:
         # The caller keeps its verified directory handles alive through release.
         fd = open_lock(lock_dir, lock_path.name)

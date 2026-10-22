@@ -118,11 +118,42 @@ matrix below are _(agent-recommended)_ implementation details.
   persistent/status sinks (#6869 and #6904).
 - [x] Route synchronous bootstrap and blocking marketplace installer output
   through the native timing, outcome and persistent-log adapters (#6920).
-- [ ] Finish the remaining detached/standalone installer and early/late Bash
-  output boundaries through their actual output owners.
+- [x] Frame standalone Worktrees install/update output in the existing
+  admitting parent, retaining child-exit timing, native arguments, source
+  admission and lease/containment ownership (#7119).
+- [x] Frame finite post-maintenance Bash preflight log scopes without
+  extending renderer lifetime across the Picker or interactive session
+  (#7672).
+- [x] Persist detached Windows marketplace-installer output through a
+  launch-owned observer without changing the installer's native authority
+  (#7683).
+- [x] Frame detached Bash marketplace-installer output through its launch-owned
+  observer, retaining the native invocation and existing log destination
+  (#7697).
+- [x] Replace routine raw-command echoes with passthrough/pane/direct argument counts
+  and existing timed action labels, preserving native argument values (#7708).
+- [x] Make early/late Bash fallback diagnostics UTC-correlated and explicit
+  about unavailable elapsed timing outside finite renderer scopes (#7727).
+- [ ] Finish the remaining standalone installer output boundaries through
+  their actual output owners.
+- [x] Admit Containers' actual PowerShell `init.ps1` producer and preserve its
+  optional Docker preflight diagnostics and failure status on both platforms
+  (#7854).
+- [x] Qualify MCP's actual PowerShell `init.ps1` producer and its remaining
+  visible native diagnostic boundaries without formatting MCP protocol output
+  (#7879).
+- [ ] Qualify Budget Guidance's actual self-staged PowerShell installer and
+  its construction-shell diagnostics before declaring captured UTF-8 output.
 - [ ] Prefix every human-readable install/update line with a wall-clock time;
   suffix it with honestly labeled monotonic elapsed time or completed-step
   duration. Do not represent arbitrary child-line arrival as execution cost.
+- [x] Normalize known legacy native progress markers to the shared human state
+  vocabulary without changing owner states, completion or structured outcomes
+  (#7736).
+- [x] Restore the registered payload-refresh phase after marketplace
+  authorization without changing auth, acquisition or outcome semantics (#7801).
+- [x] Retain numeric payload failure classes before shortening diagnostics,
+  including advisory attempts and final contention/I/O outcomes (#7828).
 - [ ] Consolidate banners, status names, nesting and error presentation;
   preserve useful detail without duplicate timestamps, repeated status
   prefixes or contradictory aggregate success.
@@ -136,12 +167,16 @@ matrix below are _(agent-recommended)_ implementation details.
   refusals through real native construction adapters (#6940).
 - [x] Remove PowerShell UV acquisition from admitted healthy reuse while
   preserving fresh-construction acquisition and cleanup (#7054).
-- [ ] Reconcile Bridge serving-version drift through the admitted runtime's
+- [x] Reconcile Bridge serving-version drift through the admitted runtime's
   existing cutover path rather than returning a misleading local-content
-  no-op or rebuilding an already current slot (#6826).
+  no-op or rebuilding an already current slot (#6826, #6877); installed
+  serving-state proof remains in the rollout validation below.
 - [ ] Verify #6598's existing Codespaces admitted-construction reuse after
   promotion instead of reimplementing it; attribute any remaining
   package/completion/activation failure with the new phase outcomes.
+- [x] Avoid unused site-package initialization in isolated portable
+  installation-mode probes while retaining fresh payload-owned authority
+  and complete real-consumer decision parity (#7818).
 - [ ] Implement the reviewed, evidence-backed reductions in repeated planning,
   probing, building or reconciliation, retaining all actual safety gates.
 - [ ] Make unchanged healthy work a genuine no-op; retain fresh, changed,
@@ -224,6 +259,890 @@ Bridge serving-version gap and supervisor framing defect survived that
 bounded source delta inspection.
 
 ## Journal
+
+### 2026-10-22 - Budget staged output and native diagnostics qualified
+
+- Real PS5 and PowerShell 7 fixtures reproduced legacy-encoded construction
+  stderr and first-stamp output before enrollment. The construction probe
+  retained isolated Python flags, literal argv, successful warnings and
+  failure decisions; the actual marketplace-path stamp retained spaced,
+  quoted and non-ASCII runtime paths.
+- Only the construction-shell diagnostic boundary changed: its existing
+  dual-stream native helper now captures stderr explicitly and forwards it
+  through the producer text writer, including on native success. The helper
+  implementation, source checks, construction callback, staging/watchdog
+  authority and transaction policy are unchanged.
+- After native qualification, the actual `install.ps1` received the guarded
+  canonical initializer and source-bound output declaration. Release
+  materialization now covers twelve output producers without adopting
+  another shared installer engine.
+- The staged fixtures execute the original installer and its real self-stage
+  route, not an injected encoded-command wrapper. Its `Start-Process`
+  compatibility function can rewrite vector `-File` invocations, but the
+  current self-stage call supplies a quoted native command-line string.
+  Both hosts retained UTF-8 stdout without CLIXML, the original arguments,
+  the source snapshot and no runtime construction.
+- The full changed-module run passed 228 Windows cases with two skips and
+  188 same-source Linux cases with 39 platform skips. Six final native
+  fixtures also passed after tightening fixture asset requirements. Existing
+  Budget staging/stamp selectors passed on both platforms; no dependency
+  was installed. Optional-helper absence and requested-missing-helper
+  refusal remain covered through the original entrypoint.
+- Unit and simple end-to-end tiers include the real updater-to-staged-child
+  capture with an empty home, declared snapshot, time-framed lines and
+  retained completion status. This is first-touch stamping, not full clean-room
+  runtime construction; that unchanged contract was not repeated. No external
+  venue or host update is authorized for this candidate.
+- Documentation impact is confined to Budget's installer section and the
+  shared captured-output contract. Runtime JSON, output-free hooks, public
+  CLI arguments and configuration remain unchanged.
+- This is a qualified source candidate, not a merged, promoted or installed
+  release. Machines' remaining output boundary, equivalent no-op counts and
+  costs, serving-state proof and parent launch/trust obligations remain open.
+
+### 2026-10-22 - MCP native diagnostics qualified before output enrollment
+
+- #7879 merged after current-head approval, empty review threads and green
+  required checks. The authorized extra CODEOWNER-vote exception did not
+  bypass CI. Both parent trackers remain open; promotion and installed
+  rollout are not inferred from this source merge.
+- Real `-File` fixtures reproduced legacy-encoded stderr bypassing the text
+  writer at both the construction-shell and GC count subprocess boundaries.
+  Both PS5 and PowerShell 7 controls failed before either boundary was
+  routed through the existing native helper.
+- The two visible diagnostic sites now use that same dual-stream helper
+  with explicit error capture and text-writer forwarding, including
+  successful native commands' warnings. Construction flags, failure checks,
+  callback ownership and GC protections are unchanged. The preceding GC
+  command retains its explicit stderr suppression. Scalar count output is
+  trimmed to preserve its original single-line presentation.
+- Only after those native controls passed was `init.ps1` enrolled with the
+  canonical initializer and source-bound declaration. Real updater first
+  stamps, legacy/helper-absence controls and all eleven output producers'
+  release-materialization fixtures passed. The MCP bridge, CLI JSON and
+  stdio protocol are not decorated or re-routed.
+- The final same-source qualification passed 237 Windows cases with two
+  skips and 187 native Linux cases with 42 platform skips. Existing native
+  cleanup, literal argv, large-stderr, construction-failure and timeout
+  diagnostics remain covered under their original deadlines and containment
+  limits. No dependency was installed.
+- The broad run also exposed an outdated test that still rejected the
+  public update request owner's now-supported `--json` option. Its coverage
+  now verifies actual request dispatch without invoking that owner, while
+  retaining rejection of undeclared `--quiet`; no updater policy changed.
+- The simple end-to-end and first-touch tier uses an empty home and the real
+  first-stamp adapter. Full fresh-machine construction was not repeated
+  because the construction contract did not change. No external-venue
+  update is authorized for this candidate; promotion and rollout remain
+  separately owned obligations.
+- This qualifies one more source boundary, not remaining Machines/Budget
+  producers, equivalent no-op measurements or parent launch completion.
+- The next output boundary is Budget's actual standalone installer, including
+  its staged child invocation. Its compatibility launcher can rewrite a
+  `-File` vector as an encoded PowerShell command, so ordinary non-staged
+  first-stamp coverage alone does not establish the actual launch route or
+  redirected stream shape.
+  Qualify that native route before enrolling it; Machines remains unqualified.
+
+### 2026-10-22 - Containers' declared producer retains native diagnostics
+
+- #7854 merged after current-head approval, empty review threads and green
+  required checks. The authorized review-rule exception covered only the
+  additional CODEOWNER vote; no CI gate was bypassed. Both parent trackers
+  remain open. This is merged source, not an installed release claim.
+- A real native preflight fixture reproduced two defects before enrollment:
+  inherited Windows stderr bypassed the requested UTF-8 text writer, and a
+  nonzero Docker version probe still printed success. The POSIX counterpart
+  suppressed stderr and likewise printed success on failure.
+- PowerShell now reuses the installer's existing asynchronous dual-stream
+  helper, retains native decoding and arguments, and forwards diagnostics
+  through its stderr text writer. Both platforms retain captured stdout
+  details and report the native exit code as a warning; Docker remains
+  optional and installation continues.
+- The output-only standalone registry identifies Containers' `init.ps1`,
+  rather than assuming every producer is `install.ps1`. Existing
+  synchronization and release materialization package the unchanged shared
+  initializer and bind the declaration to the actual entrypoint. This does
+  not adopt the construction engine or change policy, lock or runtime owners.
+- Windows qualified 268 cases with nine platform skips; the same frozen
+  candidate qualified 225 cases with 52 platform skips on native Linux.
+  Coverage includes PS5 and PowerShell 7 legacy/requested encoding controls,
+  real child exit codes and diagnostics larger than a pipe buffer, unchanged
+  native decoding/stdin, the updater's actual first-stamp adapter, legacy
+  helper absence, fail-closed requested initialization, and canonical plus
+  materialized release declarations. The original per-test and group
+  containment limits were unchanged.
+- The first broad Windows run exposed two missing-source import failures in
+  the reused test environment. Both controls passed after explicitly exposing
+  the plugin's declared local source-library closure; the complete final
+  run above used that closure. No dependency was installed or policy relaxed.
+- The first PR guard required a Worktrees changefile even for its tests-only
+  diff. Added the required development entry rather than bypassing or
+  weakening that gate; the Worktrees runtime payload itself is unchanged.
+- Validation tiers: focused logic and native subprocess coverage passed;
+  the real updater stamped an empty fixture home without constructing a
+  runtime; same-root and separate-tree release fixtures passed. A full
+  fresh-machine provision was not repeated because construction did not
+  change. No further external-venue update is authorized for this slice, so
+  installed promotion and rollout remain unproved, under the existing owner.
+- This is one source boundary, not completion of the remaining standalone,
+  equivalent no-op cost, rollout or parent launch obligations.
+- Next source slice: qualify MCP's actual `init.ps1` producer. Its native
+  work already passes through the existing dual-stream helper; retain that
+  behavior and prove the actual first-stamp and encoding boundaries before
+  declaring capture support. Machines and Budget remain separate unqualified
+  boundaries.
+
+### 2026-10-22 - Second authorized capture changed releases again
+
+- The separately authorized ordinary current-state capture completed with
+  exit zero in 2,056.7 seconds. Another release arrived before acquisition:
+  Manager and all thirteen runtime payload generations changed. This is
+  another changed-version update, not an equivalent unchanged-flow benchmark.
+  No further update or repair is implied.
+- Runtime execution accounted for 1,646.1 seconds: Worktrees 203.2, Bridge
+  221.1 and remaining runtime reconciliation 1,221.8. The registered payload
+  phase was 209.1 seconds and runtime preflight 23.6 seconds. These are
+  measured phase durations, not exclusive attribution to individual
+  package, network or probe commands.
+- The running engine now correctly framed registered payload acquisition
+  under `payload_refresh`, independently confirming the previously installed
+  #7801 behavior. Read-only post-command checks found matching selected and
+  deploy identities for the investigated runtimes; the new Bridge/Index
+  services remained healthy after the captured management channel closed,
+  and both recorded predecessor processes were absent.
+- Installed payload and selected runtime bytes for the #7828 acquisition
+  fix now exactly match the merged source, as do the earlier #7801 and
+  #7818 modules. No sharing failure occurred during this run, so this is
+  installed-source and ordinary-operation evidence, not live execution of
+  the failure-classification branch.
+- The Worktrees monitor seam again reported the explicit `no-live-monitor`
+  outcome. The retained unpublished monitor observation is not repaired or
+  reclassified by these service checks. Required-role applicability and
+  existing serving-convergence ownership remain separate.
+- Credit the independent shared-lock recovery implementation in #7814,
+  actually merged, rather than the earlier still-open proposal observation.
+  Its native/standalone source work does not itself prove live repair or
+  original-operation completion; #7117 and its existing owner retain those
+  acceptance obligations.
+
+### 2026-10-22 - Payload reporting fix merged; changed-version update proof bounded
+
+- #7828 merged as `2d42fad24d9724d677bc3eaea3497bf6b4ab6497` after
+  Copilot approved exact head `84d3c6994bc5bf98bb5daef1c77885d8ae30755e`,
+  its actual review reported no unresolved findings, discussion threads were
+  empty and every current-head required check passed.
+- The publication rebase retained the qualified acquisition, event adapter,
+  three covering test files and results reference byte-for-byte. Backed up
+  the approved tip and advanced only provider-confirmed merged history.
+  Re-read the Plan and Validation Plan; only the narrow diagnostic item is
+  closed, not serving convergence or the complete observability campaign.
+- A separately authorized ordinary x64 update completed with exit zero in
+  2,144.9 seconds. It changed runtime generations and did not reproduce the
+  historical sharing failure; it is not an equivalent no-op benchmark.
+  Read-only checks established selected/deploy agreement for the three
+  investigated runtimes and healthy newly selected Bridge/Index services.
+- The installed payload and selected Worktrees runtime contain the exact
+  merged #7801 phase-restoration and #7818 no-site-probe source bytes.
+  That does not mean the old updater process used those bytes earlier in
+  the same command, nor that #7828 is deployed.
+- Do not infer monitor readiness from update success: its installer reported
+  `no-live-monitor`, while read-only inspection found a retained older,
+  unpublished process responding with an unavailable projection publisher
+  and stale owner/route metadata. Process existence alone does not establish
+  a live owner, a required active role or permission to restart it. Preserve
+  this as a separate serving-state observation under #6389 and the existing
+  #5453/#5512 owners, not a cause of the unreproduced sharing failure.
+- No additional update, service repair, process termination or other-host
+  rollout was performed. The next equivalent cost measurement and any
+  live recovery retain their explicit authorization gates.
+
+### 2026-10-22 - Retain native payload failure classifications before truncation
+
+- A failed-first regression reproduced loss of an early sharing/lock
+  violation from a long child diagnostic: retry admission used complete
+  output, but the advisory/final status retained only its tail. The latter
+  could lose the specific event code and change a final contention exit
+  from 5 to 1. Native I/O refusal wording also lost its recognized class
+  once the numeric marker was outside that tail.
+- Preserve an evidenced Windows sharing/lock marker in the status reason
+  before the existing redacted, bounded tail. Use the existing recognized
+  I/O-error wording. Host-aware numeric admission, refusal precedence,
+  retry count/backoff/budget, activation preservation and timeout settlement
+  are unchanged. This is error reporting, not identification or repair of
+  a file-handle owner.
+- The focused regression first failed twelve cases and passed four controls.
+  The complete affected Windows acquisition/telemetry suites then passed
+  213 cases with two platform skips, including real failed child commands,
+  exact attempt counts, final exit classification and the runtime-mutation
+  barrier. The same frozen candidate passed 184 cases with 31 platform skips
+  on native Linux. Install-contract, lint and documentation checks passed.
+  No test limit or runtime dependency changed.
+- Validation tiers: unit and real-subprocess failure paths passed on both
+  native platforms. Fresh runtime construction is not changed, so a complete
+  clean-room installation was not repeated for this reporting-only slice.
+  Live deployment of this source is not authorized; the ongoing diagnostic
+  update cannot install an unpromoted change and is not its rollout proof.
+- The live diagnostic update remains separately owned and cannot be treated
+  as validation of this unpromoted source change. Equivalent whole-flow cost,
+  remaining standalone boundaries, authorized rollout and parent #6600 stay
+  open.
+
+### 2026-10-22 - Probe invocation optimization merged; continue measured diagnosis
+
+- #7818 merged as `3517f2af3db876e546fb1f24854bd8f08b0c57a9` after
+  Copilot approved exact head `c1d28cd9cb0f3dd56bd82be9aa9d4573a76f3f76`,
+  its actual review reported no open findings, discussion threads were empty
+  and every current-head required check passed.
+- The publication rebase preserved the qualified probe code, tests and
+  directly related canonical helper/procutil closure byte-for-byte. Retained
+  the approved tip on a backup and advanced only confirmed merged history.
+  Re-read this effort's Plan and Validation Plan and closed only the specific
+  unused-site work item; whole-flow cost and rollout remain open.
+- The one authorized ARM64 recovery/update is complete and its selected
+  services were independently checked. No additional update on another host
+  is implied. Other observed sharing errors still lack handle-owner evidence;
+  old native installer failures cannot be diagnosed from final exit codes alone.
+- Next diagnosis must retain complete attempt output and distinguish final
+  required failures from recovered advisory attempts. The source currently
+  bounds failed payload diagnostics to a short tail; a source-supported
+  classification-loss hypothesis is not proof of the other host's lock holder.
+  Keep #7117's independent source recovery owner and the existing rollout holds.
+
+### 2026-10-22 - Isolate repeated probe startup before changing its invocation
+
+- The installed planning observation attributed 9.201 seconds to eleven
+  serial helper invocations, not to their authority checks alone. An isolated
+  eight-process experiment separated interpreter startup, helper loading and
+  the actual probe body using the canonical helper closure and synthetic
+  legacy/policy fixtures. No deployed files or real installation state changed.
+- With the same Python 3.11 interpreter, sampled empty starts took 160/134 ms
+  with/without site initialization; direct allowed probes took 474/345 ms and
+  invalid-policy probes 409/383 ms. Instrumented warm calls attributed 246/205
+  ms to loading and 38/36 ms to the probe body. These small samples are not an
+  equivalent installed-flow speedup or proof that all remaining time is idle.
+- Complete allowed and invalid-policy JSON, exact exit status and every
+  fixture byte/mtime were unchanged. Disabling site initialization does change
+  the pre-3.14 venv prefix and removes site/editable import paths: those changes
+  are explicit, not filtered from the evidence. The standard-library-only
+  helper does not use those prefixes or paths for its authority decisions.
+- The source now adds `-S` only to this isolated, payload-owned Python probe.
+  It preserves `-I`, UTF-8, the selected executable, per-attempt validation and
+  the native fallback. The existing six Windows authority scenarios compare
+  complete output and exit status against site-initialized Python in addition
+  to their native-adapter comparison. The exact-argv regression failed first.
+  Complete covering reconciliation/probe suites passed on Windows (173 passed,
+  one platform skip, 135.50 seconds) and the same frozen source on Linux (168
+  passed, six platform skips, 40.12 seconds), at the unchanged limits.
+- The first Windows attempt could not collect because the cached environment
+  lacked a newly declared local dependency. The canonical prepare-only path
+  restored that environment; the actual regression then failed as expected
+  before the source change. Install-contract, lint, documentation and effort
+  structure guards pass. This is a below-altitude invocation optimization,
+  not a new planner, cache, installation policy or service.
+- Documentation impact: Worktrees' README owns the selected-interpreter,
+  standard-library and pre-3.14 prefix explanation; the source-owned effort
+  owns the limited cost evidence. A patch changefile names Worktrees only.
+  Clean-room installation was not run because no construction or first-install
+  code changed; fresh isolated probe consumers were exercised instead. Live
+  execution of this unpromoted candidate is not authorized by an earlier
+  update's consent. Review, release and installed qualification remain open.
+- A fresh read of #7117 found a separate shared-lock-recovery claimant.
+  Preserve that source ownership rather than opening a competing repair.
+
+### 2026-10-22 - Explicit recovery completed one normal update, not fleet rollout
+
+- After explicit operator authorization, an ordinary one-file publication-lock
+  directory was archived atomically to a unique sibling, preserving its owner
+  receipt. The recorded owner was absent, a full host restart occurred after
+  acquisition, the exact receipt remained unchanged and no installer was active.
+  No automatic stale-lock reclaim, force update or service termination was used.
+- The single authorized normal ARM64 update then exited zero: Manager took
+  2,568.6 seconds, engine execution 2,450.0 seconds and runtime reconciliation
+  1,302.8 seconds. Worktrees took 416.6 seconds, Bridge 372.1, Codespaces 230.7,
+  Dispatch 286.3 and Index 144.8. These are changed-version flows, not healthy
+  no-op measurements or evidence that every host shares the original failure.
+- Read-only post-update checks confirmed matching selected/deployed versions
+  for Worktrees, Bridge and Index. The monitor reported ready with current
+  roster readiness; Bridge reported healthy, ready and not draining. Index
+  retained its client role without activating a service. The publication lock
+  was absent and the archived receipt's digest was unchanged.
+- Bridge recovered a prior aborted cutover, then completed its normal healthy
+  transition with a clean unforced drain, predecessor exit and relay adoption.
+  That successful recovery does not identify why the earlier cutover aborted.
+  Anchor synchronization explicitly skipped a stale-index condition; no anchor
+  repair was attempted. Other historical host failures remain distinct.
+- Payload and runtime module hashes matched the source before #7801, not its
+  phase correction. Therefore this run proves neither that correction nor the
+  new probe optimization live. No second update was started. The supported
+  explicit recovery command remains with #7117's existing claimant; the
+  broader effort, safe rollout holds and parent launch obligations stay open.
+
+### 2026-10-22 - Attribution correction merged; measured planning costs remain
+
+- #7801 merged as `74753fa551edcd4cc91ee395fa4698331e2452de` after
+  Copilot approved exact head `91b3e5c78999cdf8b039ddb16d68d6e54d4f6b7a`,
+  the actual review reported no open issues, discussion threads were empty and
+  every current-head required check passed. The initial changefile failure was
+  fixed by moving client-specific documentation to its actual owner, not by
+  bypassing CI or creating an unrelated Manager release.
+- Re-read the effort's Plan and Validation Plan after actual merge. Closed
+  only the source phase-attribution item, retained the published tip on a backup
+  and advanced confirmed merged history. This does not prove installed rollout,
+  publication recovery, shorter planning or completion of the effort.
+- A separate installed Windows `reconcile-plugins --peek` observation exited
+  successfully in 19.093 seconds with unchanged plan-cache bytes and mtime.
+  Eleven serial installation-context probes occupied 9.201 seconds; 42 Git
+  commands occupied 3.815 seconds. Their non-overlapping union was 13.016
+  seconds. The remaining 6.077 seconds includes startup, Python work, gaps and
+  capture completion; it is not demonstrated idle time.
+- The observer's 162 process records matched its Job accounting total, with a
+  peak of seven concurrent processes. Launcher/worker lifetimes were not
+  double-counted in the logical spans. Observer work overlapped the invocation;
+  these figures are neither a speedup against the earlier 17.610-second run nor
+  qualification of the current Dev source. The selected catalog declared an
+  older installed payload, so further attribution must retain that provenance.
+- Next cost work must isolate repeated helper loading from authority checks
+  and investigate repeated Git/context preparation under #6086's existing
+  ownership. Keep per-attempt authority, fresh planning and execution admission.
+  The separately authorized live recovery remains conditional on a safe idle
+  window; another session's maintenance must not be interrupted.
+
+### 2026-10-21 - Reproduce update failures and correct payload cost attribution
+
+- A newly captured normal Windows ARM64 update refreshed its payloads, then
+  failed before Worktrees runtime construction: the command-binding publication
+  lock named a dead owner and required explicit repair. The stale lock and
+  missing supported recovery entrypoint are already tracked in #7117. No lock
+  was removed, archived or silently reclaimed. Other observed payload sharing
+  errors, native installer failures and historical deadline failures remain
+  distinct cases rather than one inferred fleet-wide cause.
+- The same stdio exposed a concrete attribution defect: a 1.727-second
+  marketplace auth report retained its phase while registered payload refresh
+  continued for another 224 seconds. That work appeared under a 226.6-second
+  `auth_report`, although it was not authentication. Runtime preflight in this
+  run was 18.7 seconds; a prior run's 56.759 seconds is not evidence of one
+  particular slow probe.
+- Registered plugin refresh now restores the existing `payload_refresh`
+  facade after both ordinary and fallback marketplace authorization. This
+  preserves the auth session, required-context promotion, credential overlays,
+  acquisition order, exit status and structured outcomes. It corrects both JSON
+  phase accounting and human framing, without a new clock or reporting owner.
+- Deterministic regressions exercise real session preparation with stubbed
+  external operations. Four fresh/fallback cases first failed on the wrong
+  phase; two already-prepared cases already passed. The final cases check
+  refresh, browse, acquisition and summary attribution, phase closure, human
+  framing, clean stdout and unchanged success/failure/auth behavior.
+- Full covering qualification also found an incomplete native smoke fixture.
+  It now copies the installer's two unconditional companion scripts while
+  still omitting the optional human-output initializer. Both Windows shells
+  prove ordinary smoke execution needs no initializer and requested capture
+  explicitly refuses its absence; the shipped installer is unchanged.
+- Final authentication, auth-usage and telemetry-wiring suites passed on
+  Windows (265 passed, two platform skips, 126.40 seconds) and the same frozen
+  source on Linux (245 passed, 22 platform skips, 68.57 seconds). The original
+  30-second item, 300-second group and resource caps remain. Linux needed the
+  canonical packaged test environment: isolated credential children correctly
+  ignore source-only `PYTHONPATH` injection. The hardened wrapper was attempted
+  but its host CLI could not run without native Node, so qualification used
+  the documented bounded-runner fallback with prepared test dependencies.
+- Fresh-machine construction is not exercised by this phase-boundary change.
+  The live update above establishes the failing attribution contract, not
+  deployment of this unpromoted candidate; installed validation still belongs
+  to the explicitly authorized rollout owner.
+- CI correctly detected that putting this client-specific note in a shared
+  library README would change the Manager's packaged inputs too. Moved the
+  note into the owning Worktrees README instead; the shared library remains
+  unchanged and this correction does not cause an unrelated Manager release.
+- This source correction does not fix publication recovery or claim a faster
+  reconcile plan. Safe explicit recovery, component-level cost attribution and
+  equivalent before/after measurements remain open, as do promoted-installed
+  qualification and the effort's original ownership holds.
+
+### 2026-10-21 - Remaining identity banners merged; keep protocols undecorated
+
+- #7754 merged as `53ea6f887d843698f9db55bce62423e0f0f50310` after
+  Copilot approved exact head `9ed44f690b4eaf24435d8adc406c003c6b59e420`,
+  the actual review reported no open findings, discussion threads were empty
+  and every current-head required check passed.
+- Re-read the effort's Plan and Validation Plan after actual merge. Retained
+  the published source tip on a backup and advanced confirmed merged history.
+  This closes the inventoried literal install/update identity-banner blocks,
+  not remaining standalone timing, whole-flow measurement or rollout gates.
+- The operator reiterated the programmatic-CLI boundary: protocol and
+  machine-readable exchanges must remain free of human presentation. These
+  edits target native installer statements only, not Bridge command handlers
+  or message protocols. No general command-stream formatter is introduced.
+- The effort stays active with its original ownership/deployment holds; this
+  worktree is not finalized. Continue remaining standalone-output work only at
+  an admitted installer output owner, never by decorating a general CLI.
+
+### 2026-10-21 - Consolidate the remaining literal installer identity banners
+
+- The bounded emitter inventory found remaining install/update action banners
+  in Dispatch, Vault, Pull Requests, SSH and Budget Guidance. Their existing
+  start/completion locations now use their ordinary progress/success helpers;
+  Dispatch's superseded-install branch retains its full qualification through
+  the existing skip helper. Only these literal output blocks changed.
+  Uninstall banners, tips, arbitrary diagnostics and control flow remain.
+- Extended the existing installer-engine qualification module with one batched
+  native fixture per available shell, executing all fifteen shipped identity
+  statements and their actual helper definitions. Standalone output has one
+  record per statement and no adjacent decorative blank emitters. A second real
+  child traverses the canonical human adapter and verifies running/done/skipped
+  elapsed records and the actual child-exit duration. This is not a new
+  required-CI native matrix or another installation owner.
+- The initial contract failed under both Windows shells before emitter edits.
+  Full stable-snapshot installer-engine tests passed on Windows (51 passed,
+  one platform skip, 30.41 seconds) and POSIX (50 passed, two platform skips,
+  2.87 seconds), covering source-bound declarations, materialized payloads,
+  capability refusals and the native action statements. Original 30-second
+  item, 300-second group and resource limits are unchanged.
+- Regenerated the four eligible source-bound human-output declarations; Budget
+  Guidance has no such declaration, so no new output admission was invented.
+  All thirteen installer contracts, Python lint and documentation consistency
+  pass. The shared install contract documents the emitter behavior, and one
+  patch changefile names all five changed plugins.
+- Publication found a real upstream Dispatch declaration conflict. Retained
+  the qualified commit on a backup, preserved the non-overlapping callback
+  co-deployment change and regenerated only the conflicted declaration through
+  its canonical owner. Full rebased-source qualification passed again:
+  Windows 51 passed/one platform skip in 32.32 seconds and POSIX 50 passed/two
+  platform skips in 3.18 seconds. No installer policy or conflict side was
+  discarded to make publication succeed.
+- Fresh-machine provisioning and live external deployment were not exercised:
+  no construction, activation, service or prerequisite behavior changed, and
+  isolated native execution covers the changed statements without touching a
+  deployment. Standalone timing boundaries, whole-flow measurements and the
+  existing promoted-installed/ownership holds remain separate open gates.
+
+### 2026-10-21 - Bridge action identity merged; retain the whole-flow gates
+
+- #7745 merged as `416862976cafc23f7b95af5397c954ae5f61e079` after
+  Copilot approved exact head `fdbb12c8d50191fd67ce956544d0fd2c4e10a524`,
+  the actual review had no open findings, discussions were empty and all
+  current-head required checks passed.
+- Re-read the effort's Plan and Validation Plan after actual merge. The four
+  Bridge action-header blocks are closed, not the broader banner or standalone
+  output items. Retained the published tip on a backup and advanced only
+  confirmed merged history. The active effort's worktree is not finalized.
+- Continue consolidating remaining installer-owned identity banners without
+  generic child-output filtering, while preserving the original structured
+  context owner's separate seam. Whole-flow cost and installed-release
+  qualification remain open under the existing deployment/session holds.
+
+### 2026-10-21 - Replace Bridge's decorative action banners at the emitter
+
+- Traced the launch parent's ordinary line relay and Bridge's actual native
+  install/update entrypoints. Replaced only their four blank/banner/blank
+  blocks with the existing progress helper. The standalone action identity
+  remains, while a timed parent renders one running line rather than three
+  decorative records. No general banner regex or blank-line filter was added.
+- The new native regression first failed for both actions under PowerShell 7
+  and Windows PowerShell 5.1. Final Windows identity/lifecycle coverage passed
+  18 cases with 15 platform skips in 32.98 seconds; the staged-source POSIX
+  counterpart passed 16 with 17 platform skips in 7.85 seconds.
+- Both standalone and real captured-child cases execute the shipped action
+  and progress helper, with a failing prerequisite before deployment. They
+  preserve an arbitrary diagnostic banner and empty line, verify exactly one
+  action record, canonical UTC/running/elapsed framing and the real exit-one
+  completion. The existing lifecycle tests retain their outcome/cleanup checks.
+  Original item, group and resource limits remain unchanged.
+- The generated source-bound native-output declaration and install-contract,
+  payload-generation, Python lint and documentation guards pass. Bridge's
+  README records the presentation contract. This is below the existing
+  reviewed architecture; no installation, lease, cutover or release policy
+  changed. Two decorative records per action are removed; no execution-time
+  improvement or equivalent whole-flow cost result is claimed.
+- Fresh-machine provisioning and live external deployment were not exercised:
+  the changed statements precede prerequisite admission, the isolated native
+  fixture covers their actual output contract, and rollout remains held under
+  the effort's existing owner. Other installers' banners, standalone output,
+  full-flow measurement and promoted-installed proof remain open.
+
+### 2026-10-21 - Native vocabulary merged; continue at the remaining owners
+
+- #7736 merged as `a2c6cf215e7bfdb133020cfaeebc08ba662883cc` after
+  Copilot approved exact head `8258d3b1926441805bc07807344bd90b162bd7a5`,
+  the actual review reported no blocking findings, there were no inline
+  threads and all current-head required checks passed.
+- Re-read the effort's Plan and Validation Plan after actual merge. Closed
+  only native marker normalization, retained the published tip on a backup
+  and advanced confirmed merged history. No whole-flow speed or deployment
+  claim follows from the presentation fixtures.
+- Next presentation work must distinguish a redundant installer banner from
+  useful child diagnostics at the actual native output owner. The separate
+  structured-context pump still awaits the original #6928 owner; no competing
+  wait/termination adapter or second ownership request was introduced.
+- Standalone coverage, full-flow formatting and equivalent cost/installed
+  evidence remain open. Existing deployment and protected-session holds are
+  unchanged; the effort is active and this source worktree is not finalized.
+
+### 2026-10-21 - Normalize native progress markers at their existing sinks
+
+- The reviewed presentation rule already names one state vocabulary. Existing
+  captured native helper lines still carried `[OK]`, `[SKIP]`, `[WARN]`,
+  `[FAIL]` and `...`. Python's human renderer and the native PowerShell
+  setup formatter now translate only leading, unqualified progress markers
+  to `done`, `skipped`, `warning`, `failed` and `running`.
+- This is presentation, not new result inference: a child diagnostic remains
+  an elapsed progress line. It does not complete its operation or override
+  actual exit codes/structured outcomes. Explicit owner states, completion
+  messages, unknown/embedded markers and canonical child envelopes are
+  unchanged. Recognition follows existing redaction and physical-line
+  splitting; state is local to each line.
+- Three failing-first cases reproduced the mixed vocabulary in the shared
+  Python renderer and both native Windows hosts. The real maintenance
+  producer now emits a helper marker and verifies one normalized frame while
+  retaining its argument, environment, exit and fresh-replanning checks.
+- Complete contained shared-telemetry, native launch-preparation and fresh
+  bootstrap-output suites passed 225 cases on Windows (45 platform skips,
+  185.91 seconds) and 189 on Linux (81 platform skips, 42.67 seconds). Item,
+  group and resource limits remain unchanged. Fresh isolated bootstrap
+  helpers and real native consumers are exercised; full runtime construction
+  and installed rollout are not claimed by this presentation-only slice.
+- Regenerated the three shipped bootstrap-helper copies from canonical
+  source: Logger's script package and Worktrees' script/runtime packages.
+  No generated command invocation, admission, lifecycle, wait or updater
+  owner changes. Other standalone/context output, banner convergence and
+  equivalent whole-flow/installed qualification remain open.
+- Documentation impact: the shared human-output reference and Manager's
+  launch-preparation reference now state the exact marker mapping and its
+  outcome-preservation limit. This is a below-altitude correction under the
+  existing reviewed plan, not a new architecture or daemon. Required source
+  review, CI and merge remain pending.
+
+### 2026-10-21 - Fallback correlation merged; retain the broader timing gate
+
+- #7727 merged as `5fc3ba92858c545cf61a20c9f83a427d7b6c4627` after
+  Copilot approved exact head `ec9b55c8964a9887a0d18ce188b85409ec99c92d`,
+  the actual review reported no findings, no inline threads remained and
+  current-head required CI passed. This is source completion only.
+- Re-read the Plan and Validation Plan after actual merge. Recorded the
+  fallback-correlation checkbox only; explicitly unavailable elapsed time is
+  not evidence of measured install/update cost. Retained the published tip
+  on a backup and advanced only confirmed merged history.
+- The next standalone trace follows Index's existing native self-stage parent.
+  Its PowerShell encoding initializer is not a formatter or wait owner, and
+  its native watchdog is not the Worktrees command lifecycle. Reuse the actual
+  owner rather than adding a competing lease/watchdog for presentation.
+- Other standalone/context output, banners, equivalent whole-flow costs and
+  promoted installed qualification remain open. No deployment, release-policy,
+  activation, existing hold or ownership state changed.
+
+### 2026-10-21 - Correlate Bash fallback diagnostics without invented timing
+
+- Classified the remaining fallback callsites: argument/recovery/runtime
+  setup before Python is available, background-stage dispatch and resolve
+  before the Picker, and late launch/mux/post-exit diagnostics. These do not
+  share one finite monotonic scope; keep the existing maintenance and preflight
+  clocks local rather than extending a renderer across an interactive wait.
+- Reuse the existing unavailable-timing sink for inactive `setup_log` and
+  `setup_status`. It now reads UTC wall time once per message, frames every
+  physical line and explicitly reports elapsed unavailable. A failed wall
+  clock is labeled time unavailable. Quiet stdout and the status echo gate
+  remain unchanged; no Python, new renderer or timing authority is introduced.
+- Four native regressions failed first against the old local-time grammar.
+  The complete POSIX fallback/preflight, passthrough and maintenance selection
+  then passed 70 cases with 89 platform-specific skips in 47.27 seconds under
+  the original item, group and resource limits. Existing finite-clock and
+  renderer-failure contracts remain in that selection. The synthetic fallback
+  uses a non-UTC timezone and proves three clock reads for three multiline
+  messages, with no active renderer/job. This is not a new speedup claim.
+- The existing native Windows UTC/Stopwatch and gated status contracts passed
+  all eight selected cases on both PowerShell hosts in 9.10 seconds. Python
+  lint, effort structure and the 13-plugin install-contract check passed.
+- Windows already uses native UTC plus its real Stopwatch; its launcher is
+  unchanged. The changed Bash helpers run from fresh isolated log fixtures.
+  Full runtime construction and external installation are not exercised by
+  this output-only correction; promoted installed qualification remains gated
+  by the existing release/deployment holds. The larger timing, presentation
+  and whole-flow measurement goals remain open.
+- Documentation impact: Manager's launch-preparation reference now explains
+  the fallback boundary and its intentionally unavailable duration. This is
+  a below-altitude presentation correction within the reviewed observability
+  plan, not a daemon or lifecycle change. Required review/CI and merge follow.
+
+### 2026-10-21 - Count-only source boundary merged; continue the output audit
+
+- #7708 merged as `9b14d71afdce2b3d85c5917f6e11cfdfea835885` after
+  Copilot approved corrected head `4e36b0386c97ce3a78f1e7cc94a06c896d0d1da2`,
+  the direct-handoff finding was resolved and current-head required CI passed.
+  The missed direct path was reproduced and corrected, not treated as harmless
+  because the initial source slice already had green checks.
+- Re-read the Plan and Validation Plan after the actual merge. Closed only
+  routine command-echo suppression, retained the published tip on a backup and
+  advanced only confirmed merged history. The source effort remains active.
+- Continue tracing the early/late Bash fallback logger and its bounded
+  formatter callers before choosing another presentation change. The fallback
+  still uses local wall time without a monotonic suffix; do not replace it
+  with wall-derived elapsed time, a process per line or a formatter that lives
+  across the Picker or interactive session.
+- #6928 remains open on its original contributor head. The public coordination
+  thread now also has a maintainer request to resume that original change and
+  account for the output-pump seam. Preserve that owner's wait/watchdog scope;
+  no competing context adapter or second coordination request was created.
+- Other output boundaries, banner convergence, equivalent whole-flow costs and
+  promoted installed qualification remain open. No update, runtime repair,
+  activation, deployment hold or ownership state changed.
+
+### 2026-10-21 - Keep argument values out of routine launch diagnostics
+
+- Both launchers now log passthrough argument counts instead of values;
+  Windows pane preparation likewise records only the count. Removed duplicate
+  bootstrap and reconciliation command echoes, retaining their service labels,
+  timed outcomes, admission diagnostics and child output. This does not add a
+  generic redactor or promise to sanitize arbitrary child-emitted output.
+- Native source-prefix and pane-preparation fixtures first reproduced raw
+  private arguments in the log, then proved exact forwarding with count-only
+  diagnostics. The existing native maintenance fixture now includes a private
+  command/argument sentinel, including allowed, refused and current plans,
+  while retaining child execution, environment, exit and replanning assertions.
+- The Windows selection passed 69 cases and the POSIX selection passed 46,
+  with platform-specific skips. Each also found the same overly broad pane
+  guard: it banned encoded commands across the whole launcher, including the
+  already-reviewed detached observer. Scoped that ban to the actual pane
+  creation path; the pane, install-contract and headless guard selection then
+  passed 306 cases with 15 platform-specific skips. These counts overlap;
+  no timeout, native boundary or case was removed.
+- The fixtures exercise fresh isolated log directories and real native shell
+  consumers. Full runtime construction and live external installation are not
+  claimed: this slice changes diagnostic content only, and promoted installed
+  qualification remains subject to the existing rollout gate. No runtime,
+  installer, staging parent, watchdog or publication authority was changed.
+- Updated Manager's launch-preparation documentation and its patch changefile.
+  This is a below-altitude presentation correction within Phase 2's existing
+  redaction contract, not a new architecture. Publication, review and merge
+  remain pending; the broader effort and deployment holds remain open.
+- The first review of #7708 found a missed Windows direct-handoff command
+  echo that contradicted the documented count-only boundary. Four new native
+  direct-launch fixtures first reproduced the exposure after confirming exact
+  child argv and exits, then passed with a count-only handoff record. They
+  execute the actual passthrough append and complete direct-launch block on
+  both Windows shells with child exit zero and seven. The routine command
+  logging scan found no remaining full-command echoes; child-emitted diagnostic
+  and explicit runtime-path evidence are unchanged.
+
+### 2026-10-21 - Detached Bash source slice merged; broader gates remain open
+
+- #7697 merged as `087265dfd0fd311de8d80b547a7468c5a61bedf1` after
+  Copilot approved exact corrected head
+  `996a45dc711dfcb537b19063b795a7ea4d333242`, with no unresolved review
+  threads and green current-head CI, including the required PR gate.
+  The earlier compatibility observation was reproduced and corrected,
+  not dismissed because the review footer reported no open issues.
+- Re-read the Plan and Validation Plan after the actual merge and marked
+  only detached Bash observation complete. Retained the published tip on
+  a backup and advanced only fully merged history; no unpublished work,
+  running installation or ownership state was discarded.
+- Next independent presentation audit: early/late launch log records and
+  routine raw-command diagnostics. Preserve native/protocol arguments and
+  useful failure evidence without persisting prompt-bearing command lines.
+  The context output adapter still awaits coordination on #6928; do not
+  replace its contributor-owned watchdog or staging parent.
+- Equivalent whole-flow costs, other standalone output owners and promoted
+  installed qualification remain open. This source merge neither proves
+  rollout nor authorizes another updater.
+
+### 2026-10-21 - Detached Bash output owner and context-watchdog coordination
+
+- The remaining PowerShell structured-context output is buffered by its native
+  staging parent. Open contributor PR #6928 replaces that exact wait boundary.
+  Read its current canonical watchdog and Worktrees caller, then coordinated on
+  the original PR rather than opening a competing adapter. Deadline, identity
+  and stage-retention ownership remain with that change; no context installer
+  was edited here.
+- The independent Bash detached branch already redirected native output, but
+  bypassed framing and recorded no native completion. Its existing `setsid`
+  launch now uses the shared formatter's explicit single-command observer.
+  Literal arguments, installer-only staged environment, native admission,
+  termination and the existing setup-log destination remain unchanged.
+- Two real detached success/failure fixtures first failed against the old
+  source because live progress was unframed. Both then passed, together with
+  their blocking counterparts. The native Linux selection passed 57 cases;
+  the separate finite-preflight selection passed six. Windows observer CLI
+  and shared marketplace fixtures passed 21, with five unavailable-platform
+  cases skipped. Original containment and item/group limits were retained.
+- The observer preserves native exits, redaction, nested frames, UTF-8 and a
+  partial final line, and stops at direct-child completion rather than waiting
+  for detached-descendant EOF. It adds one observer per detached installation,
+  not a process per line. Duration includes observed invocation and drain;
+  these fixtures do not claim update savings, full package provisioning or
+  promoted installed behavior. PR #7697 is open; current-head review and merge
+  remain pending.
+- The first review identified a real newer-launcher/older-runtime compatibility
+  gap despite its generic no-open-issues footer. Two native legacy-formatter
+  fixtures failed before correction. The detached bootstrap now checks the
+  optional API in-process, retaining the new observer when available and
+  explicitly warning before executing the original native command once when
+  unavailable. The focused Linux selection then passed 29 cases with 32
+  Windows-only skips, including old API, missing telemetry, literal arguments,
+  native exits, redaction and direct-child lifetime. No probe process, runtime
+  update or second installer execution was introduced.
+
+### 2026-10-21 - Detached Windows sink merged; retain the inner output owners
+
+- #7683 merged as `9b85465884d18fe14d40bdf2d52d7547016dd1d5` after
+  Copilot approved exact head `314883097265f075e529f0eeff909a0e38e4ff9d`,
+  no unresolved review threads and green current-head CI, including the
+  required PR gate. The earlier review's startup-rotation concern was
+  reproduced and fixed rather than ignored because its footer said
+  "No open issues."
+- Re-read this effort's Plan and Validation Plan after the actual merge.
+  Marked only the finite detached Windows sink complete. The current source
+  tip was retained on a backup, then only confirmed merged history was
+  advanced; no unpublished work, runtime state or ownership record was
+  discarded or repaired.
+- Next output-owner trace: the structured-context installer's retained
+  native self-staging parent. Compare the Bash inherited-output route with
+  Windows' buffered captured child before choosing a progress adapter.
+  Preserve their validation, staging, watchdog and publication ownership,
+  and coordinate any overlap with existing native-installer work.
+- Other standalone and early/late streams, banner convergence, equivalent
+  whole-flow cost measurements, promoted installed qualification and
+  authorized rollout remain open. This source merge does not change any
+  deployment hold or authorize an installed update. The effort and source
+  worktree remain active.
+
+### 2026-10-21 - Close the detached sink's startup rotation gap
+
+- The first #7683 review identified a real gap between the launcher's empty
+  sink preparation and the observer's sharing handle. Rotation in that gap
+  could remove the file, making the observer exit before running the
+  installer even though the parent had reported a successful spawn.
+- Added a deterministic native consumer regression that deletes the exact
+  prepared sidecar at the actual detached-spawn seam. Both success and
+  exit-7 scenarios first reproduced the missing progress/installation.
+  Reuse the same fixture's argument, environment, hidden-console, output,
+  active-rotation and shutdown assertions rather than creating another
+  installation path.
+- The observer now atomically opens or creates its own sink before invoking
+  the original installer. Its existing sharing handle still excludes
+  deletion during the invocation; no retry loop, parent wait, new authority
+  or containment change is needed. All nine affected detached/startup native
+  cases passed with the original limits. Source review, current-head CI and merge
+  remain required for this pending boundary.
+
+### 2026-10-21 - Give the detached Windows installer an owned output sink
+
+- Traced the original `conhost --headless pwsh -File` launch: its console
+  output had no explicit persistent sink. The legacy Worktrees installer
+  already has an admitting human-output parent, but structured-context
+  installation has a separate native validator and staging parent. Do not
+  put either under a new installation executor merely to capture output.
+- Reuse the launcher's native command observer and formatter in one
+  detached PowerShell observer. It invokes the same original installer
+  command with literal arguments and the inherited staged environment;
+  admission remains before the detached spawn, and the installer retains
+  ownership, staging, deadlines, execution policy and publication decisions.
+  No Job breakaway or new deployment authority is added.
+- A unique UTF-8 sidecar beside the main setup log receives start, physical
+  progress lines, the native exit and the observed invocation's duration.
+  The main log links that path. Separate files avoid new concurrent
+  appenders; a read-sharing handle protects the active sink against log
+  rotation until the observer exits. Existing canonical frames pass through
+  once. One observer per
+  detached invocation is presentation overhead, not a speed reduction.
+- Native Windows fixtures exercise successful and exit-7 installers from
+  both PowerShell hosts. They prove the launcher finishes before releasing
+  the installer gate, early output is persisted, literal quoted arguments
+  and non-ASCII content survive, the native descendant's console is hidden,
+  and the observer's headless console exits after completion. Missing
+  sinks, oversized Windows command lines and spawn exceptions are explicit
+  startup failures. Existing synchronous action outcomes, fresh planning,
+  refusal paths, quiet/stdio status sinks and deterministic clocks retain
+  their original test limits.
+- These are fresh disposable log/runtime-shaped native fixtures, not a
+  clean-room package installation or a promoted live update. No installer
+  construction or governance algorithm changes in this slice; a Windows
+  `conhost` contract has no equivalent external Linux lane. Source review,
+  required CI and merge still gate this pending boundary. Promoted installed
+  qualification and authorized rollout remain open and unchanged.
+- Structured-context staging still buffers its own captured child output;
+  the detached sink measures arrival at the actual outer owner, not an
+  invented execution cost. Its internal progress boundary, Bash detached
+  streams, remaining early/late records, banner convergence and equivalent
+  whole-flow cost measurements remain follow-on work.
+
+### 2026-10-21 - Finite preflight slice merged; retain the remaining boundaries
+
+- #7672 merged as `b4c46f4b23f668345e39b0005690881b7b059bea` after
+  Copilot approved exact head `20cd77143697a9b1952356152b6bcb7f58c8f5e6`,
+  no unresolved review threads and green current-head CI, including the
+  required PR gate. An earlier approval addressed the preceding head and
+  was not reused for the final correction.
+- The final native regression distinguishes each failed child's exit 7
+  from the unchanged aggregate preflight return 1. The scope completion
+  reports that aggregate result, while each attempt retains its own
+  diagnostic. All six native combinations passed with both contracts
+  asserted and the original limits unchanged.
+- Re-read the Plan and Validation Plan after the actual merge, then marked
+  only this finite log boundary complete. The effort and source worktree
+  remain active. Pull-forward retained the exact merged source on a backup;
+  the installed sync helper refused a deleted PR branch during routine
+  reconciliation, so the confirmed clean, fully merged tip was advanced
+  without replaying or discarding unpublished work. No runtime update or
+  coordination-record repair was used as a workaround.
+- Next output-owner trace: detached marketplace-installer streams and their
+  persistent-log destination, keeping detached lifetime, admission and
+  background failure reporting separate from this finite preflight owner.
+  Other early/late records, banners, equivalent whole-flow performance,
+  promoted-source qualification and authorized rollout remain open.
+
+### 2026-10-21 - Bound presentation to each post-maintenance preflight
+
+- Traced both late runtime-preflight callers after the maintenance renderer
+  has stopped. Their successful/failing/retried setup-log records used the
+  legacy raw sink, even when the preflight's own stderr already supplied
+  canonical progress.
+- Reuse the existing phase-owned renderer for one finite preflight at a
+  time. The preflight scope includes its attempts and retry waits; its
+  completion is drained before returning. Runtime re-resolution, maximum
+  three attempts, retry delay, native argv, captured stdout, optional stderr
+  passthrough and the existing final continuation warning remain unchanged.
+  No helper survives into the Picker or interactive session.
+- An exact-source native Linux fixture passed six real Bash combinations:
+  immediate success, third-attempt success and exhausted retries, each with
+  captured or passed-through stderr. It verifies one renderer, no per-line
+  clock process, UTC/monotonic setup-log framing, credential redaction,
+  unchanged stdout/return behavior, and absence of live jobs or spools.
+  The existing native Bash preparation/maintenance group passed 36 cases
+  with two platform skips; no test was dropped or deadline raised.
+- These are isolated native fixtures, not a full fresh-machine installation
+  or a live rollout. No Windows producer changed; an actual macOS Bash host
+  was not available for this source qualification. Existing renderer-failure
+  and ownership-fenced shutdown regressions remain covered by the native
+  preparation group. Hosted review and CI remain required before landing.
+- Other early/late launch records, detached installers, banner convergence
+  and equivalent whole-flow cost measurements remain explicit follow-on
+  work. One bounded helper per finite preflight is presentation cost, not
+  evidence that the complete update flow became faster.
+
+### 2026-10-21 - Reconcile the merged standalone slice and continue the output audit
+
+- Confirmed #7119 merged on 2026-10-19 as
+  `c335e85435df6f15cd386bc39ce5f63b8fe98f2d`, with final source head
+  `8acd1007f7a0dc35c3d99507c35a8c752b41913f` approved by Copilot.
+  The landed slice includes the child-exit sample before Windows Job
+  cleanup, completion after cleanup/drain/lease verification, the merged
+  installer declaration refresh, and synchronization of the newly adopted
+  PR-owner installation-context consumer.
+- Re-read this effort after confirming the provider merge. The standalone
+  Worktrees boundary is complete at source; the combined detached/other
+  standalone and early/late Bash item is not complete. Reconciled the
+  already-journaled #6877 Bridge source merge without claiming an installed
+  serving-state proof.
+- Retained the exact merged source on a backup before pulling forward.
+  The normal sync refused replaying squash-merged history and auto-aborted;
+  after confirming no unpublished commits or working-tree changes remained,
+  advanced only that confirmed merged tip and completed the managed sync.
+  No unmerged work was discarded and this active effort was not finalized.
+- Next slice: trace the remaining Bash launch-log boundaries around the
+  bounded maintenance renderer, preserving its phase-owned lifetime,
+  machine-stream isolation, redaction and monotonic timing contract.
+  Banners, equivalent whole-flow cost measurements, other native producers
+  and promoted installed acceptance remain open. No update, production
+  recovery, seed delivery or deployment-hold change was performed.
 
 ### 2026-10-17 - Keep standalone build guards independent of runtime imports
 

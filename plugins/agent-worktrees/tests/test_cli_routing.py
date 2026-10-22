@@ -13,6 +13,7 @@ import pytest
 
 from agent_worktrees import __main__ as m
 from agent_worktrees import front_door_cli as _fdc
+from agent_worktrees import manager_launch_cli as _mlc
 from agent_worktrees import related_cli
 
 # Captured at collection time, before any per-test fixture (including this
@@ -207,7 +208,7 @@ def test_extract_project_flag_trailing_value_missing():
 
 def test_bare_no_project_uses_install_trigger(monkeypatch):
     monkeypatch.delenv("WORKTREE_PROJECT", raising=False)
-    monkeypatch.setattr(m, "_usable_worktree_manager", lambda: None)
+    monkeypatch.setattr(m, "_worktree_manager_health", lambda: _mlc._ManagerHealth("absent"))
     monkeypatch.setattr(m.inst, "read_projects_registry", lambda: {"projects": {}})
     monkeypatch.setattr(m, "_git_toplevel", lambda p: None)
     seen = {}
@@ -297,9 +298,53 @@ def test_installer_registry_commands_run_without_project(
     assert len(called) == 1
 
 
+def test_project_routing_facade_exports_the_actual_decision():
+    from agent_worktrees import project_routing
+
+    assert _fdc._NO_PROJECT_COMMANDS is project_routing._NO_PROJECT_COMMANDS
+    assert _fdc._is_no_project_invocation is project_routing._is_no_project_invocation
+    assert m._is_no_project_invocation is project_routing._is_no_project_invocation
+
+
+@pytest.mark.parametrize("inline", [False, True])
+@pytest.mark.parametrize("operation", ["--peek", "--apply"])
+def test_reconcile_explicit_repo_reaches_real_front_door_from_neutral_cwd(
+    monkeypatch, tmp_path, inline, operation,
+):
+    m.cfg.set_active_project(None)
+    monkeypatch.delenv("WORKTREE_PROJECT", raising=False)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        m, "_resolve_active_project",
+        lambda _project: pytest.fail("explicit repo tried to resolve a CWD project"),
+    )
+    calls = []
+    monkeypatch.setitem(
+        m.COMMAND_MAP, "reconcile-plugins", lambda args: calls.append(args) or 0,
+    )
+    repo = str(tmp_path / "selected-repo")
+    selector = [f"--repo={repo}"] if inline else ["--repo", repo]
+    assert m.main(["reconcile-plugins", *selector, operation]) == 0
+    assert len(calls) == 1
+    assert calls[0].repo == repo
+    assert getattr(calls[0], operation.removeprefix("--")) is True
+
+
+def test_reconcile_without_repo_keeps_normal_project_routing(monkeypatch, capsys):
+    m.cfg.set_active_project(None)
+    monkeypatch.delenv("WORKTREE_PROJECT", raising=False)
+    monkeypatch.setattr(m, "_resolve_active_project", lambda _project: (None, None))
+    monkeypatch.setitem(
+        m.COMMAND_MAP, "reconcile-plugins",
+        lambda _args: pytest.fail("unscoped reconcile reached handler without a project"),
+    )
+    assert m.main(["reconcile-plugins", "--peek"]) == 1
+    assert "Could not resolve a project" in capsys.readouterr().err
+
+
 def test_project_flag_bare_invocation_uses_install_trigger_without_manager(monkeypatch):
     monkeypatch.delenv("WORKTREE_PROJECT", raising=False)
-    monkeypatch.setattr(m, "_usable_worktree_manager", lambda: None)
+    monkeypatch.setattr(m, "_worktree_manager_health", lambda: _mlc._ManagerHealth("absent"))
     called = {}
     monkeypatch.setattr(
         m,
@@ -387,7 +432,7 @@ def test_router_worktrees_folds_back_to_launch(monkeypatch):
     """`worktrees` strips + continues (== the bare `<repo> <verb>` alias); it
     must never dispatch to a sibling plugin."""
     monkeypatch.delenv("WORKTREE_PROJECT", raising=False)
-    monkeypatch.setattr(m, "_usable_worktree_manager", lambda: None)
+    monkeypatch.setattr(m, "_worktree_manager_health", lambda: _mlc._ManagerHealth("absent"))
     monkeypatch.setattr(
         m, "_route_to_sibling_plugin",
         lambda *a, **k: (_ for _ in ()).throw(
@@ -498,7 +543,7 @@ def test_router_worktree_singular_folds_back(monkeypatch):
     """`<repo> worktree …` (singular) folds back into this binstub, same as
     `worktrees`."""
     monkeypatch.delenv("WORKTREE_PROJECT", raising=False)
-    monkeypatch.setattr(m, "_usable_worktree_manager", lambda: None)
+    monkeypatch.setattr(m, "_worktree_manager_health", lambda: _mlc._ManagerHealth("absent"))
     monkeypatch.setattr(
         m, "_route_to_sibling_plugin",
         lambda *a, **k: (_ for _ in ()).throw(
@@ -799,7 +844,7 @@ def test_bare_invocation_ignores_inherited_worktree_id(monkeypatch):
     WORKTREE_ID is neither consulted nor deleted (it is simply irrelevant)."""
     import os
     monkeypatch.delenv("WORKTREE_PROJECT", raising=False)
-    monkeypatch.setattr(m, "_usable_worktree_manager", lambda: None)
+    monkeypatch.setattr(m, "_worktree_manager_health", lambda: _mlc._ManagerHealth("absent"))
     monkeypatch.setenv("WORKTREE_ID", "keep-me")
     # Context comes from CWD resolution (not the retired $WORKTREE_PROJECT).
     monkeypatch.setattr(m, "_resolve_active_project", lambda proj: ("demo", None))
@@ -1296,7 +1341,7 @@ def test_bare_headless_project_lists_not_launches(monkeypatch):
 
 def test_bare_non_headless_project_uses_install_trigger_without_manager(monkeypatch):
     monkeypatch.delenv("WORKTREE_PROJECT", raising=False)
-    monkeypatch.setattr(m, "_usable_worktree_manager", lambda: None)
+    monkeypatch.setattr(m, "_worktree_manager_health", lambda: _mlc._ManagerHealth("absent"))
     monkeypatch.setattr(m, "_resolve_active_project", lambda proj: ("demo", None))
     monkeypatch.setattr(m, "_is_headless_project", lambda: False)
     launched = {}
@@ -1333,7 +1378,8 @@ def test_bare_noninteractive_project_lists_not_launches(monkeypatch):
         lambda argv: pytest.fail("non-interactive must not launch bundled Picker"),
     )
     monkeypatch.setattr(
-        m, "_usable_worktree_manager", lambda: ("/usr/bin/worktree-manager",),
+        m, "_worktree_manager_health",
+        lambda: pytest.fail("noninteractive must not probe Manager"),
     )
 
     dispatched = {"v": None}
@@ -1356,7 +1402,8 @@ def test_bare_noninteractive_no_project_shows_help(monkeypatch):
     monkeypatch.setattr(m.cfg, "active_project", lambda: None)
     monkeypatch.setattr(m, "_is_noninteractive_invocation", lambda: True)
     monkeypatch.setattr(
-        m, "_usable_worktree_manager", lambda: ("/usr/bin/worktree-manager",),
+        m, "_worktree_manager_health",
+        lambda: pytest.fail("noninteractive must not probe Manager"),
     )
     monkeypatch.setattr(
         m, "_exec_worktree_manager",
@@ -1415,7 +1462,10 @@ def test_bare_prefers_manager_after_production_ux_transplant(monkeypatch):
     monkeypatch.setattr(m, "_resolve_active_project", lambda proj: ("demo", None))
     monkeypatch.setattr(m, "_is_headless_project", lambda: False)
     monkeypatch.setattr(m.cfg, "active_project", lambda: "demo")
-    monkeypatch.setattr(m, "_usable_worktree_manager", lambda: ("/usr/bin/worktree-manager",))
+    monkeypatch.setattr(
+        m, "_worktree_manager_health",
+        lambda: _mlc._ManagerHealth("ready", ("/usr/bin/worktree-manager",)),
+    )
     monkeypatch.setattr(m, "_bundled_picker_available", lambda: False)
 
     monkeypatch.setattr(
@@ -1549,7 +1599,7 @@ def test_bare_shows_install_trigger_when_picker_retired(monkeypatch):
     monkeypatch.setattr(m, "_resolve_active_project", lambda proj: ("demo", None))
     monkeypatch.setattr(m, "_is_headless_project", lambda: False)
     monkeypatch.setattr(m.cfg, "active_project", lambda: "demo")
-    monkeypatch.setattr(m, "_usable_worktree_manager", lambda: None)
+    monkeypatch.setattr(m, "_worktree_manager_health", lambda: _mlc._ManagerHealth("absent"))
     monkeypatch.setattr(m, "_bundled_picker_available", lambda: False)
     monkeypatch.setattr(m, "cmd_launch",
                         lambda argv: pytest.fail("picker retired: must not launch"))
@@ -1562,22 +1612,26 @@ def test_bare_shows_install_trigger_when_picker_retired(monkeypatch):
     assert trig["project"] == "demo"
 
 
-def test_bare_no_project_prefers_manager_without_project_flag(monkeypatch):
+@pytest.mark.parametrize("child_rc", [0, 7])
+def test_bare_no_project_prefers_manager_without_project_flag(monkeypatch, child_rc):
     """With no resolvable project, a bare invocation still prefers the Manager
     (its multi-project front door) and passes no --project."""
     monkeypatch.delenv("WORKTREE_PROJECT", raising=False)
     monkeypatch.setattr(m, "_resolve_active_project", lambda proj: (None, None))
     monkeypatch.setattr(m.cfg, "active_project", lambda: None)
-    monkeypatch.setattr(m, "_usable_worktree_manager", lambda: ("/usr/bin/worktree-manager",))
+    monkeypatch.setattr(
+        m, "_worktree_manager_health",
+        lambda: _mlc._ManagerHealth("ready", ("/usr/bin/worktree-manager",)),
+    )
 
     seam = {"mgr": None, "project": "unset"}
     monkeypatch.setattr(
         m, "_exec_worktree_manager",
-        lambda mgr, project: seam.update(mgr=mgr, project=project) or 0)
+        lambda mgr, project: seam.update(mgr=mgr, project=project) or child_rc)
     monkeypatch.setattr(m, "cmd_help_unrouted",
                         lambda **k: pytest.fail("should not balk when manager present"))
     rc = m.main([])
-    assert rc == 0
+    assert rc == child_rc
     assert seam == {"mgr": ("/usr/bin/worktree-manager",), "project": None}
 
 
@@ -1587,7 +1641,7 @@ def test_bare_no_project_install_trigger_when_picker_retired(monkeypatch):
     monkeypatch.delenv("WORKTREE_PROJECT", raising=False)
     monkeypatch.setattr(m, "_resolve_active_project", lambda proj: (None, None))
     monkeypatch.setattr(m.cfg, "active_project", lambda: None)
-    monkeypatch.setattr(m, "_usable_worktree_manager", lambda: None)
+    monkeypatch.setattr(m, "_worktree_manager_health", lambda: _mlc._ManagerHealth("absent"))
     monkeypatch.setattr(m, "_bundled_picker_available", lambda: False)
     monkeypatch.setattr(m, "cmd_help_unrouted",
                         lambda **k: pytest.fail("picker retired: show install trigger"))
@@ -1647,6 +1701,174 @@ def _fake_run(returncode, version="0.1.0-dev21"):
     return run
 
 
+@pytest.mark.parametrize("has_project", [False, True])
+@pytest.mark.parametrize(("providers", "selected", "diagnostic"), [
+    ([], "missing", "is not registered"),
+    (["worktree-manager"], "missing", "is not registered"),
+    (["worktree-manager"], "invalid selection!", "is not registered"),
+    (["worktree-manager", "other-manager"], "", "Multiple control-plane providers"),
+])
+def test_provider_selection_failure_is_not_first_run(
+    monkeypatch, tmp_path, capsys, has_project, providers, selected, diagnostic,
+):
+    for provider in providers:
+        _register_provider(tmp_path, provider=provider)
+    monkeypatch.setenv(m._CONTROL_PLANE_PROVIDERS_DIR_ENV, str(_provider_registry_dir(tmp_path)))
+    monkeypatch.setenv(m._CONTROL_PLANE_PROVIDER_ENV, selected)
+    monkeypatch.setattr(m, "_is_noninteractive_invocation", lambda: False)
+    monkeypatch.setattr(m, "_is_headless_project", lambda: False)
+    monkeypatch.setattr(m, "_bundled_picker_available", lambda: False)
+    monkeypatch.setattr(m.cfg, "active_project", lambda: "demo")
+    monkeypatch.setattr(m.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(
+        m.subprocess, "run",
+        lambda *a, **kw: pytest.fail("selection failure must not probe a provider"),
+    )
+    assert _fdc._select_control_plane_provider_manifest() is None
+    health = m._worktree_manager_health()
+    assert health.state == "failed"
+    assert diagnostic in health.diagnostic
+    assert len(health.diagnostic) < 300
+    assert m._usable_worktree_manager() is None
+    assert m.dispatch_bare_invocation(has_project) == 1
+    assert diagnostic in capsys.readouterr().err
+
+
+def test_explicit_provider_selection_probes_only_selected_provider(monkeypatch, tmp_path):
+    _register_provider(tmp_path)
+    command = _register_provider(tmp_path, provider="other-manager")
+    monkeypatch.setenv(m._CONTROL_PLANE_PROVIDERS_DIR_ENV, str(_provider_registry_dir(tmp_path)))
+    monkeypatch.setenv(m._CONTROL_PLANE_PROVIDER_ENV, "other-manager")
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        return _fake_run(0)(argv, **kwargs)
+
+    monkeypatch.setattr(m.subprocess, "run", run)
+    assert _fdc._select_control_plane_provider_manifest().command == command
+    assert m._worktree_manager_health() == _mlc._ManagerHealth("ready", command)
+    assert calls == [[*command, "--version"]]
+
+
+@pytest.mark.parametrize("state", ["absent", "failed"])
+@pytest.mark.parametrize("help_rc", [0, 8])
+def test_no_project_help_is_not_a_successful_provider_fallback(
+    monkeypatch, capsys, state, help_rc,
+):
+    monkeypatch.setattr(m, "_is_noninteractive_invocation", lambda: False)
+    monkeypatch.setattr(m, "_bundled_picker_available", lambda: True)
+    monkeypatch.setattr(m, "_worktree_manager_health", lambda: _mlc._ManagerHealth(state))
+    monkeypatch.setattr(m, "cmd_help_unrouted", lambda: help_rc)
+    monkeypatch.setattr(
+        m, "cmd_manager_install_trigger",
+        lambda *a: pytest.fail("bundled no-project path shows help"),
+    )
+    monkeypatch.setattr(m, "cmd_launch", lambda *a: pytest.fail("help is not a launch"))
+    expected = (help_rc or 1) if state == "failed" else help_rc
+    assert m.dispatch_bare_invocation(False) == expected
+    assert "Launching the bundled picker" not in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("has_project", [False, True])
+@pytest.mark.parametrize("failure", ["exit", "version", "old", "spawn", "timeout"])
+def test_failed_registered_provider_without_fallback_is_failure(
+    monkeypatch, tmp_path, capsys, has_project, failure,
+):
+    _register_provider(tmp_path)
+    monkeypatch.setenv(m._CONTROL_PLANE_PROVIDERS_DIR_ENV, str(_provider_registry_dir(tmp_path)))
+    monkeypatch.setattr(m, "_is_noninteractive_invocation", lambda: False)
+    monkeypatch.setattr(m, "_is_headless_project", lambda: False)
+    monkeypatch.setattr(m.cfg, "active_project", lambda: "demo")
+    monkeypatch.setattr(m, "_bundled_picker_available", lambda: False)
+    monkeypatch.setattr(m.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(
+        m, "_exec_worktree_manager",
+        lambda *a: pytest.fail("failed provider must not launch"),
+    )
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append(command)
+        if failure == "spawn":
+            raise OSError("cannot spawn")
+        if failure == "timeout":
+            raise m.subprocess.TimeoutExpired(command, kwargs["timeout"])
+        return m.subprocess.CompletedProcess(
+            command, 7 if failure == "exit" else 0,
+            stdout="unknown" if failure == "version" else "0.1.0-dev20",
+            stderr="dependency refused under configured policy",
+        )
+
+    monkeypatch.setattr(m.subprocess, "run", run)
+    assert m.dispatch_bare_invocation(has_project) == 1
+    assert len(calls) == (2 if failure == "timeout" else 1)
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "Cannot use 'worktree-manager' via" in captured.err
+    assert "stale binstub" not in captured.err
+    assert "Falling back" not in captured.err
+    assert "Launching the bundled picker" not in captured.err
+    if failure == "exit":
+        assert "exit 7" in captured.err
+        assert "stderr: dependency refused under configured policy" in captured.err
+
+
+@pytest.mark.parametrize("returncode", [0, 7])
+def test_provider_stderr_is_redacted_before_bounding(monkeypatch, tmp_path, returncode):
+    _register_provider(tmp_path)
+    monkeypatch.setenv(m._CONTROL_PLANE_PROVIDERS_DIR_ENV, str(_provider_registry_dir(tmp_path)))
+    stderr = "https://" + "fixture-secret" * 100 + "@example.invalid/ " + "x" * 2000
+    monkeypatch.setattr(
+        m.subprocess, "run",
+        lambda command, **kw: m.subprocess.CompletedProcess(
+            command, returncode, stdout="unsupported", stderr=stderr,
+        ),
+    )
+    health = m._worktree_manager_health()
+    assert health.state == "failed"
+    assert "fixture-secret" not in health.diagnostic
+    assert "example.invalid" in health.diagnostic
+    assert len(health.diagnostic.split("stderr: ", 1)[1]) == 400
+    assert len(health.diagnostic) < 800
+
+
+def test_healthy_provider_stderr_is_not_reported(monkeypatch, tmp_path, capsys):
+    command = _register_provider(tmp_path)
+    monkeypatch.setenv(m._CONTROL_PLANE_PROVIDERS_DIR_ENV, str(_provider_registry_dir(tmp_path)))
+    monkeypatch.setattr(
+        m.subprocess, "run",
+        lambda argv, **kw: m.subprocess.CompletedProcess(
+            argv, 0, stdout="0.1.0", stderr="unrelated startup note",
+        ),
+    )
+    assert m._worktree_manager_health() == _mlc._ManagerHealth("ready", command)
+    assert m._usable_worktree_manager() == command
+    assert capsys.readouterr() == ("", "")
+
+
+@pytest.mark.parametrize("has_project", [False, True])
+def test_real_failed_provider_reaches_bare_consumer(
+    monkeypatch, tmp_path, capsys, has_project,
+):
+    command = [
+        m.sys.executable, "-c",
+        "import sys; print('startup dependency refused', file=sys.stderr); sys.exit(7)",
+    ]
+    _register_provider(tmp_path, command=command)
+    monkeypatch.setenv(m._CONTROL_PLANE_PROVIDERS_DIR_ENV, str(_provider_registry_dir(tmp_path)))
+    monkeypatch.setattr(m, "_is_noninteractive_invocation", lambda: False)
+    monkeypatch.setattr(m, "_is_headless_project", lambda: False)
+    monkeypatch.setattr(m.cfg, "active_project", lambda: "demo")
+    monkeypatch.setattr(m, "_bundled_picker_available", lambda: False)
+    assert m.dispatch_bare_invocation(has_project) == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "exit 7" in captured.err
+    assert "stderr: startup dependency refused" in captured.err
+    assert "Falling back" not in captured.err
+
+
 def test_usable_manager_returns_registered_command_when_healthy(monkeypatch, tmp_path):
     """A Manager that answers `--version` with exit 0 is preferred."""
     command = _register_provider(tmp_path)
@@ -1660,6 +1882,7 @@ def test_usable_manager_none_when_unregistered(monkeypatch, tmp_path):
     monkeypatch.setenv(m._CONTROL_PLANE_PROVIDERS_DIR_ENV, str(_provider_registry_dir(tmp_path)))
     monkeypatch.setattr(m.subprocess, "run",
                         lambda *a, **k: pytest.fail("must not probe an absent manager"))
+    assert m._worktree_manager_health() == _mlc._ManagerHealth("absent")
     assert m._usable_worktree_manager() is None
 
 
@@ -1906,7 +2129,10 @@ def test_discover_rejects_a_leaked_manifest_end_to_end(monkeypatch, capsys):
     assert "pytest-of-" in capsys.readouterr().out
 
 
-def test_bare_falls_back_to_picker_when_manager_broken(monkeypatch, tmp_path):
+@pytest.mark.parametrize("fallback_rc", [0, 9])
+def test_bare_falls_back_to_picker_when_manager_broken(
+    monkeypatch, tmp_path, capsys, fallback_rc,
+):
     """End-to-end: a broken Manager on PATH must NOT dead-end bare launch --
     the seam falls back to the bundled Picker (DQ8 invariant)."""
     monkeypatch.delenv("WORKTREE_PROJECT", raising=False)
@@ -1920,10 +2146,13 @@ def test_bare_falls_back_to_picker_when_manager_broken(monkeypatch, tmp_path):
     monkeypatch.setattr(m, "_exec_worktree_manager",
                         lambda mgr, project: pytest.fail("broken manager must not be exec'd"))
     launched = {"v": False}
-    monkeypatch.setattr(m, "cmd_launch", lambda argv: launched.__setitem__("v", True) or 0)
+    monkeypatch.setattr(
+        m, "cmd_launch", lambda argv: launched.__setitem__("v", True) or fallback_rc,
+    )
     rc = m.main([])
-    assert rc == 0
+    assert rc == fallback_rc
     assert launched["v"] is True
+    assert "Launching the bundled picker." in capsys.readouterr().out
 
 
 # ── `update` → Worktree Manager seam (hand the updater/aligner over, DQ8) ──────
@@ -2022,7 +2251,10 @@ def test_bare_headless_ignores_manager(monkeypatch):
     monkeypatch.delenv("WORKTREE_PROJECT", raising=False)
     monkeypatch.setattr(m, "_resolve_active_project", lambda proj: ("ext", None))
     monkeypatch.setattr(m, "_is_headless_project", lambda: True)
-    monkeypatch.setattr(m, "_usable_worktree_manager", lambda: ("/usr/bin/worktree-manager",))
+    monkeypatch.setattr(
+        m, "_worktree_manager_health",
+        lambda: pytest.fail("headless must not probe Manager"),
+    )
     monkeypatch.setattr(m, "_exec_worktree_manager",
                         lambda mgr, project: pytest.fail("headless must not exec manager"))
     monkeypatch.setattr(m, "cmd_worktree_dispatch", lambda argv: 0)

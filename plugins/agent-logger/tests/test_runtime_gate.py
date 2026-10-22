@@ -215,7 +215,7 @@ if [[ "$1" == status ]]; then
   if [[ -n "${TEST_INSTALLATION_STATUS:-}" ]]; then
     printf '%s\\n' "$TEST_INSTALLATION_STATUS"
   else
-    printf '%s\\n' '{"status":"ready","reason":"policy-default-false","actualMode":"legacy","desiredMode":"legacy","policy":{"state":"valid","enabled":false}}'
+    printf '{"status":"ready","reason":"policy-default-false","actualMode":"legacy","desiredMode":"legacy","policy":{"state":"valid","enabled":false},"legacy":{"root":"%s"}}\\n' "${AGENT_LOGGER_HOME:-$HOME/.agent-logger}"
   fi
   exit 0
 fi
@@ -234,6 +234,7 @@ printf '{"pluginRoot":"%s","versionsRoot":"%s/versions","snapshotsRoot":"%s/snap
         newline="\n",
     )
     (payload / "scripts" / "resolve-runtime.sh").write_text(
+        '[ "${AGENT_RT_RESOLVE_TRACE_MODE:-}" = ready ] || return 126\n'
         'AGENT_RT_PY="${TEST_PYTHON:-}"\n',
         encoding="utf-8",
         newline="\n",
@@ -250,6 +251,11 @@ if ($args[0] -eq 'status') {
             actualMode = 'legacy'
             desiredMode = 'legacy'
             policy = [ordered]@{ state = 'valid'; enabled = $false }
+            legacy = [ordered]@{
+                root = if ($env:AGENT_LOGGER_HOME) { $env:AGENT_LOGGER_HOME } else {
+                    Join-Path $env:USERPROFILE '.agent-logger'
+                }
+            }
         } | ConvertTo-Json -Compress -Depth 4
     }
     exit 0
@@ -270,6 +276,8 @@ $root = $env:TEST_CELL_ROOT
         encoding="utf-8",
     )
     (payload / "scripts" / "resolve-runtime.ps1").write_text(
+        "param([string]$TraceMode)\n"
+        "if ($TraceMode -ne 'ready') { throw 'Expected ready-only resolution' }\n"
         "$AgentRtPy = $env:TEST_PYTHON\n", encoding="utf-8"
     )
 
@@ -561,7 +569,7 @@ def test_legacy_policy_without_embedded_policy(
     capture = tmp_path / "capture.json"
     env = _clean_subprocess_env()
     env.pop("COPILOT_EXTENSIONS_CONTEXT", None)
-    legacy: dict[str, object] = {"disposition": disposition}
+    legacy: dict[str, object] = {"root": str(legacy_root), "disposition": disposition}
     if tombstone != "omit":
         legacy["tombstone"] = tombstone
     env.update({

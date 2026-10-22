@@ -4,8 +4,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sqlite3
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from .native_keyed_admission import KeyedNativePrompt
 
 
 class PendingPromptRemovedError(ValueError):
@@ -82,7 +86,36 @@ class _EventsMixin:
         self, session_id: str, turn_index: int, prompt: str, now: float,
         *, delivery_id: str | None = None,
         pending_prompt_id: int | None = None,
-    ) -> None:
+        native_admission: KeyedNativePrompt | None = None,
+    ) -> dict | None:
+        if native_admission is not None:
+            if pending_prompt_id is not None or self.read_only:
+                raise ValueError("keyed_native_admission_unavailable")
+            from .native_keyed_admission import admission_receipt, stored_receipt
+            receipt = admission_receipt(session_id, turn_index, native_admission)
+            encoded = json.dumps({"facts": native_admission.facts(), "receipt": receipt},
+                                 sort_keys=True, allow_nan=False)
+            with self._write_lock:
+                conn = self._get_conn()
+                conn.execute("BEGIN IMMEDIATE")
+                try:
+                    saved = stored_receipt(self, session_id, native_admission, connection=conn)
+                    if saved is not None:
+                        conn.rollback()
+                        return {"inserted": False, "receipt": saved}
+                    conn.execute(
+                        "INSERT INTO turns (session_id,turn_index,prompt,started_at,"
+                        "acquisition_delivery_id,native_admission_json) VALUES (?,?,?,?,?,?)",
+                        (session_id, turn_index, prompt, now, delivery_id, encoded),
+                    )
+                    conn.commit()
+                    return {"inserted": True, "receipt": receipt}
+                except sqlite3.IntegrityError as exc:
+                    conn.rollback()
+                    raise ValueError("native_admission_conflict") from exc
+                except BaseException:
+                    conn.rollback()
+                    raise
         sql = (
             "INSERT INTO turns (session_id, turn_index, prompt, started_at, acquisition_delivery_id) "
             "VALUES (?, ?, ?, ?, ?)"

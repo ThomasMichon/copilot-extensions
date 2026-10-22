@@ -1,0 +1,9 @@
+{
+  "comment": "Pin that a lost acquisition receipt stays continuity_ambiguous even when the owner ledger is empty",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "dev"
+    }
+  ]
+}

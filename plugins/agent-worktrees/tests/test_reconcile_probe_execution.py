@@ -54,8 +54,8 @@ def test_probe_uses_isolated_current_python_without_native_shell(tmp_path, monke
     reconcile._run_installation_mode_helper(
         "agent-worktrees", tmp_path, helper, tmp_path / "legacy", context=context,
     )
-    assert calls[0][:6] == [
-        sys.executable, "-I", "-X", "utf8", str(helper), "probe-legacy",
+    assert calls[0][:7] == [
+        sys.executable, "-I", "-S", "-X", "utf8", str(helper), "probe-legacy",
     ]
     assert calls[0][-2:] == ["--context", str(context)]
 
@@ -165,10 +165,26 @@ def test_windows_portable_probe_matches_native_authority(env, monkeypatch, scena
 
     helper = reconcile._installation_context_helper("agent-worktrees", payload)
     assert helper is not None and helper.suffix == ".py"
+    native_run = subprocess.run
+    baseline_calls = []
+
+    def compare_site_initialized(command, **kwargs):
+        result = native_run(command, **kwargs)
+        if str(helper) in command:
+            assert "-S" in command
+            baseline = native_run([arg for arg in command if arg != "-S"], **kwargs)
+            assert baseline.returncode == result.returncode
+            assert baseline.stderr == result.stderr
+            assert json.loads(baseline.stdout) == json.loads(result.stdout)
+            baseline_calls.append(command)
+        return result
+
+    monkeypatch.setattr(subprocess, "run", compare_site_initialized)
     before = snapshot()
     portable = reconcile._run_installation_mode_helper(
         "agent-worktrees", payload, helper, legacy, context=context,
     )
+    assert len(baseline_calls) == 1
     assert snapshot() == before
     native = reconcile._run_installation_mode_helper(
         "agent-worktrees", payload, helper.with_name("installation-context.ps1"),

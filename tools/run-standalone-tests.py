@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import math
 import os
 import shutil
@@ -25,7 +26,9 @@ from plugin_test_containment import (
     isolated_environment,
     run_contained,
 )
-from standalone_consumers import STANDALONE_CONSUMERS, local_dependency_source
+from standalone_consumers import (
+    STANDALONE_CONSUMERS, local_dependency_source, standalone_build_resources,
+)
 from seasoned_uv import run_uv_install
 
 REPO = Path(__file__).resolve().parent.parent
@@ -207,13 +210,52 @@ def prepare(component: str, python: Path, *, smoke: bool = False) -> None:
         run_uv_install(
             "uv", ["--python", str(python), *overrides, *sources],
             trusted_source_roots=(REPO,),
-            retained_resource_roots=(REPO / "libs" / "versioned-runtime",),
+            retained_resource_roots=standalone_build_resources(component, source_root=REPO),
             cwd=REPO,
             check=True,
             capture_output=True,
             text=True,
             **flags,
         )
+
+
+def export_chat_membership(
+    sandbox: Path, destination: Path | None, profile: str, outcome: int,
+) -> int:
+    """Validate every Chat outcome; optionally retain its membership report."""
+    try:
+        report = json.loads((sandbox / "pytest" / "chat-membership.json").read_text("utf-8"))
+        if not isinstance(report, dict):
+            raise ValueError("membership report must be an object")
+    except (OSError, UnicodeError, ValueError) as error:
+        print(f"standalone tests: Chat membership unavailable: {error}", file=sys.stderr)
+        report = {
+            "schema": "agent-chat.test-membership", "version": 1, "profile": profile,
+            "membership_status": "unavailable",
+            "reason": "collection-not-complete" if isinstance(error, FileNotFoundError)
+            else "membership-report-unreadable",
+        }
+        result = outcome or 1
+    else:
+        report["membership_status"] = "available"
+        result = outcome
+        execution = report.get("execution")
+        if outcome == 0 and (
+            not isinstance(execution, dict) or execution.get("status") != "complete"
+        ):
+            print("standalone tests: Chat qualification execution is incomplete", file=sys.stderr)
+            report["qualification_error"] = "execution-not-complete"
+            result = 1
+    report.update(test_exit_code=outcome, exit_code=result)
+    if destination is None:
+        return result
+    try:
+        with destination.open("x", encoding="utf-8") as output:
+            json.dump(report, output, sort_keys=True)
+    except OSError as error:
+        print(f"standalone tests: Chat membership export failed: {error}", file=sys.stderr)
+        return outcome or 1
+    return result
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -230,9 +272,26 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--prepare", action="store_true", help="provision declared test dependencies")
     parser.add_argument("--smoke", action="store_true", help="run controller contracts without real deployment cycles")
+    parser.add_argument(
+        "--chat-suite", choices=("acceptance", "full"),
+        help="Chat qualification lane (default: acceptance; full is also required)",
+    )
+    parser.add_argument(
+        "--chat-membership-report", type=Path,
+        help="retain the Chat parameter-node map at a new file outside the disposable sandbox",
+    )
     parser.add_argument("--admission-wait", type=float, default=0.0)
-    parser.add_argument("--timeout", type=float, default=600.0)
+    parser.add_argument("--timeout", type=float)
     args = parser.parse_args(argv)
+    if (args.chat_suite or args.chat_membership_report) and args.component != "services/chat":
+        parser.error("Chat qualification options are only defined for services/chat")
+    if args.chat_membership_report and (
+        args.chat_membership_report.exists() or not args.chat_membership_report.parent.is_dir()
+    ):
+        parser.error("--chat-membership-report requires a new file in an existing directory")
+    chat_suite = (args.chat_suite or "acceptance") if args.component == "services/chat" else None
+    if args.timeout is None:
+        args.timeout = 120.0 if chat_suite == "acceptance" else 600.0
     if not math.isfinite(args.timeout) or args.timeout <= 0:
         parser.error("--timeout must be finite and positive")
     if not math.isfinite(args.admission_wait) or args.admission_wait < 0:
@@ -313,6 +372,9 @@ def main(argv: list[str] | None = None) -> int:
         try:
             sandbox = Path(temporary.name)
             env = isolated_environment(os.environ, sandbox)
+            env.pop("AGENT_CHAT_TEST_SUITE", None)
+            if chat_suite:
+                env["AGENT_CHAT_TEST_SUITE"] = chat_suite
             tests = (
                 [
                     root / "tests" / "test_cli.py", root / "tests" / "test_config.py",
@@ -328,7 +390,7 @@ def main(argv: list[str] | None = None) -> int:
                 ]
                 if args.smoke else [root / "tests"]
             )
-            return run_contained(
+            outcome = run_contained(
                 [str(python), "-I", "-m", "pytest", "-q", *map(str, tests),
                  "--basetemp", str(sandbox / "pytest")],
                 cwd=root,
@@ -336,6 +398,11 @@ def main(argv: list[str] | None = None) -> int:
                 sandbox=sandbox,
                 limits=limits,
             )
+            if chat_suite is not None:
+                return export_chat_membership(
+                    sandbox, args.chat_membership_report, chat_suite, outcome,
+                )
+            return outcome
         except UnreapedProcessError:
             temporary.retain()
             raise

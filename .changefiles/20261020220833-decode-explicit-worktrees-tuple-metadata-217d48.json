@@ -1,0 +1,9 @@
+{
+  "comment": "Decode explicit Worktrees tuple metadata at Manager row and action boundaries while preserving declared source routing and standalone packaging.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

@@ -37,6 +37,14 @@ CID_A, CID_B, NETWORK = "a" * 64, "b" * 64, "c" * 64
 IMAGE = "sha256:" + "d" * 64
 
 
+def test_fixed_package_allowlist_covers_current_committed_sdk_modules() -> None:
+    names = SOURCE.git(
+        ROOT, "ls-tree", "-r", "--name-only", "HEAD", "fleet-manager/src/fleet_manager",
+    ).decode().splitlines()
+    expected = {name for name in SOURCE.REQUIRED if name.startswith("fleet-manager/src/")}
+    assert set(names) == expected
+
+
 def test_hardened_argv_has_no_host_privilege_or_secret_material(tmp_path: Path) -> None:
     with patch.object(ENGINE.os, "getuid", return_value=1001):
         argv = ENGINE.container_args(

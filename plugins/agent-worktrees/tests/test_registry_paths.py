@@ -189,6 +189,96 @@ def test_incomplete_installed_registry_bootstrap_cannot_fall_back_to_payload(mon
         registry_paths._helper()
 
 
+def test_registry_validator_reuses_code_but_revalidates_context(monkeypatch, tmp_path):
+    payload = _payload(tmp_path, "payload")
+    context, plugin_root = _stamp(
+        tmp_path / "durable", payload,
+        marketplace="cached", repository="Example-Org/Cached-Validator",
+    )
+    _select(monkeypatch, context, payload)
+    monkeypatch.setattr(registry_paths.sys, "prefix", str(tmp_path / "uninstalled"))
+
+    assert config.install_dir() == plugin_root
+    first = sys.modules["_agent_worktrees_registry_installation_context"]
+    original_code = dict(first._registry_compiled_sources)
+    assert registry_paths.installation_context()["pluginRoot"] == str(plugin_root)
+    second = sys.modules["_agent_worktrees_registry_installation_context"]
+    assert second is not first
+    assert original_code
+    assert all(second._registry_compiled_sources[name][2] is entry[2]
+               for name, entry in original_code.items())
+
+    context.write_text("{}\n", encoding="utf-8")
+    with pytest.raises(ValueError):
+        config.install_dir()
+
+
+@pytest.mark.parametrize("changed_file", [
+    "installation_context.py", "_installation_context_base.py",
+])
+def test_registry_validator_reloads_changed_code_with_same_stat(
+    monkeypatch, tmp_path, changed_file,
+):
+    payload = _payload(tmp_path, "payload")
+    context, plugin_root = _stamp(
+        tmp_path / "durable", payload,
+        marketplace="changed", repository="Example-Org/Changed-Validator",
+    )
+    _select(monkeypatch, context, payload)
+    monkeypatch.setattr(registry_paths.sys, "prefix", str(tmp_path / "uninstalled"))
+    source = payload / "scripts" / "installation-context" / changed_file
+    source.write_text(source.read_text(encoding="utf-8") + "\nCACHE_PROBE = 'before'\n",
+                      encoding="utf-8")
+    assert config.install_dir() == plugin_root
+    first = sys.modules["_agent_worktrees_registry_installation_context"]
+    assert first.CACHE_PROBE == "before"
+    original_stat = source.stat()
+    source.write_text(source.read_text(encoding="utf-8").replace(
+        "CACHE_PROBE = 'before'", "CACHE_PROBE = 'after!'",
+    ), encoding="utf-8")
+    os.utime(source, ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns))
+    assert source.stat().st_size == original_stat.st_size
+
+    assert config.install_dir() == plugin_root
+    second = sys.modules["_agent_worktrees_registry_installation_context"]
+    assert second is not first
+    assert second.CACHE_PROBE == "after!"
+
+
+def test_registry_validator_does_not_retain_interleaved_fragment_code(monkeypatch, tmp_path):
+    payload = _payload(tmp_path, "payload")
+    context, plugin_root = _stamp(
+        tmp_path / "durable", payload,
+        marketplace="interleaved", repository="Example-Org/Interleaved-Validator",
+    )
+    _select(monkeypatch, context, payload)
+    monkeypatch.setattr(registry_paths.sys, "prefix", str(tmp_path / "uninstalled"))
+    fragment = payload / "scripts" / "installation-context" / "_installation_context_base.py"
+    original = fragment.read_text(encoding="utf-8") + "\nCACHE_PROBE = 'original'\n"
+    fragment.write_text(original, encoding="utf-8")
+    read_text = Path.read_text
+
+    def interleaved_read(path, *args, **kwargs):
+        if path == fragment:
+            path.write_text(original.replace("'original'", "'interleaved'"), encoding="utf-8")
+            try:
+                return read_text(path, *args, **kwargs)
+            finally:
+                path.write_text(original, encoding="utf-8")
+        return read_text(path, *args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "read_text", interleaved_read)
+        assert config.install_dir() == plugin_root
+        first = sys.modules["_agent_worktrees_registry_installation_context"]
+        assert first.CACHE_PROBE == "interleaved"
+
+    assert config.install_dir() == plugin_root
+    second = sys.modules["_agent_worktrees_registry_installation_context"]
+    assert second is not first
+    assert second.CACHE_PROBE == "original"
+
+
 def test_binstub_arbitration_is_shared_across_validated_cells(monkeypatch, tmp_path):
     isolated_home = tmp_path / "sandbox"
     monkeypatch.setenv("AGENT_HOME", str(isolated_home))
@@ -679,6 +769,9 @@ def test_namespaced_registration_persists_cell_config_dir(
     _select(monkeypatch, context, payload)
     _register_repo("example", "https://github.com/example/repo.git")
     monkeypatch.setattr(installer.output, "ok", lambda *_args, **_kwargs: None)
+
+    with pytest.raises(ValueError, match="identity receipt is unreadable"):
+        config.project_dir("example")
 
     installer.register_project("example")
 

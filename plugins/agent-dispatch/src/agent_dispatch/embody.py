@@ -28,7 +28,7 @@ import shlex
 import shutil
 import subprocess
 
-from . import bridge_remote, worktree_attribution
+from . import bridge_remote, worktree_attribution, worktree_record
 from .embody_prompts import autopilot_worker_prompt, fleet_autopilot_worker_prompt
 from .procutil import (
     agent_worktrees_environment,
@@ -41,7 +41,7 @@ DEFAULT_DRIVER = "agent-dispatch"
 
 #: Tracking statuses meaning a worktree is done and cannot be reused.
 _TERMINAL_WORKTREE_STATUSES = frozenset(
-    {"finalizing", "finalized", "complete", "completed", "orphaned", "terminal"})
+    {"finalizing", "finalized", "complete", "completed", "orphaned", "terminal", "archived"})
 
 
 class EmbodyUnavailable(RuntimeError):
@@ -177,39 +177,38 @@ def resolve_worktree(
     exe_prefix = _agent_worktrees_launch_prefix()
     if exe_prefix is None:
         raise EmbodyUnavailable("agent-worktrees CLI not found on PATH")
-    cmd = list(exe_prefix)
-    if project:
-        cmd += ["--project", project]
-    cmd += ["list", "--json", "--fresh"]
-    result = subprocess.run(  # noqa: S603 -- fixed argv, launcher resolved locally
-        cmd,
-        check=False,
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-        env=agent_worktrees_environment(),
-        **no_window_kwargs(),
-    )
-    if result.returncode != 0:
-        detail = (result.stderr or result.stdout or "").strip()
-        raise EmbodyUnavailable(detail or f"agent-worktrees list exited {result.returncode}")
+    cmd = [*exe_prefix, *(["--project", project] if project else []), "list", "--json", "--fresh"]
     try:
-        data = json.loads(result.stdout or "{}")
-    except (ValueError, TypeError) as exc:
-        raise EmbodyUnavailable("agent-worktrees list returned invalid JSON") from exc
-    worktrees = data.get("worktrees") if isinstance(data, dict) else None
-    if not isinstance(worktrees, list):
-        raise EmbodyUnavailable("agent-worktrees list returned no worktree list")
-    for row in worktrees:
-        if not isinstance(row, dict):
-            continue
-        if row.get("id") == worktree_id:
-            if row.get("status") in _TERMINAL_WORKTREE_STATUSES:
-                raise WorktreeNotFound(f"worktree is terminal and cannot be reused: {worktree_id}")
-            if task_id and (owner := worktree_attribution.foreign_task_id(row, task_id)):
-                raise WorktreeNotFound(f"worktree now owned by {owner!r}, not {task_id!r}")
-            return {"worktree": worktree_id, "path": row.get("path"), "project": row.get("repo")}
-    raise WorktreeNotFound(f"worktree not found: {worktree_id}")
+        result = subprocess.run(  # noqa: S603 -- fixed argv, launcher resolved locally
+            cmd, check=False, capture_output=True, text=True, timeout=timeout,
+            env=agent_worktrees_environment(), **no_window_kwargs(),
+        )
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout or "").strip()
+            raise EmbodyUnavailable(detail or f"agent-worktrees list exited {result.returncode}")
+        try:
+            data = json.loads(result.stdout or "{}")
+        except (ValueError, TypeError) as exc:
+            raise EmbodyUnavailable("agent-worktrees list returned invalid JSON") from exc
+        worktrees = data.get("worktrees") if isinstance(data, dict) else None
+        if not isinstance(worktrees, list):
+            raise EmbodyUnavailable("agent-worktrees list returned no worktree list")
+        row = next((r for r in worktrees if isinstance(r, dict) and r.get("id") == worktree_id), None)
+        if row is None:
+            raise WorktreeNotFound(f"worktree not found: {worktree_id}")
+    except (EmbodyUnavailable, OSError, subprocess.SubprocessError):
+        # The roster lags creation by up to one resident sweep (or the roster read
+        # failed outright); ask the exact record, else surface the original failure.
+        row = worktree_record.read_exact_row(
+            exe_prefix, worktree_id, project=project, timeout=timeout, task_scoped=bool(task_id),
+            env=agent_worktrees_environment())
+        if row is None:
+            raise
+    if row.get("status") in _TERMINAL_WORKTREE_STATUSES:
+        raise WorktreeNotFound(f"worktree is terminal and cannot be reused: {worktree_id}")
+    if task_id and (owner := worktree_attribution.foreign_task_id(row, task_id)):
+        raise WorktreeNotFound(f"worktree now owned by {owner!r}, not {task_id!r}")
+    return {"worktree": worktree_id, "path": row.get("path"), "project": row.get("repo")}
 
 
 def prepare_reusable_worktree(

@@ -60,6 +60,7 @@ def _payload_root(
 
 
 def _load_context_helper(payload_root: Path) -> ModuleType:
+    """Reuse compilation of exact source bytes, never validator module state."""
     helper = (
         Path(__file__).resolve().parent
         / "installation-context"
@@ -70,6 +71,23 @@ def _load_context_helper(payload_root: Path) -> ModuleType:
             "the owning payload has no installation-context validator"
         )
     module_name = "_agent_worktrees_registry_installation_context"
+    previous = sys.modules.get(module_name)
+    root_source = helper.read_bytes()
+    compiled = (
+        getattr(previous, "_registry_compiled_sources", {})
+        if previous is not None
+        and getattr(previous, "__file__", None) == str(helper)
+        and getattr(previous, "_registry_root_source", None) == root_source
+        else {}
+    )
+
+    def compile_source(source, filename, mode):
+        cached = compiled.get(filename)
+        if cached is None or cached[:2] != (source, mode):
+            cached = (source, mode, compile(source, filename, mode))
+            compiled[filename] = cached
+        return cached[2]
+
     spec = importlib.util.spec_from_file_location(module_name, helper)
     if spec is None or spec.loader is None:
         raise RegistryRootError(
@@ -77,13 +95,18 @@ def _load_context_helper(payload_root: Path) -> ModuleType:
         )
     module = importlib.util.module_from_spec(spec)
     sys.modules[module_name] = module
+    module.__dict__["compile"] = compile_source
     try:
-        spec.loader.exec_module(module)
+        exec(compile_source(root_source, str(helper), "exec"), module.__dict__)
     except Exception as error:
         sys.modules.pop(module_name, None)
         raise RegistryRootError(
             "the installation-context validator cannot be loaded"
         ) from error
+    finally:
+        module.__dict__.pop("compile", None)
+    module._registry_root_source = root_source
+    module._registry_compiled_sources = compiled
     return module
 
 

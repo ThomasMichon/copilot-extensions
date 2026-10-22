@@ -113,6 +113,11 @@ an attributed `agent-dispatch` companion declaration. On a configured Windows
 host, the already-durable interactive-session dispatch coordinator can
 re-launch the watchdog even when the historical Startup-folder shortcut did not
 fire for that logon or the launcher died later in the session.
+Before launching that new daemon root, the companion removes only the inherited
+Win32 OpenSSH `C28FC6F98A2C44ABBBD89D6A3037D0D9_POSIX_FD_STATE` execution-descriptor
+carrier from its process environment. Those descriptors belong to an existing
+SSH process chain, not a fresh sshd. All other variables remain inherited;
+stop/health calls and ordinary SSH descendant/re-exec chains are unchanged.
 
 `mesh-status [--json]` is a read-only view of a calling repository's
 `machines.yaml`. In addition to SSH readiness and environments, it shows the

@@ -1,0 +1,9 @@
+{
+  "comment": "Define the optional generation-bound adopter effect revocation boundary without enabling live execution handoff",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

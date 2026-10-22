@@ -69,6 +69,63 @@ Revision custody remains process-local. The source/lifecycle owner must retain
 accepted revision authority across restart; this implementation does not claim
 a durable publication fence or automatic accepted-operation recovery.
 
+### Code-registered identity-provider trust adapter
+
+An SDK embedding can supply
+`identity_provider=IdentityProvider("example-provider", prepare)` to
+`ServiceAuthority`, `build_app` or `start`. Registration is explicit trusted
+Python code, frozen for that authority's lifetime, not a global plugin registry,
+configuration-selected module import or executable. There is no vendor/default
+IdP implementation. The foreground CLI does not discover or load adapters.
+
+To use that adapter, the selected source publishes the same complete policy
+with version `2` and this exact `identity` envelope:
+
+```json
+{
+  "provider": "example-provider",
+  "profile": "jwt-pop-v1",
+  "configuration": {"snapshot": "selected"}
+}
+```
+
+Only the exact code-registered name and existing `jwt-pop-v1` profile are
+accepted. An absent/different provider, unsupported profile or failed adapter
+refuses explicitly; there is no fallback. Version `1` remains the original
+built-in public-trust schema, even when an adapter is registered; selecting it
+is an explicit source-policy choice, not an error recovery path.
+
+The pure `prepare(configuration_bytes)` callback receives bounded canonical JSON
+bytes, not mutable policy aliases. It returns exactly an immutable `IdentityTrust`
+with `issuer`, `audience`, public `jwks` JSON bytes and `trust_valid_until`.
+The existing `IdentityVerifier` validates those keys and trust values and still
+performs **every** request's access-token/PoP verification. Adapters cannot return
+a verifier, authenticated identity, permit or bearer-only acceptance decision.
+Known unavailable/invalid provider snapshots raise `IdentityProviderError()`;
+the runtime reports `provider-trust-unavailable` without provider details.
+Unexpected programming exceptions remain failures, not successful empty trust.
+
+Authenticated acquisition, key refresh, login, account policy and complete
+snapshot publication belong outside this pure callback, with the adopter's
+existing provider/source owner. The callback must not fetch keys, sample a
+clock, log in or perform I/O. Registration and JSON parsing do not authenticate
+the source or establish enrollment. Use public snapshots and external references,
+never embed provider credentials in the policy.
+
+The trust epoch includes the selected provider/profile, canonical configuration
+and normalized prepared trust. Equivalent publications retain the same verifier,
+nonce, replay cache and current handles. Changed provider configuration or
+prepared trust requires a new manifest revision and replaces that epoch,
+invalidating previous handles. Malformed candidates retain the prior context
+without extending its trust expiry. Replacing adapter code requires a controlled
+runtime change, not a request or policy-selected callable.
+
+This seam is trust preparation, **not** a new proof profile, browser login
+implementation or interoperability claim. A vendor's token lacking the required
+audience/proof binding still refuses. Vendor adapters and private selection stay
+downstream; no claim rewriting, alternate issuer, re-signing or bearer fallback
+is supplied.
+
 ## Authentication and attachment
 
 The existing maintained-library verifier checks real access JWTs and DPoP
@@ -157,6 +214,51 @@ reporting the empty transmitted body's length as the corresponding asset size.
 | Concurrent pending requests | 32 globally, 8 per channel |
 | Per-request queue / unacknowledged chunks | 8 / 1 |
 | Request deadline / backend connect / backend idle read | 60s / 5s / 15s |
+
+### Opt-in caller-aware handler
+
+An SDK embedding can select `handler=HandlerBinding(fleet, gateway, handle)`
+instead of `backend_origin`. These choices are mutually exclusive. The trusted
+async handler receives an immutable `ServiceRequest` with the checked method,
+prefix-stripped target, allowed header tuples, bounded body and `CallerContext`.
+It returns a `ServiceResponse(status, headers=(), body=b"")`. Handler responses
+are buffered and limited to 32 KiB, then use the existing chunk/ACK path; this
+does not change the HTTP backend's 8 MiB response or streaming behavior.
+
+This mode explicitly negotiates `caller-context-v1` through the existing
+service-admit body and attachment confirmation. Legacy connectors send and
+receive the original exact frame shape. An older Gateway or unrecognized
+profile refuses; there is no silent downgrade to an identity-less backend.
+
+Only the Gateway constructs context, from its currently retained caller grant:
+`fleet`, `gateway`, `slot`, authenticated `principal`, and `expires_at` bounded by
+both caller-token and issuer-trust expiry. The context crosses the verified TLS
+service channel, not an HTTP identity header or client-selected URL. The
+connector checks exact fields, its deployment-selected fleet/Gateway/slot and
+expiry before invoking the handler. Client headers, body and query remain
+untrusted application input, never identity. No caller token, proof, cookie,
+key reference or credential is forwarded.
+Malformed or wrong-owner context refuses the channel. A structurally valid
+context that expires in transit instead fails only that request with
+`caller-context-expired`; unrelated active handlers and the channel remain live.
+Lost or failed mutations still report `outcome-unknown`, not permission to retry.
+
+Constructing a context object does not authenticate it or create an offline
+permit. There is no public HTTP handler endpoint to trust a serialized copy.
+The service embedding must map the admitted principal to its own configured
+account/resource permissions and persistent namespace; context does not grant
+forge credentials, cross-account access or administration. Handlers must be
+asynchronous and cooperate with cancellation and the existing deadline.
+Withdrawal, expiry, disconnect and channel replacement cancel their tasks;
+the Gateway also rechecks authority before response emission. This does not
+atomically fence an external effect already performed by a handler.
+Handler programming failures produce value-free diagnostics and explicit
+backend errors, never a success-shaped empty response.
+
+The `service-gateway` and `dev` extras support `aiohttp>=3.14.4,<4`, including
+its bounded parser fixes. The 3.14.5 compressed-control-frame change is not
+required: this profile explicitly disables WebSocket compression. The ordinary
+seven-day configured-feed seasoning policy still governs installation.
 
 The combined JSON envelope must also fit the frame bound, including base64
 and header escaping. Preflight rejection occurs before dispatch, so an

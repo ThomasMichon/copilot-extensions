@@ -960,6 +960,38 @@ and `transport.spawn` asks the same policy before any raw-transport CodeSpace
 spawn (a resync, or a resume without a Session Host),
 advertised as HTTP generation 26 (`codespace_launch_policy`).
 
+## Ordinary native startup admission receipts
+
+HTTP protocol 45 adds an opt-in keyed native prompt endpoint and a receipt-only
+read operation. `send --native-invocation-file PATH` reads one UTF-8 JSON request
+(`-` means standard input); metadata is never passed as quoted JSON argv.
+`--expected-native-session-id` must agree with that immutable request.
+`--receipt-only` reads historical admission without admitting on a miss.
+Both operations return a JSON admission receipt, not streamed task completion.
+Mixing another prompt source, live-delivery identity, queue or force option is
+refused. The existing unkeyed send path still admits intentional new turns.
+
+The request binds a stable invocation to its exact native/session/workspace
+identity, original allocation lineage, admission generation, expected initial
+turn position and fully rendered prompt. The existing unique
+`turns.acquisition_delivery_id` index fences admission; immutable facts and
+receipt are stored atomically in a nullable `native_admission_json` turn column.
+An identical RUNNING or settled replay returns the original index without new
+events or SDK submission. Changed payload/binding and unprovable history refuse.
+The expected original turn position prevents missing accepted history from
+being treated as permission for a fresh turn. Created-workspace proof remains
+in its existing journal; a newly assigned, resumed native uses canonical owner
+record/head proof, not fabricated creation history.
+
+The receipt means admission, not SDK execution. A crash between persistence and
+SDK scheduling cannot authorize automatic resubmission. The producer requires
+the named capability before existing keyed creation and on each request attempt;
+a distinct keyed-send endpoint prevents old handlers from ignoring the contract.
+There is no new CREATE route or hard zero-allocation cutover guarantee. One known
+unprompted allocation may be retained while unsupported send is refused.
+Older clients using unkeyed send do not gain keyed-replay guarantees merely
+because the receiver was updated. Source publication and rollout remain separate.
+
 ## Persistence
 
 - **Sessions:** SQLite database at `~/.agent-bridge/sessions.db` (WAL mode)

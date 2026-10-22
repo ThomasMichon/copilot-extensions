@@ -15,6 +15,13 @@ from agent_bridge.db import SCHEMA_VERSION, Database
 from agent_bridge.routes import live_sessions
 
 
+def test_turn_state_facade_exports_the_actual_closed_import_helpers():
+    from agent_bridge import live_representation, live_turn_state
+
+    for name in ("derive_turn_state", "is_subagent_event", "subagent_id"):
+        assert getattr(live_representation, name) is getattr(live_turn_state, name)
+
+
 # -- DB layer ---------------------------------------------------------------
 
 

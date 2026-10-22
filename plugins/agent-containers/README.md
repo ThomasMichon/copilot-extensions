@@ -34,6 +34,14 @@ in. It does not enable a repair worker or supply inference/repository authority.
    missing binstub/payload makes only that namespace inactive and is diagnosed
    by `agent-bridge doctor`.
 
+The Windows installer declares its `init.ps1` human-output boundary for the
+existing updater's timed capture. Direct invocation retains its original
+encoding; requested capture uses the packaged UTF-8 text-writer initializer
+without changing native-command decoding or pipeline stdin. Docker-version
+diagnostics are drained on both streams and preserved on stderr; POSIX no
+longer suppresses those diagnostics. On both platforms a failing Docker probe
+warns with its exit code but does not prevent CLI installation.
+
 ## Dispatch-only restricted workers
 
 An image-backed restricted fleet can opt into `dispatch_only: true`. This is a
@@ -471,6 +479,8 @@ in a separate private `/tmp/agent-containers-<user>/launch` directory because
 Linux commonly mounts `/dev/shm` with `noexec`. Wrapper content contains only
 the RAM credential path and variable name, never credential bytes. Cleanup
 and the abandoned-input reaper cover both directories together.
+Executable scopes are created explicitly with mode 0700 rather than relying on
+umask, so inherited default ACLs cannot widen their permissions.
 Existing launch inputs in the former home-directory location are not migrated
 or swept by the new RAM-only reaper.
 Successful CLI startup must confirm the native child consumed its file before
@@ -933,6 +943,15 @@ An explicit restricted network must be a user-defined Docker network created
 with `--internal`; `host`, the default `bridge`, and `container:<name>` sharing
 are rejected. This lets a higher-level workflow attach a narrow proxy (for
 example, one model endpoint) without granting ambient host or internet reach.
+
+## Native launch-storage tests
+
+Run `tools/run-plugin-tests.py agent-containers --test-file tests/test_launch_storage.py`
+from the repository root. These Linux regressions inspect the actual filesystem:
+`/tmp` is not necessarily disk-backed. Disk-only refusal cases explicitly skip
+when their temporary directory is on tmpfs; complete disk-refusal qualification
+also needs a non-tmpfs run. RAM, symlink and permission witnesses remain active
+on the tmpfs layout. A prerequisite skip is not a passing disk witness.
 
 ## Discovery
 

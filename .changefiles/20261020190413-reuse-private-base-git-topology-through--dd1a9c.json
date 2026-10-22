@@ -1,0 +1,9 @@
+{
+  "comment": "Reuse private base Git topology through immutable seeds and repair all copied links and record paths",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

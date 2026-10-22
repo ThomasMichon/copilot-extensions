@@ -53,7 +53,7 @@ class Deliveries:
                     (
                         (event, event.subscriber.pending["next_attempt"],
                          event.subscriber.registration_id)
-                        for event in self.registry.pending_events()
+                        for event in self.registry.pending_events(delivery_mode="callback")
                     ),
                     key=lambda item: item[1],
                 )
@@ -196,7 +196,7 @@ class Deliveries:
                     "last_error": event.subscriber.pending["last_error"],
                     "next_attempt": event.subscriber.pending["next_attempt"],
                 }
-                for event in self.registry.pending_events()
+                for event in self.registry.pending_events(delivery_mode="callback")
             ]
 
     def running(self) -> list[dict]:

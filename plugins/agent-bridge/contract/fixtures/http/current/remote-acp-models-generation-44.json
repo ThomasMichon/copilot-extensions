@@ -1,0 +1,59 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/sessions",
+    "json": {
+      "agent": "remote-acp:example-agent",
+      "target_dir": "/workspace",
+      "remote_session_id": "saved-example"
+    }
+  },
+  "response": {
+    "preference_source": "caller-settings",
+    "session_id": "bridge-example",
+    "name": "example-agent",
+    "status": "idle",
+    "protocol_version": 44,
+    "min_protocol_version": 1
+  },
+  "client_requests": {
+    "start": {
+      "agent": "remote-acp:example-agent",
+      "target_dir": "/workspace",
+      "remote_session_id": "saved-example",
+      "protocol_version": 44
+    },
+    "form": {
+      "tool_call_id": "opaque-tool",
+      "request_id": "live-token",
+      "content": {
+        "choice": "explicit"
+      },
+      "action": "accept"
+    },
+    "permission": {
+      "request_id": "live-token",
+      "option_id": "opaque-option"
+    }
+  },
+  "capability": {
+    "remote_acp": 38,
+    "existing_permission_answer_floor": 10,
+    "unsupported_status": 426,
+    "profile": "acp-http-ws-durable-v1alpha1",
+    "experimental_namespace": "remote-acp/explicit-approvals",
+    "ordinary_provider_instance_default": false
+  },
+  "captured_from": {
+    "commit": "632cac7b9de4c42ef2c765053a783fbead0bbff0",
+    "plugin_version": "0.4.1-dev3",
+    "source_path": "plugins/agent-bridge/src/agent_bridge/models.py",
+    "source_git_blob": "0f5cc84f3f7f7bbe3cc9b7fec2e3710629952553",
+    "protocol_generation": 44,
+    "source_sha256": "9f40173a7e58e995b16dd592175aa0fa10c748a3fd5aefe145230c0c91780e5a"
+  },
+  "reattested_from": {
+    "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-acp-models-generation-43.json",
+    "sha256": "b555643320e584300562ae9cddd26d8fe866718bd8cb470b972113e97a93b59d"
+  }
+}

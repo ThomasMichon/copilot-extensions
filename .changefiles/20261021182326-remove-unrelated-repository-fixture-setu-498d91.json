@@ -1,0 +1,9 @@
+{
+  "comment": "Remove unrelated repository fixture setup from the pure non-string codename guard test.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

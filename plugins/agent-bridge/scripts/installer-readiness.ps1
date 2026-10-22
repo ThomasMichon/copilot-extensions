@@ -1,6 +1,6 @@
 $ErrorActionPreference = 'Stop'
 $pluginRoot = Split-Path -Parent $PSScriptRoot
-$command = Join-Path $pluginRoot 'bin\agent-bridge.cmd'
+$command = Join-Path $pluginRoot 'bin\agent-bridge.ps1'
 $env:AGENT_BRIDGE_NO_SELFPROVISION = '1'
 
 $output = $null

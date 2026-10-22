@@ -10,7 +10,7 @@ is reaped by staleness rather than relying on a clean deregister.
 
 from __future__ import annotations
 
-import asyncio
+import asyncio as asyncio
 import json
 import math
 import time
@@ -43,12 +43,17 @@ from ..live_controls import (
     CLAIMED_CONTROL_GRACE_SECONDS,
     CONTROL_MAX_AGE_SECONDS,
     SET_MODE_CONTROL,
+    SET_MODE_READY_CONTROL,
     ControlAckRequest,
     SetModeRequest,
     SetModeResult,
 )
 from .. import live_backfill as _backfill
 from ..live_message_receipts import admission_evidence, record_consumption
+from ..plugin_readiness import (
+    READINESS_CONTROL, PluginReadinessError, PluginReadinessRequest,
+    PluginReadinessResult, wait_plugin_readiness,
+)
 from ..live_representation import (
     progress_from_events,
     await_turn_reply,
@@ -69,6 +74,7 @@ from ..result_snapshot import (
 )
 from .sessions import _sse_event_stream
 from .live_message_receipts import router as receipt_router
+from . import live_startup_controls
 
 #: A running turn with no activity for longer than this reads as "stalled".
 _TURN_STALL_SECONDS = 90.0
@@ -684,6 +690,10 @@ async def stream_live_events(
     )
 
 
+def _existing_startup_kind(db, key: str, expectation: PluginReadinessRequest) -> str | None:
+    return live_startup_controls.existing_startup_kind(db, key, expectation)
+
+
 @router.post("/{session_id}/messages", response_model=SendMessageResult)
 async def post_live_message(
     session_id: str, body: SendMessageRequest, request: Request
@@ -700,10 +710,20 @@ async def post_live_message(
             status_code=400,
             detail="control kinds are reserved; use the session's control routes (e.g. /mode)",
         )
+    if body.kind.startswith("startup:"):
+        raise HTTPException(400, detail="startup kinds require typed Bridge-owned acquisition")
     db = _db(request)
     now = time.time()
     target = db.get_live_session(session_id)
     target_session_id = target["session_id"] if target is not None else session_id
+    message_kind = body.kind
+    expected_session_id = body.expected_session_id
+    if body.plugin_readiness is not None:
+        message_kind, expected_session_id = await live_startup_controls.startup_message(
+            db, body, target, target_session_id,
+            existing_kind=_existing_startup_kind, wait_readiness=wait_plugin_readiness,
+        )
+        now = time.time()
 
     # Freshness lease (#2906): validate the target registration's heartbeat
     # lease and enqueue *atomically* -- the check + insert run under one write
@@ -727,9 +747,9 @@ async def post_live_message(
         body=body.body,
         now=now,
         reply_to=body.reply_to,
-        kind=body.kind,
+        kind=message_kind,
         delivery=body.delivery,
-        expected_session_id=body.expected_session_id,
+        expected_session_id=expected_session_id,
         idempotency_key=body.idempotency_key,
         report_duplicate=True,
     )
@@ -820,6 +840,16 @@ async def post_live_message(
 MODE_POLL_SECONDS = 0.25
 
 
+@router.post("/{session_id}/plugin-readiness", response_model=PluginReadinessResult)
+async def plugin_readiness(
+    session_id: str, body: PluginReadinessRequest, request: Request,
+) -> PluginReadinessResult:
+    try:
+        return await wait_plugin_readiness(_db(request), session_id, body)
+    except PluginReadinessError as exc:
+        raise HTTPException(409, detail={"code": "plugins_not_ready", "reason": str(exc)}) from exc
+
+
 @router.post("/{session_id}/mode", response_model=SetModeResult)
 async def set_live_mode(
     session_id: str, body: SetModeRequest, request: Request
@@ -835,66 +865,10 @@ async def set_live_mode(
     withdrawn (``withdrawn``: it never applies later); a claimed one is waited
     on briefly for its outcome, else reported ``in_flight`` (it may still apply).
     """
-    db = _db(request)
-    target = db.get_live_session(session_id)
-    target_session_id = target["session_id"] if target is not None else session_id
-    control_id, reason = db.enqueue_live_message_if_fresh(
-        target_session_id,
-        sender=body.sender,
-        body=body.mode,
-        now=time.time(),
-        kind=SET_MODE_CONTROL,
-        delivery="queue",
-        expected_session_id=body.expected_session_id,
-    )
-    if reason == "not_found":
-        raise HTTPException(status_code=404, detail="live session not found")
-    if reason is not None or control_id is None:
-        raise HTTPException(
-            status_code=409,
-            detail=f"live session {session_id} can't take a mode change now ({reason})",
-        )
-    def settled() -> SetModeResult | None:
-        # Follow a session-id change while waiting: the control moves with it.
-        # (the DB reads and writes resolve the alias in-statement).
-        nonlocal target_session_id
-        outcome = (db.live_control_state(target_session_id, control_id) or {}).get("outcome")
-        target_session_id = db.resolve_live_session_id(target_session_id)
-        if outcome == "applied":
-            return SetModeResult(session_id=target_session_id, mode=body.mode, applied=True, state="applied")
-        if outcome is not None:
-            return SetModeResult(
-                session_id=target_session_id, mode=body.mode, applied=False, state="rejected",
-                detail="the session couldn't apply it",
-            )
-        return None
-
-    deadline = time.monotonic() + body.wait_timeout
-    while time.monotonic() < deadline:
-        if (result := settled()) is not None:
-            return result
-        await asyncio.sleep(MODE_POLL_SECONDS)
-    withdrawn = db.withdraw_live_control(target_session_id, control_id, time.time())
-    target_session_id = db.resolve_live_session_id(target_session_id)
-    if withdrawn:
-        return SetModeResult(
-            session_id=target_session_id, mode=body.mode, applied=False, state="withdrawn",
-            detail=(
-                "the session didn't take it in time: its agent-bridge extension may "
-                "predate mode changes, or the session isn't responding"
-            ),
-        )
-    # Claimed: the session is applying it; wait briefly for its outcome.
-    grace = time.monotonic() + CLAIMED_CONTROL_GRACE_SECONDS
-    while True:
-        if (result := settled()) is not None:
-            return result
-        if time.monotonic() >= grace:
-            break
-        await asyncio.sleep(MODE_POLL_SECONDS)
-    return SetModeResult(
-        session_id=target_session_id, mode=body.mode, applied=None, state="in_flight",
-        detail="the session took the change but hasn't reported it applied; it may still apply",
+    return await live_startup_controls.set_live_mode(
+        _db(request), session_id, body, wait_readiness=wait_plugin_readiness,
+        poll_seconds=MODE_POLL_SECONDS, claimed_grace_seconds=CLAIMED_CONTROL_GRACE_SECONDS,
+        mode_control=SET_MODE_CONTROL, ready_mode_control=SET_MODE_READY_CONTROL,
     )
 
 
@@ -934,16 +908,29 @@ async def ack_live_controls(
     if row is None:
         raise HTTPException(status_code=404, detail="live session not found")
     target_session_id = row["session_id"]
+    if body.plugin_readiness is not None:
+        if len(body.ids) != 1:
+            raise HTTPException(400, detail="readiness acknowledgment requires one control")
+        control = db.live_control_state(target_session_id, body.ids[0], include_body=True)
+        if control is None or control.get("kind") != READINESS_CONTROL:
+            raise HTTPException(400, detail="not a readiness control")
+        expected = json.loads(control["body"])
+        if (
+            body.plugin_readiness.session_id != expected["expected_session_id"]
+            or body.plugin_readiness.selection_digest != expected["selection_digest"]
+        ):
+            raise HTTPException(409, detail="readiness acknowledgment context changed")
     acked = db.ack_live_messages(
         target_session_id, body.ids, now=time.time(), controls=True,
-        outcome="applied" if body.applied else "rejected",
+        outcome=body.plugin_readiness.model_dump_json() if body.plugin_readiness is not None
+        else "applied" if body.applied else "rejected",
     )
     return AckMessagesResult(acked=acked)
 
 
 @router.get("/{session_id}/messages", response_model=LiveMessageListResponse)
 async def list_live_messages(
-    session_id: str, request: Request
+    session_id: str, request: Request, plugin_readiness: bool = False,
 ) -> LiveMessageListResponse:
     """Pending (undelivered) messages for a live session, oldest-first.
 
@@ -956,20 +943,31 @@ async def list_live_messages(
         raise HTTPException(status_code=404, detail="live session not found")
     target_session_id = row["session_id"]
     rows = db.list_pending_live_messages(target_session_id)
-    return LiveMessageListResponse(
-        messages=[
-            LiveMessage(
+    messages = []
+    for r in rows:
+        readiness = None
+        kind = r.get("kind") or "prompt"
+        if kind.startswith("startup:prompt:"):
+            if not plugin_readiness:
+                continue
+            try:
+                control_id = int(kind.rsplit(":", 1)[1])
+                control = db.live_control_state(target_session_id, control_id, include_body=True)
+                if control is not None and control.get("kind") == READINESS_CONTROL:
+                    readiness = json.loads(control["body"])
+            except (ValueError, TypeError):
+                pass
+        messages.append(LiveMessage(
                 id=r["id"],
                 sender=r["sender"],
                 body=r["body"],
                 reply_to=r.get("reply_to"),
-                kind=r.get("kind") or "prompt",
+                kind=kind,
                 delivery=r.get("delivery") or "queue",
                 created_at=r["created_at"],
-            )
-            for r in rows
-        ]
-    )
+                plugin_readiness=readiness,
+        ))
+    return LiveMessageListResponse(messages=messages)
 
 
 @router.post("/{session_id}/messages/ack", response_model=AckMessagesResult)

@@ -70,6 +70,14 @@ class GitHubFixture:
             "submitted_at": "2026-10-18T00:00:00Z", "commit_id": HEAD,
         }]
         self.review_decision = "REVIEW_REQUIRED"
+        self.thread_reads = 0
+        self.thread_pages = {"": {
+            "headRefOid": HEAD, "baseRefName": "dev",
+            "reviewThreads": {
+                "pageInfo": {"hasNextPage": False, "endCursor": None},
+                "nodes": [{"id": "thread-a", "isResolved": True}],
+            },
+        }}
         self.bypass = "pull_requests_only"
         self.ruleset_bypasses: dict[int, str | None] = {}
         self.labels = []
@@ -114,10 +122,18 @@ class GitHubFixture:
             assert "--paginate" in argv and "--slurp" in argv
             kind, data = "reviews", [self.reviews]
         elif argv[2] == "graphql":
-            assert f"ref=refs/heads/{self.base}" in argv
-            kind, data = "policy", {
-                "data": {"repository": {"ref": {"branchProtectionRule": self.protection}}},
-            }
+            query = next(arg for arg in argv if arg.startswith("query="))
+            if "reviewThreads" in query:
+                self.thread_reads += 1
+                after = next((arg[6:] for arg in argv if arg.startswith("after=")), "")
+                kind, data = "threads", {
+                    "data": {"repository": {"pullRequest": self.thread_pages[after]}},
+                }
+            else:
+                assert f"ref=refs/heads/{self.base}" in argv
+                kind, data = "policy", {
+                    "data": {"repository": {"ref": {"branchProtectionRule": self.protection}}},
+                }
         elif "/rules/branches/" in argv[2]:
             assert "--paginate" in argv
             assert "--slurp" in argv
@@ -479,7 +495,6 @@ def test_layered_codeowner_only_actor_cannot_waive_independent_approval(
 
 @pytest.mark.parametrize("field,value", [
     ("required_approving_review_count", 2),
-    ("required_review_thread_resolution", True),
     ("require_last_push_approval", True),
 ])
 def test_layered_review_cannot_hide_additional_requirements(field: str, value: object) -> None:
@@ -584,8 +599,164 @@ def test_nonmerge_base_ref_protections_preserve_review_exception(
     assert all(kind in evidence.rules_fingerprint for kind in base_ref_rules)
 
 
+@pytest.mark.parametrize("layer", [1, 2])
+@pytest.mark.parametrize("empty", [False, True])
+def test_review_thread_rule_is_satisfied_not_bypassed(layer, empty):
+    fixture = _layered_review_fixture()
+    fixture.rules[layer]["parameters"]["required_review_thread_resolution"] = True
+    if empty:
+        fixture.thread_pages[""]["reviewThreads"]["nodes"] = []
+    fixture.rules.append({
+        "type": "copilot_code_review",
+        "parameters": {"review_on_push": True, "review_draft_pull_requests": False},
+    })
+    evidence = review_exception_evidence(
+        "owner/project", 7, invoke=fixture.invoke, host="github.com",
+        expected_head_sha=HEAD,
+    )
+    assert evidence.head_sha == HEAD and fixture.thread_reads == 1
+    fixture.verify(
+        expected_head_sha=HEAD, expected_rules_fingerprint=evidence.rules_fingerprint,
+        expected_classic_fingerprint=evidence.classic_fingerprint,
+    )
+    assert fixture.thread_reads == 2
+    assert "copilot_code_review" in evidence.rules_fingerprint
+
+
+def test_thread_resolution_reads_all_pages():
+    fixture = GitHubFixture()
+    fixture.rules[1]["parameters"]["required_review_thread_resolution"] = True
+    fixture.thread_pages[""]["reviewThreads"]["pageInfo"] = {
+        "hasNextPage": True, "endCursor": "second",
+    }
+    second = copy.deepcopy(fixture.thread_pages[""])
+    second["reviewThreads"] = {
+        "pageInfo": {"hasNextPage": False, "endCursor": None},
+        "nodes": [{"id": "thread-b", "isResolved": False}],
+    }
+    fixture.thread_pages["second"] = second
+    with pytest.raises(RequiredChecksError, match="unresolved review threads"):
+        review_exception_evidence(
+            "owner/project", 7, invoke=fixture.invoke, host="github.com",
+        )
+    assert fixture.thread_reads == 2
+    second["reviewThreads"]["nodes"][0]["isResolved"] = True
+    assert review_exception_evidence(
+        "owner/project", 7, invoke=fixture.invoke, host="github.com",
+    ).head_sha == HEAD
+    second["headRefOid"] = "b" * 40
+    with pytest.raises(RequiredChecksError, match="head/base changed"):
+        review_exception_evidence(
+            "owner/project", 7, invoke=fixture.invoke, host="github.com",
+        )
+
+
+@pytest.mark.parametrize("state", [False, None, "true", 1])
+def test_unresolved_or_unreadable_threads_never_authorize_admin_merge(monkeypatch, state):
+    from agent_worktrees.providers import github
+
+    fixture = GitHubFixture()
+    fixture.normal_merge_fails = True
+    fixture.rules[1]["parameters"]["required_review_thread_resolution"] = True
+    fixture.thread_pages[""]["reviewThreads"]["nodes"][0]["isResolved"] = state
+    monkeypatch.setattr(github, "run_cli", fixture.invoke)
+    result = github.GitHubProvider().merge_pull(
+        "owner/project", 7, admin=True, expected_head_sha=HEAD,
+    )
+    assert "review thread" in result
+    assert not any("--admin" in argv for argv in fixture.calls)
+
+
+@pytest.mark.parametrize("field,value", [
+    ("headRefOid", "b" * 40), ("baseRefName", "other"), ("reviewThreads", None),
+])
+def test_thread_page_identity_and_completeness_fail_closed(field, value):
+    fixture = GitHubFixture()
+    fixture.rules[1]["parameters"]["required_review_thread_resolution"] = True
+    fixture.thread_pages[""][field] = value
+    with pytest.raises(RequiredChecksError, match="review-thread verification"):
+        review_exception_evidence(
+            "owner/project", 7, invoke=fixture.invoke, host="github.com",
+        )
+
+
+@pytest.mark.parametrize("connection", [
+    {"nodes": [], "pageInfo": None},
+    {"nodes": [], "pageInfo": {"hasNextPage": True, "endCursor": None}},
+    {"nodes": [], "pageInfo": {"hasNextPage": True, "endCursor": 1}},
+    {"nodes": [{"id": "a"}], "pageInfo": {"hasNextPage": False}},
+    {"nodes": [None], "pageInfo": {"hasNextPage": False}},
+    {"nodes": [{"id": "a", "isResolved": True}] * 2,
+     "pageInfo": {"hasNextPage": False}},
+])
+def test_malformed_thread_pages_fail_closed(connection):
+    fixture = GitHubFixture()
+    fixture.rules[1]["parameters"]["required_review_thread_resolution"] = True
+    fixture.thread_pages[""]["reviewThreads"] = connection
+    with pytest.raises(RequiredChecksError, match="review-thread verification"):
+        review_exception_evidence(
+            "owner/project", 7, invoke=fixture.invoke, host="github.com",
+        )
+
+
+def test_thread_lookup_failure_is_not_review_authority():
+    fixture = GitHubFixture()
+    fixture.rules[1]["parameters"]["required_review_thread_resolution"] = True
+    fixture.fail = "threads"
+    with pytest.raises(RequiredChecksError, match="permission denied"):
+        review_exception_evidence(
+            "owner/project", 7, invoke=fixture.invoke, host="github.com",
+        )
+
+
+@pytest.mark.parametrize("reply", [
+    "not JSON", "null",
+    '{"errors":[{"message":"denied"}],"data":{"repository":null}}',
+])
+def test_unreadable_thread_response_cannot_authorize_merge(reply):
+    fixture = GitHubFixture()
+    fixture.rules[1]["parameters"]["required_review_thread_resolution"] = True
+    original = fixture.invoke
+
+    def unreadable(argv, **kwargs):
+        if argv[2] == "graphql" and any("reviewThreads" in arg for arg in argv):
+            return subprocess.CompletedProcess(argv, 0, reply, "")
+        return original(argv, **kwargs)
+
+    with pytest.raises(RequiredChecksError, match="review-thread verification"):
+        review_exception_evidence(
+            "owner/project", 7, invoke=unreadable, host="github.com",
+        )
+
+
+def test_reopened_thread_before_final_merge_check_refuses_admin_retry(monkeypatch):
+    from agent_worktrees.providers import github
+
+    fixture = GitHubFixture()
+    fixture.normal_merge_fails = True
+    fixture.rules[1]["parameters"]["required_review_thread_resolution"] = True
+    original = fixture.invoke
+
+    def reopened(argv, **kwargs):
+        if (
+            argv[2] == "graphql" and fixture.thread_reads
+            and any("reviewThreads" in arg for arg in argv)
+        ):
+            fixture.thread_pages[""]["reviewThreads"]["nodes"][0]["isResolved"] = False
+        return original(argv, **kwargs)
+
+    monkeypatch.setattr(github, "run_cli", reopened)
+    result = github.GitHubProvider().merge_pull(
+        "owner/project", 7, admin=True, expected_head_sha=HEAD,
+    )
+    assert "unresolved review threads" in result
+    assert fixture.thread_reads == 2
+    assert not any("--admin" in argv for argv in fixture.calls)
+
+
 @pytest.mark.parametrize("kind", [
     "update", "creation", "required_signatures", "merge_queue", "future_merge_condition",
+    "copilot_code_review_required",
 ])
 def test_nonmerge_base_ref_protections_do_not_hide_other_requirements(
     monkeypatch: pytest.MonkeyPatch, kind: str,

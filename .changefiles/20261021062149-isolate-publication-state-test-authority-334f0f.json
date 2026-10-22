@@ -1,0 +1,9 @@
+{
+  "comment": "Isolate publication-state test authority profiles per case while retaining real file-lock contention and publication checks",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

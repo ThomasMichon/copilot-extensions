@@ -7,7 +7,7 @@
 - **Scope:** branch (a per-plugin vision under the
   [agent-fabric](../../agent-fabric/README.md) branch)
 - **Status:** Draft
-- **Last revised:** 2026-10-19
+- **Last revised:** 2026-10-21
 - **Reality docs:** [`docs/architecture.md`](../../../docs/architecture.md) ·
   the plugin's `plugins/agent-dispatch/` (skill `agent-dispatch`, `pick-and-claim`)
 
@@ -83,6 +83,24 @@ notification. It does **not** run agents, decide priority policy, or embody a
 worker; those belong to the layers around it. Its transport posture matches the
 rest of the fabric's control plane: it is reached **over the fabric's secured
 mesh**, never a raw public listener (see the parent vision's transport rule).
+
+### Logical machines and local execution authority
+
+A physical machine, an OS sub-environment, or a persistent container can each
+be a **logical machine**. Each owns one coordinator and its own task authority.
+A container selected as a self-contained execution environment runs the local
+supervision, session-hosting and workspace services its configured roles need;
+it is not merely a worker process borrowing its physical host's queue.
+Remote access reaches those services through the secured fabric transport.
+Cross-machine work federates between coordinators rather than silently sharing
+or duplicating an authoritative task store.
+
+The coordinator and the local supervisor have independent process lifetimes.
+A coordinator upgrade must not require terminating its supervisor or workers.
+Reconnection preserves the same task, workspace and session associations; an
+upgrade or missing response is not permission to replace existing execution.
+Logical-machine identity remains distinct from a physical host or replaceable
+container incarnation and grants no additional credentials or lifecycle power.
 
 ### Standing charters and linked consultations
 

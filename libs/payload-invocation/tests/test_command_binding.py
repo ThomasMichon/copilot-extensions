@@ -238,13 +238,14 @@ def test_command_binding_blocked_governance_never_selects(
     assert result["installation"] is None
 
 
-def _activate(fixture: dict, payload: Path) -> dict:
+def _activate(fixture: dict, payload: Path, *, durable_home: Path | None = None) -> dict:
     primitive = fixture["primitive"]
     environment = fixture["environment"]
     stamped = primitive.stamp_context(
         payload_version="1.0.0", payload_origin="installed",
         expected_namespace_generation=0, expected_install_generation=0,
         payload_root=payload, plugin_id=PLUGIN_ID, environment=environment,
+        durable_home=durable_home,
     )
     activated = primitive.compare_and_swap_activation(
         context=stamped["installReceipt"],
@@ -257,6 +258,7 @@ def _activate(fixture: dict, payload: Path) -> dict:
         legacy_disposition="absent",
         legacy_probe={"declared": True, "result": "absent", "checkedAt": "2026-01-01T00:00:00Z"},
         legacy_root=fixture["legacy"], environment=environment,
+        durable_home=durable_home,
     )
     return {**stamped, **activated}
 
@@ -350,13 +352,17 @@ def _catalog_environment(fixture: dict, interpreter: str | None = None) -> dict[
         # Interpreter admission must retain the same isolated OS-profile wrapper.
         f"sys.executable={str(wrapper_dir / 'python3')!r}\n"
         "args=sys.argv[1:]\n"
-        "while args and args[0].startswith('-') and args[0] not in ('-c','-m'):\n"
+        "while args and args[0].startswith('-') and args[0] not in ('-','-c','-m'):\n"
         "    option=args.pop(0)\n"
         "    if option=='-X': args.pop(0)\n"
         "if args and args[0]=='-c':\n"
         "    code=args[1]\n"
         "    sys.argv=['-c',*args[2:]]\n"
         "    exec(compile(code,'<catalog-command>','exec'),{'__name__':'__main__'})\n"
+        "    raise SystemExit(0)\n"
+        "if args and args[0]=='-':\n"
+        "    sys.argv=args\n"
+        "    exec(compile(sys.stdin.read(),'<catalog-stdin>','exec'),{'__name__':'__main__'})\n"
         "    raise SystemExit(0)\n"
         "if args:\n"
         "    sys.argv=args\n"
@@ -370,7 +376,7 @@ def _catalog_environment(fixture: dict, interpreter: str | None = None) -> dict[
             f"#!{interpreter} -I\n"
             "import os,sys\n"
             "args=sys.argv[1:]; flags=[]\n"
-            "while args and args[0].startswith('-') and args[0] not in ('-c','-m'):\n"
+            "while args and args[0].startswith('-') and args[0] not in ('-','-c','-m'):\n"
             "    option=args.pop(0); flags.append(option)\n"
             "    if option=='-X': flags.append(args.pop(0))\n"
             "os.execv(sys.executable,[sys.executable,*flags,'-c',"
@@ -387,6 +393,18 @@ def test_command_binding_catalog_disables_shell_metadata_cache(
 ) -> None:
     monkeypatch.setenv("PSModuleAnalysisCachePath", str(binding_fixture["home"] / "parent-cache"))
     assert _catalog_environment(binding_fixture)["PSModuleAnalysisCachePath"] == os.devnull
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX interpreter isolation")
+def test_command_binding_catalog_preserves_stdin_arguments(binding_fixture: dict) -> None:
+    environment = _catalog_environment(binding_fixture)
+    command = [str(binding_fixture["home"] / "test-bin/python3"), "-", "first", "space two"]
+    result = subprocess.run(
+        command, input="import json,sys; print(json.dumps(sys.argv))",
+        env=environment, capture_output=True, text=True, timeout=10,
+    )
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == ["-", "first", "space two"]
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX catalog interpreter")
@@ -522,6 +540,10 @@ class _PowerShellHost:
             "    $arguments=@($request.arguments)\n"
             "    $global:LASTEXITCODE=0\n"
             "    $code=0; $errors=@(); $output=@()\n"
+            "    $consoleOut=[Console]::Out; $consoleErr=[Console]::Error\n"
+            "    $capturedOut=New-Object IO.StringWriter\n"
+            "    $capturedErr=New-Object IO.StringWriter\n"
+            "    [Console]::SetOut($capturedOut); [Console]::SetError($capturedErr)\n"
             "    try {\n"
             "        $records=& $request.path @arguments *>&1\n"
             "        if (-not $?) { $code=$LASTEXITCODE; if (-not $code) { $code=1 } }\n"
@@ -530,9 +552,12 @@ class _PowerShellHost:
             "                $errors+=($record|Out-String)\n"
             "            } else { $output+=[string]$record }\n"
             "        }\n"
-            "    } catch { $code=1; $errors+=($_|Out-String) }\n"
-            "    $response=@{returncode=$code;stdout=($output -join \"`n\");"
-            "stderr=($errors -join \"`n\")}|ConvertTo-Json -Compress\n"
+            "    } catch { $code=1; $errors+=($_|Out-String) } finally {\n"
+            "        [Console]::SetOut($consoleOut); [Console]::SetError($consoleErr)\n"
+            "    }\n"
+            "    $response=@{returncode=$code;stdout=(($output -join \"`n\")+$capturedOut.ToString());"
+            "stderr=(($errors -join \"`n\")+$capturedErr.ToString())}|ConvertTo-Json -Compress\n"
+            "    $capturedOut.Dispose(); $capturedErr.Dispose()\n"
             "    [Console]::WriteLine($response)\n"
             "}\n",
             encoding="utf-8",

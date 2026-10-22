@@ -7,6 +7,8 @@ import copy
 
 import pytest
 
+from pr_test_helpers import _stub_remote_target
+
 from agent_worktrees import git_collab, git_ops, pr_custom_head, pr_publish, tracking
 from test_pr_rebase import _advance, _git, _prepare, _record
 
@@ -31,7 +33,7 @@ def _attested(pr_repo, monkeypatch):
     )
     monkeypatch.setattr(git_ops, "remote_slug", lambda *a, **k: "example/project")
     monkeypatch.setattr(git_ops, "_auth_config_args", lambda *a, **k: [])
-    monkeypatch.setattr(pr_publish, "push_identity", lambda *a, **k: identity)
+    _stub_remote_target(monkeypatch, None, "example/project", identity)
     monkeypatch.setattr(pr_custom_head.pr_authority, "assert_exclusive", lambda *a, **k: ())
     monkeypatch.setattr(pr_custom_head.providers, "account_token_for_slug", lambda *a: "")
     monkeypatch.setattr(pr_custom_head.providers, "get_provider", lambda *a: SimpleNamespace(get_pull=lambda *a, **k: observed))
@@ -112,7 +114,6 @@ def test_public_explicit_rewrite_round_trip_and_stale_live_head(pr_repo, monkeyp
 
     config, record, path, remote, old, observed = _attested(pr_repo, monkeypatch)
     monkeypatch.setattr(pr_publish, "push_target", lambda *a, **k: pr_publish.PushTarget("origin"))
-    monkeypatch.setattr(pr_publish, "push_slug", lambda *a, **k: "example/project")
     monkeypatch.setattr(pr_rewrite, "observe_pr", lambda *a: observed)
     monkeypatch.setattr(pr_ops, "refresh_head_observation", lambda *a: "")
     monkeypatch.setattr(pr_ops, "refresh_source_attribution", lambda *a: "")

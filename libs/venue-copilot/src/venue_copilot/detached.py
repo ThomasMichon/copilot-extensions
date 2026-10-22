@@ -29,6 +29,7 @@ from . import (
     unstable_handle_warning,
     with_new_session,
 )
+from .resume_claim import settle_resumed_claim, resume_target
 
 
 class DetachAdapter(Protocol):
@@ -66,6 +67,7 @@ _RUNNER_CONFIG_KEYS = frozenset({
     "reservation_ttl", "reserve_retry_window", "registration_error", "bridge_probe_error",
     "missing_agent_worktrees_error", "old_agent_worktrees_error", "reservation_wait",
     "launch_detail",
+    "bridge_owned_seed", "plugin_context", "seed_operation",
 })
 
 # Mirrors agent-worktrees' mux seed hard cap. The remote launch timeout must
@@ -103,7 +105,8 @@ def _launch_command(
     copilot_args: list[str],
     ensure_mux: bool,
 ) -> str:
-    typed_seed, seed_prefix = seed_delivery(seed, plan["scope_id"])
+    owned = bool(plan.get("bridge_owned_seed"))
+    typed_seed, seed_prefix = (None, "") if owned else seed_delivery(seed, plan["scope_id"])
     command = seed_prefix + build_copilot_remote_command(
         plan["identity"],
         anchor=bool(plan.get("anchor", True)),
@@ -113,6 +116,8 @@ def _launch_command(
         ensure_mux=ensure_mux,
         detach=True,
         bridge_scope_id=plan["scope_id"],
+        bridge_seed_operation=plan.get("seed_operation") if owned else None,
+        bridge_seed_pending=bool(seed) if owned else False,
         copilot_args=with_new_session(copilot_args),
         login_shell=False,
     )
@@ -172,6 +177,7 @@ def launch_detached(
     created = False
     keeper_hold_acquired = False
     ok = False
+    pending_delivery = False
     try:
         daemon_port = resolve_daemon_port()
         if not daemon_port:
@@ -241,6 +247,7 @@ def launch_detached(
             ),
         )
         progress("reserved", reservation.get("reservation_id", ""))
+        plan["seed_operation"] = reservation["reservation_id"]
         notes: str | None = None
         if refs:
             from .refs import send_refs
@@ -253,6 +260,12 @@ def launch_detached(
             if notes is None:
                 return 1, _payload(False, plan, error="could not copy the reference files to the venue")
             seed = f"{seed.rstrip()}\n\n{notes}" if seed else notes
+        owned = bool(plan.get("bridge_owned_seed"))
+        if owned:
+            from .refs import require_cli_context
+            prepared = adapter.prepare(plan)
+            plan["plugin_context"] = require_cli_context(prepared)
+            plan["workspace"] = prepared["cwd"]
         progress("launch", _venue_text(plan, "launch_detail", "`agent-worktrees embody` on the venue"))
         seed_ready_timeout = max(register_timeout, 180.0)
         rc, stdout, stderr = adapter.launch(
@@ -289,6 +302,7 @@ def launch_detached(
                 ),
                 detail=stderr.strip()[-2000:],
             )
+        created = bool(embodied.get("created"))
         if rc != 0 or not embodied.get("ok"):
             return 1, _payload(
                 False,
@@ -303,7 +317,16 @@ def launch_detached(
         if actual_mux and actual_mux != plan["mux_session"]:
             plan["mux_session"] = actual_mux
             plan["venue"]["mux_session_name"] = actual_mux
-        seed_delivery_status, seed_needs_bridge = seed_outcome(embodied, created=created, seed=seed)
+        creation_receipt = None
+        operation = reservation["reservation_id"]
+        if owned:
+            from .refs import deferred_seed
+            if not created and not (embodied.get("deferred_creation_seed") or {}).get("seed"):
+                seed = notes  # A normal rejoin never replays the host's launch task.
+            seed, operation, creation_receipt = deferred_seed(embodied, seed, operation)
+            seed_delivery_status, seed_needs_bridge = None, bool(seed)
+        else:
+            seed_delivery_status, seed_needs_bridge = seed_outcome(embodied, created=created, seed=seed)
         if seed_delivery_status == "failed":
             progress("seed-draft", f"typed seed was not submitted ({embodied.get('seed_reason')}); "
                      "not resending: the draft may remain in Copilot's input")
@@ -320,22 +343,74 @@ def launch_detached(
                 plan,
                 error="the session is running but never registered with the host bridge",
             )
-        ok = True
+        if owned:
+            session_id, reservation = settle_resumed_claim(
+                plan["scope_id"], reservation, plan["venue"],
+                expected=resume_target(copilot_args), claimed=session_id,
+                timeout=min(register_timeout, 75.0), ttl_seconds=ttl,
+            )
+            if not session_id:
+                return 1, _payload(False, plan, error="the resumed native session never registered")
         # A resume can re-register under a new id after the claim; only a daemon
         # with live-session aliases carries a bridge message (seed or note) across it.
         # A rejoin's own flags say nothing about how the running session was
         # launched (it may still be resuming), so it always needs that floor.
         alias_floor = ({"min_daemon_protocol": LIVE_SESSION_ALIAS_PROTOCOL}
                        if resuming or may_switch_session_id(copilot_args) else {})
+        if owned:
+            alias_floor["min_daemon_protocol"] = max(41, alias_floor.get("min_daemon_protocol", 0))
         if seed_needs_bridge:
             from .refs import deliver_note
+            if owned:
+                from .refs import owned_result, owned_delivery_journal
+                ledger = owned_delivery_journal(
+                    session_id, seed, plan["plugin_context"], operation=operation, plan=plan,
+                    reservation_id=reservation.get("reservation_id"),
+                    creation_receipt=creation_receipt, daemon_port=daemon_port,
+                )
+                adapter.record_pending_delivery(plan, ledger)
+                pending_delivery = True
 
             reason = embodied.get("seed_reason")
             detail = f"seed was never typed ({reason}); delivering over bridge" if reason else (
                 "seed was never typed; delivering over bridge"
             )
             progress("seed-bridge", detail)
-            seed_delivery_status = "bridge" if deliver_note(session_id, seed, operation=reservation["reservation_id"], **alias_floor) else "failed"
+            delivery_result = deliver_note(
+                session_id, seed, operation=operation,
+                **({"prepared_context": plan["plugin_context"]} if owned else {}), **alias_floor,
+            )
+            if owned:
+                delivery_result = owned_result(
+                    delivery_result, session_id=session_id, operation=operation,
+                    note=seed, context=plan["plugin_context"],
+                )
+                ledger.update(delivery_result.recovery())
+                adapter.record_pending_delivery(plan, ledger)
+                if delivery_result.status == "unknown":
+                    return 75, _payload(
+                        False, plan, pending=True, session_id=session_id,
+                        pending_delivery=delivery_result.recovery(),
+                        recovery_handle=f"{plan['scope_id']}:{delivery_result.idempotency_key}",
+                        error="owned seed admission is unknown; native session and ownership retained",
+                    )
+                if delivery_result.status == "refused":
+                    adapter.record_pending_delivery(plan, None)
+                    pending_delivery = False
+                    return 1, _payload(False, plan, error="owned seed was not admitted after plugin readiness")
+            seed_delivery_status = "bridge" if delivery_result else "failed"
+            if owned:
+                ok = True  # A durably admitted task must not be killed by receipt-cleanup failure.
+                from .refs import settle_deferred_seed
+                if not settle_deferred_seed(
+                    lambda command, stdin: adapter.run_input(command, stdin, timeout=60),
+                    plan["identity"], plan["workspace"], creation_receipt,
+                ):
+                    return 75, _payload(False, plan, pending=True, session_id=session_id, seed_admitted=True,
+                                       pending_delivery=delivery_result.recovery(),
+                                       error="owned seed admitted; creation receipt settlement unconfirmed")
+                adapter.record_pending_delivery(plan, None)
+                pending_delivery = False
         refs_extra: dict[str, Any] = {}
         if notes:
             # A typed new session got the note in its seed; a running one (or a
@@ -353,15 +428,16 @@ def launch_detached(
                 "ref_files": notes.splitlines()[1:],
                 "refs_delivered": refs_delivered,
             }
-        seed_extra = ({"seed_delivery": seed_delivery_status} if created and seed
+        seed_extra = ({"seed_delivery": seed_delivery_status} if (created or owned) and seed
                       else pending_seed_report(embodied, seed=seed))
+        ok = True
         return 0, _payload(
             True,
             plan,
             session_id=session_id,
             created=created,
             resumed=not created,
-            seeded=bool(created and seed and seed_delivery_status in {"typed", "bridge"})
+            seeded=bool((created or (owned and creation_receipt)) and seed and seed_delivery_status in {"typed", "bridge"})
             or seed_extra.get("seed_delivery") == "typed",
             keeper=keeper,
             **seed_extra,
@@ -374,12 +450,12 @@ def launch_detached(
                 "stop": adapter.stop_command(plan),
             },
         )
-    except (RuntimeError, OSError, VenueCopilotError, subprocess.SubprocessError) as exc:
+    except (RuntimeError, ValueError, OSError, VenueCopilotError, subprocess.SubprocessError) as exc:
         return 1, _payload(False, plan, error=str(exc))
     finally:
-        if reservation:
+        if reservation and not pending_delivery:
             release_cli_mode(plan["scope_id"], reservation_id=reservation.get("reservation_id"))
-        if not ok:
+        if not ok and not pending_delivery:
             if created:
                 progress("cleanup", f"stopping the unrepresented session {plan['mux_session']}")
                 adapter.run(stop_script(plan["mux_session"], verify=False), timeout=60.0)

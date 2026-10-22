@@ -1,0 +1,9 @@
+{
+  "comment": "Add an explicit standalone conversation client with owned transport providers, durable recovery and source-independent installed command contracts.",
+  "changes": [
+    {
+      "plugin": "services/chat",
+      "type": "patch"
+    }
+  ]
+}

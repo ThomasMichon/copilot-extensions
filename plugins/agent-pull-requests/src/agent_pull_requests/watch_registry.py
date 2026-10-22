@@ -59,6 +59,7 @@ class Subscriber:
     terminal_observed: bool = False
     target_id: str = ""
     registered_revision: int = 0
+    delivery_mode: str = "callback"
 
 
 @dataclass(frozen=True)
@@ -95,8 +96,13 @@ class WatchRegistry(RegistryState):
         continuous: bool = False,
         target_id: str = "",
         baseline: Baseline | None = None,
+        delivery_mode: str = "callback",
     ) -> Subscriber:
         """Add (or replace, same id) a subscriber. Returns the stored record."""
+        if delivery_mode not in {"callback", "pull"} or (
+            delivery_mode == "pull" and (not acknowledged or notify)
+        ):
+            raise ValueError("pull delivery requires acknowledged state without a callback")
         deadline = time.monotonic() + timeout if timeout else None
         sub = Subscriber(
             subscriber_id=subscriber_id, until=until, notify=notify, deadline=deadline,
@@ -105,6 +111,7 @@ class WatchRegistry(RegistryState):
             continuous=continuous,
             target_id=target_id,
             baseline=baseline,
+            delivery_mode=delivery_mode,
         )
         with self._lock:
             self._subscribers.setdefault(key, {})[subscriber_id] = sub
@@ -200,14 +207,16 @@ class WatchRegistry(RegistryState):
                 str(key): sorted(bucket.keys()) for key, bucket in self._subscribers.items()
             }
 
-    def pending_events(self) -> tuple[FiredEvent, ...]:
+    def pending_events(self, *, delivery_mode: str | None = None) -> tuple[FiredEvent, ...]:
         with self._lock:
             return tuple(
                 FiredEvent(key, sub, tuple(sub.pending["payload"]["transitions"]), None,
                            sub.pending["payload"]["timed_out"],
                            copy.deepcopy(sub.pending["payload"]))
                 for key, bucket in self._subscribers.items() for sub in bucket.values()
-                if sub.pending is not None
+                if sub.pending is not None and (
+                    delivery_mode is None or sub.delivery_mode == delivery_mode
+                )
             )
 
     def is_current(self, event: FiredEvent) -> bool:

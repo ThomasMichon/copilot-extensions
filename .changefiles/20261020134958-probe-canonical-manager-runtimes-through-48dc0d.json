@@ -1,0 +1,9 @@
+{
+  "comment": "Probe canonical Manager runtimes through their retained interpreter; hand normal updates to fresh updater code to recover only an attributable broken Manager through its own source/ref and credential admission before required profile integration.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

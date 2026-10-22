@@ -20,6 +20,7 @@ from . import (
     git_ops,
     obligations,
     output,
+    project_state,
     reap_cli,
     sessions,
     tracking,
@@ -354,6 +355,8 @@ def cmd_create(args: argparse.Namespace) -> int:
     dispatch_attempt = dispatch_fields if present_dispatch_fields else None
     with output.stdout_to_stderr():
         try:
+            if project_state.namespaced():
+                project_state.ensure_project_state(cfg.project_name())
             config = cfg.load_config()
             result = _create_worktree_core(
                 config,

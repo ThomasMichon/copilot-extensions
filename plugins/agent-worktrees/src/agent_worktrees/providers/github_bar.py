@@ -30,6 +30,9 @@ pageInfo{hasNextPage endCursor} nodes{databaseId author{__typename login} state 
 _THREADS_QUERY = """query($owner:String!,$name:String!,$number:Int!,$after:String){
 repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:100,after:$after){
 pageInfo{hasNextPage endCursor} nodes{isResolved isOutdated path comments(first:1){nodes{author{login}}}}}}}}"""
+_THREAD_RESOLUTION_QUERY = """query($owner:String!,$name:String!,$number:Int!,$after:String){
+repository(owner:$owner,name:$name){pullRequest(number:$number){headRefOid baseRefName
+reviewThreads(first:100,after:$after){pageInfo{hasNextPage endCursor} nodes{id isResolved}}}}}"""
 #: A runaway cursor stops here rather than looping forever (100 pages = 10,000 items).
 MAX_PAGES = 100
 
@@ -137,11 +140,42 @@ def _pages(run, query: str, path, *, what: str, **kw) -> list[dict]:
         nodes += page
         if not info["hasNextPage"]:
             return nodes
-        cursor = info.get("endCursor") or ""
-        if not cursor or cursor == after:
+        cursor = info.get("endCursor")
+        if not isinstance(cursor, str) or not cursor or cursor == after:
             raise ReadError(f"{what}: the page cursor didn't advance")
         after = cursor
     raise ReadError(f"{what}: more than {MAX_PAGES} pages")
+
+
+def read_thread_resolution(
+    repo: str, number: int, *, head: str, base_ref: str, host: str, run,
+) -> list[bool]:
+    """Read every thread's explicit resolution state for one pinned head/base."""
+    owner, _, name = repo.partition("/")
+    if not owner or not name or not head or not base_ref:
+        raise ReadError("review threads: PR identity is unavailable")
+
+    def connection(pr: dict):
+        if pr.get("headRefOid") != head or pr.get("baseRefName") != base_ref:
+            raise ReadError("review threads: PR head/base changed")
+        return pr.get("reviewThreads")
+
+    nodes = _pages(
+        run, _THREAD_RESOLUTION_QUERY, connection, what="review threads",
+        host=host, env={}, owner=owner, name=name, number=number,
+    )
+    seen: set[str] = set()
+    resolved: list[bool] = []
+    for node in nodes:
+        identity, state = node.get("id"), node.get("isResolved")
+        if (
+            not isinstance(identity, str) or not identity or identity in seen
+            or not isinstance(state, bool)
+        ):
+            raise ReadError("review threads: identity or resolution state is unreadable")
+        seen.add(identity)
+        resolved.append(state)
+    return resolved
 
 
 def _core(run, **kw) -> dict:

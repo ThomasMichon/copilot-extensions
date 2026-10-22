@@ -1,0 +1,9 @@
+{
+  "comment": "Submit updates to the shared durable installation execution driver",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

@@ -3832,6 +3832,45 @@ class TestResumeSession:
     """Session resume from STOPPED state."""
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("explicit_controller", [False, True])
+    async def test_local_controller_metadata_does_not_require_provider_refresh(
+        self, session_manager, tmp_path, _patch_spawn, _patch_acp,
+        mock_acp_client, explicit_controller,
+    ) -> None:
+        target = SpawnTarget(
+            type="local", cwd=str(tmp_path), local_plugin_preparation=True,
+            static_plugin_args={"base": [], "automatic": []},
+            caller_worktree=str(tmp_path) if explicit_controller else None,
+            env={"REQUEST": "kept"},
+        )
+        session = await session_manager.start_session(
+            target, agent_name="static-local", copilot_args=["--request-flag"],
+            env_overrides={"REQUEST": "kept"},
+        )
+        await session_manager.stop_session(session.session_id)
+        session.target = SpawnTarget.from_json(
+            session_manager._db.get_session(session.session_id)["target_json"],
+        )
+        assert session.target.venue["_agent_bridge_request_overrides"][
+            "controller_worktree_origin"
+        ] == ("explicit" if explicit_controller else "affinity")
+        resolver = MagicMock()
+        resolver.resolve_async = AsyncMock()
+        session_manager.set_resolver(resolver)
+
+        with patch.object(
+            session_manager, "_try_reattach_live_host", AsyncMock(return_value=False),
+        ):
+            resumed = await session_manager.resume_session(session.session_id)
+
+        assert resumed.status == SessionStatus.IDLE
+        assert resumed.target.env["REQUEST"] == "kept"
+        assert resumed.target.copilot_args == ["--request-flag"]
+        assert resumed.target.local_plugin_preparation is True
+        resolver.resolve_async.assert_not_awaited()
+        mock_acp_client.load_session.assert_awaited_once()
+
+    @pytest.mark.asyncio
     async def test_start_session_preserves_existing_provider_override_provenance(
         self, session_manager, _patch_spawn, _patch_acp
     ) -> None:

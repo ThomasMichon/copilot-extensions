@@ -71,6 +71,18 @@ class AcquisitionStore:
             request.worktree_id, request.delivery_id, request.mode, session, native, cli_driver(request),
         )
 
+    def prepared_context(self, worktree_id: str, native_session_id: str, mode: str) -> dict | None:
+        """Recover semantic preparation only for the same proven native holder."""
+        rows = self.db.execute_read(
+            "SELECT e.data_json FROM acquisition_effects e "
+            "JOIN acquisition_attempts a USING(delivery_id) "
+            "WHERE a.worktree_id=? AND json_extract(e.data_json, '$.result.native_session_id')=? "
+            "AND json_extract(e.data_json, '$.result.mode')=? "
+            "ORDER BY a.updated_at DESC LIMIT 1",
+            (worktree_id, native_session_id, mode),
+        )
+        return json.loads(rows[0]["data_json"]).get("prepared_context") if rows else None
+
     def gate_workspace(
         self, worktree_id: str, delivery_id: str, mode: str,
         session: str | None, native: str | None, driver: str,
@@ -201,6 +213,10 @@ class AcquisitionStore:
             data.setdefault("creation_authorized", authority)
             data.setdefault("retirement_recovered", previous_data.get("retirement_recovered", False))
             data.setdefault("retirement_conversation", previous_data.get("retirement_conversation"))
+            if "prepared_context" in previous_data:
+                data.setdefault("prepared_context", previous_data["prepared_context"])
+            if "plugin_preparation_required" in previous_data:
+                data.setdefault("plugin_preparation_required", previous_data["plugin_preparation_required"])
         self.db.execute_write(
             "INSERT INTO acquisition_effects VALUES (?, ?, ?) "
             "ON CONFLICT(delivery_id) DO UPDATE SET stage=excluded.stage, data_json=excluded.data_json",

@@ -1,0 +1,9 @@
+{
+  "comment": "Add legacy-default opt-in tuple identities for new anchor and external-adoption records without upgrading existing creation winners",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

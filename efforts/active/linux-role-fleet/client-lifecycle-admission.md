@@ -5,6 +5,25 @@ not a delivered installer or permission to deploy.** The common authenticated
 staging prerequisite merged in #6569. Product release authority remains with
 #6240; Gateway/node integration remains with #6443.
 
+The durable-admission slice merged in #7459. Its actual CLI and state contract
+are documented in [client admission](../../../fleet-manager/docs/client-admission.md).
+Construction and compatibility/local health merged in #7804; their actual
+contract is documented in [client construction](../../../fleet-manager/docs/client-construction.md).
+Owned runtime-selector activation with fresh local health and physically proved,
+bounded forward retry merged in #7847. Its actual
+contract is documented in [runtime activation](../../../fleet-manager/docs/client-runtime-activation.md).
+Explicit [frontdoor registration](../../../fleet-manager/docs/client-frontdoor.md)
+merged in #7866 using the shared publication and retained-execution primitives.
+Physically proved registered/pending command withdrawal, with durable owned
+retry and no runtime rollback, merged in #7882. Torn-producer-journal recovery,
+completed-runtime removal and the complete managed lifecycle remain
+serial obligations, not delivered behavior or permission for live activation.
+The next serial selector-withdrawal candidate is documented in
+[runtime activation](../../../fleet-manager/docs/client-runtime-activation.md#owned-selector-withdrawal).
+It requires settled command unregistration, withdraws only proved selectors,
+and retains all runtime/rollback bytes, admission and historical evidence.
+It is not completed-runtime deletion or installation retirement.
+
 ## Scope and ownership
 
 Implement the client-only managed lifecycle in independently reviewable serial

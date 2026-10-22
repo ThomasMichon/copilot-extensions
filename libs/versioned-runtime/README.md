@@ -99,6 +99,17 @@ spellings remain prereleases before the matching final package release,
 including repair generations. Source-qualified slots instead require an exact
 current or last-known-good selection; hashes are not ordered recovery candidates.
 
+Native resolution supports three durable-trace modes: normal (the unchanged
+default), read-only (no durable trace), and ready (buffer records and append them
+only when a completed interpreter resolves). PowerShell callers pass
+`-TraceMode`; shell callers scope `AGENT_RT_RESOLVE_TRACE_MODE` around sourcing.
+Opt-in stderr trace remains available in every mode. Cold first-use callers use
+ready before publication admission, then normal only after admission succeeds.
+Installed wrappers require the resolver's declared
+`normal/read-only/ready-v1` contract before sourcing it; an older or missing
+helper returns an explicit readiness error rather than assuming it suppresses
+writes. These modes do not grant installation or publication permission.
+
 ## Construction ownership (Python API)
 
 `construction_lease(root, version, *, timeout=60.0, poll_interval=0.05)` is a
@@ -150,6 +161,31 @@ identity, but makes no health or content claim. Multiple reuse owners coexist.
 `RetentionTimeout` distinguishes exhausted contention from storage failures.
 Normal exit, exceptions, cancellation, and process death release the descriptor;
 surviving `.retention-leases` files are never removed and do not prove ownership.
+
+### Windows user-space permissions
+
+Construction, retention and publication lease directories and files explicitly
+name the process account's user SID as their owner and grant that user access,
+alongside SYSTEM and Administrators. They never depend on an elevated token's
+default owner or an Owner Rights-only DACL: an elevated SSH installation must
+remain usable by the same account's ordinary, non-administrator session.
+
+For an existing non-public root owned by the user or an enabled owner group,
+with an active full-control grant for the account's actual user SID, the canonical helper can
+repair only the exact administrator-owned private lease ACL previously generated
+by `mkdir(0700)`. It validates ordinary, single-link lock entries, retains an
+original security-descriptor/identity audit before changing permissions, and
+changes ACLs in place without replacing files or releasing their kernel locks.
+Already repaired files permit a caught partial repair to resume. Overlapping
+repairs also accept the exact completed target descriptor after confirming the
+same filesystem identity, rather than mistaking a valid winner for corruption.
+Other descriptor or identity changes still refuse. Foreign,
+public, linked or unknown entries are not migration authority. An elevated
+installer's Administrators-owned root or publication parent is admissible only
+with that private account grant; the helper does not change the parent's ACL or
+owner. Administrators or Owner Rights access alone is insufficient. A caller lacking
+the rights to repair the old administrator-owned state receives the real access
+error; the library never elevates itself.
 
 A builder acquires retention **before** releasing construction, for example:
 

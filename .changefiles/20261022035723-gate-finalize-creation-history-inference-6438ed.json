@@ -1,0 +1,9 @@
+{
+  "comment": "Gate finalize creation-history inference on fresh graph evidence while retaining qualified reset history.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

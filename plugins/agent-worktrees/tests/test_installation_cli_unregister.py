@@ -15,6 +15,7 @@ projects.yaml/repos.yaml entries and binstub.
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 
 import pytest
 
@@ -122,6 +123,16 @@ def test_uninstall_removes_all_owned_wrapper_assets(fake_runtime):
 
 # ── unregister ────────────────────────────────────────────────────────────
 
+@pytest.mark.parametrize("flags,expected", [
+    ([], False), (["--keep-repo-entry"], "reference"),
+    (["--keep-repo-entry", "reference"], "reference"),
+    (["--keep-repo-entry", "unchanged"], "unchanged"),
+])
+def test_unregister_retention_parser(flags: list[str], expected: bool | str) -> None:
+    parser = argparse.ArgumentParser()
+    unregister_cli_mod.add_parsers(parser.add_subparsers())
+    assert parser.parse_args(["unregister", *flags]).keep_repo_entry == expected
+
 
 def test_unregister_removes_projects_yaml_entry_only(fake_runtime, monkeypatch):
     monkeypatch.setattr(repos_mod, "remove_repo", lambda name: True)
@@ -165,19 +176,69 @@ def test_unregister_keep_repo_entry_downgrades_instead_of_removing(fake_runtime,
     assert not remove_called
 
 
-def test_unregister_refuses_with_live_worktrees_unless_forced(fake_runtime, monkeypatch):
+@pytest.mark.parametrize("keep_repo_entry", [False, "unchanged"])
+def test_unregister_refuses_with_live_worktrees_unless_forced(
+    fake_runtime, monkeypatch, keep_repo_entry,
+):
     monkeypatch.setattr(
         unregister_cli_mod, "_unregister_blockers", lambda project: ["1 live worktree(s)"]
     )
     monkeypatch.setattr(repos_mod, "remove_repo", lambda name: True)
 
-    rc = installation_cli_mod.cmd_unregister(_unregister_args(force=False))
+    rc = installation_cli_mod.cmd_unregister(
+        _unregister_args(force=False, keep_repo_entry=keep_repo_entry)
+    )
     assert rc == 1
     assert "demoproj" in fake_runtime["registry"]["projects"]  # untouched
 
-    rc2 = installation_cli_mod.cmd_unregister(_unregister_args(force=True))
+    monkeypatch.setattr(repos_mod, "find_repo", lambda name: None)
+    rc2 = installation_cli_mod.cmd_unregister(
+        _unregister_args(force=True, keep_repo_entry=keep_repo_entry)
+    )
     assert rc2 == 0
     assert "demoproj" not in fake_runtime["registry"]["projects"]
+
+
+@pytest.mark.parametrize("mode,expected_class,expected_agent", [
+    (True, "reference", False), ("reference", "reference", False),
+    ("unchanged", "worktree", True),
+])
+def test_unregister_keep_repo_entry_persists_requested_class(
+    fake_runtime: dict, monkeypatch: pytest.MonkeyPatch,
+    mode: bool | str, expected_class: str, expected_agent: bool,
+) -> None:
+    home = fake_runtime["tmp_path"]
+    monkeypatch.setenv("AGENT_HOME", str(home))
+    monkeypatch.setattr(repos_mod.Path, "home", lambda: home)
+    checkout: Path = home / "checkout"
+    checkout.mkdir()
+    marker = checkout / "retained.txt"
+    marker.write_text("checkout content", encoding="utf-8")
+    repos_mod.add_repo(
+        "demoproj", str(checkout), repo_class="worktree", agent=True,
+        default_branch="dev", tags=["library"], plat="windows",
+    )
+    repos_mod.add_repo("otherproj", str(home / "other"), repo_class="singleton")
+    other_before = repos_mod.find_repo("otherproj")
+
+    if mode == "unchanged":
+        def refuse_write(*args, **kwargs) -> None:
+            pytest.fail("unchanged retention must not rewrite the repository entry")
+
+        monkeypatch.setattr(repos_mod, "add_repo", refuse_write)
+    assert installation_cli_mod.cmd_unregister(_unregister_args(keep_repo_entry=mode)) == 0
+
+    entry = repos_mod.find_repo("demoproj")
+    assert entry is not None
+    assert entry.repo_class == expected_class
+    assert entry.agent is expected_agent
+    assert entry.default_branch == "dev"
+    assert entry.tags == ["library"]
+    assert entry.local_path("windows") == str(checkout)
+    assert repos_mod.find_repo("otherproj") == other_before
+    assert "demoproj" not in fake_runtime["registry"]["projects"]
+    assert "otherproj" in fake_runtime["registry"]["projects"]
+    assert marker.read_text(encoding="utf-8") == "checkout content"
 
 
 def test_unregister_never_touches_other_projects_or_shared_root(fake_runtime, monkeypatch):

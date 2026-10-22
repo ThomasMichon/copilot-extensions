@@ -7,7 +7,7 @@ import pytest
 from agent_worktrees import launch_request, locks, status_monitor_runtime, tracking_write
 
 
-@pytest.mark.parametrize("version", [2, 3, 4])
+@pytest.mark.parametrize("version", [2, 3, 4, 5])
 def test_structured_staging_never_dials_a_pre_native_fence_authority(
     monkeypatch: pytest.MonkeyPatch, version: int,
 ) -> None:
@@ -33,27 +33,28 @@ def test_structured_staging_never_dials_a_pre_native_fence_authority(
 
 
 def test_structured_staging_advertises_native_fence_protocol() -> None:
-    assert tracking_write._VERB_VERSIONS["launch_request_stage"] == 5
+    assert tracking_write._VERB_VERSIONS["launch_request_stage"] == 6
 
 
 @pytest.mark.parametrize("verb", [
     "launch_request_admit", "launch_request_creation_start", "launch_request_creation_finish",
 ])
 def test_short_allocation_handlers_advertise_the_same_receipt_protocol(verb: str) -> None:
-    assert tracking_write._VERB_VERSIONS[verb] == 3
+    assert tracking_write._VERB_VERSIONS[verb] == 6
 
 
 @pytest.mark.parametrize("verb", [
     "launch_request_admit", "launch_request_creation_start", "launch_request_creation_finish",
 ])
+@pytest.mark.parametrize("version", [2, 3, 4, 5])
 def test_short_allocations_never_reach_an_old_receipt_handler(
-    monkeypatch: pytest.MonkeyPatch, verb: str,
+    monkeypatch: pytest.MonkeyPatch, verb: str, version: int,
 ) -> None:
     endpoint = {
         "tracking_write_endpoint": "127.0.0.1:49152",
         "tracking_write_token": "fixture-token",
         "tracking_write_verbs": [verb],
-        "tracking_write_verb_versions": {verb: 2},
+        "tracking_write_verb_versions": {verb: version},
     }
     monkeypatch.setattr(locks, "read_lock", lambda *_: endpoint)
     monkeypatch.setattr(status_monitor_runtime, "_status_monitor_enabled", lambda: False)

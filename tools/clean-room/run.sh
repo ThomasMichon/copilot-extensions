@@ -314,7 +314,7 @@ print("true" if manifest.get("tier") == "P" and manifest.get("auth", {}).get("co
         )
         echo "block-public-feeds: pypi.org, files.pythonhosted.org, registry.npmjs.org, download.pytorch.org null-routed"
     fi
-    docker run -d --name "$CONTAINER" \
+    docker run -d --init --name "$CONTAINER" \
         --label "$CLEAN_ROOM_LABEL" \
         -v "$SCENARIO_DIR:/home/operator/scenario:ro" \
         -v "$LIB_DIR:/home/operator/lib:ro" \

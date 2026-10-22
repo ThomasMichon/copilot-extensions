@@ -2,9 +2,9 @@
 
 ``$ErrorActionPreference = 'Stop'`` does not apply to native exit codes, and
 ``pwsh -File`` reports success unless the script itself fails. Without explicit
-checks a failed ``uv`` resolution left no ``worktree-manager`` binstub while the
-bootstrap still exited 0, so callers only failed later with a misleading
-"command is missing" error.
+checks a failed ``git`` fetch or ``uv`` step still exited 0, so callers only
+failed later with a misleading "command is missing" error (or silently
+installed a stale staged payload).
 """
 
 from __future__ import annotations
@@ -41,17 +41,29 @@ def _source_repo(root: Path) -> Path:
     return repo
 
 
-def _fake_uv(bin_dir: Path, exit_code: int) -> None:
+def _fake_tools(bin_dir: Path, uv_exit: int, python_exit: int) -> None:
+    """A fake ``uv`` whose ``python find`` names a fake interpreter."""
     bin_dir.mkdir(parents=True, exist_ok=True)
     if os.name == "nt":
-        (bin_dir / "uv.cmd").write_text(f"@echo off\r\nexit /b {exit_code}\r\n", "utf-8")
+        python = bin_dir / "fake-python.cmd"
+        python.write_text(f"@echo off\r\nexit /b {python_exit}\r\n", "utf-8")
+        # A .ps1 stub: cmd.exe would treat the real ``'>=3.11'`` argument as a
+        # redirection, and PowerShell resolves .ps1 before PATHEXT executables.
+        (bin_dir / "uv.ps1").write_text(
+            f"Write-Output '{python}'\nexit {uv_exit}\n", "utf-8"
+        )
     else:
-        script = bin_dir / "uv"
-        script.write_text(f"#!/bin/sh\nexit {exit_code}\n", "utf-8")
-        script.chmod(0o755)
+        python = bin_dir / "fake-python"
+        python.write_text(f"#!/bin/sh\nexit {python_exit}\n", "utf-8")
+        python.chmod(0o755)
+        uv = bin_dir / "uv"
+        uv.write_text(f"#!/bin/sh\necho {python}\nexit {uv_exit}\n", "utf-8")
+        uv.chmod(0o755)
 
 
-def _run(tmp_path: Path, uv_exit: int, ref: str = "main") -> subprocess.CompletedProcess[str]:
+def _run(
+    tmp_path: Path, uv_exit: int, ref: str = "main", python_exit: int = 0,
+) -> subprocess.CompletedProcess[str]:
     repo = _source_repo(tmp_path)
     root = tmp_path / "manager-root"
     root.mkdir()
@@ -59,7 +71,7 @@ def _run(tmp_path: Path, uv_exit: int, ref: str = "main") -> subprocess.Complete
         f'[source]\nrepo = "{repo.as_posix()}"\nref = "{ref}"\n', "utf-8"
     )
     fake_bin = tmp_path / "fake-bin"
-    _fake_uv(fake_bin, uv_exit)
+    _fake_tools(fake_bin, uv_exit, python_exit)
     env = dict(os.environ)
     env["WORKTREE_MANAGER_ROOT"] = str(root)
     env["USERPROFILE"] = str(tmp_path / "profile")
@@ -73,7 +85,13 @@ def _run(tmp_path: Path, uv_exit: int, ref: str = "main") -> subprocess.Complete
 def test_failed_uv_fails_the_bootstrap(tmp_path):
     result = _run(tmp_path, uv_exit=3)
     assert result.returncode != 0
-    assert "self-install failed (uv exit 3)" in result.stdout + result.stderr
+    assert "Python acquisition failed" in result.stdout + result.stderr
+
+
+def test_failed_runtime_command_fails_the_bootstrap(tmp_path):
+    result = _run(tmp_path, uv_exit=0, python_exit=4)
+    assert result.returncode != 0
+    assert "failed (4)" in result.stdout + result.stderr
 
 
 def test_successful_uv_succeeds(tmp_path):

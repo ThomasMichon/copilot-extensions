@@ -265,6 +265,8 @@ def _render_status(status: dict[str, Any]) -> str:
 
 
 def _cmd_status(args: argparse.Namespace) -> int:
+    if args.worktrees_command is not None:
+        return _cmd_native(args)
     try:
         status = _github_status(args.repo, args.number)
     except RuntimeError as exc:
@@ -278,6 +280,12 @@ def _cmd_status(args: argparse.Namespace) -> int:
     else:
         print(_render_status(status))
     return 0
+
+
+def _cmd_native(args: argparse.Namespace) -> int:
+    from .native_cli import run
+
+    return run(args, prefix_factory=_agent_worktrees_prefix if _WATCH_INVOCATION is not None else None)
 
 
 def _run_agent_worktrees_raw(argv: list[str]) -> subprocess.CompletedProcess[str]:
@@ -368,6 +376,8 @@ def _github_create(
 
 
 def _cmd_create(args: argparse.Namespace) -> int:
+    if args.worktrees_command is not None:
+        return _cmd_native(args)
     worktree_id = _resolve_claimant_worktree_id()
     if not worktree_id:
         if args.json:
@@ -432,6 +442,8 @@ def _github_merge(
 
 
 def _cmd_merge(args: argparse.Namespace) -> int:
+    if args.worktrees_command is not None:
+        return _cmd_native(args)
     try:
         result = _github_merge(args.repo, args.number, args.method, args.auto, args.delete_branch)
     except RuntimeError as exc:
@@ -448,6 +460,8 @@ def _cmd_merge(args: argparse.Namespace) -> int:
 
 
 def _cmd_wait(args: argparse.Namespace) -> int:
+    if args.worktrees_command is not None:
+        return _cmd_native(args)
     deadline = time.monotonic() + args.timeout
     status: dict[str, Any] | None = None
     timed_out = False
@@ -789,6 +803,7 @@ def _cmd_version(_args: argparse.Namespace) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    from .native_cli import MergeMethodAction, validate_selector
     from .watch_contract import ALL_TRANSITIONS
 
     parser = argparse.ArgumentParser(
@@ -803,7 +818,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--repo",
         required=True,
         type=_validate_repo_slug,
-        help="target GitHub repo as owner/name",
+        help="owner/name (or configured project/repository with --worktrees-command)",
     )
     status.add_argument("--number", required=True, type=int, help="pull request number")
     status.add_argument("--json", action="store_true", help="emit machine-readable JSON")
@@ -824,16 +839,16 @@ def build_parser() -> argparse.ArgumentParser:
     merge.add_argument("--number", required=True, type=int, help="pull request number")
     method_group = merge.add_mutually_exclusive_group()
     method_group.add_argument(
-        "--squash", dest="method", action="store_const", const="squash",
+        "--squash", dest="method", action=MergeMethodAction, nargs=0, const="squash",
         help="squash-merge (default)",
     )
     method_group.add_argument(
-        "--merge", dest="method", action="store_const", const="merge", help="ordinary merge commit"
+        "--merge", dest="method", action=MergeMethodAction, nargs=0, const="merge", help="ordinary merge commit"
     )
     method_group.add_argument(
-        "--rebase", dest="method", action="store_const", const="rebase", help="rebase-merge"
+        "--rebase", dest="method", action=MergeMethodAction, nargs=0, const="rebase", help="rebase-merge"
     )
-    merge.set_defaults(method="squash")
+    merge.set_defaults(method="squash", method_explicit=False)
     merge.add_argument(
         "--auto", action="store_true", help="enable auto-merge instead of merging immediately"
     )
@@ -850,6 +865,12 @@ def build_parser() -> argparse.ArgumentParser:
     wait.add_argument("--timeout", type=float, default=600.0, help="give up after this many seconds")
     wait.add_argument("--json", action="store_true", help="emit machine-readable JSON")
     wait.set_defaults(handler=_cmd_wait)
+
+    for command in (status, create, merge, wait):
+        command.add_argument(
+            "--worktrees-command", type=validate_selector,
+            help="absolute attributable Worktrees command for native configured PR operations",
+        )
 
     watch = subparsers.add_parser(
         "watch", help="non-blocking subscription against the shared watch daemon"

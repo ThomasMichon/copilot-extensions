@@ -163,3 +163,14 @@ def changed_paths(base: str, head: str, read_diff: Callable[[list[str]], bytes])
     if not isinstance(raw, bytes):
         raise UnitEvidenceError("changed-input evidence must contain raw Git path bytes")
     return [path for path in raw.decode("utf-8").split("\0") if path]
+
+
+def ci_requires_units(
+    event: str, base: str, head: str, read_diff: Callable[[list[str]], bytes],
+) -> bool:
+    """Push CI admits source; PRs select conservatively and other events run units."""
+    if event == "push":
+        return False
+    if event != "pull_request":
+        return True
+    return requires_units(changed_paths(base, head, read_diff))

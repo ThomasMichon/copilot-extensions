@@ -81,7 +81,7 @@ def _runtime_component(name: str):
             raise FileNotFoundError(f"Runtime component is unavailable: {name}")
         component = importlib.util.module_from_spec(spec)
         sys.modules[spec.name] = component
-        spec.loader.exec_module(component)
+        exec(compile(source.read_bytes(), str(source), "exec"), component.__dict__)
         _runtime_components[name] = component
     return _runtime_components[name]
 

@@ -9,6 +9,7 @@ import re
 import subprocess
 import sys
 import zipfile
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from promotion_python_artifacts import (
@@ -113,8 +114,11 @@ def verify_attestations(
                 )
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise PromotionArtifactError(f"cannot read signed promotion artifact index: {exc}") from exc
-    for entry in validated["artifacts"]:
+    def verify(entry: dict) -> None:
         verify_attestation_subject(directory / entry["filename"], **identity)
+
+    with ThreadPoolExecutor(max_workers=4) as workers:
+        list(workers.map(verify, validated["artifacts"]))
 
 
 def _tag_commit(repository: str, tag: str) -> str | None:
@@ -198,6 +202,27 @@ def _release(result: subprocess.CompletedProcess, tag: str) -> dict:
         return release
     except (json.JSONDecodeError, KeyError, TypeError) as exc:
         raise PromotionArtifactError(f"{tag}: invalid release response") from exc
+
+
+def verify_asset_downloads(repository: str, assets: list[tuple[str, int, str]]) -> None:
+    """Read every independently validated asset with bounded consumer authority."""
+    def verify(asset: tuple[str, int, str]) -> None:
+        subject, identifier, digest = asset
+        downloaded = _gh(
+            ["api", f"repos/{repository}/releases/assets/{identifier}",
+             "-H", "Accept: application/octet-stream"],
+            verification=True, binary=True, timeout=120,
+        )
+        _check(downloaded)
+        if (
+            not isinstance(downloaded.stdout, bytes)
+            or hashlib.sha256(downloaded.stdout).hexdigest() != digest
+        ):
+            raise PromotionArtifactError(f"{subject}: downloaded published asset digest mismatch")
+
+    with ThreadPoolExecutor(max_workers=4) as workers:
+        for _ in workers.map(verify, assets):
+            pass
 
 
 def validate_commit_artifacts(
@@ -291,6 +316,7 @@ def verify_published_artifacts(
     index = validate_commit_artifacts(directory, commit=candidate_commit, dev_head=dev_head, repo=repo)
     if admission_cache is None:
         admission_cache = {}
+    downloads = []
     for entry in index["artifacts"]:
         tag = f"{entry['plugin']}-v{entry['version']}"
         release = _release(
@@ -325,17 +351,8 @@ def verify_published_artifacts(
             or type(matches[0].get("id")) is not int or matches[0]["id"] <= 0
         ):
             raise PromotionArtifactError(f"{tag}: required published asset is missing or conflicting")
-        downloaded = _gh(
-            ["api", f"repos/{repository}/releases/assets/{matches[0]['id']}",
-             "-H", "Accept: application/octet-stream"],
-            verification=True, binary=True,
-        )
-        _check(downloaded)
-        if (
-            not isinstance(downloaded.stdout, bytes)
-            or hashlib.sha256(downloaded.stdout).hexdigest() != entry["sha256"]
-        ):
-            raise PromotionArtifactError(f"{tag}: downloaded published asset digest mismatch")
+        downloads.append((f"{tag}/{entry['filename']}", matches[0]["id"], entry["sha256"]))
+    verify_asset_downloads(repository, downloads)
     return index
 
 

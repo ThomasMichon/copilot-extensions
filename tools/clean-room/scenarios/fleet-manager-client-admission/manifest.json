@@ -1,0 +1,34 @@
+{
+  "name": "fleet-manager-client-admission",
+  "description": "Agent-free fresh-machine proof of installed thin-client admission, durable retry/reopen, revoked-policy refusal and absence of hosting effects.",
+  "tier": "P",
+  "family": "F1",
+  "image": "base",
+  "prereqs": {
+    "present": ["git", "python3", "node", "uv"],
+    "provisioned_by_flow": []
+  },
+  "auth": { "copilot": "none", "gh": "none", "ado": "none" },
+  "validates": [
+    "the exact archived candidate prepares through governed dependency admission",
+    "a freshly installed wheel's actual console entry point works outside the checkout",
+    "explicit client initialization and authenticated selected-release admission persist across processes",
+    "same-release retry is idempotent and revoked policy refuses without resetting durable state",
+    "installed client commands preserve user configuration and create no runtime slot, selector, hosting role or Python network use",
+    "missing packaged runtime resources never fall back to a checkout helper"
+  ],
+  "config": {
+    "CR_HARNESS_MOUNT": "directory containing candidate.tar from an exact staged Git tree archive"
+  },
+  "expected_artifacts": [
+    "cr-report.json",
+    "cr-logs/installed-client-consumer.log",
+    "cr-logs/consumer-oracle.log"
+  ],
+  "stages": [
+    { "n": 0, "title": "fresh environment and exact candidate" },
+    { "n": 1, "title": "governed client test environment" },
+    { "n": 2, "title": "actual installed thin-client console" },
+    { "n": 3, "title": "non-skipped consumer oracle" }
+  ]
+}

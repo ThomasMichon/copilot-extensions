@@ -1086,6 +1086,65 @@ def test_syntactically_invalid_file_fails_closed_not_silently_skipped(tmp_path):
     assert "syntax error" in violations[0].detail
 
 
+def test_one_ast_walk_preserves_import_then_breadth_first_diagnostics(tmp_path, monkeypatch):
+    path = _write_plugin_file(
+        tmp_path, "example", "nested.py",
+        "from agent_worktrees.tracking import save_record\n"
+        "from agent_worktrees import tracking\n"
+        "def nested():\n"
+        "    tracking.retire_record(record)\n"
+        "tracking.save_record(record, path)\n",
+    )
+    real_walk = guard.ast.walk
+    walks = []
+
+    def counted_walk(tree):
+        walks.append(tree)
+        return real_walk(tree)
+
+    monkeypatch.setattr(guard.ast, "walk", counted_walk)
+    violations = guard._check_file(path, repo_root=tmp_path)
+    assert len(walks) == 1
+    assert [(v.line, v.detail) for v in violations] == [
+        (1, "imports write function `save_record` directly "
+         "from `agent_worktrees.tracking`"),
+        (5, "calls write function `tracking.save_record` directly"),
+        (4, "calls write function `tracking.retire_record` directly"),
+    ]
+
+
+def test_reused_assignments_reach_fixed_point_across_reverse_alias_chains(tmp_path):
+    path = _write_plugin_file(
+        tmp_path, "example", "aliases.py",
+        "from importlib import import_module as load\n"
+        "queue_copy = queue\n"
+        "queue: object = module_copy._STAMP_QUEUE\n"
+        "module_copy = module\n"
+        "module: object = package_copy.tracking\n"
+        "package_copy = package\n"
+        "package = load(module_name)\n"
+        "module_name: str = 'agent_worktrees'\n"
+        "queue_copy.submit(record)\n"
+        "module_copy.save_record(record, path)\n"
+        "package_copy.tracking.retire_record(record)\n",
+    )
+    violations = guard._check_file(path, repo_root=tmp_path)
+    assert [(v.line, v.detail) for v in violations] == [
+        (9, "calls write-triggering queue method `queue_copy.submit` directly"),
+        (10, "calls write function `module_copy.save_record` directly"),
+        (11, "calls write function `package_copy.tracking.retire_record` directly"),
+    ]
+
+
+def test_invalid_utf8_file_fails_closed(tmp_path):
+    path = _write_plugin_file(tmp_path, "example", "invalid.py", "")
+    path.write_bytes(b"\xff")
+    violations = guard._check_file(path, repo_root=tmp_path)
+    assert len(violations) == 1
+    assert violations[0].line == 0
+    assert "is not valid UTF-8" in violations[0].detail
+
+
 def test_real_repo_checkout_is_clean():
     """End-to-end smoke test: the real, live repo tree must never trip this
     guard -- confirms the script (not just find_violations()) exits 0

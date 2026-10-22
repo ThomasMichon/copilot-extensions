@@ -50,6 +50,8 @@ from .coordinator_loops import (
     _spawn_self_deploy,
 )
 from .coordinator_registries import register_registry_routes
+from .coordinator_execution_scopes import register_execution_scope_routes
+from .coordinator_execution_runtime import coordinator_incarnation, register_execution_runtime_routes
 from .coordinator_spawn import register_spawn_routes
 from .coordinator_status import _slot_descriptor, register_status_routes
 from .coordinator_tasks import register_task_routes
@@ -61,6 +63,7 @@ from .queue import TaskQueue
 from .run_waiter_recovery import (
     DEFAULT_RUN_WAITER_ARM_GRACE_SECONDS,
     recover_run_waiters,
+    maintain_delegated_recovery,
 )
 from .satellites import FleetDirectory
 from .worktree_status_relay import WorktreeStatusRelayStore
@@ -268,6 +271,7 @@ def create_app(
             "retry_base": wake_retry_base,
             "idle_interval": max(wake_interval, 5.0),
             "wake_signal": wake_signal,
+            "execution_incarnation": coordinator_incarnation(app),
         }
         if wake_deliver is not None:
             wake_options["deliver"] = wake_deliver
@@ -304,6 +308,7 @@ def create_app(
                     interval=wake_interval,
                     is_active=wake_is_active,
                     release_claim=hibernation_claims.release_hibernation_claim_for_host_worktree,
+                    execution_incarnation=coordinator_incarnation(app),
                 )
             )
             if wake_interval > 0
@@ -340,6 +345,7 @@ def create_app(
             await _recover_run_waiters_pass()
             await asyncio.sleep(DEFAULT_RUN_WAITER_ARM_GRACE_SECONDS)
             await _recover_run_waiters_pass()
+            await maintain_delegated_recovery(queue, _recover_run_waiters_pass)
 
         async def _recover_run_waiters_after_prepare() -> None:
             while True:
@@ -941,6 +947,8 @@ def create_app(
         restricted_ingress_authenticated=bool(token),
     )
     register_registry_routes(app, queue, control_token=control_token)
+    register_execution_scope_routes(app, queue, bus, control_token=control_token)
+    register_execution_runtime_routes(app, queue, bus, control_token=control_token)
     register_worktree_status_routes(app, relay)
 
     if mcp_app is not None:

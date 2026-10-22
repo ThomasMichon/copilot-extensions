@@ -1,0 +1,9 @@
+{
+  "comment": "Stage missing native installation-context fixture support individually while preserving fixture overrides.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

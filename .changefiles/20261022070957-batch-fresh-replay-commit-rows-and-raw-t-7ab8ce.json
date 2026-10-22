@@ -1,0 +1,9 @@
+{
+  "comment": "Batch fresh replay commit rows and raw tree evidence while preserving source lineage checks.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

@@ -398,7 +398,7 @@ class BoundaryTests(_ShellFixture):
         self.assertRegex(self.jobs["merge-promotion"], r"(?m)^      actions: read$")
         ci = jobs((WORKFLOW.parent / "ci.yml").read_text(encoding="utf-8"))
         if "source-units" in self.jobs:
-            self.assertEqual(set(ci), {"checks", "unit-plan", "unit-tests", "pr-gate"}
+            self.assertEqual(set(ci), {"checks", "unit-tests", "pr-gate"}
                              if "unit-tests" in ci else {"main-metadata"})
             self.assertNotIn("full", self.jobs)
             self.assertNotIn("promotion-gate", ci)

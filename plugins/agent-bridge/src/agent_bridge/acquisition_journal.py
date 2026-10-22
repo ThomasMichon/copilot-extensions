@@ -176,6 +176,7 @@ class AcquisitionJournal:
                 "worktree_unknown", "workspace_identity_conflict", "worktree_terminal",
                 "cli_capability_missing", "cli_options_unsupported",
                 "target_unavailable", "venue_unsupported",
+                "plugin_preparation_failed",
             }
         ):
             return False

@@ -1,0 +1,9 @@
+{
+  "comment": "Skip unused site initialization in isolated installation-mode probes while retaining payload-owned authority checks",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

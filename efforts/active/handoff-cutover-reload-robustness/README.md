@@ -248,8 +248,14 @@ to the runtime fix (#5253† / upstream #13494). Findings:
 
 _Correlated via a facility-driven sweep of open `bug`-labeled issues against active efforts (VEI + direct review). Not yet triaged into a numbered phase — listed here as upcoming work for whoever picks this effort back up._
 
-- [ ] **#2386** agent-dispatch: supervisor generation retirement leaves duplicate old+new processes running after update
-  - Duplicate processes surviving a generation retirement is exactly this effort's cutover/reload-robustness scope.
+- [ ] **#6389, retained #2386 lane:** qualify Dispatch supervisor generation
+      retirement and the reported duplicate old/new processes after update.
+      Keep the same specialized Dispatch adapter/native-retirement custodian
+      and all original Windows, identity, failure and custody acceptance.
+      The "Qualified Dispatch supervisor retirement acceptance from #2386"
+      subsection must be delivered directly and read back before #2386 closes;
+      until then that source remains open. This cross-effort item remains
+      unresolved, not checked complete by tracking consolidation.
 
 ## Validation Plan
 

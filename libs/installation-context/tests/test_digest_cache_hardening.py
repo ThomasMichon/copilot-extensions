@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -46,6 +47,21 @@ def _assembled_python_source() -> str:
     )
 
 
+def _posix_source() -> str:
+    source = POSIX_SCRIPT.read_text(encoding="utf-8")
+    assignment = 'SCRIPT_DIR="$(cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"'
+    assert source.count(assignment) == 1
+    return source.replace(assignment, f"SCRIPT_DIR={shlex.quote(str(LIB))}", 1)
+
+
+def _powershell_source() -> str:
+    source = POWERSHELL_SCRIPT.read_text(encoding="utf-8")
+    companion = ". (Join-Path $PSScriptRoot 'guest-environment.ps1')"
+    assert source.count(companion) == 1
+    path = str(LIB / "guest-environment.ps1").replace("'", "''")
+    return source.replace(companion, f". '{path}'", 1)
+
+
 def _run_canonical_shell_digest(
     shell: str,
     root: Path,
@@ -57,7 +73,7 @@ def _run_canonical_shell_digest(
 ) -> subprocess.CompletedProcess[str]:
     work_root.mkdir(parents=True)
     if shell == "posix":
-        source = POSIX_SCRIPT.read_text(encoding="utf-8")
+        source = _posix_source()
         prefix, marker, _ = source.partition('\nACTION="${1:-}"')
         assert marker
         probe = work_root / "digest.sh"
@@ -73,7 +89,7 @@ def _run_canonical_shell_digest(
         probe.chmod(0o755)
         command = (str(probe), str(root))
     else:
-        source = POWERSHELL_SCRIPT.read_text(encoding="utf-8")
+        source = _powershell_source()
         prefix, marker, _ = source.partition("\ntry {\n    Assert-ExactChoice")
         assert marker
         probe = work_root / "digest.ps1"
@@ -86,7 +102,7 @@ def _run_canonical_shell_digest(
                 f"'{quoted_root}' "
                 f"{max_entries} {max_path_bytes} {max_content_bytes}\n"
             ),
-            encoding="utf-8",
+            encoding="utf-8-sig",
         )
         command = (str(POWERSHELL), "-NoProfile", "-File", str(probe), "probe")
     return subprocess.run(
@@ -95,6 +111,7 @@ def _run_canonical_shell_digest(
         text=True,
         encoding="utf-8",
         check=False,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
 
 
@@ -136,7 +153,7 @@ def test_shell_metadata_tokens_retain_posix_subsecond_precision() -> None:
 def test_posix_cache_hit_hashes_same_size_same_second_rewrite(
     tmp_path: Path,
 ) -> None:
-    script = POSIX_SCRIPT.read_text(encoding="utf-8")
+    script = _posix_source()
     prefix, marker, _ = script.partition('\nACTION="${1:-}"')
     assert marker
     probe = tmp_path / "digest-cache-probe.sh"
@@ -714,14 +731,19 @@ def test_powershell_wide_directory_rejects_small_limit(
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX FIFO behavior")
-def test_posix_safe_open_rejects_fifo_without_blocking(tmp_path: Path) -> None:
-    script = POSIX_SCRIPT.read_text(encoding="utf-8")
+@pytest.mark.parametrize("bash", (
+    shutil.which("bash"),
+    *((os.environ["INSTALLATION_CONTEXT_BASH32"],) if os.environ.get("INSTALLATION_CONTEXT_BASH32") else ()),
+))
+def test_posix_safe_open_rejects_fifo_without_blocking(tmp_path: Path, bash: str) -> None:
+    script = _posix_source()
     prefix, marker, _ = script.partition('\nACTION="${1:-}"')
     assert marker
     probe = tmp_path / "fifo-probe.sh"
     probe.write_text(
         prefix
         + r'''
+shift
 capture_regular_file "$1" "Probe file" "$2" true true
 ''',
         encoding="utf-8",
@@ -732,10 +754,11 @@ capture_regular_file "$1" "Probe file" "$2" true true
     started = time.monotonic()
 
     result = subprocess.run(
-        (str(probe), str(fifo), str(tmp_path / "capture")),
+        (bash, str(probe), "status", str(fifo), str(tmp_path / "capture")),
         capture_output=True,
         text=True,
         encoding="utf-8",
+        env={**os.environ, "BASHPID": "not-a-pid"},
         timeout=5,
         check=False,
     )
@@ -749,7 +772,7 @@ capture_regular_file "$1" "Probe file" "$2" true true
 def test_powershell_cache_hit_hashes_same_size_same_second_rewrite(
     tmp_path: Path,
 ) -> None:
-    script = POWERSHELL_SCRIPT.read_text(encoding="utf-8")
+    script = _powershell_source()
     prefix, marker, _ = script.partition("\ntry {\n    Assert-ExactChoice")
     assert marker
     probe = tmp_path / "digest-cache-probe.ps1"
@@ -773,7 +796,7 @@ finally {
 }
 [void](Get-FileSha256 $path -RequireSameIdentity)
 ''',
-        encoding="utf-8",
+        encoding="utf-8-sig",
     )
     target = tmp_path / "target.txt"
     replacement = tmp_path / "replacement.txt"
@@ -791,6 +814,7 @@ finally {
         encoding="utf-8",
         env=environment,
         check=False,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
 
     assert result.returncode != 0

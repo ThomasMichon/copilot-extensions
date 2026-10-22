@@ -257,7 +257,10 @@ class _SessionCoreMixin(_SessionDrainGateMixin):
         """Whether a persisted target carries namespace-provider metadata."""
         return any(
             isinstance(value, dict) and bool(value)
-            for value in (target.codespace, target.container, target.venue)
+            for value in (target.codespace, target.container)
+        ) or (
+            isinstance(target.venue, dict)
+            and any(key != _REQUEST_OVERRIDES_KEY for key in target.venue)
         )
 
     async def _refresh_provider_target(self, session: Session) -> None:

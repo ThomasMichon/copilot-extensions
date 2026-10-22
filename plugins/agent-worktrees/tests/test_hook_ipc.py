@@ -627,29 +627,59 @@ def test_installed_bin_layout_contains_all_lifecycle_helpers(tmp_path, monkeypat
         "native_source_context.py",
     ):
         assert name in declared, f"{installer} does not deploy {name}"
+    if installer != "installer.py":
+        fixture_scripts = tmp_path / "payload" / "scripts"
+        fixture_scripts.mkdir(parents=True)
+        for name in (
+            "hook_client.py", "hook_runtime.py", "hook_lifecycle_runtime.py",
+            "native_source_context.py",
+        ):
+            relative = (
+                Path("src") / "agent_worktrees" / name
+                if name == "native_source_context.py" else Path("scripts") / name
+            )
+            destination = fixture_scripts.parent / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(scripts.parent / relative, destination)
     if installer.endswith(".sh"):
-        from test_installer_slot_clean_posix import _bash_path, _resolve_bash
-
-        bash = _resolve_bash()
-        if not bash:
+        canonical_bash = Path(r"C:\Program Files\Git\bin\bash.exe")
+        if not (
+            sys.platform == "win32" and canonical_bash.is_file()
+        ) and not shutil.which("bash"):
             pytest.skip("Native shell installer requires bash")
+        from native_shell_support import admit_native_bash
+
+        bash = admit_native_bash()
         block = "for script in " + text.split("for script in ", 1)[1].split("\n    done", 1)[0] + "\n done"
+        publishers = "\n".join(
+            name + "() {" + text.split(name + "() {", 1)[1].split("\n}\n", 1)[0] + "\n}\n"
+            for name in ("_runtime_file_id", "_runtime_file_state", "_publish_runtime_file")
+        )
         subprocess.run(
-            [bash, "-eu", "-c", 'SCRIPT_DIR="$1"; BIN_DIR="$2"; ok() { :; }; deploy() {\n'
-             + block + "\n}; deploy", "fixture", _bash_path(scripts), _bash_path(installed)],
+            [bash, "-eu", "-c", publishers
+             + '\nSCRIPT_DIR="$1"; PLUGIN_DIR="$SCRIPT_DIR/.."; BIN_DIR="$2"; '
+             'ok() { :; }; err() { printf "%s\\n" "$*" >&2; }; deploy() {\n'
+             + block + "\n}; deploy", "fixture", fixture_scripts.as_posix(), installed.as_posix()],
             check=True, capture_output=True, text=True, **no_window_kwargs(),
         )
     elif installer.endswith(".ps1"):
-        assert '$src = Join-Path $ScriptDir "../src/agent_worktrees/$script"' in text
-        if shutil.which("pwsh"):
+        assert '$src = Join-Path $PluginDir "src/agent_worktrees/$script"' in text
+        if pwsh := shutil.which("pwsh"):
             block = "foreach ($script in @(" + text.split(
                 "foreach ($script in @(", 1,
             )[1].split("\n    }\n", 1)[0] + "\n}"
+            publisher = "function Publish-RuntimeFile {" + text.split(
+                "function Publish-RuntimeFile {", 1,
+            )[1].split("\n}\n", 1)[0] + "\n}\n"
             subprocess.run(
-                ["pwsh", "-NoProfile", "-NonInteractive", "-Command",
+                [pwsh, "-NoProfile", "-NonInteractive", "-Command",
                  "$ErrorActionPreference='Stop'; $ScriptDir=$env:FIXTURE_SCRIPTS; "
-                 "$BinDir=$env:FIXTURE_BIN; function Write-ServiceOk {};\n" + block],
-                env={**os.environ, "FIXTURE_SCRIPTS": str(scripts), "FIXTURE_BIN": str(installed)},
+                 "$PluginDir=Split-Path -Parent $ScriptDir; "
+                 "$BinDir=$env:FIXTURE_BIN; function Write-ServiceOk {};\n" + publisher + block],
+                env={
+                    **os.environ, "FIXTURE_SCRIPTS": str(fixture_scripts),
+                    "FIXTURE_BIN": str(installed),
+                },
                 check=True, capture_output=True, text=True, **no_window_kwargs(),
             )
         else:
@@ -659,10 +689,13 @@ def test_installed_bin_layout_contains_all_lifecycle_helpers(tmp_path, monkeypat
                     source = scripts.parent / "src" / "agent_worktrees" / name
                 if source.is_file():
                     shutil.copy2(source, installed / name)
-    for name in ("hook_lifecycle_runtime.py", "native_source_context.py"):
+    for name in (
+        "hook_client.py", "hook_runtime.py", "hook_lifecycle_runtime.py",
+        "native_source_context.py",
+    ):
         source = (
-            scripts / name if name == "hook_lifecycle_runtime.py"
-            else scripts.parent / "src" / "agent_worktrees" / name
+            scripts.parent / "src" / "agent_worktrees" / name
+            if name == "native_source_context.py" else scripts / name
         )
         assert (installed / name).read_bytes() == source.read_bytes()
     spec = importlib.util.spec_from_file_location("installed_hook_client", installed / "hook_client.py")
@@ -681,6 +714,39 @@ def test_installed_bin_layout_contains_all_lifecycle_helpers(tmp_path, monkeypat
     assert module._capture_native_source()["version"] == 1
     assert installed / "native_source_context.py" in loaded
     assert module._load_sibling("hook_lifecycle_runtime.py").run_end
+
+
+@pytest.mark.parametrize("failure", ["nonconformant", "timeout"])
+def test_lifecycle_fixture_admits_canonical_bash_without_path(
+    tmp_path, monkeypatch, failure,
+):
+    import native_shell_support as shells
+
+    canonical_bash = Path(r"C:\Program Files\Git\bin\bash.exe")
+    original_is_file = Path.is_file
+    monkeypatch.setattr(
+        Path, "is_file",
+        lambda path: path == canonical_bash or original_is_file(path),
+    )
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.delenv("COPILOT_EXTENSIONS_ALLOW_EXPLICIT_TEST_TIERS", raising=False)
+    monkeypatch.setattr(shutil, "which", lambda *_args, **_kwargs: None)
+    calls = []
+
+    def probe(argv, **kwargs):
+        calls.append(argv)
+        assert argv[0] == str(canonical_bash)
+        assert kwargs["timeout"] == 5
+        if failure == "timeout":
+            raise subprocess.TimeoutExpired(argv, 5)
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(shells, "run_headless", probe)
+    with pytest.raises(shells.ShellUnavailable, match="probe"):
+        test_installed_bin_layout_contains_all_lifecycle_helpers(
+            tmp_path, monkeypatch, "install.sh",
+        )
+    assert len(calls) == 1
 
 
 @pytest.mark.parametrize("runtime_version,returncode,stdout", [

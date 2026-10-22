@@ -87,7 +87,12 @@ def test_posix_exit_handle_failure_retains_conservative_pid_fallback(monkeypatch
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="native Linux unreaped-process exit proof")
-def test_exited_unreaped_child_is_not_a_live_retention_owner():
+@pytest.mark.parametrize("without_python_pidfd", [False, True])
+def test_exited_unreaped_child_is_not_a_live_retention_owner(monkeypatch, without_python_pidfd):
+    from zdd.singleton_linux import _open_pidfd
+
+    if without_python_pidfd:
+        monkeypatch.delattr(os, "pidfd_open", raising=False)
     child = subprocess.Popen(
         [sys.executable, "-c", "import time; print('ready',flush=True); time.sleep(30)"],
         stdout=subprocess.PIPE, text=True,
@@ -96,7 +101,7 @@ def test_exited_unreaped_child_is_not_a_live_retention_owner():
     try:
         assert child.stdout.readline().strip() == "ready"
         assert diagnostics._pid_alive(child.pid)
-        descriptor = os.pidfd_open(child.pid)
+        descriptor = _open_pidfd(child.pid)
         child.terminate()
         assert diagnostic_exit.wait_posix(descriptor, 5)
         # Do not poll/wait: its parent still owns the unreaped process record.

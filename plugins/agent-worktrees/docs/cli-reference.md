@@ -124,11 +124,40 @@ underlying diagnostic, not an unstructured traceback.
 Registered bare anchors and their linked worktrees resolve the common Git
 directory itself before considering a non-bare checkout's parent.
 
+### Trusted initialization directory
+
+The mutually exclusive `record --cwd <absolute-directory> --json` form resolves
+an existing checkout in the selected project without enrolling it, contacting
+the resident, starting a service or changing its head. It checks the actual Git
+marker's registered project, finds an existing project-scoped tracking record,
+then strictly re-reads that exact record and verifies its repository and root.
+Recorded roots are matched canonically, so symlinked/junction worktree-root
+spellings retain the same identity. Multiple records for the same canonical
+checkout refuse as ambiguous rather than choosing by filename order.
+An untracked linked checkout, a foreign project, a disappeared record or a
+nested untracked checkout refuses; there is no cross-project or anchor fallback.
+
+Success is `{"version":1,"ok":true,"context":{...}}`. The context has schema
+`agent-worktrees.workspace-context`, version1, `project`, `anchor`, `root`,
+`identity` and `worktree`. For a tracked checkout, `identity` is null and
+`worktree` extends the ordinary record projection with `codename` and `head`.
+The head's session, state, monotonic revision and pending-handoff ordinals derive
+from the same parsed record, using existing asserted-head semantics, not a live
+session scan or another stored pointer. Colliding IDs in another project are
+never consulted. Consumers must still treat the observation as potentially
+stale, not a lease or mutation authority.
+
+At the configured anchor, `worktree` is null and `identity` comes from the
+existing configured execution-identity reader. An unavailable configured
+identity remains unavailable; it is not replaced with a detected hostname or
+synthetic worktree. This read performs no Chat assignment, membership or native
+admission. The exact `--worktree-id` response below remains unchanged.
+
 Success exits zero with `{"version":1,"ok":true,"worktree":{...}}`.
 The worktree contains `id`, `repo`, `path`, `branch`, `creation_nonce`, `status`,
 `session_count`, `last_session_id`, `sessions_indexed`, `execution_leg`,
-`execution_leg_opaque`, `session_backend`, `session_backend_opaque`,
-`dispatch_attempt`, `dispatch_attempt_opaque`,
+`execution_leg_opaque`, `execution_leg_live`, `session_backend`,
+`session_backend_opaque`, `dispatch_attempt`, `dispatch_attempt_opaque`,
 and raw historical `machine`, `platform`, `owner`,
 `owner_ref`, `caller_worktree`, `parent_session`, `checkout_managed` fields
 (absent raw fields are null). `session_count` is null when sessions have not
@@ -140,6 +169,9 @@ than silently deriving a legacy head. An absent or empty legacy ledger retains
 the existing asserted-head fallback; an explicit null head transition clears it.
 `execution_leg` uses the existing read-only legacy-backend compatibility view,
 preserving an unrecognized explicit leg as opaque data.
+`execution_leg_live` follows the roster row's rule (opaque bindings, or an
+active/unknown derived leg, are live), so callers can judge a just-created
+worktree before the resident republishes the roster.
 An unrecognized legacy backend likewise remains visible as raw data with its
 opaque flag; a null derived leg does not prove absence of a provider binding.
 `dispatch_attempt` uses the canonical seven-field dispatch provenance parser.
@@ -977,6 +1009,17 @@ on a cadence at two natural lifecycle boundaries -- **picker launch** and
 
 ### `update` results: exit codes, events, and status
 
+The public command submits a durable request before Manager or standalone
+execution. `--wait` observes it by default; `--detach --json` returns an
+acceptance receipt, and `--request-status <id> --json` is a project-independent
+read-only query. `--no-manager` still uses the same execution authority.
+`--supervised-debug` uses foreground supervision under that authority.
+`--recovery-status` reports restart-confirmed settlement availability;
+`--recover-after-restart` settles only old-boot interrupted work without
+replaying it. Both support `--json` and need no project.
+The [Manager reference](../../../worktree-manager/README.md#durable-update-execution)
+defines the shared lifetime, output, interruption and migration boundary.
+
 Required payload acquisition is a barrier before the engine's runtime work:
 if its own payload refresh or an active/activation-unknown target refresh
 fails, the engine returns that failure without running runtime installers,
@@ -984,6 +1027,12 @@ anchor synchronization, pruning or local command/profile finishing. Successfully
 refreshed payloads remain available for a retry; the error names the cause and
 asks the caller to resolve it and retry `update`. Inactive inventory failures
 remain advisory.
+
+Payload failure summaries retain a recognized native sharing/lock violation or
+I/O/permission cause before shortening the child output to a redacted tail.
+Both failed-attempt history and the final result keep that classification;
+a successful bounded retry remains advisory history rather than a failed run.
+The classification identifies an error class, not the process holding a file.
 
 The engine collects the logical target selection before acquisition, refreshes
 its own payload once, and attempts required registered payloads before inactive
@@ -1052,6 +1101,28 @@ sessions, or an open PR, so deregistering never silently orphans in-flight
 work. The project's own per-project state directory (`~/.<project>`) is left
 in place; remove it by hand, or with `uninstall --project <name>
 --remove-config --yes`, once it's no longer needed.
+
+To remove only full project adoption while retaining a related repository's
+editing class, agent preference and repository metadata, use:
+
+```
+<agent-worktrees catalog argv[0]> --project related-library unregister --keep-repo-entry unchanged
+```
+
+The bare `--keep-repo-entry` (or explicit `reference`) retains its legacy
+reference/no-agent behavior. `unchanged` leaves the repository registry entry
+untouched. Existing worktree/session/PR guards still apply, and an unowned or
+foreign launcher is not transferred or deleted. A retained local worktree-class
+repository remains usable through
+`<agent-worktrees catalog argv[0]> --project related-library create --json`; it does not need to
+rejoin `projects.yaml` merely to create and manage isolated worktrees.
+Replace the placeholder with the selected installation's command from the
+session catalog, quoted and invoked for the current shell; do not resolve it
+through PATH.
+On installation-cell hosts, first `create` initializes or validates the
+registered repository's cell-local identity and state before loading lifecycle
+configuration. It does not add project membership or replace a mismatched
+identity receipt.
 
 ## Effort Focus
 
@@ -1136,6 +1207,14 @@ warning.
 
 ### Repo-adopted plugin reconciliation (`reconcile-plugins`)
 
+`--apply` submits its canonical work to that same durable execution owner,
+including when invoked by the provisioning hook. It still returns the original
+JSON summary and canonical exit status. Default planning, `--peek` and
+`--check-update` do not enqueue installers. Public `stage-update` acquisition
+also uses the owner while preserving its status file and optional JSON output;
+`--indicator-state` remains read-only. These adapters do not replace the
+stager's own implementation or the installers' existing inner custody.
+
 On an interactive launch, the launcher reconciles the anchor repo's
 `.github/copilot/settings.json` `enabledPlugins`: for each
 `<name>@copilot-extensions` it ensures the **payload** is installed (throttled
@@ -1170,8 +1249,26 @@ helper cannot silently ignore it.
 deployment permission before either its default or custom execution adapter.
 This catches a policy added after planning. Healthy runtimes need no
 publication permission to remain selected. Uninstall is a separate action,
-not runtime publication. These checks cover the reconciler, not independent
-bootstrap, first-use or direct native installer entry points.
+not runtime publication.
+
+Native launch wrappers use `reconcile-plugins --check-update` with one runtime
+action on JSON stdin immediately before execution. It returns
+`{"allowed": true, "diagnostics": []}` with exit 0, or `allowed: false`
+and recovery diagnostics with exit 3. It bypasses project resolution and never
+discovers a repository,
+replans or executes the action. Cached payload/root/context changes are refused
+through the same execution admission used by `--apply`.
+Only Worktrees' staged self-update carries `trigger: "stage-update"`: that
+action repeats the stager's owning payload discovery, preserving its supported
+`_direct` fallback. It still compares the planned payload/root/context and checks
+deployment policy. The marker cannot select another plugin or an arbitrary
+payload path, and ordinary marketplace reconciliation is unchanged.
+An older standalone payload without policy needs no new policy helper.
+An older engine without this check is different: wrappers skip runtime
+publication with an explicit readiness warning rather than treating absent
+capability as permission. Independent bootstrap/payload/uninstall actions
+continue under their existing contracts. Direct native installer admission
+remains that installer's responsibility.
 
 ### Teardown sweep (`uninstall-plugins`)
 

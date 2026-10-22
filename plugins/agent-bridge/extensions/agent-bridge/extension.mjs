@@ -90,6 +90,7 @@ const state = {
   inFlight: new InFlightMessages(), // delivered but not yet recorded by the CLI
   mainTurn: new MainTurn(), // is the main agent's turn running (not a sub-agent's)?
   lastEventAt: 0, // advanced by the observe-only event handler
+  readinessTasks: new Map(),
 };
 
 function extLog(msg) {
@@ -222,6 +223,7 @@ const register = serializedRegister(
 );
 
 async function deregister() {
+  for (const entry of state.readinessTasks.values()) entry.controller.abort();
   // Every id this process registered, once no registration is left in flight
   // (a rename can leave the placeholder's row and the resumed one). An id
   // folded into its successor is already gone; its DELETE is a no-op. Each
@@ -282,10 +284,12 @@ async function pollInbox() {
   if (!state.deliveryEnabled) return;
   if (!state.sessionId || !state.registered) return;
   state.delivering = true;
+  const sid = state.sessionId;
   try {
-    await drainInbox(state.sessionId, {
+    await drainInbox(sid, {
       getJson: bridgeGetJson, post: bridgeFetch, session, inFlight: state.inFlight,
       mainTurn: state.mainTurn, log: extLog,
+      pluginReadiness: true, isCurrent: () => state.registered && state.sessionId === sid,
     });
   } finally {
     state.delivering = false;
@@ -300,9 +304,12 @@ async function pollControls() {
   if (state.controlling) return;
   if (!state.sessionId || !state.registered) return;
   state.controlling = true;
+  const sid = state.sessionId;
   try {
-    await drainControls(state.sessionId, {
+    await drainControls(sid, {
       getJson: bridgeGetJson, post: bridgeFetch, session, replayHistory, log: extLog,
+      isCurrent: () => state.registered && state.sessionId === sid,
+      readinessTasks: state.readinessTasks,
     });
   } finally {
     state.controlling = false;
@@ -380,6 +387,7 @@ session.on((event) => {
     state.inFlight.observe(event);
     state.mainTurn.observe(event);
     if (adoptSessionId(state, event?.sessionId)) {
+      for (const entry of state.readinessTasks.values()) entry.controller.abort();
       // A late id, or a resume that renamed this conversation: register it
       // off the event loop (the bridge folds a renamed placeholder into it).
       setTimeout(() => register().catch(() => {}), 0);

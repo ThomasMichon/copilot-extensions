@@ -19,6 +19,18 @@ class _FakeProc:
         self.stderr = None
 
 
+async def test_settle_preserves_bounded_raw_tail_without_changing_legacy_error_text():
+    relay = SupervisedRelayForward(SSHConfig(host_alias="fixture"), 41001, ready_timeout=0.01)
+    proc = _FakeProc(123)
+    proc.stderr = asyncio.StreamReader()
+    proc.stderr.feed_data(b"remote port forwarding ")
+    result = await relay._wait_settled(proc)
+    assert result.ready and not result.remote_forward_failed
+    assert result.stderr == "remote port forwarding"
+    assert result.raw_tail == "remote port forwarding "
+    assert "raw_tail" not in repr(result)
+
+
 def test_pid_change_callback_tracks_establish_restart_and_stop(monkeypatch):
     procs = [_FakeProc(111), _FakeProc(222)]
     seen: list[tuple[int | None, str | None]] = []
@@ -153,6 +165,16 @@ async def test_monitor_without_gate_still_reconnects(monkeypatch):
 
     assert relay.is_alive is True
     await relay.stop()
+
+
+async def test_reconnect_gate_fault_does_not_log_raw_provider_exception(monkeypatch, caplog):
+    async def gate():
+        raise RuntimeError("private-provider-value")
+    relay, spawned = _supervised(monkeypatch, gate=gate)
+    assert await relay._reconnect_allowed() is None
+    assert not spawned
+    assert "inconclusive" in caplog.text
+    assert "private-provider-value" not in caplog.text
 
 
 async def test_stop_nowait_cancels_monitor_and_kills_owned_tree(monkeypatch):

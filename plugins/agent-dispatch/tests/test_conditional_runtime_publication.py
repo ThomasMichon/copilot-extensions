@@ -241,6 +241,7 @@ fi
     "foreign-directory", "foreign-symlink", "backup-tamper",
     "restore-io", "remove-io",
 ])
+@pytest.mark.timeout(60 if os.name == "nt" else 30)
 def test_outer_recovery_requires_per_file_ownership(tmp_path: Path, case: str) -> None:
     from .test_install_sh_activation_guard import _resolve_bash
 
@@ -252,7 +253,7 @@ def test_outer_recovery_requires_per_file_ownership(tmp_path: Path, case: str) -
     root = tmp_path / "runtime"
     root.mkdir()
     engine = Path(__file__).parents[3] / "libs/installer-engine/installer-engine.sh"
-    result = subprocess.run(
+    result = fixture.run_publication_bash(
         [bash, "-c", f"""
 set -euo pipefail
 . '{engine.as_posix()}'
@@ -329,13 +330,13 @@ else
 fi
 [[ "$(cat "$current")" == 1.0.0 ]]
 """],
-        env=fixture.environment(tmp_path), cwd=tmp_path, capture_output=True,
-        text=True, timeout=20, creationflags=fixture.HEADLESS,
+        tmp_path=tmp_path,
     )
     assert result.returncode == 0, result.stdout + result.stderr
 
 
 @pytest.mark.parametrize("rename_error", [73], ids=["rename-then-error"])
+@pytest.mark.timeout(60 if os.name == "nt" else 30)
 def test_outer_recovery_accepts_rename_then_error(tmp_path: Path, rename_error: int) -> None:
     from .test_install_sh_activation_guard import _resolve_bash
 
@@ -345,7 +346,7 @@ def test_outer_recovery_accepts_rename_then_error(tmp_path: Path, rename_error: 
     root = tmp_path / "runtime"
     root.mkdir()
     engine = Path(__file__).parents[3] / "libs/installer-engine/installer-engine.sh"
-    result = subprocess.run(
+    result = fixture.run_publication_bash(
         [bash, "-c", f"""
 set -euo pipefail
 . '{engine.as_posix()}'
@@ -373,13 +374,13 @@ for directory in "$INSTALL_DIR"/.*.publication-stage.*; do
     [[ ! -e "$directory" && ! -L "$directory" ]]
 done
 """],
-        env=fixture.environment(tmp_path), cwd=tmp_path, capture_output=True,
-        text=True, timeout=20, creationflags=fixture.HEADLESS,
+        tmp_path=tmp_path,
     )
     assert result.returncode == 0, result.stdout + result.stderr
 
 
 @pytest.mark.parametrize("operation", ["replace", "remove"])
+@pytest.mark.timeout(60 if os.name == "nt" else 30)
 def test_owned_recovery_can_retry_after_io_failure(tmp_path: Path, operation: str) -> None:
     from .test_install_sh_activation_guard import _resolve_bash
 
@@ -389,7 +390,7 @@ def test_owned_recovery_can_retry_after_io_failure(tmp_path: Path, operation: st
     root = tmp_path / "runtime"
     root.mkdir()
     engine = Path(__file__).parents[3] / "libs/installer-engine/installer-engine.sh"
-    result = subprocess.run(
+    result = fixture.run_publication_bash(
         [bash, "-c", f"""
 set -euo pipefail
 . '{engine.as_posix()}'
@@ -410,8 +411,7 @@ _runtime_publication_restore
 if [[ '{operation}' == replace ]]; then [[ "$(cat "$target")" == original ]]; else [[ ! -e "$target" ]]; fi
 [[ "$(cat "$current")" == 1.0.0 && ! -e "$evidence" ]]
 """],
-        env=fixture.environment(tmp_path), cwd=tmp_path, capture_output=True,
-        text=True, timeout=20, creationflags=fixture.HEADLESS,
+        tmp_path=tmp_path,
     )
     assert result.returncode == 0, result.stdout + result.stderr
 

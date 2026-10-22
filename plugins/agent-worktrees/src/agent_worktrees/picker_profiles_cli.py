@@ -195,6 +195,9 @@ def _refresh_terminal_profiles(project: str | None = None, *, machine: str | Non
         if manager is None:
             output.warn("Could not refresh Windows Terminal profiles: Worktree Manager is unavailable")
             return False
+        provider_root = getattr(manager, "provider_root", "")
+        if provider_root and not Path(provider_root).is_absolute():
+            raise ValueError("Manager profile provider root is not absolute")
         target_project = cfg.project_name() if project is None else project
         if machine is None:
             machine = cfg.load_config(
@@ -224,6 +227,8 @@ def _refresh_terminal_profiles(project: str | None = None, *, machine: str | Non
         result = subprocess.run(
             arguments,
             **input_kwargs,
+            env={**os.environ, "WORKTREE_MANAGER_ROOT": provider_root}
+            if provider_root else dict(os.environ),
             capture_output=True,
             encoding="utf-8",
             errors="replace",

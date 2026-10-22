@@ -1,0 +1,9 @@
+{
+  "comment": "Queue suite updates through a durable, caller-independent execution owner",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

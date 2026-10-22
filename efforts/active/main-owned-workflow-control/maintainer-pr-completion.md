@@ -50,6 +50,66 @@ These directions authorize the completion slice, not reassignment of other
 participants' release or control responsibilities. The mechanisms and tests
 below are **agent-recommended** ways to implement those requirements.
 
+October 20 deployment acceptance direction, verbatim:
+
+> Just deploy whenever necessary
+
+> All that needs filing and fixing
+
+This authorizes the normal deployment and repair work needed for this slice,
+not ownership transfers, policy exceptions, credential expansion or controller
+activation. The installed-update failures are tracked separately: #6925/#6928
+retain phase-aware watchdog ownership, #7305 with #7420/#7446 retain Manager
+construction and recovery, #6820 retains historical-command reconciliation,
+and #7494/#7495 track the new native dependency and staged-refresh regressions.
+The maintenance-axis gap is tracked by #7510; #7511 owns the narrow repeated
+validator-code import repair exposed by native profile validation.
+Repository editing class, agent exposure and Manager project membership are
+independent; a related worktree-class repository is not automatically a full
+Manager project. Concrete downstream classifications remain downstream.
+
+The first #7510 repair merged in #7547. It distinguishes an omitted repository class from an
+explicit reclassification, including `reference`, while retaining independent
+agent preferences and project membership. Its isolated registry, CLI and
+retained-reference unregister regressions cover persisted class changes,
+metadata retention and invalid-input rejection.
+
+The second #7510 source repair merged in #7552. It adds explicit
+`unregister --keep-repo-entry unchanged`
+retention, preserving repository class, agent preference and metadata while
+removing only full project adoption and an owned project launcher. Existing
+blockers and foreign-launcher ownership checks remain. Registered local
+worktree repositories use the shared explicit-project lifecycle without
+readoption, and absence from the project registry alone is not diagnostic drift.
+Native isolated CLI regressions retain both agent choices, private state,
+related links and an unknown launcher, then create real isolated worktrees
+without recreating project membership. A fresh catalog-only installation-cell
+case initializes its repository identity independently of full adoption before
+loading lifecycle configuration; mismatched identity receipts remain rejected.
+Historical launcher disposition and
+installed acceptance remain open; a reviewed source repair does not authorize
+live command transfer or state deletion.
+
+The #7494 Windows construction repair merged in #7645. It adds an explicit, installation-owned
+signed base-Python preference rather than weakening the required MCP dependency
+closure or changing machine-wide Python discovery. The plugin README owns its
+input, persistence and fail-closed contract. Native PowerShell coverage includes
+publication/failure/supersession boundaries and an opt-in real signed-base/venv
+probe. The source repair is now in qualified Main; actual configured-feed
+dependency installation and running coordinator readiness remain separate
+acceptance gates. The shared #7494 cleanup repair preserves primary exceptions
+and nonzero UV results, independently reports retained-input cleanup failures,
+and fails cleanup-only errors. Its release and installed acceptance remain
+distinct from the signed-base repair. The coordinated updater retains ownership
+of the normal installed-readiness attempt; conditional registry and launcher
+reconciliation stays on hold until the required readiness evidence exists.
+
+The #7441 per-review-layer authority fix is qualified by promotion #7448 and
+present in the selected, importable Worktrees 1.24.106-dev1 runtime. That is
+caller delivery evidence, not whole-update acceptance: Bridge cutover, Dispatch
+construction, command ownership and the first real Manager/profile invocation
+remain open. The CODEOWNER split stays rolled back and the controller stays off.
+
 ## Evidence and the delta
 
 Evidence was read against Dev `37ecc15c8c`; refresh before implementation:

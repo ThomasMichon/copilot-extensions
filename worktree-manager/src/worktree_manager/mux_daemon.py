@@ -36,7 +36,8 @@ from .mux_mapping_registry import (
     register_next_mapping,
     remove_mapping,
 )
-from .self_install import current_version, default_root
+from .self_install import default_root
+from .runtime_identity import route_version, running_generation
 from .restart_observer import RestartObserver
 from .restart_notification_runtime import RestartNotificationRuntime
 
@@ -754,6 +755,7 @@ class MuxDaemonRuntime:
         return {
             "status": "draining" if self.draining else "ready",
             "version": __version__,
+            "runtime_generation": running_generation(),
             "attached_clients": attached_clients,
             "busy": active_handlers > 0,
             "restart_recovery": self.restart_notifications.status,
@@ -873,7 +875,7 @@ def run_daemon_foreground(
         runtime.start()
         if runtime.server is None or runtime.port is None:
             return 1
-        active_version = current_version(resolved_root)
+        active_version = route_version()
         if lease is not None:
             active_endpoint = mux_daemon_cutover.publish_route(
                 runtime.port,

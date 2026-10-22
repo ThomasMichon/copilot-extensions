@@ -253,15 +253,18 @@ class HostedRelease:
                 self.target = "f" * 40
             return result()
         if argv[:2] == ["release", "upload"]:
-            name = Path(argv[-1]).name
-            if self.failure == "upload" and name != artifacts.INDEX_NAME:
-                return result(code=1, error="bundle upload unavailable")
-            payload = (self.directory / name).read_bytes()
-            self.assets[name] = {
-                "id": len(self.assets) + 1, "name": name,
-                "state": "uploaded", "digest": "sha256:" + hashlib.sha256(payload).hexdigest(),
-                "payload": payload,
-            }
+            for path in argv[argv.index("--repo") + 2:]:
+                name = Path(path).name
+                assert name not in self.assets
+                if self.failure == "upload" and name != artifacts.INDEX_NAME:
+                    return result(code=1, error="bundle upload unavailable")
+                payload = (self.directory / name).read_bytes()
+                self.assets[name] = {
+                    "id": max((asset["id"] for asset in self.assets.values()), default=0) + 1,
+                    "name": name,
+                    "state": "uploaded", "digest": "sha256:" + hashlib.sha256(payload).hexdigest(),
+                    "payload": payload,
+                }
             return result()
         if argv[0] != "api":
             raise AssertionError(argv)
@@ -315,12 +318,28 @@ def test_prepare_uploads_signed_index_and_bundles_then_reads_every_byte_with_rea
     create = server.writes[0]
     assert "--prerelease" in create and "--latest=false" in create
     assert all("--clobber" not in argv for argv in server.writes)
+    uploads = [argv for argv in server.writes if argv[:2] == ["release", "upload"]]
+    assert len(uploads) == 1
+    assert set(uploads[0][5:]) == {str(path) for path in directory.iterdir()}
     reads = [argv for argv, options in server.calls if options.get("binary")]
     assert len(reads) == len(server.assets)
     writes = list(server.writes)
     assert readiness.prepare_artifacts(directory, **kwargs) == tag
     assert server.writes == writes
     assert all(options["timeout"] == 120 for _, options in server.calls if "timeout" in options)
+
+
+def test_retry_batches_only_missing_assets_even_when_the_index_is_missing(hosted):
+    directory, server, kwargs = hosted
+    readiness.prepare_artifacts(directory, **kwargs)
+    del server.assets[artifacts.INDEX_NAME]
+    writes = len(server.writes)
+    readiness.prepare_artifacts(directory, **kwargs)
+    assert server.writes[writes:] == [[
+        "release", "upload", server.tag, "--repo", kwargs["repository"],
+        str(directory / artifacts.INDEX_NAME),
+    ]]
+    assert set(server.assets) == {path.name for path in directory.iterdir()}
 
 
 @pytest.mark.parametrize("failure", [

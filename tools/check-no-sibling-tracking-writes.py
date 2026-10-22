@@ -268,6 +268,9 @@ def _check_file(path: Path, *, repo_root: Path = REPO) -> list[Violation]:
             repo_root=repo_root,
         )]
 
+    # Reuse the same breadth-first order without rewalking unchanged AST edges.
+    nodes = tuple(ast.walk(tree))
+    tracking_module_names = frozenset(f"agent_worktrees.{m}" for m in TRACKING_MODULES)
     violations: list[Violation] = []
     # Local names bound to a whole tracking module (from either
     # `from agent_worktrees import tracking` or `import agent_worktrees.tracking
@@ -292,7 +295,7 @@ def _check_file(path: Path, *, repo_root: Path = REPO) -> list[Violation]:
     # narrow but real gap without flagging every non-literal dynamic
     # import in the codebase (which would be far too broad/noisy).
     constant_string_aliases: dict[str, str] = {}
-    for node in ast.walk(tree):
+    for node in nodes:
         if (
             isinstance(node, ast.Assign)
             and len(node.targets) == 1
@@ -317,7 +320,7 @@ def _check_file(path: Path, *, repo_root: Path = REPO) -> list[Violation]:
     # optionally `as X`) let a sibling call it completely bare.
     importlib_aliases: set[str] = {"importlib"}
     import_module_aliases: set[str] = set()
-    for node in ast.walk(tree):
+    for node in nodes:
         if isinstance(node, ast.Import):
             for alias in node.names:
                 if alias.name == "importlib":
@@ -339,16 +342,16 @@ def _check_file(path: Path, *, repo_root: Path = REPO) -> list[Violation]:
     # by name and calling it directly to reach `tracking.save_record`
     # without ever writing `tracking.save_record` itself.
     tracking_helper_aliases: set[str] = set()
-    for node in ast.walk(tree):
+    for node in nodes:
         if (
             isinstance(node, ast.ImportFrom)
-            and node.module in {f"agent_worktrees.{m}" for m in TRACKING_MODULES}
+            and node.module in tracking_module_names
         ):
             for alias in node.names:
                 if alias.name == "_tracking":
                     tracking_helper_aliases.add(alias.asname or "_tracking")
 
-    for node in ast.walk(tree):
+    for node in nodes:
         if isinstance(node, ast.ImportFrom):
             if node.module == "agent_worktrees":
                 for alias in node.names:
@@ -371,9 +374,7 @@ def _check_file(path: Path, *, repo_root: Path = REPO) -> list[Violation]:
                             f"(`from agent_worktrees import {alias.name}`)",
                             repo_root=repo_root,
                         ))
-            elif node.module in {
-                f"agent_worktrees.{m}" for m in TRACKING_MODULES
-            }:
+            elif node.module in tracking_module_names:
                 owning = node.module.rsplit(".", 1)[-1]
                 for alias in node.names:
                     if alias.name == "*":
@@ -530,7 +531,7 @@ def _check_file(path: Path, *, repo_root: Path = REPO) -> list[Violation]:
     # a chain (`a = tracking; b = a; c = b`, or `x = aw.tracking; y = x`)
     # needs more than one pass to fully propagate.
     def _simple_assignments():
-        for node in ast.walk(tree):
+        for node in nodes:
             if (
                 isinstance(node, ast.Assign)
                 and len(node.targets) == 1
@@ -617,10 +618,11 @@ def _check_file(path: Path, *, repo_root: Path = REPO) -> list[Violation]:
                 return f"{label}.{STAMP_QUEUE_ATTR}"
         return None
 
+    assignments = tuple(_simple_assignments())
     changed = True
     while changed:
         changed = False
-        for target, value, lineno in _simple_assignments():
+        for target, value, lineno in assignments:
             if isinstance(value, ast.Name):
                 source = value.id
                 if source in module_aliases and target not in module_aliases:
@@ -694,7 +696,7 @@ def _check_file(path: Path, *, repo_root: Path = REPO) -> list[Violation]:
                     module_aliases[target] = lineno
                     changed = True
 
-    for node in ast.walk(tree):
+    for node in nodes:
         if isinstance(node, ast.Attribute) and node.attr in WRITE_FUNCTIONS:
             label = _module_expr_label(node.value)
             if label is not None:

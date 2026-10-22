@@ -1,0 +1,46 @@
+{
+  "evidence_family": "ordinary-workspace-creation-cli-v1",
+  "request": {
+    "argv": ["--json", "create", "example@local", "--creation-key", "logical-work", "--min-daemon-protocol", "45"],
+    "wire": {
+      "protocol_version": 45,
+      "agent": "example@local",
+      "creation_key": "logical-work",
+      "sender_repo": "example",
+      "caller_id": "caller",
+      "force_new": true
+    }
+  },
+  "server_response": {
+    "session_id": "bridge-a",
+    "status": "idle",
+    "creation": {
+      "status": "complete",
+      "native_session_id": "native-a",
+      "worktree": {"id": "worktree-a", "path": "synthetic-path"}
+    }
+  },
+  "complete_receipt": {
+    "session_id": "bridge-a",
+    "status": "awaiting_first_prompt",
+    "creation": {
+      "status": "complete",
+      "native_session_id": "native-a",
+      "worktree": {"id": "worktree-a", "path": "synthetic-path"}
+    },
+    "connection": {
+      "repo": "example",
+      "worktree_id": "worktree-a",
+      "native_session_id": "native-a",
+      "target_dir": "synthetic-path"
+    },
+    "ready": true
+  },
+  "floor_refusal": {
+    "daemon_protocol": 44,
+    "required_protocol": 45,
+    "status": 426,
+    "creation_requests": 0
+  },
+  "scope": "Independent synthetic expected vectors for the real CLI/parser/client builder; no workspace allocation or native backend is executed."
+}

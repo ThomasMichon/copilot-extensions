@@ -66,7 +66,7 @@ from agent_logger.sync.provenance import (
 from agent_logger.sync.provenance import (
     windows_extended_path as _windows_extended_path,
 )
-from agent_logger.sync.targets import publication_admission
+from agent_logger.sync.targets import protected_publication, publication_admission
 from agent_logger.sync.targets.base import (
     SESSION_INDEX_NAMES,
     DoctorResult,
@@ -76,6 +76,11 @@ from agent_logger.sync.targets.base import (
     SyncStatus,
     Target,
     is_session_path_included,
+)
+from agent_logger.sync.targets.hub_sessions import (
+    _hub_session_age_days,
+    _hub_session_cwd,
+    _parse_iso,
 )
 
 #: Excluded from sync: legacy lock names, ``.lock``/``.tmp`` suffixes, and ``.hold`` (Copilot's restrictive-ACL ``inuse.<pid>.hold`` marker).
@@ -1558,57 +1563,6 @@ def _remove_tree_checked(path: Path, *, allow_nonempty: bool = False) -> None:
         _rmdir_replace_target(directory)
 
 
-def _parse_iso(ts: str) -> datetime | None:
-    """Parse an ISO-8601 timestamp (tolerating a trailing ``Z``)."""
-    raw = (ts or "").strip()
-    if not raw:
-        return None
-    if raw.endswith("Z"):
-        raw = raw[:-1] + "+00:00"
-    try:
-        dt = datetime.fromisoformat(raw)
-    except ValueError:
-        return None
-    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
-
-
-def _hub_session_age_days(session_dir: Path, now: datetime) -> float | None:
-    """Age in days from a hub session's ``workspace.yaml`` timestamps.
-
-    Uses ``updated_at`` then ``created_at`` -- never filesystem mtime, which is
-    unreliable on OneDrive online-only placeholders. ``None`` if no timestamp.
-    """
-    ws_file = session_dir / "workspace.yaml"
-    if not ws_file.is_file():
-        return None
-    try:
-        ws = sessions.parse_workspace_text(
-            ws_file.read_text(encoding="utf-8", errors="replace")
-        )
-    except OSError:
-        return None
-    for key in ("updated_at", "created_at"):
-        dt = _parse_iso(ws.get(key, ""))
-        if dt is not None:
-            return (now - dt).total_seconds() / 86400.0
-    return None
-
-
-def _hub_session_cwd(session_dir: Path) -> str:
-    """Normalized cwd/git_root from a hub session's ``workspace.yaml`` ("" if none)."""
-    ws_file = session_dir / "workspace.yaml"
-    if not ws_file.is_file():
-        return ""
-    try:
-        ws = sessions.parse_workspace_text(
-            ws_file.read_text(encoding="utf-8", errors="replace")
-        )
-    except OSError:
-        return ""
-    raw = (ws.get("cwd") or ws.get("git_root") or "").strip()
-    return os.path.normcase(os.path.normpath(raw)) if raw else ""
-
-
 def _count_sessions(dest: Path) -> int:
     """Count session directories under ``<dest>/session-state``."""
     base = dest / "session-state"
@@ -1670,6 +1624,11 @@ class FilesystemTarget(Target):
         ) as admitted:
             if admitted is not None:
                 return admitted
+            if self.protection is not None and self.protection.enabled:
+                return protected_publication.push(
+                    self, source, dest, machine, include_sessions, detritus,
+                    batch_mode=batch_mode, source_identity=source_identity,
+                )
 
             copied = 0
             nbytes = 0
@@ -2108,6 +2067,7 @@ class FilesystemTarget(Target):
             machine_root,
             Path(".session-sync-rescue-captures"),
         )
+        receipts = protected_publication.receipts_dir(machine_root)
         cutoff = time.time() - retention_days * 86400
         removed = 0
         for d in base.iterdir():
@@ -2129,6 +2089,7 @@ class FilesystemTarget(Target):
                 if snapshots is not None:
                     snapshot_session = snapshots / rescue_session_key(d.name)
                     _remove_path_checked(snapshot_session)
+                protected_publication.forget_receipt(receipts, d.name)
                 removed += 1
         return removed
 
@@ -2244,6 +2205,7 @@ class FilesystemTarget(Target):
         result.add("root resolved", True, str(root))
         result.add("ancestor exists", probe.exists(), str(probe))
         result.add("ancestor writable", os.access(probe, os.W_OK), str(probe))
+        protected_publication.add_doctor_row(self, result, root)
         return result
 
     def describe(self) -> str:

@@ -1,0 +1,9 @@
+{
+  "comment": "Avoid unused commit-ID subprocess reads in landing test helpers while preserving all cases.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

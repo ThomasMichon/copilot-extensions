@@ -1,0 +1,9 @@
+{
+  "comment": "Gate bespoke first-use publication against the selected installation before cold writes; preserve failed stamp selection and legacy PowerShell argument boundaries",
+  "changes": [
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    }
+  ]
+}

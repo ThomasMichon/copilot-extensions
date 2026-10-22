@@ -119,6 +119,12 @@ or invent a flow.
   normal PR merge operation. They remain in the verified policy fingerprint;
   their presence does not waive CI, review authority or any other merge
   requirement, and a policy change before the write still refuses.
+  GitHub's automatic Copilot-review request rule is not an additional merge
+  requirement. A ruleset's review-thread-resolution requirement is satisfied only by a
+  complete, current-head read with every thread explicitly resolved, rechecked
+  before the administrative fallback. Unresolved, unreadable or reopened
+  threads still block; actor-scoped review authority and required CI are never
+  waived by either rule's presence.
 - If `pr-merge` reports "no automerge_label" on a repo you **expected** to be
   `pr-agent-merge`, inspect its effective profile and resolved configuration.
   A stale binding is one possible cause; refresh it through the project's

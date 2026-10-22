@@ -209,7 +209,8 @@ def main(argv: list[str] | None = None) -> int:
             # npm consumes only the retained, admitted manifests, never the
             # concurrently writable project. Lifecycle scripts remain disabled.
             result = subprocess.call(
-                [*command, "ci", "--ignore-scripts", "--include=optional", "--strict-peer-deps"],
+                [*command, "ci", "--ignore-scripts", "--include=optional", "--strict-peer-deps",
+                 "--no-audit"],
                 cwd=snapshot, creationflags=HEADLESS,
             )
             if result != 0:

@@ -20,8 +20,11 @@ from types import ModuleType
 import tomllib
 import versioned_runtime as runtime
 import versioned_runtime_source as runtime_source
-from installer_dependency_policy import RetainedUVInstall, retain_uv_install
-from installer_engine_process import run_owned
+from installer_dependency_policy import (
+    DependencyPolicyError, RetainedUVInstall, _bundled_dbus_next, _contained,
+    _select_uv_executable, retain_uv_install,
+)
+from installer_engine_process import ChildLaunchError, ChildTimeoutExpired, run_owned
 
 _GENERATED_DIRECTORIES = {
     ".git", ".venv", "__pycache__", ".pytest_cache", ".ruff_cache",
@@ -87,7 +90,14 @@ def _package_roots(plugin: Path) -> tuple[Path, ...]:
             path = source["path"]
             if not isinstance(path, str) or not path:
                 raise ValueError(f"Runtime dependency path is invalid for {dependency}: {manifest}")
-            pending.append((root / path, dependency))
+            child = root / path
+            if child.is_file():
+                child = _contained(child, (root,))
+                if not _bundled_dbus_next(key, dependency, child):
+                    raise DependencyPolicyError("local UV artifacts cannot prove release age")
+                # The admitted artifact is already covered by its owning package's files.
+                continue
+            pending.append((child, dependency))
     return tuple(sorted(roots))
 
 
@@ -163,11 +173,17 @@ def _procutil(inputs: FrozenInputs) -> ModuleType:
         data = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
         if data["project"]["name"] == "agent-procutil":
             path = root / "src" / "agent_procutil" / "__init__.py"
-            spec = importlib.util.spec_from_file_location("_installer_procutil", path)
+            namespace = "_installer_procutil_" + hashlib.sha256(str(path).encode("utf-8")).hexdigest()
+            spec = importlib.util.spec_from_file_location(namespace, path)
             if spec is None or spec.loader is None:
                 raise ImportError(f"Cannot load frozen installer process ownership: {path}")
             module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(module)
+            sys.modules[spec.name] = module
+            try:
+                spec.loader.exec_module(module)
+            except BaseException:
+                sys.modules.pop(spec.name, None)
+                raise
             return module
     raise ValueError("Runtime inputs do not declare the canonical agent-procutil dependency")
 
@@ -179,9 +195,12 @@ def _retained_inputs(inputs: FrozenInputs, uv: Path, python: Path, *, refresh: b
     for name in ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV"):
         environment.pop(name, None)
     with retain_uv_install(
-        str(uv.resolve(strict=True)),
-        ["--python", str(python), "--no-sources", "--no-editable", "--link-mode", "copy",
-         *(["--reinstall"] if refresh else []), *map(str, inputs.packages)],
+        str(Path(_select_uv_executable(str(Path.cwd() / uv))).resolve(strict=True)),
+        ["--python", str(python), "--no-editable", "--link-mode", "copy",
+         *(["--reinstall"] if refresh else []),
+         *(argument for package in inputs.packages
+           for argument in ("-r", str(package / "pyproject.toml"))),
+         *map(str, inputs.packages)],
         env=environment, cwd=inputs.plugin,
         trusted_source_roots=inputs.packages,
     ) as transaction:
@@ -216,6 +235,7 @@ def _child(
     argv: list[str], *, inputs: FrozenInputs, descriptor: int,
     timeout: float, delays: tuple[float, ...] = (), transient: str = "",
     environment: dict[str, str] | None = None, cwd: Path | None = None,
+    candidate: Path | None = None,
 ) -> subprocess.CompletedProcess:
     env = dict(os.environ if environment is None else environment)
     if environment is None:
@@ -227,6 +247,10 @@ def _child(
             return run_owned(
                 argv, cwd=cwd or Path(Path(argv[0]).resolve().anchor), env=env, timeout=timeout,
                 procutil=procutil, construction_fd=descriptor,
+                **({
+                    "runtime_root": candidate.parent.parent, "runtime_version": candidate.name,
+                    "runtime_path": Path(runtime.__file__),
+                } if candidate is not None else {}),
             )
         except subprocess.CalledProcessError as error:
             diagnostic = error.stdout + error.stderr
@@ -313,14 +337,14 @@ for name, expected in expected_origins.items():
         _child(
             [str(python), "-I", "-B", "-c", probe, str(slot), module, json.dumps(origins),
              health_callable or "", "fresh" if require_frozen_origin else "reuse"],
-            inputs=inputs, descriptor=descriptor, timeout=timeout,
+            inputs=inputs, descriptor=descriptor, timeout=timeout, candidate=slot,
         )
-    except subprocess.CalledProcessError as error:
+    except (subprocess.CalledProcessError, ChildLaunchError, ChildTimeoutExpired) as error:
         if require_frozen_origin:
             raise
         raise HealthRepairRequired(
             f"Published runtime {slot.name} failed isolated installed health; "
-            f"use distinct-generation repair.\n{error.stderr}"
+            f"use distinct-generation repair.\n{getattr(error, 'stderr', None) or error}"
         ) from error
 
 
@@ -328,13 +352,13 @@ def _construct(
     inputs: FrozenInputs, slot: Path, uv: Path, base_python: Path,
     descriptor: int, timeout: float, *, refresh: bool = False,
 ) -> Path:
-    uv = uv.resolve(strict=True)
+    uv = Path(_select_uv_executable(str(Path.cwd() / uv))).resolve(strict=True)
     base_python = base_python.resolve(strict=True)
     python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     if not refresh or not python.is_file() or not (slot / "pyvenv.cfg").is_file():
         _child(
             [str(base_python), "-I", "-m", "venv", "--without-pip", "--copies", str(slot)],
-            inputs=inputs, descriptor=descriptor, timeout=timeout,
+            inputs=inputs, descriptor=descriptor, timeout=timeout, candidate=slot,
             delays=(0.75, 0.75) if os.name == "nt" else (),
             transient=r"Access is denied|failed to persist temporary file",
         )
@@ -345,7 +369,7 @@ def _construct(
         raise RuntimeError("Runtime construction requires the canonical retained UV transaction")
     _child(
         list(transaction.argv),
-        inputs=inputs, descriptor=descriptor, timeout=timeout,
+        inputs=inputs, descriptor=descriptor, timeout=timeout, candidate=slot,
         delays=(3, 6, 10), transient=r"SRE module mismatch",
         environment=transaction.environment, cwd=transaction.cwd,
     )
@@ -372,7 +396,7 @@ getattr(module, sys.argv[3])(json.loads(sys.argv[4]))
     _child(
         [str(python), "-I", "-B", "-c", probe, str(slot), module, function,
          json.dumps({**data, "frozen_plugin": str(inputs.plugin)})],
-        inputs=inputs, descriptor=descriptor, timeout=timeout,
+        inputs=inputs, descriptor=descriptor, timeout=timeout, candidate=slot,
     )
 
 

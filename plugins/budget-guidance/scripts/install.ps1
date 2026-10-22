@@ -12,6 +12,13 @@ param(
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
+
+if ($env:COPILOT_EXTENSIONS_HUMAN_UTF8 -eq '1') {
+    if (-not [IO.File]::Exists((Join-Path $PSScriptRoot 'installer-human-output.ps1'))) {
+        throw 'Required installer human-output initializer is unavailable.'
+    }
+    . (Join-Path $PSScriptRoot 'installer-human-output.ps1')
+}
 . (Join-Path $PSScriptRoot 'versioned_runtime_native.ps1')
 
 if (-not $PSBoundParameters.ContainsKey('Action')) {
@@ -215,6 +222,8 @@ if (-not $env:COPILOT_PLUGIN_INSTALL_STAGED -or
                 $__wdChild = Start-Process -FilePath $__selfStageExe -PassThru -NoNewWindow `
                     -WorkingDirectory $env:USERPROFILE `
                     -ArgumentList $__selfStageArgs
+                # Windows PowerShell must retain the handle before waiting to preserve ExitCode.
+                $null = $__wdChild.Handle
                 if ($__wdDeadline -gt 0 -and -not $__wdChild.WaitForExit($__wdDeadline * 1000)) {
                     try { & taskkill.exe /PID $__wdChild.Id /T /F 2>&1 | Out-Null } catch {}
                     try { Stop-Process -Id $__wdChild.Id -Force -ErrorAction SilentlyContinue } catch {}
@@ -602,7 +611,11 @@ function Invoke-VersionedSlotClean {
     $py = Get-BootstrapPython
     if (-not $py) { throw 'Construction requires a bootstrap Python interpreter' }
     if (-not (Get-Command Start-RuntimeConstruction -ErrorAction SilentlyContinue)) {
-        $helpers = (& $py -I $vr --root $InstallDir construction-shell --shell ps1 | Out-String)
+        $nativeError = ''
+        $helpers = (Invoke-Hidden -FilePath $py `
+            -ArgList @('-I', $vr, '--root', $InstallDir, 'construction-shell', '--shell', 'ps1') `
+            -ErrorOutput ([ref]$nativeError) | Out-String)
+        if ($nativeError) { [Console]::Error.Write($nativeError) }
         if ($LASTEXITCODE -ne 0) { throw 'Canonical construction adapter is unavailable' }
         Invoke-Expression $helpers
     }
@@ -930,9 +943,7 @@ if ($Action -eq 'uninstall') {
     exit 0
 }
 
-Write-Host ''
-Write-Host '=== budget-guidance install ===' -ForegroundColor Cyan
-Write-Host ''
+Write-Step 'budget-guidance install'
 
 if (-not (Test-Path $PkgSrcDir)) {
     Write-Fail "Package source not found at $PkgSrcDir"
@@ -1143,8 +1154,7 @@ if ($pathDirs -contains $LocalBin) {
     }
 }
 
-Write-Host ''
-Write-Host '=== budget-guidance install complete ===' -ForegroundColor Cyan
+Write-Ok 'budget-guidance install'
 } finally {
     Stop-RuntimeConstruction
 }

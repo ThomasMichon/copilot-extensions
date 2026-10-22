@@ -32,6 +32,7 @@ dependencies = [
     "pyyaml>=6.0",
     "packaging>=25.0",
     "pydantic>=2.0",
+    "typing-extensions>=4.12",
     "agent-client-protocol>=0.12.0,<1",
     "agent-ssh-manager",
     "agent-credential-relay",
@@ -44,9 +45,11 @@ dependencies = [
     "agent-plugin-activation",
     "agent-remote-login-shell",
     "agent-machine-transport",
+    "agent-worktree-identity",
 ]
 
 [tool.uv.sources]
+agent-worktree-identity = { path = "../../libs/worktree-identity", editable = true }
 # Always resolve the vendored lib from the local path, never an index.
 # The distribution is named agent-ssh-manager (not the squatted PyPI name
 # "ssh-manager") to prevent dependency-confusion; the import module stays

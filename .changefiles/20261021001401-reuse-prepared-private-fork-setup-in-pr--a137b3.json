@@ -1,0 +1,9 @@
+{
+  "comment": "Reuse prepared private fork setup in PR rerun consumers while preserving live publication and repoint checks.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

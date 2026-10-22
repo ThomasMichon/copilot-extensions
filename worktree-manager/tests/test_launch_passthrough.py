@@ -27,8 +27,11 @@ Two guards, mirroring test_launch_session_unwrap.py:
 
 from __future__ import annotations
 
+import json
+import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -134,3 +137,153 @@ def test_launcher_still_splits_and_forwards_passthrough():
     assert "$CopilotPassthrough += $arg" in text
     # the collected passthrough is appended to the Copilot command
     assert "$cmd += $CopilotPassthrough" in text
+
+
+@pytest.mark.parametrize("shell", ["pwsh", "powershell", "bash"])
+@pytest.mark.parametrize("stdio", [False, True])
+def test_native_launcher_logs_passthrough_count_not_values(tmp_path, shell, stdio):
+    if shell == "bash" and os.name != "posix":
+        pytest.skip("POSIX shell contract")
+    if shell != "bash" and not shutil.which(shell):
+        pytest.skip("PowerShell unavailable")
+    private = "private-launch-fixture space ' ; $ ` &"
+    passthrough = ["--prompt", private, "--allow-all"]
+    if stdio:
+        passthrough += ["--stdio"]
+    argv = ["--json", "--worktree-id", "fixture", "--", *passthrough]
+    env = dict(os.environ, TEMP=str(tmp_path), TMP=str(tmp_path), TMPDIR=str(tmp_path))
+    env.pop("WORKTREE_SETUP_LOG", None)
+    env.pop("AGENT_WORKTREES_LAUNCH_TRACE", None)
+    if shell == "bash":
+        source = _LAUNCH_PS1.with_suffix(".sh").read_text("utf-8")
+        prefix = source[:source.index("# Recovery escape hatch resolves")]
+        script = tmp_path / "prefix.sh"
+        script.write_text(
+            prefix + '\nprintf "%s\\0" "$@" __PASSTHROUGH__ "${COPILOT_PASSTHROUGH[@]}"\n',
+            encoding="utf-8",
+        )
+        command = ["/bin/bash", str(script), *argv]
+    else:
+        source = _LAUNCH_PS1.read_text("utf-8")
+        prefix = source[:source.index("# Recovery fast-path: skip resolve/picker")]
+        script = tmp_path / "prefix.ps1"
+        script.write_text(
+            prefix + "\nConvertTo-Json -Compress -InputObject "
+            "@{filtered=@($CopilotArgs);passthrough=@($CopilotPassthrough)}\n",
+            encoding="utf-8-sig",
+        )
+        payload = tmp_path / "arguments.json"
+        payload.write_text(json.dumps(argv), encoding="utf-8")
+        driver = tmp_path / "driver.ps1"
+        driver.write_text(
+            "$forward=@(foreach($item in (Get-Content -Raw -LiteralPath $args[1] | ConvertFrom-Json)){[string]$item})\n"
+            "& $args[0] @forward\n",
+            encoding="utf-8",
+        )
+        command = [shell, "-NoProfile", "-File", str(driver), str(script), str(payload)]
+    result = subprocess.run(
+        command, capture_output=True, text=True, encoding="utf-8", timeout=15, env=env,
+        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stderr == ""
+    if shell == "bash":
+        assert result.stdout.split("\0") == [
+            "--json", "--worktree-id", "fixture", "__PASSTHROUGH__", *passthrough, "",
+        ]
+    else:
+        assert json.loads(result.stdout) == {
+            "filtered": ["--json", "--worktree-id", "fixture"], "passthrough": passthrough,
+        }
+    logs = list((tmp_path / "worktree-setup-logs").glob("setup-*.log"))
+    assert len(logs) == 1
+    log = logs[0].read_text("utf-8-sig")
+    assert private not in log
+    assert f"Copilot passthrough: {len(passthrough)} argument(s)" in log
+
+
+@pytest.mark.parametrize("shell", ["pwsh", "powershell"])
+def test_native_pane_preparation_logs_count_without_changing_argv(tmp_path, shell):
+    if not shutil.which(shell):
+        pytest.skip("PowerShell unavailable")
+    source = _LAUNCH_PS1.read_text("utf-8")
+    prefix = source[:source.index("# Recovery fast-path: skip resolve/picker")]
+    start = source.index('    Write-SetupLog "psmux: creating session $sessName"')
+    end = source.index("\n    $paneWrapper =", start)
+    expected = ["program", "--prompt", "private-pane-fixture ' ; $ ` &", "", "two words"]
+    payload = tmp_path / "command.json"
+    payload.write_text(json.dumps(expected), encoding="utf-8")
+    fixture = tmp_path / "pane.ps1"
+    fixture.write_text(
+        prefix
+        + "\n$sessName='fixture-session'\n"
+        "$cmd=@(foreach($item in (Get-Content -Raw -LiteralPath $env:FIXTURE_COMMAND | ConvertFrom-Json)){[string]$item})\n"
+        + source[start:end]
+        + '\n"ARGV=" + (ConvertTo-Json -InputObject @($paneCmd) -Compress)\n',
+        encoding="utf-8-sig",
+    )
+    result = subprocess.run(
+        [shell, "-NoProfile", "-File", str(fixture)],
+        capture_output=True, text=True, encoding="utf-8", timeout=15,
+        env=dict(os.environ, TEMP=str(tmp_path), TMP=str(tmp_path), FIXTURE_COMMAND=str(payload)),
+        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stderr == ""
+    forwarded = [line[5:] for line in result.stdout.splitlines() if line.startswith("ARGV=")]
+    assert len(forwarded) == 1
+    assert json.loads(forwarded[0]) == expected
+    logs = list((tmp_path / "worktree-setup-logs").glob("setup-*.log"))
+    assert len(logs) == 1
+    log = logs[0].read_text("utf-8-sig")
+    assert expected[2] not in log
+    assert "psmux: pane command: 5 argument(s)" in log
+
+
+@pytest.mark.parametrize("shell", ["pwsh", "powershell"])
+@pytest.mark.parametrize("exit_code", [0, 7])
+def test_native_direct_launch_logs_count_and_preserves_child_argv(tmp_path, shell, exit_code):
+    if os.name != "nt" or not shutil.which(shell):
+        pytest.skip("Windows launcher contract")
+    source = _LAUNCH_PS1.read_text("utf-8")
+    prefix = source[:source.index("# Recovery fast-path: skip resolve/picker")]
+    append_start = source.index("# Append copilot passthrough args (from after -- separator)")
+    append_end = source.index("\nif ($ahpArgs.Count", append_start)
+    direct_start = source.index("# ── Direct launch (explicit --no-mux only)")
+    expected = ["--prompt", "private-direct-fixture space ' ; $ ` &", "--allow-all"]
+    payload = tmp_path / "arguments.json"
+    payload.write_text(json.dumps(expected), encoding="utf-8")
+    captured = tmp_path / "captured.json"
+    child = tmp_path / "direct-child.py"
+    child.write_text(
+        "import json,sys\nfrom pathlib import Path\n"
+        "Path(sys.argv[1]).write_text(json.dumps(sys.argv[2:]),encoding='utf-8')\n"
+        f"sys.exit({exit_code})\n",
+        encoding="utf-8",
+    )
+    fixture = tmp_path / "direct.ps1"
+    fixture.write_text(
+        prefix
+        + "\n$noMux=$true; $ahpArgs=@()\n"
+        "$plan=[pscustomobject]@{worktree_id='fixture';post_exit=$false}\n"
+        "function Write-ActivityLog { param($Event,$WorktreeId,$Fields) }\n"
+        "$CopilotPassthrough=@(foreach($item in "
+        "(Get-Content -Raw -LiteralPath $env:FIXTURE_ARGUMENTS | ConvertFrom-Json)){[string]$item})\n"
+        f"$cmd=@('{getattr(sys, '_base_executable', sys.executable)}','{child}','{captured}')\n"
+        + source[append_start:append_end]
+        + "\n" + source[direct_start:],
+        encoding="utf-8-sig",
+    )
+    result = subprocess.run(
+        [shell, "-NoProfile", "-File", str(fixture)],
+        capture_output=True, text=True, encoding="utf-8", timeout=15, cwd=tmp_path,
+        env=dict(os.environ, TEMP=str(tmp_path), TMP=str(tmp_path), FIXTURE_ARGUMENTS=str(payload)),
+        creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    assert result.returncode == exit_code, result.stdout + result.stderr
+    assert json.loads(captured.read_text("utf-8")) == expected
+    logs = list((tmp_path / "worktree-setup-logs").glob("setup-*.log"))
+    assert len(logs) == 1
+    log = logs[0].read_text("utf-8-sig")
+    assert expected[1] not in log + result.stdout + result.stderr
+    assert "Handing off to setup script: 6 argument(s)" in log

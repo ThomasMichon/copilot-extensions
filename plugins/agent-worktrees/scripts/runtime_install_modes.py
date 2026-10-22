@@ -169,6 +169,9 @@ def run_owned(
     candidate_plugin = publication_source_root if publication_source_root is not None else plugin
     os.environ["AGENT_WORKTREES_PAYLOAD_ROOT"] = str(governance.payload)
     with ExitStack() as custody:
+        # Keep namespace custody across construction and nested settlement;
+        # a manager already holds these locks before starting its child.
+        custody.enter_context(governance.held(timeout=wait_timeout))
         guard = cutover._acquire_cutover_lock(
             root / "status-monitor-routing",
             timeout_s=wait_timeout,
@@ -258,7 +261,7 @@ def run_owned(
                 (publication_source_root if publication_source_root is not None else candidate.frozen_plugin)
                 if frontend is not None else None
             ),
-            child_timeout=child_timeout, base_python=base_python,
+            child_timeout=child_timeout, base_python=base_python, governance=governance,
         )
         result["reused"] = candidate.reused
         return result
@@ -367,6 +370,7 @@ def _release(
         cutover_guard=guard,
         lifecycle_slot=control_slot,
         package_version=package_version,
+        governance=governance,
     )
     with governance.held(timeout=wait_timeout):
         if lifecycle.runtime.read_dev_claim(root, strict=True) != claim:

@@ -243,6 +243,7 @@ class RegisteredPivot:
     #: ``None`` => this pivot offers no create action (today's default for
     #: every existing manifest).
     create_action: CreateAction | None = None
+    view_actions: tuple[PivotAction, ...] = ()
     placement: str = "left"
 
     @property
@@ -636,6 +637,12 @@ def parse_manifest(data: Mapping[str, object], *, name: str, source_path: str) -
         worker=_parse_worker(data.get("worker"), id_field=id_field),
         create_action=parse_create_action(
             data.get("create_action"), where="`create_action`"
+        ),
+        view_actions=(
+            parse_manifest(
+                {"label": label, "list": list_cmd, "actions": data["view_actions"]},
+                name=name, source_path=source_path,
+            ).actions if "view_actions" in data else ()
         ),
     )
 

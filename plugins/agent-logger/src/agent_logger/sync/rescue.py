@@ -506,6 +506,14 @@ def push_rescues(
     """Validate provider captures and publish the newest session lineage."""
     if provider != SUPPORTED_PROVIDER:
         raise RescueSourceError(f"unsupported rescue provider: {provider}")
+    protection = cfg.sync_protection
+    if protection.enabled:
+        # Rescued captures would reach the destination outside the protected
+        # copy path, so refuse rather than publish them unprotected.
+        raise RescueSourceError(
+            "rescue publication is not supported while session protection "
+            f"is enabled ({protection.describe()})"
+        )
     venue_id(target_prefix, "probe")
     _validate_home(cfg.home)
     summary = RescuePushSummary()

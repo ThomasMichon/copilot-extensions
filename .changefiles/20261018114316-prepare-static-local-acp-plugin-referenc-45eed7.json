@@ -1,0 +1,21 @@
+{
+  "comment": "Prepare static local ACP plugin references before launch; preserve remote-copy defaults and explicit child environments. Recognize verified output-free native bootstrap admission in customization scans.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-containers",
+      "type": "patch"
+    },
+    {
+      "plugin": "customizing-copilot",
+      "type": "patch"
+    }
+  ]
+}

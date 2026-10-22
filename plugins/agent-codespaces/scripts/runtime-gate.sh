@@ -31,15 +31,24 @@ json_get() {
     LC_ALL=C awk -f "$JSON_QUERY" -v mode=get -v "query_path=$2" <<<"$1"
 }
 
+json_type() {
+    LC_ALL=C awk -f "$JSON_QUERY" -v mode=type -v "query_path=$2" <<<"$1"
+}
+
 resolve_runtime() {
     AGENT_RT_PY=""
     AGENT_RT_ROOT="$RUNTIME_ROOT"
     export AGENT_RT_ROOT
+    local AGENT_RT_RESOLVE_TRACE_MODE="${1:-ready}"
+    # Slot misses are resolver control flow, not this dispatcher's errexit failures.
     # shellcheck source=/dev/null
-    . "$RUNTIME_RESOLVER"
+    if ! . "$RUNTIME_RESOLVER"; then
+        printf '[agent-codespaces] runtime resolver failed. Re-enable/update the plugin, then retry.\n' >&2
+        exit 126
+    fi
 }
 
-run_runtime() {
+apply_runtime_env() {
     export AGENT_CODESPACES_HOME="$RUNTIME_ROOT"
     export AGENT_CODESPACES_PAYLOAD_ROOT="$PAYLOAD_ROOT"
     if [[ -n "$CONTEXT" ]]; then
@@ -47,6 +56,10 @@ run_runtime() {
     else
         unset COPILOT_EXTENSIONS_CONTEXT
     fi
+}
+
+run_runtime() {
+    apply_runtime_env
     exec "$AGENT_RT_PY" -m agent_codespaces "$@"
 }
 
@@ -55,6 +68,10 @@ run_runtime() {
     printf '[agent-codespaces] installation-context runtime support is unavailable.\n' >&2
     exit 126
 }
+if ! grep -Fq '# Trace contract: normal/read-only/ready-v1' "$RUNTIME_RESOLVER"; then
+    printf '[agent-codespaces] read-only runtime resolver is unavailable. Re-enable/update the plugin, then retry.\n' >&2
+    exit 126
+fi
 
 RUNTIME_ROOT="$LEGACY_ROOT"
 CONTEXT=""
@@ -141,6 +158,14 @@ else
     exit 126
 fi
 
+if [[ -z "$CONTEXT" ]]; then
+    RUNTIME_ROOT="$(json_get "$RESOLUTION" "$(json_path legacy root)" 2>/dev/null || true)"
+    if [[ "$RUNTIME_ROOT" != /* ]]; then
+        printf '[agent-codespaces] installation context is missing the canonical legacy root.\n' >&2
+        exit 126
+    fi
+fi
+
 resolve_runtime
 if [[ -n "$AGENT_RT_PY" ]]; then
     run_runtime "$@"
@@ -151,6 +176,30 @@ if [[ -n "${AGENT_CODESPACES_NO_SELFPROVISION:-}" ]]; then
     exit 1
 fi
 
+PUBLICATION_ARGS=(
+    probe-plugin-publication --payload-root "$PAYLOAD_ROOT"
+    --plugin-id agent-codespaces --legacy-root "$RUNTIME_ROOT"
+)
+if [[ -n "$CONTEXT" ]]; then
+    PUBLICATION_ARGS+=(--context "$CONTEXT" --durable-home "$VALIDATION_DURABLE_HOME")
+fi
+PUBLICATION="" PUBLICATION_RC=0
+PUBLICATION="$(bash "$MODE_RUNNER" "${PUBLICATION_ARGS[@]}")" || PUBLICATION_RC=$?
+PUBLICATION_ROOT_PATH="$(json_path legacy root)"
+[[ -z "$CONTEXT" ]] || PUBLICATION_ROOT_PATH="$(json_path runtimeRoot)"
+if [[ "$PUBLICATION_RC" != 0 ||
+      "$(json_type "$PUBLICATION" "$(json_path deployment allowPluginPublication)" 2>/dev/null || true)" != boolean ||
+      "$(json_get "$PUBLICATION" "$(json_path deployment allowPluginPublication)" 2>/dev/null || true)" != true ||
+      "$(json_get "$PUBLICATION" "$PUBLICATION_ROOT_PATH" 2>/dev/null || true)" != "$RUNTIME_ROOT" ||
+      "$(json_get "$PUBLICATION" "$(json_path deployment path)" 2>/dev/null || true)" != "$RUNTIME_ROOT/runtime-deployment.json" ]]; then
+    printf '[agent-codespaces] Runtime publication refused: %s Use explicit installation management to install or repair this runtime.\n' \
+        "$PUBLICATION" >&2
+    exit 3
+fi
+resolve_runtime normal
+if [[ -n "$AGENT_RT_PY" ]]; then
+    run_runtime "$@"
+fi
 mkdir -p "$RUNTIME_ROOT"
 STATUS_PATH="$RUNTIME_ROOT/.provision-status"
 _lock_link=""
@@ -199,6 +248,7 @@ printf '::agent-provisioning:: plugin=%s eta_seconds=120 reason=first-use status
     'agent-codespaces' "$STATUS_PATH" >&2
 printf 'provisioning %s\n' "$(date -u +%FT%TZ 2>/dev/null)" > "$STATUS_PATH" 2>/dev/null || true
 
+apply_runtime_env
 set +e
 bash "$INSTALLER" provision --install-dir "$RUNTIME_ROOT" >&2
 PROVISION_EXIT=$?

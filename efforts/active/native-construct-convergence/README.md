@@ -5,10 +5,11 @@
 - **Branch(es):** per-phase `pr/<slug>` worktrees targeting `dev`
 - **Created:** 2026-08-23
 - **Status:** Active <!-- Draft | Active | Blocked | Done -->
-- **Umbrella issue:** [#985](https://github.com/ThomasMichon/copilot-extensions/issues/985)
+- **Historical umbrella:** [#985](https://github.com/ThomasMichon/copilot-extensions/issues/985);
+  live phase coordination uses this effort's Journal and open execution issues.
 - **Sub-issues:**
   [#986](https://github.com/ThomasMichon/copilot-extensions/issues/986) (Phase A — worktree layout),
-  [#987](https://github.com/ThomasMichon/copilot-extensions/issues/987) (closed by an unrelated artifact; Phase B remains under #985),
+  [#987](https://github.com/ThomasMichon/copilot-extensions/issues/987) (closed by an unrelated artifact; Phase B remains in this Plan),
   [#988](https://github.com/ThomasMichon/copilot-extensions/issues/988) (Phase C — delegate create, deferred),
   [#989](https://github.com/ThomasMichon/copilot-extensions/issues/989) (Phase D — steering onto cloud/agent-host)
 - **Vision:** **vision-closing** against the new
@@ -50,7 +51,7 @@ vision, under two firm guardrails the vision states as Behaviors:
 
 | Participant | Role in this effort | Reached via |
 |-------------|---------------------|-------------|
-| Claimed phase lead | Owns one declared implementation phase through review, validation, and merge | claim on `#985` and a managed per-phase worktree |
+| Claimed phase lead | Owns one declared implementation phase through review, validation, and merge | open phase execution issue recorded in this Journal and a managed per-phase worktree |
 | Sweep audit lead | Reconciles source evidence and tracker disposition without assuming phase implementation ownership | `vision-backport-sweep`, `#5456` |
 
 ## Context
@@ -97,7 +98,7 @@ with its owning plugins, not inferred from this mapping table.
 ## Request
 
 The original effort records the requested intent through its Guiding Intent and
-umbrella `#985`: converge on released native constructs without losing existing
+historical umbrella `#985`: converge on released native constructs without losing existing
 harness capabilities, with feature-detected fallback. It does not preserve the
 operator's verbatim wording; this is an agent-authored summary, not a quotation
 or a newly requested feature. The source audit above changes neither that intent
@@ -120,7 +121,7 @@ preserves every existing harness capability before it lands.
       preserved across the layout change. Closes
       §Behaviors/`no-capability-regression` for this slice.
 
-### Phase B — Roots, project & session-identity mapping (under #985; #987 closed)
+### Phase B — Roots, project & session-identity mapping (this Plan; #987 closed)
 - [ ] Map the harness's **source root** and **worktree root** onto the CLI's
       native roots (mapping now; delegation deferred to Phase C). Closes
       native-convergence §Concepts/native-source-&-worktree-roots,
@@ -181,15 +182,72 @@ preserves every existing harness capability before it lands.
 ## Coordination
 
 `copilot-extensions` is public and may be driven from more than one private
-control repo. **[#985](https://github.com/ThomasMichon/copilot-extensions/issues/985)
-is the shared coordination token** for this convergence work; claim a slice
-there (comment/assign) before starting, and land changes serially through the
-PR-required `dev`. Downstream private plans may **link to** this effort and its
-issues; the public artifacts stay self-contained and general-purpose.
+control repo. Record the exact phase, existing owner and open execution issue in
+this Journal before implementation; claim that issue and preserve its source
+boundaries. Reuse an existing matching open issue, including assigned #1266 for
+Phase D. If no open token owns a phase, use the existing intake process to
+identify its bounded implementation issue before work starts. Historical #985
+retains request and acceptance provenance, not live execution authority.
+Land changes serially through PR-required `dev`. Downstream private plans may
+link to this effort and its issues; public artifacts remain self-contained.
+
+## Preserved native-convergence acceptance from #985
+
+This is an agent-recommended administrative mapping of existing acceptance.
+The existing Active effort remains the complete canonical Plan and Validation
+home, not a completed native capability or a new umbrella. #985 stays open
+until this record clears normal review, merges and is read back. Superseding
+its tracker must not invalidate a held source or assign work to a closed token.
+Preserve all phase leads, claims and rollout holds, especially assigned #1266
+and its AHP effort. #987's unrelated closure and source audits are not Phase B
+completion.
+
+- [ ] Phase A establishes the actual released native layout and mutual
+  discovery before choosing migration. The old nested-layout suggestion is
+  conditional, not an instruction to rewrite the sibling default. Preserve
+  IDs, checkouts and compatibility without stranded objects; prove CLI-created
+  and harness-created mutual discovery, including a fresh-machine case.
+- [ ] Phase B maps source/worktree roots, project/adoption/catalogued location
+  and session/workspace identity onto released native constructs through one
+  canonical owner, not a shadow copy. Retain #987's unresolved mapping here.
+  Already-consumed session metadata is partial evidence, not the complete
+  roots/catalogue schema contract.
+- [ ] Establish actual released working-boundary semantics separately from
+  folder trust, launch CWD, allowed permissions and repository adoption. Do not
+  infer that boundary from help text or incidental native metadata.
+- [ ] Phase C remains deferred until native create/switch and root semantics
+  are released and stable. Detect capabilities, not mere command presence;
+  delegate only supported primitives and retain older/absent-native harness
+  creation/switch fallbacks. Direct Git creation is not native delegation.
+- [ ] Phase D preserves assigned #1266 and its existing AHP effort: map live
+  coordination/handoff onto released native cloud/agent-host surfaces through
+  the shared hosting boundary while retaining cross-machine reach, agency,
+  claims and missing capabilities. Unreleased endpoints cannot become mandatory;
+  protocol scaffolding is not native runtime acceptance.
+- [ ] Each phase preserves finalize/cleanup, asserted disposition, resource
+  claims, Picker, PR gates, clone/source policy, cross-machine coordination and
+  independently usable harness value. Prove no regression for the changed scope,
+  not only one happy path or a completed phase/PR label.
+- [ ] Retain feature-detected older/absent fallback, staged released-surface
+  adoption, reversibility without taking over native objects, compatibility
+  and mutual discovery. Preserve the original fresh-box/no-stranded-state
+  validation and all declared native/installed gates with their owners,
+  without adding an unrelated universal host campaign.
+- [ ] Preserve the complete existing Plan/Validation and deferred-intake
+  ownership gate. #5783/#5814 audits do not implement phases; a completed child
+  does not complete this effort. Source publication grants no live migration,
+  permission change, native-object mutation or rollout. Record evidence and
+  remaining ownership before resolving a phase.
+
+All residuals remain planned. This record performs no CLI probe, migration,
+session steering, file/registry/permission operation, authentication,
+assigned-source release or runtime change.
+
+<!-- backlog-reconciliation:7556:transfer:985:to:efforts/active/native-construct-convergence/README.md -->
 
 ## Proposal
 
-Retain the staged convergence plan and existing phase ownership under `#985`.
+Retain the staged convergence plan and phase ownership recorded in this Journal.
 Before implementing a native mapping or migration, establish the released
 contract that phase relies on and prove the no-regression and fallback gates
 above. The sweep's source-audit reconciliation is not approval to implement an
@@ -197,6 +255,11 @@ unproved native API, nor completion of an implementation phase.
 
 ## Journal
 
+- **2026-10-22** — Recorded complete original/inherited #985 acceptance for
+  reviewed tracker consolidation. Live phase ownership remains recorded in this
+  Journal and open execution issues; assigned #1266 and its AHP effort remain
+  untouched. All implementation, fallback and validation gates stay open;
+  this documentation record does not itself close #985.
 - **2026-10-09** — Recorded the sweep's remaining root/catalog/working-boundary
   source audit. Native identity consumption is concrete; native root/catalog
   mapping, mutual discovery, and working-boundary semantics remain unproved.

@@ -18,7 +18,10 @@
 # marker fails.
 #
 # Compatible with PowerShell 5.1+ and pwsh 7+.
+param([ValidateSet('normal', 'read-only', 'ready')][string]$TraceMode = 'normal')
+
 $AwPy = $null
+$_awDeferredTrace = [System.Collections.Generic.List[string]]::new()
 $_awr = if ($env:AGENT_RT_ROOT) {
   $env:AGENT_RT_ROOT
 } else {
@@ -55,10 +58,10 @@ function _Aw-WriteBootTraceRecord(
   [string]$version = '',
   [string]$dispatchPath = ''
 ) {
+  if ($TraceMode -eq 'read-only') { return }
   if (-not $_awBootTraceLogPath) { return }
   if (-not [IO.Directory]::Exists($_awr)) { return }
   try {
-    [IO.Directory]::CreateDirectory((Split-Path -Parent $_awBootTraceLogPath)) | Out-Null
     $parts = [System.Collections.Generic.List[string]]::new()
     $parts.Add('"ts":"' + (_Aw-EscapeBootTraceJson (_Aw-BootTraceIsoTimestamp)) + '"')
     $parts.Add('"event":"boot_trace"')
@@ -84,6 +87,11 @@ function _Aw-WriteBootTraceRecord(
       $parts.Add('"path":"' + (_Aw-EscapeBootTraceJson $dispatchPath) + '"')
     }
     $line = '{' + ($parts -join ',') + '}'
+    if ($TraceMode -eq 'ready') {
+      $_awDeferredTrace.Add($line)
+      return
+    }
+    [IO.Directory]::CreateDirectory((Split-Path -Parent $_awBootTraceLogPath)) | Out-Null
     [IO.File]::AppendAllText(
       $_awBootTraceLogPath,
       $line + [Environment]::NewLine,
@@ -213,3 +221,13 @@ if ($AwPy) {
 }
 
 $AgentRtPy = $AwPy
+if ($TraceMode -eq 'ready' -and $AwPy -and $_awDeferredTrace.Count) {
+  try {
+    [IO.Directory]::CreateDirectory((Split-Path -Parent $_awBootTraceLogPath)) | Out-Null
+    [IO.File]::AppendAllText(
+      $_awBootTraceLogPath,
+      ($_awDeferredTrace -join [Environment]::NewLine) + [Environment]::NewLine,
+      [Text.UTF8Encoding]::new($false)
+    )
+  } catch {}
+}

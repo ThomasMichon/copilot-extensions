@@ -1,0 +1,13 @@
+{
+  "comment": "Persist detached Windows installer output in a launch-owned, timed log without changing installer admission",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

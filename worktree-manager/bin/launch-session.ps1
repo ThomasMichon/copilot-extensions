@@ -49,6 +49,7 @@ function Format-SetupLine {
         [string]$State = '',
         [switch]$Completed
     )
+    $explicitState = [bool]$State
     if (-not $State) {
         $State = switch ($Level) { 'WARN' { 'warning' } 'ERROR' { 'failed' } default { 'running' } }
     }
@@ -60,7 +61,17 @@ function Format-SetupLine {
         if ($line -cmatch '^\[\d{2}:\d{2}:\d{2}\.\d{3}Z\] .+ \[(?:elapsed|duration) \d+\.\d+s\]$') {
             $line
         } else {
-            "[$stamp] $Scope $State $line [$kind ${secondsText}s]"
+            $lineState = $State
+            if (-not $Completed -and -not $explicitState -and $Level -eq 'INFO' -and
+                $line -cmatch '^[ \t]*(?:\[(OK|SKIP|WARN|FAIL)\]|(\.\.\.))[ \t]+(.*)$') {
+                $marker = if ($Matches[1]) { $Matches[1] } else { $Matches[2] }
+                $line = $Matches[3]
+                $lineState = switch ($marker) {
+                    'OK' { 'done' } 'SKIP' { 'skipped' } 'WARN' { 'warning' }
+                    'FAIL' { 'failed' } '...' { 'running' }
+                }
+            }
+            "[$stamp] $Scope $lineState $line [$kind ${secondsText}s]"
         }
     }
 }
@@ -72,7 +83,7 @@ function Write-SetupLog {
         [string]$Scope = 'launch', [string]$State = '', [switch]$Completed
     )
     $lines = @(Format-SetupLine $Message $Level -Seconds $Seconds -Scope $Scope -State $State -Completed:$Completed)
-    try { Add-Content -Path $script:SetupLog -Value $lines -ErrorAction SilentlyContinue } catch {}
+    try { Add-Content -LiteralPath $script:SetupLog -Value $lines -Encoding utf8 -ErrorAction SilentlyContinue } catch {}
 }
 
 function Write-LaunchTrace {
@@ -141,7 +152,7 @@ try {
         "# Host: $env:COMPUTERNAME"
         ""
     ) -join "`n"
-    Set-Content -Path $script:SetupLog -Value $header -ErrorAction SilentlyContinue
+    Set-Content -LiteralPath $script:SetupLog -Value $header -Encoding utf8 -ErrorAction SilentlyContinue
     # Prune old logs (keep last 10)
     Get-ChildItem $script:SetupLogDir -Filter 'setup-*.log' |
         Sort-Object LastWriteTime -Descending |
@@ -242,7 +253,7 @@ $CopilotArgs = $FilteredArgs
 Write-SetupLog 'launch-session.ps1 starting'
 Write-LaunchTrace 'launcher_start'
 if ($CopilotPassthrough.Count -gt 0) {
-    Write-SetupLog "Copilot passthrough args: $($CopilotPassthrough -join ' ')"
+    Write-SetupLog "Copilot passthrough: $($CopilotPassthrough.Count) argument(s)"
 }
 
 # When launched in --stdio mode (ACP protocol), stdout is the JSON-RPC
@@ -546,7 +557,7 @@ function Push-UpdateEnvironment {
     if ($Update -and $Update.PSObject.Properties['unset_environment']) {
         foreach ($key in @($Update.unset_environment | Where-Object { $_ })) {
             $saved[$key] = [Environment]::GetEnvironmentVariable($key, 'Process')
-            [Environment]::SetEnvironmentVariable($key, $null, 'Process')
+            Remove-Item -LiteralPath "Env:$key" -ErrorAction SilentlyContinue
         }
     }
     if ($Update -and $Update.PSObject.Properties['environment'] -and $Update.environment) {
@@ -567,24 +578,64 @@ function Push-UpdateEnvironment {
 function Pop-UpdateEnvironment {
     param([hashtable]$Saved)
     foreach ($entry in $Saved.GetEnumerator()) {
+        if ($null -eq $entry.Value) {
+            Remove-Item -LiteralPath "Env:$($entry.Key)" -ErrorAction SilentlyContinue
+            continue
+        }
         [Environment]::SetEnvironmentVariable(
             $entry.Key, $entry.Value, 'Process'
         )
     }
 }
 
-function Invoke-SetupAction {
+function Test-UpdateAdmission {
+    param([object]$Update)
+    if ($Update -and -not $Update.phase -and $Update.service -eq 'agent-worktrees') {
+        $Update | Add-Member -NotePropertyName phase -NotePropertyValue runtime -Force
+    }
+    if (-not $Update -or $Update.phase -ne 'runtime') { return $true }
+    $savedErrorPreference = $ErrorActionPreference
+    $savedNativePreference = $PSNativeCommandUseErrorActionPreference
+    $savedOutputEncoding = $OutputEncoding
+    $savedConsoleEncoding = [Console]::OutputEncoding
+    try {
+        $ErrorActionPreference = 'Continue'
+        $PSNativeCommandUseErrorActionPreference = $false
+        $OutputEncoding = [Text.UTF8Encoding]::new($false)
+        [Console]::OutputEncoding = $OutputEncoding
+        $reply = ($Update | ConvertTo-Json -Depth 20 -Compress) |
+            & $VenvPython -X utf8 -m agent_worktrees reconcile-plugins --check-update 2>&1
+        $code = $LASTEXITCODE
+        $decision = ($reply -join "`n") | ConvertFrom-Json -ErrorAction Stop
+        foreach ($diagnostic in @($decision.diagnostics)) {
+            Write-SetupLog "Runtime execution: [$($diagnostic.reason)] $($diagnostic.message)" 'WARN'
+        }
+        if ($decision.allowed -isnot [bool]) { throw 'Missing boolean execution admission.' }
+        if ($code -eq 0 -and $decision.allowed) { return $true }
+        if ($code -eq 3 -and -not $decision.allowed -and @($decision.diagnostics).Count -gt 0) { return $false }
+        throw "Unexpected execution admission response (exit $code)."
+    } catch {
+        Write-SetupLog "Runtime execution admission unavailable; skipping runtime action. Update the engine explicitly before retrying: $_" 'WARN'
+        return $false
+    } finally {
+        $ErrorActionPreference = $savedErrorPreference
+        $PSNativeCommandUseErrorActionPreference = $savedNativePreference
+        $OutputEncoding = $savedOutputEncoding
+        [Console]::OutputEncoding = $savedConsoleEncoding
+    }
+}
+
+function Invoke-SetupCommand {
     param(
-        [string[]]$CommandArgv, [object]$Update,
+        [string[]]$CommandArgv,
         [string]$Scope, [string]$Label
     )
     $exe = $CommandArgv[0]
-    $rest = if ($CommandArgv.Count -gt 1) { $CommandArgv[1..($CommandArgv.Count - 1)] } else { @() }
+    $rest = @($CommandArgv | Select-Object -Skip 1)
     $actionTimer = [Diagnostics.Stopwatch]::StartNew()
     $actionExitCode = $null
     $actionSpawnError = $null
     Write-SetupStatus "$Label starting" -Seconds 0 -Scope $Scope -State starting
-    $savedEnvironment = Push-UpdateEnvironment $Update
     $actionErrorPreference = $ErrorActionPreference
     $actionNativeErrorPreference = $PSNativeCommandUseErrorActionPreference
     try {
@@ -603,17 +654,86 @@ function Invoke-SetupAction {
         $ErrorActionPreference = $actionErrorPreference
         $PSNativeCommandUseErrorActionPreference = $actionNativeErrorPreference
         $actionTimer.Stop()
-        Pop-UpdateEnvironment $savedEnvironment
     }
     $duration = $actionTimer.Elapsed.TotalSeconds
     if ($actionSpawnError) {
         Write-SetupStatus "$Label spawn failed; continuing" 'WARN' -Seconds $duration -Scope $Scope -State failed -Completed
         Write-SetupLog "$Label error: $actionSpawnError" 'WARN'
+        return 1
     } elseif ($actionExitCode -ne 0) {
         Write-SetupStatus "$Label failed (exit $actionExitCode); continuing" 'WARN' -Seconds $duration -Scope $Scope -State failed -Completed
     } else {
         Write-SetupStatus "$Label done (exit 0)" -Seconds $duration -Scope $Scope -State done -Completed
     }
+    return $actionExitCode
+}
+
+function Invoke-SetupAction {
+    param(
+        [string[]]$CommandArgv, [object]$Update,
+        [string]$Scope, [string]$Label
+    )
+    if (-not (Test-UpdateAdmission $Update)) { return }
+    $savedEnvironment = Push-UpdateEnvironment $Update
+    try {
+        $null = Invoke-SetupCommand -CommandArgv $CommandArgv -Scope $Scope -Label $Label
+    } finally {
+        Pop-UpdateEnvironment $savedEnvironment
+    }
+}
+
+function Start-DetachedSetupInstaller {
+    param([string[]]$CommandArgv)
+    # Detached output outlives launch maintenance. A separate, linked sink also
+    # avoids two PowerShell processes racing to append to the launch log.
+    $installerLog = [IO.Path]::ChangeExtension(
+        $script:SetupLog, "$([guid]::NewGuid().ToString('N')).installer.log"
+    )
+    $sink = [IO.File]::Open(
+        $installerLog, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::Read
+    )
+    $sink.Dispose()
+    # Snapshot only the observer and its data, never the launcher's dispatch or
+    # admission machinery. The original -File command still owns installation.
+    $data = @{
+        argv = $CommandArgv
+        log = $installerLog
+    } | ConvertTo-Json -Compress
+    $encodedData = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($data))
+    $functions = foreach ($name in @(
+        'Format-SetupLine', 'Write-SetupLog', 'Write-SetupStatus', 'Invoke-SetupCommand'
+    )) {
+        "function $name {`n$((Get-Item -LiteralPath "Function:$name").Definition)`n}"
+    }
+    $observer = @'
+$ErrorActionPreference = 'Stop'
+$PSNativeCommandUseErrorActionPreference = $false
+[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+$OutputEncoding = [Console]::OutputEncoding
+$script:LaunchTimer = [Diagnostics.Stopwatch]::StartNew()
+$script:ShowLaunchStatus = $false
+'@ + "`n" + (
+        "`$data = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('$encodedData')) | ConvertFrom-Json`n" +
+        "`$script:SetupLog = `$data.log`n" +
+        ($functions -join "`n") + "`n" +
+        # Rotation can remove the empty preparation file before observer start.
+        # Recreate it atomically, then deny deletion while permitting appends.
+        "`$sink = [IO.File]::Open(`$script:SetupLog, [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)`n" +
+        "try { `$code = Invoke-SetupCommand -CommandArgv @(`$data.argv) -Scope 'launch/installer' -Label 'Installer update' }`n" +
+        "finally { `$sink.Dispose() }`n" +
+        "exit `$code"
+    )
+    $encodedObserver = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($observer))
+    # conhost owns the detached, hidden console; the observer owns the durable
+    # sink. Redirecting conhost itself does not capture its console children.
+    $observerArguments = @(
+        '--headless', 'pwsh.exe', '-NoProfile', '-EncodedCommand', $encodedObserver
+    )
+    if (("conhost.exe " + ($observerArguments -join ' ')).Length -ge 32767) {
+        throw 'Detached installer observer exceeds the Windows command-line limit.'
+    }
+    Start-Process -FilePath 'conhost.exe' -ArgumentList $observerArguments -WindowStyle Hidden | Out-Null
+    return $installerLog
 }
 
 function Invoke-UpdateApply {
@@ -660,7 +780,14 @@ function Invoke-UpdateApply {
 
         # (1) Marketplace installer, iff the download changed the payload.
         #     NO re-exec: a launcher-script change applies on the next launch.
-        if ($status -and $status.plugin_changed) {
+        $stageUpdate = if ($status) {
+            [PSCustomObject]@{
+                phase = 'runtime'; service = 'agent-worktrees'; trigger = 'stage-update'
+                payload_root = $status.plugin_dir; runtime_root = $status.runtime_root
+                environment = if ($status.environment) { $status.environment } else { [PSCustomObject]@{} }
+            }
+        } else { $null }
+        if ($status -and $status.plugin_changed -and (Test-UpdateAdmission $stageUpdate)) {
             $pdir = $status.plugin_dir
             $pluginInstaller = if ($pdir) { Join-Path $pdir 'scripts\install.ps1' } else { $null }
             if ($pluginInstaller -and (Test-Path $pluginInstaller)) {
@@ -692,22 +819,18 @@ function Invoke-UpdateApply {
                     # single-instance lock, so a concurrent background install can't
                     # collide.
                     Write-SetupStatus 'A new plugin version was downloaded; installing it in the background (applies on the next launch)...'
-                    $bgArgs = @(
-                        '-NoProfile',
-                        '-File',
-                        "`"$pluginInstaller`"",
+                    $bgCommand = @(
+                        'pwsh.exe', '-NoProfile', '-File', $pluginInstaller,
                         'update',
                         '-InstallDir',
-                        "`"$([string]$status.runtime_root)`""
+                        [string]$status.runtime_root
                     )
-                    if ($script:LaunchProject) { $bgArgs += @('-ProjectName', "`"$($script:LaunchProject)`"") }
+                    if ($script:LaunchProject) { $bgCommand += @('-ProjectName', $script:LaunchProject) }
                     try {
-                        # conhost --headless: -WindowStyle Hidden alone is ignored
-                        # by the DefTerm handoff (windows-launch-hardening #786).
-                        Start-Process -FilePath 'conhost.exe' -ArgumentList (@('--headless', 'pwsh.exe') + $bgArgs) -WindowStyle Hidden | Out-Null
-                        Write-SetupLog 'Background install started (new version applies on the next launch)'
+                        $installerLog = Start-DetachedSetupInstaller -CommandArgv $bgCommand
+                        Write-SetupLog "Background install started (new version applies on the next launch); output: $installerLog"
                     } catch {
-                        Write-SetupLog "Background install failed to start ($($_.Exception.Message)) — continuing" 'WARN'
+                        Write-SetupStatus "Background install failed to start ($($_.Exception.Message)) — continuing" 'WARN'
                     } finally {
                         Pop-UpdateEnvironment $savedEnvironment
                     }
@@ -730,7 +853,6 @@ function Invoke-UpdateApply {
             if ($prePlan -and $prePlan.action -eq 'self-update') {
                 Write-SetupStatus 'Bootstrap services are stale; updating them...'
                 foreach ($update in $prePlan.updates) {
-                    Write-SetupLog "  command: $($update.command)"
                     $argv = @($update.argv)
                     if ($argv.Count -gt 0) {
                         Invoke-SetupAction -CommandArgv $argv -Update $update `
@@ -787,7 +909,6 @@ function Invoke-UpdateApply {
                     Write-SetupLog "Plugin reconcile: skipping $($u.service) (copilot not on PATH)" 'WARN'
                     continue
                 }
-                Write-SetupLog "Plugin reconcile: $($u.service) -> $($rargv -join ' ')"
                 Invoke-SetupAction -CommandArgv $rargv -Update $u `
                     -Scope "launch/reconcile/pass-$rpass/$($u.service)" -Label "Plugin reconcile: $($u.service)"
             }
@@ -1660,6 +1781,7 @@ function Invoke-ManagedMuxRegister {
     ) { return }
     try {
         $managerRoot = Split-Path -Parent $PSScriptRoot
+        . (Join-Path $managerRoot 'bin/manager-runtime.ps1')
         # The real mux session's own stable identity (Copilot review finding
         # on PR #3906): stored so a later teardown's own live probe of the
         # SAME psmux session (pane-wrapper.ps1) can be compared against it --
@@ -1671,11 +1793,7 @@ function Invoke-ManagedMuxRegister {
             $incarnation = (& $script:AwPsmuxBin display-message -t $Session -p '#{session_id}:#{session_created}' 2>$null)
         } catch {}
         $registerArgs = @(
-            'run',
-            '--quiet',
-            '--project', $managerRoot,
-            '-m', 'worktree_manager',
-            'mux-daemon', 'register',
+            'register',
             "--project=$($script:LaunchProject)",
             "--worktree-id=$([string]$plan.worktree_id)",
             "--worktree-path=$WorkDir",
@@ -1685,13 +1803,8 @@ function Invoke-ManagedMuxRegister {
         if (-not [string]::IsNullOrWhiteSpace([string]$incarnation)) {
             $registerArgs += "--session-incarnation=$incarnation"
         }
-        # Dispatch detached rather than blocking on `& uv @registerArgs`
-        # (real-bug follow-up to #3825): the bundled register edge can
-        # spend tens of seconds (mux metadata probes, daemon boot-wait,
-        # status-monitor-restart) before it returns, and this call sits on
-        # the launcher's own attach path -- never block create/join on it.
-        Start-Process -FilePath 'uv' -ArgumentList $registerArgs `
-            -WindowStyle Hidden -ErrorAction Stop | Out-Null
+        # Wait only for the canonical spawn handshake, not registration work.
+        Invoke-ManagerMuxCallback -PayloadRoot $managerRoot -CallbackArguments $registerArgs
     } catch {
         Write-SetupLog "psmux: managed mux registration failed: $($_.Exception.Message)" 'WARN'
     }
@@ -1898,7 +2011,7 @@ if (-not $noMux) {
     # Clear nesting vars so psmux doesn't kill the detached session.
     # The new session is independent — it shouldn't inherit the parent's
     # nesting state even though we're creating it from inside a psmux pane.
-    Write-SetupLog "psmux: pane command: $($cmd -join ' ')"
+    Write-SetupLog "psmux: pane command: $($cmd.Count) argument(s)"
 
     # Route the pane through pane-wrapper.ps1 so the child's real exit code is
     # observable (recorded as a pane_exited activity mark) and a crash shows a
@@ -2303,7 +2416,7 @@ if (-not $noMux) {
     exit 1
 }
 
-Write-SetupLog "Handing off to setup script: $($cmd -join ' ')"
+Write-SetupLog "Handing off to setup script: $($cmd.Count) argument(s)"
 Write-Host 'Launching Copilot...'
 Write-Host ''
 

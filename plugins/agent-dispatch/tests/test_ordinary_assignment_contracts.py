@@ -141,9 +141,10 @@ def test_ordinary_assignment_inherited_retirement_checks_actual_current_head(ass
     record.update(last_session_id=head, session_count=2 if head else 0)
     if head == "native-b":
         response.update(acp_session_id=head, durable_session_id=head)
-        _start(assigned)
-        assert calls.count("resume") == calls.count("send") == 1
-        assert not queue.get_reservation(retry.key).conversation_retired
+        with pytest.raises(bridge.BridgeCarriedSessionBusy, match="no immutable ordinary invocation"):
+            _start(assigned)
+        assert calls == ["record"]
+        assert queue.get_reservation(retry.key).conversation_retired
         facts = reservation_native_facts(queue, retry.key)
         assert facts["retired_native_session_ids"] == ["native-a"]
         assert facts["known_native_session_ids"] == ["native-a", "native-b"]
@@ -243,9 +244,10 @@ def test_ordinary_assignment_receipt_before_handle_keeps_terminal_retirement(ass
     facts = reservation_native_facts(queue, current.key)
     assert facts["retired_native_session_ids"] == ["native-a"]
     if head == "native-b":
-        _start(assigned)
-        assert calls.count("resume") == calls.count("send") == 1
-        assert queue.get_reservation(current.key).agent_info["acp_session_id"] == head
+        with pytest.raises(bridge.BridgeCarriedSessionBusy, match="no immutable ordinary invocation"):
+            _start(assigned)
+        assert calls == ["record"]
+        assert queue.get_reservation(current.key).agent_info is None
     else:
         with pytest.raises(bridge.BridgeCarriedSessionBusy):
             _start(assigned)
@@ -301,9 +303,10 @@ def test_ordinary_assignment_cross_task_handleless_retirement_keeps_exact_origin
     facts = reservation_native_facts(queue, current.key)
     assert facts["known_native_session_ids"] == facts["retired_native_session_ids"] == ["native-a"]
     if head == "native-b":
-        _start(assigned)
-        assert calls.count("resume") == calls.count("send") == 1
-        assert queue.get_reservation(current.key).agent_info["acp_session_id"] == head
+        with pytest.raises(bridge.BridgeCarriedSessionBusy, match="no immutable ordinary invocation"):
+            _start(assigned)
+        assert calls == ["record"]
+        assert queue.get_reservation(current.key).agent_info is None
     else:
         with pytest.raises(bridge.BridgeCarriedSessionBusy, match="known or retired"):
             _start(assigned)
@@ -368,8 +371,9 @@ def test_ordinary_assignment_exclusive_carry_keeps_original_handle_native(assign
     facts = reservation_native_facts(queue, current.key)
     assert facts["known_native_session_ids"] == ["native-a"]
     if head == "native-a":
-        _start(assigned)
-        assert calls.count("resume") == calls.count("send") == 1
+        with pytest.raises(bridge.BridgeCarriedSessionBusy, match="no immutable ordinary invocation"):
+            _start(assigned)
+        assert calls == ["record"]
     else:
         with pytest.raises(bridge.BridgeCarriedSessionBusy, match="known or retired"):
             _start(assigned)
@@ -401,7 +405,8 @@ def test_ordinary_assignment_dedup_reemission_preserves_original_owner(assigned,
             _start(assigned)
         assert calls == ["record"]
     else:
-        _start(assigned)
-        assert calls.count("resume") == calls.count("send") == 1
+        with pytest.raises(bridge.BridgeCarriedSessionBusy, match="no immutable ordinary invocation"):
+            _start(assigned)
+        assert calls == ["record"]
         assert queue.get(next_task.id).status == "queued"
     assert "create" not in calls

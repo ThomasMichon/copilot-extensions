@@ -31,6 +31,7 @@ class InstallationPrimitive(Protocol):
     def resolve_installation_mode(self, **arguments: Any) -> dict[str, Any]: ...
     def validate_context_receipt(self, *args: Any, **kwargs: Any) -> dict[str, Any]: ...
     def read_json(self, path: Path) -> Any: ...
+    def read_deployment_manifest(self, path: Path) -> Any: ...
     def _DirectoryLock(self, path: Path, **arguments: Any) -> Any: ...
     def _atomic_write_json(self, path: Path, value: Any, **arguments: Any) -> None: ...
     def _pid_is_live(self, pid: int) -> bool: ...
@@ -75,7 +76,9 @@ def publish_legacy_binding(
         if manifest_path.is_symlink() or not manifest_path.is_file():
             raise CommandOwnershipConflict("The legacy deploy manifest is not an owned file.")
         try:
-            incumbent = primitive.read_json(manifest_path)
+            incumbent = getattr(
+                primitive, "read_deployment_manifest", primitive.read_json,
+            )(manifest_path)
         except (primitive.InstallationContextError, OSError, ValueError) as error:
             raise CommandOwnershipConflict(
                 f"Cannot validate incumbent command ownership: {error}"
@@ -170,7 +173,9 @@ def write_legacy_manifest(
             receipt = publish_legacy_binding(primitive, **arguments)
         except SourceProvenanceUnavailable as error:
             if lease is None and (root / "deploy-manifest.json").exists():
-                incumbent = primitive.read_json(root / "deploy-manifest.json")
+                incumbent = getattr(
+                    primitive, "read_deployment_manifest", primitive.read_json,
+                )(root / "deploy-manifest.json")
                 if "commandLifecycle" in incumbent:
                     owner = lifecycle._owner(_rules(), primitive, arguments)
                     lifecycle._reservation(_rules(), primitive, root, owner)
@@ -185,7 +190,9 @@ def write_legacy_manifest(
                     "version": 1, "state": "complete", "owner": lease.owner,
                 }
             elif (root / "deploy-manifest.json").exists():
-                incumbent = primitive.read_json(root / "deploy-manifest.json")
+                incumbent = getattr(
+                    primitive, "read_deployment_manifest", primitive.read_json,
+                )(root / "deploy-manifest.json")
                 if "commandLifecycle" in incumbent:
                     manifest["commandLifecycle"] = incumbent["commandLifecycle"]
             result = {"status": "published", "reason": "ownership-validated"}
@@ -286,7 +293,9 @@ def resolve_command_binding(
             if manifest_path.is_symlink() or not manifest_path.is_file():
                 result.update(status="blocked", reason="legacy-manifest-invalid")
                 return result
-            manifest = primitive.read_json(manifest_path)
+            manifest = getattr(
+                primitive, "read_deployment_manifest", primitive.read_json,
+            )(manifest_path)
             if (
                 not isinstance(manifest, dict)
                 or manifest.get("schema_version") != 3
@@ -384,6 +393,7 @@ def main() -> int:
     parser.add_argument("--payload-root", required=True, type=Path)
     parser.add_argument("--plugin-id", required=True)
     parser.add_argument("--legacy-root", required=True, type=Path)
+    parser.add_argument("--project-root", type=Path)
     parser.add_argument("--publish-legacy", action="store_true")
     parser.add_argument("--source-payload-root", type=Path)
     parser.add_argument("--write-manifest", action="store_true")
@@ -416,6 +426,8 @@ def main() -> int:
         parser.error("--teardown requires --run-lifecycle without --deferred-runtime.")
     if arguments.source_payload_root is not None and not (arguments.publish_legacy or lifecycle_action):
         parser.error("--source-payload-root belongs to explicit lifecycle publication.")
+    if arguments.project_root is not None and not (arguments.publish_legacy or lifecycle_action):
+        parser.error("--project-root belongs to explicit lifecycle publication.")
     if arguments.write_manifest and not arguments.publish_legacy:
         parser.error("--write-manifest requires --publish-legacy.")
     try:
@@ -423,7 +435,7 @@ def main() -> int:
             source_payload = arguments.source_payload_root or arguments.payload_root
             publication_arguments = dict(
                 payload_root=source_payload, plugin_id=arguments.plugin_id,
-                legacy_root=arguments.legacy_root, project_root=Path.cwd(),
+                legacy_root=arguments.legacy_root, project_root=arguments.project_root or Path.cwd(),
                 environment={**os.environ, "COPILOT_PLUGIN_ROOT": str(source_payload)},
             )
             primitive = _load_primitive(arguments.payload_root)

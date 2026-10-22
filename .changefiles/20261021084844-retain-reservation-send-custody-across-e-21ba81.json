@@ -1,0 +1,9 @@
+{
+  "comment": "Retain reservation-send custody across execution closure, response loss and restart without advertising live handoff support.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

@@ -1,0 +1,120 @@
+{
+  "captured_from": {
+    "commit": "632cac7b9de4c42ef2c765053a783fbead0bbff0",
+    "plugin_version": "0.4.1-dev3",
+    "source_path": "plugins/agent-bridge/extensions/agent-bridge/delivery.mjs",
+    "source_git_blob": "dd7d21971b3b224528428ff1c6b8529de9257185",
+    "protocol_generation": 44,
+    "source_sha256": "eb5ffd40843e4e5019d36dc0aeef1c896d164cdb5fb4c3a2094daa91ae2f1204"
+  },
+  "response": {
+    "protocol_version": 44,
+    "min_protocol_version": 1
+  },
+  "capability": {
+    "required_protocol_version": 44,
+    "readiness_control": "control:plugin-readiness",
+    "autopilot_control": "control:set-mode-ready",
+    "ordinary_input_is_gated": false,
+    "installs_or_reloads_plugins": false
+  },
+  "request": {
+    "sender": "bridge-startup",
+    "body": "assigned task",
+    "kind": "prompt",
+    "delivery": "queue",
+    "expected_session_id": "native-example",
+    "idempotency_key": "startup-example",
+    "plugin_readiness": {
+      "owner": "bridge",
+      "expected_session_id": "native-example",
+      "cwd": "/workspace/example",
+      "plugins": [
+        {
+          "projected_source": "helper@bridge-controller",
+          "logical_source": "helper@controller",
+          "version": "1.0.0",
+          "live_marketplace_root": "/workspace/controller"
+        }
+      ],
+      "timeout_seconds": 120.0
+    }
+  },
+  "readiness_response": {
+    "status": "ready",
+    "reason": "selected-loadout-registered",
+    "session_id": "native-example",
+    "cwd": "/workspace/example",
+    "selection_digest": "2df0acbe2602b43db7e2a5ecc899d28bfaf2e66ea6e87f3d813544a929aede2a",
+    "missing": [],
+    "control_id": 1
+  },
+  "queued_message": {
+    "id": 2,
+    "sender": "bridge-startup",
+    "body": "assigned task",
+    "reply_to": null,
+    "kind": "startup:prompt:1",
+    "delivery": "queue",
+    "created_at": 100.0,
+    "plugin_readiness": {
+      "owner": "bridge",
+      "expected_session_id": "native-example",
+      "cwd": "/workspace/example",
+      "plugins": [
+        {
+          "projected_source": "helper@bridge-controller",
+          "logical_source": "helper@controller",
+          "version": "1.0.0",
+          "live_marketplace_root": "/workspace/controller"
+        }
+      ],
+      "timeout_seconds": 120.0,
+      "selection_digest": "2df0acbe2602b43db7e2a5ecc899d28bfaf2e66ea6e87f3d813544a929aede2a"
+    }
+  },
+  "mode_request": {
+    "mode": "autopilot",
+    "sender": "bridge-startup",
+    "wait_timeout": 30.0,
+    "expected_session_id": "native-example"
+  },
+  "legacy_request": {
+    "sender": "operator",
+    "body": "ordinary input"
+  },
+  "acquisition_request": {
+    "version": 2,
+    "target": "task-worker",
+    "mode": "cli",
+    "task_id": "example-task",
+    "task_generation": 1,
+    "worktree_id": "example-worktree",
+    "allocation": "created",
+    "delivery_id": "example-delivery",
+    "prompt": "assigned task",
+    "project": "example",
+    "worktree_path": "/workspace/example",
+    "reservation_key": "example-reservation"
+  },
+  "admission_response": {
+    "ok": true,
+    "session_id": "native-example",
+    "message_id": 2,
+    "duplicate": false,
+    "receipt": {
+      "session_id": "native-example",
+      "message_id": 2,
+      "stage": "admitted",
+      "admitted_at": 100.0,
+      "sdk_accepted_at": null,
+      "consumed_at": null
+    },
+    "receipt_current": true,
+    "receipt_error": null,
+    "reply_correlation": null,
+    "replied": false,
+    "reply": null,
+    "stop_reason": null
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "comment": "Clarify logical-machine authority and independent local supervisor lifetimes",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

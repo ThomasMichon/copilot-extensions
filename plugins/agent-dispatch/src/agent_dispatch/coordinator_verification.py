@@ -4,17 +4,17 @@ from __future__ import annotations
 
 import os
 import secrets
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import Depends, FastAPI, Header, HTTPException
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 from . import remote_dispatch
 from .coordinator_auth import _make_control_auth, scoped_control_token
 from .events import EventBus
 from .queue import RegistrationKind, Task, TaskError, TaskQueue
 
-PositiveInt = Annotated[int, Field(strict=True, gt=0)]
+PositiveInt = Annotated[int, Field(strict=True, gt=0, lt=2**63)]
 NonEmptyText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 
 
@@ -36,6 +36,17 @@ class RunWaiterRegisterBody(BaseModel):
     host: NonEmptyText
     resume_worktree: NonEmptyText
     command: list[str] = Field(default_factory=list)
+    kind: Literal["process", "delegated"] = "process"
+    delegation: dict | None = None
+
+    @model_validator(mode="after")
+    def validate_kind(self):
+        from .delegated_waiter_contract import validate_delegation
+        if self.kind == "delegated":
+            validate_delegation(self.delegation)
+        elif self.delegation is not None:
+            raise ValueError("process waiters have no delegation")
+        return self
 
 
 class RunWaiterArmBody(BaseModel):
@@ -48,6 +59,34 @@ class RunWaiterArmBody(BaseModel):
 
 class RunWaiterFinishBody(RunWaiterArmBody):
     message: NonEmptyText
+
+
+class DelegatedArmBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    generation: PositiveInt
+    kind: Literal["delegated"]
+    delegation: dict
+
+    @model_validator(mode="after")
+    def validate_identity(self):
+        from .delegated_waiter_contract import validate_delegation
+        validate_delegation(self.delegation, armed=True)
+        return self
+
+
+class DelegatedFinishBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    generation: PositiveInt
+    kind: Literal["delegated"]
+    delegation: dict
+    event: dict
+
+    @model_validator(mode="after")
+    def validate_identity(self):
+        from .delegated_waiter_contract import validate_delegation, validate_event
+        validate_delegation(self.delegation)
+        validate_event(self.event, self.delegation)
+        return self
 
 
 class RunWaiterAbortBody(BaseModel):
@@ -170,6 +209,8 @@ def register_verification_routes(
                 reason=body.reason,
                 resume_worktree=body.resume_worktree,
                 command=body.command,
+                kind=body.kind,
+                delegation=body.delegation,
             )
         except TaskError as exc:
             msg = str(exc)
@@ -182,15 +223,17 @@ def register_verification_routes(
         bus.publish({"type": "task.run_waiter_registered", "task_id": task_id})
         return result
 
+    @app.get("/tasks/{task_id}/run-waiter/preparation/{preparation_id}")
+    def delegated_preparation(task_id: str, preparation_id: str) -> dict:
+        return {"waiter": queue.find_delegated_preparation(task_id, preparation_id),
+                "coordinator_id": queue.run_waiter_coordinator_id()}
+
     @app.post("/tasks/{task_id}/run-waiter/arm")
-    def arm_run_waiter(task_id: str, body: RunWaiterArmBody) -> dict:
+    def arm_run_waiter(task_id: str, body: RunWaiterArmBody | DelegatedArmBody) -> dict:
         try:
             waiter = queue.arm_run_waiter(
                 task_id,
-                generation=body.generation,
-                pid=body.pid,
-                host=body.host,
-                start_token=body.start_token,
+                **body.model_dump(),
             )
         except TaskError as exc:
             msg = str(exc)
@@ -199,17 +242,23 @@ def register_verification_routes(
         return {"accepted": waiter is not None, "waiter": waiter}
 
     @app.post("/tasks/{task_id}/run-waiter/finish")
-    def finish_run_waiter(task_id: str, body: RunWaiterFinishBody) -> dict:
-        waiter = queue.retire_run_waiter_with_wake(
-            task_id,
-            generation=body.generation,
-            pid=body.pid,
-            host=body.host,
-            start_token=body.start_token,
-            reason="waiter completed",
-            message=body.message,
-            sender="agent-dispatch-hibernate",
-        )
+    def finish_run_waiter(task_id: str, body: RunWaiterFinishBody | DelegatedFinishBody) -> dict:
+        if isinstance(body, DelegatedFinishBody):
+            message = (
+                "PR watch timed out; re-check the external state before continuing."
+                if body.event["timed_out"] else
+                "PR watch observed: " + ", ".join(body.event["transitions"]) + ". Re-check current PR state."
+            )
+            kwargs = {"generation": body.generation, "delegation": body.delegation,
+                      "event": body.event, "message": message}
+        else:
+            kwargs = body.model_dump()
+        try:
+            waiter = queue.retire_run_waiter_with_wake(
+                task_id, **kwargs, reason="waiter completed", sender="agent-dispatch-hibernate",
+            )
+        except (TaskError, ValueError) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         return {"accepted": waiter is not None, "waiter": waiter}
 
     @app.post("/tasks/{task_id}/run-waiter/abort")

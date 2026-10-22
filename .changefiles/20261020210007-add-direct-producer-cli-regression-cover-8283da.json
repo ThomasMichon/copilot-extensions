@@ -1,0 +1,9 @@
+{
+  "comment": "Add direct producer CLI regression coverage for routing, output, and reservation safety flags.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

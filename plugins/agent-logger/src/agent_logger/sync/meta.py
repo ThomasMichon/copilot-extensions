@@ -57,8 +57,16 @@ def write_sync_meta(
     excluded_file_count: int = 0,
     excluded_byte_count: int = 0,
     excluded_measurement_complete: bool = True,
+    *,
+    reason: str | None = None,
+    protection: dict | None = None,
 ) -> None:
-    """Atomically write ``sync-meta.json`` into *dest* (best-effort)."""
+    """Atomically write ``sync-meta.json`` into *dest* (best-effort).
+
+    *protection*, when given, is the bounded metadata-only summary of the
+    opt-in session-copy protection (``sync.redact_secrets`` /
+    ``sync.session_files``) and is recorded as ``session_protection``.
+    """
     now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     deferred = [str(path) for path in deferred_files]
     excluded = [str(path) for path in excluded_roots]
@@ -86,6 +94,8 @@ def write_sync_meta(
             path[:MAX_DEFERRED_PATH_CHARS] for path in excluded[:MAX_EXCLUDED_ROOT_SAMPLES]
         ],
     }
+    if protection is not None:
+        metadata["session_protection"] = protection
     try:
         merge_health(
             metadata,
@@ -95,6 +105,7 @@ def write_sync_meta(
             deferred=deferred,
             sample_limit=MAX_DEFERRED_FILE_SAMPLES,
             sample_chars=MAX_DEFERRED_PATH_CHARS,
+            reason=reason,
         )
     except OSError as exc:
         log.warning("cannot update sync health at %s: %s", dest, exc)

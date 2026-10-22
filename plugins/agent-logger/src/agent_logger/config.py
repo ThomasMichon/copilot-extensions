@@ -29,6 +29,7 @@ except ImportError:  # pragma: no cover - pyyaml is a hard dependency
 
 from .repo_trust import has_symlink_ancestor, path_traverses_symlink, repo_config_is_trusted
 from .config_process_logs import ProcessLogArchiveConfig
+from .config_sync_protection import SYNC_PROTECTION_DEFAULTS, SyncProtectionConfig
 from .config_origin import MachineConfigOrigin, machine_config_origin
 
 #: Neutral, personality- and multi-machine system-free defaults.
@@ -72,6 +73,7 @@ DEFAULTS: dict[str, Any] = {
         # config remains sufficient on its own, as today) so enabling it is
         # an explicit, opt-in behavior change, not a silent one.
         "require_repo_opt_in": False,
+        **SYNC_PROTECTION_DEFAULTS,
         # Retention for destination pruning. None/<=0 -> retain everything.
         "retention_days": None,
         "lock_timeout_sec": 10,
@@ -638,7 +640,7 @@ def _load_repo_config(path: Path) -> dict[str, Any]:
     return result
 
 
-class Config(ProcessLogArchiveConfig):
+class Config(ProcessLogArchiveConfig, SyncProtectionConfig):
     """Resolved agent-logger configuration."""
 
     def __init__(
@@ -656,6 +658,7 @@ class Config(ProcessLogArchiveConfig):
         self.repo_root = repo_root
         self._machine_origin = _machine_origin
         _ = self.process_log_reclamation
+        _ = self.sync_protection
 
     # -- resolved convenience accessors ---------------------------------
 

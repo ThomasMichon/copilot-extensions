@@ -230,8 +230,14 @@ test command. It is not a worker-allocation or readiness receipt.
   `tools/ci_plugin_partitions.py`, with dedicated cases in
   `tools/test_ci_plugin_partitions.py`; preserve all original functions/tests,
   partition inventory and CLI behavior.
-- [ ] Integrate ordinary PR smoke/heavy routing after #7164 through the existing
-  CI owner, preserving current row/job identities and execution semantics.
+- [x] Land the source-only selector/test/effort slice as #7168, merged to Dev
+  at `b22d5d34aadfa91d93daa7c151aed8729e16a8fb`; this closes no routing,
+  executor, qualification, activation or real-job acceptance gate.
+- [ ] Reconcile the historical ordinary-PR smoke/heavy routing proposal after
+  #7164 through the existing CI owner against the current `TESTING.md` policy:
+  required PR/promotion execution remains positively admitted in-process units
+  with coverage; integration stays in periodic containers. This receipt neither
+  wires nor activates a route.
 - [ ] Implement the owner-coordinated routing and bounded execution for the
   selected existing recipes; keep live routing unchanged until its gates clear.
 - [ ] Add behavioral authorization, graph, partition and mutation regressions;
@@ -729,3 +735,23 @@ source pins and qualified execution remain coordinated integration work under
 - CI wiring and executor work remain owner integration after #7164.
   Qualification, activation and real-job acceptance remain open; the pure
   selector establishes none of them.
+
+### 2026-10-20 - Reconcile pure selector source closure
+
+- [#7168](https://github.com/ThomasMichon/copilot-extensions/pull/7168)
+  merged to Dev as `b22d5d34aadfa91d93daa7c151aed8729e16a8fb`,
+  from reviewed head `78ed40e37e091eb786a0ee417d1afc30e2c72463`.
+  Copilot approved that head; the source-only implementation and effort
+  documentation are delivered, not CI wiring or execution authority.
+- The merged slice's historical focused module passed 119 tests; its coupled
+  portfolio passed 298 tests with two existing opt-in integration skips.
+  This records that slice's validation, not a new run, a current required
+  packet, native qualification or a worker-readiness receipt.
+- The original selector's `smoke`/Dispatch and `worktrees-smoke`/Worktrees
+  identities are historical source scope, not permission to restore mixed
+  integration testing to required PR/promotion gates. Further integration
+  belongs to the existing CI owner under the current
+  [unit-only policy](../../../TESTING.md#unit-only-promotion-packet).
+- Full routing/executor work, qualification, activation and real-job acceptance
+  remain open under #7122. No workflow, runner, source pin, native state or
+  release policy changed; the effort remains Active.

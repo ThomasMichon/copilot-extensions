@@ -1,0 +1,13 @@
+{
+  "comment": "Frame detached Bash installer output and retain native exit outcomes",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

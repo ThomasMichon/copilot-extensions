@@ -19,6 +19,7 @@ from pathlib import Path
 
 from agent_logger.config import Config, load_config
 from agent_logger.segmenter.platform import detect_machine
+from agent_logger.sync import protection_engine as _pe
 from agent_logger.sync.lock import sync_lock
 from agent_logger.sync.automation import automation_disabled as _automation_disabled
 from agent_logger.sync.log_archive_cli import run_compact_logs
@@ -144,14 +145,15 @@ def _push_incremental(
     false`` reverts to always pushing everything, exactly as before this
     existed).
     """
-    from agent_logger.sync.change_tracker import ChangeTracker, chunked, resolve_db_path
+    from agent_logger.sync.change_tracker import chunked, resolve_db_path
     from agent_logger.sync.targets.base import PushResult
 
     settings = cfg.sync_change_tracking
     if not settings["enabled"]:
         return target.push(source, machine, include)
 
-    tracker = ChangeTracker(resolve_db_path(settings["db_path"], cfg.home))
+    pp = _pe.ProtectedPass(target)
+    tracker = pp.change_tracker(resolve_db_path(settings["db_path"], cfg.home))
     # The repo-scope business filter (allowlist/denylist), not a transport
     # batching artifact -- `batch_mode` on target.push tells the target "this
     # explicit session set is only a size-bounded slice of what would
@@ -159,7 +161,8 @@ def _push_incremental(
     # index and defers (rather than hard-fails) a locked file, exactly like
     # an unfiltered push would.
     unfiltered = include is None
-    identity = f"{source}|{target.describe()}|{machine}"
+    track_index = pp.tracks_index(unfiltered)
+    identity = f"{source}|{target.describe()}|{machine}" + pp.identity_suffix()
     identity_stale = tracker.identity_changed(identity)
     do_full = (
         force_full
@@ -180,7 +183,7 @@ def _push_incremental(
     if not do_full:
         changed = tracker.changed_sessions(source, include)
         final_include = changed if include is None else (changed & include)
-        index_due = unfiltered and tracker.index_changed(source)
+        index_due = track_index and tracker.index_changed(source)
         if not final_include and not index_due:
             target.heartbeat(machine)
             return PushResult(ok=True, detail="no session changes detected")
@@ -188,7 +191,7 @@ def _push_incremental(
         # post-push could capture a live append that happened during the
         # push but was never actually transferred, permanently masking it.
         snapshot = tracker.snapshot(source, final_include)
-        index_snapshot = tracker.snapshot_index(source) if unfiltered else None
+        index_snapshot = tracker.snapshot_index(source) if track_index else None
         result = target.push(source, machine, final_include, batch_mode=unfiltered)
         if result.ok:
             _record_push_result(tracker, snapshot, result, unfiltered, index_snapshot)
@@ -215,7 +218,7 @@ def _push_incremental(
         if verbose:
             print(f"session-sync: full sync batch {batch_count} ({len(batch)} session(s))")
         snapshot = tracker.snapshot(source, batch)
-        index_snapshot = tracker.snapshot_index(source) if unfiltered else None
+        index_snapshot = tracker.snapshot_index(source) if track_index else None
         result = target.push(source, machine, set(batch), batch_mode=unfiltered)
         if not result.ok:
             return result
@@ -225,6 +228,10 @@ def _push_incremental(
         excluded_roots.extend(result.excluded_roots)
         measurement_complete = measurement_complete and result.excluded_measurement_complete
         _record_push_result(tracker, snapshot, result, unfiltered, index_snapshot)
+        pp.add(result)
+
+    if failed := pp.repush(source, machine, unfiltered, verbose, _record_push_result):
+        return failed
 
     vanished = tracker.vanished_sessions(source)
     if vanished:
@@ -234,13 +241,13 @@ def _push_incremental(
     # another full reconciliation instead of silently trusting a signature
     # set recorded under an identity that was never actually confirmed.
     tracker.record_identity(identity)
-    tracker.mark_full_sync()
+    pp.mark_full_sync()
 
     detail = (
         f"full reconciliation: {len(all_ids)} session(s) in {batch_count} batch(es)"
         if all_ids else "full reconciliation: nothing to push"
     )
-    return PushResult(
+    return pp.finish(PushResult(
         ok=True,
         detail=detail,
         file_count=total_files,
@@ -248,7 +255,7 @@ def _push_incremental(
         excluded_byte_count=total_excluded_bytes,
         excluded_roots=tuple(excluded_roots),
         excluded_measurement_complete=measurement_complete,
-    )
+    ))
 
 
 def _mark_source(
@@ -293,6 +300,8 @@ def run_sync(
     validate_reclamation_context(cfg, dry_run=dry_run)
     source = cfg.sync_source
     target = build_target(cfg.sync_target, cfg.target_options(cfg.sync_target))
+    if _pe.refuse(cfg, target):
+        return 1
     allowlist = cfg.sync_repo_allowlist
     denylist = cfg.sync_repo_denylist
     require_repo_opt_in = cfg.sync_require_repo_opt_in
@@ -311,19 +320,22 @@ def run_sync(
             if require_repo_opt_in:
                 scope += " require_repo_opt_in=True"
             print(f"filter:    {scope} -> {len(include)} session(s) included")
+        _pe.print_scope(cfg)
 
     if not source.is_dir():
         print(f"session-sync: source not found: {source}", file=sys.stderr)
         return 1
 
+    reclaim = _pe.reclamation_allowed(cfg)
     if dry_run:
-        reclamation = prepare_reclamation(cfg, machine, target, dry_run=True)
+        reclamation = prepare_reclamation(cfg, machine, target, dry_run=True) if reclaim else None
         _mark_source(source, machine, effective, dry_run=True, verbose=verbose)
         scope = "" if include is None else f", {len(include)} session(s) match"
         print(
             f"session-sync: would push {source} -> {target.describe()} "
-            f"(machine={machine}{scope})"
+            f"(machine={machine}{scope}{_pe.scope_suffix(cfg)})"
         )
+        _pe.process_logs_skipped(cfg)
         return report_reclamation(reclamation, dry_run=True) if reclamation else 0
 
     lock_file = cfg.home / cfg.sync_lock_name
@@ -331,18 +343,19 @@ def run_sync(
         if not acquired:
             print("session-sync: another sync holds the lock; skipping", file=sys.stderr)
             return 0
-        reclamation = prepare_reclamation(cfg, machine, target, dry_run=False)
+        reclamation = prepare_reclamation(cfg, machine, target, dry_run=False) if reclaim else None
         _mark_source(source, machine, effective, dry_run=False, verbose=verbose)
 
         from agent_logger.usage_capture import capture_for_sync
 
         accounting_complete, accounting_failed = capture_for_sync(cfg, include, verbose=verbose)
+        compaction = _pe.compaction_enabled(cfg)
 
         # On-device compaction (before the push): archive cold, in-scope,
         # untracked local sessions into the compressed store and reclaim their
         # live dirs, so the scheduled service performs the whole compaction
         # lifecycle from config -- no separate `compact` invocation needed.
-        if cfg.sync_compact["enabled"] and accounting_complete:
+        if compaction and accounting_complete:
             from agent_logger.sync.compact import compact_local
 
             cres = compact_local(cfg, verbose=verbose)
@@ -366,6 +379,7 @@ def run_sync(
             print(f"session-sync: push failed: {result.detail}", file=sys.stderr)
             return 1
         print(f"session-sync: ok {result.detail} ({result.file_count} files)")
+        _pe.print_protection(result)
         if result.excluded_roots:
             mib = result.excluded_byte_count / (1024 * 1024)
             qualifier = "" if result.excluded_measurement_complete else "at least "
@@ -375,7 +389,9 @@ def run_sync(
                 f"file(s) in {len(result.excluded_roots)} root(s) ({mib:.1f} MiB)"
             )
 
-        process_logs_failed = sync_process_logs(cfg, target, machine, include, reclamation)
+        process_logs_failed = not _pe.process_logs_skipped(cfg) and sync_process_logs(
+            cfg, target, machine, include, reclamation
+        )
 
         if prune:
             removed = target.prune(machine, cfg.sync_retention_days)
@@ -385,14 +401,14 @@ def run_sync(
         # Two-pair sync: publish the compressed archive store to
         # {machine}/archived/, compact the hub-only backlog, and reconcile away
         # the uncompressed hub duplicates.
-        if cfg.sync_compact["enabled"]:
+        if compaction:
             arc = target.push_archives(cfg.compact_archive_root, machine)
             if arc.ok and arc.file_count:
                 print(f"session-sync: pushed {arc.file_count} archive file(s)")
             elif not arc.ok:
                 print(f"session-sync: archive push failed: {arc.detail}", file=sys.stderr)
 
-        if cfg.sync_compact["enabled"] and accounting_complete:
+        if compaction and accounting_complete:
             opts = cfg.sync_compact
             from agent_logger.sync.compact import resolve_hub_tracked_paths
 
@@ -479,11 +495,14 @@ def run_push(
             return 1
 
     target = build_target(cfg.sync_target, cfg.target_options(cfg.sync_target))
+    if _pe.refuse(cfg, target):
+        return 1
 
     if verbose:
         print(f"machine: {machine}")
         print(f"source:  {src}")
         print(f"target:  {target.describe()}")
+        _pe.print_scope(cfg)
 
     if identity is None:
         result = target.push(src, machine, None)
@@ -493,6 +512,7 @@ def run_push(
         print(f"session-sync: push failed: {result.detail}", file=sys.stderr)
         return 1
     print(f"session-sync: ok {result.detail} ({result.file_count} files)")
+    _pe.print_protection(result)
     if result.excluded_roots:
         mib = result.excluded_byte_count / (1024 * 1024)
         qualifier = "" if result.excluded_measurement_complete else "at least "
@@ -515,6 +535,7 @@ def do_status(cfg: Config) -> int:
     print(f"repo_allowlist: {allowlist or '(all)'}")
     print(f"repo_denylist:  {cfg.sync_repo_denylist or '(none)'}")
     print(f"require_repo_opt_in: {cfg.sync_require_repo_opt_in}")
+    _pe.print_scope(cfg, "protection:    ")
     notify = cfg.sync_notify
     print(f"notify:         {notify['url'] or '(none)'}")
     latest = target.sync_status(machine)
@@ -562,6 +583,7 @@ def do_status(cfg: Config) -> int:
                 )
         elif excluded_roots is not None:
             print("  - (invalid excluded_detritus_roots metadata)")
+        _pe.print_protection_status(metadata.get("session_protection"))
     return 0
 
 
@@ -675,7 +697,7 @@ def do_health(
 def do_doctor(cfg: Config) -> int:
     target = build_target(cfg.sync_target, cfg.target_options(cfg.sync_target))
     print(f"target: {target.describe()}")
-    result = target.doctor()
+    result = _pe.doctor(cfg, target, _machine)
     for name, ok, detail in result.checks:
         mark = "ok " if ok else "FAIL"
         suffix = f" ({detail})" if detail else ""
@@ -690,6 +712,8 @@ def do_compact_hub(cfg: Config, *, dry_run: bool, verbose: bool) -> int:
     if not opts["enabled"]:
         print("session-sync compact-hub: disabled (sync.compact.enabled=false)")
         return 0
+    if _pe.refuse_compact_hub(cfg):
+        return 1
     target = build_target(cfg.sync_target, cfg.target_options(cfg.sync_target))
     lock_file = cfg.home / cfg.sync_lock_name
     # Protect hub copies of sessions whose worktree is still tracked (the

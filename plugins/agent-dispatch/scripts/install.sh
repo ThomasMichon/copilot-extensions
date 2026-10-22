@@ -958,7 +958,8 @@ deploy_binstub() {
         _runtime_publication_commit_file "$INSTALL_DIR/machine" "$MACHINE_STAGE" || return 1
     fi
     # Co-deploy the canonical marker-only resolver (uniform-runtime-resolution, #765).
-    for r in resolve-runtime.sh resolve-runtime.ps1; do
+    for r in resolve-runtime.sh resolve-runtime.ps1 \
+        delegated-waiter-callback.ps1 delegated-waiter-callback.sh; do
         if [[ -f "$SCRIPT_DIR/$r" ]]; then
             _runtime_publication_copy "$SCRIPT_DIR/$r" "$INSTALL_DIR/bin/$r" || return 1
         fi
@@ -1150,8 +1151,8 @@ _ensure_runtime() {
     # again -- covering agent-dispatch itself AND its own local
     # `[tool.uv.sources]` workspace path deps (agent-procutil, agent-zdd,
     # agent-dropin-registry, agent-plugin-activation, agent-plugin-resolve,
-    # agent-single-instance-lease), which are equally local PATH sources and
-    # equally vulnerable. #2863 also flagged a second, same-class ImportError
+    # agent-single-instance-lease, agent-worktree-identity), which are equally
+    # local PATH sources and vulnerable. #2863 also flagged a same-class ImportError
     # in the self-update fallback (`from agent_procutil import ...`) --
     # agent-procutil is exactly one of these.
     _STALE_CACHE_REFRESH_PACKAGES=(
@@ -1162,6 +1163,7 @@ _ensure_runtime() {
         agent-plugin-activation
         agent-plugin-resolve
         agent-single-instance-lease
+        agent-worktree-identity
     )
     _scrub_payload_build_artifacts() {
         # Installing FROM the pristine payload directory ("$PLUGIN_DIR",
@@ -2322,7 +2324,7 @@ do_stamp() {
 }
 
 do_install() {
-    echo ''; echo '=== agent-dispatch install ==='; echo ''
+    _step 'agent-dispatch install'
     _ensure_runtime || return 1
     if _activation_superseded_now; then
         # A concurrent, newer install already activated -- either caught at
@@ -2333,25 +2335,25 @@ do_install() {
         # themselves version-agnostic (they write generic, marker-resolving
         # systemd units), but running them from this invocation's own
         # (older, losing) build is still unnecessary -- nothing left to do.
-        echo ''; echo '=== agent-dispatch install complete (superseded by a newer concurrent build) ==='
+        _skip 'agent-dispatch install (superseded by a newer concurrent build)'
         return 0
     fi
     _install_service
     _install_supervisor_service
     _supervisor_audit installer-reconcile invocation-returned "" "" ok
-    echo ''; echo '=== agent-dispatch install complete ==='
+    _ok 'agent-dispatch install'
     echo '  Coordinator: systemctl --user status agent-dispatch'
     echo '  Supervisor:  systemctl --user status agent-dispatch-supervisor'
 }
 
 do_update() {
-    echo ''; echo '=== agent-dispatch update ==='; echo ''
+    _step 'agent-dispatch update'
     # Mark the live-service update lifecycle as in-progress (ce#5066) so a
     # local liveness watchdog never force-restarts a daemon that is
     # legitimately, briefly mid-cutover. The EXIT trap covers every path
     # below uniformly, including an unhandled error under `set -euo pipefail`.
     _write_update_marker
-    trap _clear_update_marker EXIT
+    trap '_lifecycle_finish "$?"; _clear_update_marker' EXIT
     _downgrade_guard
     _ensure_runtime || return 1
     if _activation_superseded_now; then
@@ -2475,7 +2477,7 @@ do_update() {
     _install_supervisor_service
     _unlock_cutover
     _supervisor_audit installer-reconcile invocation-returned "" "" ok
-    echo ''; echo '=== agent-dispatch update complete ==='
+    _ok 'agent-dispatch update'
 }
 
 do_start() {
@@ -2483,7 +2485,7 @@ do_start() {
     # unlike agent-bridge's do_start, this one has no "already healthy,
     # nothing to do" early return, so the marker covers the whole function.
     _write_update_marker
-    trap _clear_update_marker EXIT
+    trap '_lifecycle_finish "$?"; _clear_update_marker' EXIT
 
     if command -v systemctl >/dev/null 2>&1 && [[ -f "$UNIT_DIR/$SYSTEMD_UNIT" ]]; then
         systemctl --user start "$SYSTEMD_UNIT"
@@ -2620,9 +2622,45 @@ do_uninstall() {
     [[ "$DRY_RUN" -eq 1 ]] && echo "agent-dispatch uninstall dry run complete -- nothing was changed"
 }
 
+_lifecycle_emit() {
+    local py recorder="$PLUGIN_DIR/libs/zdd/src/zdd/lifecycle.py"
+    if [[ ! -f "$recorder" ]]; then
+        recorder="$PLUGIN_DIR/../../libs/zdd/src/zdd/lifecycle.py"
+    fi
+    if ! py="$(_bootstrap_python)" || [[ ! -f "$recorder" ]]; then
+        _warn "Lifecycle record unavailable: bootstrap Python or payload recorder is missing"
+        return 0
+    fi
+    if ! "$py" -I "$recorder" record \
+        --config-dir "${AGENT_DISPATCH_ROUTING_DIR:-$INSTALL_DIR}" \
+        --service agent-dispatch --action "$_LIFECYCLE_ACTION" --outcome "$1" \
+        --pid "$$" --version "${SRC_VERSION:-}"; then
+        _warn "Lifecycle recorder failed; installer outcome is unchanged"
+    fi
+    return 0
+}
+
+_lifecycle_finish() {
+    local rc="$1"
+    if [[ -n "${_LIFECYCLE_ACTION:-}" ]]; then
+        if [[ "$rc" == 0 ]]; then _lifecycle_emit ok; else _lifecycle_emit fail; fi
+        _LIFECYCLE_ACTION=""
+    fi
+    return 0
+}
+
 source "$SCRIPT_DIR/source-runtime.sh"
 PACKAGE_VERSION="$SRC_VERSION"
 SOURCE_RUNTIME_IDENTITY=""
+_LIFECYCLE_ACTION=""
+case "$ACTION" in
+    install|provision) _LIFECYCLE_ACTION=install ;;
+    update|start|stop) _LIFECYCLE_ACTION="$ACTION" ;;
+esac
+if [[ -n "$_LIFECYCLE_ACTION" ]]; then
+    trap '_lifecycle_finish "$?"' EXIT
+    _lifecycle_emit begin
+fi
 case "$ACTION" in
     install|update|provision|stamp)
         _initialize_source_runtime || exit 1

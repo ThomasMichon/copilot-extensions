@@ -1,0 +1,9 @@
+{
+  "comment": "Freeze versioned ordinary startup invocation intent with ready facts and recover keyed native admission receipts without duplicate turns.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

@@ -1,6 +1,7 @@
 """Read-only, role-selected artifact integrity preflight; not release authentication."""
 
 import argparse
+from contextlib import contextmanager
 import hashlib
 import os
 import stat
@@ -20,7 +21,49 @@ def _identity(info):
 
 
 def _content_stamp(info):
-    return info.st_size, info.st_mtime_ns, info.st_ctime_ns
+    # Windows readers deny writes/deletion; ChangeTime can advance on read-side
+    # metadata updates. Python <=3.11 exposes creation time only as st_ctime.
+    created = (info.st_birthtime_ns if sys.version_info >= (3, 12) else info.st_ctime_ns) if (
+        os.name == "nt"
+    ) else info.st_ctime_ns
+    return info.st_size, info.st_mtime_ns, created
+
+
+def _open_artifact(path):
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
+    if os.name != "nt":
+        return os.open(path, flags | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
+    import ctypes
+    import msvcrt
+    from ctypes import wintypes
+
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    create = kernel.CreateFileW
+    create.argtypes = (wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, ctypes.c_void_p,
+                       wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE)
+    create.restype = wintypes.HANDLE
+    close = kernel.CloseHandle
+    close.argtypes = (wintypes.HANDLE,)
+    close.restype = wintypes.BOOL
+    # FILE_SHARE_READ only fences existing and new write/delete handles.
+    handle = create(str(path), 0x80000000, 1, None, 3, 0x00200000, None)
+    if handle == ctypes.c_void_p(-1).value:
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        return msvcrt.open_osfhandle(handle, flags)
+    except BaseException:
+        close(handle)
+        raise
+
+
+@contextmanager
+def _reader(path):
+    descriptor = _open_artifact(path)
+    try:
+        with os.fdopen(descriptor, "rb", closefd=False) as incoming:
+            yield incoming
+    finally:
+        os.close(descriptor)
 
 
 def _file_stat(path):
@@ -44,11 +87,7 @@ def _artifact(path, remaining):
         before = _file_stat(path)
         if not 1 <= before.st_size <= MAX_ARTIFACT_BYTES or before.st_size > remaining:
             raise PlanError("artifact set exceeds byte bounds or contains an empty artifact")
-        flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
-        # Nonblocking open prevents a raced FIFO from waiting before the regular-file check.
-        flags |= getattr(os, "O_NONBLOCK", 0)
-        descriptor = os.open(path, flags)
-        with os.fdopen(descriptor, "rb") as stream:
+        with _reader(path) as stream:
             opened = os.fstat(stream.fileno())
             if (not stat.S_ISREG(opened.st_mode) or _identity(opened) != _identity(before)
                     or opened.st_size != before.st_size):
@@ -68,9 +107,12 @@ def _artifact(path, remaining):
                 hasher.update(chunk)
             after = os.fstat(stream.fileno())
             # Compare content timestamps from the same handle, not cached path metadata.
-            if (_content_stamp(after) != _content_stamp(opened) or size != opened.st_size
-                    or _identity(_file_stat(path)) != _identity(before)):
-                raise PlanError("artifact changed during preflight")
+            if _content_stamp(after) != _content_stamp(opened):
+                raise PlanError("artifact changed during preflight (descriptor-stamp)")
+            if size != opened.st_size:
+                raise PlanError("artifact changed during preflight (read-size)")
+            if _identity(_file_stat(path)) != _identity(before):
+                raise PlanError("artifact changed during preflight (named-identity)")
         return hasher.hexdigest(), size
     except PlanError:
         raise

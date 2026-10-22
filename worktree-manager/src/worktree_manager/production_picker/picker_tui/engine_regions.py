@@ -148,6 +148,25 @@ class _PickerButtons(_FocusRegion):
 
     _zone = "BTN"
 
+    def on_click(self, event) -> None:
+        scr = self._screen
+        reg = scr._reg_pivot()
+        if event.y == 0 and reg is not None and scr._pivot_view_actions():
+            labels = (
+                ([f"+ {reg.create_action.label}"] if reg.create_action else [])
+                + [action.label for action in scr._pivot_view_actions()]
+            )
+            x = 2
+            for index, label in enumerate(labels):
+                if x <= event.x < x + len(label) + 2:
+                    scr.sel = ("BTN", 0)
+                    scr.btn_idx = index
+                    scr._activate()
+                    scr.refresh()
+                    break
+                x += len(label) + 5
+        event.stop()
+
     def render(self):
         scr = self._screen
         W = scr.size.width or 100

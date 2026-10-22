@@ -1,0 +1,9 @@
+{
+  "comment": "Add optional trusted workspace resolution with stable participant tuples, session-segmented anchors and read-only owner head observations; retain explicit standalone actors and unavailable Chat assignment.",
+  "changes": [
+    {
+      "plugin": "agent-chat-service",
+      "type": "patch"
+    }
+  ]
+}

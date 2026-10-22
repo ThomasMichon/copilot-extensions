@@ -8,6 +8,7 @@ _FRAGMENT_FILES = (
     "_installation_context_base.py",
     "_installation_context_files.py",
     "_installation_context_source.py",
+    "_installation_context_lock_recovery.py",
     "_installation_context_receipts.py",
     "_installation_context_snapshot.py",
     "_installation_context_runtime_slot_ownership.py",
@@ -21,6 +22,7 @@ _FRAGMENT_FILES = (
     "_installation_context_maintenance.py",
     "_installation_context_mode_cli.py",
     "_installation_context_deployment.py",
+    "_installation_context_publication.py",
 
 )
 

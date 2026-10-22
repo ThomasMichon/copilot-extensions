@@ -165,6 +165,7 @@ def test_concurrent_project_registration_preserves_both_ledgers(authority_state)
 import sys,time
 from pathlib import Path
 from agent_worktrees import config as cfg,installer
+assert sys.flags.utf8_mode == 1
 cfg.install_dir=lambda:Path(sys.argv[1])
 installer.projects_yaml_path=lambda:Path(sys.argv[2])
 read=installer.read_projects_registry
@@ -176,10 +177,12 @@ installer.read_projects_registry=delayed_read
 installer.register_project(sys.argv[3], 'unused', 'main')
 """
     env = dict(os.environ)
+    env["PYTHONUTF8"] = "0"
     env["PYTHONPATH"] = str(Path(pr_publish.__file__).parent.parent) + os.pathsep + env.get("PYTHONPATH", "")
     children = [subprocess.Popen(
-        [sys.executable, "-c", script, str(root), str(registry), name],
+        [sys.executable, "-X", "utf8", "-c", script, str(root), str(registry), name],
         env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        encoding="utf-8",
         creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
     ) for name in ("first-project", "second-project")]
     for child in children:

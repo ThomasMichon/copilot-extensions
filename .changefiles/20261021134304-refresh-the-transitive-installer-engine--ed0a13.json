@@ -1,0 +1,9 @@
+{
+  "comment": "Refresh the transitive installer-engine payload for shared first-use publication and snapshot source preservation.",
+  "changes": [
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    }
+  ]
+}

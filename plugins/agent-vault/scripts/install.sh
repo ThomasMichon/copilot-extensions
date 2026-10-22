@@ -870,18 +870,18 @@ EOF
 }
 
 do_install() {
-    echo ''; echo '=== agent-vault install ==='; echo ''
+    _step 'agent-vault install'
     _ensure_runtime || return 1
     _install_service || return 1
-    echo ''; echo '=== agent-vault install complete ==='
+    _ok 'agent-vault install'
 }
 
 do_update() {
-    echo ''; echo '=== agent-vault update ==='; echo ''
+    _step 'agent-vault update'
     _downgrade_guard
     _ensure_runtime || return 1
     _install_service || return 1
-    echo ''; echo '=== agent-vault update complete ==='
+    _ok 'agent-vault update'
 }
 
 do_start() {

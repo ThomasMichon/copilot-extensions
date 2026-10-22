@@ -17,6 +17,33 @@ from .client_worktree_restart import _Base
 class CliModeClientMixin(_Base):
     """Mixin supplying ``BridgeClient``'s CLI-mode reservation and deregister calls."""
 
+    def wait_live_plugin_readiness(self, session_id: str, expectation: dict[str, Any]) -> dict[str, Any]:
+        from .client_protocol_floor import protocol_floored_request
+        from .plugin_readiness import PluginReadinessRequest
+        from .protocol import PLUGIN_READINESS_PROTOCOL_VERSION
+
+        body = PluginReadinessRequest.model_validate(expectation)
+        return protocol_floored_request(self, PLUGIN_READINESS_PROTOCOL_VERSION)(
+            "POST", f"/api/v1/live-sessions/{session_id}/plugin-readiness", body.model_dump(),
+            request_timeout=body.timeout_seconds + 15,
+        ) or {}
+
+    def set_live_mode_after_plugins(
+        self, session_id: str, mode: str, expectation: dict[str, Any], *, wait_timeout: float = 30,
+    ) -> dict[str, Any]:
+        from .client_protocol_floor import protocol_floored_request
+        from .live_controls import SetModeRequest
+        from .protocol import PLUGIN_READINESS_PROTOCOL_VERSION
+
+        body = SetModeRequest(
+            mode=mode, plugin_readiness=expectation, wait_timeout=wait_timeout,
+            expected_session_id=expectation.get("expected_session_id"),
+        )
+        return protocol_floored_request(self, PLUGIN_READINESS_PROTOCOL_VERSION)(
+            "POST", f"/api/v1/live-sessions/{session_id}/mode", body.model_dump(),
+            request_timeout=body.plugin_readiness.timeout_seconds + body.wait_timeout + 20,
+        ) or {}
+
     def resolve_live_session(self, handle: str, *, qualified_peer: bool = False) -> dict[str, Any]:
         """Resolve an exact session, legacy local worktree, or qualified peer address."""
         from .client import BridgeClientError

@@ -250,6 +250,8 @@ if (-not $env:COPILOT_PLUGIN_INSTALL_STAGED -or
                 $__wdChild = Start-Process -FilePath $__selfStageExe -PassThru -NoNewWindow `
                     -WorkingDirectory $env:USERPROFILE `
                     -ArgumentList $__selfStageArgs
+                # Windows PowerShell must retain the handle before waiting to preserve ExitCode.
+                $null = $__wdChild.Handle
                 if ($__wdDeadline -gt 0 -and -not $__wdChild.WaitForExit($__wdDeadline * 1000)) {
                     try { & taskkill.exe /PID $__wdChild.Id /T /F 2>&1 | Out-Null } catch {}
                     try { Stop-Process -Id $__wdChild.Id -Force -ErrorAction SilentlyContinue } catch {}
@@ -1726,7 +1728,7 @@ function Get-ActivationRole {
     $previousPreference = $ErrorActionPreference
     try {
         $ErrorActionPreference = 'Continue'
-        $role = (& $python.Source -E -X utf8 $resolver --repo $repoRoot --machine $me 2>$null |
+        $role = (& $python.Source -B -E -X utf8 $resolver --repo $repoRoot --machine $me 2>$null |
             Select-Object -Last 1)
         $resolverExitCode = $LASTEXITCODE
     } finally {

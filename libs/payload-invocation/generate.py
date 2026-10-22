@@ -223,6 +223,11 @@ def load_manifest(path: Path) -> dict[str, object]:
         raise ValueError(
             f"{path}: payloadDispatcher must declare both posix and windows"
         )
+    powershell_pipeline_input = data.get("powershellPipelineInput", False)
+    if not isinstance(powershell_pipeline_input, bool):
+        raise ValueError(f"{path}: powershellPipelineInput must be a boolean")
+    if powershell_pipeline_input and not normalized_dispatcher["windows"]:
+        raise ValueError(f"{path}: powershellPipelineInput requires a payloadDispatcher")
     catalog_gate = data.get("catalogGate", "")
     if not isinstance(catalog_gate, str) or (
         catalog_gate
@@ -251,6 +256,14 @@ def load_manifest(path: Path) -> dict[str, object]:
     catalog_binding = data.get("catalogBinding", False)
     if not isinstance(catalog_binding, bool):
         raise ValueError(f"{path}: catalogBinding must be a boolean")
+    installer_lifecycle = data.get("installerLifecycle", False)
+    if not isinstance(installer_lifecycle, bool):
+        raise ValueError(f"{path}: installerLifecycle must be a boolean")
+    if installer_lifecycle and (
+        installation_context != "required"
+        or not (path.parent / "scripts/installation-context/installation_context.py").is_file()
+    ):
+        raise ValueError(f"{path}: installerLifecycle requires a vendored installation primitive")
     binding_module = data.get("catalogBindingModule", "")
     if (
         not isinstance(binding_module, str)
@@ -281,8 +294,10 @@ def load_manifest(path: Path) -> dict[str, object]:
     data["payloadRootEnv"] = payload_root_env
     data["bootTraceLogFile"] = boot_trace_log_file
     data["payloadDispatcher"] = normalized_dispatcher
+    data["powershellPipelineInput"] = powershell_pipeline_input
     data["catalogGate"] = catalog_gate
     data["catalogBinding"] = catalog_binding
+    data["installerLifecycle"] = installer_lifecycle
     data["catalogBindingModule"] = binding_module
     data["plugin"] = plugin
     data["commands"] = commands
@@ -415,6 +430,10 @@ def render(
         "WINDOWS_CATALOG_SHELL": windows_catalog_shell,
         "WINDOWS_CATALOG_NOTE_PS": windows_catalog_note_ps,
         "WINDOWS_CMD_HOST_BLOCK": windows_cmd_host_block,
+        "POWERSHELL_PIPELINE_SETUP": (
+            "$ProgressPreference = 'SilentlyContinue'\n"
+            if data["powershellPipelineInput"] else ""
+        ),
         "PROVISION_POSIX": provision_posix,
         "PROVISION_POWERSHELL": provision_powershell,
         "CATALOG_GATE_POSIX": (
@@ -534,8 +553,16 @@ def render(
             )
             + "$_payloadDispatcher = Join-Path $_payloadRoot "
             f"'{str(data['payloadDispatcher']['windows']).replace('/', chr(92))}'\n"
-            "& $_payloadDispatcher @args\n"
-            "exit $LASTEXITCODE"
+            + (
+                "if ($MyInvocation.ExpectingInput -and $MyInvocation.Line) {\n"
+                "    (Get-Variable input -ValueOnly) | & $_payloadDispatcher @args\n"
+                "} else {\n"
+                "    & $_payloadDispatcher @args\n"
+                "}\n"
+                if data["powershellPipelineInput"]
+                else "& $_payloadDispatcher @args\n"
+            )
+            + "exit $LASTEXITCODE"
             if data["payloadDispatcher"]["windows"]
             else ""
         ),
@@ -672,7 +699,7 @@ def expected_files(manifest: Path) -> dict[Path, str]:
             (TEMPLATES / template).read_text(encoding="utf-8"),
             data,
         )
-    if data["catalogBinding"]:
+    if data["catalogBinding"] or data["installerLifecycle"]:
         binding_source = (TEMPLATES.parent / "command_binding.py").read_text(encoding="utf-8")
         binding_paths = [manifest.parent / "scripts" / "command_binding.py"]
         if data["catalogBindingModule"]:

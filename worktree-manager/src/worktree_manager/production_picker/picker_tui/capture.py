@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import asyncio
 import io
+import math
 from typing import Any, Awaitable, Callable, Optional
 
 from rich.console import Console
@@ -44,16 +45,28 @@ DEFAULT_SIZE = (118, 40)
 
 async def _wait_for_initial_setup(scr: Any, pilot: Any, *, timeout: float = 5.0) -> None:
     """Wait until a non-live picker's initial async setup epoch has applied."""
-    deadline = asyncio.get_event_loop().time() + timeout
-    while asyncio.get_event_loop().time() < deadline:
+    if not math.isfinite(timeout) or timeout < 0:
+        raise ValueError("setup timeout must be finite and non-negative")
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while True:
+        completion = scr._setup_completion_event
         current = getattr(scr, "_setup_epoch", 0)
         failed = getattr(scr, "_setup_failed_epoch", 0)
+        if scr._bg_cancel.is_set():
+            raise RuntimeError("Picker closed before initial setup completed")
+        if current != 0 and failed == current:
+            raise RuntimeError(
+                f"Picker setup epoch {current} failed: {scr.debug}"
+            )
         if current != 0 and getattr(scr, "_setup_applied_epoch", 0) == current:
             return
-        if current != 0 and failed == current:
-            return
-        await pilot.pause()
-        await asyncio.sleep(0.01)
+        remaining = deadline - loop.time()
+        if remaining <= 0:
+            break
+        # Wait off the render flow; do not enqueue per-widget Pilot barriers.
+        # Setup publishes only after applying its payload or diagnosing failure.
+        await asyncio.to_thread(completion.wait, remaining)
     current = getattr(scr, "_setup_epoch", 0)
     applied = getattr(scr, "_setup_applied_epoch", 0)
     failed = getattr(scr, "_setup_failed_epoch", 0)
@@ -145,6 +158,7 @@ async def capture_async(
     update_state: Optional[str] = None,
     manager_update_state: Optional[str] = None,
     prepare: Optional[Callable[[Any, Any], Awaitable[None]]] = None,
+    setup_timeout: float = 5.0,
     pivot: str | None = None,
     wait_pivot: float = 0.0,
     title: str = "Worktree Picker",
@@ -177,6 +191,8 @@ async def capture_async(
       ``"available"``/``"idle"``.
     - ``prepare`` -- an escape-hatch coroutine awaited with ``(screen, pilot)``
       for anything ``keys`` can't express.
+    - ``setup_timeout`` -- total bound for initial non-live setup, including
+      registry verification and source loading, not a render-speed target.
     """
     from .engine import PickerApp, PickerScreen
 
@@ -184,7 +200,7 @@ async def capture_async(
     async with app.run_test(size=size) as pilot:
         scr = app.query_one(PickerScreen)
         if not live:
-            await _wait_for_initial_setup(scr, pilot)
+            await _wait_for_initial_setup(scr, pilot, timeout=setup_timeout)
         if view == "all":
             scr.machine_idx = 0
         else:

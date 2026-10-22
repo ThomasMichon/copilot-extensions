@@ -229,8 +229,9 @@ class Channel:
     """An exact grant/generation owns every accepted frame and cancellation."""
 
     def __init__(self, ws: web.WebSocketResponse, authority: ServiceAuthority,
-                 grant: ServiceGrant) -> None:
+                 grant: ServiceGrant, *, caller_context: bool = False) -> None:
         self.ws, self.authority, self.grant = ws, authority, grant
+        self.caller_context = caller_context
         self.pending: dict[str, Pending] = {}
         self.retired: deque[str] = deque(maxlen=64)
         self.closed = False
@@ -294,7 +295,8 @@ class Channel:
         elif kind == "error":
             shape(value, {"type", "id", "code"})
             check(value["code"] in ("backend-unavailable", "backend-timeout",
-                                     "response-limit", "invalid-backend-response"))
+                                     "response-limit", "invalid-backend-response",
+                                     "caller-context-expired"))
             pending.fail("outcome-unknown" if pending.method not in
                          ("GET", "HEAD", "OPTIONS") else value["code"],
                          504 if value["code"] == "backend-timeout" else 502)

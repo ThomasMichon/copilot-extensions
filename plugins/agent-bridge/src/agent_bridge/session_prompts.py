@@ -7,7 +7,10 @@ import contextlib
 import inspect
 import json
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from .native_keyed_admission import KeyedNativePrompt
 
 from .db_events import PendingPromptRemovedError
 from .models import SessionStatus
@@ -57,6 +60,7 @@ class _SessionPromptMixin:
     async def _submit_prompt_locked(
         self, session_id: str, prompt: str, *, no_resume: bool = False,
         delivery_id: str | None = None,
+        native_admission: KeyedNativePrompt | None = None,
         pending_prompt_id: int | None = None,
         pending_prompt_caller_id: str | None = None,
     ) -> int:
@@ -115,11 +119,21 @@ class _SessionPromptMixin:
         await assert_admission(self, session)
         if self._draining:
             raise DaemonDrainingError("turn")
+        if native_admission is not None:
+            from .native_keyed_admission import validate_holder
+            validate_holder(self, session_id, session, native_admission)
         turn_index = session.turn_count
         now = time.time()
 
         # Persist turn skeleton
-        if pending_prompt_id is not None:
+        if native_admission is not None:
+            admitted = self._db.create_turn(
+                session_id, turn_index, prompt, now, delivery_id=delivery_id,
+                native_admission=native_admission,
+            )
+            if not admitted["inserted"]:
+                return admitted["receipt"]["turn_index"]
+        elif pending_prompt_id is not None:
             self._db.create_turn(
                 session_id, turn_index, prompt, now, delivery_id=delivery_id,
                 pending_prompt_id=pending_prompt_id,

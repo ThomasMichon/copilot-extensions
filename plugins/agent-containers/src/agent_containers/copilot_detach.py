@@ -248,6 +248,29 @@ class _ContainerAdapter:
         self.inputs_safe_to_cleanup = True
         self._hold_updated_at: float | None = None
         self.plugin_args = None
+        self._plugins_prepared = False
+        self.pending_delivery = False
+
+    def record_pending_delivery(self, plan, pending):
+        from . import forward_keeper
+        if pending is not None:
+            pending = {
+                **pending, "remote_env": self.remote_env,
+                "relay_port": self.relay_port, "host_relay_port": self.host_relay_port,
+            }
+        forward_keeper.record_pending_delivery(self.name, self.hold_id, pending)
+        self.pending_delivery = pending is not None
+
+    def prepare(self, plan):
+        from .plugin_preparation import prepare_plugins
+        from venue_copilot.refs import require_cli_context
+        context = {}
+        prepare_plugins(
+            self.plugin_args, self.target, run_input=self.run_input,
+            remote_env=self.remote_env, relay_port=self.relay_port, prepared_context=context,
+        )
+        self._plugins_prepared = True
+        return require_cli_context(context.get("plugin_context"))
 
     def run(self, command: str, *, timeout: float) -> tuple[int, str, str]:
         return _remote(self.ssh_config, command, timeout=timeout)
@@ -265,12 +288,8 @@ class _ContainerAdapter:
 
         auth_env = None
         try:
-            if self.plugin_args is not None:
-                from .plugin_preparation import prepare_plugins
-                prepare_plugins(
-                    self.plugin_args, self.target, run_input=self.run_input,
-                    remote_env=self.remote_env, relay_port=self.relay_port,
-                )
+            if self.plugin_args is not None and not self._plugins_prepared:
+                self.prepare({})
             if self.target is not None:
                 auth_env = prepare_launch(
                     self.target.config, self.target.fleet, self.name, self.target.user,
@@ -388,6 +407,57 @@ def cmd_detach(
     remote_env: str | None = None
     adapter: _ContainerAdapter | None = None
     try:
+        from . import forward_keeper
+        held = forward_keeper.read_state(args.name) or {}
+        pending = (held.get("pending_deliveries") or {}).get(plan["scope_id"])
+        if pending:
+            from venue_copilot.refs import reconcile_owned_delivery, settle_deferred_seed
+            ssh_config = prepare_ssh_config(args.name, target.user)
+            if pending.get("status") != "admitted":
+                from venue_copilot.detached import _bridge_path_ok
+                port = pending.get("daemon_port", held.get("venue_port"))
+                mux = pending.get("mux_session") or (held.get("holds", {}).get(
+                    plan["scope_id"], {}).get("mux"))
+                try:
+                    if type(port) is not int or not 0 < port <= 65535 or not isinstance(mux, str) or not mux:
+                        raise RuntimeError("Pending delivery lacks its original native forward metadata")
+                    adapter = _ContainerAdapter(
+                        name=args.name, ssh_config=ssh_config, hold_id=plan["scope_id"],
+                        remote_env=pending.get("remote_env"),
+                        relay_port=pending.get("relay_port", held.get("relay_port")),
+                        host_relay_port=pending.get("host_relay_port", held.get("host_relay_port")),
+                    )
+                    adapter.ensure_keeper(venue_port=port, mux=mux)
+                    if not _bridge_path_ok(adapter, port):
+                        raise RuntimeError("The retained native session's bridge forward is unavailable")
+                except (RuntimeError, OSError) as exc:
+                    return _emit(busy_exit, {
+                        "ok": False, **public_plan(plan), "pending": True,
+                        "session_id": pending["session_id"], "error": str(exc),
+                    })
+            result = reconcile_owned_delivery(pending)
+            def settle(command, stdin):
+                return _remote_input(
+                    ssh_config, command, stdin, timeout=60,
+                )
+            if result.status == "admitted" and settle_deferred_seed(
+                settle, plan["identity"], pending["envelope"]["plugin_context"]["cwd"],
+                pending.get("creation_receipt"),
+            ):
+                forward_keeper.record_pending_delivery(args.name, plan["scope_id"], None)
+                if pending.get("remote_env"):
+                    cleanup_remote_env(args.name, target.user, pending["remote_env"])
+                from venue_copilot import release_cli_mode
+                release_cli_mode(plan["scope_id"], reservation_id=pending.get("reservation_id"))
+                return _emit(0, {"ok": True, **public_plan(plan), "session_id": result.session_id,
+                                 "recovered": True, "seed_admitted": True, "message_id": result.message_id})
+            pending.update(result.recovery())
+            forward_keeper.record_pending_delivery(args.name, plan["scope_id"], pending)
+            return _emit(_BUSY_EXIT, {
+                "ok": False, **public_plan(plan), "pending": True, "session_id": pending["session_id"],
+                "pending_delivery": result.recovery(),
+                "error": "owned delivery remains pending; original native session and ownership retained",
+            })
         try:
             launch_env, relay_port, host_relay_port = _launch_env(
                 args,
@@ -410,6 +480,7 @@ def cmd_detach(
         )
         _progress("prepare", "registration credentials on the container")
         adapter.plugin_args = args
+        plan["bridge_owned_seed"] = True
         rc, payload = launch_detached(
             adapter,
             plan,
@@ -423,7 +494,9 @@ def cmd_detach(
         )
         return _emit(rc, payload)
     finally:
-        if remote_env and (adapter is None or adapter.inputs_safe_to_cleanup):
+        if remote_env and (adapter is None or (
+            adapter.inputs_safe_to_cleanup and not adapter.pending_delivery
+        )):
             try:
                 cleanup_remote_env(args.name, target.user, remote_env)
             except RuntimeError:

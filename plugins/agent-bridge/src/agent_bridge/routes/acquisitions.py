@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException, Request
 from ..acquisition_cli import ACQUISITION_PROTOCOL_VERSION
 from ..acquisition_contract import AcquisitionRefused, AcquisitionRequest, AcquisitionResult
 from ..acquisition_runtime import AcquisitionRuntime
+from ..protocol import PLUGIN_READINESS_PROTOCOL_VERSION
 
 router = APIRouter(prefix="/api/v1/acquisitions", tags=["acquisition"])
 
@@ -31,8 +32,11 @@ async def inspect_acquisition(delivery_id: str, request: Request) -> dict:
 
 @router.post("", response_model=AcquisitionResult)
 async def acquire_session(body: RequestEnvelope, request: Request) -> AcquisitionResult:
-    if body.protocol_version not in {30, 31, 32, ACQUISITION_PROTOCOL_VERSION} or (
+    if body.protocol_version not in {30, 31, 32, ACQUISITION_PROTOCOL_VERSION, PLUGIN_READINESS_PROTOCOL_VERSION} or (
         body.version == 2 and body.protocol_version < ACQUISITION_PROTOCOL_VERSION
+    ) or (
+        body.mode == "cli" and body.plugin_readiness is not None
+        and body.protocol_version < PLUGIN_READINESS_PROTOCOL_VERSION
     ):
         raise HTTPException(426, detail={
             "code": "unsupported_acquisition_protocol",

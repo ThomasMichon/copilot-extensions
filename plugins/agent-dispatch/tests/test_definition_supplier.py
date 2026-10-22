@@ -232,15 +232,22 @@ def test_supplier_headless_worker_requests_harness_not_task_lane(supplier, monke
             assert "--creation-key" in argv
             return subprocess.CompletedProcess(argv, 0, json.dumps({
                 "session_id": "bridge-worker", "ready": True, "status": "awaiting_first_prompt",
+                "creation": {"worktree": {"creation_nonce": "supplier-allocation"}},
                 "connection": {"repo": "control-harness", "worktree_id": "worker-space",
                                "target_dir": str(tmp_path / "worker-space"),
                                "native_session_id": "native-worker"},
             }), "")
         assert argv[2] == "send"
         assert queue.latest_reservation(task.id).allocation_project == "control-harness"
+        invocation = json.loads(kwargs["input"])
+        assert invocation["binding"]["project"] == "control-harness"
+        assert invocation["binding"]["creation_nonce"] == "supplier-allocation"
+        assert invocation["expected_native_session_id"] == "native-worker"
         return subprocess.CompletedProcess(argv, 0, json.dumps({
             "session_id": "bridge-worker", "native_session_id": "native-worker",
-            "outcome": "delivered",
+            "outcome": "delivered", "version": 1,
+            "invocation_key": invocation["invocation_key"], "turn_index": 0,
+            "queued": False, "admission": "accepted",
         }), "")
 
     monkeypatch.setattr(ordinary_bridge.subprocess, "run", run)

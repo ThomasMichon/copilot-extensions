@@ -29,15 +29,28 @@ standalone product, not a marketplace plugin. Its owner page defines current
 planning, release, and deployment scope. Installing a client does not itself
 establish a hosted controller or container manager.
 
+The Manager and Worktrees public suite-update commands, Worktrees staging and
+hook apply share the
+[durable execution driver](../worktree-manager/README.md#durable-update-execution).
+Callers enqueue and observe; a finite background worker holds one kernel-backed
+transaction authority over the existing canonical update chain. This execution
+mechanism does not enroll recurring maintenance or make Manager a dependency of
+standalone plugins. Individual installers and remaining native plan-action adapters keep
+their existing custody until their separately tracked migration.
+
 The standalone [agent-chat-service](../services/chat/README.md) currently
 provides dependency-free conversation state and a callable RPC core, plus an
 explicit optional `service` role for independently installed foreground hosting.
 That role reuses canonical single-instance/endpoint ownership, authenticated
 bounded local HTTP and the store-owned drain boundary. POSIX uses a private
 Unix socket; Windows currently uses the documented OS-assigned loopback fallback.
-Default imports do not start a listener, and hosting supplies no installer,
-supervisor, plugin, installed user-facing client or managed cutover. Those
-remain separate slices of the
+The separate optional `client` role uses canonical owned provider execution.
+Its installed command uses explicit nonsecret configuration and
+preserves output/flush/CAS and stable-request recovery. The core also provides
+an explicit store-owned drain/undrain boundary for an embedding lifecycle owner,
+preserving committed state and fencing held waits. Default imports do not start
+a listener. Neither role supplies an installer, supervisor, connection plugin or
+managed cutover; those remain separate slices of the
 [graduation effort](../efforts/active/agent-chat-graduation/README.md).
 
 ### Runtime plugins (installer-deployed runtime + payload-local commands)
@@ -45,7 +58,7 @@ remain separate slices of the
 | Plugin | Kind | Legacy runtime home | Global command surface (legacy wrapper / project binstubs) | Lifecycle |
 |--------|------|--------------|---------|-----------|
 | [agent-worktrees](../plugins/agent-worktrees/) | Session plugin (skills + `sessionStart` hook) | `~/.agent-worktrees/` | `~/.local/bin/agent-worktrees` + per-project binstubs | Per session (launched by binstub); runtime auto-updates on session start |
-| [agent-pull-requests](../plugins/agent-pull-requests/) | Cross-repo PR CLI | `~/.agent-pull-requests/` | `~/.local/bin/agent-pull-requests` | On-demand status/create/merge/wait without a local checkout; current GitHub account/token resolution uses `agent-worktrees repos gh <owner/repo> -- ...` |
+| [agent-pull-requests](../plugins/agent-pull-requests/) | Cross-repo PR CLI | `~/.agent-pull-requests/` | `~/.local/bin/agent-pull-requests` | On-demand status/create/merge/wait without a local checkout; current GitHub account/token resolution uses `agent-worktrees repos gh <owner/repo> -- ...`. Optional [Gateway replay adapter](../plugins/agent-pull-requests/docs/watch-gateway.md) is source-only, not an activated fleet service. |
 | [agent-bridge](../plugins/agent-bridge/) | Persistent HTTP service | `~/.agent-bridge/` | `~/.local/bin/agent-bridge` | Always-on daemon (Windows scheduled task / Linux systemd user unit) |
 | [agent-codespaces](../plugins/agent-codespaces/) | CLI + credential relay | `~/.agent-codespaces/` | `~/.local/bin/agent-codespaces` | On-demand CLI; self-registers a `codespace:` namespace **provider** (+ credential relay) with the agent-bridge daemon via a `~/.agent-bridge/providers.d/` manifest — the daemon drives its binstub over a process boundary |
 | [agent-containers](../plugins/agent-containers/) | CLI + `container:` provider | `~/.agent-containers/` | `~/.local/bin/agent-containers` | On-demand CLI; self-registers a `container:` namespace **provider** with the agent-bridge daemon via a `~/.agent-bridge/providers.d/` manifest (process-boundary binstub invocation) |

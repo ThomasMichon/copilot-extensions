@@ -1,0 +1,36 @@
+{
+  "operation": "rehydrate-manager-progress",
+  "events": [
+    {
+      "event": "agent_message",
+      "data": {
+        "text": "PROGRESS: build=failed"
+      }
+    },
+    {
+      "event": "agent_message",
+      "data": {
+        "text": "PROGRESS: build=ok",
+        "history_replay": true
+      }
+    }
+  ],
+  "expected": {
+    "progress": {
+      "build": "failed"
+    },
+    "historical_output_is_fresh": false
+  },
+  "captured_from": {
+    "commit": "632cac7b9de4c42ef2c765053a783fbead0bbff0",
+    "plugin_version": "0.4.1-dev3",
+    "source_path": "plugins/agent-bridge/src/agent_bridge/session_core.py",
+    "source_git_blob": "4c54b8eb33e5a48c69eccade796be238feef4641",
+    "protocol_generation": 44,
+    "source_sha256": "d5e10c0357f6a64995948d9ad63b2c9b03fcf69cf3b6c2a4155713265ac94741"
+  },
+  "reattested_from": {
+    "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-acp-progress-generation-43.json",
+    "sha256": "52d18082b1a04d483767818db14136a119ca3954517499480fe4e22a7b04d885"
+  }
+}

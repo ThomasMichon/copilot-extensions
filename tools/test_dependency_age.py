@@ -23,6 +23,7 @@ REPOSITORY_NPM_FLOORS = {
     "^2.6.2": "2.6.2",
     "0.31.2": "0.31.2",
     "7.2.1": "7.2.1",
+    "0.80.0": "0.80.0",
 }
 
 
@@ -217,6 +218,31 @@ def test_arbitrary_sources_do_not_exempt(tmp_path, source):
     write(tmp_path / "libs" / "wrong" / "pyproject.toml", '[project]\nname = "not-owned"\n')
     _, errors = age.audit(tmp_path, fetch=lambda _: json.dumps({"releases": {"1": release()}}), now=NOW)
     assert len(errors) == 1
+
+
+@pytest.mark.parametrize("corrupt", [False, True])
+def test_bundled_dbus_next_still_requires_canonical_release_age(tmp_path, corrupt):
+    path = write(tmp_path / "worktree-manager" / "pyproject.toml", """
+[project]
+name = "copilot-extensions-worktree-manager"
+dependencies = ["dbus-next==0.2.3; sys_platform == 'linux'"]
+[tool.uv.sources]
+dbus-next = {path = "vendor/dbus_next-0.2.3-py3-none-any.whl"}
+""")
+    wheel = path.parent / "vendor" / "dbus_next-0.2.3-py3-none-any.whl"
+    wheel.parent.mkdir()
+    wheel.write_bytes(b"changed" if corrupt else (REPO / "worktree-manager" / "vendor" / wheel.name).read_bytes())
+    for timestamp, expected in ((BOUNDARY, 0 if not corrupt else 1), (NOW, 1)):
+        calls = []
+
+        def fetch(url):
+            calls.append(url)
+            return json.dumps({"releases": {"0.2.3": release(timestamp)}})
+
+        _, errors = age.audit(tmp_path, fetch=fetch, now=NOW)
+        assert len(errors) == expected, errors
+        if not corrupt:
+            assert any("/dbus-next/" in url for url in calls)
 
 
 def test_name_alone_is_not_repository_source_attribution(tmp_path):
@@ -427,6 +453,106 @@ def prepare(component, python):
     registry.write_text('STANDALONE_CONSUMERS = ("services/demo",)\n', encoding="utf-8")
     runner.write_text('def prepare(component, python):\n    sources = []\n', encoding="utf-8")
     assert age.contract_source(Requirement("owned"), path, projects, tmp_path) is None
+
+
+def _plugin_source_evidence(root):
+    project(root, dependencies='"owned"')
+    write(root / "libs" / "owned" / "pyproject.toml", '[project]\nname = "owned"\n')
+    return write(root / "tools" / "run-plugin-tests.py", """
+def _ensure_venv(name, uv, reinstall=False):
+    cmd = []
+    if name == "demo":
+        cmd.extend(["-e", str(REPO / "libs" / "owned")])
+""")
+
+
+def test_audit_parses_each_identical_source_contract_once(tmp_path, monkeypatch):
+    plugin = _plugin_source_evidence(tmp_path)
+    project(tmp_path, "services/demo", dependencies='"owned", "external>=1"')
+    registry = write(
+        tmp_path / "tools" / "standalone_consumers.py",
+        'STANDALONE_CONSUMERS = ("services/demo",)\n',
+    )
+    standalone = write(tmp_path / "tools" / "run-standalone-tests.py", """
+def prepare(component, python):
+    if component == "services/demo":
+        sources = [str(REPO / "libs" / "owned")]
+""")
+    sources = {path.read_text(encoding="utf-8"): path for path in (plugin, registry, standalone)}
+    calls = []
+    parse = age.ast.parse
+
+    def observed_parse(source, *args, **kwargs):
+        if source in sources:
+            calls.append(sources[source])
+        return parse(source, *args, **kwargs)
+
+    monkeypatch.setattr(age.ast, "parse", observed_parse)
+    fetched = []
+
+    def fetch(url):
+        fetched.append(url)
+        return json.dumps({"releases": {"1": release()}})
+
+    assert age.audit(tmp_path, fetch=fetch, now=NOW) == (5, [])
+    assert {path: calls.count(path) for path in sources.values()} == {
+        plugin: 1, registry: 1, standalone: 1,
+    }
+    assert fetched == [
+        "https://pypi.org/pypi/builder/json",
+        "https://pypi.org/pypi/external/json",
+    ]
+
+
+@pytest.mark.parametrize("mode", ["changed", "syntax", "encoding", "read-error", "removed"])
+def test_source_evidence_is_reread_within_one_audit(tmp_path, monkeypatch, mode):
+    runner = _plugin_source_evidence(tmp_path)
+    read_text = Path.read_text
+
+    def fetch(url):
+        assert "/builder/" in url or "/owned/" in url
+        if "/builder/" in url:
+            if mode == "changed":
+                runner.write_text('def _ensure_venv(name, uv):\n    pass\n', encoding="utf-8")
+            elif mode == "syntax":
+                runner.write_text("def invalid:\n", encoding="utf-8")
+            elif mode == "encoding":
+                runner.write_bytes(b"\xff")
+            elif mode == "read-error":
+                def denied(path, *args, **kwargs):
+                    if path == runner:
+                        raise PermissionError("source evidence unreadable")
+                    return read_text(path, *args, **kwargs)
+                monkeypatch.setattr(Path, "read_text", denied)
+            else:
+                runner.unlink()
+        return json.dumps({"releases": {"1": release(NOW) if "/owned/" in url else release()}})
+
+    if mode in {"syntax", "read-error"}:
+        with pytest.raises(SyntaxError if mode == "syntax" else PermissionError):
+            age.audit(tmp_path, fetch=fetch, now=NOW)
+    else:
+        count, errors = age.audit(tmp_path, fetch=fetch, now=NOW)
+        assert count == 2 and len(errors) == 1
+        assert ": owned:" in errors[0]
+        assert ("invalid dependency declaration" if mode == "encoding"
+                else "specifier admits no seasoned stable, non-yanked public release") in errors[0]
+
+
+def test_later_audit_observes_source_contract_revocation(tmp_path):
+    runner = _plugin_source_evidence(tmp_path)
+    fetched = []
+
+    def fetch(url):
+        fetched.append(url)
+        return json.dumps({"releases": {"1": release(NOW) if "/owned/" in url else release()}})
+
+    assert age.audit(tmp_path, fetch=fetch, now=NOW) == (2, [])
+    assert not any("/owned/" in url for url in fetched)
+    runner.write_text('def _ensure_venv(name, uv):\n    pass\n', encoding="utf-8")
+    count, errors = age.audit(tmp_path, fetch=fetch, now=NOW)
+    assert count == 2 and len(errors) == 1 and ": owned:" in errors[0]
+    assert any("/owned/" in url for url in fetched)
 
 
 @pytest.mark.parametrize("mode", [
@@ -712,7 +838,8 @@ def test_canonical_manifest_syntax_fastapi_floor_and_cooldown():
     assert (REPO / "libs" / "update-telemetry" / "pyproject.toml").resolve() in projects
     expected_npm = {}
     for relative in (".github/actions/package.json",
-                     "worktree-manager/scripts/picker-snapshot/package.json"):
+                     "worktree-manager/scripts/picker-snapshot/package.json",
+                     "tools/devcontainer-cli/package.json"):
         path = REPO / relative
         data = json.loads(path.read_text(encoding="utf-8"))
         for section in ("dependencies", "devDependencies", "optionalDependencies", "peerDependencies"):
@@ -720,7 +847,7 @@ def test_canonical_manifest_syntax_fastapi_floor_and_cooldown():
                 expected_npm[path, section, f"{name} {spec}"] = REPOSITORY_NPM_FLOORS[spec]
     actual_npm = {(d.path, d.section, d.requirement) for d in declarations if d.ecosystem == "npm"}
     assert actual_npm == set(expected_npm)
-    assert set(expected_npm.values()) == {"2.6.2", "0.31.2", "7.2.1"}
+    assert set(expected_npm.values()) == {"2.6.2", "0.31.2", "7.2.1", "0.80.0"}
     for data in projects.values():
         age.check_uv_policy(data, NOW)
         for dependency in data.get("project", {}).get("dependencies", []):

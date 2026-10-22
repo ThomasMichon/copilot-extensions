@@ -1,0 +1,9 @@
+{
+  "comment": "Document plugin projection relationships and prove same-repository child worktrees use their own local marketplace",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

@@ -1,4 +1,4 @@
-"""Outbound-only SDK connector with a fixed deployment-selected backend origin.
+"""Outbound SDK with one deployment-selected HTTP backend or bounded handler.
 
 Credentials come from an embedding callback, never argv/environment/config data.
 Reconnect creates a new admission; requests from a lost channel are never retried.
@@ -27,9 +27,12 @@ from .gateway_service_channel import (
     unpack, wire_headers,
 )
 from .gateway_service_context import METHODS
+from .gateway_service_handler import (
+    PROFILE, HandlerBinding, ServiceRequest, respond,
+)
 
 LOG = logging.getLogger(__name__)
-RequestSpec = tuple[str, str, dict[str, str], bytes, float]
+RequestSpec = tuple[str, str, dict[str, str], bytes, float, ServiceRequest | None]
 
 def verified_tls(ca: str | None) -> ssl.SSLContext:
     context = ssl.create_default_context(cafile=ca)
@@ -60,24 +63,31 @@ class Exchange:
 
 
 class ServiceConnector:
-    """One explicit service assignment and target; no issuer or provider login.
+    """One explicit service assignment and backend; no issuer or provider login.
 
     ``access_token_callback`` is async and returns a current token. ``proof_key``
     is an externally provisioned P-256 private key accepted by make_proof.
     ``gateway_ca``/``backend_ca`` are optional explicit CA file references;
     omission uses platform trust, never disabled verification.
+    Select exactly one of ``backend_origin`` and ``handler``. Only a handler
+    negotiates channel-derived caller context; no identity headers are added
+    to the HTTP backend path.
     """
 
-    def __init__(self, *, slot: str, gateway_origin: str, backend_origin: str,
+    def __init__(self, *, slot: str, gateway_origin: str, backend_origin: str | None = None,
                  access_token_callback: Callable[[], Awaitable[str]], proof_key: Any,
                  gateway_ca: str | None = None, backend_ca: str | None = None,
-                 methods: frozenset[str] = METHODS) -> None:
+                 methods: frozenset[str] = METHODS,
+                 handler: HandlerBinding | None = None) -> None:
         check(isinstance(slot, str) and 0 < len(slot) <= 128, "invalid-slot")
         check(bool(methods) and methods <= METHODS, "invalid-methods")
         check(callable(access_token_callback), "invalid-token-source")
+        check((backend_origin is None) != (handler is None), "select-one-backend")
+        check(handler is None or type(handler) is HandlerBinding, "invalid-handler")
         self.slot = slot
         self.gateway = origin(gateway_origin)
-        self.backend = origin(backend_origin, tls=False)
+        self.backend = origin(backend_origin, tls=False) if backend_origin is not None else None
+        self.handler = handler
         self.methods = frozenset(methods)
         self._access, self._key = access_token_callback, proof_key
         self._gateway_tls, self._backend_tls = verified_tls(gateway_ca), verified_tls(backend_ca)
@@ -107,15 +117,17 @@ class ServiceConnector:
         check(isinstance(access, str) and 0 < len(access) <= 8192, "invalid-token-source")
         uri = self.gateway + "/_fleet/service-admit"
         proof = make_proof(self._key, access, nonce=challenge["nonce"], target_uri=uri)
-        async with session.post(uri, json={"slot": self.slot, "access": access, "proof": proof},
+        async with session.post(uri, json={"slot": self.slot, "access": access, "proof": proof,
+                                          **({"profile": PROFILE} if self.handler else {})},
                                 ssl=self._gateway_tls, allow_redirects=False) as response:
             ticket = await self._json(response)
         shape(ticket, {"ticket"})
         check(isinstance(ticket["ticket"], str) and len(ticket["ticket"]) == 64)
         return ticket["ticket"]
 
-    def _request(self, value: dict) -> tuple[str, str, dict[str, str], bytes, float]:
-        shape(value, {"type", "id", "method", "target", "headers", "body", "timeout"})
+    def _request(self, value: dict) -> RequestSpec:
+        names = {"type", "id", "method", "target", "headers", "body", "timeout"}
+        shape(value, names | {"context"} if self.handler else names)
         check(value["type"] == "request"
               and isinstance(value["id"], str) and len(value["id"]) == 48)
         check(isinstance(value["method"], str) and value["method"] in self.methods,
@@ -125,7 +137,12 @@ class ServiceConnector:
         body = binary(value["body"], BODY_BYTES)
         timeout = value["timeout"]
         check(type(timeout) in (int, float) and 0 < timeout <= DEADLINE)
-        return value["method"], path + query, selected, body, timeout
+        request = None
+        if self.handler:
+            context = self.handler.context(value["context"], self.slot)
+            request = ServiceRequest(
+                context, value["method"], path + query, tuple(selected.items()), body)
+        return value["method"], path + query, selected, body, timeout, request
 
     async def _proxy(self, ws: aiohttp.ClientWebSocketResponse,
                      session: aiohttp.ClientSession,
@@ -146,22 +163,29 @@ class ServiceConnector:
     async def _exchange(self, ws: aiohttp.ClientWebSocketResponse,
                         session: aiohttp.ClientSession,
                         exchange: Exchange, request: RequestSpec) -> None:
-        method, path, selected, body, timeout = request
+        method, path, selected, body, timeout, admitted = request
         try:
+            if admitted is not None:
+                assert self.handler is not None
+                response = respond(ws, exchange, self.handler, admitted)
+            else:
+                response = self._response(ws, session, exchange, method, path, selected, body)
             await asyncio.wait_for(
-                self._response(ws, session, exchange, method, path, selected, body), timeout)
+                response, timeout)
         except asyncio.TimeoutError:
             await send(ws, {"type": "error", "id": exchange.id, "code": "backend-timeout"})
         except (aiohttp.ClientError, OSError):
             await send(ws, {"type": "error", "id": exchange.id, "code": "backend-unavailable"})
         except TransportError as exc:
-            code = "response-limit" if exc.code == "response-limit" else "invalid-backend-response"
+            code = (exc.code if exc.code in {"response-limit", "caller-context-expired"}
+                    else "invalid-backend-response")
             await send(ws, {"type": "error", "id": exchange.id, "code": code})
     async def _response(
         self, ws: aiohttp.ClientWebSocketResponse, session: aiohttp.ClientSession,
         exchange: Exchange, method: str, path: str, selected: dict[str, str], body: bytes,
     ) -> None:
         # encoded=True preserves the checked path/query instead of URL normalization.
+        assert self.backend is not None
         async with session.request(
             method, URL(self.backend + path, encoded=True), headers=selected, data=body,
             ssl=self._backend_tls, allow_redirects=False, skip_auto_headers={
@@ -221,7 +245,8 @@ class ServiceConnector:
                 attached = await asyncio.wait_for(ws.receive(), 5)
                 check(attached.type == aiohttp.WSMsgType.TEXT, "channel-refused")
                 confirmation = unpack(attached.data)
-                check(confirmation == {"type": "attached"}, "channel-refused")
+                check(confirmation == {"type": "attached", **(
+                    {"profile": PROFILE} if self.handler else {})}, "channel-refused")
                 attached_at = asyncio.get_running_loop().time()
                 self.connected.set()
                 try:

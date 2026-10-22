@@ -214,7 +214,8 @@ def _fake_runtime_gate_payload(
         encoding="utf-8",
     )
     (scripts / "resolve-runtime.sh").write_text(
-        '#!/usr/bin/env bash\nAGENT_RT_PY="$TEST_AGENT_RT_PY"\n',
+        '#!/usr/bin/env bash\n# Trace contract: normal/read-only/ready-v1\n'
+        'AGENT_RT_PY="$TEST_AGENT_RT_PY"\n',
         encoding="utf-8",
     )
     (scripts / "install.sh").write_text(

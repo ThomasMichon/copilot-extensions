@@ -13,6 +13,7 @@ from dataclasses import dataclass
 
 from . import planning
 from .gateway_contract import GatewayError, public_key
+from .gateway_identity_provider import IdentityProvider, IdentityProviderError, prepare_identity
 from .gateway_manifest import GatewayManifest, ManifestError, ServiceSlot
 from .runtime_identity import IdentityError, IdentityVerifier
 
@@ -151,24 +152,30 @@ class ServiceContext:
                      if caller == principal), None)
 
 
-def parse_context(raw: bytes, clock: Callable[[], int]) -> tuple[ServiceContext, IdentityVerifier]:
+def parse_context(raw: bytes, clock: Callable[[], int], *,
+                  identity_provider: IdentityProvider | None = None,
+                  ) -> tuple[ServiceContext, IdentityVerifier]:
     """Validate a complete bounded candidate, including real keys, off-lock."""
     try:
         root = fields(planning.decode(raw), {
             "schema", "version", "manifest", "identity", "bindings", "callers",
         })
         require(root["schema"] == SCHEMA and type(root["version"]) is int
-                and root["version"] == 1, "unsupported-schema")
+                and root["version"] in (1, 2), "unsupported-schema")
         manifest = GatewayManifest.load(root["manifest"])
-        identity = fields(root["identity"], {"issuer", "audience", "jwks", "trust_valid_until"})
-        jwks = fields(identity["jwks"], {"keys"})
-        signing_keys = items(jwks["keys"], 16, minimum=1)
-        normalized_identity = dict(identity, jwks={
-            "keys": sorted(signing_keys, key=planning.canonical),
-        })
-        verifier = IdentityVerifier(**normalized_identity, clock=clock)
-        trust_valid_until = identity["trust_valid_until"]
-        assert type(trust_valid_until) is int
+        if root["version"] == 1:
+            identity = fields(root["identity"], {"issuer", "audience", "jwks", "trust_valid_until"})
+            jwks = fields(identity["jwks"], {"keys"})
+            signing_keys = items(jwks["keys"], 16, minimum=1)
+            normalized_identity = dict(identity, jwks={
+                "keys": sorted(signing_keys, key=planning.canonical),
+            })
+            verifier = IdentityVerifier(**normalized_identity, clock=clock)
+            trust_valid_until = identity["trust_valid_until"]
+            assert type(trust_valid_until) is int
+        else:
+            normalized_identity, verifier, trust_valid_until = prepare_identity(
+                root["identity"], identity_provider, clock)
         mappings: dict[tuple[str, str], tuple[str, dict[str, object]]] = {}
         declared = {(item.provider, item.reference) for item in manifest.key_sources}
         for item in items(root["bindings"], MAX_BINDINGS):
@@ -205,7 +212,7 @@ def parse_context(raw: bytes, clock: Callable[[], int]) -> tuple[ServiceContext,
         ]
         manifest_value = manifest.to_dict()
         normalized = {
-            "schema": SCHEMA, "version": 1, "manifest": manifest_value,
+            "schema": SCHEMA, "version": root["version"], "manifest": manifest_value,
             "identity": normalized_identity, "callers": normalized_callers,
             "bindings": [{"provider": provider, "reference": reference, "jwk": value[1]}
                          for (provider, reference), value in sorted(mappings.items())],
@@ -233,3 +240,5 @@ def parse_context(raw: bytes, clock: Callable[[], int]) -> tuple[ServiceContext,
         raise ServicePolicyError(exc.code) from None
     except IdentityError as exc:
         raise ServicePolicyError(exc.code) from None
+    except IdentityProviderError:
+        raise ServicePolicyError("provider-trust-unavailable") from None

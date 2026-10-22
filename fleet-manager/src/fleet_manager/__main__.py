@@ -1,4 +1,4 @@
-"""Thin fleet planning/diagnostics and explicit opt-in NEW Gateway serving."""
+"""Thin fleet planning, explicit client lifecycle and opt-in NEW Gateway serving."""
 
 import argparse
 import sys
@@ -42,6 +42,28 @@ def main(argv=None):
     profile.add_argument("--config", type=Path)
     profile.add_argument("--service-policy", type=Path)
     hosting.add_argument("--tls-config", type=Path)
+    admission = commands.add_parser(
+        "client-state", help="Explicit client admission, construction, runtime selectors and commands",
+    )
+    state_commands = admission.add_subparsers(dest="state_command", required=True)
+    for operation in (
+        "initialize", "inspect", "admit", "construct", "activate-runtime",
+        "register-commands", "unregister-commands", "deactivate-runtime",
+    ):
+        state = state_commands.add_parser(operation)
+        state.add_argument("--root", type=Path, required=True)
+        state.add_argument("--identity", type=Path, required=True)
+        if operation in ("admit", "construct", "activate-runtime", "register-commands"):
+            state.add_argument("--selection", type=Path, required=True)
+            state.add_argument("--release", type=Path, required=True)
+            state.add_argument("--proof", type=Path, required=True)
+            state.add_argument("--policy", type=Path, required=True)
+            state.add_argument("--sources", type=Path, required=True)
+            state.add_argument("--staging-parent", type=Path, required=True)
+        if operation in ("construct", "activate-runtime", "register-commands"):
+            state.add_argument("--target", type=Path, required=True)
+        if operation in ("register-commands", "unregister-commands"):
+            state.add_argument("--command-directory", type=Path, required=True)
     try:
         args = parser.parse_args(argv)
     except SystemExit as exc:
@@ -67,7 +89,67 @@ def main(argv=None):
             return 1
         return serve(args.config)
     try:
-        if args.command == "doctor":
+        if args.command == "client-state":
+            from .artifact_staging import _bytes, stage_authenticated_artifacts
+            from .client_admission import (
+                admit_client_release, initialize_client_admission, inspect_client_admission,
+                recover_client_admission,
+            )
+
+            def local(path):
+                return decode(_bytes(path.absolute(), MAX_BYTES))
+
+            identity = local(args.identity)
+            if args.state_command == "initialize":
+                result = initialize_client_admission(args.root, identity)
+            elif args.state_command == "inspect":
+                result = inspect_client_admission(args.root, identity)
+            elif args.state_command == "unregister-commands":
+                from .client_command_removal import unregister_client_frontdoor
+
+                result = unregister_client_frontdoor(
+                    args.root, identity, command_directory=args.command_directory,
+                )
+            elif args.state_command == "deactivate-runtime":
+                from .client_deactivation import deactivate_client_runtime
+
+                result = deactivate_client_runtime(args.root, identity)
+            else:
+                recover_client_admission(args.root, identity)
+                if (
+                    args.staging_parent.absolute().is_relative_to(args.root.absolute())
+                    or args.root.absolute().is_relative_to(args.staging_parent.absolute())
+                ):
+                    raise PlanError("client admission requires a separate explicit staging parent")
+                policy = local(args.policy)
+                selection = local(args.selection)
+                with stage_authenticated_artifacts(
+                    _bytes(args.release.absolute(), MAX_BYTES), local(args.proof), policy,
+                    local(args.sources), authority=identity["authority"],
+                    installation=identity["installation"], role="client",
+                    staging_parent=args.staging_parent,
+                ) as staged:
+                    if args.state_command in ("construct", "activate-runtime", "register-commands"):
+                        from .client_activation import activate_client_runtime
+                        from .client_construction import construct_client_release
+                        from .client_frontdoor import register_client_frontdoor
+
+                        execute = {
+                            "construct": construct_client_release,
+                            "activate-runtime": activate_client_runtime,
+                            "register-commands": register_client_frontdoor,
+                        }[args.state_command]
+                        options = ({"command_directory": args.command_directory}
+                                   if args.state_command == "register-commands" else {})
+                        result = execute(
+                            args.root, identity, selection, staged,
+                            current_policy=lambda: local(args.policy),
+                            current_target=lambda: local(args.target),
+                            **options,
+                        )
+                    else:
+                        result = admit_client_release(args.root, identity, selection, staged, policy)
+        elif args.command == "doctor":
             from .client_diagnostics import diagnose_client
 
             result = diagnose_client()
@@ -87,7 +169,7 @@ def main(argv=None):
         print(f"fleet-manager: {exc}", file=sys.stderr)
         return 1
     print(serialized)
-    if args.command == "doctor":
+    if args.command in ("doctor", "client-state"):
         return 0
     if args.command == "inspect":
         return 0 if result["status"] in ("installed", "ready") else 2

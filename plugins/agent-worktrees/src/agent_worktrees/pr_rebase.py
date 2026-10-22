@@ -65,15 +65,24 @@ def _empty_upstream_commit(commit: str, parent: str, upstream: str, cwd: str) ->
     )
 
 
-def _series(base: str, head: str, cwd: str, *, upstream: str = "") -> list[str] | None:
+def _commit_rows(base: str, head: str, cwd: str) -> list[list[str]]:
+    return [line.split() for line in _git(
+        "rev-list", "--reverse", "--parents", f"{base}..{head}", cwd=cwd,
+    ).splitlines()]
+
+
+def _series(
+    base: str, head: str, cwd: str, *, upstream: str = "",
+    rows: list[list[str]] | None = None,
+) -> list[str] | None:
     """Ordered diagnostic patch IDs, including whitespace and binary changes.
 
     They do not bind hunk locations; tree reconstruction authorizes the replay.
     Only empty commits already reachable from the pinned upstream may lack IDs.
     Merge commits and other empty/unreadable patches are not replay evidence.
     """
-    commits = _git("rev-list", "--reverse", "--parents", f"{base}..{head}", cwd=cwd)
-    rows = [line.split() for line in commits.splitlines()]
+    if rows is None:
+        rows = _commit_rows(base, head, cwd)
     if any(len(row) != 2 for row in rows):
         return None
     if not rows:
@@ -159,10 +168,39 @@ def _merge_tree(parent: str, onto: str, commit: str, cwd: str) -> tuple[str, boo
     return tree, result.returncode == 1
 
 
+def _tree_ids(heads: tuple[str, ...], cwd: str) -> dict[str, str] | None:
+    """Read the pinned commits' trees once for this replay decision."""
+    if not heads or any(
+        not isinstance(head, str) or re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", head) is None
+        for head in heads
+    ):
+        return None
+    heads = tuple(dict.fromkeys(heads))
+    output = _git_bytes(
+        "log", "--stdin", "--no-walk=unsorted", "--format=%H %T",
+        "--no-notes", "--no-show-signature", "--no-color", cwd=cwd,
+        stdin=("".join(f"{head}\n" for head in heads)).encode("ascii"),
+    )
+    lines = output.split(b"\n")
+    if len(lines) != len(heads) + 1 or lines[-1] != b"":
+        return None
+    rows = [line.split(b" ") for line in lines[:-1]]
+    if any(
+        len(row) != 2 or row[0] != head.encode("ascii")
+        or re.fullmatch(rb"(?:[0-9a-f]{40}|[0-9a-f]{64})", row[1]) is None
+        for head, row in zip(heads, rows)
+    ):
+        return None
+    return {head.decode("ascii"): tree.decode("ascii") for head, tree in rows}
+
+
 def _conflict_lineage(
     base: str, original: str, onto: str, finished: str,
     old: list[str], new: list[str],
     steps: list[tuple[str, str]], cwd: str,
+    *,
+    old_rows: list[list[str]] | None = None,
+    new_rows: list[list[str]] | None = None,
 ) -> tuple[tuple[str, str], ...] | None:
     """Reconstruct every source change at its real location on the new parent.
 
@@ -171,12 +209,10 @@ def _conflict_lineage(
     proves already-applied work; only a real conflict with an explicit continue
     may differ, still preserving one-to-one raw author/message provenance.
     """
-    old_rows = [row.split() for row in _git(
-        "rev-list", "--reverse", "--parents", f"{base}..{original}", cwd=cwd,
-    ).splitlines()]
-    new_rows = [row.split() for row in _git(
-        "rev-list", "--reverse", "--parents", f"{onto}..{finished}", cwd=cwd,
-    ).splitlines()]
+    if old_rows is None:
+        old_rows = _commit_rows(base, original, cwd)
+    if new_rows is None:
+        new_rows = _commit_rows(onto, finished, cwd)
     if any(len(row) != 2 for row in [*old_rows, *new_rows]):
         return None
     if len(old_rows) != len(old):
@@ -189,6 +225,9 @@ def _conflict_lineage(
         or [sha for sha, _ in steps] != [row[0] for row in new_rows]
     ):
         return None
+    trees = _tree_ids((onto, *(row[0] for row in new_rows)), cwd)
+    if trees is None:
+        return None
     conflicts: list[tuple[str, str]] = []
     current = onto
     index = 0
@@ -197,9 +236,7 @@ def _conflict_lineage(
         if _ancestor(old_sha, onto, cwd):
             continue
         tree, conflicted = _merge_tree(old_parent, current, old_sha, cwd)
-        current_tree = _git("rev-parse", f"{current}^{{tree}}", cwd=cwd)
-        if not current_tree:
-            return None
+        current_tree = trees[current]
         if not conflicted and tree == current_tree:
             continue
         if index >= len(new_rows):
@@ -212,8 +249,8 @@ def _conflict_lineage(
         after = _git_bytes("show", "--encoding=none", "-s", identity, new_sha, cwd=cwd)
         if not before or before != after:
             return None
-        new_tree = _git("rev-parse", f"{new_sha}^{{tree}}", cwd=cwd)
-        if not new_tree or new_tree == current_tree:
+        new_tree = trees[new_sha]
+        if new_tree == current_tree:
             return None
         if conflicted:
             if not steps[index][1].startswith("rebase (continue): "):
@@ -305,12 +342,16 @@ def verify(record, repo, remote: str, refspec: str, expected: str, *, cwd: str,
     if not published_ids or not re.fullmatch(rb"[0-9a-f]{40,64}", published_ids[0]):
         return refuse("The saved published head has no reconstructible patch against its base.")
     published_patch = published_ids[0].decode("ascii")
-    old = _series(base, original, cwd, upstream=onto)
-    new = _series(onto, finished, cwd)
+    # Both consumers use the same pinned ranges during this one verification.
+    old_rows = _commit_rows(base, original, cwd)
+    new_rows = _commit_rows(onto, finished, cwd)
+    old = _series(base, original, cwd, upstream=onto, rows=old_rows)
+    new = _series(onto, finished, cwd, rows=new_rows)
     if old is None or new is None or not old:
         return refuse("The source series is empty, unreadable, or contains unsupported merge commits.")
     conflicts = () if recovery is not None else _conflict_lineage(
         base, original, onto, finished, old, new, steps, cwd,
+        old_rows=old_rows, new_rows=new_rows,
     )
     if conflicts is None:
         return refuse("The manual replay did not preserve source trees and commit identity.")

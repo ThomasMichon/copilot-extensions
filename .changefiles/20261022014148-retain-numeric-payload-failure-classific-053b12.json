@@ -1,0 +1,9 @@
+{
+  "comment": "Retain numeric payload failure classifications before truncating redacted child diagnostics",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

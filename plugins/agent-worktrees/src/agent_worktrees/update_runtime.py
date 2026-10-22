@@ -183,6 +183,7 @@ def _update_registered_plugins(
             continue
         refreshed_contexts.add(context)
         _auth.prepare_marketplace(context, required=context in required_contexts)
+        update_events.enter("payload_refresh")
         if refresh_marketplace(reconcile.MARKETPLACE, cwd=context):
             browse_contexts.append(context)
 
@@ -196,6 +197,7 @@ def _update_registered_plugins(
         if fallback_context is not None and fallback_context not in refreshed_contexts:
             refreshed_contexts.add(fallback_context)
             _auth.prepare_marketplace(fallback_context, required=False)
+            update_events.enter("payload_refresh")
             if refresh_marketplace(reconcile.MARKETPLACE, cwd=fallback_context):
                 browse_contexts.append(fallback_context)
 

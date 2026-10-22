@@ -6,6 +6,7 @@ import copy
 import hashlib
 import json
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
 
 from .watch_contract import PRSnapshot
@@ -124,6 +125,7 @@ def decode_snapshot(data: object, repo: str, number: int) -> PRSnapshot:
 
 def fetch_snapshot(
     repo: str, number: int, command: str, *, prefix: list[str] | None = None,
+    runner: Callable[[list[str]], subprocess.CompletedProcess] | None = None,
 ) -> PRSnapshot:
     """Perform exactly one native configured read; never start another waiter."""
     if prefix is None:
@@ -136,7 +138,9 @@ def fetch_snapshot(
     if not repo or any(character in repo for character in "\0\r\n&|<>^%!"):
         raise ValueError("invalid native repository target")
     try:
-        result = _run_native([*launch, "pr-watch", "snapshot", repo, str(number), "--json"])
+        result = (runner or _run_native)(
+            [*launch, "pr-watch", "snapshot", repo, str(number), "--json"],
+        )
         if result.returncode or len(result.stdout.encode("utf-8")) > _MAX_SNAPSHOT_BYTES:
             raise ValueError("native snapshot command failed or exceeded its budget")
         return decode_snapshot(json.loads(result.stdout), repo, number)

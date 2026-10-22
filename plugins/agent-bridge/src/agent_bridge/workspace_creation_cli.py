@@ -7,6 +7,8 @@ import sys
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--min-daemon-protocol", type=int, default=None,
+                        help="Require this protocol before each keyed creation request")
     parser.add_argument("--creation-key", help="opaque logical creation identity; exact local workspace/session retries retain the original result")
     parser.add_argument("--provider-instance", action="store_true",
                         help="keyed native creation on an exact provider-exec instance, without a worktree")
@@ -35,6 +37,8 @@ def create(args: argparse.Namespace, client, *, caller_id: str | None) -> None:
     _hold_protocol_floor(
         client, PROVIDER_CREATION_PROTOCOL_VERSION if provider_instance else WORKSPACE_CREATION_PROTOCOL_VERSION,
     )
+    if getattr(args, "min_daemon_protocol", None):
+        _hold_protocol_floor(client, args.min_daemon_protocol)
     inventory = _read_agent_inventory(client)
     preference = _prepare_sender_preference(client, args.target, agent_inventory=inventory)
     prompt = _companion_seed_prompt(_resolve_prompt(args, required=False))

@@ -1,0 +1,9 @@
+{
+  "comment": "Keep launch argument values out of routine setup diagnostics while preserving native commands and action outcomes.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

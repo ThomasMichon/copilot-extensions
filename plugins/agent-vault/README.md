@@ -61,6 +61,14 @@ Custom askpass and service-unit publication also refuses directory and
 symlink-to-directory destinations and invalid staging types; colliding
 directories are preserved rather than treated as move containers.
 
+Installed first-use wrappers and payload dispatchers enforce the shared
+[publication boundary](../../libs/installation-context/README.md) before cold
+trace, status or provisioning-lock writes. Healthy managed runtimes still run.
+Payload dispatchers retain the independently selected cell; absent or older
+admission support returns explicit readiness instead of authorizing replacement.
+Fresh Windows activation checks the actual historical `.venv` path before
+attempting legacy daemon migration, not the newly built version slot.
+
 The cross-plugin native source contracts are in
 `plugins/agent-logger/tests/test_source_runtime_install.py`. Required smoke uses
 small assembled payloads and the real native source/stamp boundaries. Full

@@ -62,6 +62,19 @@ def _resolve_environment(*args, **kwargs):
 
 def add_parsers(sub) -> None:
     p = sub.add_parser("update", help="Re-deploy from repo")
+    mode = p.add_mutually_exclusive_group()
+    mode.add_argument("--detach", action="store_true", help="Submit a durable update request without waiting")
+    mode.add_argument("--wait", action="store_true", help="Observe the durable update through completion (default)")
+    mode.add_argument(
+        "--supervised-debug", action="store_true",
+        help="Execute in the foreground under the same exclusive update authority",
+    )
+    mode.add_argument("--request-status", metavar="ID", help="Read a durable update request without installing")
+    mode.add_argument("--recovery-status", action="store_true", help="Read restart-confirmed settlement availability")
+    mode.add_argument(
+        "--recover-after-restart", action="store_true",
+        help="Settle interrupted requests only after a kernel-confirmed restart; never replay",
+    )
     p.add_argument(
         "--recreate-venv",
         action="store_true",
@@ -98,7 +111,7 @@ def add_parsers(sub) -> None:
     p.add_argument(
         "--no-manager",
         action="store_true",
-        help="Run the in-plugin update directly, bypassing the "
+        help="Use the in-plugin updater through the execution queue, bypassing the "
         "Worktree Manager seam (the escape hatch the Manager "
         "itself re-enters through, and the DQ8 fallback)",
     )
@@ -108,6 +121,11 @@ def add_parsers(sub) -> None:
 
     sp = sub.add_parser(
         "reconcile-plugins", help="Reconcile repo enabledPlugins payloads + gated runtimes (JSON)"
+    )
+    sp.add_argument(
+        "--check-update",
+        action="store_true",
+        help="Revalidate one native runtime action from JSON stdin without executing it.",
     )
     sp.add_argument(
         "--machine", default=None, help="Machine name (auto-detected from hostname if omitted)"
@@ -163,6 +181,24 @@ def add_parsers(sub) -> None:
     )
 
 
+def cmd_update_request(args: argparse.Namespace) -> int:
+    from .update_driver_cli import cmd_update_request as dispatch
+
+    return dispatch(args)
+
+
+def cmd_stage_request(args: argparse.Namespace) -> int:
+    from .update_driver_json_cli import cmd_stage_request as dispatch
+
+    return dispatch(args)
+
+
+def cmd_reconcile_request(args: argparse.Namespace) -> int:
+    from .update_driver_json_cli import cmd_reconcile_request as dispatch
+
+    return dispatch(args)
+
+
 def cmd_update(args: argparse.Namespace) -> int:
     """Update the harness -- via the Worktree Manager when present (the seam).
 
@@ -181,6 +217,14 @@ def cmd_update(args: argparse.Namespace) -> int:
     update_options.validate_auth_flags(args)
     if getattr(args, "auth_report", False):
         return _auth.cmd_report(args)
+    handed_off = manager_handoff(args)
+    if handed_off is not None:
+        return handed_off
+    return _core_helper("_cmd_update_in_plugin", _cmd_update_in_plugin)(args)
+
+
+def manager_handoff(args: argparse.Namespace) -> int | None:
+    """Preserve the existing Manager seam without executing a fallback install."""
     if not getattr(args, "no_manager", False):
         mgr = _usable_worktree_manager()
         if mgr:
@@ -204,7 +248,7 @@ def cmd_update(args: argparse.Namespace) -> int:
                     os.environ.pop(update_context_env, None)
                 else:
                     os.environ[update_context_env] = previous_context
-    return _core_helper("_cmd_update_in_plugin", _cmd_update_in_plugin)(args)
+    return None
 
 
 def _update_flags(args: argparse.Namespace) -> list[str]:
@@ -218,6 +262,11 @@ def _update_flags(args: argparse.Namespace) -> list[str]:
         flags.append("--no-prune-pivots")
     if getattr(args, "recreate_venv", False):
         flags.append("--recreate-venv")
+    for name in ("detach", "wait", "supervised_debug"):
+        if getattr(args, name, False):
+            flags.append("--" + name.replace("_", "-"))
+    if getattr(args, "json", False) and getattr(args, "detach", False):
+        flags.append("--json")
     flags.extend(update_options.forwarded_flags(args))
     skip = getattr(args, "skip_modules", None)
     if skip is not None:
@@ -624,6 +673,7 @@ def plan_pre_launch() -> dict:
             diagnostics.append(
                 {
                     "service": "agent-worktrees",
+                    "phase": "runtime",
                     "reason": "installation-context-invalid",
                     "message": str(error),
                 }
@@ -641,7 +691,18 @@ def plan_pre_launch() -> dict:
                 staleness = svc.check_marketplace_staleness(wm_manifest, aw_plugin_dir)
             else:
                 staleness = svc.check_staleness(wm_manifest, repo_dir)
+        diagnostic = None
         if staleness != "current":
+            diagnostic = _reconcile.publication_diagnostic(
+                "agent-worktrees", aw_plugin_dir, aw_runtime_root,
+                context=(
+                    Path(aw_environment["COPILOT_EXTENSIONS_CONTEXT"])
+                    if "COPILOT_EXTENSIONS_CONTEXT" in aw_environment else None
+                ),
+            )
+            if diagnostic is not None:
+                diagnostics.append(diagnostic)
+        if staleness != "current" and diagnostic is None:
             installer = next(
                 (
                     aw_plugin_dir / "scripts" / name
@@ -663,6 +724,8 @@ def plan_pre_launch() -> dict:
                 updates: list[dict] = [
                     {
                         "service": "agent-worktrees",
+                        "phase": "runtime",
+                        "payload_root": str(aw_plugin_dir),
                         "staleness": staleness,
                         "command": cmd,
                         "argv": cmd_argv,
@@ -759,25 +822,60 @@ def _append_update_if_stale(
     )
 
 
+def write_reconcile_status(status_arg, payload: dict[str, object]) -> None:
+    """Atomically publish canonical provisioning status, including driver failures."""
+    if not status_arg:
+        return
+    status_path = Path(status_arg).expanduser()
+    status_path.parent.mkdir(parents=True, exist_ok=True)
+    data = {
+        "version": 1,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        **payload,
+    }
+    temp = status_path.with_name(f".{status_path.name}.{os.getpid()}.tmp")
+    temp.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    os.replace(temp, status_path)
+
+
 def cmd_reconcile_plugins(args: argparse.Namespace) -> int:
     """Reconcile repo-configured copilot-extensions plugins (JSON action plan)."""
     from . import reconcile
 
+    if getattr(args, "check_update", False):
+        from .reconcile_deployment import execution_diagnostic
+
+        try:
+            update = json.load(sys.stdin)
+            if (
+                not isinstance(update, dict)
+                or update.get("phase") != "runtime"
+                or not isinstance(update.get("service"), str)
+                or not update["service"]
+                or not isinstance(update.get("environment", {}), dict)
+                or any(
+                    not isinstance(key, str) or not key or not isinstance(value, str)
+                    for key, value in update.get("environment", {}).items()
+                )
+            ):
+                raise ValueError("Expected one runtime action with service and environment metadata.")
+            diagnostic = execution_diagnostic(
+                update, staged=update.get("trigger") == "stage-update",
+            )
+        except (OSError, ValueError) as error:
+            diagnostic = {
+                "reason": "execution-admission-invalid", "message": str(error),
+            }
+        print(json.dumps({
+            "allowed": diagnostic is None,
+            "diagnostics": [diagnostic] if diagnostic else [],
+        }))
+        return 3 if diagnostic else 0
+
     status_arg = getattr(args, "status", None)
 
     def _write_status(payload: dict[str, object]) -> None:
-        if not status_arg:
-            return
-        status_path = Path(status_arg).expanduser()
-        status_path.parent.mkdir(parents=True, exist_ok=True)
-        data = {
-            "version": 1,
-            "updated_at": datetime.now(timezone.utc).isoformat(),
-            **payload,
-        }
-        temp = status_path.with_name(f".{status_path.name}.{os.getpid()}.tmp")
-        temp.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-        os.replace(temp, status_path)
+        write_reconcile_status(status_arg, payload)
 
     repo_override = getattr(args, "repo", None)
     repo_dir = repo_override or worktree_identity._find_repo_dir()

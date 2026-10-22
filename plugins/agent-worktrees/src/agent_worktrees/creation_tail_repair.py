@@ -38,15 +38,30 @@ def _same_repository(anchor: str, checkout: str, *, branch: str | None = None) -
             raise ValueError("retained checkout is on another Git branch")
 
 
-def _validate(config: cfg.Config, path: Path, seed_id: str | None):
+def _validate(
+    config: cfg.Config, path: Path, seed_id: str | None, *,
+    retained: tracking.WorktreeRecord | None = None,
+):
     execution_spaces.require_current_execution_space(config)
     if path.is_symlink():
         raise ValueError("tracking record symlink refused")
     record = tracking.load_record(path)
     execution_spaces.require_record_mutation(record, config)
+    if retained is not None and (
+        any(getattr(record, field) != getattr(retained, field) for field in (
+            "worktree_id", "repo", "branch", "worktree_path", "creation_nonce",
+            "machine", "platform", "machine_identity", "owner_ref",
+        ))
+        or any(
+            getattr(retained, field) is not None and getattr(record, field) != getattr(retained, field)
+            for field in ("pair_id", "pair_role", "pair_ref", "pair_kind")
+        )
+    ):
+        raise ValueError("retained creation allocation identity changed during repair")
     if (
         record.worktree_id != path.stem or record.repo != config.repo_name
-        or record.execution_machine != config.machine or record.platform != config.platform
+        or not execution_spaces.require_owner_identity(record.execution_machine, config, canonical_ref=False)
+        or record.platform != config.platform or record.platform != cfg.detect_platform()
         or record.kind != "session"
         or record.status != "active"
         or getattr(config.default_repo, "knowledge_only", False)
@@ -220,7 +235,7 @@ def _prepare_pair(
 ) -> None:
     root, existing, allocation, child = plan
     config = cfg.load_config()
-    record, _ = _validate(config, path, seed_id)
+    record, _ = _validate(config, path, seed_id, retained=record)
     current_plan = _pair_plan(config, record)
     if (current_plan[0].repo, current_plan[0].path) != (root.repo, root.path):
         raise ValueError("knowledge binding changed during creation recovery")
@@ -243,6 +258,7 @@ def _prepare_pair(
                 config, harness_id=record.worktree_id, timestamp=timestamp, suffix=suffix,
                 plat=record.platform, plat_short=platform,
                 machine_identity=record.machine_identity,
+                legacy_machine=record.machine if record.machine_identity is None else None,
             )
             if stamp is None:
                 raise ValueError("paired creation did not establish its required companion")
@@ -258,7 +274,7 @@ def _prepare_pair(
         timeout=300, stale_after=3600,
     ))
     fresh = cfg.load_config()
-    current, _ = _validate(fresh, path, seed_id)
+    current, _ = _validate(fresh, path, seed_id, retained=record)
     current_root, existing, _, child = _pair_plan(fresh, current)
     if (current_root.repo, current_root.path) != (root.repo, root.path):
         raise ValueError("knowledge binding changed during creation recovery")
@@ -276,7 +292,7 @@ def _prepare_pair(
         _require_composition(result)
         return
     fresh = cfg.load_config()
-    current, _ = _validate(fresh, path, seed_id)
+    current, _ = _validate(fresh, path, seed_id, retained=record)
     current_root = state_root.resolve_state_root(fresh)
     if (current_root.repo, current_root.path) != (root.repo, root.path):
         raise ValueError("knowledge binding changed during creation recovery")
@@ -339,7 +355,7 @@ def targeted_doctor(args) -> int:
                 timeout=300, stale_after=3600,
             ), launch_admission.guard(path), ExitStack() as admission:
                 config = cfg.load_config()
-                record, seed = _validate(config, path, expected)
+                record, seed = _validate(config, path, expected, retained=record)
                 plan = _pair_plan(config, record)
                 root, _, allocation, _ = plan
                 if root.requires_external:
@@ -360,8 +376,8 @@ def targeted_doctor(args) -> int:
                     if refreshed.status != "ready":
                         raise ValueError(refreshed.diagnostic)
                 config = cfg.load_config()
-                current, retained = _validate(config, path, seed.seed_id)
-                if retained != seed:
+                current, retained_seed = _validate(config, path, seed.seed_id, retained=record)
+                if retained_seed != seed:
                     raise ValueError("retained New changed during creation recovery")
                 current_plan = _pair_plan(config, current)
                 checks = _checks(current, current_plan)

@@ -1,0 +1,21 @@
+{
+  "comment": "Add opt-in finite reverse-forward selection through the existing SSH owner with attempt-specific readiness, retained process custody and held unknown outcomes; preserve fixed-port defaults.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-containers",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-ssh",
+      "type": "patch"
+    }
+  ]
+}

@@ -233,6 +233,7 @@ profile_home() {
 }
 
 resolve_runtime() {
+    local AGENT_RT_RESOLVE_TRACE_MODE=ready
     AGENT_RT_PY=""
     if [[ -n "${COPILOT_EXTENSIONS_BOOT_TRACE:-}" ]]; then
         export COPILOT_EXTENSIONS_BOOT_TRACE_PLUGIN="agent-worktrees"
@@ -433,7 +434,34 @@ installation_resolution_current() {
     fi
 }
 
+assert_plugin_runtime_publication() {
+    local probe="" code=0 allowed="" allowed_type="" path="" actual="" expected_root=""
+    local probe_args=("${STATUS_ARGS[@]}")
+    probe_args[0]=probe-plugin-publication
+    probe="$(bash "$MODE_RUNNER" "${probe_args[@]}")" || code=$?
+    allowed="$(json_get "$probe" "$(json_path deployment allowPluginPublication)" 2>/dev/null || true)"
+    allowed_type="$(LC_ALL=C awk -f "$JSON_QUERY" -v mode=type \
+        -v "query_path=$(json_path deployment allowPluginPublication)" <<<"$probe" 2>/dev/null || true)"
+    path="$(json_get "$probe" "$(json_path deployment path)" 2>/dev/null || true)"
+    actual="$(json_get "$probe" "$(json_path actualMode)" 2>/dev/null || true)"
+    if [[ "$ACTUAL_MODE" == legacy || "$SIMPLE_POLICY_LEGACY" == 1 ]]; then
+        expected_root="$(json_get "$RESOLUTION" "$(json_path legacy root)" 2>/dev/null || true)"
+    else
+        expected_root="$(json_get "$RESOLUTION" "$(json_path runtimeRoot)" 2>/dev/null || true)"
+    fi
+    if [[ "$code" == 0 && "$allowed_type" == boolean && "$allowed" == true &&
+          "$actual" == "$ACTUAL_MODE" && "$expected_root" == /* &&
+          "$path" == "$expected_root/runtime-deployment.json" ]]; then
+        return 0
+    fi
+    printf '[agent-worktrees] Runtime publication refused: %s Use explicit installation management to install or repair this runtime.\n' "$probe" >&2
+    exit 126
+}
+
 resolve_runtime
+if [[ -z "${AGENT_RT_PY:-}" && -z "${AGENT_WORKTREES_NO_SELFPROVISION:-}" ]]; then
+    assert_plugin_runtime_publication
+fi
 # Commit to self-provisioning (and, in doing so, permit boot_trace_log to
 # eagerly create a not-yet-existing legacy root) as soon as we actually
 # know provisioning will happen -- i.e. no runtime resolved AND
@@ -537,6 +565,7 @@ if [[ -n "${AGENT_RT_PY:-}" ]]; then
     run_runtime "$@"
 fi
 
+assert_plugin_runtime_publication
 if [[ "$ACTUAL_MODE" == namespaced ]]; then
     [[ "$RESOLUTION_STATUS" == ready && "$RESOLUTION_REASON" == namespaced-active ]] || {
         printf '[agent-worktrees] deactivation-pending installation cannot provision a new runtime.\n' >&2

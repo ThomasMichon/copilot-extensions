@@ -7,8 +7,10 @@ Parent: [Dev/Main Release Pipeline](README.md). Related portfolio:
 independent Main control #7282 are reviewed and merged. One real manual
 paused qualification succeeded through actual publication, Main merge and
 tagging in 11m22s (11m28s through complete workflow termination). Canonical
-resume #7287 is merged and verified; natural cycles and client acceptance
-remain open.
+resume #7287 is merged and verified. Two natural qualified cycles completed in
+11m38s and 15m50s including queueing; a subsequent sampled attempt completed in
+14m27s. Stable source operation permits the first regression-led admission
+cohort below; client acceptance and periodic execution remain open.
 This governs the next recovery slice. It supersedes the earlier requirement to
 preserve full, generated, native and installation integration suites as
 promotion prerequisites.
@@ -20,6 +22,13 @@ promotion prerequisites.
 > Your focus should likely be at this point on jettisoning any blocking tests which are holding up promotion, aggressivel purging  excessively long tasks until the whole flow can run under 30 minutes, and then working to have a "validation tournament" where more-valuable tests come in to replace lesser ones. End-to-end integration tests which use multi-process, use actual git, etc. all need to be relegated to periodic, containerized tests, and need to stay out of promotion. Promotion can only run unit tests from which we collect coverage, and conditionally run during PR CI. No others.
 
 ## Governing policy
+
+**2026-10-21 captured operator continuation (verbatim):**
+
+> Well, release is definitely happening quickly. Taking only 12 minutes or so. Means we have room to stuff more tests back in, especially ones which resulted in regressions filed by other people. See bugs filed by mikedelgaudio, jamesyu5421, and others.
+
+This adds regression-led enrollment using measured headroom. It does not
+silently rescind the explicit effect exclusions in the earlier request.
 
 - **Promotion runs unit tests only**, collecting coverage in that execution.
   Required PR CI conditionally selects the eligible unit portfolio by actual
@@ -39,9 +48,10 @@ promotion prerequisites.
   signing, freshness, actual publication, exact merge and tagging remain
   production safeguards. This is not permission to reintroduce integration
   suites by calling them operational checks, nor to fake missing unit evidence.
-- After stability, a **validation tournament** replaces low-value tests with
-  more valuable eligible units within the same or smaller budget. Integration
-  contenders remain periodic.
+- After stability, a **validation tournament** admits valuable product
+  regressions using measured headroom and replaces redundant cases when
+  stronger evidence supports removal. More cases do not increase the existing
+  unit budget or turn integration contenders into promotion dependencies.
 
 **Agent-recommended eligibility rule:** enroll units positively, by behavior,
 not by file name or tier label alone. Use bounded in-process tests with
@@ -70,9 +80,9 @@ private worktree paths and session locators are intentionally omitted.
 | PB-07 | P1 | Route removed integration to periodic containers with named failure ownership, never a release dependency. | Routing and locked CLI provisioning merged; actual container execution still unproven |
 | PB-08 | P0 | Preserve fail-closed configuration admission, including quoted/merged keys, if reused by the unit gate. | Explicit unit profile and strict evidence admission merged in #7269 |
 | PB-09 | P0 | Keep bounded production build/signing/provenance/freshness/publication/merge safeguards. | Actual canary built, signed, verified, published, merged and tagged |
-| PB-10 | P0 | Measure the whole flow under thirty minutes; remove long tasks rather than increasing deadlines. | First canary 11m28s including queue; natural-cycle measurements pending |
-| PB-11 | P0 | Land reviewed control, prove the unit-only release, resume canonically and observe stable natural cycles. | Controls, canary and canonical resume done; natural-cycle acceptance pending |
-| PB-12 | P1 | Run the first value-for-cost replacement tournament after stable operation. | Deferred until PB-11 |
+| PB-10 | P0 | Measure the whole flow under thirty minutes; remove long tasks rather than increasing deadlines. | Canary 11m28s; natural cycles 11m38s/15m50s; subsequent sampled attempt 14m27s |
+| PB-11 | P0 | Land reviewed control, prove the unit-only release, resume canonically and observe stable natural cycles. | Done for source cadence: controls, canary, resume and two natural qualified cycles; client acceptance separate |
+| PB-12 | P1 | Run the first value-for-cost regression-led admission tournament after stable operation. | First cohort complete: #7554, 86 runtime cases added, exact 322-node proof reused in natural 12m12s release; later contenders and periodic repair remain |
 
 The recovery owner owns the manifest, Source publication, Main control proposal,
 release/resume and deployment. The existing portfolio owner retains periodic
@@ -123,13 +133,82 @@ policy, through normal reviewed Source and independently governed Main changes.
 6. **Earn stability.** Verify publication, exact Main merge/tag and canonical
    resume, then observe natural cycles under thirty minutes. Keep deployment
    and client acceptance owned separately from the test-policy verdict.
-7. **Improve by replacement.** Start the tournament only after the burndown
-   delivers stable release operation.
+7. **Improve by measured admission and replacement.** Start the tournament only
+   after stable release operation. Prioritize actual contributor regressions
+   within the unchanged budget; preserve stronger existing safeguards.
 
 **Agent-recommended initial budget:** allocate at most five minutes to the
 entire unit-plus-coverage phase, reserving the remainder for queueing and
 production operations. This is a starting allocation to validate and tighten,
 not a new per-stage allowance or permission to exceed the overall limit.
+
+## First regression-led unit admission cohort
+
+The following **agent-recommended implementation** was reviewed in #7543 and
+landed in #7554. The exact pre-cohort baseline packet contained 236 units,
+28 declared Python sources and 18 production coverage targets with a
+300-second cap; it passed locally in 8.355 seconds. Release
+`39553184584`, attempt 1, spent 21 seconds in its unit job and 14m27s
+event-to-completion including queueing. The first cohort uses this headroom
+without raising either budget or introducing another workflow/runner role.
+The resulting packet has 322 nodes, 35 declared Python sources and 23
+production coverage targets. Natural promotion `39570244030` qualified the
+exact expanded source, reused its unit proof at the immutable candidate and
+completed publication/Main merge/tag in 12m12s including queueing.
+
+| Report | First-cohort unit target | Boundary retained outside promotion |
+|---|---|---|
+| #5610 | Real project-independent front-door predicate for explicit `reconcile-plugins --repo`, including both argument forms and missing-selector controls. The current predicate still omits this case; fix that narrow contract. | Actual HOME-cwd shim/CLI/reconcile execution and installed status reporting. |
+| #6739 | Actual mux absence/result classifiers and parsers, including healthy-empty versus unconfirmed error, binary/code/stdout/stderr controls and malformed/partial output. Exercise caller decisions where their import closure is genuinely eligible. | Real missing-socket probe and resident current-roster readiness; leaf assertions alone do not claim installed readiness. |
+| #4828 | Actual anchor guard decisions for read-only command batches and explicit mutation-denial controls. Supply repository-state evidence at its external boundary without accessing Git storage or mocking the command classifier. | Installed hook/shell payload parity and real Git behavior. |
+| #5773 | Actual parent/sub-agent event ownership and turn folding, all supported marker forms, ordering and prior-state controls. Keep unknown fresh state unknown rather than inventing idle. | Actual SDK forwarding and JavaScript delivery/interrupt behavior; Python tests do not stand in for the Node runtime. |
+
+Small closed-import leaf extraction may move the existing production
+predicate/folder into a cohesive module and preserve its original imports or
+facades. The live call sites must use that same implementation. Do not copy a
+production algorithm into a test, execute only an unrelated production call,
+or weaken import/effect guards to make an enrollment pass.
+
+Other reports stay explicit rather than being represented by inadequate
+proxies:
+
+| Report | Disposition / remaining evidence |
+|---|---|
+| #7500 | Reporter explicitly owns the forced-registration source fix. Do not duplicate it. Evaluate the actual preservation/malformed-input regression for admission after the fix is available; no skip/xfail in the admitted packet. |
+| #7412 | Current shell/PowerShell source uses the normalized plugin root. Preserve a real callback-emission/publication regression in periodic validation; a Python alias-rejection unit does not prove the shell emitted correct paths. |
+| #5611 | Launcher asset versus usable-Manager status contract needs its canonical decision. Do not choose or weaken the installation contract merely to write a passing test. |
+| #7116 | Fresh session/head readiness, launch recovery and reservation lifecycle require actual source/authority tracing and existing-owner coordination. A missing initial-state parameter is not proof of SQL behavior or permission to default unknown sessions to idle. |
+| #6584 | Metadata rollback units cannot establish atomicity under actual Git lock contention. Preserve the real Git/process failure and recovery counterpart. |
+| #6564 | Use the actual `agent-machines` PowerShell stamp/hash paths and immutable-slot policy, not another plugin's installer. Preserve real payload-tree/fingerprint parity testing and the existing conflict refusal. |
+
+### Cohort validation
+
+- [x] Record original report, actual production boundary, owner/fix status,
+      exact admitted nodes and periodic counterpart for every selected case.
+      Open/closed tracker state alone is not source or installed proof.
+- [x] Prove relevant faulty behavior is detected, with mutation-denial,
+      unknown/unconfirmed and legacy controls. Keep the existing release
+      integrity tests unless stronger evidence justifies retirement.
+- [x] Run the canonical single-process packet, collecting coverage once;
+      verify every admitted node/phase/import/source/production call and no
+      prohibited effect. No skips, xfails, hidden selection or budget increase.
+- [x] Measure marginal runtime, coverage, defect detection and flakiness against
+      the baseline; keep the packet under 300 seconds and the ordinary release
+      under thirty minutes including queue/publication/merge/tag.
+- [x] Verify impact-conditional PR selection and exact candidate proof reuse
+      for the expanded packet, without duplicating its execution.
+- [x] Keep actual shell/native/Git/process families enrolled or visibly
+      unenrolled in the existing periodic inventory with named repair owners.
+      Unavailable capacity is not passing evidence or a new release gate.
+
+**Recorded first-cohort result:** four real #5610 assertions failed before the
+fix with 82 runtime controls passing; the effect-fenced packet rejected the
+first new failure after its 236 existing cases. After the fix, the same
+admitted bytes passed in working-tree, committed, published-head and natural
+release executions with no observed failed/skipped phases or effects. Local
+whole-packet samples were 8.603/8.234/7.738 seconds; the actual release packet
+took 7.034 seconds and its job took 24 seconds. These small samples do not
+establish a statistical flake-rate guarantee or a causal speedup.
 
 ## Validation and closure
 
@@ -148,9 +227,12 @@ not a new per-stage allowance or permission to exceed the overall limit.
       publication, merge and tagging remain enforced.
 - [ ] An actual normal promotion, measured from event creation through landed
       tag, completes in less than thirty minutes including queueing.
-- [ ] Canonical resume and natural cycles demonstrate stable operation.
-- [ ] The first tournament records defect-detection value, coverage, runtime,
-      flakiness and maintenance cost, replacing rather than accumulating cases.
+- [x] Canonical resume and two natural qualified cycles demonstrate stable
+      source operation; client acceptance remains separate.
+- [x] The first tournament records defect-detection value, coverage, runtime,
+      flakiness and maintenance cost, admitting valuable regressions within the
+      unchanged budget and replacing redundant cases when stronger evidence
+      supports removal.
 - [ ] Every issue in the manifest is resolved or transferred to a named tracked
       objective before the parent effort is declared complete.
 

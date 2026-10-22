@@ -575,6 +575,8 @@ def build_copilot_remote_command(
     embody_bin: str = "agent-worktrees",
     detach: bool = False,
     bridge_scope_id: str | None = None,
+    bridge_seed_operation: str | None = None,
+    bridge_seed_pending: bool = False,
     copilot_args: list[str] | None = None,
     login_shell: bool = True,
 ) -> str:
@@ -627,6 +629,10 @@ def build_copilot_remote_command(
         argv.append("--ensure-mux")
     if bridge_scope_id:
         argv += ["--bridge-scope-id", bridge_scope_id]
+    if bridge_seed_operation:
+        argv += ["--bridge-seed-operation", bridge_seed_operation]
+        if bridge_seed_pending:
+            argv.append("--bridge-seed-pending")
     home_expandable: set[int] = set()
     for extra in copilot_args or []:
         if "$HOME" in extra:

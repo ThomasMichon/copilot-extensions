@@ -531,24 +531,27 @@ def selectable_tests(tmp_path, monkeypatch):
     return tests
 
 
-def test_index_preparation_selects_same_checkout_fleet_dependency(tmp_path, monkeypatch):
+@pytest.mark.parametrize("name,extra", [
+    ("agent-index", "auth"), ("agent-pull-requests", "service-gateway"),
+])
+def test_preparation_selects_same_checkout_fleet_dependency(tmp_path, monkeypatch, name, extra):
     monkeypatch.setattr(runner, "REPO", tmp_path)
     monkeypatch.setattr(runner, "VENV_ROOT", tmp_path / "venvs")
-    plugin = tmp_path / "plugins" / "agent-index"
+    plugin = tmp_path / "plugins" / name
     plugin.mkdir(parents=True)
     monkeypatch.setattr(runner, "_plugin_dir", lambda _name: plugin)
     (plugin / "pyproject.toml").write_text(
-        '[project.optional-dependencies]\ndev = ["fleet-manager[auth]>=0.1.0.dev1"]\n',
+        f'[project.optional-dependencies]\ndev = ["fleet-manager[{extra}]>=0.1.0.dev1"]\n',
         encoding="utf-8",
     )
     fleet = tmp_path / "fleet-manager"
     fleet.mkdir()
     metadata = fleet / "pyproject.toml"
     metadata.write_text('[project]\nversion = "0.1.0.dev1"\n', encoding="utf-8")
-    (runner.VENV_ROOT / "agent-index").mkdir(parents=True)
-    before = runner._dep_fingerprint("agent-index")
+    (runner.VENV_ROOT / name).mkdir(parents=True)
+    before = runner._dep_fingerprint(name)
     metadata.write_text('[project]\nversion = "0.1.0.dev2"\n', encoding="utf-8")
-    assert runner._dep_fingerprint("agent-index") != before
+    assert runner._dep_fingerprint(name) != before
     calls = []
     monkeypatch.setattr(
         runner.subprocess, "run",
@@ -561,13 +564,17 @@ def test_index_preparation_selects_same_checkout_fleet_dependency(tmp_path, monk
         return runner.subprocess.run([uv, "pip", "install", *arguments])
 
     monkeypatch.setattr(runner, "run_uv_install", prepare)
-    runner._ensure_venv("agent-index", "fixture-uv", reinstall=False)
+    runner._ensure_venv(name, "fixture-uv", reinstall=False)
     install = calls[-1]
     assert install[-len(runner.RUNNER_DEPENDENCIES) - 2:] == [
-        "-e", str(fleet) + "[auth]", *runner.RUNNER_DEPENDENCIES,
+        "-e", str(fleet) + f"[{extra}]", *runner.RUNNER_DEPENDENCIES,
     ]
     assert not any("http" in argument for argument in install)
-    assert retained == [(tmp_path / "libs" / "versioned-runtime",)]
+    assert retained == [(
+        tmp_path / "libs" / "versioned-runtime",
+        tmp_path / "libs" / "installer-engine",
+        tmp_path / "libs" / "agent-procutil" / "src" / "agent_procutil",
+    )]
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="native Windows editable staging contract")
@@ -681,6 +688,53 @@ def test_explicit_test_files_preserve_default_grouping_and_filter_only_collectio
         "example", 1, filtered=True,
         test_files=("tests/test_selected.py", "tests/nested/test_child.py", "tests/test_selected.py"),
     ) == [[tests / "nested/test_child.py", tests / "test_selected.py"]]
+
+
+def test_manager_default_discovery_excludes_only_its_prepared_native_lane():
+    root = runner._plugin_dir("worktree-manager")
+    native = set((root / "tests" / "native").glob("test_*.py"))
+    assert {path.name for path in native} == {
+        "test_manager_runtime_install.py", "test_manager_mux_callbacks.py",
+        "test_manager_updater_recovery.py",
+    }
+    default = {path for group in runner._test_file_groups("worktree-manager", 25) for path in group}
+    assert default == set((root / "tests").rglob("test_*.py")) - native
+
+
+def test_manager_explicit_native_selection_remains_available():
+    root = runner._plugin_dir("worktree-manager")
+    files = tuple(sorted(
+        path.relative_to(root).as_posix() for path in (root / "tests" / "native").glob("test_*.py")
+    ))
+    assert runner._test_file_groups("worktree-manager", 25, test_files=files) == [
+        [root / value for value in files],
+    ]
+
+
+@pytest.mark.parametrize("setting", [
+    '["native", "build_*", "test_default.py"]', '"native build_* test_default.py"',
+])
+@pytest.mark.parametrize("filtered", [False, True])
+def test_default_discovery_honors_pytest_directory_patterns_but_not_file_names(
+    tmp_path, monkeypatch, setting, filtered,
+):
+    root = tmp_path / "fixture"
+    for name in ("test_default.py", "native/test_native.py", "nested/native/test_nested.py",
+                 "build_fixture/test_build.py", "nested/test_kept.py"):
+        path = root / "tests" / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.touch()
+    (root / "pyproject.toml").write_text(
+        "[tool.pytest.ini_options]\nnorecursedirs = " + setting + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(runner, "_plugin_dir", lambda name: root)
+    default = {path.relative_to(root).as_posix()
+               for group in runner._test_file_groups("fixture", 25, filtered=filtered) for path in group}
+    assert default == {"tests/test_default.py", "tests/nested/test_kept.py"}
+    assert runner._test_file_groups(
+        "fixture", 25, test_files=("tests/native/test_native.py",),
+    ) == [[root / "tests" / "native" / "test_native.py"]]
 
 
 @pytest.mark.parametrize("value", ["./tests/test_selected.py", "tests//test_selected.py"])
@@ -1306,6 +1360,7 @@ def test_external_targets_are_explicit_and_contained_in_repository(monkeypatch, 
     assert runner._plugin_dir("worktree-manager") == tmp_path / "worktree-manager"
     assert runner._plugin_dir("payload-invocation") == tmp_path / "libs" / "payload-invocation"
     assert runner._plugin_dir("runtime-source") == tmp_path / "libs" / "versioned-runtime"
+    assert runner._plugin_dir("worktree-identity") == tmp_path / "libs" / "worktree-identity"
     assert runner.EXTERNAL_TEST_DEPENDENCIES["payload-invocation"] == ("pyyaml>=6.0.3",)
     assert runner.EXTERNAL_TEST_DEPENDENCIES["runtime-source"] == ("pyyaml>=6.0.3",)
 

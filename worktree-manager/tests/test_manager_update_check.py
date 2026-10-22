@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import time
 
+import pytest
 from worktree_manager import manager_update_check as muc
 from worktree_manager import self_install
 
@@ -111,3 +112,21 @@ def test_invalidate_is_a_no_op_when_nothing_was_persisted(tmp_path):
     """Never raises even when there is no cache file to remove yet."""
     muc.invalidate(tmp_path)
     assert muc.read_status(tmp_path) == {}
+
+
+@pytest.mark.parametrize("kind", ["repair", "source", "source-repair"])
+@pytest.mark.parametrize("remote", ["1.2.3", "1.2.4"])
+def test_qualified_selector_compares_package_version(tmp_path, monkeypatch, kind, remote):
+    source = self_install._runtime_installer().runtime_source
+    generation = (
+        "1.2.3+repair." + "c" * 32 if kind == "repair"
+        else source.runtime_version("1.2.3", "a" * 40, "b" * 64)
+    )
+    if kind == "source-repair":
+        generation += ".repair." + "c" * 32
+    (tmp_path / "current-version").write_text(generation + "\n")
+    monkeypatch.setattr(self_install, "fetch_remote_version", lambda root=None: remote)
+    data = muc.check_now(tmp_path)
+    assert data["local_version"] == "1.2.3"
+    assert data["available"] == (remote == "1.2.4")
+    assert self_install.current_version(tmp_path) == generation

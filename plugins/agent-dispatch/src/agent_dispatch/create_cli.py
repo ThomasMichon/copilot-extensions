@@ -568,18 +568,20 @@ def _do_spawn(args: argparse.Namespace, task: dict, *, route: str = ""):
     backend = getattr(args, "spawn_backend", "bridge")
     import subprocess
     from . import bridge, embody, ordinary_bridge, session_acquisition
-    worker_id = f"embody-{task.get('spawn_reservation_key')}" if backend == "embody" else f"dispatch-{task.get('spawn_reservation_key')}"
-    prompt = embody.autopilot_worker_prompt(
-        task["id"], worker_id=worker_id, route=route, explicit_worker_identity=False,
-    )
     try:
         if backend == "bridge":
+            from .ordinary_invocation import startup_seed
+            prompt = startup_seed(task, task.get("_spawn_client"), route=route)
             handle = ordinary_bridge.start(
                 task, client=task.get("_spawn_client"), agent=args.spawn_agent,
                 prompt=prompt, project=embody.project_for_task(task),
                 charter=getattr(args, "spawn_charter", None),
             )
             return subprocess.CompletedProcess([], 0, "", ""), "agent-bridge", handle
+        worker_id = f"embody-{task.get('spawn_reservation_key')}" if backend == "embody" else f"dispatch-{task.get('spawn_reservation_key')}"
+        prompt = embody.autopilot_worker_prompt(
+            task["id"], worker_id=worker_id, route=route, explicit_worker_identity=False,
+        )
         result = session_acquisition.acquire(
             task, mode="cli" if backend == "embody" else "acp",
             agent=args.spawn_agent,

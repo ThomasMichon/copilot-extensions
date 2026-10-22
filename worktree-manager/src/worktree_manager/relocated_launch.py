@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import os
 import subprocess
-from pathlib import Path
 
 
 def _core():
@@ -26,15 +25,13 @@ def _relocated_launch_script():
     """Locate the Manager-owned launch-session script, this package's own
     canonical muxed-launch implementation (Phase 3b Sub-slice 2a).
 
-    ``worktree-manager/bin/launch-session.{ps1,sh}`` is copied verbatim into
-    this package's own ``bin/`` sibling directory -- present both in an
-    installed versioned slot (``<root>/versions/<ver>/{src,bin}``) and in a
-    source checkout (``worktree-manager/{src,bin}``), since both layouts put
-    ``bin/`` two levels above this file. Returns ``None`` when the sibling
-    script is absent, so callers degrade to the graceful non-muxed launcher.py
-    path (DQ9) exactly as before this script existed.
+    Resolve the installation's retained payload, not site-packages ancestry.
+    Source and legacy src-layout invocations keep their existing payload root.
+    Missing optional assets retain the graceful non-muxed fallback.
     """
-    root = Path(__file__).resolve().parents[2]
+    from .self_install import running_payload_dir
+
+    root = running_payload_dir()
     name = "launch-session.ps1" if _core()._is_windows() else "launch-session.sh"
     script = root / "bin" / name
     return script if script.exists() else None

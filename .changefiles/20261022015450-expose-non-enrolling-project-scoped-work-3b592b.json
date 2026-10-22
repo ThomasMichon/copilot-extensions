@@ -1,0 +1,9 @@
+{
+  "comment": "Expose non-enrolling project-scoped workspace record context for explicitly selected consumers",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

@@ -188,9 +188,26 @@ agent-recommended evidence and implementation decomposition are recorded in
 [Test validation burndown](test-validation-burndown.md). This extends the
 existing portfolio audit, not the release writer's ownership or authority.
 
+**2026-10-19 - Upstream repairs need not wait for Main (verbatim):**
+
+> Ideally we don't wait on main activation. Fixing tests upstream will help unblock main
+
+Take independently owned upstream test repairs through ordinary Dev review
+without treating Main activation as a prerequisite. Existing contributors'
+reserved hunks and release/control authority remain unchanged.
+
 The operator confirmed the explicit main-owned control/dev-owned content model.
 The detailed decomposition and validation cases below are **agent-recommended**,
 reconciled with the other planning agent's public handoff on #6237.
+
+**2026-10-21 - Return to whole-flow optimization (verbatim):**
+
+> What's the wait here? ARC is working; move on to this worktree's original goal of auditing, analyzing, and improving the overall CI and promotion flows. Analyze runner queue times, improve conditional execution, and reduce redundancy across the board
+
+The immediate execution focus is the existing flow-consolidation objective,
+not further capacity setup or individual installer-test repairs. The next
+source reduction and measurement methods are agent-recommended; required
+checks, release-unit coverage and existing source/control boundaries remain.
 
 ## Plan
 
@@ -251,9 +268,52 @@ authorizes critical main-path acceptance or a bounded administrative change.
 
 ### Phase 1 - Earliest safe run and check reductions
 
+- [x] Land the bounded source-CI job consolidation and remove duplicate
+  report-only PR inventory (#7656), preserving real selected-unit outcomes,
+  every admitted unit, parallel guards and the independent release pass.
+  Natural source/push CI and the closed, unmerged narrative validation #7663
+  prove the actual conditional outcomes and retained push diagnostic.
+  This does not close the whole-flow measurement and release-cycle items.
+- [x] Land bounded same-release upload batching and four-way independent raw
+  readback in the source helpers (#7679), preserving qualification, signer,
+  metadata, source/tag identity and receipt gates. Existing-control selection
+  and comparable natural publication timing remain open under Phase 6;
+  source merge alone does not activate a new trusted helper pin.
+- [x] Land and observe the bounded tracking-write guard traversal reuse (#7692),
+  preserving all sibling files, failure handling, alias fixed points and
+  diagnostic ordering. Keep local paired timing separate from hosted timing
+  and the broader whole-flow acceptance gates.
+- [x] Land and observe bounded headless-guard analysis reuse (#7700), preserving
+  all production roots, six enforcement rules, allowlists and failure handling.
+  Keep local paired timing distinct from natural hosted observations.
+- [x] Land and observe conservative narrative-only PR omission of the three
+  source AST scans (#7706), retaining full non-narrative and non-PR execution,
+  pinned input/error handling, every other guard and all required unit evidence.
+  Draft validation #7712 proves actual narrative-only omission without
+  manufactured unit evidence; it was explicitly closed without merging.
+- [x] Land bounded independent bundle-attestation verification (#7732),
+  retaining serial index/schema/original-admission checks, all exact signer
+  identities, consumer authority, deadlines and joined failures. Existing
+  control selection and comparable live publication timing remain open;
+  this source reduction does not update the trusted helper pin.
+- [x] Land and observe fixed three-worker execution of the unchanged full
+  source AST scanners, preserving pinned narrative admission, joined failure
+  diagnostics and bounded step/child execution (#7768). Actual source CI
+  retains every scanner and completes the group in 25 seconds. Local paired
+  timing is not controlled hosted whole-flow acceptance or a CPU-work reduction.
+- [x] Land bounded, invocation-local dependency source-tree reuse, retaining
+  every evidence read, changed-input reparse, path/identity/closure check and
+  failure (#7845). Equivalent attribution and current required CI pass; the
+  actual all-ecosystem guard audits 332 declarations with zero violations.
+  Local phase timing is not full live metadata or pipeline timing.
 - [ ] Remove redundant release-shaped PR and main-push validation only where
   existing trusted gates and exact-SHA release evidence cover the removed work;
   first prove no generated-output coverage or required context is lost.
+- [x] Land and observe bounded asyncio ancestry-map reduction, preserving
+  every file read/parse, path validation, handler classification and ordered
+  diagnostic/list output (#7865). Actual required source CI runs all three
+  scanners in 22 seconds. Local paired comparisons and this natural sample
+  do not close comparable whole-flow acceptance.
 - [x] Consolidate main-PR admission into its existing trusted reminder
   invocation: release and prove admission and generated-content identifier
   scanning first, then remove legacy CI allocation while retaining full
@@ -312,8 +372,52 @@ authorizes critical main-path acceptance or a bounded administrative change.
   every Main release, and scheduled Dev integration/multiprocess runs with a
   named repair owner. Coordinate the implementation with the existing release
   and test-portfolio owners; do not activate a superseded full-corpus profile.
+  The bounded history sweep and requested contract merged in #7275; suite
+  classification, coverage selection, scheduled repair and live timing
+  acceptance remain open.
+  The independent CLI-fixture correction merged in #7288; comparable Linux
+  timing acceptance remains on #7075, with no production provisioning change.
+  The pinned unit-census and actual periodic-execution audit merged in #7506.
+  It distinguishes the admitted 236-node packet from the unfinished full unit
+  identity map and the still-unproved accepted repair initiation for #7377.
+  The Campaign driver initiated and merged #7546 for #7377's Containers
+  fixture family, preserving real disk-refusal coverage in a complementary
+  non-tmpfs run. Other failure families and a subsequent complete scheduled
+  execution remain open; this is not whole-portfolio acceptance.
+  The separately retained Windows framing source repair #7264 is also merged
+  and its original source worktree finalized. Current-head native framing
+  evidence and actual review/required CI passed; the old blanket native-suite
+  publication blocker was reconciled with the current unit-only PR policy.
+  This neither closes the separately tracked #7387/#7433 native repairs nor
+  establishes release, rollout or complete periodic-portfolio acceptance.
+- [x] Map the fourteen original shared lazy-dispatch unit bodies into the
+  unchanged release packet without copying assertions (#7749). All 408
+  previous identities remain, yielding 422 source-qualified nodes with
+  actual call coverage. This bounded mapping does not close the complete
+  historical census or establish a subsequent Main release's execution.
+- [x] Map the 201 original fleet-contracts cases through exact function objects
+  and unchanged parameterization, preserving all current packet identities,
+  closed source hashes and production-call evidence (#7781). Actual hosted
+  source CI executes all 646 admitted cases in 13.666 seconds. This does not
+  close the whole census or every-release acceptance.
+- [x] Map the 72 original worktree-identity cases through exact function
+  objects and unchanged parameterization, preserving the current packet,
+  source closure and production-call evidence (#7816). The canonical packet
+  and real refusal controls pass; actual hosted source CI executes all 718
+  admitted cases in 12.126 seconds. Full-census and every-release acceptance
+  remain separate.
+- [x] Map the 29 original config-migrate cases without copying assertions,
+  retaining synthetic temporary-file operations, unchanged source admission,
+  actual production-call coverage and the 300-second packet bound (#7831).
+  Actual source CI executes all 747 admitted cases in 11.369 seconds.
+  Full-census and every-release acceptance remain separate.
 - [x] Land the dev implementation of reviewed, widen-only module-size baseline
   maintenance and remove its obsolete main exception from source (#6438).
+- [x] Map the nineteen original drop-in registry cases through exact original
+  function objects, retaining actual temporary-file/link/FIFO assertions,
+  source closure, production-call coverage and the existing packet budget.
+  #7874 and actual hosted execution prove all 778 admitted cases in 15.166
+  seconds. This bounded Linux mapping is not full-census or Windows qualification.
 - [x] Verify a covering promotion activates the dev-owned baseline producer on
   default main; record authorized runtime adoption separately.
   #6631 and hosted job `115706505844` prove activation of #6438; this
@@ -532,4 +636,8 @@ this contract. New evidence belongs in its date file, not another peer effort.
 - [2026-10-18](journal/2026/10.18.md)
 - [2026-10-19](journal/2026/10.19.md)
 - [2026-10-19 - Metadata source delivery](journal/2026/10.19-metadata-source.md)
+- [2026-10-19 - Test burndown contract and measured evidence](journal/2026/10.19-test-burndown.md)
 - [2026-10-20](journal/2026/10.20.md)
+- [2026-10-20 - Independent upstream test repairs](journal/2026/10.20-test-repairs.md)
+- [2026-10-21 - Windows Dispatch base selection](journal/2026/10.21.md)
+- [2026-10-21 - Whole-flow CI consolidation](journal/2026/10.21-flow-consolidation.md)

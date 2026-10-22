@@ -261,9 +261,9 @@ class TestPRStatusLive:
         monkeypatch.setattr(providers, "get_provider", lambda name: _Prov())
         monkeypatch.setattr(providers, "resolve_token", lambda prcfg: "tok")
 
-    def test_live_block_present_when_provider_ok(self, pr_repo, monkeypatch):
+    def test_live_block_present_when_provider_ok(self, record_repo, monkeypatch):
         from agent_worktrees import pr_contract as pc
-        config, wid, _wt, _ = pr_repo
+        config, wid, _wt, _ = record_repo
         config = self._config_with_binding(config)
         pr_ops.set_pr(wid, number=7, state="open", provider="gitea")
         snap = pc.PRSnapshot(
@@ -281,13 +281,13 @@ class TestPRStatusLive:
         assert res["live"]["occupancy"] == "needs-consent"
 
     def test_live_verdict_reports_comment_when_review_blocking_false(
-        self, pr_repo, monkeypatch
+        self, record_repo, monkeypatch
     ):
         """A repo config'd review_blocking=False (e.g. Copilot code review on
         a pr-self-merge repo, which can only COMMENT) reports that comment as
         the "COMMENTED" verdict instead of no verdict at all."""
         from agent_worktrees import pr_contract as pc
-        config, wid, _wt, _ = pr_repo
+        config, wid, _wt, _ = record_repo
         config = self._config_with_binding(config, review_blocking=False)
         pr_ops.set_pr(wid, number=7, state="open", provider="gitea")
         snap = pc.PRSnapshot(
@@ -610,8 +610,8 @@ class TestPRStatusLive:
         assert live["approval_stale_authorized"] is False
         assert live["verdict"] == ""
 
-    def test_live_disabled_skips_provider(self, pr_repo, monkeypatch):
-        config, wid, _wt, _ = pr_repo
+    def test_live_disabled_skips_provider(self, record_repo, monkeypatch):
+        config, wid, _wt, _ = record_repo
         config = self._config_with_binding(config)
         pr_ops.set_pr(wid, number=7, state="open", provider="gitea")
 
@@ -625,8 +625,8 @@ class TestPRStatusLive:
         res = pr_ops.pr_status(wid, live=False, config=config)
         assert "live" not in res
 
-    def test_live_enabled_still_reconciles(self, pr_repo, monkeypatch):
-        config, wid, _wt, _ = pr_repo
+    def test_live_enabled_still_reconciles(self, record_repo, monkeypatch):
+        config, wid, _wt, _ = record_repo
         config = self._config_with_binding(config)
         pr_ops.set_pr(
             wid,
@@ -645,8 +645,8 @@ class TestPRStatusLive:
 
         assert calls == [config]
 
-    def test_live_best_effort_on_provider_error(self, pr_repo, monkeypatch):
-        config, wid, _wt, _ = pr_repo
+    def test_live_best_effort_on_provider_error(self, record_repo, monkeypatch):
+        config, wid, _wt, _ = record_repo
         config = self._config_with_binding(config)
         pr_ops.set_pr(wid, number=7, state="open", provider="gitea")
         from agent_worktrees import providers
@@ -665,8 +665,8 @@ class TestPRStatusLive:
         assert res["has_pr"] is True
         assert "live" not in res
 
-    def test_live_omitted_when_no_number(self, pr_repo, monkeypatch):
-        config, wid, _wt, _ = pr_repo
+    def test_live_omitted_when_no_number(self, record_repo, monkeypatch):
+        config, wid, _wt, _ = record_repo
         config = self._config_with_binding(config)
         pr_ops.set_pr(wid, url="https://h/pulls/x", provider="gitea")  # no number
         from agent_worktrees import providers
@@ -677,13 +677,13 @@ class TestPRStatusLive:
         res = pr_ops.pr_status(wid, config=config)
         assert "live" not in res
 
-    def test_live_self_merge_note_surfaced_when_bypassable(self, pr_repo, monkeypatch):
+    def test_live_self_merge_note_surfaced_when_bypassable(self, record_repo, monkeypatch):
         # #3296 follow-up: a pr-self-merge repo with a live, actor-bypassable
         # required review must surface that explicitly in the live block --
         # not just a bare eligible=False an agent has to puzzle out.
         from agent_worktrees import pr_contract as pc
 
-        config, wid, _wt, _ = pr_repo
+        config, wid, _wt, _ = record_repo
         config = self._config_with_binding(
             config, merge_actor="submitter-direct", automerge_label="",
         )
@@ -727,11 +727,11 @@ class TestPRStatusLive:
         ]
 
     def test_live_self_merge_note_absent_when_not_bypassable(
-        self, pr_repo, monkeypatch,
+        self, record_repo, monkeypatch,
     ):
         from agent_worktrees import pr_contract as pc
 
-        config, wid, _wt, _ = pr_repo
+        config, wid, _wt, _ = record_repo
         config = self._config_with_binding(
             config, merge_actor="submitter-direct", automerge_label="",
         )
@@ -775,13 +775,13 @@ class TestPRStatusLive:
         ]
 
     def test_live_self_merge_note_absent_on_non_self_merge_repo(
-        self, pr_repo, monkeypatch,
+        self, record_repo, monkeypatch,
     ):
         # A gitea repo without submitter-direct merge_actor never surfaces the
         # note even if the provider supports a head-bound review exception.
         from agent_worktrees import pr_contract as pc
 
-        config, wid, _wt, _ = pr_repo
+        config, wid, _wt, _ = record_repo
         config = self._config_with_binding(config)  # no merge_actor override
         pr_ops.set_pr(wid, number=7, state="open", provider="gitea")
         snap = pc.PRSnapshot(
@@ -835,9 +835,9 @@ class TestPRThreads:
         monkeypatch.setattr(providers, "resolve_token", lambda prcfg: "tok")
         return state
 
-    def test_threads_listed(self, pr_repo, monkeypatch):
+    def test_threads_listed(self, record_repo, monkeypatch):
         from agent_worktrees import pr_contract as pc
-        config, wid, _wt, _ = pr_repo
+        config, wid, _wt, _ = record_repo
         pr_ops.set_pr(wid, number=7, state="open", provider="azure-devops")
         tr = pc.ThreadsResult(threads=(
             pc.CommentThread(id=1, status="active",
@@ -851,9 +851,9 @@ class TestPRThreads:
         assert res["active_count"] == 1
         assert len(res["threads"]) == 2
 
-    def test_threads_resolve(self, pr_repo, monkeypatch):
+    def test_threads_resolve(self, record_repo, monkeypatch):
         from agent_worktrees import pr_contract as pc
-        config, wid, _wt, _ = pr_repo
+        config, wid, _wt, _ = record_repo
         pr_ops.set_pr(wid, number=7, state="open", provider="azure-devops")
         tr = pc.ThreadsResult(threads=(
             pc.CommentThread(id=1, status="active",
@@ -864,16 +864,16 @@ class TestPRThreads:
         assert res["resolved"] is True
         assert prov["resolved"] is True
 
-    def test_threads_unsupported_degrades(self, pr_repo, monkeypatch):
+    def test_threads_unsupported_degrades(self, record_repo, monkeypatch):
         from agent_worktrees import pr_contract as pc
-        config, wid, _wt, _ = pr_repo
+        config, wid, _wt, _ = record_repo
         pr_ops.set_pr(wid, number=7, state="open", provider="gitea")
         tr = pc.ThreadsResult(supported=False, error="no token")
         self._mock_provider(monkeypatch, tr)
         res = pr_ops.pr_threads(wid, config=config)
         assert res["supported"] is False and res["threads"] == []
 
-    def test_threads_no_pr(self, pr_repo):
-        config, wid, _wt, _ = pr_repo
+    def test_threads_no_pr(self, record_repo):
+        config, wid, _wt, _ = record_repo
         res = pr_ops.pr_threads(wid, config=config)
         assert res["has_pr"] is False

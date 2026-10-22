@@ -6,8 +6,34 @@ The registry is repository-side evidence; no runtime component reads it.
 
 ## Updating a contract
 
+Classify the change before touching a golden packet:
+
+- An implementation-only flow change leaves every fixture and its original
+  `captured_from` provenance untouched. Refresh only that source's fingerprint
+  in `registry.json`, set `semantic: false`, and explain the unchanged wire
+  behavior in `non_semantic_reason`. Run the affected producer/consumer tests;
+  the classification is not permission to skip behavioral validation.
+- A semantic change keeps `semantic: true` and requires matching current
+  evidence for the affected source. Add the affected capture and its provenance;
+  unrelated captures may retain their original commits and packets. They do not
+  need to share the newest capture's commit or source bytes.
+- Actual protocol generations, capability floors and meaningful wire digests
+  remain contract assertions. This maintenance path does not bypass a version
+  bump or mixed-version validation when the contract really changes.
+
+The registry checker owns source freshness, capture provenance and immutable
+fixture hashes. Packet replay tests own behavioral expectations; they must not
+add a second, stricter rule that every capture matches today's implementation.
+The checker still rejects unrefreshed source hashes, unjustified non-semantic
+classification, uncovered semantic changes and corrupt historical provenance.
+Never bulk-rebaseline goldens to make an implementation-only update pass.
+
+When a wire contract does change:
+
 1. Change the owning source and its tests.
-2. Update the affected immutable fixture or add a new generation fixture.
+2. Add the affected capture or a new generation fixture; preserve historical
+   captures. The three refreshable current authority vectors use the bounded
+   capture flow below.
 3. Record exact source commit, plugin version, capture method, support window,
    and removal gate in `registry.json`.
 4. Refresh every changed fixture and source SHA-256 in the registry. Text
@@ -20,28 +46,74 @@ The registry is repository-side evidence; no runtime component reads it.
    python tools/run-plugin-tests.py agent-bridge --guards
    ```
 
-HTTP generation 43 retains every generation-42 fixture unchanged. Its
-re-attestations identify each original vector by path and LF-normalized hash,
-advance only `protocol_version` advertisements and record the exact committed
-source, Git blob and source hash. `test_http_targets_contract.py` checks that
-relationship for all 42 vectors and keeps the separate generation-40 to
-generation-41 and generation-41 to generation-42 checks. The hand-authored
-`owned-remote-generation-43.json` vector
-adds managed-owner negotiation and retained relationship inspection expectations;
-it does not claim that source capture proves live deployment or accepted
-cross-worktree transfer.
-Current re-attestations can identify different exact commits for different
-changed source files. Their hashes must match each current registered source
-and their complete capture identity must match registered provenance; an
-unrelated file does not require recapture solely to share a commit number.
-The ownership generation records the durable database dependencies alongside
-the source capture for its current vectors. Queue consumption and turn persistence
-are atomic, schema 26 requires ordinary preparation before passive adoption,
-and production import deferral preserves the native five-second gate. The
-expected wire bytes, prior-generation fixtures and capability floors do not
-change. Removing the selected queue row during authority inspection advances
-to the next durable row; changed rows, database failures and authority failures
-are not mistaken for removal or retried.
+HTTP generation 45 adds distinct ordinary native keyed-admission and
+receipt-only endpoints. Immutable binding facts and an admission receipt are
+inserted atomically with the turn using the existing unique delivery key.
+Identical running or settled replay returns that receipt without another SDK
+submission; an admitted-but-not-submitted crash is not proof of execution and
+is never automatically resubmitted. Intentional unkeyed follow-up turns remain
+unchanged. The new CLI transports the complete invocation through UTF-8
+stdin/file input and refuses an older receiver without legacy fallback.
+
+Keyed sends and receipt reads reject alternate payload, envelope, notification,
+queue/interrupt, reply-wait and history options before client preflight or
+stdin/file decoding, using `mixed_native_invocation`. Canonical parser defaults
+(`prompt` kind, `steer` delivery), receipt-only/no-wait and output/feed-format
+flags remain accepted; they do not replace the frozen invocation or start a
+different delivery mode. Real-parser refusal probes require zero input reads
+and zero requests and replay the independently expected CLI refusal vector.
+An explicitly empty invocation selector remains keyed intent, never an unkeyed
+fallback, and is refused before input reads or client preflight.
+
+The independently authored `ordinary-native-admission-generation-45.json`
+vectors run through the typed public ASGI routes and actual turn journal with
+a mock SDK, covering both running and settled replay and changed-prompt
+refusal. Linked source re-attestations preserve the frozen previous vectors
+apart from the advertised protocol version; explicit prior fixture/hash links
+are checked by tests. Provenance names a real local source checkpoint, not an
+invented future publication commit. This is source evidence, not a deployed
+daemon, qualified native session or task-verification claim.
+
+The client and CLI keyed-send vectors reference that shared new-operation
+evidence explicitly; they are not independent captures or legacy re-attestations.
+Prompt admission also retains linked native-bound and managed-drain predecessor
+families. Workspace creation has its own real parser/client-builder,
+complete-receipt and floor-refusal vectors, not a copied prompt-admission body.
+`provider-creation-refresh-generation-45.json` preserves its consumer's named
+predecessor alias. The validator checks these families and shapes in addition
+to source/fixture hashes.
+
+Independent expected inputs live in `inputs/http45/`. After committing matching
+source, use the Bridge development interpreter with `agent-procutil` available:
+
+```text
+python tools/capture_bridge_http45.py --source-commit <full-source-commit> --write
+python tools/capture_bridge_http45.py --source-commit <full-source-commit>
+```
+
+This owned capture verifies source bytes, runs the bounded model-free operation
+probes through the existing contained runner, then writes only the corrected
+current families and registry. The no-write command verifies reproducibility.
+Historical vectors and capability floors are preserved. Execute it only in an
+admitted test environment; a passing source replay is not host qualification.
+
+HTTP generation 44 added the Bridge-owned startup plugin-readiness requirement,
+after generation 41's direct remote ACP targets and generation 42's attention
+boundaries, followed by generation 43's managed remote ACP ownership.
+All historical generations and their capability floors remain
+unchanged.
+Its frozen vectors include typed readiness results, readiness-bound task/mode
+inputs and omission-compatible ordinary input. Every readiness golden is replayed
+through the public HTTP router, durable readiness-control acknowledgment and
+SQLite inbox. Public input uses `kind: prompt`; only the admitted inbox message
+carries the generated `startup:prompt:<control-id>` kind. The frozen control
+digest, admission receipt, inbox packet, retry identity and changed-selection
+refusal are checked at that boundary, not only through model parsing. The native
+observer and inbox tests consume the same generated packet; a pending selection
+must produce no SDK send or acknowledgment. Historical generation-40 packets remain unchanged,
+and earlier capability floors do not move merely because the health
+advertisement advances. Each semantic source has current-generation provenance,
+including the joined-session observer and delivery producer.
 
 ## Re-attesting the current preference-authority vectors
 
@@ -61,6 +133,12 @@ negative vector, terminal consent/refusal, and the real Host's
 verify-before-consent and refusal/reaping order. It refuses changes to receipt
 semantics, authority closure, binding environment or wire generation rather than
 silently broadening this capture.
+
+The component digest is an actual attested wire value, not just provenance
+bookkeeping. Changing an included authority component legitimately changes it,
+even without a framing-version bump. Refresh those three current captures with
+this tool; do not relax their live-digest assertions or re-attest unrelated
+HTTP packets to accommodate that bounded change.
 
 Only the three current `wrapper-authority-v1`, `wrapper-exec` and
 `wrapper-consent` fixtures and their registry hashes/provenance are written.

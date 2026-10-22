@@ -99,6 +99,10 @@ def register_status_routes(
             "steering_acceptance": 1,
             "task_categories": 1,
             "exact_dedup_lookup": 1,
+            "delegated_run_waiters": {
+                "protocol": "delegated_run_waiters/v1",
+                "coordinator_id": queue.run_waiter_coordinator_id(),
+            },
         }
 
     @app.get("/events")

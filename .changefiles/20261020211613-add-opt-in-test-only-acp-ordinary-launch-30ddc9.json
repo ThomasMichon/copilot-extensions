@@ -1,0 +1,9 @@
+{
+  "comment": "Add transactional keyed native startup admission receipts and opt-in real SessionHost replay witnesses; preserve unkeyed follow-up turns.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

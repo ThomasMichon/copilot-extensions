@@ -75,6 +75,78 @@ def test_ignores_non_adopting_plugin(repo):
     assert guard.verify() == []
 
 
+@pytest.mark.parametrize("visitor_name", ["_FlagFinder", "_SpawnFinder", "_DetachedSpawnFinder"])
+def test_visitor_dispatch_resolves_each_node_type_once_per_file(visitor_name, monkeypatch):
+    text = "from subprocess import Popen\n" + "value = alias\n" * 50
+    tree = guard.ast.parse(text)
+    visitor_type = getattr(guard, visitor_name)
+    lookups = []
+
+    def getattribute(self, name):
+        if name == "visit_Name":
+            lookups.append(name)
+        return object.__getattribute__(self, name)
+
+    monkeypatch.setattr(visitor_type, "__getattribute__", getattribute)
+
+    def visitor():
+        if visitor_name == "_SpawnFinder":
+            return visitor_type(text)
+        if visitor_name == "_DetachedSpawnFinder":
+            return visitor_type(tree)
+        return visitor_type()
+
+    visitor().visit(tree)
+    assert lookups == ["visit_Name"]
+    visitor().visit(tree)
+    assert lookups == ["visit_Name"] * 2
+
+
+def test_daemon_analysis_only_visits_adopting_source_without_skipping_other_rules(
+    repo, monkeypatch,
+):
+    body = (
+        "import subprocess\n"
+        "from agent_procutil import detached_kwargs\n"
+        "x = subprocess.CREATE_NEW_CONSOLE\n"
+        "def unsuppressed():\n"
+        "    subprocess.run(['git', 'status'])\n"
+        "subprocess.Popen(['worker'], **detached_kwargs())\n"
+    )
+    _mk_plugin(repo, "agent-adopter", adopts=True, body=body)
+    _mk_plugin(repo, "agent-other", adopts=False, body=body)
+    extra_roots = [
+        repo / "plugins" / "agent-adopter" / "scripts",
+        repo / "plugins" / "agent-adopter" / "libs" / "vendored" / "src",
+        repo / "libs" / "shared" / "src",
+    ]
+    for root in extra_roots:
+        root.mkdir(parents=True)
+        (root / "mod.py").write_text(body, encoding="utf-8")
+    visited = []
+    original_init = guard._DetachedSpawnFinder.__init__
+
+    def record_init(self, tree):
+        visited.append(tree)
+        original_init(self, tree)
+
+    monkeypatch.setattr(guard._DetachedSpawnFinder, "__init__", record_init)
+    problems = guard.verify()
+    assert len(visited) == 1
+    assert sum("unsafe 'CREATE_NEW_CONSOLE'" in p for p in problems) == 5
+    assert sum("unsuppressed console spawn of 'git'" in p for p in problems) == 5
+    assert sum("hand-rolled detached Popen" in p for p in problems) == 1
+    assert "plugins/agent-adopter/src/" in next(
+        p for p in problems if "hand-rolled detached Popen" in p
+    )
+    manifest = repo / "plugins" / "agent-other" / "pyproject.toml"
+    manifest.write_text('dependencies = ["agent-procutil"]\n', encoding="utf-8")
+    visited.clear()
+    problems = guard.verify()
+    assert len(visited) == 2
+    assert sum("hand-rolled detached Popen" in p for p in problems) == 2
+
+
 def test_forbids_new_console_in_non_adopting_plugin(repo):
     _mk_plugin(repo, "agent-window", adopts=False,
                body="import subprocess\nx = subprocess.CREATE_NEW_CONSOLE\n")

@@ -5,7 +5,7 @@
   local services on a user's machine.
 - **Scope:** branch (links cross-cutting and per-plugin child visions)
 - **Status:** Active
-- **Last revised:** 2026-10-16
+- **Last revised:** 2026-10-22
 - **Reality docs:** [`docs/architecture.md`](../../docs/architecture.md) ·
   [`docs/install-contract.md`](../../docs/install-contract.md) · each plugin's
   `docs/architecture.md`
@@ -605,11 +605,16 @@ release/review/CI gates should remain intact.
 
 ### collision-free-endpoints
 Two plugin services — and the *same* service running on both sides of a shared
-network boundary (e.g. Windows and its WSL guest) — never contend for one
-address. Deconfliction is **structural**, achieved by construction, never by a
-human maintaining a registry of fixed ports or applying per-platform offsets. A
+network boundary (e.g. Windows and its WSL guest) — cannot independently claim
+one active endpoint. Deconfliction is **structural**, achieved by construction,
+never by a human maintaining a registry of fixed ports or applying per-platform offsets. A
 new service can be added, or an existing one relocated, without anyone arbitrating
 addresses.
+
+When boundary forwarding is constrained by existing scoped permissions,
+contention is resolved only among authorized choices with exclusive current
+ownership. Unavailable authorized capacity remains unavailable; it never
+justifies broader access, stale discovery or reclaiming another actor's endpoint.
 
 ### endpoint-discovered-not-assumed
 A client always learns *where* a service currently is from the service itself,
@@ -666,7 +671,12 @@ OS-native local endpoint (a Unix domain socket or a named pipe, in a namespace
 the service owns) — over binding a loopback TCP port, *even one bound only to
 `127.0.0.1`*. A network port is a last resort, not a default: when one is
 genuinely required, it is an **OS-assigned ephemeral** port advertised through
-discovery, never a fixed or well-known one. Crossing a host or trust boundary —
+discovery, never a fixed or well-known one. A policy-constrained boundary
+transport that cannot support narrowly authorized OS assignment may instead
+select a temporary, exclusively owned endpoint within its existing explicit
+permissions. Verified readiness and discovered current ownership remain
+mandatory; selection never widens a grant or assumes custody of an occupied
+endpoint. Crossing a host or trust boundary —
 including the shared-loopback boundary between a host and its WSL guest — is done
 by an explicit, opt-in **tunnel layered over an already-trusted transport**, so
 the only surface a service ever exposes beyond its own namespace is the one the

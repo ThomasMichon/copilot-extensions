@@ -30,6 +30,12 @@ Callers invoke that path through the platform shell and should pass structured
 input through stdin or a request file rather than inline CMD arguments; the
 generated Windows catalog says so beside the `argv` (`cmd.exe` ends a command at
 a newline, so a multi-line argument is silently cut off).
+`powershellPipelineInput: true` explicitly opts a payload dispatcher into
+forwarding PowerShell object input. The dispatcher must likewise distinguish
+object pipelines from native redirected stdin and preserve raw native bytes;
+Windows PowerShell's `ExpectingInput` alone does not distinguish those paths.
+The opted-in launcher suppresses PowerShell progress records, not errors, so
+module auto-loading cannot add CLIXML to its stderr transport.
 `provisionMode` defaults to `snapshot`, where first use stamps the owning
 payload and provisions through its published snapshot. A self-staging installer
 may select `direct`; the payload shim then invokes that same installer with
@@ -59,6 +65,16 @@ before dispatch or the test supplies its own explicit CLI stub. Tests invoking
 the real Worktrees CLI retain the complete copied runtime and staged dependencies.
 
 ### Source-qualified command binding
+
+`installerLifecycle: true` packages the existing command-binding/lifecycle
+helpers for a required-context installer's admission without changing command
+catalogs or enabling their additive binding field. The installer must invoke
+that admission before staging and authenticate a borrowed ticket on reentry;
+packaging alone does not enforce it. Logger is the first installer-only adopter.
+Its real managed-first-stamp regression and standalone/custody checks run in the
+ordinary suite. The full policy/action/root matrix is an explicit T3 portfolio:
+`python tools/run-plugin-tests.py payload-invocation --test-file
+tests/test_adopter_publication.py --allow-explicit-tiers`.
 
 `catalogBinding: true` opts a required-context runtime into the additive
 `binding` field of the existing version-1 session catalog. Agent Worktrees is
@@ -154,6 +170,15 @@ Without explicit opt-in, child stdout and stderr remain inherited separately;
 catalogs, protocol callers and other lifecycle actions do not infer human mode
 from their output or environment. Structured-context installers retain their
 separate native owner; this does not wrap those entrypoints.
+
+Lifecycle/publication CLI callers may pass `--project-root` to retain their
+launch project's source declarations while moving waiting supervisors out of a
+replaceable payload. Omission retains the original current-directory behavior;
+the option is not accepted by ordinary read-only catalog discovery. Logger
+carries that read context across its native staging handoff while the same
+live lease still validates source/root/purpose. On Windows Bash, re-executing
+a command-string Bash before native Python avoids retaining the payload script
+descriptor in MSYS's native-exec parent.
 
 Legacy `uninstall` uses the same ownership-validated transaction without a
 runtime-build reservation. The shared lock is a sibling of the canonical

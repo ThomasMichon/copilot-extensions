@@ -43,10 +43,14 @@ the suite, whether or not they ever contribute:
    there, don't assume it's ours.
 2. **Never monkey-patch.** Do not hand-edit an installed/deployed plugin
    payload (`~/.copilot/installed-plugins/...`) or a running runtime
-   (`~/.agent-*`) to work around a bug, "just this once" or otherwise. A local
+   code file (`~/.agent-*`) to work around a bug, "just this once" or otherwise. A local
    edit is invisible to every other consumer, gets silently overwritten by the
-   next update, and leaves the real defect unfixed. There are exactly two
-   sanctioned responses when something is actually broken:
+   next update, and leaves the real defect unfixed. **Operational lock state is
+   different from code:** use
+   `agent-conduct-guidance:recovering-operational-locks` for approved,
+   evidence-bound hand-edits or bypasses of stale coordination guards. Do not
+   categorically refuse that recovery or stop at a bug report when the working
+   operation can be restored. For a code defect, the sanctioned responses are:
    - **File a bug upstream** — open (or find and comment on) a GitHub issue on
      `ThomasMichon/copilot-extensions`, written in generic, sanitized terms: no
      PII, internal paths/hostnames, account details, or proprietary/downstream
@@ -57,7 +61,7 @@ the suite, whether or not they ever contribute:
    - **Run the auto-update/reset path** — `<repo> update` (or `--force`), or
      the baseline reset below, if the deployed copy is simply stale or
      corrupted rather than genuinely buggy.
-   - The **only** other sanctioned path is becoming a real contributor: fixing
+   - Become a real contributor: fix
      the repo source itself and landing it through
      `contributing-to-copilot-extensions`'s worktree/PR flow — never the
      deployed copy directly.

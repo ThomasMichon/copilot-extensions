@@ -12,7 +12,6 @@ import sys
 import threading
 import time
 from types import ModuleType
-from typing import BinaryIO
 import tempfile
 import uuid
 
@@ -22,6 +21,7 @@ from .artifacts import (
     _content_stamp,
     _file_stat,
     _identity,
+    _reader,
     verify_role_artifacts,
 )
 from .client_diagnostics import diagnose_client
@@ -68,18 +68,6 @@ def _directory(path: Path) -> tuple[int, int]:
         raise PlanError("staging directory identity could not be inspected") from None
 
 
-@contextmanager
-def _reader(path: Path) -> Iterator[BinaryIO]:
-    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
-    flags |= getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
-    descriptor = os.open(path, flags)
-    try:
-        with os.fdopen(descriptor, "rb", closefd=False) as incoming:
-            yield incoming
-    finally:
-        os.close(descriptor)
-
-
 def _read_bytes(path: Path, limit: int) -> bytes:
     before = _file_stat(path)
     if not 1 <= before.st_size <= limit:
@@ -91,13 +79,14 @@ def _read_bytes(path: Path, limit: int) -> bytes:
         data = incoming.read(limit + 1)
         after = os.fstat(incoming.fileno())
         named = _file_stat(path)
-        if (
-            not 1 <= len(data) <= limit or len(data) != opened.st_size
-            or _content_stamp(after) != _content_stamp(opened)
-            or _identity(named) != _identity(before)
-            or _content_stamp(named) != _content_stamp(before)
-        ):
-            raise PlanError("staged input changed during admission")
+        if not 1 <= len(data) <= limit or len(data) != opened.st_size:
+            raise PlanError("staged input changed during admission (read-size)")
+        if _content_stamp(after) != _content_stamp(opened):
+            raise PlanError("staged input changed during admission (descriptor-stamp)")
+        if _identity(named) != _identity(before):
+            raise PlanError("staged input changed during admission (named-identity)")
+        if _content_stamp(named) != _content_stamp(before):
+            raise PlanError("staged input changed during admission (named-stamp)")
     return data
 
 
@@ -118,6 +107,7 @@ def _primitive() -> Iterator[ModuleType]:
     companions = {}
     for component in (
         "versioned_runtime_leases", "versioned_runtime_construction", "versioned_runtime_source",
+        "versioned_runtime_publication",
     ):
         member = component + ".py"
         retained = _bytes(resource.with_name(member), MAX_BYTES)
@@ -136,6 +126,9 @@ def _primitive() -> Iterator[ModuleType]:
             sys.modules[child.__name__] = child
             exec(compile(retained, child.__file__, "exec"), child.__dict__)
             module._retained_runtime_components[component] = child
+        module._retained_runtime_components["versioned_runtime_publication"]._leases = (
+            module._retained_runtime_components["versioned_runtime_leases"]
+        )
         exec(compile(content, str(resource), "exec"), module.__dict__)
         yield module
     finally:
@@ -166,13 +159,14 @@ def _copy_bytes(source: Path, target: Path, expected: str) -> None:
             os.fsync(outgoing.fileno())
         after = os.fstat(incoming.fileno())
         named = _file_stat(source)
-        if (
-            size != opened.st_size or digest.hexdigest() != expected
-            or _content_stamp(after) != _content_stamp(opened)
-            or _identity(named) != _identity(before)
-            or _content_stamp(named) != _content_stamp(before)
-        ):
-            raise PlanError("artifact changed while being frozen")
+        if size != opened.st_size or digest.hexdigest() != expected:
+            raise PlanError("artifact changed while being frozen (content)")
+        if _content_stamp(after) != _content_stamp(opened):
+            raise PlanError("artifact changed while being frozen (descriptor-stamp)")
+        if _identity(named) != _identity(before):
+            raise PlanError("artifact changed while being frozen (named-identity)")
+        if _content_stamp(named) != _content_stamp(before):
+            raise PlanError("artifact changed while being frozen (named-stamp)")
 
 
 def _copy(source: Path, target: Path, expected: str) -> None:
@@ -207,6 +201,19 @@ class StagedArtifacts:
         """Selected component names, never reusable filesystem paths."""
         return tuple(name for name, _ in self._artifacts)
 
+    @property
+    def artifact_filenames(self) -> dict[str, str]:
+        """Portable artifact names only; no reusable stage pathname."""
+        return {name: path.name for name, path in self._artifacts}
+
+    def read_manifest(
+        self, policy: object, *, clock: Callable[[], int] = _clock,
+    ) -> bytes:
+        """Return the exact manifest bytes after current live-stage authentication."""
+        with self._operation_lock:
+            self._reverify(policy, clock=clock)
+            return self._manifest_bytes
+
     def read_artifact(
         self, component: str, policy: object, *, clock: Callable[[], int] = _clock,
     ) -> bytes:
@@ -238,6 +245,25 @@ class StagedArtifacts:
         with self._operation_lock:
             return self._reverify(policy, clock=clock)
 
+    def read_artifacts(
+        self, policy: object, *, clock: Callable[[], int] = _clock,
+    ) -> dict[str, bytes]:
+        """Consume the selected snapshots with constant-count closure verification."""
+        with self._operation_lock:
+            evidence = self._reverify(policy, clock=clock)
+            expected = {item["component"]: item for item in evidence["components"]}
+            snapshots = {}
+            for name, path in self._artifacts:
+                content = _bytes(path, MAX_ARTIFACT_BYTES)
+                if (
+                    len(content) != expected[name]["bytes"]
+                    or hashlib.sha256(content).hexdigest() != expected[name]["artifact_sha256"]
+                ):
+                    raise PlanError("artifact snapshot digest mismatch")
+                snapshots[name] = content
+            self._reverify(policy, clock=clock)
+            return snapshots
+
     def _close(self) -> None:
         with self._operation_lock:
             self._closed.set()
@@ -264,7 +290,7 @@ class StagedArtifacts:
         result = {
             "schema": "fleet-manager.staged-artifacts", "version": 1,
             "status": "retained-byte-stage", "evidence": "current-owned-stage-reverification",
-            "release": authenticated["release"], "release_digest": self.release_digest,
+            "release": authenticated["release"], "release_digest": authenticated["release_digest"],
             "authority": self.authority, "installation": self.installation, "role": self.role,
             "sequence": authenticated["sequence"], "verified_at": authenticated["verified_at"],
             "valid_until": authenticated["valid_until"],

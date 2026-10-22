@@ -17,6 +17,12 @@ Held housekeeping on a completed task has a separate preview-first
 [`reservations retry-cleanup` recovery flow](docs/cleanup-recovery.md).
 It preserves failure and attachment history and never rearms completed work.
 
+The optional [execution handoff construction APIs](docs/execution-handoff.md)
+define the effect-adapter boundary and durable queue-level admission closure.
+They expose no live handoff command, destination activation or acknowledgement;
+coordinator authentication, runtime enrollment and final-effect integration
+remain unwired. Unconfigured ordinary execution is unchanged.
+
 Internal coordinator deployment accepts optional `conditional`/`routing_dir`
 keyword arguments using the shared
 [conditional cutover contract](../../libs/zdd/README.md#conditional-owner-operation-partial-lifecycle-support).
@@ -43,6 +49,11 @@ is unchanged, and health attestation must honor configured coordinator auth.
 > Scheduled Task**.
 
 ## Task categories
+
+For opt-in user-level tracing of the existing ordinary Bridge CLI launch
+boundary and exact-prefix manual diagnosis, see
+[launch debugging](docs/launch-debugging.md). Tracing defaults off and never
+changes launch or task ownership behavior.
 
 Task purpose is an orthogonal [work/maintenance category](docs/task-categories.md):
 compatible creation defaults, before-limit selection, independent Tasks and
@@ -193,6 +204,18 @@ status-core summary; agent-worktrees conduct and regular
 `agent-worktrees status --summary` remain authoritative for ongoing disposition
 and retain their normal cadence. Agent-dispatch maintains no parallel store.
 
+Focus reads use the shared dependency-free identity codec. For explicit
+version-1 Worktrees rows, `focus --list --machine <owner>` selects the execution
+owner, not the physical host shared by native and guest environments. Focus JSON
+keeps its one-term `machine` owner and includes the original validated tuple
+under `machine_identity`. Unversioned rows keep the historical output shape.
+Malformed explicit tuples fail visibly before filtering or summary omission,
+rather than returning an apparently empty or partial focus view. This changes
+neither stored worktree records nor task ownership, queues or transport routing.
+Checkout-based PowerShell stamping embeds the codec and rewrites its source
+mapping into the standalone snapshot; installer cache refresh includes the
+declared library on both platforms.
+
 When an adopting repository enables this opt-in, remove any superseded
 hand-written **Worktree Focus** prose from its instructions. This coordination
 hint is not a safety policy, so it needs no static fallback on launch paths that
@@ -230,10 +253,29 @@ Both installers source the canonical installer engine during development;
 release tooling materializes byte-identical payload-local copies. The engine
 owns pinned, checksum-verified uv acquisition, transient venv/package retries
 and deploy-manifest writing. Dispatch retains dependency order, build-artifact
-scrubbing, optional `[mcp]` fallback, launchers, and coordinator/supervisor
+scrubbing, required `[mcp]` dependencies, launchers, and coordinator/supervisor
 lifecycle. Windows prefers signed Python with `--copies` and validates the
 result independently of its exit code before accepting it; Python venv/pip
 remains the fallback when uv is unavailable.
+
+On Windows, set `AGENT_DISPATCH_BASE_PYTHON` to an absolute base `python.exe`
+path in the **updater process** to explicitly choose a Dispatch-only interpreter.
+The installer requires a valid Python Software Foundation Authenticode signature
+and probes the executable in isolation for supported 64-bit CPython 3.10+.
+It uses that base before PATH or launcher discovery, without changing the global
+Python default, PATH, or other plugins' interpreter selection.
+
+After a qualified candidate publishes, Dispatch atomically stores the choice in
+`base-python.json` under its runtime root. Later updates use that preference
+without needing the environment input again; an explicit process input takes
+precedence. Missing, invalid or untrusted selected interpreters and malformed or
+reparse-point preference files fail closed instead of reverting to another
+interpreter. A completed candidate using a different base is rejected without
+rebuilding it in place. Failed or superseded builds do not save a new preference.
+With neither an explicit choice nor a stored preference, existing discovery and
+fallback behavior is unchanged. Dependency seasoning, configured resolver feeds,
+required MCP installation and import-health gates apply to every selected base.
+Saving a preference is not proof of a successful coordinator cutover.
 
 The installer also manages optional, label-gated **embody supervisor** services.
 The primary supervisor reads `~/.agent-dispatch/supervisor.env` and installs as
@@ -248,6 +290,12 @@ such as `--pool host-a,host-b --origin origin --headless` in
 `AGENT_DISPATCH_SUPERVISE_EXTRA_ARGS`. See
 [`docs/spawn-supervisor.md`](docs/spawn-supervisor.md#running-as-a-persistent-service-the-always-on-last-mile)
 for the full supervisor/profile contract.
+On Windows, an already-registered interactive-logon launcher is also eligible
+for the installer `start` action when its env selects
+`AGENT_DISPATCH_SUPERVISE_MODE=serve`, even without legacy embody labels.
+Unlabeled legacy launchers remain inert, absent registrations are not enrolled,
+and an explicitly disabled Scheduled Task is not bypassed through a logon
+registration.
 
 ### Same-cell sibling invocation
 
@@ -2141,6 +2189,15 @@ agent-dispatch run --resume <machine/worktree> --task <id> -- agent-worktrees pr
 # be torn down (costing nothing) while it waits -- true hibernation:
 agent-dispatch run --detach --resume <machine/worktree> --task <id> -- agent-worktrees pr-watch 42
 ```
+
+For a terminal PR wait, explicit `--pr-watch-repo <owner/repo>
+--pr-watch-number <number>` opts into negotiated, optional delegation to
+`agent-pull-requests`' acknowledged shared watch owner. Keep the real command
+after `--`: it remains the process fallback when either owner's capability or
+the caller's reproducible credential context is unavailable. No optional plugin
+is installed or auto-started just to enable this optimization. See
+[`Delegated PR waits`](docs/delegated-pr-waits.md) for transition syntax, safe
+fallback decisions, generation-fenced at-least-once completion, and recovery.
 
 Everything after `--` is the blocking wait command (its own flags are never parsed
 as `run` options). With `--detach` the wait is re-exec'd as a fully detached,

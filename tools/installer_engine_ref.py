@@ -11,9 +11,11 @@ restoring the shipped self-contained payload.
 """
 from __future__ import annotations
 
+import ast
 from dataclasses import dataclass
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 
@@ -24,8 +26,24 @@ REPO = Path(__file__).resolve().parent.parent
 CANONICAL_DIR = REPO / "libs" / "installer-engine"
 FILES = ("installer-engine.ps1", "installer-engine.sh")
 SUPPORT_FILES = ("installer_dependency_policy.py", "installer_dependency_config.py")
+_NATIVE_BEGIN = "# native-executable:begin"
+_NATIVE_END = "# native-executable:end"
 PYTHON_FILES = ("installer_engine.py", "installer_engine_process.py", "runtime_launcher.py")
 PYTHON_ADOPTERS = ("agent-worktrees",)
+STANDALONE_PYTHON_ADOPTERS = ("worktree-manager",)
+
+
+def standalone_python_adopter_dirs(repo: Path) -> tuple[Path, ...]:
+    return tuple(repo / name for name in STANDALONE_PYTHON_ADOPTERS if os.path.lexists(repo / name))
+
+
+def python_adopter_dirs(repo: Path, *, plugins: tuple[str, ...] | None = None) -> tuple[Path, ...]:
+    return (
+        *(repo / "plugins" / name for name in (PYTHON_ADOPTERS if plugins is None else plugins)),
+        *standalone_python_adopter_dirs(repo),
+    )
+
+
 INSTALLER_SCRIPTS = ("install.ps1", "install.sh")
 ADOPTERS = (
     "agent-pull-requests",
@@ -47,6 +65,12 @@ HUMAN_PROLOGUE = (
     f"    {HUMAN_SOURCE_LINE}\n"
     "}"
 )
+HUMAN_STANDALONE_ENTRYPOINTS = {
+    "agent-worktrees": "install.ps1",
+    "agent-containers": "init.ps1",
+    "agent-mcp": "init.ps1",
+    "budget-guidance": "install.ps1",
+}
 
 
 def human_output_enabled(canonical_dir: Path) -> bool:
@@ -58,11 +82,18 @@ def human_output_enabled(canonical_dir: Path) -> bool:
 
 
 def human_output_adopters(repo: Path, adopters) -> tuple[str, ...]:
-    # The engine's own installer does not consume installer-engine functions,
-    # but shares this small, independently packaged native output initializer.
-    return (*adopters, "agent-worktrees") if (
-        repo / "plugins" / "agent-worktrees" / "scripts" / "install.ps1"
-    ).is_file() else tuple(adopters)
+    # Standalone installers share only the output initializer, not the engine.
+    return (
+        *adopters,
+        *(name for name, entrypoint in HUMAN_STANDALONE_ENTRYPOINTS.items()
+          if (repo / "plugins" / name / "scripts" / entrypoint).is_file()),
+    )
+
+
+def human_output_entrypoint(consumer: Path) -> Path:
+    return consumer / "scripts" / HUMAN_STANDALONE_ENTRYPOINTS.get(
+        consumer.name, "install.ps1",
+    )
 
 
 def human_output_declaration(script: Path) -> dict:
@@ -88,6 +119,41 @@ def human_output_declaration(script: Path) -> dict:
 
 def human_output_json(script: Path) -> str:
     return json.dumps(human_output_declaration(script), indent=2) + "\n"
+
+
+def native_executable_config(canonical_dir: Path) -> str | None:
+    """Project the canonical standalone primitive without another runtime dependency."""
+    config = canonical_dir / "installer_dependency_config.py"
+    root = canonical_dir.parent.parent.resolve()
+    if uer._find_symlinked_ancestor(config, root) is not None:
+        raise ValueError(f"{config}: linked native executable projection refused")
+    if not config.is_file():
+        return None
+    source = root / "libs" / "agent-procutil" / "src" / "agent_procutil" / "_interpreter.py"
+    text = config.read_text(encoding="utf-8")
+    if _NATIVE_BEGIN not in text and _NATIVE_END not in text:
+        if "def select_uv_executable(" in text:
+            raise ValueError(f"{config}: native executable projection markers are missing")
+        return None
+    if (
+        text.count(_NATIVE_BEGIN) != 1 or text.count(_NATIVE_END) != 1
+        or text.index(_NATIVE_BEGIN) > text.index(_NATIVE_END)
+    ):
+        raise ValueError(f"{config}: native executable projection markers are invalid")
+    if uer._find_symlinked_ancestor(source, root) is not None:
+        raise ValueError(f"{source}: linked native executable source refused")
+    body = source.read_text(encoding="utf-8")
+    functions = [
+        node for node in ast.parse(body).body
+        if isinstance(node, ast.FunctionDef) and node.name == "physical_executable"
+    ]
+    if len(functions) != 1:
+        raise ValueError(f"{source}: expected one canonical physical_executable")
+    function = functions[0]
+    projected = "".join(body.splitlines(keepends=True)[function.lineno - 1:function.end_lineno])
+    before, remaining = text.split(_NATIVE_BEGIN)
+    _previous, after = remaining.split(_NATIVE_END)
+    return before + _NATIVE_BEGIN + "\n" + projected.rstrip() + "\n" + _NATIVE_END + after
 
 
 def support_files(canonical_dir: Path) -> tuple[str, ...]:

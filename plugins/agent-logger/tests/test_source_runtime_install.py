@@ -68,6 +68,10 @@ def _small_stage(tmp_path: Path, plugin: str):
         "installer_dependency_policy.py", "installer_dependency_config.py",
     }
     names.update(path.name for path in original.glob("versioned_runtime*.*"))
+    if plugin == "agent-logger":
+        names.update(("command_binding.py", "command_lifecycle.py"))
+        shutil.copytree(original / "installation-context", scripts / "installation-context")
+        shutil.copytree(original / "_lifecycle_human", scripts / "_lifecycle_human")
     for name in names:
         shutil.copy2(original / name, scripts / name)
     for path in (REPOSITORY / "libs" / "installer-engine").iterdir():

@@ -478,8 +478,13 @@ _Correlated via a facility-driven sweep of open `bug`-labeled issues against act
       immutable slot without rebuilding.
 - [ ] **#6390** _(agent-recommended)_: preserve Index native deploy failures at
       the installer boundary and reconcile healthy-but-old non-systemd services.
-- [ ] Coordinate adapter acceptance with existing #438, #3959, #5558, #2386,
+- [ ] Coordinate adapter acceptance with existing #438, #3959, #5558,
       #6143 and #5769 owners; retain #6373's narrow monitor PID-adapter scope.
+      Preserve #2386's same specialized Dispatch adapter/native-retirement
+      custodian through #6389's "Qualified Dispatch supervisor retirement
+      acceptance from #2386" lane after complete direct intake and readback.
+      Until then #2386 remains open; neither consolidation nor this pointer
+      completes its qualification or releases its owner.
       #5956 separately owns the reviewed engine/full-entrypoint applicability
       decision. This amendment neither removes Worktrees' engine exception nor
       pulls all service-specific lifecycle logic into the shared build engine.

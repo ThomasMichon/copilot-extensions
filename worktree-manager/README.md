@@ -40,6 +40,77 @@ your shell after a PATH change) and idempotent (re-running heals a partial
 install). The core install is never reimplemented — the Worktree Manager locates and
 calls agent-worktrees' own `install.{ps1,sh}`.
 
+The Manager is a standalone canonical Python-installer-engine adopter. Bootstrap
+selects Python 3.11 or newer without running project resolution, then the engine
+retains the source/dependency/configuration inputs and constructs a non-editable
+runtime. Governed `uv pip install` selects runtime dependencies for this platform,
+not development groups or unrelated platforms, while retaining the configured
+indexes and the seven-day minimum external-dependency age.
+
+Only a candidate passing isolated installed-origin and real CLI-import health
+receives canonical completion and becomes `current-version`. Construction failure
+leaves the previous selector and mux untouched. A legacy payload-only or
+interpreter-only slot is retained; repair constructs a distinct generation rather
+than rewriting an active runtime.
+A completed matching slot without a nonempty valid selection is not
+`already-current`: dry-run plans repair, while apply health-checks/reuses the
+canonical ready candidate and restores selection without rebuilding it.
+
+Selector publication uses canonical created-object receipts and recovery while
+holding the selector lease. A partial write restores both previous selector
+states (including absence); prior selected/last-known-good runtimes remain
+retained until publication or recovery settles. Recovery never copies over
+foreign objects. An unsettled recovery retains custody rather than cutting over.
+Empty/whitespace-only prior selectors have no runtime to retain, but their
+existence and exact bytes remain rollback state. Target and nonblank prior slot
+names still receive canonical validation.
+
+PowerShell, CMD and Bash launch the selected slot through the canonical retention
+bootstrap in isolated mode, preserve its exit status, and never resolve or acquire
+dependencies during ordinary launch. Mux cutover uses that same constructed
+interpreter, not an old interpreter with the new source on `PYTHONPATH`.
+The PowerShell entry fails nonzero if that interpreter cannot start and
+preserves the actual exit status when it runs.
+Mux routes and target readiness use the constructed slot's immutable generation,
+including repair/source qualifiers. Health preserves the semantic package
+`version` and separately reports `runtime_generation` from its own interpreter
+prefix, never from the mutable selected marker.
+The retained launch-session registration and pane-wrapper removal callbacks
+also use that payload's constructed interpreter and retention bootstrap, without
+requiring `uv`. Their bounded metadata work is dispatched through the existing
+`agent-procutil` background primitive; only its spawn handshake is synchronous.
+Source and legacy project layouts retain their `uv run --project` entry.
+The existing Ctrl+K Companion popup uses the same runtime resolver through its
+separate interactive entry: it inherits the popup terminal and all standard
+streams, rather than using the background metadata dispatcher. Its key, popup
+dimensions and close-on-exit behavior are unchanged.
+Update availability compares the canonical package version, not the selected
+repair/source-qualified slot name; selection and mux identity remain unchanged.
+
+Normal `agent-worktrees update` also repairs an already-adopted Manager whose
+registered launcher cannot run. Its new installer settles under the newly
+constructed updater interpreter before returning to an older update caller;
+the current updater also checks recovery before local profile integration when
+its runtime is already current. If an old caller skips installation because a
+concurrent update already selected the new runtime, run the same normal update
+again: that invocation uses the new caller's recovery check. Copying a payload
+alone does not replace code already loaded by an old process.
+
+Recovery requires the existing provider registration and an unedited,
+Manager-owned local-bin launcher. It reuses a healthy registered Manager without
+source acquisition, never adopts an unregistered installation, and preserves the
+Manager's own root, source repository, ref/pin and credential context. The
+selected source must contain the canonical recovery adapter; a pinned older
+source is an explicit failure, not permission to fall back to `main`. Candidate
+construction, selection and mux activation use the canonical installer and the
+constructed Manager interpreter, retaining the previous runtime and restoring
+selectors on activation failure.
+
+The **One-line bootstrap** below remains the fresh-install entry, not a required
+manual migration step for an adopted Manager. Do not rewrite a deployed launcher,
+install application dependencies into ambient Python, or use update bypass flags
+to force recovery.
+
 `doctor` also reports **plugin-catalog alignment**: whether the authored
 catalog (`data/plugins.toml`) still matches the discovered plugin membership
 (same report as `plugins --reconcile`, folded into one surface). A discovered
@@ -68,6 +139,13 @@ treated as confirmed drift.
 
 ## Launch preparation
 
+For changes to installation or launch, run the ordinary contained Manager tests
+and `python tools/run-manager-runtime-acceptance.py --root .validation` from the
+repository root. The latter constructs fresh candidates under the existing
+bounded native supervisor before running its isolated-import, rollback,
+retained-launch and target-interpreter mux assertions through the standard
+test runner. It does not install on the host.
+
 Normal shell launch maintenance reports each synchronous marketplace installer,
 bootstrap update and reconciliation action's start, process exit code and
 completed duration. Failures (including commands that
@@ -79,7 +157,14 @@ native UTC formatting. Bash, including Bash 3.2, uses one launch-owned
 command starts, providing the shared formatter's UTC and monotonic clocks
 without a Python or `date` process per line. These durations measure the
 containing action, not individual child lines or a verified serving-state
-postcondition. An in-process clock reader observes native completion records
+postcondition. Outside those finite scopes, Bash's early/late launcher
+diagnostics retain UTC wall-clock correlation at whole-second resolution but
+explicitly report `[elapsed unavailable]`: there is no monotonic scope across
+the Picker or interactive session. Multiline diagnostics share one clock read
+and each physical line carries its severity and envelope. Fallback status
+echoes retain the existing terminal gate and use the same envelope as the log.
+A failed wall-clock read is labeled `[time unavailable]`, never a fabricated
+time or duration. An in-process clock reader observes native completion records
 independently of the presentation sink, so draining queued diagnostics does
 not inflate a completed action's duration. Child output
 continues streaming to the setup log; interactive action summaries use the
@@ -89,11 +174,74 @@ an exit of zero does not replace the second reconciliation pass.
 Bootstrap updates likewise retain runtime re-resolution and their fresh
 staleness check. Child stdout and stderr go through the same setup-log sink,
 including an unterminated final line; a nested canonical frame is not prefixed
-with another installer label. PowerShell restores the action's environment and
+with another installer label. Unqualified native progress uses the same state
+vocabulary: leading `[OK]`, `[SKIP]`, `[WARN]`, `[FAIL]` and `...` become
+`done`, `skipped`, `warning`, `failed` and `running`. These remain elapsed
+diagnostics, not completed-step durations or changes to a child's actual exit
+outcome. Explicit owner states, completion messages, unknown/embedded markers
+and canonical records are preserved on both native paths.
+PowerShell restores the action's environment and
 native-error preferences even when spawning fails. Bash obtains the installer's
 exit code from the command, not its output consumer, and decodes staged metadata
 with NUL-delimited fields so an empty optional value cannot shift the installer
 path or runtime root.
+
+Launcher-owned diagnostics record passthrough and Windows pane/direct-handoff
+argument counts, not argument values. Bootstrap and reconciliation actions retain
+their service labels, timed outcomes and child diagnostics without a duplicate raw command
+echo. Execution arguments are unchanged; this does not redact arbitrary output
+emitted by a child command.
+
+Before executing a runtime action, the native wrappers ask the engine's
+read-only [`reconcile-plugins --check-update`](../plugins/agent-worktrees/docs/cli-reference.md#repo-adopted-plugin-reconciliation-reconcile-plugins)
+seam to revalidate the cached installation and publication permission.
+The staged marketplace installer is checked before either synchronous execution
+or detached spawn. A refusal retains its diagnostic; an older engine without
+the capability or a malformed decision warns and skips runtime publication.
+Independent bootstrap and non-publication actions still run. This does not
+replace installer-side ownership checks or grant explicit management authority.
+Admission preserves non-ASCII installation identity through a scoped UTF-8 pipe
+on PowerShell, restoring the caller's encoding afterward. Bash uses one decoded
+staged-status snapshot for the check, installer root and child environment;
+a peer replacing the status file cannot mix two staged actions.
+
+The default detached Windows installer writes to a unique UTF-8
+`setup-<pid>.<id>.installer.log` beside the launch log; the main log links its
+exact path. A launch-owned observer records start, stdout/stderr progress and
+the original installer's exit outcome using the same formatter. The separate
+sink avoids competing appenders after launch maintenance continues. It retains
+already-framed output and does not echo into quiet or protocol streams. The
+active sink permits readers and appends but is held against log rotation until
+the observer exits. The observer atomically opens or recreates the prepared
+file before starting the installer, so rotation during observer startup cannot
+prevent the installation. The observer ends with the original invocation, not
+with the launching shell, and
+keeps the existing headless `conhost` and containment behavior. Literal argument
+data is carried separately from observer code; the installer still executes
+through its original `pwsh -NoProfile -File` command and inherited staged
+environment, without changing execution policy or installation authority.
+The measured duration covers the observed invocation and stream drain, not
+the execution cost of individual child lines. Sink preparation and observer
+spawn failures warn and retain the launch's existing continuation policy.
+This adds one observer per detached installation, not a process per line or
+evidence of an update-speed improvement.
+
+The detached Bash installer uses one `update_telemetry.shell observe` process
+inside its existing `setsid` boundary. It appends framed, redacted stdout/stderr
+and the native exit outcome to the existing setup-log destination, without
+echoing into the launcher's terminal or protocol streams. The original `env`
+and Bash argument vector still applies staged environment changes only to the
+installer. The observer waits for that invocation, drains already-written
+output and stops without waiting for detached descendants to close inherited
+pipes. Its duration includes invocation and output drain, not per-line cost or
+a serving-health verdict. Admission, staging, deadlines and termination remain
+with their original owners; this is not another updater.
+The launcher can be newer than the active Worktrees runtime. Its in-process
+bootstrap checks the optional observer API before using the new mode. If that
+API or telemetry package is unavailable, it records an explicit timing warning
+and replaces itself with the original native command once. It neither prevents
+installation nor retries an installer whose exit was already observed. No
+probe process, implicit runtime update or invented legacy duration is added.
 
 The native maintenance sinks share one physical-line envelope with the
 Python updater: `[HH:mm:ss.fffZ] scope state message [elapsed Ns]` or a
@@ -112,9 +260,19 @@ signalling; a cached PID alone never authorizes termination. A final receipt
 is written after output closes and the clock thread joins. Cleanup requires
 both that receipt and the absence of a live owned job, even if Bash already
 reaped its exit status. Job-table checks run only at lifecycle boundaries.
-Early/late Bash launcher diagnostics outside maintenance and detached or
-standalone installer output retain their existing behavior;
-these are not evidence of standalone installer presentation convergence.
+Each finite Bash runtime preflight also owns one renderer for its setup-log
+records, stopped before returning to the launcher. Its scope covers all
+attempts and retry delays, not a single child execution. Runtime re-resolution,
+three attempts, native argument vectors, captured stdout, optional stderr
+passthrough and the existing final continuation warning are unchanged.
+Successful preflights do not gain terminal summaries or contaminate protocol
+stdout. No renderer is kept alive across the Picker or interactive session.
+Other early/late Bash diagnostics outside these bounded scopes retain their
+existing behavior. Legacy standalone Worktrees
+install/update presentation is owned by its existing admission parent, not
+this launcher renderer. Structured-context installers retain their own native
+validation and staging owner, including its existing internal output buffering;
+the detached Windows observer does not replace that owner with legacy admission.
 
 New and Resume wait for the engine to finish repository synchronization,
 prompt staging and instruction projection rather than imposing a fixed
@@ -165,6 +323,22 @@ abrupt disconnects are distinct; reconnect retains explicitly stale last-good
 rows until the replacement generation completes. Unsupported authority is an
 actionable engine-upgrade error. Explicit `AGENT_WORKTREES_PICKER_STREAM=0`
 selects current one-shot reads, not a direct computation fallback.
+
+Explicit version-1 machine tuples are validated by the shared dependency-free
+identity codec before current rows or stream publications are admitted.
+`engine_client.Worktree.machine` is their execution owner; the original physical
+host and environment remain unchanged in `raw`. Picker rows additionally expose
+the validated tuple as `machine_identity`, while their `machine`, `env` and
+`source_id` keep the already-selected logical source. Tuple metadata never
+retargets a configured transport or grants native/guest authority.
+
+Contributed action context keeps an explicitly selected source owner; if it
+needs a raw-row fallback, it uses the tuple's execution owner, not its physical
+host. `{physical_machine}` exposes that original host for versioned rows.
+Malformed explicit tuples fail visibly before background/template effects;
+unversioned rows keep historical parsing and output behavior. The codec is an
+ordinary first-party dependency embedded by the existing payload materializer,
+not an import of an installed Worktrees runtime.
 
 The CLAIMS preview retains the engine's ranking and links, with a leading
 omitted-count or unresolved-descendant warning when the bounded publication
@@ -321,24 +495,18 @@ registry rather than a literal `worktree-manager` PATH probe.
 
 ### Slot completeness and recovery
 
-Each `versions/<version>/` slot is proven complete by its own
-`.install-complete` marker, written only as the **last** step of a fully
-successful copy + pointer materialization, and invalidated **before** any
-mutation of that slot begins (never left to the copy/removal step that
-follows, which can itself fail partway through on a locked file) -- the
-marker is what proves the build itself completed. A version is reported
-installed (`current-version` published) only when its slot carries that
-marker **and** its key entrypoint files (`pyproject.toml`,
-`src/worktree_manager/__init__.py`, `src/worktree_manager/__main__.py`) --
-a cheap, independent check against *later* damage to an otherwise-complete
-slot, not an exhaustive scan of every module `__main__.py` imports. This
-closes a real failure mode: a Windows `PermissionError` (WinError 32) from
-`shutil.rmtree`/`shutil.copytree` hitting a slot still held open by another
-process (a stranded or still-live mux-daemon pinned there) could otherwise
-leave an existing-but-empty slot on disk while `current-version` still
-correctly named it — every subsequent run then failed with `No module named
-worktree_manager`, indefinitely, since presence-only (`is_dir()`) checking
-treated that broken slot as valid forever.
+Each `versions/<generation>/` directory is an engine-owned venv with canonical
+`.install-complete.json`, `.runtime-input-origins.json` and `.runtime-bootstrap/`
+evidence. Its self-contained source payload is retained under `payload/`;
+that subtree's legacy `.install-complete` proves only assembly. It does not
+authorize runtime selection. Frozen source provenance and isolated installed
+health precede canonical completion, and candidate custody is retained through
+selection and update-triggered mux cutover.
+
+Package versions and runtime generations are distinct: a repair adds the
+canonical `+repair.<identity>` qualifier (or `.repair.<identity>` after a local
+version). Existing source-qualified identities retain their canonical identity.
+This installer does not implicitly claim a mutable `dev` slot.
 
 If you hit `No module named worktree_manager`, the `worktree-manager` binstub
 itself is unusable (it runs `python -m worktree_manager` straight out of the
@@ -355,6 +523,84 @@ Registered project binstubs enter the interactive front door as
 `worktree-manager --project <name>`; that project-only form launches the Picker.
 Truly argument-free `worktree-manager` retains the provider-free first-run
 banner and onboarding roadmap.
+
+## Durable update execution
+
+Ordinary `worktree-manager update` and `agent-worktrees update` submit a
+durable request to the shared, per-user execution-space driver and wait for
+its recorded outcome. The calling terminal or agent is an observer, not an
+installer. One kernel-backed transaction owner spans Manager self-update,
+payload acquisition, runtime construction, activation and local integration;
+existing installer publication and per-slot leases remain in force underneath.
+Manager and engine retain their process boundary, including the engine's
+`--no-manager` re-entry, which does not bypass execution ownership.
+
+```text
+worktree-manager update --wait
+worktree-manager update --detach --json
+worktree-manager update --request-status <request-id> --json
+worktree-manager update --recovery-status --json
+worktree-manager update --recover-after-restart --json
+worktree-manager update --supervised-debug
+```
+
+`--wait` is the default. `--detach` returns an acceptance receipt, not a
+successful-installation claim. The status operation is read-only and does not
+create a driver, fetch source or run installers. `--supervised-debug` keeps
+supervision in the foreground but uses the same queue and exclusive authority;
+it cannot bypass an active transaction. The engine exposes the same options.
+Equivalent pending requests can coalesce; a request arriving after execution
+starts remains separate. Explicit options, invocation context, installation
+scope and pinned runner identity are retained rather than collapsed.
+The engine resolves the caller's marketplace context before submission, so a
+queued engine-to-Manager-to-engine round trip cannot replace it with anchor
+settings. Accepted provider argv and the explicit
+`WORKTREE_MANAGER_ENGINE_CMD` override retain their existing precedence and
+participate in request identity. Each queued product starts with its own
+approved context; absent overrides are cleared rather than inherited from
+another caller that launched the shared worker. Scoped Windows update
+handoffs remain headless without changing ordinary interactive passthrough.
+Updater stdout/stderr bytes are retained in the request log; waiting renders
+that combined log as UTF-8 on stderr. Stdout is reserved for requested receipts
+and status JSON. Read the log when original non-UTF-8 bytes matter;
+the read-only authentication-report protocol remains unchanged.
+
+The finite worker uses the shared headless, caller-independent launch primitive
+and exits when its queue drains. It does not enroll recurring maintenance,
+write an Autorun entry, require an open Picker or create another scheduler.
+Unattended credential prompts are disabled; authentication failures remain
+observable. A direct Manager request retains its configured source identity
+and refuses a changed source selection at execution rather than silently
+substituting it. Credential-bearing source URLs are refused before journaling;
+use the existing source credential helper.
+
+The driver keeps requests, logs and results beneath
+`~/.copilot-extensions/update-driver`. Canonical update telemetry below remains
+separate: a queued request is not yet an executing update run. A worker
+interruption is not success and is not automatically replayed; uncertain
+execution fences subsequent installations. Never delete its lock or journal
+to override that fence. `--recovery-status` reports settlement availability
+without changing state. After an independently confirmed kernel restart,
+`--recover-after-restart` can settle old-boot interruptions under the same
+exclusive authority. It refuses same-boot, missing, malformed or unsupported
+boot evidence; age and PID disappearance are not substitutes. Settlement retains
+the interrupted failure and does not replay it or start an update. Submit a new
+ordinary update explicitly after recovery.
+
+The same authority wraps public `stage-update` acquisition and
+`reconcile-plugins --apply`, including the session provisioning hook. They
+retain their canonical JSON result, exit status and status-file behavior;
+stage output remains quiet unless `--json` is requested. Planning, indicator
+reads and `--check-update` do not enqueue installation work. Nested canonical
+update calls explicitly hand off checked custody rather than queue recursively.
+The witness is consumed at entry, so unrelated service/daemon children do not
+inherit transaction authority.
+
+Standalone first provisioning, individual plugin installers and native launch
+wrappers that execute validated plan actions directly retain their existing
+ownership contracts; their remaining convergence is tracked
+under [#7758](https://github.com/ThomasMichon/copilot-extensions/issues/7758),
+not inferred complete from these migrated entry points.
 
 ## Choose the update source (fork / canary branch)
 
@@ -871,6 +1117,15 @@ pivot registry a real contributed pivot uses). The older minimal `picker_app`
 (`demo_source`/`capture_svg`/`run_picker`) is no longer used by `--demo`; it
 remains only as the still-live `LaunchRequest`/launch-compose machinery
 shared with other commands.
+
+Non-live screenshots wait for the current setup epoch to apply before reading
+the compositor. Setup completion, diagnosed failure and teardown wake the
+capture without repeated per-widget render barriers. Production captures use
+the engine's 120-second operation budget for the whole setup wait, including
+plugin verification and source loading; this is not a first-paint speed target.
+The low-level fixture capture helper retains its five-second default.
+Setup failure, teardown or deadline expiry returns an error, not a successful
+capture of an unloaded screen. Interactive startup remains asynchronous.
 
 During the migration, the copied presentation modules reach their existing
 engine/data operations through a private compatibility boundary to the active

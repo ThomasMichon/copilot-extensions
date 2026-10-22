@@ -32,6 +32,8 @@ param(
     [Alias('install-dir')]
     [string]$InstallDir,
 
+    [string]$BootstrapPython,
+
     # Preview mode for the 'uninstall' action: print what WOULD be removed
     # without touching the scheduled task or binstubs.
     [switch]$DryRun
@@ -45,6 +47,146 @@ if ($env:COPILOT_EXTENSIONS_HUMAN_UTF8 -eq '1') {
         throw 'Required installer human-output initializer is unavailable.'
     }
     . (Join-Path $PSScriptRoot 'installer-human-output.ps1')
+}
+
+# Staging itself writes installation state, so publication admission precedes it.
+if ($Action -in @('install', 'update', 'stamp', 'provision')) {
+    . (Join-Path $PSScriptRoot 'versioned_runtime_native.ps1')
+    $publicationProject = if ($env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT -and (
+        $env:COPILOT_EXTENSIONS_COMMAND_LIFECYCLE -or
+        ($env:COPILOT_PLUGIN_INSTALL_STAGED -and
+            (($PSScriptRoot -replace '\\', '/') -match '/\.install-stage/'))
+    )) {
+        $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath(
+            $env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT)
+    } elseif ($env:COPILOT_PROJECT_DIR) {
+        $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath(
+            $env:COPILOT_PROJECT_DIR)
+    } else { $ExecutionContext.SessionState.Path.CurrentFileSystemLocation.ProviderPath }
+    $env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT = $publicationProject
+    $publicationRoot = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($(if ($InstallDir) {
+        $InstallDir
+    } else { Join-Path $env:USERPROFILE '.agent-logger' }))
+    if ($InstallDir) {
+        $InstallDir = $publicationRoot
+        $PSBoundParameters['InstallDir'] = $InstallDir
+    }
+    $publicationPayload = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
+    $publicationSource = $publicationPayload
+    if ($env:COPILOT_EXTENSIONS_COMMAND_LIFECYCLE -and $env:COPILOT_PLUGIN_STAGED_FROM -and
+        (($PSScriptRoot -replace '\\', '/') -notmatch '/\.copilot/installed-plugins/')) {
+        $publicationSource = $env:COPILOT_PLUGIN_STAGED_FROM
+    }
+    $publicationPython = $null
+    $publicationCandidates = @()
+    if ($BootstrapPython) {
+        if (-not [IO.Path]::IsPathRooted($BootstrapPython) -or
+            -not [IO.File]::Exists($BootstrapPython)) {
+            throw 'BootstrapPython must be an existing absolute executable.'
+        }
+        $publicationCandidates += @{ Path = $BootstrapPython; Prefix = @() }
+    } else {
+        $launcher = Get-Command py -CommandType Application -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+        if ($launcher) { $publicationCandidates += @{ Path = $launcher.Source; Prefix = @('-3') } }
+        foreach ($name in @('python3', 'python')) {
+            foreach ($candidate in @(Get-Command $name -All -CommandType Application -ErrorAction SilentlyContinue)) {
+                if ($candidate.Source -notmatch '[\\/]WindowsApps[\\/]') {
+                    $publicationCandidates += @{ Path = $candidate.Source; Prefix = @() }
+                }
+            }
+        }
+    }
+    foreach ($candidate in $publicationCandidates) {
+        $probe = Invoke-Hidden -FilePath $candidate.Path -ArgList (@($candidate.Prefix) + @(
+            '-I', '-B', '-c',
+            'import json,sys; assert sys.version_info >= (3,10); print(json.dumps(sys.executable))'
+        ))
+        if ($LASTEXITCODE -ne 0) { continue }
+        try { $resolved = $probe | ConvertFrom-Json -ErrorAction Stop } catch { continue }
+        if ($resolved -is [string] -and [IO.Path]::IsPathRooted($resolved) -and
+            [IO.File]::Exists($resolved)) {
+            $publicationPython = $resolved
+            break
+        }
+    }
+    if ($BootstrapPython -and -not $publicationPython) {
+        throw 'BootstrapPython must be a working Python 3.10+ executable.'
+    }
+    if ($publicationPython -and -not $env:COPILOT_EXTENSIONS_CONTEXT) {
+        $publicationArgs = @(
+            '-I', '-B', '-X', 'utf8', (Join-Path $PSScriptRoot 'command_binding.py'),
+            '--payload-root', $publicationPayload, '--plugin-id', 'agent-logger',
+            '--legacy-root', $publicationRoot, '--source-payload-root', $publicationSource,
+            '--project-root', $publicationProject
+        )
+        if ($env:COPILOT_EXTENSIONS_COMMAND_LIFECYCLE) {
+            $check = Invoke-Hidden -FilePath $publicationPython -ArgList (
+                $publicationArgs + @('--check-lifecycle', '--lifecycle-operation', 'publish')
+            )
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        } else {
+            Remove-Item Env:COPILOT_PLUGIN_STAGED_FROM -ErrorAction SilentlyContinue
+            $forward = @()
+            foreach ($key in $PSBoundParameters.Keys) {
+                $value = $PSBoundParameters[$key]
+                if ($value -is [System.Management.Automation.SwitchParameter]) {
+                    if ($value.IsPresent) { $forward += "-$key" }
+                } else { $forward += @("-$key", [string]$value) }
+            }
+            if ($Action -eq 'stamp') { $publicationArgs += '--deferred-runtime' }
+            Set-Location -LiteralPath $env:USERPROFILE
+            [IO.Directory]::SetCurrentDirectory($env:USERPROFILE)
+            $result = Invoke-Hidden -FilePath $publicationPython -ArgList (
+                $publicationArgs + @('--run-lifecycle', '--', (Get-Process -Id $PID).Path,
+                    '-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $PSCommandPath) + $forward
+            )
+            $publicationCode = $LASTEXITCODE
+            if ($result) { [Console]::Out.Write($result) }
+            exit $publicationCode
+        }
+    } elseif ($env:COPILOT_EXTENSIONS_COMMAND_LIFECYCLE) {
+        throw 'Runtime publication refused: lifecycle custody requires an existing Python 3.10+ executable.'
+    }
+    if (-not $publicationPython -or $env:COPILOT_EXTENSIONS_CONTEXT) {
+        $publicationHelper = Join-Path $PSScriptRoot 'installation-context\installation-context.ps1'
+        if (-not [IO.File]::Exists($publicationHelper)) {
+            throw 'Runtime publication refused: installation helper is unavailable.'
+        }
+        $nativePublicationPayload = $publicationPayload
+        if ($env:COPILOT_PLUGIN_INSTALL_STAGED -and $env:COPILOT_PLUGIN_STAGED_FROM -and
+            (($PSScriptRoot -replace '\\', '/') -notmatch '/\.copilot/installed-plugins/')) {
+            $nativePublicationPayload = $env:COPILOT_PLUGIN_STAGED_FROM
+        }
+        $publicationJson = @(& $publicationHelper -Action probe-plugin-publication `
+            -PayloadRoot $nativePublicationPayload -PluginId agent-logger `
+            -LegacyRoot $publicationRoot -ProjectRoot $publicationProject)
+        $publicationCode = $LASTEXITCODE
+        try {
+            $publication = ($publicationJson -join "`n") | ConvertFrom-Json -ErrorAction Stop
+        } catch {
+            throw 'Runtime publication refused: installation helper returned an invalid decision.'
+        }
+        $publicationActualRoot = if ($env:COPILOT_EXTENSIONS_CONTEXT) {
+            [string]$publication.runtimeRoot
+        } else { [string]$publication.legacy.root }
+        if ($publicationCode -ne 0 -or
+            $publication.deployment.allowPluginPublication -isnot [bool] -or
+            -not $publication.deployment.allowPluginPublication -or
+            -not [IO.Path]::IsPathRooted($publicationActualRoot) -or
+            [string]$publication.deployment.path -cne
+                (Join-Path $publicationActualRoot 'runtime-deployment.json') -or
+            ($env:COPILOT_EXTENSIONS_CONTEXT -and
+                $publicationActualRoot -cne $publicationRoot)) {
+            throw ("Runtime publication refused: " + ($publicationJson -join ' ') +
+                ' Use explicit installation management to install or repair this runtime.')
+        }
+        if ($InstallDir) {
+            $InstallDir = $publicationActualRoot
+            $PSBoundParameters['InstallDir'] = $InstallDir
+        }
+        $publicationSource = $nativePublicationPayload
+    }
 }
 
 # === install-contract:v4 self-stage -- keep byte-identical across plugins ===
@@ -155,6 +297,8 @@ if (-not $env:COPILOT_PLUGIN_INSTALL_STAGED -or
                 $__wdChild = Start-Process -FilePath $__selfStageExe -PassThru -NoNewWindow `
                     -WorkingDirectory $env:USERPROFILE `
                     -ArgumentList $__selfStageArgs
+                # Windows PowerShell must retain the handle before waiting to preserve ExitCode.
+                $null = $__wdChild.Handle
                 if ($__wdDeadline -gt 0 -and -not $__wdChild.WaitForExit($__wdDeadline * 1000)) {
                     try { & taskkill.exe /PID $__wdChild.Id /T /F 2>&1 | Out-Null } catch {}
                     try { Stop-Process -Id $__wdChild.Id -Force -ErrorAction SilentlyContinue } catch {}
@@ -782,6 +926,13 @@ function Test-SnapshotRequiresMaterializedEngine {
     return $false
 }
 
+function Publish-SnapshotSource {
+    param([string]$SnapshotDir)
+    Publish-LegacySnapshotSource -SnapshotDir $SnapshotDir -HelperDirectory $ScriptDir `
+        -PayloadRoot $publicationSource -PluginId agent-logger -RuntimeRoot $InstallDir `
+        -ProjectRoot $publicationProject
+}
+
 function Publish-PayloadSnapshot {
     <# Publish one immutable payload snapshot and atomically point payload-dir
        and stamped-version at it. Existing complete same-version snapshots are
@@ -795,6 +946,7 @@ function Publish-PayloadSnapshot {
     $snapDir = Join-Path (Join-Path $InstallDir 'snapshots') $SrcVersion
     if ($script:SourceRuntimeIdentity) {
         $snapDir = Publish-SourceSnapshot
+        Publish-SnapshotSource -SnapshotDir $snapDir
         $py = Get-BootstrapPython
         if (-not $py) { throw 'Source redirect publication requires a bootstrap Python interpreter' }
         Prepare-SourceManifestContext
@@ -822,6 +974,7 @@ function Publish-PayloadSnapshot {
         if (-not $complete) {
             throw "Existing agent-logger snapshot is incomplete; refusing replacement: $snapDir"
         }
+        Publish-SnapshotSource -SnapshotDir $snapDir
     } else {
         $snapTmp = "$snapDir.tmp-$PID"
         if (Test-Path $snapTmp) {
@@ -840,6 +993,7 @@ function Publish-PayloadSnapshot {
             }
         Materialize-SnapshotLibs -SnapshotDir $snapTmp
         Materialize-SnapshotInstallerEngine -SnapshotDir $snapTmp
+        Publish-SnapshotSource -SnapshotDir $snapTmp
         Move-Item -LiteralPath $snapTmp -Destination $snapDir
     }
 
@@ -1443,7 +1597,15 @@ function Deploy-SelfProvisioningBinstub {
 export PYTHONUTF8=1
 _root="$HOME/.agent-logger"
 AGENT_RT_PY=""
-if [ -f "$_root/bin/resolve-runtime.sh" ]; then AGENT_RT_ROOT="$_root"; . "$_root/bin/resolve-runtime.sh"; fi
+_resolver="$_root/bin/resolve-runtime.sh"
+if [ ! -f "$_resolver" ] ||
+   ! grep -Fq '# Trace contract: normal/read-only/ready-v1' "$_resolver"; then
+    echo '[agent-logger] read-only runtime resolver is unavailable. Re-enable/update the plugin, then retry.' >&2
+    exit 126
+fi
+AGENT_RT_ROOT="$_root"
+AGENT_RT_RESOLVE_TRACE_MODE=ready
+. "$_resolver"
 [ -n "$AGENT_RT_PY" ] && exec "$AGENT_RT_PY" -m agent_logger "$@"
 _i="$(cat "$_root/payload-dir" 2>/dev/null)/scripts/install.sh"
 [ -f "$_i" ] || _i="$(ls "$HOME"/.copilot/installed-plugins/*/agent-logger/scripts/install.sh 2>/dev/null | head -n1)"
@@ -1459,9 +1621,15 @@ exit 1
 $env:PYTHONUTF8 = '1'
 $_root = Join-Path $env:USERPROFILE '.agent-logger'
 $_resolver = Join-Path $_root 'bin\resolve-runtime.ps1'
-function _Resolve-Py {
+if (-not (Test-Path -LiteralPath $_resolver) -or
+    -not (Select-String -LiteralPath $_resolver -SimpleMatch '# Trace contract: normal/read-only/ready-v1' -Quiet)) {
+    [Console]::Error.WriteLine('[agent-logger] read-only runtime resolver is unavailable. Re-enable/update the plugin, then retry.')
+    exit 126
+}
+function _Resolve-Py([string]$TraceMode = 'ready') {
     $AgentRtPy = $null
-    if (Test-Path -LiteralPath $_resolver) { $env:AGENT_RT_ROOT = $_root; . $_resolver }
+    $env:AGENT_RT_ROOT = $_root
+    . $_resolver -TraceMode $TraceMode
     return $AgentRtPy
 }
 $_py = _Resolve-Py
@@ -1471,6 +1639,16 @@ $_snap = ''
 try { $_snap = ([IO.File]::ReadAllText((Join-Path $_root 'payload-dir'))).Trim() } catch {}
 $_inst = if ($_snap) { Join-Path $_snap 'scripts\install.ps1' } else { '' }
 if (-not ($_inst -and (Test-Path -LiteralPath $_inst))) { [Console]::Error.WriteLine('[agent-logger] cannot self-provision: snapshot installer not found. Re-enable the plugin, then retry.'); exit 127 }
+$_probe = Join-Path $_snap 'scripts\installation-context\plugin-publication-probe.ps1'
+if (-not (Test-Path -LiteralPath $_probe -PathType Leaf)) {
+    [Console]::Error.WriteLine('[agent-logger] Runtime publication refused: snapshot admission helper is unavailable. Re-enable/update the plugin, then retry.')
+    exit 126
+}
+$global:LASTEXITCODE = 0
+& $_probe -PayloadRoot $_snap -PluginId agent-logger -LegacyRoot $_root
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+$_py = _Resolve-Py normal
+if ($_py) { & $_py -m agent_logger @args; exit $LASTEXITCODE }
 [Console]::Error.WriteLine('[agent-logger] runtime not provisioned -- provisioning on first use (acquires uv + builds a venv; ~30-120s). Do not kill; extend your timeout.')
 [Console]::Error.WriteLine('::agent-provisioning:: plugin=agent-logger eta_seconds=120 reason=first-use')
 $_pwsh = Get-Command pwsh -ErrorAction SilentlyContinue

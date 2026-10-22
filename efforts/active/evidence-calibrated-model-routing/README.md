@@ -12,7 +12,9 @@
   - `least-expensive-demonstrated-choice`
   - `accepted-outcome-economics`
   - `independent-promotion`
-- **Umbrella issue:** [#2014](https://github.com/ThomasMichon/copilot-extensions/issues/2014)
+- **Continuing coordination:** This Active Plan, Validation Plan and Journal;
+  [#2014](https://github.com/ThomasMichon/copilot-extensions/issues/2014) is
+  historical tracking only after complete reviewed intake and readback.
 - **Foundation:** [#1267](https://github.com/ThomasMichon/copilot-extensions/issues/1267)
   (coordinator-first delegation guidance)
 
@@ -42,6 +44,11 @@ the default routing policy.
 
 - **Topology:** serial per-slice PRs; one open implementation PR at a time.
 - **Host (owns PRs):** public effort host.
+- **Continuing intake:** The same host retains remaining admission, delivery,
+  accepted-outcome and independent-promotion work through this Plan and Journal.
+  Claim bounded source slices on eligible open public issues under normal
+  review; preserve existing workers, stewards and resource/implementation custody.
+  A historical umbrella closure is neither a live claim nor an eligibility grant.
 - **Delegates:** evidence and implementation workers receive non-overlapping,
   bounded scopes; no worker owns final synthesis, publication, or promotion.
 - **Handoff:** each slice records its merged outcome and unresolved decisions in
@@ -169,10 +176,86 @@ Public formulation from issue #2014:
   evaluated coordinator, worker, pair, or PR author cannot validate itself.
 - [ ] Preserve task-class, execution-surface, and uncertainty boundaries instead
   of generalizing one successful outcome to every role.
-- [ ] Record measured findings, close #2014 when the implementation delta is
-  complete, and archive this effort.
+- [ ] Record measured findings, resolve every implementation and Validation
+  item or transfer it to an accepted named objective, and only then archive
+  this effort. Administrative supersession of #2014 does not satisfy that gate.
+
+### Full remaining evidence-calibrated routing acceptance from #2014
+
+<!-- backlog-reconciliation:7556:transfer:2014:to:efforts/active/evidence-calibrated-model-routing/README.md -->
+
+Before administrative archival of #2014, land/read back this whole unchecked section in
+the EXISTING reviewed Active effort and update its live umbrella/claim/close-step
+references to the existing host/Journal and eligible bounded-source process. Preserve
+#2014 as immutable request/evidence history, not a closed live coordination dependency.
+Keep the current effort host, bounded trial/evaluation/reviewer/steward owners and
+source/resource claims unchanged. A proposal, resolver output or old creation merge is
+not this section's typed delivery receipt.
+
+This is research/acceptance DATA only. It does not select or change any executing
+session's model, reasoning/context settings, account, credentials, spend/concurrency,
+agent set or tools. All actual trials and settings changes require their existing
+separate authority. Do not hardcode real model/provider preferences into portable
+guidance.
+
+- [ ] Preserve task/purpose registry role/class,
+  demonstrated/candidate/held/failed-or-rejected states, execution surface,
+  tool/context/reasoning constraints, fallback/escalation, dated evidence and recheck
+  policy as strict inert configuration with deterministic layers/provenance. Code
+  reuse/schema/availability is not proof a role was demonstrated.
+- [ ] Keep direct-versus-delegate FIRST: bounded cohesive work stays direct; broad
+  separable work is routed only where justified. Prefer the least-expensive AVAILABLE
+  DEMONSTRATED eligible choice for the classified role/surface; candidates require
+  explicit identified armed trials, and substitutions/escalations must be recorded
+  rather than silent.
+- [ ] Enforce demonstrated/candidate admission at actual dispatch/restricted-container
+  launch, not only in the pure resolver or assignment record. Bind writable authority to
+  the reviewed manifest/worktree/containment/path/tool/network/credential envelope;
+  reject unauthorized requests before effects.
+- [ ] Preserve the original staged real-work authority ladder: read-only planning,
+  documentation, contained source changes and separately reviewed publication. Workers
+  do not acquire merge/deploy/admin or ambient credential authority; use isolated
+  worktrees and credential-free contained venues when their shell/tool surface warrants
+  them. Product correctness/security/review/publication gates remain unchanged and
+  outrank cost.
+- [ ] Prove current compact routing policy reaches every applicable Task-capable
+  decision-maker BEFORE its first delegation decision, while non-delegating workers
+  receive only their bounded assignment rather than the full catalog. Keep current
+  exact-session/per-owner delivery, kernel bounds and fail-open malformed-configuration
+  startup behavior; change audience gating only through evidence, not a second
+  aggregator or assumption that a file was consumed.
+- [ ] Attribute each classified task, chosen role/model, evidence state, surface,
+  fallback/escalation reason and integration owner to immutable assignment/outcome
+  records without raw prompts/source/private context. Current dispatch provenance is
+  credited but does not grant admission or independent promotion.
+- [ ] Evaluate complete ACCEPTED outcomes, including retries, discarded output,
+  coordinator repair, review findings and later defects, not one cheap call. Join
+  parent/child unique provider billing events externally exactly once to
+  accepted/rejected/repaired/retried/abandoned/superseded outcomes. Context-transfer
+  volume is an efficiency measure, NOT another monetary charge atop billed input; do not
+  create a duplicate in-product billing ledger.
+- [ ] Run real bounded reviewed trials only under their approved manifests and normal
+  product gates. Preserve uncertainty and role/surface boundaries; one successful task
+  cannot validate every role or provider pairing.
+- [ ] Keep product-artifact review independent from eligibility promotion. A separately
+  reviewed steward registry decision based on durable evidence promotes a model OR
+  coordinator/worker pair; evaluated agents cannot promote themselves or treat candidate
+  usage as a validated default.
+- [ ] Retain actual negative tests for authority/path/tool/network/worktree/container
+  admission, unavailable/expired/held/failed entries, explicit candidate arming,
+  fallback, exactly-once billing joins and audience/delivery. Preserve
+  source/published/installed and real trial evidence distinctions plus original native
+  gates; no universal unrelated all-parent campaign.
+
+Registry, deterministic choice and provenance already landed are preserved. All missing
+enforcement, delivery, adoption/economic and promotion outcomes remain planned. Ordinary
+budget-policy adapters are related but do not substitute for capability/trial authority.
+No model trial, API/usage probe, container, agent, settings change, credential action,
+runtime update or promotion occurs through this consolidation.
 
 ## Validation Plan
+
+- [ ] Complete every directly retained #2014 Plan/Validation clause above at its original evidence tier and bounds; preserve current owners, holds and accepted deferrals. Administrative supersession is not completion.
 
 - [ ] The strategy, kernel, skills, and vision contain no hardcoded preferred
   model or provider.
@@ -210,6 +293,13 @@ Public formulation from issue #2014:
 See [design.md](design.md).
 
 ## Journal
+
+### 2026-10-22 - Complete retained acceptance from #2014
+
+- Retained the full #2014 remainder directly in the Plan and Validation,
+  preserving delivered partials, existing source/resource custodians and gates.
+  Reviewed actual merge and current full readback precede administrative
+  supersession; no capability, native trial or adoption is declared complete.
 
 ### 2026-09-04 - Kickoff
 

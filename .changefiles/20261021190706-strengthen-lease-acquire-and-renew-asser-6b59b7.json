@@ -1,0 +1,9 @@
+{
+  "comment": "Strengthen lease acquire-and-renew assertions while retaining standalone renewal coverage.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

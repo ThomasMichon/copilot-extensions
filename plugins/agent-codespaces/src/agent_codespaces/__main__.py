@@ -918,6 +918,9 @@ def main(argv: list[str] | None = None) -> int:
         help="Print the current `dev` slot claim (or null) as JSON.",
     )
 
+    from .authorize import add_parser as add_authorize_parser
+
+    add_authorize_parser(sub)
     args = parser.parse_args(argv)
 
     try:
@@ -961,7 +964,8 @@ def main(argv: list[str] | None = None) -> int:
     # gh-prerequisite balk (dotfiles#1462): a CodeSpace-operating verb needs the
     # `gh` CLI; without it, fail fast with actionable install guidance rather
     # than an opaque mid-dispatch FileNotFoundError.
-    if args.command in _GH_REQUIRED_COMMANDS and not _gh_binary_available():
+    if (args.command in _GH_REQUIRED_COMMANDS and not _gh_binary_available()
+            and not (args.command == "pool" and getattr(args, "picker_json", False))):
         _balk_missing_gh(args.command)
         return 1
 
@@ -1516,6 +1520,8 @@ def _ssh_session(
                     worktree_id=getattr(args, "plugin_worktree_id", None),
                     repo_roots=getattr(args, "plugin_roots", []),
                     prelude=relay_env, relay_port=None if args.no_relay else relay_port,
+                    **({"prepared_context": args.plugin_prepared_context}
+                       if getattr(args, "plugin_prepared_context", None) is not None else {}),
                 )
 
             tracker.reached(ConnectStage.TARGET_BINSTUB)
@@ -1992,6 +1998,7 @@ async def _register_codespace_plugins(
     manager, name: str, repo: str | None, config, *, workspace: str | None = None,
     sources=(), worktree_id: str | None = None, repo_roots=(),
     prelude: str = "", relay_port: int | None = None,
+    prepared_context: dict | None = None,
 ) -> list[str]:
     """Install/copy all selections, then register locally before either launch."""
     from .plugin_preparation import prepare_plugins
@@ -2005,6 +2012,7 @@ async def _register_codespace_plugins(
         manager, name, repo, config, workspace, sources, worktree_id=worktree_id,
         repo_roots=repo_roots,
         prelude=prelude, relay_port=relay_port,
+        **({"prepared_context": prepared_context} if prepared_context is not None else {}),
     )
 
 
@@ -4082,78 +4090,13 @@ def _cmd_release_claim(args: argparse.Namespace) -> int:
     return 0
 
 
-def _cmd_pool_stream(
-    args: argparse.Namespace,
-    members,
-    budget,
-    banner: str,
-) -> int:
-    """Emit the CodeSpaces pivot as the registered-pivot NDJSON envelope (D2).
-
-    One-shot: ``begin`` -> a ``row`` per CodeSpace -> ``summary`` -> ``done``,
-    one JSON object per flushed line so the pivot paints progressively. With
-    ``--subscribe`` the channel is then held open: every ``--interval`` seconds
-    the pool is re-scanned and the diff vs. the last snapshot is emitted as
-    ``delta`` / ``removed`` frames (whole-row by ``id``), plus a fresh
-    ``summary`` when the budget line changes, so an open pivot live-updates. The
-    loop exits cleanly when the reader closes the pipe (BrokenPipeError) or on
-    interrupt/kill, so the Picker's teardown never orphans it."""
-    out = sys.__stdout__
-
-    def emit(obj: dict) -> bool:
-        try:
-            out.write(json.dumps(obj, default=str) + "\n")
-            out.flush()
-            return True
-        except (BrokenPipeError, OSError):
-            return False
-
-    for frame in pool_mod.picker_stream_frames(members, budget, banner=banner):
-        if not emit(frame):
-            return 0
-
-    if not getattr(args, "subscribe", False):
-        return 0
-
-    # --subscribe: periodic re-scan + diff -> live delta/removed frames.
-    interval = max(0.5, float(getattr(args, "interval", 5.0) or 5.0))
-    prev = pool_mod.picker_payload(members, budget, banner=banner)
-    prev_entries = prev["entries"]
-    prev_summary = prev["summary"]
-    budget_cores = args.budget if args.budget is not None else pool_mod.DEFAULT_BUDGET_CORES
-    stale_after = (
-        args.stale_after if args.stale_after is not None
-        else pool_mod.DEFAULT_STALE_AFTER
-    )
-    try:
-        while True:
-            time.sleep(interval)
-            curr = None
-            try:
-                members, budget = pool_mod.build_pool(
-                    budget_cores=budget_cores, stale_after=stale_after,
-                )
-                curr = pool_mod.picker_payload(members, budget, banner=banner)
-            except Exception:
-                # A transient re-scan failure (e.g. a gh hiccup) must not kill
-                # the live channel -- skip this tick and try again next time.
-                curr = None
-            if curr is None:
-                continue
-            deltas, removed = pool_mod.diff_entries(prev_entries, curr["entries"])
-            for entry in deltas:
-                if not emit({"type": "delta", "entry": entry}):
-                    return 0
-            for rid in removed:
-                if not emit({"type": "removed", "id": rid}):
-                    return 0
-            if curr["summary"] != prev_summary:
-                if not emit({"type": "summary", "summary": curr["summary"]}):
-                    return 0
-            prev_entries = curr["entries"]
-            prev_summary = curr["summary"]
-    except KeyboardInterrupt:
-        return 0
+def _annotate_pool_members(members) -> None:
+    owner, worktree = _self_claim_identity()
+    if owner or worktree:
+        for member in members:
+            member.held_by_self = _hold_is_self(
+                member.holder_owner, member.l2_holder, owner, worktree,
+            )
 
 
 def _intended_cores(config, repo: str) -> int:
@@ -4218,6 +4161,10 @@ def _cmd_pool(args: argparse.Namespace) -> int:
     -- the programmatic surface the Picker's CodeSpaces pivot and the
     reuse/recycle policies consume.
     """
+    if getattr(args, "picker_json", False):
+        from .picker_pool import command
+
+        return command(args, annotate=_annotate_pool_members)
     budget_cores = args.budget if args.budget is not None else pool_mod.DEFAULT_BUDGET_CORES
     stale_after = (
         args.stale_after if args.stale_after is not None
@@ -4230,27 +4177,7 @@ def _cmd_pool(args: argparse.Namespace) -> int:
     # Self-recognition (#1362 / agent-claim-awareness): mark the box(es) THIS
     # worktree holds so an agent reuses its own instead of steering clear. Best-
     # effort; annotates every output path (text / --json / picker / stream).
-    _self_owner, _self_wtid = _self_claim_identity()
-    if _self_owner or _self_wtid:
-        for _m in members:
-            _m.held_by_self = _hold_is_self(
-                _m.holder_owner, _m.l2_holder, _self_owner, _self_wtid)
-
-    if getattr(args, "picker_json", False):
-        # Surface the missing-`codespace`-scope remedy as a prominent, actionable
-        # **banner** (rather than an empty, opaque list) so the Picker CodeSpaces
-        # pivot renders an unmissable notice with the exact `gh auth refresh`
-        # remedy (#980). Best-effort: never let it break the payload.
-        try:
-            _msgs = _gh_auth_preflight()
-            banner = " \u00b7 ".join(_msgs) if _msgs else ""
-        except Exception:
-            banner = ""
-        if getattr(args, "stream", False):
-            # D2: NDJSON streaming envelope (optionally held live via --subscribe).
-            return _cmd_pool_stream(args, members, budget, banner)
-        print(json.dumps(pool_mod.picker_payload(members, budget, banner=banner)))
-        return 0
+    _annotate_pool_members(members)
 
     if args.json_output:
         print(json.dumps({

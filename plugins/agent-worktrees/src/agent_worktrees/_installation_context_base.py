@@ -285,7 +285,7 @@ def _rename_directory_no_replace(source: Path, destination: Path) -> None:
     )
 
 
-def read_json(path: str | os.PathLike[str]) -> Any:
+def _read_json_document(path: str | os.PathLike[str], *, encoding: str) -> Any:
     canonical = canonical_path(path, must_exist=True)
     try:
         content, validated_stat = _read_regular_file(
@@ -294,13 +294,21 @@ def read_json(path: str | os.PathLike[str]) -> Any:
             require_stable_identity=True,
         )
         value = json.loads(
-            content.decode("utf-8"),
+            content.decode(encoding),
             object_pairs_hook=_reject_duplicate_keys,
         )
         _cache_validated_file_digest(canonical, content, validated_stat)
         return value
     except (OSError, UnicodeError, json.JSONDecodeError) as error:
         _fail(f"Invalid JSON in '{canonical}': {error}")
+
+
+def read_json(path: str | os.PathLike[str]) -> Any:
+    return _read_json_document(path, encoding="utf-8")
+
+
+def read_deployment_manifest(path: str | os.PathLike[str]) -> Any:
+    return _read_json_document(path, encoding="utf-8-sig")
 
 
 def _utc_now() -> str:

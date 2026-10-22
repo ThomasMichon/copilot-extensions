@@ -5,6 +5,7 @@ import importlib.util
 import json
 from pathlib import Path
 import sys
+from types import SimpleNamespace
 
 import pytest
 
@@ -17,6 +18,25 @@ SPEC = importlib.util.spec_from_file_location(
 assert SPEC is not None and SPEC.loader is not None
 RUNNER = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(RUNNER)
+
+
+@pytest.mark.parametrize("platform", ["win32", "linux", "darwin"])
+def test_framework_io_bootstrap_selects_only_the_windows_adapter(monkeypatch, platform):
+    imported = []
+    monkeypatch.setattr(RUNNER, "sys", SimpleNamespace(platform=platform))
+    monkeypatch.setattr(RUNNER, "importlib", SimpleNamespace(import_module=imported.append))
+    RUNNER.prepare_framework_io()
+    assert imported == (["colorama"] if platform == "win32" else [])
+
+
+def test_framework_io_bootstrap_does_not_hide_a_missing_adapter(monkeypatch):
+    def unavailable(name):
+        raise ImportError("framework adapter unavailable")
+
+    monkeypatch.setattr(RUNNER, "sys", SimpleNamespace(platform="win32"))
+    monkeypatch.setattr(RUNNER, "importlib", SimpleNamespace(import_module=unavailable))
+    with pytest.raises(ImportError, match="framework adapter unavailable"):
+        RUNNER.prepare_framework_io()
 
 
 def test_no_production_call_is_rejected_by_the_collector_and_packet_verifier(tmp_path, monkeypatch):
@@ -56,6 +76,13 @@ def test_no_production_call_is_rejected_by_the_collector_and_packet_verifier(tmp
         "run-promotion-unit-tests.py", "--source-sha", "a" * 40,
         "--manifest", str(manifest_path), "--output-dir", str(output),
     ])
+    real_pytest_main = pytest.main
+
+    def scoped_collection(arguments, **kwargs):
+        assert Path(arguments[arguments.index("--confcutdir") + 1]) == root
+        return real_pytest_main(arguments, **kwargs)
+
+    monkeypatch.setattr(pytest, "main", scoped_collection)
     with pytest.raises(UnitEvidenceError, match="production call coverage"):
         RUNNER.main()
     with pytest.raises(UnitEvidenceError, match="production call coverage"):

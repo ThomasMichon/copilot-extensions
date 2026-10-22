@@ -21,6 +21,7 @@ from agent_bridge.acquisition_executor import executor
 from agent_bridge.acquisition_runtime import AcquisitionRuntime
 from agent_bridge.client import BridgeClient, BridgeClientError
 from agent_bridge.models import SessionStatus
+from agent_bridge.protocol import PLUGIN_READINESS_PROTOCOL_VERSION
 from agent_bridge.routes.acquisitions import router
 from agent_bridge.session_manager import SessionManager
 from agent_bridge.transport import SpawnTarget
@@ -381,7 +382,8 @@ async def test_prepare_target_does_not_layer_same_padded_binding_twice(rig, bind
     rig.runtime.resolver = resolver
     row = {"bound_agent": binding}
     result, _env = await rig.runtime._prepare_target(req(), row)
-    assert result is target
+    assert result is not target
+    assert target.static_plugin_args is None
     assert result.copilot_args == original_args
     assert row["bound_agent"] == binding
     resolver.canonical_agent_name.assert_not_called()
@@ -526,6 +528,35 @@ async def test_initial_creation_refuses_unproven_or_historical_launch(rig, monke
     with pytest.raises(AcquisitionRefused) as error:
         await rig.runtime.acquire(retry)
     assert error.value.code == ("authority_unknown" if defect == "existing_head" else "continuity_ambiguous")
+    assert not rig.manager.list_sessions()
+    assert not rig.db.execute_read("SELECT * FROM turns")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["cli", "acp"])
+async def test_lost_receipt_stays_ambiguous_when_owner_ledger_is_empty(rig, monkeypatch, mode):
+    # An interrupted launch followed by bridge-database loss leaves no receipt
+    # while the owner ledger is still empty; that ledger is not no-launch proof.
+    retry = await preflight_retry(rig, monkeypatch, mode)
+    rig.db.execute_write("DELETE FROM acquisition_attempts WHERE delivery_id='delivery-a'")
+    original = acquisition_authority.worktree_command
+    sessionless = {
+        "sessions_indexed": True, "session_count": 0, "last_session_id": None,
+        "execution_leg": None, "session_backend": None,
+    }
+
+    async def command(args, project):
+        result = await original(args, project)
+        if args[0] == "record":
+            result["worktree"] = {**result["worktree"], **sessionless}
+        elif args[0] == "list":
+            result["worktrees"] = [{**row, **sessionless} for row in result["worktrees"]]
+        return result
+
+    monkeypatch.setattr(acquisition_authority, "worktree_command", command)
+    with pytest.raises(AcquisitionRefused) as error:
+        await rig.runtime.acquire(retry)
+    assert error.value.code == "continuity_ambiguous"
     assert not rig.manager.list_sessions()
     assert not rig.db.execute_read("SELECT * FROM turns")
 
@@ -700,7 +731,7 @@ async def test_real_constructed_client_envelope_and_http_response(rig):
         assert refused.json()["detail"]["code"] == "cli_options_unsupported"
         assert refused.json()["detail"]["effect"] == "not_started"
     client = BridgeClient("http://unused", "unused", connect_grace=0)
-    client._daemon_proto = (ACQUISITION_PROTOCOL_VERSION, 1)
+    client._daemon_proto = (PLUGIN_READINESS_PROTOCOL_VERSION, 1)
     sent = []
 
     def request(method, path, body, **kw):
@@ -711,7 +742,7 @@ async def test_real_constructed_client_envelope_and_http_response(rig):
     result = client_acquire(client, req(mode="cli"))
     assert result.native_session_id == response.json()["native_session_id"]
     assert sent[0][:2] == ("POST", "/api/v1/acquisitions")
-    assert sent[0][2]["protocol_version"] == ACQUISITION_PROTOCOL_VERSION
+    assert sent[0][2]["protocol_version"] == PLUGIN_READINESS_PROTOCOL_VERSION
     assert sent[0][2]["mode"] == "cli"
     for old_protocol in (30, 31):
         client._daemon_proto = (old_protocol, 1)

@@ -1,0 +1,9 @@
+{
+  "comment": "session-sync: add opt-in sync.redact_secrets (redact known secret shapes in pushed copies, defer unreadable JSONL whole-file) and sync.session_files: all|essential for the local and onedrive targets; remote targets refuse both",
+  "changes": [
+    {
+      "plugin": "agent-logger",
+      "type": "patch"
+    }
+  ]
+}

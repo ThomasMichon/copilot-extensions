@@ -1,0 +1,31 @@
+{
+  "captured_from": {
+    "commit": "c9c688139f8582496a83c1c7632f3d426fa7b855",
+    "plugin_version": "0.4.1-dev3",
+    "source_path": "plugins/agent-bridge/src/agent_bridge/routes/agents.py",
+    "source_git_blob": "e1cd7775e3ac5b39ef66d7c6f4badbf018ac3c51",
+    "protocol_generation": 45,
+    "source_sha256": "bcdc7ca5f9952f2738d8f890abdb1454671499d3e41d3fd7dd4cca1603873237"
+  },
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/agents",
+    "query": {
+      "force_refresh": null,
+      "require_complete": null
+    }
+  },
+  "response": {
+    "status_code": 200,
+    "json": {
+      "agents": [],
+      "topology_errors": [],
+      "topology_warnings": [],
+      "incomplete_namespaces": []
+    }
+  },
+  "reattested_from": {
+    "path": "plugins/agent-bridge/contract/fixtures/http/current/agents-list-generation-44.json",
+    "sha256": "aa56cf4ea313040285ac0513dbf6273df9972f477c377bdc7bd461cc9aa131c3"
+  }
+}

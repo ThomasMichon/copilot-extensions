@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import asdict
 import logging
+import sqlite3
 import subprocess
 
 from fastapi import Depends, FastAPI, HTTPException, Request
@@ -158,6 +159,9 @@ def register_spawn_routes(
     restricted_ingress_authenticated: bool = False,
 ) -> None:
     from .coordinator_auth import _make_control_auth
+    from .coordinator_execution_runtime import coordinator_incarnation
+
+    incarnation = coordinator_incarnation(app)
 
     def rejected(event: str, detail: dict[str, object]) -> None:
         logging.getLogger("agent-dispatch").warning("%s: %s", event, detail)
@@ -223,6 +227,8 @@ def register_spawn_routes(
             # CI bodies launch inside the trusted coordinator, never the
             # caller-selected supervisor factory. Return no launch permission.
             from .ci_repair_spawn import make_ci_repair_spawn
+            from .coordinator_execution_sender import CoordinatorExecutionSender
+            sender = CoordinatorExecutionSender(queue, task, reservation, incarnation)
             registration = queue.get_registration(task.origin_ref)
             spec = registration.spec if registration else {}
             try:
@@ -232,9 +238,10 @@ def register_spawn_routes(
                     spec["ci_repair_bindings"],
                     admission_command=spec["ci_repair_admission_command"],
                     route=" --shared" if spec.get("shared") is True else "",
+                    execution_sender=sender,
                 )
                 ok, handle = spawn(asdict(task))
-            except (ValueError, KeyError, OSError) as exc:
+            except (TaskError, ValueError, KeyError, OSError) as exc:
                 ok, handle = False, {"error": str(exc)}
             if ok:
                 queue.record_staging_spawn(reservation.key, handle["session"])
@@ -256,16 +263,28 @@ def register_spawn_routes(
                             "coordinator_launch": {"ok": False, "error": "authority changed"}}
                 bus.publish({"type": "spawn.spawned", "reservation": _reservation_dict(queue.get_reservation(reservation.key))})
                 from . import bridge
+                delivery_error = "admitted task turn delivery failed"
                 try:
-                    delivered = bridge.resume_worker(handle["session"].removeprefix("local-body:"), handle["task_seed"], timeout=30)
-                except (OSError, __import__("subprocess").TimeoutExpired):
+                    with sender.attempt("deliver") as attempt:
+                        delivered = bridge.resume_worker(handle["session"].removeprefix("local-body:"), handle["task_seed"], timeout=30)
+                        if delivered:
+                            attempt.sent()
+                except (TaskError, OSError, sqlite3.Error, subprocess.TimeoutExpired) as exc:
                     delivered = False
+                    delivery_error = str(exc)
                 if not delivered:
-                    queue.request_spawn_release(reservation.key, detail="admitted task turn delivery failed")
+                    queue.request_spawn_release(reservation.key, detail=delivery_error)
                     return {"reserved": False, "reservation": _reservation_dict(queue.get_reservation(reservation.key)),
-                            "coordinator_launch": {"ok": False, "error": "task turn delivery failed"}}
+                            "coordinator_launch": {"ok": False, "error": delivery_error}}
             else:
-                queue.fail_spawn(reservation.key, detail=handle.get("error"))
+                if handle.get("session"):
+                    queue.request_spawn_release(
+                        reservation.key,
+                        session_handle=handle["session"],
+                        detail=handle.get("error"),
+                    )
+                else:
+                    queue.fail_spawn(reservation.key, detail=handle.get("error"))
             return {"reserved": False, "reservation": _reservation_dict(queue.get_reservation(reservation.key)),
                     "coordinator_launch": {"ok": ok, **handle}}
         if reserved:

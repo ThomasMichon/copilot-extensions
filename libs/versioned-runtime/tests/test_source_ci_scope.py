@@ -11,17 +11,17 @@ WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
 
 def test_source_runtime_changes_select_bounded_units_not_required_integration() -> None:
     jobs = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))["jobs"]
-    planning = jobs["unit-plan"]
     testing = jobs["unit-tests"]
-    assert planning["timeout-minutes"] <= 2
     assert testing["timeout-minutes"] <= 5
-    detector = next(step for step in planning["steps"] if step.get("id") == "impact")
+    assert "unit-plan" not in jobs and "needs" not in testing and "if" not in testing
+    detector = next(step for step in testing["steps"] if step.get("id") == "impact")
+    assert detector["timeout-minutes"] <= 2
     execution = next(
         step for step in testing["steps"]
         if step.get("name") == "Execute only the positively admitted unit packet once"
     )
-    assert "from promotion_unit_contract import changed_paths, requires_units" in detector["run"]
-    assert "needed = requires_units(paths)" in detector["run"]
+    assert "from promotion_unit_contract import ci_requires_units" in detector["run"]
+    assert "needed = ci_requires_units(" in detector["run"]
     spec = importlib.util.spec_from_file_location(
         "source_ci_unit_contract", ROOT / "tools" / "promotion_unit_contract.py",
     )
@@ -44,7 +44,8 @@ def test_source_runtime_changes_select_bounded_units_not_required_integration() 
     ):
         assert contract.requires_units([path]) is True, path
     assert contract.requires_units(["docs/README.md"]) is False
-    assert testing["if"] == "needs.unit-plan.outputs.run == 'true'"
+    assert execution["if"] == "steps.impact.outputs.run == 'true'"
+    assert testing["outputs"]["result"] == "${{ steps.units.outcome }}"
     assert execution["run"] == (
         'python tools/run-promotion-unit-tests.py --source-sha "$GITHUB_SHA" '
         '--output-dir "$RUNNER_TEMP/promotion-unit-evidence"'

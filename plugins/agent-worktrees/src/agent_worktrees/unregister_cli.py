@@ -27,8 +27,9 @@ def add_parsers(sub) -> None:
         description=(
             "Remove ONLY this project's registration lifecycle: its "
             "projects.yaml entry, its repos.yaml entry (or, with "
-            "--keep-repo-entry, downgrade that entry to a catalogued "
-            "'reference' repo instead of removing it), and its own "
+            "--keep-repo-entry, retain that entry as reference/no-agent; "
+            "use '--keep-repo-entry unchanged' to preserve its current "
+            "class and agent preference), and its own "
             "per-project binstub. Never touches the shared "
             "~/.agent-worktrees runtime (venv/lib/bin) or shared config "
             "(config.yaml, accounts.yaml), and never touches any OTHER "
@@ -39,11 +40,14 @@ def add_parsers(sub) -> None:
     )
     p.add_argument(
         "--keep-repo-entry",
-        action="store_true",
+        nargs="?",
+        const="reference",
+        choices=("reference", "unchanged"),
+        default=False,
         help=(
-            "Keep the repos.yaml entry but downgrade its class to "
-            "'reference' (catalogued, un-adopted) instead of removing it "
-            "outright"
+            "Keep the repos.yaml entry: bare flag or 'reference' changes it "
+            "to reference/no-agent; 'unchanged' preserves its class, agent "
+            "preference and metadata"
         ),
     )
     p.add_argument(
@@ -145,9 +149,12 @@ def _unregister_guarded(args: argparse.Namespace) -> int:
     if args.keep_repo_entry:
         entry = _repos.find_repo(project)
         if entry is not None:
-            plat = cfg.detect_platform()
-            path = entry.local_path(plat)
-            if path:
+            if args.keep_repo_entry == "unchanged":
+                output.skipped(
+                    f"Kept '{project}' repos.yaml entry unchanged "
+                    f"(class '{entry.repo_class}', agent={entry.agent})"
+                )
+            elif path := entry.local_path(cfg.detect_platform()):
                 _repos.add_repo(
                     project,
                     path,
@@ -155,7 +162,7 @@ def _unregister_guarded(args: argparse.Namespace) -> int:
                     remote=entry.remote,
                     default_branch=entry.default_branch,
                     agent=False,
-                    plat=plat,
+                    plat=cfg.detect_platform(),
                 )
                 output.changed(
                     f"Downgraded '{project}' repos.yaml entry to class "

@@ -212,12 +212,11 @@ def _analyze(path: Path) -> list[str]:
         tree = ast.parse(path.read_text(encoding="utf-8"))
     except (SyntaxError, UnicodeDecodeError):
         return []
-    pmap = _build_parent_field_map(tree)
+    calls = [node for node in ast.walk(tree) if _is_asyncio_wait_for(node)]
+    pmap = _build_parent_field_map(tree) if calls else {}
     rel = path.relative_to(REPO).as_posix()
     problems: list[str] = []
-    for node in ast.walk(tree):
-        if not _is_asyncio_wait_for(node):
-            continue
+    for node in calls:
         verdict = _classify(node, pmap)
         if verdict is None:
             continue
@@ -236,11 +235,10 @@ def _list_all() -> None:
             tree = ast.parse(path.read_text(encoding="utf-8"))
         except (SyntaxError, UnicodeDecodeError):
             continue
-        pmap = _build_parent_field_map(tree)
+        calls = [node for node in ast.walk(tree) if _is_asyncio_wait_for(node)]
+        pmap = _build_parent_field_map(tree) if calls else {}
         rel = path.relative_to(REPO).as_posix()
-        for node in ast.walk(tree):
-            if not _is_asyncio_wait_for(node):
-                continue
+        for node in calls:
             scopes = _enclosing_scopes(node, pmap)
             if not scopes:
                 print(f"{rel}:{node.lineno}: wait_for (unguarded)")

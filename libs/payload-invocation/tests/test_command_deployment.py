@@ -31,6 +31,43 @@ def _policy(fixture: dict, managed: bool = True) -> dict:
     return value
 
 
+@pytest.mark.parametrize("phase", ["before", "after", "both"])
+def test_lifecycle_accepts_native_powershell_utf8_manifests(
+    binding_fixture: dict, phase: str,
+) -> None:
+    manifest = binding_fixture["legacy"] / "deploy-manifest.json"
+    document = {
+        "schema_version": 3, "service": "agent-worktrees", "source": {"version": "1.0.0"},
+    }
+    if phase in {"before", "both"}:
+        manifest.write_text(json.dumps(document), encoding="utf-8-sig")
+    command = [sys.executable, "-I", "-B", "-c", "pass"]
+    if phase in {"after", "both"}:
+        command[-1] = (
+            "from pathlib import Path;"
+            f"Path({str(manifest)!r}).write_text({json.dumps(document)!r},encoding='utf-8-sig')"
+        )
+    binding = binding_fixture["binding"]
+    assert binding._load_lifecycle().run_lifecycle(
+        binding, binding_fixture["primitive"], command, **binding_fixture["arguments"],
+    ) == 0
+
+
+def test_lifecycle_retains_older_manifest_reader(
+    binding_fixture: dict, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    primitive = binding_fixture["primitive"]
+    monkeypatch.delattr(primitive, "read_deployment_manifest")
+    _write(binding_fixture["legacy"] / "deploy-manifest.json", {
+        "schema_version": 3, "service": "agent-worktrees",
+    })
+    binding = binding_fixture["binding"]
+    with binding._load_lifecycle().legacy_lifecycle(
+        binding, primitive, **binding_fixture["arguments"],
+    ) as lease:
+        lease.assert_owned()
+
+
 @pytest.mark.parametrize("reserve", [True, False])
 @pytest.mark.parametrize("state,management", [
     (state, management)

@@ -1,0 +1,9 @@
+{
+  "comment": "Validate ordinary native Bash admission and retain real lifecycle-helper publication in bounded fixtures.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

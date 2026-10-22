@@ -54,9 +54,9 @@ Retained means candidate ownership, not reviewed, passing or already landed.
 | Y | 3 / safe YAML loader | `config.py` and `test_config.py:1`: C safe loader when available, safe Python fallback, scalar/non-map/error returns unchanged. Excludes committed-ref candidate selection. |
 | H | 3 / one hook protection decision | `hooks.py` and `test_hooks.py`: one in-repo read per decision including empty mappings; retain machine-local > committed > registry priority; later calls re-read. No persistent authority cache. |
 | C | 3 / committed-config absence probe | `inrepo_config_source.py`, `test_config.py:2`: literal NUL `ls-tree` candidate probe, no unsafe path globbing; absent candidates avoid blob reads; failure retains bounded ordered reads, deadline, precedence and diagnostics. Separate from Y/H. |
-| S | 3 / squash tree object reads | `finalize_ref.py:2`: one ordered two-tree probe; require exactly two complete SHA-1/SHA-256 IDs; empty base/no change/error retain refusal. Focused regression still needs extraction from finalization tests. |
-| F | 3 / upstream blob comparison | `finalize_ref.py:5`, `test_finalize_blob_comparison.py`: raw tree diff and exact object maps include deletion/type/path cases, malformed reads fail closed with warning. Requires actual `git_tree_diff` consumer availability, not an inferred filename match. |
-| G | 3 / creation-point gating | `finalize_open_pr_gate.py`, `finalize_ref.py:3-4`: skip unnecessary creation inference only after fresh zero-ahead proof; malformed counts/unknown creation remain conservative; local source shadowing, remote tips/reflogs and subsequent reset history still constrain publication. Separate from S/F; regression extraction unresolved. |
+| S | 3 / squash tree object reads | `finalize_ref.py:2`: one ordered two-tree probe; require exactly two complete SHA-1/SHA-256 IDs; empty base/no change/error retain refusal. Focused regression ownership is the existing real-Git no-ref-movement case plus ordered-read unit cases in `test_finalize_landing.py`, detailed below. |
+| F | 3 / upstream blob comparison | `finalize_ref.py:5` and the F-only test functions partitioned below: raw tree diff and exact object maps include deletion/type/path cases, malformed reads fail closed with warning. Reuses the existing `git_tree_diff` consumer API. |
+| G | 3 / creation-point gating | `finalize_open_pr_gate.py`, `finalize_ref.py:3-4` and `test_finalize_creation_gating.py`: skip unnecessary creation inference only after fresh zero-ahead proof (or identical refs); malformed counts/unknown creation remain conservative; local source shadowing, remote tips/reflogs and subsequent reset history still constrain publication. Separate from S/F. |
 | P | 3 / publication transport evidence | `README.md`, `pr_publish.py`, `pr_rewrite.py`, `test_pr_remote_evidence.py`: one fresh fetch/push snapshot per decision; same slug on another host refused; literal remote-key regex, NUL framing, repeated/multiline/valueless settings and order retained; read errors prevent push; pinning, leases and later mutation checks remain real. |
 | R | 3 / replay tree evidence | `pr_rebase.py`, `test_pr_rebase_trees.py`: pinned complete commits, exact ordered raw trees, notes/signature/color/replacement/foreign Git context cannot substitute evidence; malformed/truncated/duplicate rows and timeout preserve refusal; parent reconstruction and raw author/message comparisons remain independent checks. |
 | A | 3 / atomic recovery retention | `pr_recovery.py`, `test_pr_recovery_batch.py`: fresh NUL-input commit resolution on each call; full SHA-1/SHA-256 IDs, missing/noncommit rejection; create-only transaction retains all refs or none on collision. Excludes remote publication authority and replay authorization. |
@@ -85,9 +85,2156 @@ bodies nor claims #6909's installer work.
 No hunk is assigned to a catch-all wave-6 implementation batch. Wave 6 is
 the still-open #5694/#5682 qualification and residual-settlement obligation.
 
+## Admitted narrow batches
+
+### R fresh pinned replay ranges and raw trees
+
+`verify` reads each pinned old/new range once, sharing those rows only
+between that decision's diagnostic patch series and lineage reconstruction.
+A later verification obtains new lists and fresh Git reads. `_tree_ids`
+accepts only complete SHA-1/SHA-256 commit IDs, deduplicates them in request
+order and reads their raw trees in one bounded isolated binary Git probe.
+Exactly one ordered, complete row per requested commit is required;
+missing, truncated, malformed, duplicate or substituted output refuses
+proof. Notes, signatures, color, replacement objects and inherited foreign
+repository selectors cannot become tree evidence.
+
+The extraction retains current Dev's stronger empty-upstream behavior:
+only an empty commit already reachable from the pinned upstream can lack
+a diagnostic patch ID. A source-owned empty commit still refuses proof.
+The old-range filter is local to its consumer rather than mutating shared
+range evidence. Existing parent reconstruction, clean/no-op replay,
+explicit conflict continuation and raw author/message comparison remain
+independent conditions; cached patch IDs never authorize replay.
+
+B-REPLAY-OBSERVE adds exact range-read counts and fresh-list assertions to
+the existing real original-lease cases. The conflict-message double now
+provides complete pinned IDs and actual-shaped raw tree output, and
+asserts both unstripped identity/message reads occurred before refusal.
+No fixture conversion, replay permission, retention authority, assertion
+retirement, mark or runner-group change is bundled.
+
+The focused raw-tree module and existing replay module collect seventy
+unique nodes. With the existing exhaustive opt-in enabled, all but the
+separate native-consoleless control passed in exhaustive disjoint
+15/15/15/15/10 functional groups: 69 passed, one original opt-in skip,
+275.09 seconds including collection, preparation and cleanup. Group walls
+were 10.58/37.83/130.42/64.31/25.28 seconds. Enabling that existing native
+opt-in then passed its consoleless two-cycle control and all twenty-two
+raw-tree cases without skips, 20.48 seconds inclusive. Together these
+account for all seventy original collected identities without exclusions.
+
+A further normal, unpartitioned replay-module run enabled both opt-ins
+and passed all forty-eight assertions without skips, but took 243.39
+seconds including preparation and cleanup (235.97 seconds pytest).
+The diagnostic therefore failed the unchanged 240-second inclusive
+headroom target and receives no performance-qualification credit.
+All executions used exactly two workers, retained existing marks and
+every item/native/process/memory bound, and made no host quietness claim.
+Ruff and thirteen install contracts pass. Full-plugin and repeated
+same-head performance acceptance remain open.
+
+Documentation impact: the plugin README and this census describe fresh
+range/tree evidence. This below-altitude optimization changes no public
+command/configuration or replay authorization boundary. Real temporary Git
+histories provide the simple consumer end-to-end lane. No installer,
+bootstrap or first-provision behavior changes, so production clean-room
+and external development-venue lanes are inapplicable. Full native
+same-head and all normal-group qualification remain parent obligations.
+
+### P fresh publication transport evidence
+
+`_remote_snapshot` resolves fetch and complete push URLs once per decision
+and derives both the repository slug and full destination identity from
+those same results. Recorded/discovered targets, publication and remote
+recording reuse that invocation-local evidence. Explicit rewrite still
+obtains its own later snapshot and rejects a repoint after target selection;
+no value persists across decisions. Same-slug destinations on another host
+and fetch/push disagreement remain refusals.
+
+`_transport_settings` uses one literal remote-key regular expression and
+NUL-framed configuration read instead of one subprocess per known key.
+It preserves setting-key order, repeated and multiline values, and
+valueless settings. Only an empty no-match result with no diagnostic means
+absence. Read errors, malformed framing and unexpected keys explicitly
+refuse publication. URL pinning, hooks, configured deadlines, ownership,
+leases and later mutation checks are unchanged.
+
+The directly coupled B-PUBSTUB adapter wraps the real snapshot and relabels
+only a valid local transport as a synthetic provider repository. A real-Git
+regression proves a conflicting push URL cannot become valid through that
+adapter. Existing publication/custom-head/recovery scenarios retain their
+real URL reads, effects and refusal assertions. The deadline double
+recognizes the actual no-match query, and the rewrite regression proves
+equal snapshots followed by fresh unequal identities leave both remote
+heads and the tracking record unchanged. No test relocation, fixture-seed
+batch, assertion retirement, mark or normal runner-group change is bundled.
+B-RECOVERED and B-BACKED remain separately owned follow-up contracts.
+
+Native Windows focused evidence/dispatch/deadline checks passed 68 nodes
+in 51.36 seconds including preparation and cleanup. All 78 direct
+publication/custom-head/rewrite nodes passed in 230.22 seconds, and all
+55 confirmation/audit nodes passed in 226.47 seconds. Advanced and routine
+recovery collection contains 80 unique nodes; an exhaustive bijection
+accounts for all of them in six complete eleven-node groups followed by
+two seven-node groups. All passed without skips. Group walls were
+114.50/123.88/158.92/126.72/133.12/151.05/98.33/158.81 seconds.
+These are separate functional diagnostics, not one qualified plugin run.
+The first attempt to execute those eighty cases in one diagnostic exhausted
+the intact 900-second budget and cut its seventh group; its incomplete
+aggregate receives no pass credit. The tail was then run in full, without
+crediting partially completed failed-group nodes.
+
+The normal advanced-recovery module also exceeded the intact 240-second
+group limit (242.58 seconds inclusive, return code 124). An earlier combined
+advanced/routine diagnostic failed the same bound and reported 4,922.62
+seconds inclusive; its unexplained elapsed-time discrepancy gets no
+qualification credit. Neither failure is waived by the functional batches.
+Existing pin/hook/state/lease modules passed 53 nodes in 85.00 seconds,
+with only their two pre-existing Windows trailing-space-directory skips.
+No skip or exclusion was introduced. Every execution used exactly two
+workers and retained all item, group, native, process and memory bounds.
+Ruff and thirteen install contracts pass.
+
+Documentation impact: the plugin README describes fresh transport evidence;
+no public command or configuration changes. This is a below-altitude
+optimization of existing publication proof. Temporary real Git repositories
+exercise the consumer boundary without external infrastructure. No
+installer, bootstrap or first-provision behavior changes; production
+clean-room and external development-venue lanes are inapplicable.
+Normal-group and repeated complete same-head native qualification remain
+open; bounded functional batches never substitute for those gates.
+
+### G fresh graph evidence before creation-history inference
+
+`_tracked_branch_ahead` omits a tautological identical-ref probe; every
+different tracked ref first supplies a fresh, valid nonnegative ASCII
+count. Zero needs no creation inference; positive counts still require
+the existing creation proof before any exclusion. `_extra_commit_count`
+similarly counts against the actual head and all qualified published
+bases first. Only zero short-circuits; a positive count with no creation
+proof stays positive, and unreadable/malformed counts stay unknown.
+The existing `published_bases` call contract is retained in both phases.
+
+`creation_point` batches the local-source shadow check and current remote
+tips in one full-ID query, then retains ancestry and source/remote-HEAD
+reflog fallbacks when needed. Failed or malformed tip reads return
+unknown. `_later_resets_to_source` avoids tip/reflog reads only when there
+is no reset anywhere after creation. The pinned oldest-move-only shortcut
+is deliberately not copied: current Dev recognizes a qualified reset
+after earlier local work, including resets across qualified published
+bases on the same remote. Existing shadow/remote/qualification checks
+and commits beyond that boundary remain unchanged.
+
+The five G-owned functions from the pinned mixed blob test are extracted
+into `test_finalize_creation_gating.py`, not into F's blob module. The
+real changed-branch case reuses the existing landing `_commit` helper
+instead of F's `_change`; the no-reset case uses the current
+`published_bases` signature. Additional cheap cases reject malformed
+first and second counts, validate both object-ID widths and shadowing,
+and prove a reset after earlier local work still reads qualified tips.
+Existing real-Git landing/precondition regressions retain the stronger
+reset and unpublished-follow-up contract.
+
+Native Windows focused G/F modules: 44 passed, zero skips, 38.75 seconds
+including preparation and cleanup. An unchanged normal landing-module
+group still exceeded its 240-second limit (244.70 seconds inclusive,
+return code 124); it receives no pass or qualification credit.
+All 59 landing and 65 precondition nodes then passed without skips in
+exhaustive disjoint functional groups of 20/20/19 and 25/25/15 nodes.
+Collection-to-group bijections prove no omitted or duplicated case.
+Group wall times were 42.42/172.27/107.58/42.69/30.38/37.26 seconds;
+447.42 seconds includes collection, preparation and cleanup.
+Exactly two workers retain every original item/group/native/process/
+memory bound and mark. Ruff and thirteen install contracts pass.
+These ad hoc functional groups do not alter or qualify normal runner
+grouping; no skip, exclusion, reduced selection or waiver is added.
+
+Documentation impact: this below-altitude internal optimization changes
+no public command/configuration or finalization safety boundary. This
+ledger records the G ownership and reconciliation. Real temporary Git
+histories provide the simple integration lane; no installation or
+first-provision behavior changes, so production clean-room and external
+development-venue lanes are inapplicable. Complete same-head Windows
+qualification and normal-group performance remain open.
+
+Prior F disposition: #7842 actually merged as
+`b921cd03708bb5aa38453ab5e8d16aaee32168ff`. All 62 consumer/helper and
+59 landing nodes passed without skips in exhaustive bounded functional
+groups, with every original guard retained. One earlier run failed the
+host-state guard on an unattributed machine-PATH change and receives no
+pass credit; an unchanged-head recheck passed the intact guard. The
+normal-group and complete-suite performance obligations remain open.
+Neither F nor G completes #5694/#5682.
+
+### F batched upstream blob comparison
+
+Only `finalize_ref.py::_blobs_on_upstream` and its `git_tree_diff` import
+are extracted from the pinned production residual. The existing raw tree
+diff helper supplies complete changed-path object IDs. Existing exact
+object-map reads resolve deleted branch paths (including replacement by
+a directory) and all upstream paths. Ordinary nondeleted paths require
+exactly three Git calls, independent of their count. An unreadable or
+malformed diff/object map warns and refuses landing; no ref is moved.
+Content comparison retains the existing mode-only behavior.
+
+Full-PR review identified a necessary correction to the pinned after-image:
+the shared text Git capture normalizes CR/LF and replaces invalid UTF-8.
+This consumer now conservatively refuses changed paths containing CR, LF
+or the replacement character before inferring absence from object maps.
+That also refuses a literal LF/replacement-character filename rather than
+mistaking lossy bytes for authoritative missing-path evidence. The shared
+Git wrapper and other consumers are unchanged. Two object-only real-Git
+regressions construct CR and non-UTF-8 filenames without checking them out,
+so both deletion failures run on Windows as well as POSIX. Both reproduced
+false landing before the correction; the warning and unchanged refs are
+part of the regression contract.
+
+A second full review reproduced false landing with inherited
+`GIT_LITERAL_PATHSPECS=1`: it disables the helper's literal-magic pathspec
+interpretation. Before object lookups, F now conservatively refuses any
+configured `GIT_LITERAL_PATHSPECS`, `GIT_GLOB_PATHSPECS`,
+`GIT_NOGLOB_PATHSPECS` or `GIT_ICASE_PATHSPECS`. This includes disabled
+values rather than attempting to reinterpret Git's environment-boolean
+syntax. Four real-Git deletion cases require refusal, a warning and
+unchanged refs. No environment variable is rewritten or cleared.
+
+The original mixed `test_finalize_blob_comparison.py:1` hunk is partitioned
+by symbol, not copied wholesale. F owns `_change`, its landing-seed
+aliases/`env` fixture, and these four test functions:
+`test_changed_objects_cover_files_deletions_and_directory_replacements`,
+`test_many_literal_changed_paths_use_a_bounded_number_of_real_git_calls`,
+`test_failed_object_evidence_is_not_reported_as_landed`, and
+`test_landing_compares_object_content_without_turning_modes_into_unpublished_work`.
+The failed-evidence test additionally exercises successful commands with
+malformed output through this consumer, retaining its warning assertion.
+The new `test_lossy_path_evidence_never_certifies_an_unpublished_deletion`
+belongs only to F's review correction, not to the preserved mixed hunk.
+The same is true of
+`test_inherited_pathspec_modes_never_certify_an_unpublished_deletion`.
+
+G retains the other five original test functions:
+`test_a_tracked_ref_cannot_have_commits_beyond_the_identical_current_ref`,
+`test_a_different_tracked_branch_still_blocks_unpublished_work`,
+`test_zero_extra_commits_use_real_graph_evidence_without_creation_history`,
+`test_unreadable_extra_commit_counts_never_authorize_finalization`, and
+`test_creation_point_without_a_later_reset_needs_no_source_tip_reread`.
+Its imports and later-reset signature must reconcile to current Dev's
+stronger published-base contract. No G behavior, whitespace retirement,
+publication, replay or recovery change is included in F.
+
+Native Windows blob-consumer and helper modules: 56 passed, zero skips,
+26.47 seconds pytest / 30.16 preparation-cleanup inclusive, including the
+helper's existing explicitly admitted native T3 cases. All 59 landing
+nodes passed in exhaustive disjoint functional groups of 20/20/19:
+54.45, 174.09 and 115.75 seconds; collection, preparation and cleanup
+totaled 353.89 seconds. The collected-node bijection proves no omitted or
+duplicated case. Exactly two work-stealing workers retain the original
+30-second item watchdog, 240-second diagnostic group and all native,
+process and memory bounds. Ruff and thirteen install contracts pass.
+No normal runner grouping, skip, mark, deadline or resource limit changes.
+The previously observed single-file landing-group timeout remains open.
+
+Documentation impact: this below-altitude internal optimization preserves
+the landing API and no-ref-mutation guarantee. This ledger records the
+read contract and mixed-test ownership; no operator command/configuration
+changes. Actual temporary Git repositories provide the simple integration
+lane. No installer or first-provision behavior changes, so production
+clean-room and external-development-venue lanes are inapplicable.
+Functional evidence does not qualify normal whole-suite grouping,
+quiet-host execution or repeated same-head performance.
+
+### S ordered squash-probe tree reads
+
+Only `finalize_ref.py::squash_landed` and its `re` import are extracted
+from the pinned production residual. After a successful nonempty merge-base
+read, one ordered `rev-parse --revs-only --end-of-options` resolves the
+branch tree followed by the base tree. Exactly two full lowercase SHA-1
+or SHA-256 object IDs are required. Unreadable, missing, extra, malformed
+or unchanged tree results return the existing unknown verdict before a
+probe commit is written. Probe identity, parent, message, no-signing flag,
+cherry comparison and all native deadlines remain unchanged.
+
+Regression ownership is now explicit in `test_finalize_landing.py`.
+The existing real-Git no-ref-movement case observes exactly one ordered
+two-tree query while preserving its genuine squash-landing assertion.
+Cheap unit cases cover both object-ID widths, exact downstream probe
+arguments and failed/empty/truncated/extra/invalid/unchanged results.
+The original real-Git squash, unreadable-upstream and different-change
+cases remain. No F blob comparison, G creation-point inference, P/R/A,
+or whitespace-retirement hunk is included.
+
+The complete module has 59 collected nodes. One unpartitioned functional
+run exceeded the unchanged 240-second diagnostic group limit; it is not
+a pass. All 59 nodes then passed without skips in three exhaustive,
+disjoint functional groups of 20/20/19 nodes, retaining exactly two
+workers, the original 30-second item watchdog and all native/resource
+bounds. Group wall times were 47.34, 151.17 and 122.53 seconds;
+329.95 seconds includes collection, preparation and cleanup. A checked
+node-list bijection establishes no omitted or duplicated case.
+This is complete functional coverage only: it neither changes the runner's
+normal file grouping nor qualifies that grouping, the complete plugin,
+quiet-host execution or repeated same-head performance.
+
+Documentation impact: this below-altitude internal optimization preserves
+the existing landing interface and no-ref-mutation guarantee; this ledger
+records its ordered-read contract and regression ownership. Actual Git
+squash detection supplies the simple integration check. No installer or
+first-provision behavior changes, so production clean-room and external
+development-venue lanes are inapplicable. The normal-group performance
+blocker and parent qualification remain open without a waiver.
+
+Prior native dispositions: #7821 actually merged N-UTF8-LAUNCH as
+`b55d6811210ff472006db72e78abda7b459ae203`; #7823 actually merged
+N-UTF8-AUTHORITY as `ecd9213ba1fb353a6eda1bd0ef7bdfd75bbca41a`.
+Both received fresh full exact-head review, and their worktrees were
+finalized and parent claims settled after the owning source effort was
+reread and journaled. Neither merged test slice completes #5694/#5682.
+
+### N-STAMP independently exercise both Windows stamp-copy hosts
+
+Baseline: the actual #7808 merge. Only
+`test_native_stamp_directory_copy_preserves_complete_tree` changes in
+`test_installer_powershell51.py`; all other original test functions are
+AST-identical. Current Dev already excludes nested bytecode in this
+fixture and already carries M6707's actual production
+`Copy-StampDirectory` exclusion. Neither is republished as new work.
+
+The remaining pinned contract independently parameterizes
+`powershell.exe` and `pwsh`, rather than silently selecting the first
+available host. Both actual hosts execute the same extracted current
+production copy function against a source path containing literal brackets,
+dot-prefixed nested data, an empty directory and metadata. Root and nested
+`__pycache__` directories contain bytecode inputs; exact destination
+membership excludes only those subtrees, and every retained file remains
+byte-identical. Current Dev's existing filtered-payload assertions and
+the original fifteen-second native deadline/headless flag are retained.
+No production installer, copier or external installer-owner work changes.
+
+Complete native Windows PowerShell-compatibility module: 56 passed and
+one unchanged native-POSIX-Bash skip, 52.96 seconds pytest / 65.19
+preparation-cleanup inclusive. Both stamp-copy hosts are available and
+both new parameter nodes pass. Exactly two work-stealing workers retain
+the original 30-second item watchdog, 240-second diagnostic group and
+every native/process/memory bound and mark. Ruff and thirteen install
+contracts pass. No new skip, exclusion, waiver or reduced selection.
+This is bounded functional evidence, not quiet-host, whole-suite,
+repeated same-head or final qualification.
+
+Documentation impact: this below-altitude test-only extraction changes
+no operator-facing command, installation or runtime/API. This ledger
+documents the independently exercised native-host contract. Real
+PowerShell copies into a fresh destination provide the simple
+end-to-end/fixture-first-touch check; that does not qualify production
+provisioning. Production clean-room and external-venue lanes are
+inapplicable. Other N and production S/F/G/P/R/A residuals remain open.
+
+Prior-slice disposition: #7808 actually merged as
+`21d6ca7e130e7aeddb5c06ae15f8b3e075580b46`.
+Its worktree was finalized, parent claim settled, and the owning source
+effort reread and journaled before this independent slice.
+
+### N-HTTP-DEADLINE absolute expiry before connection and bounded fixture cleanup
+
+Baseline: the actual #7799 merge. Only
+`test_native_transport_absolute_deadline_bounds_slow_stream` changes in
+`test_azure_pr_observation.py`; its implementation starts from pinned
+preserved source, with the request-arrival assertion moved after completed
+worker cleanup to avoid observing an unsettled event. A focused regression
+sets the arrival event during worker join and proves the fixture rejects
+that late arrival. Every other original test/function/class is
+AST-identical. No production transport, authentication or deadline changes.
+
+The real urllib opener/HTTP parser continues to read a plaintext loopback
+fixture through the existing HTTPS-connect substitution. A fixed fixture
+SSL context avoids unrelated platform trust-store initialization. Existing
+fast/slow cases and their node IDs remain, with an expired-before-connect
+case added for each length, chunked and slow-header framing. Delaying
+opener construction consumes the reader's original absolute budget;
+request-arrival events prove those expired readers send no request.
+
+The original 0.15-second slow budget, 2.0-second fast budget and
+0.75-second elapsed assertion remain unchanged. A stop event interrupts
+slow fixture writes during cleanup; the server's formerly unbounded
+accept now has a two-second timeout and the original two-second worker
+join/liveness assertion remains. No connection retry, skip or deadline
+increase is introduced.
+
+Complete native Windows observation module: 75 passed, zero skips,
+8.69 seconds pytest / 12.94 preparation-cleanup inclusive. Exactly two
+work-stealing workers retain the original 30-second item watchdog,
+240-second diagnostic group and all native/process/memory bounds and
+marks. Ruff and thirteen install contracts pass. No reduced selection,
+exclusion or qualification waiver. This is bounded functional evidence,
+not quiet-host, whole-suite, repeated same-head or final qualification.
+
+Documentation impact: this test-only, below-altitude extraction changes
+no operator-facing transport/API. This ledger documents the fixture
+contract. Actual loopback HTTP framing and request-arrival assertions
+provide the simple end-to-end check without contacting an external
+service or changing authentication. Fresh fixture startup is not
+production provisioning; production clean-room and external-venue lanes
+are inapplicable. Other N and production S/F/G/P/R/A residuals remain open.
+
+Prior-slice disposition: #7799 actually merged as
+`fadb6c810fa483635d6b17d0f76aab2d9032b012`.
+Its worktree was finalized, parent claim settled, and the owning source
+effort reread and journaled before this independent slice.
+
+### N-PANE-DIAGNOSTICS bounded native prompt launch diagnostics
+
+Baseline: the actual #7790 merge. Only `TestPaneWrapperInitialPrompt`
+changes in `test_handoff_cutover.py`; every original test is retained and
+all other top-level functions/classes are AST-identical. No production
+wrapper, launcher, argument transport or W4-PANE implementation changes.
+
+The real Windows fixture verifies the exact generated PowerShell prefix,
+then invokes the quoted launcher/manifest suffix through the resolved
+PowerShell command boundary. It retains the real interactive prompt,
+blank lines, paths with spaces, receipt and child-argument assertions.
+The child invocation is headless with the unchanged fifteen-second
+deadline. Binary capture preserves original stream bytes rather than
+depending on platform-specific text-mode timeout results. Timeout failure
+identifies before-receipt, before-child and
+after-child states, preserving exactly the last 4,096 bytes of each
+captured output stream. No retry or deadline increase is introduced.
+
+Fixture-only PowerShell tracing is enabled only by `PROFILE_DURATIONS=true`
+or `RUNNER_DEBUG=1`; the default copied wrapper remains byte-identical.
+Three added test functions cover all three trace-policy configurations
+and all three timeout stages. Unlike the pinned candidate's new
+Windows-only skip, the mocked trace-policy test models Windows on any
+host; mocked shell discovery prevents diagnostic cases from acquiring
+a native-shell prerequisite. The original real native round trip keeps
+its existing prerequisite checks. Oversized synthetic output verifies
+the exact 4,096-byte tails and absence of discarded prefixes.
+A real Python child writes oversized multibyte stdout/stderr and reaches
+the same fifteen-second timeout. Its actual timeout streams must be bytes,
+and the fixture's final failure message must contain the exact byte tails.
+This distinguishes a byte bound from a character bound. Text-mode capture
+failed that native regression; binary capture resolves the discrepancy
+without decoding, retrying or changing the deadline.
+
+Complete native Windows handoff-cutover module: 147 passed, zero skips,
+24.48 seconds pytest / 28.66 preparation-cleanup inclusive. Exactly two
+work-stealing workers retain the original 30-second item watchdog,
+240-second diagnostic group and all native/process/memory bounds and
+marks. Ruff and thirteen install contracts pass. No new skip, exclusion,
+waiver or reduced selection. This is bounded functional evidence, not
+quiet-host, whole-suite, repeated same-head or final qualification.
+
+Documentation impact: this test-only, below-altitude fixture extraction
+changes no operator-facing runtime/API. This ledger documents the test
+contract and the deliberate portable-policy-test adaptation. The real
+PowerShell/launcher/wrapper/child prompt round trip supplies the simple
+end-to-end check; fixture first touch is not production provisioning.
+Production clean-room and external-venue lanes are inapplicable.
+Other N and production S/F/G/P/R/A residuals remain open.
+
+Prior-slice disposition: #7790 actually merged as
+`4eca45b48cecfa860b909086a88b1980d65ddd2b`.
+Its worktree was finalized, parent claim settled, and the owning source
+effort reread and journaled before this independent slice.
+
+### N-SHELL ordinary host admission and current lifecycle publication
+
+Baseline: the actual #7783 merge. The native shell helper and complete
+collection module match preserved source, including an ordinary
+`admit_native_bash` entrypoint that retains the existing headless,
+five-second conformance probes and WSL-launcher rejection. The explicit
+resolver still requires the optional-tier opt-in. Collection stays
+process-free and the success regression exercises both admission paths.
+
+Only `test_installed_bin_layout_contains_all_lifecycle_helpers` changes
+in the hook IPC module. Current Dev already uses PowerShell `-Command`
+rather than stdin; that invocation is retained with the resolved executable.
+Bash receives POSIX path arguments and the canonical admission helper,
+without importing an unrelated installer test module.
+The availability precheck preserves the supported canonical Windows Bash
+location even when Bash is absent from PATH. A regression
+executes this lifecycle fixture with that configuration and proves both
+nonconformant and timed-out admission probes fail rather than skip.
+
+The first bounded run exposed stale assumptions in this same fixture:
+current installers call publication helpers and PowerShell resolves
+the native-source helper through `PluginDir`. The fixture now extracts
+and executes the real current publication functions and installer loops.
+A fresh miniature payload contains the four actual lifecycle helpers,
+preserving their canonical scripts/source layout. Publishing every
+unrelated installer helper exceeded the unchanged item watchdog; limiting
+fixture input to the four lifecycle helpers under test keeps the real
+publication boundary without dropping any test or assertion. Exact byte
+comparison now covers all four helpers, followed by the existing deployed
+client/native-source/lifecycle import assertions. Production installers
+are unchanged; no external installer-owner work is absorbed.
+
+Complete native Windows shell-collection and hook-IPC modules, including
+the canonical-Bash failure regressions: 178 passed, zero skips,
+31.56 seconds pytest / 37.33
+preparation-cleanup inclusive. The initial passing implementation had 176
+passes; it is not substituted for the final regression run.
+Exactly two work-stealing workers retain the original 30-second item
+watchdog, 240-second diagnostic group and every process/memory/native
+deadline and mark. Initial runs failed honestly on the stale fixture
+and then its overbroad publication input; neither receives passing credit.
+No new skip, exclusion, waiver, deadline increase or reduced selection.
+This is bounded functional evidence, not quiet-host, whole-suite,
+repeated same-head or final #5694/#5682 qualification.
+
+Documentation impact: this test-only, below-altitude extraction changes no
+operator-facing command or runtime behavior. This ledger is the relevant
+test-contract documentation. The actual Bash/PowerShell publication and
+deployed-helper imports provide the simple end-to-end check; fresh fixture
+publication exercises first touch, but does not qualify production
+provisioning. Production clean-room and external-venue lanes are inapplicable
+to this test-only change. Other N and production S/F/G/P/R/A residuals
+remain open; W4-BIND and its tests are unchanged.
+
+Prior-slice disposition: #7783 actually merged as
+`4bd41133e43596c4c3803bc34de399cef3875e8205`.
+Its worktree was finalized, parent claim settled, and the owning source
+effort reread and journaled before starting this independent slice.
+
+### B-RECONCILE stage complete native fixture support without replacing overrides
+
+Baseline: the actual #7776 merge. Both installation-context fixture
+staging paths now share `_stage_installation_context`, which copies each
+missing immediate Python/PowerShell sibling independently. Existing
+fixture-owned files remain untouched even when another support file is
+missing. Current Dev already copied all PowerShell siblings on first
+staging, but gated the whole copy on one entrypoint's presence; this
+extraction repairs incomplete staging without replacing current overrides.
+
+The helper, complete `env` fixture and new regression match pinned
+preserved source. All original test functions, decorators and assertions
+are unchanged. The regression verifies byte equality for every native
+sibling, modifies the portable entrypoint, removes the guest helper,
+then proves restaging repairs the missing helper while preserving the
+override. Existing native context stamp/selection consumers still run.
+
+Complete native Windows reconcile module: 164 passed, one existing
+POSIX execute-bit skip, 65.59 seconds pytest / 83.12 preparation-cleanup
+inclusive. No new skip or exclusion. Exactly two work-stealing workers
+retained the original 30-second item watchdog, 240-second diagnostic
+group and every native/process/memory/mark bound. Ruff and thirteen
+install contracts passed. Functional integration only, not quiet-host,
+whole-suite or repeated same-head qualification.
+
+This below-altitude fixture correction changes no production, command,
+configuration, installation or architecture contract. Documentation
+impact is this ledger. Clean-room production provisioning and live
+external-venue lanes are inapplicable; the regression itself exercises
+fresh fixture staging and incomplete-fixture repair. Other residuals
+and parent qualification/settlement remain open.
+
+### B-GENERATION align the raced foreign-record fence with generation three
+
+Actual disposition: #7776 merged as
+`531cd24a184c94f99f1067096f9536a1d93be6eb`; fresh full Copilot
+review `5609547858` approved exact head
+`7c75cfe5beda914439fd0755b4d2dd71c9378e82`.
+All overview/inline/general channels and threads were clear;
+every required check and live authority passed before merge.
+The child is finalized.
+
+Baseline: the actual #7771 merge. The session register/deregister
+raced-foreign-record regression now documents generation three and
+requires `min_version=3` when dispatching through the actual server.
+The advertised-version assertion was already three on current Dev;
+both production verb registrations are three and remain unchanged.
+This raises the regression's admission floor rather than weakening it.
+
+The complete target function matches pinned preserved source. Its four
+parameterized direct/daemon register/deregister cases retain the raced
+lock, forbidden-save assertion, exact foreign bytes, execution-space
+error and still-live original session. Every other module node is
+unchanged. Complete native Windows execution-space module: 134 passed,
+zero skips, 8.43 seconds pytest / 22.36 preparation-cleanup inclusive.
+Exactly two work-stealing workers retained the original 30-second item
+watchdog, 240-second diagnostic group and every native/process/memory/
+mark bound. Ruff and thirteen install contracts passed. Functional only,
+not quiet-host, whole-suite or repeated same-head qualification.
+
+This below-altitude test correction changes no production, command,
+configuration, installation or architecture contract. Documentation
+impact is this ledger; the real loopback server and direct handlers
+provide integration coverage. Clean-room provisioning and external-venue
+lanes are inapplicable. Other residuals and parent settlement remain open.
+
+### B-CLONE-IDENTITY retain one explicit clone-local identity
+
+Actual disposition: #7771 merged as
+`d2ca2567809392fd0fec7598b0c8779eb4fdecf6`; fresh full Copilot
+review `5609448370` approved exact head
+`e4d8a8112566750c120d6e6c9cc83f3b483b8e96`.
+All overview/inline/general channels and threads were clear;
+every required check and live authority passed before merge.
+The child is finalized.
+
+Baseline: the actual #7765 merge. `_bare_anchor_from_clone` wrote the
+same local user email/name twice. Remove only the repeated second pair
+and its duplicate explanation. The first checked identity writes remain,
+before `core.bare` is set; a clone still never relies on global identity.
+Every original test function, fixture, decorator and assertion is
+unchanged, and the complete module AST now matches pinned preserved
+source.
+
+The complete native Windows repos module passed 135 tests, zero skips,
+43.50 seconds pytest / 52.36 preparation-cleanup inclusive. This includes
+both actual clone-anchor `commit-tree` consumers: each feeds its result
+to checked `update-ref`, so an empty or invalid commit ID cannot pass.
+This explicit identity probe used private HOME, removed inherited `GIT_*`
+variables, disabled global Git config and ignored system Git config.
+No ambient identity is needed. Exactly two work-stealing workers retained the
+original 30-second item watchdog, 240-second diagnostic group and every
+native/process/memory/mark bound. Ruff and thirteen install contracts
+passed. Functional integration only, not quiet-host, whole-suite or
+repeated same-head qualification.
+
+This below-altitude fixture cleanup changes no production, command,
+configuration, installation or architecture contract. Documentation
+impact is this ledger, correcting the candidate wording to distinguish
+duplicate writes from removal of required identity. Clean-room
+provisioning and external-venue lanes are inapplicable. All other
+residuals and parent qualification/settlement remain open.
+
+### B-REPOS-CONFIG native config without unrelated commits
+
+Actual disposition: #7765 merged as
+`6477c4c8c38abe5919d34a7bdf1fb6eb1ecd694a`; fresh full Copilot
+review `5609318256` approved exact head
+`de537df007daa7240ed8ac990fa6efcb5ef3263f`.
+All overview/inline/general channels and threads were clear;
+every required check and live authority passed before merge.
+The child is finalized.
+
+Baseline: the actual #7737 merge. `_init_config_repo` initializes real
+Git configuration without identity or commit setup. The twelve named
+backfill/add-repo tests use that helper where local credential config
+is consumed, or a plain existing directory where account/remote
+preflight must refuse before pinning. Host-derived credential readback,
+account clarification, unknown-name refusal and all original assertions
+remain. `_init_repo` still supplies identity and commits for every
+real-history consumer. `_bare_anchor_from_clone` is unchanged;
+B-CLONE-IDENTITY remains a separate, unaccepted contract.
+
+All fourteen changed/new function ASTs exactly match pinned preserved
+source. Every original test identity, decorator, fixture and assertion
+outside those setup substitutions remains unchanged. The complete
+native Windows repos module passed 135 tests, zero skips, in 35.84
+seconds pytest / 49.52 preparation-cleanup inclusive. Exactly two
+work-stealing workers retained the original 30-second item watchdog,
+240-second diagnostic group and all native/process/memory bounds.
+Ruff and all thirteen install contracts passed. Functional integration
+only, not quiet-host, whole-suite or repeated same-head qualification.
+
+This below-altitude fixture-only change alters no production, command,
+configuration, installation or architecture contract. Documentation
+impact is this ledger; real Git config consumption is exercised, not
+mocked away. Clean-room provisioning and external-venue lanes are
+inapplicable. Other B/N, production S/F/G/P/R/A and parent qualification
+remain open.
+
+### B-CLI-USAGE current pr-watch command family
+
+Actual disposition: #7737 merged as
+`a4677aafbc4443007ca3da0384cb94869207e5c7`; fresh full Copilot
+review `5608742047` approved exact head
+`66bf96c6cb8f75ef3ec9eafd894feb14f59b58fe`.
+All overview/inline/general channels and threads were clear.
+After confirmed npm recovery, the actual required attribution job
+`119635311301` in run `39713519004` succeeded; all required checks
+and live authority passed before merge. No gate was bypassed for the
+outage. The child is finalized.
+
+Baseline: the actual #7730 merge. The no-argument `pr-watch`
+module-invocation regression now expects the actual current
+`wait|cursor|snapshot|status|threads` usage family instead of the
+obsolete `wait|cursor` spelling. The complete module matches pinned
+preserved source. Both tests and the real `python -m agent_worktrees`
+subprocess remain, including explicit project selection to reach PR
+dispatch and every circular-import/traceback-negative assertion.
+
+Complete native Windows module-invocation module: two passed,
+zero skips, 4.63 seconds pytest / 15.14 preparation-cleanup inclusive.
+Exactly two work-stealing workers retain the original 30-second item
+watchdog, subprocess deadline, all marks/resource ceilings and the
+240-second diagnostic group. Functional integration only, not quiet-host,
+whole-suite or repeated same-head qualification.
+
+This below-altitude expectation correction changes no production,
+command, configuration, installation or architecture contract.
+Documentation impact is this ledger; current usage already describes
+the real command family. Clean-room provisioning and external-venue
+lanes are inapplicable to this native test-only change. Other B/N
+and production S/F/G/P/R/A contracts and parent qualification stay open.
+
+### B-REGISTRY-ASSERT refusal before registration persistence
+
+Actual disposition: #7730 merged as
+`91dffadbdffc3efafcf663ef33e6fd586e2f14b5`; full Copilot review
+`5608620441` approved exact head
+`9d5c38ba25de90b3c8a83ea76181507e1be6083a`.
+Overview, inline/general channels and threads had no findings;
+required CI was green and the child worktree is finalized.
+The reviewed standalone-test removal-delta retirement below is
+accepted; every original test identity remains.
+
+Baseline: the actual #7725 merge. Before real `register_project`,
+the namespaced registration case now requires the exact
+`identity receipt is unreadable` exception from `config.project_dir`.
+It then registers and verifies that the persisted config directory
+equals the validated project directory. The complete extended function
+matches pinned preserved source.
+
+All 31 original tests, fixture dependencies, decorators and assertions
+remain. The standalone
+`test_namespaced_project_state_requires_identity_receipt` is unchanged.
+Its historical removal delta is retired from future
+extraction, not retirement of the refusal test or identity contract.
+Keeping it preserves original selection while adding the combined
+refusal/registration transition.
+
+Complete native Windows registry-path module: 31 passed, zero skips,
+49.75 seconds pytest / 67.97 preparation-cleanup inclusive. Exactly
+two work-stealing workers retain the original 30-second item watchdog,
+all marks/resource ceilings and the 240-second diagnostic group.
+Functional integration only, not quiet-host, whole-suite or repeated
+same-head qualification.
+
+This below-altitude assertion-only extraction changes no production,
+command, configuration, installation or architecture contract.
+Documentation impact is this ledger; no adopter guide changes.
+Clean-room provisioning and external-venue lanes are inapplicable
+to this native test-only change. Other B/N and production S/F/G/P/R/A
+contracts and parent qualification remain open.
+
+### B-LEASE-CLI renewal assertions with original cases retained
+
+Actual disposition: #7725 merged as
+`6c3ccecbfe5248fa86af2922275a7b45a0224878`; full Copilot review
+`5608509338` approved exact head
+`1c2050a64b62ab8f07a010c1e1688847b8731dd1`.
+Overview, inline/general channels and threads had no findings;
+required CI was green and the child worktree is finalized.
+The reviewed removal/rename-delta retirement below is accepted;
+every original test identity remains.
+
+Baseline: the actual #7718 merge. Extend the explicit-disposition acquire
+case with a plain renewal that must preserve `at-rest`. Extend the
+default acquire case with flagged renewal and a real inspect proving
+durable `at-rest` settlement. Both resulting bodies match pinned
+preserved source, retaining their original test names.
+
+Every original name, fixture dependency, decorator and assertion remains;
+the standalone `test_renew_advances_disposition_to_at_rest` and
+`test_renew_without_flags_preserves_existing_disposition` are unchanged.
+The historical removal of those two cases and rename of the acquire
+cases are retired from future extraction, not retirement
+of tests or contracts. Keeping them preserves the original selection
+without preventing the combined acquire/renew assertions.
+
+Complete native Windows lease CLI module: nine passed, zero skips,
+25.32 seconds pytest / 42.11 preparation-cleanup inclusive. Exactly
+two work-stealing workers retain the original 30-second item watchdog,
+all marks/resource ceilings and the 240-second diagnostic group.
+Functional integration only, not quiet-host, whole-suite or repeated
+same-head qualification.
+
+This below-altitude assertion-only extraction changes no production,
+command, configuration, installation or architecture contract.
+Documentation impact is this ledger; no adopter guide changes.
+Clean-room provisioning and external-venue lanes are inapplicable
+to this native test-only change. Other B/N and production S/F/G/P/R/A
+contracts and parent qualification remain open.
+
+### N-STAT native stat fields in nonregular-input simulation
+
+Actual disposition: #7718 merged as
+`1e4fb226350f0448d4e0aa8af664998bc38c345a`; full Copilot review
+`5608376973` approved exact head
+`438523cc25d3846274b68f79c01312e4da6ac865`.
+Overview, inline/general channels and threads had no findings;
+required CI was green and the child worktree is finalized.
+
+Baseline: the actual #7710 merge. The simulated FIFO now copies every
+actual `st_*` attribute from the native stat result into a
+`SimpleNamespace`, changing only `st_mode`. Reconstructing
+`os.stat_result` from its sequence fields and one optional Windows field
+discarded other native fields, including `st_reparse_tag`.
+The `file_stat` helper matches pinned preserved source. The test checks
+FIFO mode and equality of every other native `st_*` field before invoking
+the real refresh; this strengthens the source's two-field parity check.
+
+All original assertions, fixture dependencies, decorators and cases
+remain. The five settings/declaration/template/exclude/output cases still
+require rejection before reads; the exclude case still refuses Git
+ignore-rule consultation before rejection. No production reader changes,
+mocked refresh result, new skip, reduced selection or fixture-seed changes.
+
+Complete native Windows local-cache-refresh module: 94 passed and the
+same four existing POSIX-FIFO-unavailable skips, 46.43 seconds pytest /
+62.94 preparation-cleanup inclusive. Exactly two work-stealing workers
+retain the original 30-second item watchdog, all marks/resource ceilings
+and the 240-second diagnostic group. Functional integration only, not
+quiet-host, whole-suite or repeated same-head qualification.
+
+This below-altitude test-double correction changes no production,
+command, configuration, installation or architecture contract.
+Documentation impact is this ledger; no adopter guide changes.
+Clean-room provisioning and external-venue lanes are inapplicable
+to this native stat-result simulation. Other B/N and production
+S/F/G/P/R/A contracts and parent qualification remain open.
+
+### B-PROVIDER-RECORD non-string guard fixture signature
+
+Actual disposition: #7710 merged as
+`d96da43cc8f905d74e86cc144ba00ed73c424ab8`; full Copilot review
+`5608251961` approved exact head
+`1056298c9965fa8dd4cd4eb992f860ff048c9da6`.
+Overview, inline/general channels and threads had no findings;
+required CI was green and the child worktree is finalized.
+
+Baseline: the actual #7704 merge. The non-string-codename guard case
+directly exercises `is_valid_handle` and its short-circuit guard; it
+does not read `pr_repo` or use `monkeypatch`. Remove only those unused
+parameters so this pure guard case does not construct unrelated Git
+repositories. The entire resulting function matches pinned preserved
+source; its body, exception assertion and short-circuit assertion are
+unchanged. All original test identities and decorators remain.
+
+The MX-PROVIDER hunk-15 signature subspan belongs to
+`TestCreatePRAutoOpen.test_codename_mode_skips_marker_for_a_non_string_codename`,
+not `test_attribution_keys_are_consistent`. The latter symbol is absent
+from both immutable inputs and current Dev. This corrects the ownership
+description, not the immutable hunk hash or its B-PROVIDER-RECORD owner.
+The hunk's separate test-removal subspans retain their reviewed
+B-PROVIDER-ASSERT delta retirement; their tests still execute.
+
+Complete native Windows provider module: 246 passed, zero skips,
+123.61 seconds pytest / 137.33 preparation-cleanup inclusive. Exactly
+two work-stealing workers retain the original 30-second item watchdog,
+all marks/resource ceilings and the 240-second diagnostic group.
+Functional integration only, not quiet-host, whole-suite or repeated
+same-head qualification.
+
+This below-altitude test-fixture extraction changes no production,
+command, configuration, installation or architecture contract.
+Documentation impact is this ledger; no adopter guide changes.
+Clean-room provisioning and external-venue lanes are inapplicable
+to this native test-only fixture reduction. Other B/N and production
+S/F/G/P/R/A contracts and parent qualification remain open.
+
+### B-LANDING unused commit-ID reads
+
+Actual disposition: #7704 merged as
+`554c185201ed633686ee2783f0dbce609ccd100c`; full Copilot review
+`5608120552` approved exact head
+`4cda40926163034d83bf02ed45a6d8a86d876bed`.
+Overview, inline/general channels and threads had no findings;
+required CI was green and the child worktree is finalized.
+
+Baseline: the actual #7701 merge. `_commit` now returns `None`,
+avoiding a `rev-parse HEAD` after commits whose callers discard the
+result. All 23 call sites are statement-only. The five formerly
+value-consuming sites in `_two_commit_change`,
+`_sync_worktree_branch_to_a_newer_main`, the conflict-rebase scenario
+(two sites) and the multiple-base scenario explicitly resolve fresh
+`HEAD` immediately after their commits. Their resulting IDs, real Git
+operations and landing assertions are unchanged. All five edited
+functions match the pinned preserved source.
+
+All 33 collected cases remain, with every original test name, fixture
+dependency, decorator and assertion intact. No other module imports
+these private helpers. This completes only the unused-OID helper
+subcontract; other B/N and production S/F/G/P/R/A contracts remain
+separate.
+
+Complete native Windows landing module: 33 passed, zero skips,
+141.11 seconds pytest / 156.53 preparation-cleanup inclusive. Exactly
+two work-stealing workers retain the original 30-second item watchdog,
+all marks/resource ceilings and the 240-second diagnostic group.
+Functional integration only, not quiet-host, whole-suite or repeated
+same-head qualification.
+
+This below-altitude test-helper extraction changes no production,
+command, configuration, installation or architecture contract.
+Documentation impact is this ledger; no adopter guide changes.
+Clean-room provisioning and external-venue lanes are inapplicable
+to the native test-only subprocess reduction.
+
+### B-LANDING-ASSERT non-mutating probe evidence
+
+Actual disposition: #7701 merged as
+`a912a66b8ec44e8bf2705c59bee17f341fea7a56`; full Copilot review
+`5607940307` approved exact head
+`1f1c488420dd2745d367d151f04771c759007572`.
+Overview, inline/general channels and threads had no findings;
+required CI was green and the child worktree is finalized.
+The reviewed probe-removal/default-base-relocation delta retirement
+below is accepted; every original test identity and location remains.
+
+Baseline: the actual #7698 merge. The multi-commit squash/later-upstream-edit
+case first fetches the actual squash, snapshots every ref, invokes the real
+`squash_landed` probe and requires all refs to remain unchanged. Its later
+upstream edit, complete landing explanation and finalization-precondition
+assertions remain in place. That extended function matches the pinned
+preserved source.
+
+All 33 existing tests, fixture dependencies, decorators and old assertions
+remain. `test_the_probe_moves_no_ref` is unchanged and separately collected.
+The default-base/provider-call-zero case is also unchanged, including
+its location. The historical probe-case removal and default-base-case
+relocation are retired from future extraction, not
+retirement of tests or contracts; neither delta is needed to add the
+non-mutating checks to the combined scenario. Commit-helper OID returns
+and all creation-point, reset, shadowing and private-copy checks remain
+unchanged.
+
+Complete native Windows landing module: 33 passed, zero skips,
+141.79 seconds pytest / 154.72 preparation-cleanup inclusive. Exactly two
+work-stealing workers retain the original 30-second item watchdog,
+all marks/resource ceilings and the 240-second diagnostic group.
+Functional integration only, not quiet-host, whole-suite or repeated
+same-head qualification.
+
+This below-altitude assertion-only change affects no production,
+command, configuration, installation or architecture contract.
+Documentation impact is this ledger. Clean-room provisioning and
+external-venue lanes are inapplicable; other B/N and S/F/G/P/R/A
+contracts remain separate.
+
+### B-LEASE-ASSERT preview, apply and repeated-apply evidence
+
+Actual disposition: #7698 merged as
+`df0ab9b2ada18528d7fc8389246dd46a878f048a`; full Copilot review
+`5607842453` approved exact head
+`23d3d6adf2fe394cdfae4f5bc23fc1e292c5848d`.
+Overview, inline/general channels and threads had no findings;
+required CI was green and the child worktree is finalized.
+The reviewed removal/rename-delta retirement below is accepted;
+every original test identity remains.
+
+Baseline: the actual #7695 merge. Extend
+`test_squash_stale_dry_run_reports_without_pushing` after its original
+preview assertions: the real apply reports the released ref and exact old
+and new OIDs; the remote advances to a different OID; the second apply
+returns no changes and leaves the remote stable.
+
+Every existing test identity, fixture dependency, decorator and assertion
+remains. The standalone
+`test_squash_stale_is_idempotent_on_an_already_squashed_ref` is unchanged.
+The historical removal of that case and rename of the preview case are
+retired from future extraction, not retirement of their
+tests or contracts. The assertion additions do not need either delta.
+The real force-with-lease race, live-holder checks, lease generations,
+private-copy seed isolation and all retention cases remain unchanged.
+
+Complete native Windows lease-store module: 21 passed, zero skips,
+67.52 seconds pytest / 77.19 preparation-cleanup inclusive. Exactly two
+work-stealing workers retain the original 30-second item watchdog,
+all marks/resource ceilings and the 240-second diagnostic group.
+Functional integration only, not quiet-host, whole-suite or repeated
+same-head qualification.
+
+This below-altitude assertion-only change affects no production,
+command, configuration, installation or architecture contract.
+Documentation impact is this ledger. Clean-room provisioning and
+external-venue lanes are inapplicable; other B/N and S/F/G/P/R/A
+contracts remain separate.
+
+### B-PROVIDER-ASSERT body and malformed-marker controls
+
+Actual disposition: #7695 merged as
+`08db822fe28f887ced822580a6a0f3fb3c25b609`; full Copilot review
+`5607739203` approved exact head
+`bf315626d899ee9b185769cf7799b1ac70db665c`.
+Overview, inline/general channels and threads had no findings;
+required CI was green and the child worktree is finalized.
+The reviewed removal-delta retirement below is accepted; every
+original test remains.
+
+Baseline: the actual #7691 merge. The default-disabled publication
+case now requires an exact empty body. The explicit disabled-attribution
+override supplies `"Hello"` through real `create_pr` and requires those
+exact bytes. The malformed-codename/stale-marker record case additionally
+requires no marker text and no persisted `attribution_head`.
+
+All 246 existing test identities, fixture dependencies, decorators and
+old assertions remain. In particular, the three historical duplicate
+removal candidates are not applied: the actual publication tests
+`test_codename_mode_skips_marker_for_a_malformed_codename`,
+`test_codename_mode_skip_does_not_record_attribution_head` and
+`test_no_attribution_omits_marker` still execute unchanged. The stronger
+record-boundary assertions supplement rather than replace those end-to-end
+cases. Their removal deltas are retired from future
+extraction, not their tests or contracts; preserving them maintains complete original
+selection under the reviewed wave plan.
+
+Complete native Windows provider module: 246 passed, zero skips,
+122.11 seconds pytest / 136.88 preparation-cleanup inclusive. Exactly
+two work-stealing workers retain the original 30-second item watchdog,
+all marks/resource ceilings and the 240-second diagnostic group.
+This is functional integration, not quiet-host, whole-suite or
+repeated same-head qualification.
+
+This below-altitude assertion-only change affects no production,
+command, configuration, installation or architecture contract.
+Documentation impact is this ledger. Clean-room provisioning and
+external-venue lanes are inapplicable; other B/N and S/F/G/P/R/A
+contracts remain separate.
+
+### B-PROVIDER-RECORD persisted provider inputs
+
+Actual disposition: #7691 merged as
+`5106ca4d00f69dfbc74b7486da85ae9d55636d2b`; full Copilot review
+`5607632841` approved exact head
+`7bcecd5dc854a5ad8999c2dc4f9e8e2debdd4b96`.
+All findings and threads are resolved, required CI was green, and
+the child worktree is finalized.
+
+Baseline: the actual #7684 merge. `provider_record_repo` constructs fresh
+configuration and a real tracking record per case, without Git setup.
+`_open_record` persists a creating PR and calls the real
+`_finish_auto_open`; five attribution-focused cases use that boundary.
+Four ready/legacy-hold cases use the same record fixture and real `set_pr`
+before invoking `pr_ready`. Provider, attribution, frozen-policy,
+record-writing and ready-state decisions are not replaced.
+
+All 246 existing tests, assertions and decorators remain. Actual
+`create_pr` publication integrations, default attribution propagation,
+draft/hold creation and duplicate malformed-marker assertions remain
+unchanged. The separate B-PROVIDER-ASSERT consolidation is not absorbed.
+The historical `test_attribution_keys_are_consistent` is absent from
+both the current baseline and preserved source, so there is no fixture
+parameter to remove from that symbol here.
+
+Complete native Windows provider module: 246 passed, zero skips,
+129.09 seconds pytest / 143.23 preparation-cleanup inclusive. Exactly
+two work-stealing workers retain the original 30-second item watchdog,
+all marks/resource ceilings and the 240-second diagnostic group.
+This is functional integration, not quiet-host, whole-suite or
+repeated same-head qualification.
+
+This below-altitude test setup adaptation changes no production,
+command, configuration, installation or architecture contract.
+Documentation impact is this ledger. Clean-room provisioning and
+external-venue lanes are inapplicable; no other B/N or S/F/G/P/R/A
+contract is absorbed.
+
+### B-LEGACY-CONFIG fixture-owned committed-layer absence
+
+Actual disposition: #7684 merged as
+`272c89f28a7483d7105ed1750c0512924859e102`; full Copilot review
+`5607391353` approved exact head
+`ce90ea97e6e0231fbad99911043d9e04b1396696`.
+Inline/general channels and threads had no findings. Required CI was green.
+The child worktree is finalized.
+
+Baseline: the actual #7681 merge. `graph.committed_config` returns an
+empty committed layer only for this fixture's named plain anchors
+without a `.git` entry. Every other anchor, including a fixture anchor
+after it becomes a real Git repository, delegates to the original
+committed-ref reader with unchanged arguments and keyword options.
+On-disk configuration and transaction-scoped receiving-authority
+behavior are unchanged.
+
+The new regression runs under both existing graph variants. It proves
+owned plain anchors avoid Git probes, a foreign plain anchor still
+delegates, and both a foreign Git repo and a now-Git fixture anchor
+read actual committed configuration. Two successive ref updates
+return their fresh values through the forwarded remote/parser options.
+All old test functions, decorators and assertions remain AST-identical.
+
+Complete native Windows historical-handoff module: 74 passed, zero
+skips, 54.34 seconds pytest / 64.66 preparation-cleanup inclusive.
+Exactly two work-stealing workers retain the original 30-second
+watchdog, all marks/resource ceilings and a 240-second diagnostic group.
+This is functional integration, not quiet-host, whole-suite or
+repeated same-head qualification.
+
+Documentation impact is this ledger. This below-altitude fixture
+adaptation changes no production, command, installation, configuration
+or architecture contract. Clean-room provisioning and external-venue
+lanes are inapplicable. No other B/N or S/F/G/P/R/A contract is absorbed.
+
+### B-TERMINAL private-copy consumers
+
+Actual disposition: #7681 merged as
+`cbce035cb15ee3c80708956e937b7cdd1cf1a8c7`; full Copilot review
+`5607240222` approved exact head
+`82dc9c46985e6a1b036809a4d1ea73dbd6b48938`. Overview, inline/general
+channels and threads had no findings; required CI was green. The child
+worktree is finalized.
+
+Baseline: the actual #7678 foundation merge. `_worker` now returns
+`_copy_worker` output from the immutable session seed. Explicitly
+forward that fixture through 52 consumer/helper functions, including
+reciprocal-disposal `_harness`. The copied anchor, origin, linked
+checkout and fresh lifecycle record remain private to each case.
+Every actual live-session, foreign-head, dirty-work, claim, finality,
+managed-GC and reciprocal-disposal decision remains per-case.
+
+All old test names, decorators, assertions and body structure remain;
+normalizing only the added fixture parameter/argument makes the 54
+other existing top-level functions/classes AST-identical. The two
+foundation isolation cases are literally unchanged. No external test
+module imports this module, and no production behavior is changed.
+
+Complete native Windows terminal-conclusion module: 142 passed,
+zero skips, 76.06 seconds pytest / 89.67 preparation-cleanup inclusive.
+Exactly two work-stealing workers retain the original 30-second
+item watchdog, all existing marks/resource ceilings and the
+240-second diagnostic group. Functional integration only, not
+quiet-host, whole-suite or repeated same-head qualification.
+
+This below-altitude test setup conversion affects only this ledger's
+documentation. Commands, configuration, installation, architecture
+and runtime contracts remain unchanged; clean-room provisioning and
+external-venue lanes do not apply. Other B/N and S/F/G/P/R/A
+contracts remain separately owned.
+
+### B-TERMINAL seed/copy foundation
+
+Actual disposition: #7678 merged as
+`e4f0a55052ab6ceb2282f37165756a0817da9ac6`; full Copilot review
+`5607103580` approved exact head
+`32185bb49bd3372276717170d6b94f743fef02d7`. Overview, inline/general
+channels and threads had no findings; required CI was green. The child
+worktree is finalized.
+
+Baseline: the actual #7674 merge. Split the existing `_worker` helper
+into a template-free Git builder and fresh record setup. Its old
+consumers still build their own Git topology; none is converted yet.
+`_worker_seed` runs the same builder under the existing hermetic
+environment and run-local seed lock. `_copy_worker` physically copies
+Git stores and linked checkouts, repairs administrative links,
+relocates origin and creates fresh tracking/session records.
+
+Two isolation cases verify initial Git bytes, private physical file
+identity, origins/common directories and fresh records. Commit,
+push, configuration and record mutation plus removal of the first
+checkout leave every seed/sibling byte unchanged. The second copy
+retains its complete linked-worktree topology; no object alternates
+or shared files are introduced.
+
+All existing test functions/classes, assertions and decorators remain
+AST-identical; only `_worker` is split into the shared preparation
+helpers. Complete native Windows terminal-conclusion module:
+142 passed, zero skips, 114.94 seconds pytest / 121.12 preparation-cleanup
+inclusive. Exactly two work-stealing workers retain the original
+30-second item watchdog, marks and resource ceilings under a
+240-second diagnostic group. This is functional integration, not
+quiet-host, whole-suite or repeated same-head qualification.
+
+The consumer conversion, including reciprocal-disposal `_harness`,
+remains a separate next slice. Live/foreign/dirty/claim/finality and
+disposal decisions are unchanged. This below-altitude test preparation
+refactor changes no production, command, installation, configuration
+or architecture contract; documentation impact is this ledger.
+Clean-room provisioning and external-venue lanes are inapplicable.
+
+### B-RESOURCE private finalization inputs
+
+Actual disposition: #7674 merged as
+`4a18e654de6c47a83484de38a238154bc1ffe319`; full Copilot review
+`5606924751` approved exact head
+`9e59060f9888e05a59a07eed078b6e9f02c14c9a`. Overview, inline/general
+channels and threads had no findings; required CI was green. The child
+worktree is finalized.
+
+Baseline: the actual #7668 merge. `_final_owner_seed` runs the original
+transitive-finalization `_env` builder under the existing run-local
+seed lock and hermetic setup environment. `_copy_final_owner` copies
+only the anchor and origin stores, relocates origin and constructs
+fresh configuration, tracking records and project/install paths.
+`final_owner` never copies mutable owner records or caches finalization
+authority.
+
+Two repeated isolation cases compare copied Git bytes and physical
+file identity, then commit and push only in the first copy, reserve
+and close a real producer claim, and actually finalize its owner.
+Every seed/sibling byte and sibling record remains unchanged. Both
+configurations and their nested repository objects are independent;
+all origins and administrative paths name the current copy.
+
+The four existing test functions, their decorators, all assertions,
+the cross-process lock regression and `_reserve` remain AST-identical.
+Complete native Windows resource-producer-finalization module:
+17 passed, zero skips, 58.68 seconds pytest / 77.56 preparation-cleanup
+inclusive. Exactly two work-stealing workers preserve the 30-second
+item watchdog, all original marks and resource limits under a
+240-second diagnostic group. This is functional integration, not
+quiet-host, whole-suite or repeated same-head qualification.
+
+This below-altitude test setup extraction changes no production,
+command, installation, configuration or architecture contract.
+Documentation impact is this ledger only. Clean-room provisioning
+and external-venue lanes do not apply to test-only preparation.
+Other fixture batches and S/F/G/P/R/A remain separately owned.
+
+### B-CACHE-SEED private empty-Git workspaces
+
+Actual disposition: #7668 merged as
+`ffc220ecfdcec8397ce8d313f0cb3648e650ec80`; full Copilot review
+`5606637029` approved exact head
+`a569f57d69c9d35a5af063d58ea7179ef3395643`. Overview, inline/general
+channels and threads had no findings; required CI was green. The child
+worktree is finalized. N-STAT remains separately owned.
+
+Baseline: the actual #7665 merge. Prepare only an empty repository
+under the existing run-local seed lock and hermetic setup environment.
+Each `copy_workspace` physically copies that store and creates its own
+empty HOME. Provider payloads, settings, output caches and all current
+refresh/launch decisions remain test-local; no authority is cached.
+
+Two repeated guard cases compare every seed/copied byte and reject
+shared physical files. They then change the first copy's worktree,
+config, info/exclude, index, objects and refs through an actual commit.
+Every seed/sibling byte remains unchanged and the isolated home remains
+empty; no object alternates are introduced.
+
+All 45 other existing functions/classes and decorators remain
+AST-identical, including the native-stat/FIFO simulation. N-STAT is not
+absorbed. Complete native Windows cache-refresh module: 94 passed,
+four unchanged native-POSIX-FIFO skips, 46.67 seconds pytest /
+62.50 preparation-cleanup inclusive. No new skip or selection change.
+Exactly two work-stealing workers preserve the original 30-second
+watchdog, T2/process/filesystem marks and resource ceilings under a
+240-second diagnostic group. Actual discovery/copy/index protection/
+refresh/launch consumers execute. This is functional integration, not
+quiet-host, whole-suite or repeated same-head qualification.
+
+Documentation impact is this ledger only; runtime, command, install,
+configuration and architecture contracts stay unchanged. Clean-room
+provisioning and external-venue lanes do not apply to test-only setup.
+
+### B-LEASE-SEED private released histories
+
+Actual disposition: #7665 merged as
+`85ff7d66cddb174a5ff91aa45b9d68bfbc2345aa`; full Copilot review
+`5606458404` approved exact head
+`f34ae3c0aeb29b67765da655994f16e2b2a4191c`. Overview, inline/general
+channels and threads had no findings; required CI was green. The child
+worktree is finalized. B-LEASE-ASSERT remains separately owned.
+
+Baseline: the actual #7662 merge. Extract `_settings` without changing
+its values; prepare one real acquire/renew/release history per worker
+session under the existing hermetic setup environment. The source
+fixture is process-private, not a mutable run-wide lease authority.
+`_copy_released_history` physically copies its bare Git store and
+deep-copies all three snapshots; `released_history` returns fresh
+settings naming only that case's private remote.
+
+Only the collapse, kind-filter and mid-sweep race consumers reuse this
+history. The race acquires/inspects the prepared `stale-history` key;
+the real force-with-lease race, generation/token and live-holder checks
+remain intact. All old test names, assertions and decorators remain.
+The other 23 functions are AST-identical, including the standalone
+idempotence and dry-run cases. B-LEASE-ASSERT consolidation is excluded.
+
+Two repeated isolation cases check exact acquire/renew/release ancestry,
+all copied remote bytes, independent origins and nested mutable snapshot
+records. They then execute real squash and reacquisition against the
+first copy. Every seed/sibling byte and snapshot must stay unchanged,
+without alternates or shared object files. Each consumer performs its
+own current observation and mutation; no lease/store authority is cached.
+
+Complete native Windows lease-store module: 21 passed, zero skips,
+70.92 seconds pytest / 81.75 preparation-cleanup inclusive. Exactly
+two work-stealing workers preserve the 30-second item watchdog, original
+marks and resource ceilings under a 240-second diagnostic group.
+This is functional Git integration, not quiet-host, whole-suite or
+repeated same-head qualification. Production and other fixture contracts
+are unchanged.
+
+Documentation impact is this ledger only; no command, runtime, install,
+configuration or architecture contract changes. Clean-room provisioning
+and external-venue lanes are inapplicable to test-only preparation.
+
+### B-LANDING private-copy consumers
+
+Actual disposition: #7662 merged as
+`86f055d12f95f5162d1adc8ff681cf071fe5a493`; full Copilot review
+`5606270816` approved exact head
+`c5636a9e62c713b922350683e3fd871bf4618eb6`. Overview, inline/general
+channels and threads had no findings; required CI was green. The child
+worktree is finalized. Assertion consolidation and unused-OID cleanup
+remain separate, not waived.
+
+Baseline: the actual #7661 foundation merge. The function-scoped `env`
+now copies the private base seed. Add `merged_env` and `handmade_env`
+to copy their derived seed plus the known original published-head marker.
+Six consumer functions (seven parametrized cases) use those prepared
+inputs instead of rebuilding the identical merge history. Their real
+landing, provider-base, refusal, pull-forward, report and finalization
+decisions still execute separately with fresh provider/tracking state.
+
+All existing test names, assertions and decorators are retained. The
+37 other existing functions/classes are AST-identical, including the
+OID-returning commit helper, creation-point/reset/shadowing helpers and
+the three foundation isolation regressions. No external test module
+imports this module. In particular `test_the_probe_moves_no_ref` and
+the default-base/provider-call-zero test remain separately collected:
+B-LANDING-ASSERT consolidation is not included.
+
+Complete native Windows landing module: 33 passed, zero skips,
+145.53 seconds pytest / 159.91 preparation-cleanup inclusive. Exactly
+two work-stealing workers retain the original 30-second item watchdog,
+marks and resource ceilings under a 240-second diagnostic group.
+This is real per-case Git consumer integration, not quiet-host,
+whole-suite or repeated same-head performance qualification. No production
+S/F/G/P/R/A/B-INCONCLUSIVE, selection, skip or timeout change is included.
+
+Documentation impact is this ledger; commands, runtime, configuration,
+architecture and installation are unchanged. Clean-room and external
+venue lanes are inapplicable to test-only fixture reuse.
+
+### B-LANDING foundation: private base, merged and handmade inputs
+
+Actual disposition: #7661 merged as
+`a51b337947f6d1a1f0a6430b624c267e6d958086`; full Copilot review
+`5606060042` approved exact head
+`16d755f32a855f064e8c09d9926b9fe8b5bbb31e`. Overview, inline/general
+channels and threads had no findings; required CI was green. The child
+worktree is finalized. This settles the foundation, not its consumers
+or whole-suite qualification.
+
+Baseline: the actual #7653 merge. Add only the named `_landing_seed`,
+`_build_landing_seed`, `_copy_landing_env`, `_merged_landing_seed` and
+`_handmade_landing_seed` foundation plus three copy-isolation cases.
+The existing `env` fixture, all 37 old functions/classes and their
+decorators remain AST-identical, including `_commit`'s OID return.
+Consumer conversion is a later B-LANDING slice. B-LANDING-ASSERT's
+consolidation is excluded: all old tests remain separately collected.
+
+Use the existing hermetic environment and run-local seed lock to build
+real main/dev history. Copy complete physical object stores, refs and
+creation reflogs without alternates or hardlinks, relocate both origin
+URLs, and retain each derived topology's known `published-head` marker.
+The base has main/dev/worktree at one commit; the merged topology has
+main behind dev and the worktree reset to dev after its two-commit PR;
+the handmade topology keeps the worktree at main while `pr/hand-made`
+holds that PR's original head. No landing decision is cached.
+
+Each of the three cases makes two private copies, checks every seed byte
+except the relocated Git configs, checks branch/content/OID relationships,
+then commits and pushes from both the first checkout and its publisher.
+Every seed and second-copy byte must remain unchanged; copied object
+files must not share identity with either source. The original consumer
+tests continue building and evaluating their own real Git histories.
+
+Complete native Windows landing module: 33 passed, zero skips,
+177.77 seconds pytest / 192.09 preparation-cleanup inclusive. Exactly two
+work-stealing workers preserve the 30-second default item watchdog,
+original marks and resource limits under a 240-second diagnostic group.
+This is functional real-Git integration, not quiet-host or repeated
+same-head whole-suite performance qualification. Production S/F/G/P/R/A,
+B-INCONCLUSIVE, selection changes and all other fixture batches are excluded.
+
+Documentation impact is this ledger only: no runtime, command, install,
+configuration, architecture or adopter behavior changes. Clean-room and
+external-venue lanes are inapplicable to test-only seed preparation.
+
+### B-REFSPEC private unlanded finalization inputs
+
+Actual disposition: #7653 merged as
+`56574e1510e0c2a24e7dfe49924b82e55d8b4c32`. Copilot's full review
+`5605763035` approved exact head
+`5cf9caa13260f3bc342288bae5aabc26ce711bee`; overview, inline and
+general channels had no findings, required CI was green, and the child
+worktree was finalized. This settles this fixture slice only, not the
+whole-suite qualification gate.
+
+Baseline: the actual #7649 merge. Add only the named
+`_refspec_worktree_seed`, `_copy_refspec_worktree`, adapted
+`refspec_worktree` and copy-isolation regression with its snapshot helper.
+Build actual init/commit/push/clone/fix history under the existing hermetic
+environment and run-local seed lock. Copy every object/ref/reflog into
+independent stores, relocating the publisher and worktree origin URLs.
+The copied input remains unlanded: origin/master is the base, worktree
+HEAD is its one fix child, and neither local nor remote PR branch exists.
+Each test still performs its actual landing/refusal/finalization decision.
+
+Two repeated cases require exact branch/content/base topology and every
+copied input byte except the intentionally relocated Git configs.
+Commit/push from the first worktree advances only its origin/master;
+commit/push from its publisher creates only that copy's publisher ref.
+Every seed and second-copy byte remains unchanged, with no alternates
+or shared object files. All 54 other existing top-level functions/classes
+and all original decorators are AST-identical. In particular the five
+inconclusive-evidence cases remain separate: no B-INCONCLUSIVE, G/S/F,
+production, selection or timeout change is absorbed.
+
+Complete native Windows precondition module: 65 passed, zero skips,
+81.71 seconds pytest / 97.89 preparation-cleanup inclusive. Exactly two
+work-stealing workers retain the original 30-second default item watchdog,
+marks and resource limits under a 240-second diagnostic group.
+Ruff F/E9 and the 13-plugin install contract pass.
+This is real Git consumer integration, not quiet-host, whole-suite or
+repeated same-head performance qualification.
+
+Documentation impact is this ledger only; runtime/command/install/config
+contracts are unchanged. Provisioning clean-room and external deployment
+are inapplicable to this fixture-only change. Parent #5694/#5682 and
+complete repeated same-head native qualification remain open.
+
+### B-DOCTOR isolate unrelated daemon reporting
+
+**Actually merged:** #7649 as
+`b6ff25d16a2d237e122aaf5d06e26614c1fccd5f`.
+
+Baseline: the actual #7647 merge. Add only the named local
+`daemon_health.doctor_report` replacement to
+`test_doctor_json_repairs_pair_from_untracked_knowledge_cwd`.
+The case's subject is actual persisted pair-integrity repair and JSON
+projection from an untracked knowledge CWD, not host daemon diagnosis or
+repair. Its existing records, invalid project entry, project resolution,
+repair counts and resulting knowledge tracking-record assertion remain
+unchanged. Removing the one added patch restores the exact original
+module AST. Production daemon reporting and its dedicated tests are untouched.
+
+Complete native Windows pair-integrity module: three passed, zero skips,
+4.10 seconds pytest / 14.42 preparation-cleanup inclusive, exactly two
+work-stealing workers with unchanged 30-second item watchdog and resource
+limits under a 240-second diagnostic group. Ruff F/E9 and the 13-plugin
+install contract pass. This is actual in-process doctor/record integration,
+not daemon-health, quiet-host or whole-suite qualification.
+
+Documentation impact is this ledger only; runtime/command/install/config
+contracts are unchanged. Provisioning clean-room and external deployment
+are inapplicable to this fixture-only change. Parent #5694/#5682 and
+complete repeated same-head native qualification remain open.
+
+### B-CREATION private native creation anchors
+
+**Actually merged:** #7647 as
+`bf3099d764aadc2155c209817aaa7b53f25eeae0`.
+
+Baseline: the actual #7644 merge. Add only the named
+`_creation_anchor_seed`, adapted `_creation_fixture`/`native_creation` and
+`test_creation_anchor_copies_isolate_native_git_mutations`. Build the real
+template-free initial commit once under the existing hermetic environment
+and run-local seed lock; each native fixture physically copies independent
+harness/knowledge stores and assigns its own origin.
+Records, retained prompts, permissions, project configuration, tracking,
+worktree creation and actual creation-tail repair remain per-case.
+
+The fixture's empty machine topology is explicit on disk, not a reader
+stub or cache. Preserve the existing raw `native_git=True` entry point
+used by retained-allocation tests, including tuple/suffix identity and
+later legacy machine-config changes; it still builds its own actual Git
+history and does not acquire a shadowing empty topology.
+Two repeated guard cases prove local origins/config/topology, retained
+prompt, absent companion tracking and independent object files. Config,
+new-object and ref mutations in the harness leave every seed and knowledge
+byte unchanged. All 38 other existing functions and all original
+decorators remain AST-identical.
+
+Complete native Windows creation and retained-allocation modules: 66 passed,
+zero skips, 86.14 seconds pytest / 91.61 preparation-cleanup inclusive.
+Exactly two work-stealing workers retain the 30-second default item
+watchdog, existing native deadlines/marks and resource limits under a
+240-second diagnostic group. This includes real subprocess/kernel lease,
+first-touch CLI, native pairing and tuple/historical-allocation consumers.
+Ruff F/E9 and the 13-plugin install contract pass.
+No quiet-host, whole-suite or repeated same-head qualification is claimed.
+
+Documentation impact is this ledger only; runtime, command, installation
+and configuration contracts remain unchanged. The fresh actual CLI check
+is included above; provisioning clean-room and live external deployment
+are inapplicable to this test-fixture-only change. Parent #5694/#5682 and
+complete repeated same-head Windows qualification remain open.
+
+### B-CONTEXT private context-resolution topology
+
+**Actually merged:** #7644 as
+`b724784e9325fd3d4e90d5fbb93e9812fe51351a`.
+
+Baseline: the actual #7639 merge. Add only the named session
+`_context_repo_seed`, `_copy_context_repo`, adapted `adopted_repo` and
+`test_context_repo_copies_preserve_seed_and_sibling`. Construction uses the
+existing hermetic HOME/Git/identity environment and run-local seed lock.
+Each case copies real Git stores and repairs its relocated linked worktree;
+project/repos registration, configuration and tracking remain fresh per case.
+Actual CWD/project/worktree resolution is not cached or substituted.
+
+Two repeated cases require exact private registration and tracking inputs,
+real relocated roots and branch identity, then mutate the first copy's
+branch, bare config, file and tracking bytes. Every seed and sibling file
+remains unchanged. All 49 other existing functions and original decorators
+are AST-identical; no production, selection, skip, timeout or resource-limit
+change is included.
+
+The complete affected module passes on native Windows: 49 passed, zero
+skips, 19.16 seconds pytest / 31.00 preparation-cleanup inclusive, exactly
+two work-stealing workers, unchanged 30-second item watchdog and resource
+limits under a 240-second diagnostic group. Ruff F/E9 and the 13-plugin
+install contract pass. This is functional evidence without a quiet-host,
+whole-suite or repeated same-head performance qualification claim.
+
+Documentation impact is this ledger only; runtime, command, installation and
+configuration contracts remain unchanged. Provisioning clean-room and
+external deployment are inapplicable to this test-only fixture slice.
+Parent #5694/#5682 and complete repeated same-head Windows qualification
+remain open.
+
+### B-ADVANCED private upstream advancement for recovery consumers
+
+**Actually merged:** #7639 as
+`6170fd59e1a4cc4e2d3f2ba1790fc011fbd5b7ab`.
+
+Baseline: the actual #7634 merge. Add only the named recovery seed,
+module-private copied `pr_repo`, raw `legacy_pr_repo`, extracted upstream
+advancement and setup adapter in `test_pr_recovery.py`. Construction uses the
+existing hermetic HOME/Git/identity context and run-local seed locking.
+It executes actual initial publication and upstream commit/push once.
+The copy preserves the recorded old head/base and newer shared remote-tracking
+default tip; synchronization/rebase/checkpoint/publication remains each case's
+operation, not shared completed authority.
+
+Unlike the preserved candidate's generic `Add feature` published input,
+construction retains the original `Owned change` title and
+`feature/owned-change-aaaa` branch. Legacy inputs remain unpublished raw
+copies, so the actual custom-head publication, legacy record adjustment and
+upstream advancement still occur independently in those cases.
+Two adapter cases prove zero/one actual create calls for prepared/legacy
+inputs, exact title/branch and legacy base/patch metadata.
+
+Two repeated copy cases check exact published/source/base topology, relocated
+record/remote identity, absent recovery checkpoints and private state.
+Changing one copy's hook, config, source commit, remote ref and record leaves
+all seed and sibling bytes unchanged. The existing unrelated-branch sync
+consumer additionally preserves seed record and refs through actual sync and
+publication. Existing recovery/refusal bodies remain unchanged apart from
+that additive preservation check and the legacy fixture argument/input.
+The separate atomic-retention failure stub remains on `git_ops.git`; no
+A/R/P batching or dependent stub conversion is absorbed.
+
+The complete affected module passes on native Windows: 21 passed, zero
+skips, 191.28 seconds pytest / 198.56 preparation-cleanup inclusive, exactly
+two work-stealing workers under a 240-second diagnostic group with unchanged
+30-second default item watchdog, 180-second module mark and resource limits.
+Fifteen existing function bodies and all original decorators are
+AST-identical; the only other old-body changes are the named setup adapter,
+legacy fixture input and additive seed-preservation assertions.
+Ruff F/E9 and the 13-plugin install contract pass.
+The anchor's actual push updates refs shared with its linked worktree.
+The cases require the newer tip and the exact common original
+base of the published and upstream commits, while source HEAD stays old.
+No quiet-host, full-suite or repeated same-head qualification is claimed.
+
+Documentation impact is this ledger only; runtime, command, installation and
+configuration contracts remain unchanged. Provisioning clean-room and
+external deployment are inapplicable to this test-only fixture slice.
+Parent #5694/#5682 and repeated complete same-head native qualification
+remain open.
+
+### B-AUTH-PROFILE private authority installation profile
+
+**Actually merged:** #7634 as
+`af49d9ee8d183ff46097a7be789e06250114cc4d`.
+
+Baseline: the actual #7559 merge. Add only the named function-autouse
+`_isolated_authority_profile` fixture in `test_pr_publication_state.py`.
+It points `cfg.install_dir` at the case's own temporary authority profile;
+it does not substitute the authority guard, file lock, publication operation
+or persisted record. Every existing test body and decorator remains unchanged,
+including real subprocess contention, lock-through-I/O and post-wait
+authority revalidation checks.
+
+Two repeated cases require the exact private profile to start absent, acquire
+the real guard, observe its actual lock file and retain only their own case
+marker. No process/native boundary, test selection, skip, timeout, resource
+limit, production or publication contract changes are included.
+
+The complete affected module passes on native Windows: 23 passed, zero
+skips, 74.19 seconds pytest / 95.43 including host launch, preparation and
+owned cleanup. Exactly two work-stealing workers retain the 30-second default
+item watchdog, original 120-second module mark and resource limits under
+the 240-second diagnostic group. All 16 existing functions/classes and their
+decorators are AST-identical. Ruff F/E9 and the 13-plugin install contract
+pass. This is bounded functional evidence without a quiet-host or whole-suite
+performance qualification claim.
+
+Documentation impact is this ledger only; runtime, command, installation and
+configuration documentation stays accurate. Clean-room provisioning and
+external deployment are inapplicable to this test-only profile isolation.
+Parent #5694/#5682 and complete repeated same-head Windows qualification
+remain open.
+
+### B-PARTIAL private accepted-head fixture and refusal consumers
+
+**Actually merged:** #7559 as
+`842038a9a54d0c085b19a28311c5ed337c0226bc`.
+
+Baseline: the actual #7544 merge. Add only the named session
+`_partial_success_seed` and per-case `partial_success_repo` in
+`test_pr_rebase.py`. Construction uses the existing hermetic HOME/Git/identity
+context, run-local seed lock and real lost-acknowledgement publication helper.
+The seed contains the actual accepted remote commit, stale saved PR head,
+rebased unpublished source and saved JSON inputs; copying repairs private
+worktree/remote/record identity and restores the refspec config binding.
+
+The four original refusal parameter cases consume independent copies.
+Unavailable/different provider, unrelated foreign remote and racing update
+checks retain real publication refusal, remote-head and stale-record
+assertions. The foreign case additionally proves the provider is never
+observed; every refused outcome preserves the immutable seed record and refs.
+The positive recovery case still constructs its own real partial publication,
+so fixture reuse cannot replace that behavior under test.
+
+Two repeated-copy cases check exact saved JSON, old/accepted/rebased ancestry,
+feedback messages/content, config and relocated ownership. Mutating a private
+copy's JSON, hook, Git config, source commit, remote head and record leaves all
+seed and sibling bytes unchanged. All other 30 existing function bodies and
+all original decorators/parameter selections are unchanged. No production
+batching, transport snapshot adaptation, R/P absorption, new skip, selection
+or deadline change is included.
+
+The complete partial-success family passes on native Windows: seven passed,
+zero skips, 86.76 seconds pytest / 91.42 including preparation and cleanup.
+Exactly two work-stealing workers retain the 30-second default item watchdog,
+original module marks and resource limits under a 240-second diagnostic group.
+Initial new copy-regression failures were incorrect ancestry expectations:
+fresh publication squashes both schemes, leaving one `Own change` commit
+before accepted and unpublished feedback, not the two original work commits.
+The corrected regression checks the exact three-message sequence and base.
+Ruff F/E9, unchanged-body AST comparison and the 13-plugin install contract
+pass. This focused family is functional evidence, not full-module or
+whole-suite qualification; the outstanding complete rebase-module budget
+remains tracked by #5682.
+
+The combined coordination window including normal commit/publication and
+turn gaps exceeded its separate 240-second total cap: 15,990.83 seconds
+at release. The original message claiming that total was under 240 was
+explicitly corrected to both peers. No wait time was excluded and no
+total-window, quiet-host or whole-suite performance credit is taken.
+The 91.42-second functional test-group result is separate.
+
+Documentation impact is this ledger only: command, runtime, installation and
+configuration contracts remain unchanged. Provisioning clean-room and external
+deployment are inapplicable to this test-only fixture conversion. Parent
+#5694/#5682 and repeated complete same-head native qualification remain open.
+
+### B-FORK prepared helper and rerun consumers
+
+**Actually merged:** #7544 as
+`855ffa066206401e0b02bfddfac375ca5dc5ca1c`.
+
+Baseline: the actual #7539 foundation merge. The existing
+`pr_workflow_setup.PRWorkflowSetup._fork_headed_rerun` helper recognizes the
+private prepared fork record/directory and verifies its feedback file before
+returning. Every unprepared input retains the original real `create_pr`,
+fork migration and feedback-commit path, including already-published inputs.
+This slice does not absorb the independent published-input shortcut from
+the preserved source.
+
+Eleven named fork cases stay at their original `test_pr_ops.py` paths and
+select `fork_pr_repo` instead of the unpublished base. AST comparison
+confirms all 38 existing functions, names, decorators and bodies are
+unchanged after normalizing only the fixture argument and corresponding
+helper input. Later actual rerun publication, remote repoint, push-URL,
+locked identity, ownership and exact-lease refusal assertions remain real.
+No transport stub, P-dependent snapshot adaptation, production function,
+test selection, skip or deadline changes.
+
+Five adapter cases cover unpublished, already-published and prepared-fork
+inputs plus missing/changed prepared feedback. The first two paths call the
+actual publication once and build the original topology. The prepared path
+performs no publication or file mutation; malformed prepared feedback fails
+before any publication and leaves all private files unchanged.
+
+Both complete affected modules pass on native Windows in separate bounded
+groups: fixture/adapter 24 passed, zero skips, 61.86 seconds pytest / 74.39
+including preparation and cleanup; PR consumers 33 passed, zero skips,
+64.21 / 69.50 seconds. Exactly two work-stealing workers, the 30-second
+default item watchdog and unchanged marks/resource limits are retained
+under the 240-second diagnostic group. AST preservation, Ruff F/E9 and
+the 13-plugin install contract pass. These are functional diagnostics,
+not whole-suite budget qualification.
+
+Documentation impact is this ledger only; command, runtime, installation
+and configuration contracts remain unchanged. Provisioning clean-room and
+external deployment are inapplicable to this test-only adapter. Real-Git
+consumer/adapter contracts exercise the changed setup. Parent #5694/#5682
+and full repeated same-head native qualification remain open.
+
+### B-FORK foundation: private fork-only head, no consumer conversions
+
+**Actually merged:** #7539 as
+`e7583912a79a6a14d5c7025afd4526d7e06d4ec2`. Helper and consumer
+conversions are not included in that merge.
+
+Baseline: the actual #7535 consumer merge. Add only `_fork_pr_seed` and
+`fork_pr_repo`, using the existing private published snapshot and hermetic
+HOME/Git/identity context under run-local seed locking. The prepared topology
+keeps the old publication only in the copied fork, not origin; the fork has
+no default-branch head. The private worktree contains one unpublished
+feedback commit on top of the old snapshot. The persisted legacy record
+selects `fork` and has no rewrite ownership/identity.
+
+Two repeated-copy regression cases assert the exact old head, feedback
+parent/message/content, snapshot scheme, config/load binding, relocated
+record and origin/fork URLs, missing origin publication and missing fork
+default head. A second private sibling has the same initial history and
+independent physical fork files. Changing the first copy's fork config,
+hook, source commit, published head and record leaves every seed and sibling
+byte unchanged. Existing fixture/test functions and decorators are unchanged;
+no helper adapter, fork consumer or transport stub changes are included.
+
+Both complete fixture-copy and seed-cache modules pass on native Windows:
+48 passed, zero skips, 62.20 seconds pytest / 75.28 including preparation
+and cleanup, exactly two work-stealing workers, 30-second default item
+watchdog and unchanged resource limits under the 240-second diagnostic
+group. Ruff F/E9, unchanged-existing-body AST comparison and the 13-plugin
+install contract pass. This is not a whole-suite budget qualification.
+
+Documentation impact is this ledger only. Runtime, command, installation
+and configuration contracts do not change. Provisioning clean-room and
+external deployment are inapplicable to this test-only foundation; real-Git
+fixture-copy contracts exercise first construction and private copies.
+No Linux/container or parent whole-suite qualification is claimed.
+Consumer conversions and original #5694/#5682 remain open.
+
+### B-REBASED rewrite and legacy consumers
+
+**Actually merged:** #7535 as
+`810bbc09c81e23516c94371f3155000dfcac5742`. B-FORK foundation
+and consumer conversions are not included in that merge.
+
+Baseline: the actual #7523 foundation merge. Twelve rewrite test functions
+and four legacy-rewrite functions now take private completed real post-rebase
+fixtures instead of invoking `publish_and_rebase` as unrelated setup.
+Parameterized cases still select their actual snapshot/refspec scheme;
+literal cases use the matching concrete fixture.
+
+Only fixture arguments and the corresponding setup assignment change.
+AST comparison confirms all 23 rewrite and seven legacy functions,
+decorators, names and remaining bodies are unchanged. In particular, the
+later squash, ordinary-push refusal, explicit confirmation, exact lease,
+hook rejection, fork repoint, process race and record-generation checks
+still exercise the real consumer operations. The three rewrite cases that
+alter identity or destination before publication, or test legacy ownership
+refresh, keep their actual `publish_and_rebase` calls. That helper and the
+shared fixture implementation remain unchanged. The now-unused legacy
+module helper import is removed.
+
+No production batching, transport snapshot adaptation, record-only
+conversion, new skip, test selection or deadline change is included.
+Both complete consumer modules pass on native Windows in separate bounded
+groups: rewrite 40 passed in 157.34 seconds pytest / 170.84 including
+preparation/cleanup; legacy rewrite 21 passed in 55.63 / 59.38 seconds.
+Both use exactly two work-stealing workers, the 30-second default item
+watchdog and unchanged module marks/resource limits under the 240-second
+diagnostic group. There are zero skipped cases. The rewrite run overlapped
+unrelated artifact-extraction I/O; these are functional diagnostics, not
+quiet-host measurements or a whole-suite budget qualification.
+
+Documentation impact is this ledger only; runtime, command, installation
+and configuration contracts do not change. Provisioning clean-room and
+external deployment tests are inapplicable to this test-only conversion.
+The real-Git consumer modules are the direct integration check. Parent
+#5694/#5682 qualification remains open.
+
+### B-REBASED foundation: private completed setup, no consumer conversions
+
+**Actually merged:** #7523 as
+`f56434e4564fb3680fffc3f52460c4c445df4b92`. Consumer conversions
+are not included in that merge.
+
+Baseline: the actual #7521 adapter merge. Add only
+`_rebased_refspec_pr_seed`, `_rebased_snapshot_pr_seed`,
+`_copy_rebased_pr_repo`, both concrete fixtures and `rebased_pr_repo`.
+Both seeds invoke the existing unchanged
+`test_pr_rewrite.publish_and_rebase` against a copied unpublished base.
+That helper performs the actual first publication, advances the bare remote
+and rebases the source while retaining the old published head. Session setup
+uses the already-proven hermetic HOME/Git/identity context and run-local
+seed lock, not ambient host configuration.
+
+Four new cases (two schemes, two independent copies each) verify the old
+record/remote publication head, different rebased source head, exact new
+upstream parent and source/upstream content. They check copied config/load
+bindings and destination identity, and preserve the old snapshot-only local
+PR-head ref. Each makes a second sibling copy, then commits/pushes a new
+private ref and updates only its own record; all seed and sibling bytes
+must remain unchanged. Existing fixture tests and setup helper bodies are
+unchanged. No rewrite/rebase consumer, test selection, skip, item mark,
+deadline or production function changes.
+
+Both complete fixture-copy and seed-cache contract modules pass on native
+Windows: 46 passed, zero skips, 51.45 seconds pytest / 55.64 including
+preparation/cleanup, exactly two work-stealing workers, 30-second default
+item timeout and unchanged process/memory/temp limits under the 240-second
+diagnostic group. This does not qualify the parent suite budget.
+Documentation impact is this ledger only; runtime/command/install/config
+contracts do not change. Provisioning clean-room and external deployment
+are inapplicable to these test-only fixtures; the real-Git fixture contracts
+exercise first construction and independent copies directly. No Linux or
+container result is claimed. Consumer conversions remain a separate wave,
+and parent #5694/#5682 remains open.
+
+### B-PUBLISHED rebase setup adapter
+
+**Actually merged:** #7521 as
+`99d85042c87ff43d93aa94807f3d9dca528c9ae3`. B-REBASED foundation and
+consumer conversions are not included in that merge.
+
+Baseline: the actual #7509 finalization-consumer merge. This slice adds
+only the module-private published-state adapter in `test_pr_rebase.py`.
+Default/refspec cases copy the existing real refspec publication; snapshot
+cases, including the legacy checked-out-head case, copy a separately built
+snapshot publication with the original `Own change` title. The general
+`Add feature` snapshot seed is deliberately not substituted: that would
+change the published branch and commit subject. The new session seed uses
+the existing run-local locking and hermetic HOME/Git/identity setup.
+
+`_prepare` reuses only a matching scheme, title and derived branch when no
+explicit branch is requested. Custom-branch cases copy the unpublished base
+and still execute the real first publication. Four real-Git cases check both
+schemes, title/branch/head/record preservation, snapshot-only local head refs,
+and the absence or presence of the real `create_pr` call. Three refusal
+canaries independently vary scheme, title and branch. AST comparison proves
+all 21 original test bodies/decorators and other existing helpers unchanged.
+There is no rebase-result cache, partial-success seed, production batching,
+new skip or deadline change in this slice.
+
+Native Windows diagnostics cover all 46 cases with exactly two work-stealing
+workers. The setup/publication group passes 12 cases in 76.12 seconds
+(80.38 including preparation/cleanup); the remaining groups pass 18, 10
+and five non-native cases. The opt-in native consoleless two-cycle case
+initially failed before observation because the cached test interpreter
+lacked the newly declared `agent-worktree-identity` dependency. Restoring
+that dependency, without source changes, lets that case pass in 13.78
+seconds (16.80 inclusive). Every group stays below 240 seconds with the
+existing resource limits and item marks. These are complete case diagnostics
+across groups, not a single complete-module or whole-suite budget proof;
+parent #5694/#5682 qualification remains open.
+
+Documentation impact is confined to this execution ledger: no public command,
+runtime, installation or configuration contract changes. Clean-room
+provisioning and external deployment tests are inapplicable to this test-only
+adapter. Its real publication/rebase consumers and native observer exercise
+the changed setup directly; Linux/container evidence is not claimed.
+
+### B-PUBLISHED finalization consumers
+
+**Actually merged:** #7509 as
+`f0f2cda72af7caeeefb6f66d5eff29945e7278dc`. Rebase setup adapters and
+the remaining fixture/production contracts are not included in that merge.
+
+Baseline: the actual #7497 B-MUX merge
+`91e6b9bbea7e65e958a8903016e03a710dfe9d87`, following the
+#7483 published-fixture foundation. Convert only the eleven named
+`test_finalize_pr.py::TestPRFinalize` methods in the PUB inventory below.
+Each substitutes the private published fixture argument/unpack and removes
+its setup-only first `create_pr`. AST comparison proves all remaining body
+statements, decorators and seven other cases unchanged.
+
+The complete eighteen-case module and both mux-binding canaries pass
+without skips on native Windows: 20 passed in 79.97 seconds, 91.20 including
+preparation/cleanup. Exactly two work-stealing workers preserve the
+30-second item, 240-second diagnostic group and existing resource limits.
+Actual merge/reconciliation, dirty-state refusal and each race check remain
+in their original test bodies. This is not whole-suite qualification.
+
+Only this ledger needs documentation: runtime/command/install behavior
+does not change. Provisioning clean-room and external deployment testing
+are inapplicable to this test-only setup substitution; the native finalization
+consumer module exercises the changed contract directly. Rebase setup
+scheme/title preservation, landing reuse/consolidation and all other
+residual contracts remain independent. Parent #5694/#5682 stays open.
+
+### B-MUX: explicit no-mux boundary for Git-only finalization fixtures
+
+**Actually merged:** #7497 as
+`91e6b9bbea7e65e958a8903016e03a710dfe9d87`. The separate
+B-PUBLISHED finalization substitutions are not included in that merge.
+
+Add the opt-in `git_only_mux` fixture and apply it only to
+`test_finalize_pr.py`, `test_finalize_diverged_branch.py` and
+`test_finalize_landing.py`. These fixtures create Git repositories, not mux
+sessions. Discovery and mux termination return absent without contacting the
+host service. The handmade-PR landing case additionally checks the exact
+worktree ID/path passed to its synthetic mux/process termination doubles.
+Arguments are recorded and asserted after finalization returns, outside
+production's broad cleanup exception handler; each expected call must occur
+exactly once. Its real `validate_and_finalize` result assertion is unchanged.
+
+Two regression cases put failing canaries behind the original discovery and
+termination bindings, prove the fixture cannot reach either, and prove
+teardown restores both. No native process/kernel/session-ownership module,
+production function, subprocess admission rule or global autouse behavior
+changes. These explicit Git-only doubles are not process-ownership evidence.
+
+All four complete affected modules pass without skips on native Windows:
+9 boundary/diverged cases, 18 PR-finalization cases and 24 landing cases
+(51 total). Exactly two work-stealing workers retain 30-second item and
+existing resource limits; diagnostic groups take 33.67/105.81/122.11 seconds
+under the unchanged 240-second group bound, 266.05 seconds including aggregate
+preparation/cleanup. Runtime clean-room/external deployment testing is
+inapplicable to this test-only isolation boundary. No complete-suite
+qualification is claimed.
+
+Review found that an assertion inside the process-termination double was
+swallowed by production's broad exception handler. After moving both argument
+checks outside cleanup, all 26 boundary/landing cases pass without skips in
+114.54 seconds. A disposable in-memory wrong-cleanup-path wrapper then makes
+the real finalization case fail at the external path assertion, as intended
+(31.12 seconds); no production file is edited. Both runs retain exactly two
+workers and unchanged bounds; 156.70 seconds includes their preparation and
+cleanup. The mutation helper is removed afterward.
+
+Documentation impact is this ledger's explicit fixture scope and evidence
+limits; no command/install/runtime behavior changes. B-PUBLISHED finalization
+consumers remain unchanged in this slice, as do B-LANDING seed reuse and
+assertion consolidation. Those follow independently after this boundary lands.
+Parent #5694/#5682 and all remaining contracts stay open.
+
+### B-PUBLISHED create/target/state consumers
+
+**Actually merged:** #7490 as
+`5ae60e3699ee2b8dd12128c39fd3d917479de98f`. Finalization and
+rebase consumers are not included in that merge.
+
+Baseline: the actual #7483 foundation merge
+`a74f203c3927dd392878662bd66d70dfac6b2d01`. Convert exactly
+27 named methods below: six in `TestCreatePR`, sixteen PUB-owned methods in
+the retained `test_pr_ops.py::TestPRPublication`, and five in
+`test_pr_publication_state.py`. Each changes only its fixture argument and
+unpack, removing the setup-only first `create_pr` and its success assertion
+where present. An AST comparison proves the remaining body and every
+decorator unchanged. The five state methods consume an already-published
+snapshot; their assertions concern provider/attribution/revision behavior,
+not the setup title or branch spelling.
+
+Both mixed PUB/LOAD methods retain their existing record reload behavior;
+no B-OBSERVATION changes are included. Fork setup, transport stubs and all
+subsequent native creates/pushes/refusals/locks remain under their original
+case bodies. Fresh-publication controls still use `pr_repo`. The legacy
+`test_pr_ops.py` path remains for exact-node selection compatibility.
+
+All three complete affected modules pass without skips on native Windows:
+31 create cases, 33 publication-target cases and 21 publication-state cases
+(85 total). Their two-worker diagnostic groups take 117.31, 146.97 and
+65.34 seconds, with 336.61 seconds including aggregate preparation/cleanup.
+The 30-second item, 240-second diagnostic group and existing resource limits
+are unchanged. No full-suite qualification is claimed.
+
+The eleven finalization consumers await the independently owned B-MUX
+fixture contract, while the rebase setup adapter needs its own scheme/title
+preservation check. Neither is silently credited by this consumer slice.
+Other fixture, production and selection waves and parent #5694/#5682 remain
+open. This ledger is the documentation impact; runtime/install/command
+behavior is unchanged. Provisioning clean-room and external-venue validation
+are inapplicable to these test-only substitutions; real native Git/provider
+boundary and race cases run in the complete affected modules.
+
+### B-PUBLISHED foundation: private published topology, no consumer conversion
+
+**Actually merged:** #7483 as
+`a74f203c3927dd392878662bd66d70dfac6b2d01`. This settles only
+the foundation; consumer conversions remain separate.
+
+Baseline: the actual #7476 B-BASE merge
+`42ea761856e212becd1a758df0f637f77fc72cd6`. This slice adds only
+`_published_pr_seed`, `_published_refspec_pr_seed`, `published_pr_repo` and
+`published_refspec_pr_repo`, together with their isolated session environment
+and I's four published-copy cases. Existing consumers remain unchanged.
+Snapshot and refspec seeds each execute the real initial `create_pr` once
+under the run-local publication lock. Copies preserve the actual published
+head and repair their private tracking path, remote slug and rewrite identity.
+The refspec fixture returns and binds refspec configuration, not the base
+copy helper's snapshot default.
+
+Session setup precedes function-autouse isolation, so the shared setup context
+reuses the existing HOME isolation generator, disables global/system Git config
+and resident-monitor startup, and selects an absent identity key under that
+temporary home. It restores all bindings on both success and failure. Two
+native subprocess probes start with synthetic global signing/external-hook
+configuration, a registry sentinel and an invalid operator key; actual seed
+construction succeeds without using or changing that host-like state.
+
+All 83 focused cases pass without skips on native Windows in 128.19 seconds
+(134.27 inclusive of preparation and cleanup): the complete seed-cache,
+base/published-copy and publication-check modules. Exactly two work-stealing
+workers retain the 30-second item and unchanged resource limits under a
+240-second diagnostic group. Ruff F/E9 and the thirteen-plugin install-contract
+gate pass. This is fixture-contract evidence, not whole-suite qualification.
+Clean-room provisioning and an external venue are inapplicable to this
+test-only setup contract; the synthetic uncontained subprocess probes exercise
+first-touch session setup directly.
+
+Documentation impact: this ledger records the bounded test-fixture contract;
+no runtime, command, installed behavior or CI selection changes. The remaining
+B-PUBLISHED consumers, rebase/fork seeds and parent #5694/#5682 qualification
+are explicitly unimplemented by this slice.
+
+### B-BASE: private copies of the base Git topology
+
+**Actually merged:** #7476 as
+`42ea761856e212becd1a758df0f637f77fc72cd6`. This settles the base
+copy contract only, not published/rebased/fork adoption or parent qualification.
+
+Baseline: Dev `66ec88c76c013a7833a9c48a9602c094caf4ca4c`, the actual
+#7471 B-SEED merge. Build the bare remote, anchor and two-commit linked
+worktree once in the run-local seed. Each `pr_repo` call physically copies
+all Git stores and repairs administrative links, origin/fork URLs and saved
+record/rewrite identities. Config and tracking bindings remain per case.
+Empty Git templates leave private hook directories; automatic maintenance is
+disabled in this setup-only topology. Session construction temporarily ignores
+global/system Git configuration, restoring the environment even on failure:
+session fixtures run before function-scoped HOME isolation. No published/rebased/fork fixture
+adoption or provider observation caching is included.
+
+Only the existing `pr_repo` body changes; the other 25 existing conftest
+function/class bodies are AST-identical. Existing test bodies, native
+deadlines, parameters and tier/skip declarations are unchanged.
+Five real-Git regressions cover private object files (no hardlinks or
+alternates), repaired links, two-commit history, private config/index/hooks/
+refs/tracking records, sibling isolation and byte-identical seeds.
+Synthetic persisted PR inputs additionally test relocation with and without
+a rewrite identity, stable stamped entry IDs, revision advancement and an
+unrelated PR entry that must not be relocated. These inputs are not live
+publication authority.
+
+All 38 focused cases pass without skips on native Windows in 20.86 seconds
+(25.33 inclusive): all five copy regressions, two config-isolation regressions,
+all 29 merged publication regressions and unchanged record-only/real create-pr controls.
+The native uncontained construction probe first observes synthetic global
+signing/external-hook settings, builds without using either and observes the
+unchanged restored settings afterward. Failure-path restoration is also covered.
+Exactly two
+work-stealing workers and unchanged 30-second item/resource limits apply,
+with a 240-second diagnostic group. Ruff F/E9 and thirteen-plugin
+install-contract checks pass.
+
+Broader affected-consumer diagnostics are deliberately not qualification:
+ten completed two-file groups pass 358 cases (maximum group 190.50 seconds
+inclusive). The first diagnostic's 900-second aggregate expires in the next
+group with 14.656 seconds remaining. A separate remaining-file diagnostic
+then completes that group but reaches the unchanged 240-second limit in
+the rebase pair. Neither incomplete diagnostic is a passing complete suite,
+and no interrupted group or pre-existing exhaustive skip earns credit.
+The #5682/#5694 budget obligation remains open for the subsequent fixture/
+behavioral waves and repeated complete same-head qualification; limits and
+selection are not relaxed here.
+
+Fresh private Git construction/copy is directly exercised, including actual
+publication and hook effects in the completed consumer groups. Deployment
+clean-room testing is inapplicable to this test-only fixture; unavailable
+Linux/external execution receives no credit. Next are separately scoped
+published/rebased/fork setup consumers, not absorption of those contracts
+into this base-copy wave.
+
+### B-SEED: run-local seed publication only
+
+**Actually merged:** #7471 as
+`66ec88c76c013a7833a9c48a9602c094caf4ca4c`. This settles seed
+publication only; adoption by copy fixtures and parent qualification remain open.
+
+Baseline: Dev `2b3e36bc9f3bfae5b8fc692e627ecbd859cc7cc1`, the actual
+#7465 B-RECORD foundation merge. Extract only `_seed_directory` and its
+publication regressions from the pinned residual source. No existing fixture
+uses this helper yet; B-BASE, published/rebased/fork copies and their isolation
+regressions remain independently scoped.
+
+Contained calls use the runner's private plugin sandbox, outside per-group
+temporary directories. A mandatory cross-process sidecar lock spans build,
+atomic readiness publication and consumption. Readiness must match the exact
+version/key/path object, including an integer (not boolean or floating-point)
+version. Invalid keys, missing/relative/non-directory sandbox roots,
+symlink controls, incomplete builds and invalid readiness fail explicitly.
+Uncontained calls retain independent `tmp_path_factory` directories.
+These seeds hold test setup, never authority or mutable provider results.
+
+All 25 pre-existing conftest functions/classes have identical AST bodies.
+Twenty-nine seed-publication cases exercise independent group factories,
+readiness shape/type/content failures, symlink predicates, missing published
+directories, mandatory-lock failure, builder exceptions, abrupt process exit,
+invalid keys and uncontained fallback. The real two-process test waits for an
+observed failed native sidecar acquisition before allowing the builder to
+finish: it proves actual contention, build-once publication and reuse after
+group cleanup rather than relying on a startup-delay race.
+
+All 31 targeted cases pass without skips on native Windows in 12.04 seconds
+(15.11 inclusive): all 29 new publication cases, the unchanged record-only
+construction regression and the unchanged real create-pr association control.
+Exactly two work-stealing workers, 30-second items, the 240-second diagnostic
+group and unchanged process/memory/storage limits apply. Ruff F/E9 and the
+thirteen-plugin install-contract guard pass with zero violations. This is
+focused contract evidence, not complete same-head Windows qualification.
+Fresh private sandbox publication is exercised directly; no installer/runtime
+behavior changes require a clean-room deployment. Linux/external execution
+is unavailable and receives no credit. No production code, provider doubles,
+existing fixture consumers, test tiers or CI admission changes are included.
+
+### B-RECORD foundation: persisted records without publication setup
+
+**Actually merged:** #7465 as
+`2b3e36bc9f3bfae5b8fc692e627ecbd859cc7cc1`. This settles only the
+foundation and named consumers below, not the remaining B-RECORD conversions
+or the parent Windows qualification.
+
+Baseline: Dev `8a70551c987775375310794e38d3c89aaee4607d`, the actual
+#7457 final mechanical-family merge. Add function-private `record_repo` with
+the existing base fixture's config, worktree identity and tracking bindings,
+but no Git repository, commits, remote or publication. The local `recorded_pr`
+fixture supplies explicit synthetic fork/head/base/patch inputs and stamps a
+fresh frozen identity through the existing production helper. These inputs
+are record-model test data, never live publication or merge authority.
+
+Convert exactly 36 methods / 42 expanded cases: the fourteen
+`TestSetPRAndStatus` methods except `test_set_pr_merges_with_create_pr`,
+the nine B-RECORD `TestPRStatusLive` methods and four `TestPRThreads` methods
+listed below, and all nine reassignment/stale-writer methods (fifteen cases)
+now in `test_pr_record_reassignment.py`. The real create-pr association
+control retains its original `pr_repo` and actual publication.
+
+Complete real collection preserves every original 317 identity and adds two
+fixture regressions. All original subject/assertion/decorator/parameter/mark/
+base AST is preserved: only the named fixture arguments/unpacks and the
+reassignment methods' setup-only `_fork_headed_rerun` calls change, with
+additive missing-identity precondition assertions described below.
+The other 275 original cases have identical full method and resolved-fixture
+metadata. Collection passes take 23.92 and 13.61 seconds inclusive.
+
+All 45 targeted cases pass without skips on native Windows in 17.38 seconds
+(21.19 inclusive): all 42 converted consumers, both new construction
+regressions that reject any Git invocation, and the retained real-publication
+control. Exactly two work-stealing workers and unchanged 30-second item,
+240-second diagnostic group and resource limits apply. Ruff F/E9 and the
+thirteen-plugin install-contract guard pass with zero violations.
+No provider double, production code, seed reuse, native-operation assertion,
+test tier or CI admission changes enter this batch.
+
+The shared synthetic fixture leaves `head_identity` absent from its first
+persisted state. Record merging restores a nonempty durable identity, so
+the case explicitly asserts both loaded snapshots lack it before the other
+writer backfills. All 45 cases pass without skips in
+18.18 seconds (22.17 inclusive); final collection takes 14.38 seconds inclusive.
+A separate contained in-memory mutation suppressing only identity backfill
+causes this case to fail at its original final preservation assertion, not
+at the new preconditions (3.23 seconds pytest / 6.62 inclusive). This negative
+control is expected failure evidence, not a passing suite or qualification.
+
+This admits only the named B-RECORD foundation/consumers; other record-only
+conversions in legacy/native-state files remain separately scoped. B-SEED,
+B-BASE, B-PUBLISHED, B-REBASED and B-FORK are not implemented by this batch.
+Fresh fixture construction is exercised directly in private native sandboxes;
+installer clean-room provisioning is inapplicable and unavailable Linux/external
+execution gets no credit. Repeated complete same-head Windows qualification
+and the original #5694/#5682 completion gate remain open.
+
 ## Mechanical move mapping: preserved, not conflated with fixtures
 
 ### Final mechanical family: retain the legacy publication module path
+
+**Actually merged:** #7457 as
+`8a70551c987775375310794e38d3c89aaee4607d`. The original 317-case
+mechanical family partition is complete; fixture-semantic contracts and
+parent qualification remain open.
 
 Baseline: Dev `98b77a6d2de17cec5c850b742ea1a0d08f7dab5e`, the actual
 #7452 push-changes partition merge. The 33 remaining methods already form
@@ -1564,7 +3711,7 @@ effects remain per-case and fresh.
 | B-RECONCILE | 4 | `test_reconcile.py::_stage_installation_context`, both staging callers and regression: stage every native `.py`/`.ps1` sibling, preserve fixture override, repair missing guest helper; do not silently replace a current override or omit native dependencies. |
 | B-REGISTRY-ASSERT | 2 | `test_registry_paths.py` standalone missing-receipt case moves into namespaced registration case before valid receipt publication; exact unreadable-identity exception retained. Combined identity must still exercise both refusal and later registration persistence. |
 | B-REPOS-CONFIG | 2 | `test_repos.py::_init_config_repo` plus named backfill/add-repo consumers: real Git config only where consumed, plain directory for preflight-skipped cases; preserve credential host/account/unknown-name refusals. `_init_repo` continues identity/commit setup for real-history tests. Terminal LF has no new behavior. |
-| B-CLONE-IDENTITY | 2 | `test_repos.py::_bare_anchor_from_clone`: remove clone-local user identity only if its actual commit-tree consumers provide their own identity; exact outstanding validation question is whether every such caller still resolves nonempty commits under isolated HOME. Candidate belongs here, not a broad Git batching batch; keep/reinstate identity if that gate fails. |
+| B-CLONE-IDENTITY | 2 | `test_repos.py::_bare_anchor_from_clone`: remove only the repeated second local user identity writes; the first checked email/name writes remain. Both actual commit-tree consumers must still resolve nonempty commits under isolated HOME and pass checked update-ref. Candidate belongs here, not a broad Git batching batch; required identity is not removed. |
 | B-RESOURCE | 2 | `test_resource_producer_finalize.py::_final_owner_seed`, `final_owner`: copy anchor/origin privately, construct fresh tracking/project/install dirs and relocate origin; transitive finalization retains real resource-owner decisions. Depends B-SEED and original `_env` builder, not mutable owner snapshots. |
 | B-TERMINAL | 2 | `test_terminal_conclusion.py::_worker_seed`, `_worker`, copy-isolation regression and remaining 58 consumer/helper hunks (including `TestReciprocalDisposal._harness`): copied template-free Git topology, repaired links and URLs; fresh tracking per copy; actual live/foreign/dirty/claim/finality decisions and reciprocal disposal remain unchanged. Commit/push/removal of first copy leaves seed/second byte-identical. No cached liveness. |
 | B-GENERATION | 5 | `test_independent_execution_spaces.py::test_session_register_deregister_fence_raced_fresh_foreign_record`: documented write-verb generation and required `min_version` both 3, preserving raced-foreign-record fence; not lowering API admission. |
@@ -1664,7 +3811,10 @@ not create a behavioral dependency between otherwise independent batches.
   `test_codename_mode_skip_does_not_record_attribution_head`, and
   `test_no_attribution_omits_marker` maps to the strengthened equivalent
   assertions above -> B-PROVIDER-ASSERT. Removing unused fixture parameters
-  from `test_attribution_keys_are_consistent` -> B-PROVIDER-RECORD.
+  from `TestCreatePRAutoOpen.test_codename_mode_skips_marker_for_a_non_string_codename`
+  -> B-PROVIDER-RECORD. The earlier `test_attribution_keys_are_consistent`
+  label was an ownership-description error, not a symbol in either
+  immutable input; hunk 15 and its hash are unchanged.
 
 No MX item is a new unresolved ownership question. Implementation must first
 split the identified statements/functions and retain their prerequisite

@@ -17,6 +17,7 @@ import asyncio
 import datetime
 import os
 import re
+import threading
 import types
 
 import pytest
@@ -28,6 +29,109 @@ from worktree_manager.production_picker.picker_tui import derive  # noqa: E402
 from worktree_manager.production_picker.picker_tui import obscure as pobs  # noqa: E402
 
 GOLDEN_DIR = os.path.join(os.path.dirname(__file__), "goldens", "picker")
+
+
+def _pending_setup_screen(epoch=1):
+    return types.SimpleNamespace(
+        _setup_epoch=epoch, _setup_applied_epoch=0, _setup_failed_epoch=0,
+        _setup_completion_event=threading.Event(), _bg_cancel=threading.Event(),
+        debug="setup-failed: source unavailable",
+    )
+
+
+@pytest.mark.parametrize("outcome", ["applied", "failed"])
+def test_initial_setup_wait_yields_without_widget_barriers(outcome):
+    screen = _pending_setup_screen()
+
+    async def forbidden_pause():
+        pytest.fail("setup polling must not enqueue widget barriers or force repaint")
+
+    async def run():
+        async def complete():
+            await asyncio.sleep(0)
+            setattr(screen, f"_setup_{outcome}_epoch", 1)
+            screen._setup_completion_event.set()
+
+        completion = asyncio.create_task(complete())
+        try:
+            if outcome == "failed":
+                with pytest.raises(RuntimeError, match="source unavailable"):
+                    await pcap._wait_for_initial_setup(
+                        screen, types.SimpleNamespace(pause=forbidden_pause)
+                    )
+            else:
+                await pcap._wait_for_initial_setup(
+                    screen, types.SimpleNamespace(pause=forbidden_pause)
+                )
+        finally:
+            await completion
+        assert getattr(screen, f"_setup_{outcome}_epoch") == 1
+
+    asyncio.run(run())
+
+
+def test_initial_setup_wait_ignores_superseded_outcome():
+    screen = _pending_setup_screen(epoch=2)
+    screen._setup_applied_epoch = screen._setup_failed_epoch = 1
+
+    async def run():
+        async def complete():
+            await asyncio.sleep(0)
+            screen._setup_applied_epoch = 2
+            screen._setup_completion_event.set()
+
+        completion = asyncio.create_task(complete())
+        try:
+            await pcap._wait_for_initial_setup(screen, None)
+            assert screen._setup_applied_epoch == 2
+        finally:
+            await completion
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("epoch", [0, 1])
+def test_initial_setup_wait_keeps_timeout_diagnostics(epoch):
+    screen = _pending_setup_screen(epoch)
+    with pytest.raises(
+        AssertionError,
+        match=rf"setup epoch {epoch} to finish \(applied=0, failed=0\)",
+    ):
+        asyncio.run(pcap._wait_for_initial_setup(screen, None, timeout=0))
+
+
+def test_initial_setup_wait_wakes_when_picker_closes():
+    screen = _pending_setup_screen()
+
+    async def run():
+        async def close():
+            await asyncio.sleep(0)
+            screen._bg_cancel.set()
+            screen._setup_completion_event.set()
+
+        closing = asyncio.create_task(close())
+        try:
+            with pytest.raises(RuntimeError, match="Picker closed"):
+                await pcap._wait_for_initial_setup(screen, None)
+        finally:
+            await closing
+
+    asyncio.run(run())
+
+
+def test_initial_setup_wait_remains_bounded_without_completion():
+    with pytest.raises(AssertionError, match="timed out waiting for setup epoch 1"):
+        asyncio.run(
+            pcap._wait_for_initial_setup(_pending_setup_screen(), None, timeout=0.01)
+        )
+
+
+@pytest.mark.parametrize("timeout", [-1, float("inf"), float("nan")])
+def test_initial_setup_wait_rejects_unbounded_timeout(timeout):
+    with pytest.raises(ValueError, match="finite and non-negative"):
+        asyncio.run(
+            pcap._wait_for_initial_setup(_pending_setup_screen(), None, timeout=timeout)
+        )
 
 
 def _fixture_source():
@@ -91,6 +195,18 @@ def test_worktrees_list_grid_matches_golden(monkeypatch, tmp_path):
     caps = pcap.capture(_fixture_source(), live=False)
     grid = _normalize(caps["text"])
     assert grid == _golden("worktrees_list.txt", grid)
+
+
+def test_capture_reports_the_actual_setup_failure(monkeypatch, tmp_path):
+    _isolate_pivots(monkeypatch, tmp_path)
+    source = _fixture_source()
+
+    def fail_load():
+        raise RuntimeError("fixture source unavailable")
+
+    source.load = fail_load
+    with pytest.raises(RuntimeError, match="fixture source unavailable"):
+        pcap.capture(source, live=False)
 
 
 def test_grid_renders_state_vocabulary(monkeypatch, tmp_path):

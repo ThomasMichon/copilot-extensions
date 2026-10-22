@@ -20,8 +20,11 @@ import re
 import subprocess
 from pathlib import Path
 
+from agent_procutil import no_window_kwargs
+
 from . import config as cfg
 from . import git_ops, output, tracking
+from .creation_identity import IdentityMode, new_tracking_identity, validate_mode
 
 
 def _worktree_id_from_git(cwd: Path) -> str | None:
@@ -94,8 +97,11 @@ def _worktree_path_for_id(
     return str(Path(config.default_repo.worktree_root) / worktree_id)
 
 
-def _adopt_linked_worktree(cwd: str | Path) -> str | None:
+def _adopt_linked_worktree(
+    cwd: str | Path, *, identity_mode: IdentityMode = "legacy",
+) -> str | None:
     """Track a linked worktree created by an external session host."""
+    validate_mode(identity_mode)
     root = _linked_worktree_root(cwd)
     worktree_id = _worktree_id_from_git(root) if root is not None else None
     if root is None or not worktree_id or not cfg.active_project():
@@ -111,6 +117,7 @@ def _adopt_linked_worktree(cwd: str | Path) -> str | None:
         branch = git_ops.current_branch(root)
         if not branch:
             return None
+        tracking_path = cfg.tracking_dir()
         record, _created = tracking.create_new_record_if_absent(
             worktree_id=worktree_id,
             branch=branch,
@@ -118,12 +125,18 @@ def _adopt_linked_worktree(cwd: str | Path) -> str | None:
             repo=config.repo_name,
             machine=config.machine,
             platform_name=config.platform,
-            tracking_path=cfg.tracking_dir(),
+            tracking_path=tracking_path,
             interface="cli",
             origin="user",
             checkout_managed=False,
+            machine_identity_factory=lambda: new_tracking_identity(
+                identity_mode, repo=config.repo_name, machine=config.machine,
+                platform_name=config.platform, tracking_path=tracking_path, config=config,
+            ),
         )
     except Exception:
+        if identity_mode != "legacy":
+            raise
         return None
     if record.repo != config.repo_name or git_ops._normalize_wt_path(
         record.worktree_path
@@ -368,6 +381,7 @@ def _find_repo_dir() -> Path | None:
             capture_output=True,
             text=True,
             timeout=5,
+            **no_window_kwargs(),
         )
         if r.returncode == 0:
             return git_ops.resolve_to_anchor(Path(r.stdout.strip()))

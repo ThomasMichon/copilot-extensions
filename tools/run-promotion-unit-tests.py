@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import _thread
 import hashlib
+import importlib
 import json
 import os
 import sys
@@ -24,6 +25,11 @@ from promotion_unit_packet import verify_packet
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKET = ROOT / "tools/promotion_unit_tests"
+
+
+def prepare_framework_io() -> None:
+    if sys.platform == "win32":
+        importlib.import_module("colorama")
 
 
 def write_line_coverage(cov, path: Path, version: str) -> None:
@@ -76,6 +82,8 @@ def main() -> int:
     import coverage
     import pytest
 
+    # Pytest's Windows capture adapter loads native console support before collection.
+    prepare_framework_io()
     with tempfile.TemporaryDirectory(prefix="promotion-units-") as temporary:
         run = UnitRun(None, ROOT, manifest["sources"], Path(temporary))
         cov = coverage.Coverage(
@@ -100,7 +108,8 @@ def main() -> int:
                     "-q", "-x", "--capture=sys", "-c", os.devnull, "-p", "no:cacheprovider",
                     "--noconftest", "--import-mode=importlib", "--assert=plain",
                     "--log-file", str(Path(temporary) / "pytest.log"),
-                    "--rootdir", str(ROOT), "--basetemp", str(Path(temporary) / "pytest"),
+                    "--rootdir", str(ROOT), "--confcutdir", str(ROOT),
+                    "--basetemp", str(Path(temporary) / "pytest"),
                     *[str(ROOT) + "/" + node for node in manifest["nodes"]],
                 ], plugins=[run])
             finally:

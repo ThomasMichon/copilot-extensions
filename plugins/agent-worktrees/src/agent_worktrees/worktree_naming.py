@@ -41,9 +41,20 @@ def prospective_session_worktree_id(
     identity: WorktreeMachineIdentity, timestamp: str, suffix: str,
 ) -> str:
     """Name a new physical/environment tuple without stripping the physical name."""
-    return session_worktree_id(
+    worktree_id = session_worktree_id(
         identity.machine, identity.environment, timestamp, suffix, physical_machine=True,
     )
+    reserved = {"CON", "PRN", "AUX", "NUL"} | {
+        f"{prefix}{digit}" for prefix in ("COM", "LPT") for digit in "123456789¹²³"
+    }
+    if (
+        any(ord(char) <= 32 or ord(char) == 127 or char in '/\\~^:?*["<>|' for char in worktree_id)
+        or worktree_id.startswith(".") or worktree_id.endswith((".", ".lock"))
+        or ".." in worktree_id or "@{" in worktree_id
+        or worktree_id.split(".", 1)[0].upper() in reserved
+    ):
+        raise ValueError("physical machine name cannot form a portable path/Git-ref component")
+    return worktree_id
 
 
 def parse_session_worktree_id(worktree_id: str) -> tuple[str, str, str] | None:

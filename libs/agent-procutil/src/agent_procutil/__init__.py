@@ -98,6 +98,7 @@ __all__ = [
     "JobHandle",
     "spawn_in_kill_on_close_job",
     "spawn_sync_in_kill_on_close_job",
+    "SyncProcessLaunchError",
     "detached_kwargs",
     "windowless_daemon_kwargs",
     "windowless_python",
@@ -310,9 +311,9 @@ def _assign_suspended_to_kill_on_close_job(
 
     The returned :class:`JobHandle` owns the Job Object handle. Hold it for the
     child process lifetime; close it once ordinary cleanup has finished.
-    Private to :func:`spawn_in_kill_on_close_job`: using a bare PID is safe only
-    while the child is still suspended and cannot have exited or spawned
-    descendants before assignment.
+    Internal callers use either a still-suspended child or their own current
+    process, whose identity cannot be reused during this call. The latter
+    establishes inherited containment before a cross-OS owner creates children.
     """
     if not _is_windows():
         return None
@@ -458,6 +459,20 @@ async def spawn_in_kill_on_close_job(
     return process, job_handle
 
 
+class SyncProcessLaunchError(OSError):
+    """Process creation failed before any child or Job handle was returned."""
+
+    def __init__(self, error: OSError):
+        super().__init__(*error.args)
+        for name in ("errno", "strerror", "filename", "filename2", "winerror"):
+            if hasattr(error, name):
+                setattr(self, name, getattr(error, name))
+
+
+class SyncProcessNotFoundError(SyncProcessLaunchError, FileNotFoundError):
+    """Keep native missing-file handling compatible with the typed boundary."""
+
+
 def spawn_sync_in_kill_on_close_job(
     argv: list[str] | str,
     *,
@@ -494,6 +509,8 @@ def spawn_sync_in_kill_on_close_job(
     charge -- containment is a best-effort hardening layer, not a hard
     dependency for the child to execute at all. Off Windows this is a plain
     ``subprocess.Popen`` call returning ``(process, None)``.
+    Process-creation OS errors are ``SyncProcessLaunchError`` instances;
+    subsequent containment or cleanup errors retain their original types.
     """
     if type(allow_breakaway) is not bool:
         raise ValueError("allow_breakaway must be a boolean")
@@ -503,13 +520,21 @@ def spawn_sync_in_kill_on_close_job(
     ):
         raise ValueError("CREATE_BREAKAWAY_FROM_JOB conflicts with allow_breakaway=False")
     if not _is_windows():
-        return subprocess.Popen(argv, **kwargs), None  # noqa: S603 - argv list, no shell
+        try:
+            return subprocess.Popen(argv, **kwargs), None  # noqa: S603 - argv list, no shell
+        except OSError as error:
+            kind = SyncProcessNotFoundError if isinstance(error, FileNotFoundError) else SyncProcessLaunchError
+            raise kind(error) from error
 
     spawn_kwargs = dict(kwargs)
     spawn_kwargs["creationflags"] = (
         int(spawn_kwargs.get("creationflags", 0)) | _CREATE_SUSPENDED
     )
-    process = subprocess.Popen(argv, **spawn_kwargs)  # noqa: S603 - argv list, no shell
+    try:
+        process = subprocess.Popen(argv, **spawn_kwargs)  # noqa: S603 - argv list, no shell
+    except OSError as error:
+        kind = SyncProcessNotFoundError if isinstance(error, FileNotFoundError) else SyncProcessLaunchError
+        raise kind(error) from error
     job_handle: JobHandle | None = None
     try:
         pid = process.pid
@@ -541,6 +566,50 @@ def spawn_sync_in_kill_on_close_job(
     return process, job_handle
 
 
+def _physical_executable(path: str) -> str | None:
+    # Minimal bundles and installer loaders use short-lived helpers without
+    # packaging interpreter-selection dependencies.
+    from ._interpreter import physical_executable
+
+    return physical_executable(path)
+
+
+def _local_pythonw(python: str) -> str | None:
+    return _physical_executable(os.path.join(os.path.dirname(python), "pythonw.exe"))
+
+
+def _venv_home_python(python: str, filename: str) -> str | None:
+    venv_root = os.path.dirname(os.path.dirname(python))
+    cfg_path = os.path.join(venv_root, "pyvenv.cfg")
+    try:
+        with open(cfg_path, encoding="utf-8", errors="replace") as fh:
+            home = next(
+                (value.strip() for line in fh
+                 for key, _, value in [line.partition("=")] if key.strip() == "home"),
+                "",
+            )
+    except OSError:
+        return None
+    # Keep resolution outside the optional-config read: access errors, unreadable
+    # reparse points and cycles are not evidence that an interpreter is absent.
+    if not home:
+        return None
+    # CPython rereads this home through __PYVENV_LAUNCHER__, even if the
+    # requested executable is missing. Validate independently of selection.
+    try:
+        os.stat(home)
+    except (FileNotFoundError, NotADirectoryError):
+        return None
+    except OSError as exc:
+        if getattr(exc, "winerror", None) == 448:
+            raise RuntimeError(
+                "Cannot preserve the Windows venv: pyvenv.cfg home is blocked "
+                "by RedirectionGuard; rebuild the runtime with a physical Python home."
+            ) from exc
+        raise
+    return _physical_executable(os.path.join(home, filename))
+
+
 def _venv_home_pythonw(python: str) -> str | None:
     """Return the base ``pythonw.exe`` recorded by a venv's ``pyvenv.cfg``.
 
@@ -550,22 +619,7 @@ def _venv_home_pythonw(python: str) -> str | None:
     ships a genuine GUI-subsystem ``pythonw.exe``, prefer it over the local
     trampoline so the detached daemon never re-enters a console interpreter.
     """
-    venv_root = os.path.dirname(os.path.dirname(python))
-    cfg_path = os.path.join(venv_root, "pyvenv.cfg")
-    try:
-        with open(cfg_path, encoding="utf-8", errors="replace") as fh:
-            for line in fh:
-                key, _, value = line.partition("=")
-                if key.strip() != "home":
-                    continue
-                home = value.strip()
-                if not home:
-                    return None
-                base_pythonw = os.path.join(home, "pythonw.exe")
-                return base_pythonw if os.path.isfile(base_pythonw) else None
-    except OSError:
-        return None
-    return None
+    return _venv_home_python(python, "pythonw.exe")
 
 
 def no_window_flags() -> int:
@@ -593,7 +647,9 @@ def no_window_kwargs() -> dict:
     return {}
 
 
-def windowless_python(executable: str | os.PathLike[str] | None = None) -> str:
+def windowless_python(
+    executable: str | os.PathLike[str] | None = None, *, require_windowless: bool = False,
+) -> str:
     """Return the interpreter for a fully detached Python daemon.
 
     A Windows venv ``python.exe`` is a console-subsystem launcher. Even when it
@@ -602,7 +658,9 @@ def windowless_python(executable: str | os.PathLike[str] | None = None) -> str:
     Prefer the base install's own ``pythonw.exe`` recorded in ``pyvenv.cfg``
     when available; otherwise fall back to the local ``pythonw.exe`` sibling.
     Off Windows, or when no windowless interpreter exists, return the requested
-    interpreter unchanged.
+    interpreter unchanged. On Windows, ``require_windowless=True`` instead
+    refuses that console fallback. GUI intent comes from selecting the
+    pythonw entry, not from the resolved target's filename.
     """
     python = os.fspath(executable) if executable is not None else sys.executable
     if not _is_windows():
@@ -610,8 +668,12 @@ def windowless_python(executable: str | os.PathLike[str] | None = None) -> str:
     base_pythonw = _venv_home_pythonw(python)
     if base_pythonw:
         return base_pythonw
-    candidate = os.path.join(os.path.dirname(python), "pythonw.exe")
-    return candidate if os.path.isfile(candidate) else python
+    physical = _local_pythonw(python)
+    if physical:
+        return physical
+    if require_windowless:
+        raise RuntimeError("A Windows windowless Python interpreter is unavailable.")
+    return python
 
 
 def windowless_python_env(
@@ -630,6 +692,14 @@ def windowless_python_env(
         return {}
     if _venv_home_pythonw(python):
         return {"__PYVENV_LAUNCHER__": python}
+    local_gui = _local_pythonw(python)
+    config = os.path.join(os.path.dirname(os.path.dirname(python)), "pyvenv.cfg")
+    candidate = os.path.abspath(os.path.join(os.path.dirname(python), "pythonw.exe"))
+    if (
+        local_gui and os.path.isfile(config)
+        and os.path.normcase(local_gui) != os.path.normcase(candidate)
+    ):
+        return {"__PYVENV_LAUNCHER__": python}
     return {}
 
 
@@ -645,14 +715,24 @@ def direct_python(executable: str) -> tuple[str, dict[str, str]]:
             "Cannot start daemon directly: the Windows venv's base "
             "pythonw.exe is unavailable; repair the Python installation."
         )
-    if os.path.basename(python).lower() == "pythonw.exe":
-        python = os.path.join(os.path.dirname(python), "python.exe")
-        if not os.path.isfile(python):
+    if (
+        extra_env or python != executable or os.path.basename(python).lower() == "pythonw.exe"
+        or _local_pythonw(executable)
+    ):
+        console = (
+            _venv_home_python(executable, "python.exe") if extra_env
+            else (
+                _physical_executable(os.path.join(os.path.dirname(executable), "python.exe"))
+                or _physical_executable(os.path.join(os.path.dirname(python), "python.exe"))
+            )
+        )
+        if not console:
             raise RuntimeError(
                 "Cannot start daemon directly: the base python.exe "
                 "is unavailable; repair the Python installation."
             )
-    return python, extra_env
+        python = console
+    return _physical_executable(python) or python, extra_env
 
 
 def detached_kwargs(*, breakaway: bool = False) -> dict:
@@ -782,20 +862,6 @@ def _validated_daemon_log_path(
                 + "); keep the daemon log under its runtime root or home directory"
             )
     return path
-
-
-def _validated_daemon_argv(argv: object) -> list[str]:
-    # A bare string (or path) is itself a Sequence: iterating it would launch
-    # its first character as the executable.
-    if isinstance(argv, (str, bytes, bytearray, os.PathLike)):
-        raise TypeError(
-            "spawn_daemon argv must be a sequence of arguments, not a single "
-            f"{type(argv).__name__}; pass [executable, *args]"
-        )
-    command = [os.fspath(part) for part in argv]  # type: ignore[union-attr]
-    if not command:
-        raise ValueError("spawn_daemon requires a non-empty argv")
-    return command
 
 
 def _validated_extra_creationflags(flags: object) -> int:

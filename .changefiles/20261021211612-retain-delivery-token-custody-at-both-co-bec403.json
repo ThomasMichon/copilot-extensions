@@ -1,0 +1,9 @@
+{
+  "comment": "Retain delivery-token custody at both coordinator wake outboxes and prevent unresolved or accepted owner-prompt resends",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

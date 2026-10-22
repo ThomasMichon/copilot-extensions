@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -200,6 +201,50 @@ def test_unsupported_native_cli_is_not_weakened(monkeypatch):
     with pytest.raises(RuntimeError, match="--secret-env-vars"):
         auth.prepare_launch(ContainersConfig(copilot_cli_account="inference-user"),
                             FleetConfig(), "example-1", "vscode")
+
+
+@pytest.mark.guard
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux POSIX ACL extended attributes")
+def test_native_launcher_directory_is_private_with_inherited_default_acl(tmp_path, monkeypatch):
+    import errno
+    import struct
+
+    directory = tmp_path / "launch"
+    directory.mkdir(mode=0o700)
+    acl = struct.pack("<I", 2) + b"".join(
+        struct.pack("<HHI", tag, permissions, 0xFFFFFFFF)
+        for tag, permissions in ((1, 7), (4, 5), (32, 6))
+    )
+    try:
+        os.setxattr(directory, "system.posix_acl_default", acl)
+    except OSError as error:
+        if error.errno in (errno.ENOTSUP, errno.EOPNOTSUPP):
+            pytest.skip("Filesystem does not support POSIX default ACLs")
+        raise
+    auth_env = str(directory / "input.env")
+    monkeypatch.setattr(resolver, "host_copilot_cli_token", lambda account: "synthetic")
+    monkeypatch.setattr(auth.transport, "write_remote_env", lambda *a: auth_env)
+    real_guard = auth.directory_guard
+    # No credential is staged here; retain all guards except the unrelated tmpfs check.
+    monkeypatch.setattr(
+        auth, "directory_guard",
+        lambda path, **kwargs: real_guard(path, **{"require_ram": False, **kwargs}),
+    )
+
+    def execute(argv, **kwargs):
+        if "--secret-env-vars" in argv[-1]:
+            return subprocess.CompletedProcess(argv, 0, "/usr/bin/copilot\n", "")
+        return subprocess.run(
+            ["sh", "-c", argv[-1]], input=kwargs.get("input_text"),
+            capture_output=True, text=True, timeout=10,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+
+    monkeypatch.setattr(auth.transport, "_run", execute)
+    assert auth.prepare_launch(
+        ContainersConfig(copilot_cli_account="inference-user"), None, "example-1", "vscode",
+    ) == auth_env
+    assert (Path(auth.launcher_directory(auth_env)).stat().st_mode & 0o777) == 0o700
 
 
 @pytest.mark.guard

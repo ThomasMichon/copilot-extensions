@@ -3,6 +3,11 @@
 from __future__ import annotations
 
 import argparse
+import json
+import os
+import subprocess
+import sys
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -77,3 +82,62 @@ def test_finalizing_record_refuses_both_preflight_and_locked_admission(monkeypat
     assert launch.refusal(args, record, "worktree-a") is None
     record.status = "finalizing"
     assert "finalizing" in launch.refusal(args, record, "worktree-a")
+
+
+@pytest.mark.parametrize("cancel", [False, True])
+def test_preparation_uses_real_owner_environment_and_checks_cancel_before_launch(tmp_path, monkeypatch, cancel):
+    from plugin_resolve import preparation
+    from plugin_resolve.registration import atomic_json
+
+    subprocess.run(
+        ["git", "init", "--quiet", str(tmp_path)], check=True, timeout=10,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    payload = tmp_path / ".ai" / "helper"
+    payload.mkdir(parents=True)
+    atomic_json(payload / "plugin.json", {"name": "helper", "version": "2.0.0"})
+    atomic_json(payload.parent / "marketplace.json", {
+        "name": "local", "owner": {"name": "Synthetic"},
+        "plugins": [{"name": "helper", "source": "helper"}],
+    })
+    settings = tmp_path / ".github" / "copilot"
+    settings.mkdir(parents=True)
+    atomic_json(settings / "settings.json", {
+        "enabledPlugins": {"helper@local": True},
+        "extraKnownMarketplaces": {"local": {"source": {"source": "directory", "path": "./.ai"}}},
+    })
+    root = tmp_path / ".git" / "copilot-venue-plugins" / "launch-requests" / "operation"
+    root.mkdir(parents=True)
+    path = root / "request.json"
+    atomic_json(path, {
+        "version": 1, "cwd": str(tmp_path), "worktree_id": "worktree-a",
+        "deadline": time.time() + 120, "plan": {"plugins": [], "marketplaces": {}},
+    })
+    args = argparse.Namespace(
+        bridge_acquisition="fresh", bridge_plugin_request=str(path), require_plugin_preparation=True,
+    )
+    profile = str(tmp_path / "actual-profile")
+    environment = {"COPILOT_HOME": profile, "COPILOT_PATH": sys.executable}
+    original = preparation.prepare
+    observed = []
+
+    def prepare(*args, **kwargs):
+        observed.append(kwargs["environment"]["COPILOT_HOME"])
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(preparation, "prepare", prepare)
+    before = dict(os.environ)
+    context, check_cancelled = launch.prepare_plugins(args, "worktree-a", str(tmp_path), environment)
+    assert observed == [profile] and dict(os.environ) == before
+    assert context["plugins"] == [{
+        "projected_source": "helper@local", "logical_source": "helper@local",
+        "version": "2.0.0", "live_marketplace_root": str(tmp_path / ".ai"),
+    }]
+    assert json.loads(path.with_suffix(".prepared.json").read_text()) == context
+    assert not (tmp_path / "actual-profile").exists()
+    if cancel:
+        path.with_suffix(".cancel").touch()
+        with pytest.raises(InterruptedError):
+            check_cancelled()
+    else:
+        check_cancelled()

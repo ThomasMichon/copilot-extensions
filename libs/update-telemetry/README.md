@@ -104,6 +104,14 @@ empty and unterminated child lines are framed individually. Known credentials
 are redacted before the human sink; already canonical child records are not
 framed twice. Human output goes to stderr; JSON output helpers and unscoped
 legacy output retain their existing behavior.
+For unqualified progress, the human renderer translates leading native helper
+markers `[OK]`, `[SKIP]`, `[WARN]`, `[FAIL]` and `...` to `done`, `skipped`,
+`warning`, `failed` and `running`. This changes presentation only: a child
+diagnostic is still an elapsed progress line, not a completed operation or an
+override of its actual exit/structured outcome. Explicit owner states,
+completion messages, unknown/embedded markers and canonical child envelopes
+remain unchanged. Marker recognition follows redaction and physical-line
+splitting; one line's state cannot leak into the next.
 Redaction covers complete logical messages before line splitting or state
 prefixes. Native relays retain only incomplete credential prefixes recognized
 by the existing redactor until their following text can be masked safely.

@@ -767,9 +767,7 @@ if [[ "$ACTION" == "uninstall" ]]; then
     exit 0
 fi
 
-echo ''
-echo '=== budget-guidance install ==='
-echo ''
+_step 'budget-guidance install'
 
 if [[ ! -d "$PKG_SRC_DIR" ]]; then
     _fail "Package source not found at $PKG_SRC_DIR"
@@ -912,7 +910,6 @@ case ":$PATH:" in
     *) _step "Add $LOCAL_BIN to your PATH (e.g. in ~/.bashrc): export PATH=\"\$HOME/.local/bin:\$PATH\"" ;;
 esac
 
-echo ''
-echo '=== budget-guidance install complete ==='
+_ok 'budget-guidance install'
 echo '  Try: budget-guidance --version'
 exit 0

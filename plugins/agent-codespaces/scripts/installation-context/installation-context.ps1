@@ -2569,7 +2569,87 @@ function Resolve-InstalledEvidence(
     }
 }
 
+function Resolve-LegacySnapshotEvidence([string]$ResolvedPayload, [string]$RequestedPluginId) {
+    $receiptPath = Join-Path $ResolvedPayload 'snapshot-provenance.json'
+    if (-not (Test-Path -LiteralPath $receiptPath)) { return $null }
+    $receipt = Read-Json $receiptPath
+    if ((Get-StringProperty $receipt 'schema') -cne 'copilot-extensions.legacy-snapshot-source') {
+        return $null
+    }
+    if (-not (Has-ExactProperty $receipt 'version') -or
+        ($receipt.PSObject.Properties['version'].Value -isnot [int] -and
+            $receipt.PSObject.Properties['version'].Value -isnot [long])) {
+        Fail 'Legacy snapshot source has an unsupported version.'
+    }
+    $version = $receipt.PSObject.Properties['version'].Value
+    Assert-PositiveInteger $version 'legacy snapshot source version'
+    if ($version -notin @(1, 2)) { Fail 'Legacy snapshot source has an unsupported version.' }
+    $snapshots = Split-Path -Parent $ResolvedPayload
+    $root = Split-Path -Parent $snapshots
+    if ((Split-Path -Leaf $snapshots) -cne 'snapshots' -or
+        ((Get-Item -LiteralPath $receiptPath -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+        Fail 'Legacy snapshot source must be an ordinary snapshot-local file.'
+    }
+    $selectedBytes = Read-RegularFileBytes (Join-Path $root 'payload-dir') `
+        'Legacy snapshot redirect' -RequireSameIdentity
+    $selected = $strictUtf8.GetString([byte[]]$selectedBytes.bytes).Trim()
+    $stamped = Read-RuntimeMarker (Join-Path $root 'stamped-version') 'Legacy snapshot version'
+    $snapshotId = Split-Path -Leaf $ResolvedPayload
+    $payloadVersion = $snapshotId
+    if ($version -eq 2) {
+        foreach ($field in @('snapshotId', 'payloadVersion')) {
+            if (-not (Has-ExactProperty $receipt $field) -or
+                $receipt.PSObject.Properties[$field].Value -isnot [string]) {
+                Fail 'Legacy snapshot source requires string snapshot identity and payload version.'
+            }
+        }
+        $snapshotId = Get-StringProperty $receipt 'snapshotId'
+        $payloadVersion = Get-StringProperty $receipt 'payloadVersion'
+        if (-not $snapshotId -or -not $payloadVersion) {
+            Fail 'Legacy snapshot source requires snapshot identity and payload version.'
+        }
+    }
+    if (-not [IO.Path]::IsPathRooted($selected) -or
+        -not (Paths-Equal $selected $ResolvedPayload) -or
+        $snapshotId -cne (Split-Path -Leaf $ResolvedPayload) -or $stamped -cne $payloadVersion) {
+        Fail 'Legacy snapshot source does not describe the selected snapshot.'
+    }
+    $resolution = Get-PropertyValue $receipt 'resolution'
+    $operative = Get-PropertyValue $resolution 'operative'
+    $rebind = Get-PropertyValue $resolution 'rebindRequired'
+    if ((Get-StringProperty $resolution 'action') -cne 'resolve' -or
+        $operative -isnot [bool] -or $operative -or $rebind -isnot [bool] -or $rebind) {
+        Fail 'Legacy snapshot source requires a canonical read-only resolution.'
+    }
+    $plugin = Get-StringProperty $resolution 'pluginId'
+    Assert-PluginId $plugin
+    if ($RequestedPluginId -and $plugin -cne $RequestedPluginId) {
+        Fail 'Legacy snapshot source identifies another plugin.'
+    }
+    $manifest = Read-Json (Join-Path $ResolvedPayload 'plugin.json')
+    if ((Get-StringProperty $manifest 'name') -cne $plugin) {
+        Fail 'Legacy snapshot source does not match its payload plugin.'
+    }
+    $source = Get-PropertyValue $resolution 'source'
+    $normalized = Normalize-Source $source '' -FromReceipt
+    $marketplace = Get-StringProperty $resolution 'marketplaceId'
+    Assert-MarketplaceId $marketplace
+    $readable = $marketplace.Substring(0, $marketplace.LastIndexOf('--', [StringComparison]::Ordinal))
+    $identity = Source-Identity $normalized $readable
+    if ($identity.marketplaceId -cne $marketplace -or
+        $identity.fingerprint -cne (Get-StringProperty $resolution 'sourceFingerprint') -or
+        $identity.record -cne (Get-StringProperty $source 'record')) {
+        Fail 'Legacy snapshot source identity does not match its canonical fingerprint.'
+    }
+    return [pscustomobject]@{
+        source = $normalized; pluginId = $plugin
+        readableName = $readable; locator = $null
+    }
+}
+
 function Resolve-DirectoryEvidence([string]$ResolvedPayload, [string]$RequestedPluginId) {
+    $snapshot = Resolve-LegacySnapshotEvidence $ResolvedPayload $RequestedPluginId
+    if ($null -ne $snapshot) { return $snapshot }
     $cursor = $ResolvedPayload
     while ($cursor) {
         foreach ($relativeManifest in @(
@@ -4180,7 +4260,9 @@ function Get-RuntimeDeploymentOwner(
     }
     $identity = Source-Identity $evidence.source $evidence.readableName
     Assert-PluginId $evidence.pluginId
-    if ($Resolution.status -cne 'ready' -or
+    if (($Resolution.status -cne 'ready' -and
+            -not ($Resolution.status -ceq 'deactivation-required' -and
+                $Resolution.actualMode -ceq 'namespaced')) -or
         $Resolution.actualMode -cnotin @('legacy', 'namespaced') -or
         $identity.marketplaceId -cne $Resolution.marketplaceId -or
         $evidence.pluginId -cne $Resolution.pluginId) {

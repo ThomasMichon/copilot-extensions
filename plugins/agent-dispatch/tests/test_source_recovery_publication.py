@@ -10,6 +10,9 @@ import pytest
 
 from . import source_publication_fixture as fixture
 
+# A Windows case composes several native installer calls, not one 30-second unit.
+pytestmark = pytest.mark.timeout(120) if os.name == "nt" else []
+
 
 def _stage(tmp_path: Path, ext: str):
     if ext == "sh" and os.name == "nt":
@@ -34,6 +37,8 @@ def _published(root: Path, identity) -> None:
     _selected(root, identity)
     assert (root / "stamped-version").read_text().strip() == identity.runtime_version
     assert Path((root / "payload-dir").read_text().strip()) == root / "snapshots" / identity.runtime_version
+    for name in ("delegated-waiter-callback.sh", "delegated-waiter-callback.ps1"):
+        assert (root / "bin" / name).read_bytes() == (fixture.SCRIPTS / name).read_bytes()
 
 
 def _completion(root: Path, sources) -> dict[str, bytes]:

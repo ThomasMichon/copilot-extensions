@@ -13,7 +13,7 @@ Installation-mode governance owns legacy versus namespaced selection,
 activation and transfer. Command binding owns source-qualified installation
 identity. Canonical runtime construction/publication owns immutable candidates,
 redirects and rollback. Manager orchestrates an explicitly selected install;
-Agent Machines owns scheduled invocation.
+the [maintenance slice](maintenance.md) owns recurring invocation.
 
 Managed deployment is an additional authority decision at those existing
 publication boundaries, not another installation mode, source of actual-root
@@ -134,6 +134,31 @@ plans, session bootstrap and indirect first use still need their own admission
 at the actual mutation seam, including explicit management authorization.
 Those remaining paths and positive retained-hook assertions keep Phase 3 open.
 
+### Launcher producer admission
+
+Worktrees' `pre-launch` planner checks its actual governed installation before
+emitting a stale-runtime installer action. Allowed actions carry the runtime
+phase and owning payload/root/context metadata used by execution admission.
+Other repository bootstrap services retain their existing independent actions.
+Already-current runtimes do not require publication permission.
+
+Background staging continues marketplace refresh and fingerprinting in managed
+mode. Only the runtime-application request is suppressed, with the canonical
+reason and recovery diagnostic retained in its status. Payload changes and
+venv-version drift are checked independently; drift repair cannot override a
+deployment refusal. These checks prepare new plans, not authorize execution of
+old ones. The native consumers now call the existing reconciler's read-only
+execution-admission seam before each runtime action and before synchronous
+or detached staged-installer spawn. The engine repeats canonical installation
+and policy admission; the shell neither parses deployment policy nor grants
+management permission. Missing engine capability and malformed decisions
+remain explicit skip/readiness outcomes, distinct from an older standalone
+payload that has no deployment policy.
+Staged Worktrees self-update repeats its own canonical marketplace-or-direct
+payload discovery before comparing the cached installation. Ordinary
+marketplace reconciliation does not gain a direct-payload fallback; a trigger
+marker cannot borrow another plugin's installation or skip policy admission.
+
 ## Source-qualified lifecycle admission
 
 The shared legacy lifecycle now composes the canonical deployment decision
@@ -150,9 +175,88 @@ source-qualified token rather than trusting an environment boolean. A borrowed
 plugin lease cannot become management, invalid/unsupported/foreign deployment
 policy remains blocking, and teardown cannot become publication.
 
-This slice does not wire Manager source selection, installation-cell admission,
-bootstrap lib-copy reconciliation or early first-use writes. Their actual
-mutation gates and positive retained-hook behavior remain required.
+This slice does not wire Manager source selection or installation-cell installer
+admission. Their actual mutation gates remain required.
+
+Logger's direct native publication actions now enter that same legacy lifecycle
+before staging when an existing bootstrap Python is available. Its installer-only
+packaging opt-in does not change catalogs. A staged child authenticates the
+inherited live ticket, including its immutable publication purpose; a forged
+ticket cannot admit managed stamping. The canonical native probe retains
+Python-free default standalone stamping without installing an interpreter.
+This qualifies the direct installer, not the bootstrap hook's separate
+observability/reaping boundary or the remaining adopter and cell paths.
+
+## Cell installer and retained-backend admission
+
+Worktrees' native cell installers now consult the canonical deployment decision
+after validating the context/root/generations and before self-staging. They
+repeat admission before runtime-input writes. Status remains a non-publication
+operation rather than requiring a deployment permit.
+
+The Python lifecycle makes the same decision at entry and each governance
+recheck, including the existing genesis/install lock boundary, candidate
+handover and helper callback validation. A direct retained-backend invocation
+does not bypass policy. Retained bootstraps include the canonical command-binding
+and lifecycle companions so legacy management can authenticate its existing live
+publication-purpose lease without importing source code.
+
+Explicit managed-cell installation now composes the canonical
+[Python publication custody API](../../../libs/installation-context/README.md#explicit-runtime-publication-custody-python).
+Worktrees' native staging, backend construction, retained candidate handover
+and native callbacks authenticate and borrow the same live genesis/install
+owners. A context receipt or staging environment flag alone remains
+insufficient; namespaced installs are not coerced into legacy command binding.
+Management purpose pins the original native process birth as well as its PID;
+an exited, unreaped or reused process cannot retain publication authority.
+Standalone and managed flows acquire namespace custody before service cutover.
+Explicit modes retain the same governance owner through nested settlement and
+release cutover before releasing the namespace, avoiding an overlap cycle with
+an outer management owner.
+Settlement revalidates after blocking cutover acquisition and preparation,
+before helper or selector publication, including callers without a native
+frontend. A wait cannot extend an expired management owner's authority.
+Manager source selection and other caller/launcher gates remain open.
+
+## Native bootstrap and early first-use admission
+
+Worktrees' native bootstrap now probes its own invoked payload's canonical
+installation helper before deferred stamping or the older lib-copy replacement.
+It does not use the old deployment manifest's source hint as policy authority
+or wrap that old manifest in a newer command-binding schema. Older deployed
+hooks without the native helper retain standalone behavior only when no
+deployment policy exists; a present policy requires capable explicit management.
+The gate is outside the legacy reconciliation error handler, so refusal and
+recovery diagnostics cannot disappear into that compatibility path.
+
+The payload-local first-use dispatchers retain their healthy fast path. A
+runtime miss probes the actual governed root before committing to provisioning,
+boot-trace writes, root creation or lock creation. It repeats the probe under
+the existing provision lock after checking for a now-available runtime. Both
+native adapters validate the decision's type and governed policy path, including
+canonical home aliases and active-cell versus legacy-root scope.
+
+An unattributed standalone payload can have a null mode/root in the canonical
+diagnostic result. Bootstrap composes `probe-legacy` admission rather than
+accepting all null modes; first use retains its already-admitted simple legacy
+fallback and uses `legacy.root`. Explicit mode policy, ownership tombstones and
+receipt safeguards are not relaxed.
+
+The bespoke resolver's `read-only` trace mode lets bootstrap inspect a selected
+runtime without writing diagnostics into the installation. First-use resolution
+uses `ready` trace mode: it buffers durable resolver events and emits them only
+after a complete selected interpreter is found. Missing-runtime refusal
+therefore leaves even an existing policy-only root unchanged, while healthy
+dispatch retains its marker/slot trace phases. Normal resolver callers keep
+their existing tracing behavior.
+
+Focused native regressions exercise real policy adapters and inventory all
+product writes on refusal. They separately preserve standalone first stamping
+and legacy lib-copy replacement, healthy dispatch, and policy changes at the
+held provision lock. A hook-composition regression runs the independent
+project, registration, nudge and hygiene siblings even when the bootstrap
+component returns a deployment refusal. These fixtures do not claim the
+remaining assembled-use, installer-cell, launcher-plan or version-skew gates.
 
 ## Validation before claiming Phase 3 complete
 

@@ -59,6 +59,8 @@ def rpc(host, request, *, token=TOKEN, path="/api/v1/chat"):
 @contextmanager
 def running(config):
     with hosting.HostedChat(config) as host:
+        # Only idle fixture shutdown polling; production I/O bounds are unchanged.
+        host.server.timeout = .01
         stop = threading.Event()
         thread = threading.Thread(target=host.serve, args=(stop,))
         thread.start()

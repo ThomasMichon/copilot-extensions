@@ -1,0 +1,9 @@
+{
+  "comment": "Limit historical handoff fixture committed-layer stubs to their owned plain anchors.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

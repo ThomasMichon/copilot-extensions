@@ -43,6 +43,22 @@ else:
 native_settings_path = home / "settings.json"
 native = json.loads(native_settings_path.read_text()) if native_settings_path.exists() else {}
 registered = native.setdefault("extraKnownMarketplaces", {})
+
+
+def publish_catalog():
+    catalog_path.parent.mkdir(parents=True, exist_ok=True)
+    catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
+    clone = catalog_path.parents[2]
+    for variable, relative in (
+        ("VENUE_LEGACY_CATALOG", ".claude-plugin/marketplace.json"),
+        ("VENUE_NESTED_CATALOG", "plugins/sample/tests/marketplace.json"),
+    ):
+        if os.environ.get(variable):
+            alternative = clone / relative
+            alternative.parent.mkdir(parents=True, exist_ok=True)
+            alternative.write_text(Path(os.environ[variable]).read_text(), encoding="utf-8")
+
+
 if sys.argv[1:3] == ["plugin", "marketplace"]:
     if sys.argv[3] == "add":
         if catalog["name"] in registered:
@@ -61,19 +77,10 @@ if sys.argv[1:3] == ["plugin", "marketplace"]:
         if os.environ.get("VENUE_FAIL_REFRESH"):
             print("fatal: synthetic package extraction failed", file=sys.stderr)
             raise SystemExit(1)
-    catalog_path.parent.mkdir(parents=True, exist_ok=True)
-    catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
-    clone = catalog_path.parents[2]
-    for variable, relative in (
-        ("VENUE_LEGACY_CATALOG", ".claude-plugin/marketplace.json"),
-        ("VENUE_NESTED_CATALOG", "plugins/sample/tests/marketplace.json"),
-    ):
-        if os.environ.get(variable):
-            alternative = clone / relative
-            alternative.parent.mkdir(parents=True, exist_ok=True)
-            alternative.write_text(Path(os.environ[variable]).read_text(), encoding="utf-8")
+    publish_catalog()
     raise SystemExit(0)
 assert sys.argv[1:3] == ["plugin", "install"]
+publish_catalog()
 if os.environ.get("VENUE_FAIL_INSTALL"):
     if os.environ.get("VENUE_PARTIAL_PAYLOAD"):
         name, marketplace = sys.argv[3].split("@")

@@ -1,0 +1,9 @@
+{
+  "comment": "Verify real lease preview apply and repeated apply without consolidating test cases",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

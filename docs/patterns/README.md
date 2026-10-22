@@ -125,9 +125,12 @@ core of the principles above; a reviewer checks a change against these.
   Integrated roles retain one lifecycle implementation, immutable activation,
   provenance and effect-side authority fencing.
 - **Endpoints are collision-free by construction.** Two plugin services — and the
-  same service across the Windows/WSL boundary — never contend for one address by
-  design, not by a human maintaining a fixed-port table or applying per-platform
-  offsets. (Serves *§Behaviors/collision-free-endpoints*.)
+  same service across the Windows/WSL boundary — cannot independently claim one
+  active endpoint. Deconfliction is structural, not a human-maintained fixed-port
+  table or per-platform offset. A constrained reverse-listener candidate may be
+  occupied; it cannot be advertised without actual exclusive custody, and
+  unavailable authorized capacity remains unavailable. (Serves
+  *§Behaviors/collision-free-endpoints*.)
 - **Endpoints are discovered, not assumed.** A client resolves a service's current
   endpoint from the service's own runtime state; there is no ambient constant a
   mismatch can silently break. (Serves *§Behaviors/endpoint-discovered-not-assumed*.)
@@ -139,6 +142,12 @@ core of the principles above; a reviewer checks a change against these.
   discovered, never fixed; a boundary is crossed by an opt-in tunnel over an
   already-trusted transport, never a new inbound port. (Serves
   *§Behaviors/minimal-network-exposure*.)
+  The narrowly scoped
+  [constrained reverse-SSH grant exception](service-transport.md#constrained-reverse-ssh-listener-grants)
+  permits a retained actual server bind from an already authorized finite
+  loopback set when OS-assigned allocation cannot be narrowly authorized.
+  It does not relax local endpoint defaults, permit forwarding-policy widening
+  or promise capacity when every authorized candidate is occupied.
 - **Deploy through the pipeline, never edit the deployed copy.** Source lives in
   the repo; changes reach a runtime only via the installer + version bump. Editing
   `~/.copilot/installed-plugins/…` or a runtime dir is forbidden.

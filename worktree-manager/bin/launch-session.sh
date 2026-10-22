@@ -28,16 +28,17 @@ setup_log() {
         _setup_progress_emit log "$level" "$msg" || _setup_progress_unavailable "$level" "$msg" 0
         return 0
     fi
-    printf '[%s] [%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$level" "$msg" >> "$SETUP_LOG" 2>/dev/null || true
+    _setup_progress_unavailable "$level" "$msg" 0
 }
 
 _setup_progress_unavailable() {
-    local level="$1" msg="$2" echo_line="$3" state=running line
+    local level="$1" msg="$2" echo_line="$3" state=running line stamp
+    stamp="$(date -u '+%H:%M:%SZ' 2>/dev/null)" || stamp="time unavailable"
     case "$level" in WARN) state=warning ;; ERROR) state=failed ;; esac
     while IFS= read -r line; do
-        line="[time unavailable] launch $state $line [elapsed unavailable]"
+        line="[$stamp] launch $state $line [elapsed unavailable]"
         printf '%s\n' "$line" >> "$SETUP_LOG" 2>/dev/null || true
-        [[ "$echo_line" == 1 && "$_SHOW_LAUNCH_STATUS" == 1 ]] && printf '%s\n' "$line" >&2 || true
+        [[ "$echo_line" == 1 && "${_SHOW_LAUNCH_STATUS:-}" == 1 ]] && printf '%s\n' "$line" >&2 || true
     done <<< "$msg"
 }
 
@@ -178,8 +179,38 @@ setup_status() {
         _setup_progress_emit status "$level" "$msg" || _setup_progress_unavailable "$level" "$msg" 1
         return 0
     fi
-    setup_log "$level" "$msg"
-    [[ "$_SHOW_LAUNCH_STATUS" == "1" ]] && printf '  %s\n' "$msg" >&2 || true
+    _setup_progress_unavailable "$level" "$msg" 1
+}
+
+check_update_admission() {
+    local update="$1" reply code messages allowed=0
+    [[ -n "$update" ]] || return 0
+    if reply=$("$PYTHON" -m agent_worktrees reconcile-plugins --check-update <<< "$update" 2>&1); then
+        code=0
+    else
+        code=$?
+    fi
+    if messages=$("$PYTHON" -c '
+import json, sys
+try:
+    decision = json.load(sys.stdin)
+    code = int(sys.argv[1])
+    if code == 0 and decision.get("allowed") is True:
+        raise SystemExit(0)
+    if code != 3 or decision.get("allowed") is not False or not decision.get("diagnostics"):
+        raise ValueError("unexpected admission response")
+    for diagnostic in decision["diagnostics"]:
+        print("Runtime execution: [{}] {}".format(diagnostic.get("reason"), diagnostic.get("message")))
+except (ValueError, KeyError, TypeError, AttributeError):
+    print("Runtime execution admission unavailable; skipping runtime action. Update the engine explicitly before retrying.")
+raise SystemExit(1)
+' "$code" <<< "$reply"); then
+        allowed=1
+    fi
+    while IFS= read -r message; do
+        [[ -n "$message" ]] && setup_log WARN "$message"
+    done <<< "$messages"
+    [[ "$allowed" == 1 ]]
 }
 
 # Write header
@@ -241,7 +272,7 @@ set -- "${FILTERED_ARGS[@]+"${FILTERED_ARGS[@]}"}"
 setup_log INFO 'launch-session.sh starting'
 launch_trace launcher_start
 if [[ ${#COPILOT_PASSTHROUGH[@]} -gt 0 ]]; then
-    setup_log INFO "Copilot passthrough args: ${COPILOT_PASSTHROUGH[*]}"
+    setup_log INFO "Copilot passthrough: ${#COPILOT_PASSTHROUGH[@]} argument(s)"
 fi
 
 # Recovery escape hatch resolves from explicit project identity or CWD.
@@ -339,7 +370,11 @@ run_runtime_preflight() {
     fi
     local max_attempts=3
     local retry_delay_s=0.4
-    local attempt py output rc
+    local attempt py output rc=1
+    local _SETUP_PROGRESS_DIR="" _SETUP_PROGRESS_PID="" _SETUP_PROGRESS_JOB="" _SETUP_PROGRESS_SEQUENCE=0 _SETUP_PROGRESS_FAILED=0
+    local _SHOW_LAUNCH_STATUS=0
+    _start_setup_progress
+    _setup_progress_begin "preflight/$label"
     for ((attempt = 1; attempt <= max_attempts; attempt++)); do
         py="$(resolve_runtime_python)" || py=""
         [[ -n "$py" && -x "$py" ]] || py="$PYTHON"
@@ -353,7 +388,7 @@ run_runtime_preflight() {
             fi
             if ((rc == 0)); then
                 setup_log INFO "$label completed: $output"
-                return 0
+                break
             fi
             setup_log WARN "$label failed on attempt $attempt/$max_attempts (exit $rc): ${output:-no details}"
         fi
@@ -361,10 +396,19 @@ run_runtime_preflight() {
             sleep "$retry_delay_s"
         fi
     done
-    setup_log ERROR "$label failed after $max_attempts attempts -- continuing launch without it"
-    printf 'WARNING: %s failed after %s attempts -- continuing launch without it (see %s)\n' \
-        "$label" "$max_attempts" "${WORKTREE_SETUP_LOG:-the setup log}" >&2
-    return 1
+    if ((rc == 0)); then
+        _setup_progress_end done 'exit 0'
+    else
+        setup_log ERROR "$label failed after $max_attempts attempts -- continuing launch without it"
+        _setup_progress_end failed 'exit 1; continuing launch'
+    fi
+    _stop_setup_progress
+    if ((rc != 0)); then
+        printf 'WARNING: %s failed after %s attempts -- continuing launch without it (see %s)\n' \
+            "$label" "$max_attempts" "${WORKTREE_SETUP_LOG:-the setup log}" >&2
+        return 1
+    fi
+    return 0
 }
 
 if [[ -n "$PYTHON" && -x "$PYTHON" ]]; then
@@ -494,12 +538,12 @@ invoke_update_apply() {
     _start_setup_progress
 
     local status_file="$HOME/.agent-worktrees/updater-status.json"
-    local stage_done="" plugin_changed="" skipped="" plugin_dir="" runtime_root="" runtime_apply_blocked=""
+    local stage_done="" plugin_changed="" skipped="" plugin_dir="" runtime_root="" runtime_apply_blocked="" stage_snapshot=""
 
     _parse_stage_status() {
         [[ -f "$status_file" ]] || return 0
         local _stage_key
-        for _stage_key in stage_done plugin_changed skipped plugin_dir runtime_root runtime_apply_blocked; do
+        for _stage_key in stage_done plugin_changed skipped plugin_dir runtime_root runtime_apply_blocked stage_snapshot; do
             if ! IFS= read -r -d '' "$_stage_key"; then
                 stage_done=""
                 setup_log WARN 'Plugin-update stage metadata could not be decoded'
@@ -519,6 +563,7 @@ for value in [
     str(d.get('plugin_dir', '')),
     str(d.get('runtime_root', '')),
     str(d.get('runtime_apply_blocked', '')),
+    json.dumps(d),
 ]:
     sys.stdout.write(value + '\0')
 " "$status_file" 2>/dev/null
@@ -549,11 +594,24 @@ for value in [
         # (1) Marketplace installer, iff the download changed the payload.
         #     NO re-exec: a launcher-script change applies on the next launch.
         if [[ "$plugin_changed" == "True" ]]; then
+            local _stage_update
+            if ! _stage_update=$("$PYTHON" -c '
+import json, sys
+status = json.load(sys.stdin)
+print(json.dumps(dict(
+    phase="runtime", service="agent-worktrees", trigger="stage-update",
+    payload_root=status.get("plugin_dir"),
+    runtime_root=status.get("runtime_root"), environment=status.get("environment", {}),
+)))
+' <<< "$stage_snapshot") || ! check_update_admission "$_stage_update"; then
+                setup_log WARN 'Staged runtime execution refused; continuing with the existing runtime'
+                plugin_changed="False"
+            fi
             local _stage_env_text=""
             local _stage_env=()
             if ! _stage_env_text=$("$PYTHON" -c "
 import sys, json
-status = json.load(open(sys.argv[1], encoding='utf-8'))
+status = json.load(sys.stdin)
 unset = status.get('unset_environment', [])
 environment = status.get('environment', {})
 if (
@@ -571,7 +629,7 @@ for key in unset:
     print(key)
 for key, value in environment.items():
     print(f'{key}={value}')
-" "$status_file" 2>/dev/null); then
+" <<< "$stage_snapshot" 2>/dev/null); then
                 setup_log WARN 'Plugin installer environment metadata is invalid -- skipping'
                 plugin_changed="False"
             fi
@@ -620,7 +678,21 @@ for key, value in environment.items():
                         # background install can't collide.
                         setup_status INFO 'A new plugin version was downloaded; installing it in the background (applies on the next launch)...'
                         local _ilog="${APERTURE_SETUP_LOG:-${WORKTREE_SETUP_LOG:-/dev/null}}"
-                        setsid env ${_stage_env[@]+"${_stage_env[@]}"} \
+                        local _observer_code='
+import os, sys
+try:
+    from update_telemetry import shell
+except ImportError:
+    shell = None
+if shell is None or not callable(getattr(shell, "observe_command", None)):
+    print("WARNING: detached installer timing unavailable (observer-unavailable); running the original native installer.",
+          file=sys.stderr, flush=True)
+    os.execvp(sys.argv[2], sys.argv[2:])
+sys.argv = [sys.argv[0], "observe", "--log", sys.argv[1], "--", *sys.argv[2:]]
+raise SystemExit(shell.main())
+'
+                        setsid "$PYTHON" -c "$_observer_code" "$_ilog" \
+                            env ${_stage_env[@]+"${_stage_env[@]}"} \
                             bash "$_installer" "${_inst_args[@]}" \
                             >>"$_ilog" 2>&1 </dev/null &
                         disown 2>/dev/null || true
@@ -662,6 +734,13 @@ for a in json.load(sys.stdin)['updates'][$i].get('argv', []):
     print(a)
 " <<< "$PRE_JSON" 2>/dev/null)
                 if [[ ${#UPDATE_ARGV[@]} -gt 0 ]]; then
+                    _UPDATE_JSON=$("$PYTHON" -c "
+import sys, json
+update = json.load(sys.stdin)['updates'][$i]
+if not update.get('phase') and update.get('service') == 'agent-worktrees': update['phase'] = 'runtime'
+if update.get('phase') == 'runtime': print(json.dumps(update))
+" <<< "$PRE_JSON") || { setup_log WARN "Invalid action for $SVC_NAME; skipping"; continue; }
+                    check_update_admission "$_UPDATE_JSON" || continue
                     _UPDATE_ENV=()
                     _UPDATE_ENV_TEXT=$("$PYTHON" -c "
 import sys, json
@@ -690,7 +769,6 @@ for key, value in environment.items():
                     while IFS= read -r _update_env; do
                         [[ -n "$_update_env" ]] && _UPDATE_ENV+=("$_update_env")
                     done <<< "$_UPDATE_ENV_TEXT"
-                    setup_log INFO "  command: ${UPDATE_ARGV[*]}"
                     _setup_progress_begin "bootstrap/$SVC_NAME"
                     if env ${_UPDATE_ENV[@]+"${_UPDATE_ENV[@]}"} \
                         "${UPDATE_ARGV[@]}" 2>&1 | while IFS= read -r _ul || [[ -n "$_ul" ]]; do setup_log INFO "$_ul"; done; then
@@ -762,11 +840,17 @@ for a in json.load(sys.stdin)['updates'][$_ri].get('argv', []):
     print(a)
 " <<< "$REC_JSON" 2>/dev/null)
                 [[ ${#_RARGV[@]} -gt 0 ]] || continue
+                _RUPDATE=$("$PYTHON" -c "
+import sys, json
+update = json.load(sys.stdin)['updates'][$_ri]
+if not update.get('phase') and update.get('service') == 'agent-worktrees': update['phase'] = 'runtime'
+if update.get('phase') == 'runtime': print(json.dumps(update))
+" <<< "$REC_JSON") || { setup_log WARN "Invalid action for $_RSVC; skipping"; continue; }
+                check_update_admission "$_RUPDATE" || continue
                 if [[ "${_RARGV[0]}" == "copilot" ]] && ! command -v copilot &>/dev/null; then
                     setup_log WARN "Plugin reconcile: skipping $_RSVC (copilot not on PATH)"
                     continue
                 fi
-                setup_log INFO "Plugin reconcile: $_RSVC -> ${_RARGV[*]}"
                 _RENV=()
                 _RENV_TEXT=$("$PYTHON" -c "
 import sys, json
@@ -1316,10 +1400,10 @@ print(str(leg.get('state', '')) if isinstance(leg, dict) and leg.get('provider')
             local sess="$1"
             local spath="$2"
             [[ -n "$sess" && -n "${LAUNCH_PROJECT:-}" && -n "${WORKTREE_ID:-}" ]] || return 0
-            command -v uv >/dev/null 2>&1 || return 0
             local wm_root
             wm_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P 2>/dev/null || true)"
             [[ -n "$wm_root" ]] || return 0
+            source "$wm_root/bin/manager-runtime.sh" || return 0
             # The real mux session's own stable identity (Copilot review
             # finding on PR #3906): stored so a later teardown's own live
             # probe of the SAME tmux session (pane-wrapper.sh) can be
@@ -1329,21 +1413,16 @@ print(str(leg.get('state', '')) if isinstance(leg, dict) and leg.get('provider')
             # below.
             local incarnation=""
             incarnation="$(tmux display-message -t "$sess" -p '#{session_id}:#{session_created}' 2>/dev/null || true)"
-            # Dispatch detached rather than blocking attach on this call
-            # (real-bug follow-up to #3825): the bundled register edge can
-            # spend tens of seconds (mux metadata probes, daemon boot-wait,
-            # status-monitor-restart) before it returns, plus `uv run`'s own
-            # resolve overhead -- never block create/join on it. Mirrors the
-            # existing background-subshell dispatch already used above for
-            # activity-log.
-            ( uv run --quiet --project "$wm_root" -m worktree_manager mux-daemon register \
+            # Only the canonical spawn handshake is synchronous; expensive
+            # registration continues outside the launcher's lifetime.
+            aw_manager_callback "$wm_root" register \
                 --project="$LAUNCH_PROJECT" \
                 --worktree-id="$WORKTREE_ID" \
                 --worktree-path="$spath" \
                 --mux-session="$sess" \
                 --mux-bin=tmux \
                 ${incarnation:+--session-incarnation="$incarnation"} \
-                >/dev/null 2>&1 & ) || true
+                >/dev/null 2>&1 || true
         }
 
         # Deliver a worktree's queued `pending_seed` (picker-new-session-

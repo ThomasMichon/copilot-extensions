@@ -28,6 +28,7 @@ from .queue_common import (
 )
 from .queue_records import SpawnReservation, Status, TaskError
 from .queue_dedup import find_live_dedup_task
+from .queue_execution_handoff import closed_execution, require_execution_admission
 
 
 class QueueClaimQueriesMixin:
@@ -85,12 +86,16 @@ class QueueClaimQueriesMixin:
             best_affinity = -1
             producer_rejections: list[dict[str, object]] = []
             for row in rows:
+                if repo is not None and row["repo"] != repo:
+                    continue
+                if closed_execution(conn, row["id"]) is not None:
+                    if task_id is not None:
+                        require_execution_admission(conn, row["id"])
+                    continue
                 if row["source"] == "ci-repair":
                     task = self._fetch(conn, row["id"])
                     if ci_admissions.get(task.id) != authority_snapshot(conn, task):
                         continue
-                if repo is not None and row["repo"] != repo:
-                    continue
                 rejection = self._claim_fence_rejection(conn, row)
                 if rejection is not None:
                     if "_fingerprint" not in rejection:

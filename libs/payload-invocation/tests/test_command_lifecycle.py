@@ -26,6 +26,17 @@ def _lifecycle(fixture: dict):
     return _load(ROOT / "libs/payload-invocation/command_lifecycle.py", "lifecycle_reference")
 
 
+def test_lifecycle_loads_single_file_procutil(tmp_path: Path) -> None:
+    helper = tmp_path / "libs/agent-procutil/src/agent_procutil/__init__.py"
+    helper.parent.mkdir(parents=True)
+    shutil.copyfile(ROOT / "libs/agent-procutil/src/agent_procutil/__init__.py", helper)
+    lifecycle = _load(ROOT / "libs/payload-invocation/command_lifecycle.py", "lifecycle_reference")
+    procutil = lifecycle._procutil(tmp_path)
+    with pytest.raises(procutil.SyncProcessLaunchError) as raised:
+        procutil.spawn_sync_in_kill_on_close_job([str(tmp_path / "missing-executable")])
+    assert isinstance(raised.value, FileNotFoundError)
+
+
 @pytest.mark.skipif(os.name != "nt", reason="Windows strict containment")
 @pytest.mark.parametrize("parent_exits", [False, True])
 def test_command_binding_deadline_stops_tree_before_releasing_admission(

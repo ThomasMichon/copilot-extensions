@@ -11,6 +11,15 @@ it needs. This document is the reference, and
 `tools/check-install-contract.py` enforces conformance (run it
 manually or wire it as a git `pre-push` hook).
 
+Interrupted installation-context directory-lock recovery has a standalone,
+stdlib-only entry independent of broken command dispatch. The
+[canonical recovery contract](../libs/installation-context/README.md) preserves
+live/foreign owners, binds repair to exact observed evidence and retains
+quarantine receipts. Approved manual operational-lock recovery is not an
+installed-code patch or an installation-policy bypass. Repair does not make a
+failed update successful or establish whole-set rollback; the original
+operation's completion and consumer gates remain mandatory.
+
 Standalone wheel/sdist resources name the same primitive `_versioned_runtime.py`
 instead of the plugin script's `versioned_runtime.py`. The source companion loads
 exactly one ordinary, co-located primitive in either layout, never an ambient import.
@@ -1543,6 +1552,13 @@ this helper does not itself enroll an old shell installer's build lifetime.
 Installation-cell provenance/receipt governance and its receipt-only
 reservation release remain independently binding.
 
+Read-only helper execution must not mutate the admitted payload. The runtime
+primitive loads its canonical sidecar source directly without creating or
+consuming bytecode caches; both native Index role probes similarly suppress
+bytecode writes. A cold first invocation must preserve the same full payload
+fingerprint through construction completion. Do not weaken the fingerprint
+by ignoring newly generated files to make an unstable constructor pass.
+
 Optional PowerShell construction cleanup probes the loaded `Function:` provider
 with `Test-Path -LiteralPath`, not `Get-Command`. Command discovery can import an
 autoloadable module even with `-ErrorAction SilentlyContinue`; a cold installer
@@ -1781,6 +1797,31 @@ activation restoration failures after launch do not erase the usage evidence.
 `CE_UPDATE_AUTH=report-only` applies no credential fix, so
 fixable sources remain unresolved. `CE_UPDATE_AUTH=off` skips this preflight.
 There is no persistent configuration cleanup or cleanup-consent flag.
+
+### Recovery of an adopted standalone Manager
+
+The normal updater repairs an unusable, already-adopted Worktree Manager before
+profile integration. Admission requires one selected provider registration,
+its Manager root and an exact known Manager-owned launcher. A healthy registered
+command is reused without source acquisition; an unadopted host is not enrolled.
+Recovery snapshots the selection, registration, launcher and source evidence,
+then fetches only the Manager's own configured repository/ref, with its normal
+authentication admission. Missing canonical recovery support at that ref blocks
+the update; it never substitutes the updater's marketplace or a different branch.
+
+The new Worktrees installer runs this check under its constructed interpreter
+before settling publication, so an older running updater can hand off during
+self-upgrade. The new update caller also checks before local integration when
+the Worktrees runtime is already current. An old caller which skips installation
+after concurrent publication cannot acquire new in-memory code: the next normal
+invocation performs that check. No force flag or standalone bootstrap is needed.
+
+The Manager adapter constructs through the canonical engine, retains candidate
+and rollback custody, and runs completion/mux activation under the constructed
+Manager interpreter. It does not import application dependencies into the
+stdlib bootstrap interpreter or recursively run the full update flow. Adoption
+is reverified before publication; failed activation restores both selectors
+using canonical publication receipts.
 
 The Worktree Manager consumes the same report through its existing engine JSON
 process seam before its own Git fetch. Its engine environment preserves an
@@ -2048,19 +2089,15 @@ against a stub writer.
 > WATCHDOG whole-tree kill, MARKER/TOSS, NO-ORPHANS, BOUNDED) — via a
 > `COPILOT_PLUGIN_INSTALL_SMOKE` seam, without a heavy venv build.
 
-> **`worktree-manager` carries an independent analog, not this shared
-> helper.** It is deliberately **not** a Copilot plugin (see its own
-> [README](../worktree-manager/README.md)) and ships no `libs/` monorepo
-> ancestor to a machine that fetched it standalone via tarball, so its
-> `self_install.py` cannot depend on `versioned_runtime.py`. It reimplements
-> the same "marker published only after a verified-complete build" invariant
-> directly: a per-slot `.install-complete` file, invalidated before
-> mutation and published only after its three key entrypoint files are
-> confirmed present (a cheap secondary check, not an exhaustive scan of
-> every module the package imports), closing the identical corpse-slot
-> hazard (there, a Windows `PermissionError` from
-> `shutil.rmtree`/`shutil.copytree` hitting a slot still held open by
-> another process) for this one standalone installer.
+> **`worktree-manager` is a standalone canonical Python-engine adopter.**
+> It remains outside the marketplace/plugin installation-cell contract, but
+> ships byte-identical engine, seasoning and versioned-runtime helpers in its
+> own `scripts/` payload. Its adapter uses governed platform-runtime package
+> acquisition and isolated installed-origin health before canonical completion,
+> selector publication and mux cutover. Runtime slots are venvs; the materialized
+> source snapshot lives under `payload/`. Legacy payload-only selected slots
+> require a distinct constructed repair generation, never an in-place rebuild.
+> See its [README](../worktree-manager/README.md).
 
 ### Install-transaction lock — mutating runs never interleave, never run unlocked
 
@@ -2617,7 +2654,10 @@ existing output encoding. Requested missing helpers fail closed. The initializer
 changes only the producer's stdout/stderr text writers, preserving native
 command decoding and pipeline stdin encoding.
 `tools/sync-installer-engine.py` vendors this helper and generates
-`install.human-output.json`, binding the declaration to both source files.
+`<entrypoint-stem>.human-output.json`, binding the declaration to both source files
+(for example, `install.human-output.json` or Containers' and MCP's
+`init.human-output.json`). Standalone adopters declare their actual entrypoint;
+using the output initializer does not adopt the shared installer engine.
 Regenerate after changing either file. Release materialization validates all
 original declarations before any owner rewrites the tree, including when the
 source and destination are the same promotion scratch tree. It refreshes the
@@ -2625,6 +2665,27 @@ entrypoint digests after all owning materializers finish (including the engine's
 own installer, which has no engine reference) and refuses conflicting helper
 assets. The helper is packaged with the installer, under the same
 native execution-policy and payload-ownership requirements.
+
+Containers' PowerShell Docker-version preflight uses its existing asynchronous
+dual-stream native helper. It retains native decoding and `--version` arguments,
+then writes diagnostics through the producer's stderr text writer instead of
+letting raw child bytes bypass the declared encoding. A failed Docker probe
+reports its exit code as a non-fatal warning, not a successful version check;
+Docker remains optional for installing the CLI. The POSIX preflight likewise
+preserves stderr and reports nonzero status without aborting installation.
+
+MCP's PowerShell construction-shell and GC count subprocesses likewise use its
+existing dual-stream helper, forwarding diagnostics through the producer's
+text writer. The preceding GC command's explicit stderr suppression remains
+unchanged. Scalar count output retains its single-line shape. Construction
+ownership, failure decisions and the MCP stdio protocol are not changed.
+
+Budget Guidance's PowerShell construction-shell call uses the same existing
+dual-stream helper and producer-writer boundary, retaining diagnostics even
+when the native command succeeds. Its actual self-staged installer preserves
+requested UTF-8 output and literal forwarded arguments; the staging/watchdog
+authority and runtime CLI JSON are unchanged. POSIX has no corresponding
+PowerShell text-writer boundary.
 
 This declaration admits the existing Python updater's human-stream adapter;
 it does not replace signature/provenance checks or change `-File` arguments,
@@ -2638,6 +2699,16 @@ deadline and deployed-version receipt judgment. Streaming output does not turn
 a zero exit with a missing target receipt, an expired deadline or a failed
 cutover into a successful operation.
 
+Bridge, Dispatch, Vault, Pull Requests, SSH and Budget Guidance emit ordinary
+progress-helper lines for install/update action identity instead of decorative
+blank/banner blocks. Existing start/completion locations and useful action
+names remain; Dispatch's superseded-install line retains its qualification as
+skipped progress. Captured parents normalize these helpers to running, done or
+skipped diagnostics with elapsed time. Only the parent's actual completion
+records an operation duration and result. This is emitter-side cleanup, not
+generic banner recognition or suppression of arbitrary empty child lines.
+Uninstall presentation is unchanged.
+
 ### External dependency seasoning
 
 External build, runtime, development and selected optional dependencies must
@@ -2650,7 +2721,9 @@ dependency when the exact plugin test consumer explicitly installs that
 inventoried project's literal source path. Removing or redirecting that
 consumer binding revokes attribution; a package name alone is never exempt.
 Being a local path is not attribution: local wheels, archives and unattributed
-projects are refused. Source-directory admission verifies project identity,
+projects are refused, except Manager's temporary exact-checksum
+[dbus-next 0.2.3 wheel](../worktree-manager/vendor/README.md).
+Source-directory admission verifies project identity,
 resolved containment and the recursive local dependency graph, including
 symlink escapes and hidden requirement-file references.
 
@@ -2704,6 +2777,27 @@ span metadata never excuses a younger executed override. Retained
 comparison accounts for that intentional span-to-absolute conversion, preserving
 the admitted timestamp and every other resolver setting even as probe and
 execution clocks advance.
+On Windows, an installer-selected absolute native UV `.exe` path is resolved without
+traversing links before configuration probing and retained execution. Both
+use the same physical target of that selected command; another UV on PATH is
+not substituted, and no PATH, mitigation, index or seasoning setting is
+changed. This handles an otherwise usable WinGet UV binary whose link is
+rejected by inherited RedirectionGuard. Missing targets refuse explicitly.
+Python-owned construction applies this same selection before its own strict
+path resolution, so a traversing caller cannot fail before SDK admission.
+For a named native Windows command (`uv` or `uv.exe`), the SDK uses the
+read-only `SearchPathW` API with the process's existing system search policy,
+then resolves that exact logical result without traversing its links.
+Manager's default availability check uses the same selection before `is_file`;
+`shutil.which` can otherwise hide a guarded but usable WinGet entry.
+No PATH or search-mode setting is changed, and lookup failure never substitutes
+another UV. Non-Windows, explicit relative paths and non-native wrappers retain
+their existing behavior.
+The existing two-file SDK closure includes a generated projection of
+`agent_procutil._interpreter.physical_executable` in the configuration helper.
+Regenerate it with `tools/sync-installer-engine.py`, then fan runtime helpers
+out with `tools/sync-versioned-runtime.py`; the SDK sync check rejects drift
+from the canonical primitive rather than maintaining a separate resolver.
 `--reinstall` forces actual resolution rather than
 trusting a previously installed, potentially newer package. Skipping dependency
 or isolated-build resolution is not an age-enforcement fallback.
@@ -2716,6 +2810,19 @@ configured resolver, including index order/authentication, TLS, workspace
 constraints and stricter package cutoffs; an unsupported merge or mismatch
 refuses installation. `prepare_uv_install` is only a preflight API, not an
 installation boundary.
+
+Retain complete admitted projects before merging their declared build-resource
+directories. A resource may be a package subdirectory of another admitted
+project; its presence must not make that parent look fully copied while its
+`pyproject.toml` and other build inputs are still missing.
+
+Retained-input cleanup preserves an active exception or a nonzero UV child
+result, including captured output and the original exit status. A secondary
+filesystem cleanup failure is reported independently as `retained-input-cleanup`,
+not as dependency-seasoning rejection. Cleanup failure after otherwise successful
+execution raises `RetainedInputCleanupError` and makes the CLI fail; it never
+turns an incomplete cleanup into success. Context-owned runtime construction
+uses the same exception-preserving cleanup path.
 
 Absolute, non-editable source-only installations retain the common source/resource
 layout without reproducing unrelated caller-directory or staging ancestry.
@@ -2874,6 +2981,11 @@ source identity, and records the transaction's actual non-editable installation
 origins, not a second snapshot's paths. `freeze_inputs()` remains an explicit
 source-copy utility for packaging fixtures, not the construction path.
 The bootstrap requires Python 3.11 or newer.
+The POSIX guardian observes its direct child without reaping it until the
+owned process group is settled. Python 3.11/3.12 on macOS lack `os.waitid`;
+there it uses the existing `ps` process-state dependency to observe zombie
+state without releasing the child's PID/PGID. It does not raise the declared
+Python floor or use a reaping `Popen.poll()` fallback.
 Worktrees' Windows pre-lifecycle admission independently requires Python 3.10+,
 the declared minimum for its payload and shared human-output helper, before
 reserving ownership or staging the installer. A working but older `py -3`
@@ -2899,6 +3011,16 @@ context. Exact reuse never obtains exclusive construction ownership or invokes
 venv/package writers, even when construction tools are absent. Unfinished
 builders recheck under the canonical OS lease; completed content drift or
 invalid evidence refuses instead of rewriting a published slot.
+
+Reused installed-health failures request distinct-generation repair when the
+probe exits unsuccessfully, cannot create its child, or reaches its deadline
+after every owned writer has settled. Process creation is distinguished by
+`agent_procutil.SyncProcessLaunchError`; the installer propagates a separate
+settled-child timeout type. Missing-file launch errors also remain
+`FileNotFoundError` instances, preserving missing authentication-tool detection.
+Ownership, Job admission and cleanup failures are
+not repair licenses. Fresh construction still fails its health gate rather
+than reporting an unhealthy candidate ready.
 
 For a materialized source deployment, the Python lifecycle validates
 `runtime-source.json`, publishes the canonical source snapshot and selects its
@@ -3015,6 +3137,13 @@ introduces no deploy-time import or alternate lock protocol.
 
 `installer_engine_process.py` owns bounded child execution. Windows uses the
 frozen canonical `agent-procutil` strict, non-breakaway Job implementation.
+For candidate-backed Windows children, a finite guardian acquires the existing
+canonical candidate retention lease before starting the Job. It observes its
+caller's liveness pipe and retains that lease until the Job is settled even
+after caller death; release of the caller's construction byte lock alone does
+not admit destructive cleanup. The supplied runtime root, version and helper
+path must form a complete custody context. Child launch and settled-timeout
+outcomes retain their existing explicit error classes.
 POSIX uses an owner-death pipe guardian retaining the construction descriptor,
 an unreaped process-group leader and verified process-group teardown. The
 canonical POSIX lease releases on final descriptor close, not an explicit

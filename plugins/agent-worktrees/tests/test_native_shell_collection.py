@@ -82,7 +82,10 @@ def test_native_shell_collection_unavailable(monkeypatch, shell_policy):
         shells.resolve_native_bash()
 
 
-def test_native_shell_collection_success_headless_bounded(monkeypatch, shell_policy):
+@pytest.mark.parametrize("explicit", [False, True])
+def test_native_shell_collection_success_headless_bounded(monkeypatch, shell_policy, explicit):
+    if not explicit:
+        monkeypatch.delenv("COPILOT_EXTENSIONS_ALLOW_EXPLICIT_TEST_TIERS", raising=False)
     calls = []
     monkeypatch.setattr(Path, "is_file", lambda self: True)
     monkeypatch.setattr(shells.shutil, "which", _forbid_process)
@@ -94,7 +97,8 @@ def test_native_shell_collection_success_headless_bounded(monkeypatch, shell_pol
         )
 
     monkeypatch.setattr(subprocess, "run", run)
-    assert shells.resolve_native_bash() == r"C:\Program Files\Git\bin\bash.exe"
+    resolver = shells.resolve_native_bash if explicit else shells.admit_native_bash
+    assert resolver() == r"C:\Program Files\Git\bin\bash.exe"
     assert len(calls) == 3
     assert all(
         kwargs

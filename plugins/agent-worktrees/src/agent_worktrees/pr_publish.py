@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import contextlib
 import os
+import re
 import subprocess
 import threading
 import time
@@ -103,30 +104,57 @@ def _identity(url: str, cwd: str) -> str:
     return f"{host}/{path[:-4] if path.endswith('.git') else path}".lower()
 
 
-def push_slug(remote: str, *, cwd: str) -> str | None:
-    """The repo slug ``git push <remote>`` writes to, or None when it can't be read
-    or any push URL names another destination than the fetch URL (a separate
-    ``pushurl``, even one with the same ``owner/name`` on another host): a tip,
-    lease or credential resolved from one must not guard a push to another."""
+def _remote_snapshot(
+    remote: str, *, cwd: str,
+) -> tuple[subprocess.CompletedProcess[str], subprocess.CompletedProcess[str], PushTarget]:
+    """Read fresh fetch/push destinations and derive authority from those exact URLs."""
     fetch = git_ops.git("remote", "get-url", remote, cwd=cwd, check=False, isolated_repository=True)
     push = git_ops.git("remote", "get-url", "--push", "--all", remote, cwd=cwd,
                        check=False, isolated_repository=True)
     url = fetch.stdout.rstrip("\r\n") if fetch.returncode == 0 else ""
     slug = git_ops.slug_from_url(url) if url else None
-    if not slug or push.returncode != 0:
-        return None
+    identity = _identity(url, cwd) if url else ""
     pushes = {_identity(u, cwd) for u in push.stdout.splitlines() if u.strip()}
-    return slug if pushes == {_identity(url, cwd)} else None
+    if not slug or push.returncode != 0 or pushes != {identity}:
+        return fetch, push, PushTarget(remote)
+    return fetch, push, PushTarget(remote, slug, identity)
+
+
+def push_slug(remote: str, *, cwd: str) -> str | None:
+    """The repo slug ``git push <remote>`` writes to, or None when it can't be read
+    or any push URL names another destination than the fetch URL (a separate
+    ``pushurl``, even one with the same ``owner/name`` on another host): a tip,
+    lease or credential resolved from one must not guard a push to another."""
+    return _remote_snapshot(remote, cwd=cwd)[2].head_repo or None
 
 
 def push_identity(remote: str, *, cwd: str) -> str:
     """``host/owner/name`` of where ``git push <remote>`` writes (see :func:`push_slug`),
     or "" when it can't be read: the same ``owner/name`` on another host is another
     repository."""
-    if not push_slug(remote, cwd=cwd):
-        return ""
-    fetch = git_ops.git("remote", "get-url", remote, cwd=cwd, check=False, isolated_repository=True)
-    return _identity(fetch.stdout.rstrip("\r\n"), cwd) if fetch.returncode == 0 else ""
+    return _remote_snapshot(remote, cwd=cwd)[2].head_identity
+
+
+def _transport_settings(remote: str, *, cwd: str) -> tuple[tuple[str, str], ...]:
+    from .git_push_transport import REMOTE_TRANSPORT_SETTINGS
+
+    prefix = f"remote.{remote}."
+    pattern = "^" + re.escape(prefix) + "(" + "|".join(REMOTE_TRANSPORT_SETTINGS) + ")$"
+    args = ("config", "--null", "--get-regexp", pattern)
+    configured = git_ops.git(*args, cwd=cwd, check=False, isolated_repository=True)
+    if configured.returncode == 1 and not configured.stdout and not configured.stderr:
+        return ()
+    if configured.returncode != 0:
+        raise git_ops.GitError(["git", *args], configured.returncode, configured.stderr)
+    if not configured.stdout.endswith("\0"):
+        raise ValueError("Remote transport configuration is not NUL-terminated.")
+    values: dict[str, list[str]] = {key: [] for key in REMOTE_TRANSPORT_SETTINGS}
+    for item in configured.stdout.split("\0")[:-1]:
+        name, _, value = item.partition("\n")
+        if not name.startswith(prefix) or name[len(prefix):] not in values:
+            raise ValueError("Remote transport configuration contains an unexpected key.")
+        values[name[len(prefix):]].append(value)
+    return tuple((key, value) for key in REMOTE_TRANSPORT_SETTINGS for value in values[key])
 
 
 def _tip(remote: str, branch: str, worktree_path: str) -> str | None:
@@ -226,9 +254,10 @@ def _select_push_target(repo, pr, worktree_path: str) -> PushTarget | None:
         # The name alone isn't proof: fork setup repoints `fork` when the identity changes,
         # and a repoint to another host can keep the same owner/name.
         want = (getattr(pr, "head_repo", "") or "").lower()
-        got = (push_slug(recorded, cwd=worktree_path) or "").lower()
+        _, _, candidate = _remote_snapshot(recorded, cwd=worktree_path)
+        got = candidate.head_repo.lower()
         want_identity = getattr(pr, "head_identity", "") or ""
-        identity = push_identity(recorded, cwd=worktree_path) if got else ""
+        identity = candidate.head_identity
         if not got or (want and got != want) or (want_identity and identity != want_identity):
             return None
         return PushTarget(recorded, got, identity)
@@ -259,10 +288,12 @@ def _select_push_target(repo, pr, worktree_path: str) -> PushTarget | None:
         matches = [r for r in [*holding, repo.remote] if head and tips[r] == head]
         found = matches[0] if len(matches) == 1 else None
     # The tips (and the push's lease) were read from the fetch URL: the push must land there too.
-    slug = push_slug(found, cwd=worktree_path) if found else ""
+    if not found:
+        return None
+    _, _, candidate = _remote_snapshot(found, cwd=worktree_path)
+    slug = candidate.head_repo
     fork = found != repo.remote
-    return PushTarget(found, slug if fork else "", push_identity(found, cwd=worktree_path) if fork else "") \
-        if found and slug else None
+    return PushTarget(found, slug if fork else "", candidate.head_identity if fork else "") if slug else None
 
 
 def push_remote(repo, pr, worktree_path: str) -> str | None:
@@ -460,44 +491,35 @@ def push_checked(record, remote: str, refspec: str, *, cwd: str,
     try:
         with publish_lock(cwd, push_timeout_seconds=timeout):
             got = identity = ""
+            fetch, urls, candidate = _remote_snapshot(remote, cwd=cwd)
             if expected_head_repo or remote == getattr(pr, "remote", ""):
-                got = (push_slug(remote, cwd=cwd) or "").lower()
-                identity = push_identity(remote, cwd=cwd) if got else ""
+                got = candidate.head_repo.lower()
+                identity = candidate.head_identity
                 if not want or got != want or not want_identity or identity != want_identity:
                     return git_ops.PushResult(ok=False, stderr=REPOINTED)
             elif record is not None:
-                got = (push_slug(remote, cwd=cwd) or "").lower()
-                identity = push_identity(remote, cwd=cwd) if got else ""
+                got = candidate.head_repo.lower()
+                identity = candidate.head_identity
             if getattr(pr, "rewrite_identity", "") and pr.rewrite_identity != identity:
                 return git_ops.PushResult(ok=False, stderr=REPOINTED)
             rewrite_args = {"allow_history_rewrite": True} if allow_history_rewrite else {}
             # get-url expands insteadOf/pushInsteadOf before the snapshot leaves
             # the lock. A later remote-name repoint cannot redirect transport or auth.
-            urls = git_ops.git("remote", "get-url", "--push", "--all", remote,
-                               cwd=cwd, check=False, isolated_repository=True)
             destinations = urls.stdout.splitlines() if urls.returncode == 0 else []
             if not destinations or any(not url.strip() for url in destinations):
                 return git_ops.PushResult(ok=False, stderr=UNREADABLE_REMOTE)
             destinations = tuple(destinations)
             if len({_identity(url, cwd) for url in destinations}) != 1:
                 return git_ops.PushResult(ok=False, stderr=UNREADABLE_REMOTE)
-            fetch = git_ops.git("remote", "get-url", remote, cwd=cwd, check=False,
-                                isolated_repository=True)
             fetch_url = fetch.stdout.rstrip("\r\n")
             if fetch.returncode or not fetch_url.strip():
                 return git_ops.PushResult(ok=False, stderr=UNREADABLE_REMOTE)
-            from .git_push_transport import REMOTE_TRANSPORT_SETTINGS
-            transport_settings = []
-            for key in REMOTE_TRANSPORT_SETTINGS:
-                configured = git_ops.git(
-                    "config", "--null", "--get-all", f"remote.{remote}.{key}",
-                    cwd=cwd, check=False, isolated_repository=True,
-                )
-                if configured.returncode not in (0, 1):
-                    return git_ops.PushResult(ok=False, stderr=configured.stderr)
-                transport_settings.extend(
-                    (key, value) for value in configured.stdout.split("\0")[:-1]
-                )
+            try:
+                transport_settings = _transport_settings(remote, cwd=cwd)
+            except git_ops.GitError as exc:
+                return git_ops.PushResult(ok=False, stderr=exc.stderr)
+            except ValueError as exc:
+                return git_ops.PushResult(ok=False, stderr=str(exc))
         from .git_push_transport import pinned_destination
         with pinned_destination(remote, destinations, tuple(transport_settings), fetch_url=fetch_url):
             result = git_ops.push(remote, refspec, cwd=cwd, force_with_lease=force_with_lease,
@@ -576,8 +598,11 @@ def record_remote(pr, remote: str, repo_remote: str, worktree_path: str) -> None
     ``owner/name``, which :func:`push_remote` checks the remote still points at."""
     fork = remote != repo_remote
     pr.remote = remote if fork else ""
-    pr.head_repo = (push_slug(remote, cwd=worktree_path) or "") if fork else ""
-    pr.head_identity = push_identity(remote, cwd=worktree_path) if fork else ""
+    if fork:
+        _, _, target = _remote_snapshot(remote, cwd=worktree_path)
+        pr.head_repo, pr.head_identity = target.head_repo, target.head_identity
+    else:
+        pr.head_repo = pr.head_identity = ""
 
 
 def record_remote_identity(pr, remote: str, repo_remote: str, head_repo: str = "",

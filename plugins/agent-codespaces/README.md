@@ -126,6 +126,32 @@ left intact. Use a distinct repair generation or a new released version;
 this health refusal does not itself implement generation repair or complete
 the broader admission/coalescing rollout.
 
+### First-use deployment admission
+
+The stamped global command and payload-local runtime gate use the canonical
+resolver's ready mode before considering provisioning. A healthy selected
+runtime remains callable under managed deployment. Cold commands require the
+selected installation's publication decision before writing boot traces,
+provision status or orchestration locks; context validation alone is not
+deployment permission. Missing or older admission support produces an explicit
+readiness error rather than an alternate installer or completion parser.
+
+Windows stamping captures the private snapshot candidate's canonical source
+before publishing the command and replacing the previous selection. Failed
+resolver or command publication leaves that previous snapshot and its selectors
+intact. Resolver destinations must be files, not directories.
+The global command binds configuration and provisioning to its installed root.
+The generated PowerShell command uses UTF-8 with a BOM so Windows PowerShell
+5.1 preserves non-ASCII installation paths.
+PowerShell's legacy native argument mode stringifies and encodes forwarded
+arguments before module execution to preserve embedded quotes and native
+argument conversion; newer native argument passing retains direct module
+invocation.
+Cold `provision` builds and activates the addressed runtime without publishing
+user-global commands; ordinary install/update/stamp retain their command
+publication responsibilities. An incomplete selected slot remains a cold
+candidate rather than a silent POSIX dispatcher exit.
+
 ## Configuration
 
 **Most repos need no config at all.** agent-codespaces works out of the box on
@@ -435,6 +461,56 @@ authorizes whatever account the browser is already on), then poll the same file
 for `✓ Authentication complete`. Note `gh auth refresh` targets the **active**
 account (no `-u/--user` on many `gh` builds), so `gh auth switch --user <login>`
 first and restore afterward.
+
+## CodeSpaces pivot authentication
+
+The canonical `pool --picker-json` contribution reports authentication in its
+summary: `auth_status` is `ready`, `auth_required`, `scope_blocked`, or `error`;
+`auth_account` names the selected login, and `auth` includes per-account results.
+These fields accompany both JSON snapshots and streaming summary frames. A
+failed probe or inventory is visible as an error, never an authenticated empty
+pool. Subscriptions recheck authentication rather than retaining a stale banner.
+
+The Manager displays **Sign in** or **Authorize** above a blocked list, even
+when there are no rows. Clicking starts a cancellable progress modal containing
+the vendor browser/device-code instructions. Only that explicit action (or the
+explicit CLI below) starts authentication; listing and rendering never do.
+
+```bash
+agent-codespaces authorize --account <login> --user-initiated
+```
+
+Omit `--account` only when no login has been selected yet. The command uses
+GitHub's device OAuth endpoints and the GitHub CLI's public OAuth application
+identifier. It never runs `gh auth login`: that command can modify the shared OS
+keyring even with an isolated `GH_CONFIG_DIR`, and even its file-storage option
+can delete the global active credential.
+
+Identity and granted scope are verified before storing a credential in the
+provider's own installation-qualified OS keyring namespace. No GitHub CLI keyring
+slot is written or deleted. On POSIX without an available keyring, the provider
+logs that it is using a private vendor-compatible `hosts.yml`: directories must
+be owner-only and files are published with mode `0600`. The modal discloses this
+fallback before authorization. Windows requires the OS keyring and reports an
+explicit storage failure rather than silently writing an unprotected token file.
+No token is exported into the session environment, and no global `gh` file or
+keyring slot is changed. A wrong login, denied scope, failed ceremony or
+cancellation is not success. Verified provider credentials take precedence over
+an older named keyring token for CodeSpace operations. The Manager refreshes the
+provider after success.
+
+Authentication and inventory use one shared set of mapped, bound, configured,
+provider-authorized and active account candidates. A mapped-only account
+missing scope therefore offers Authorize even when another account has rows.
+
+No private broker, persistent authentication daemon, PAT or repository opt-out
+is required. A remote terminal without an available browser can still use the
+displayed vendor verification URL/code in a browser. Native authorization and
+operating-system credential-store behavior require an operator-run ceremony;
+headless regression tests mock that boundary and never authorize an account.
+No browser or authentication child process is spawned; opening the displayed
+verification URL remains a deliberate user action, and cancelling cannot
+terminate an operator's browser or leave an authentication child behind.
 
 ## Credential relay: fail-fast & auth verification
 

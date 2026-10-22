@@ -1,0 +1,9 @@
+{
+  "comment": "Discard inherited Win32 OpenSSH descriptor state only at managed dtssh daemon-root startup.",
+  "changes": [
+    {
+      "plugin": "agent-ssh",
+      "type": "patch"
+    }
+  ]
+}

@@ -164,9 +164,212 @@ The sequence below is **agent-recommended** and requires this proposal's review.
    release path, then perform only authorized installed updates and acceptance.
    No integration suite becomes a promotion prerequisite.
 
+## Shared raw-JSON codec integration
+
+The operator selected a shared dependency-free codec for this consumer
+boundary. The **agent-recommended package name and sequence** were reviewed in
+#7440 and implemented in #7481, #7484, #7502 and #7519. This completed reader
+slice does not enable ordinary tuple producers or authorize rollout.
+
+### Bounded implementation
+
+- [x] Extract the existing pure decoder into `libs/worktree-identity`
+  (distribution `agent-worktree-identity`, import `worktree_identity`) using
+  ordinary first-party library packaging, with no runtime dependencies.
+  Preserve the existing version-1 fields, supported canonical environments,
+  exception behavior and absent-version legacy interpretation. Do not add a
+  second machine map, environment inference or a broader platform contract.
+- [x] Retain `agent_worktrees.worktree_machine_identity` as a compatibility
+  import of the same implementation and types. Keep tracking serialization,
+  identity fences and every already-merged Worktrees guard unchanged.
+- [x] Declare the shared package through the repository's canonical local
+  dependency, materialization and artifact-attribution mechanisms. Never
+  require an installed sibling plugin or copy the decoder into each consumer.
+  Preserve package sources, dependency seasoning and standalone installation.
+- [x] Adapt Dispatch's raw Worktrees row filtering and focus presentation,
+  Bridge's venue-plugin owner checks, and Manager's raw-row source/action
+  routing. Use the shared execution owner at one-term boundaries, retain
+  physical/environment metadata separately, and refuse malformed explicit
+  tuples before any ownership or routing effect.
+  Dispatch's reader/focus boundary landed in #7484 and Bridge's controller
+  boundary in #7502; Manager's row/action boundary landed in #7519.
+- [x] Keep task queues, sessions, relationships, transport profiles and
+  historical rows untouched. This is tuple-wire adaptation, not a takeover of
+  existing transport, task lifecycle, installer or Manager runtime work.
+- [x] Land the extraction and adapters in reviewable source slices.
+  The next Phase 3d stretch continues the existing prospective-producer and
+  retained-replay gates. Ordinary create, anchor and external-adoption
+  producers remain legacy here.
+
+### Required validation
+
+- [x] Exercise the extracted package using only the standard library at import
+  time, without Worktrees, machine-transport, configuration, I/O or subprocess
+  discovery. Verify the compatibility module exports the same classes and
+  functions, not a parallel implementation.
+- [x] Preserve valid version-1 and legacy behavior; cover boolean/unknown
+  versions, missing dimensions, conflicting platform/environment and invalid
+  owner fields. A physical name shared by native and guest records cannot
+  substitute for the execution owner.
+- [x] Test each actual consumer's raw JSON boundary with legacy, valid tuple
+  and malformed tuple rows. Preserve full metadata without putting physical
+  identity into one-term owner fields; filtering must not hide uncertainty.
+  Dispatch's raw reader and actual focus CLI have this coverage in #7484.
+  Bridge's controller and provider/transport refusal boundary is covered in #7502.
+  Manager's model, current publications and Picker action boundary are covered
+  in #7519, retaining selected source identity independently of tuple metadata.
+- [x] Verify real first-party package construction, materialization and
+  installed import boundaries through existing bounded tools, without adding
+  networked or native integration work to the unit-only promotion packet.
+- [x] Pass affected bounded suites, dependency/install-contract and module
+  guards, documentation review, current-head review and required Source CI.
+  Exact-head Source CI for #7519 ran the complete live declaration audit:
+  320 declarations, zero violations, minimum seven days. The separate local
+  timeout was not counted as proof.
+  Source proof does not satisfy qualified delivery or installed acceptance.
+
+## Gated producer implementation
+
+This **agent-recommended source realization** implements the operator-selected
+`gated-producer-implementation`. Review this amendment before adding its API or
+changing a producer. It closes the existing agent-fabric
+`host-qualified-guest-identity` and Worktrees durable-identity intent; it does
+not extend the vision. It retains the architecture patterns' single registry,
+independent installation, separate execution workspace and explicit repair
+boundaries.
+
+### Source interfaces and ownership
+
+Use a small internal typed `identity_mode` selection with only `legacy` and
+`tuple-v1`; omitted means `legacy`. There is no new command-line flag,
+environment override, persistent setting or ordinary default change in this
+source slice. Exercise the opt-in through the actual producer APIs in isolated
+fixtures. A later reviewed activation change owns ordinary call-site selection.
+
+For a genuinely new tuple allocation, derive `WorktreeMachineIdentity` from
+the existing shared identity seam and actual local execution context, applying
+`execution_spaces.registry_for_config` and `resolve_machine_selection` for
+optional declared customization. The initial merged gated implementation
+requires a registry entry; the operator's
+[manifest-independent amendment](manifest-independent-local-identity.md)
+supersedes that precondition before ordinary activation. Missing or unrelated
+map entries must not deny basic local operation. Explicit conflicts and foreign
+receiving-space authority still refuse; neither a suffix nor caller-constructed
+tuple supplies that authority. `Config.machine` remains a one-term execution
+identifier, not a globally reinterpreted physical-name field.
+
+| Authoritative boundary | Implementation obligation |
+|---|---|
+| `_create_worktree_core` | Resolve a fresh tuple only for a new opt-in allocation; use `prospective_session_worktree_id`, and pass physical machine plus the typed identity to tracking |
+| Paired knowledge creation | Share the admitted harness tuple and exact harness ID; keep qualified forward/back references execution-qualified, including an anchor companion |
+| `launch_request.execute` / admission | Persist and consume the admitted complete allocation, not a timestamp/suffix that is reformatted using current naming defaults |
+| `creation_requests.create` | Replay a completed receipt before selecting a new producer representation; retain original allocation and validate current receiving-space authority |
+| `creation_tail_repair` | Use the retained record and original pair identity; never derive a new tuple or rename an admitted allocation during repair |
+| Anchor and external linked-worktree adoption | Stamp the tuple only on a new opt-in record; load an existing record unchanged under existing locked/if-absent semantics |
+| Tracking and projections | Reuse the shared codec and immutable identity fence; retain current JSON and execution-reference adapters, sessions and controller semantics |
+
+Keep the public compatibility imports and existing low-level
+`machine_identity` tracking parameter. The internal mode selects derivation,
+not permission to overwrite an existing record. Unknown modes refuse explicitly.
+Do not centralize tuple derivation inside every tracking save: loading/saving a
+legacy record is not adoption or a format upgrade.
+
+### Admission, replay and repair
+
+The existing SQLite creation journal and daemon-owned launch admission remain
+the owning stores; do not add a reservation registry. Keep legacy allocation
+facts byte-compatible. Representation mode is not a new logical creation
+request: retrying the same creation key under a different producer default must
+return its original supported representation, not conflict solely on that mode
+or allocate again.
+
+Introduce an immutable internal admitted-allocation value where the current
+timestamp/suffix pair loses information. Carry the exact ID, branch, checkout
+and original owner representation from the validated reservation or retained
+record; a raw arbitrary ID supplied by a caller is not admission. Capture
+additive identity evidence in new receipts through their existing locked
+writers, with strict validation and backward-compatible legacy receipt reads.
+Validate current project, execution-space authority, allocation namespace and
+existing nonce checks before reuse. Changed registry spelling may resolve
+through the shared compatibility rules or produce an explicit demonstrated
+conflict, never a newly formatted replacement.
+
+An already-started or interrupted journal entry retains its existing
+pending/inspect refusal. This is not an automatic restart or a second carve.
+Completed creation-key replay returns the stored original result; explicit
+tail repair operates on the retained record and seed. Preserve original
+relationship bytes, creation nonce, pair stub, sessions, head, title, flags,
+claims and paths. A missing or mismatched allocation, foreign execution space,
+changed owner, nonce, project or pair must refuse without new allocation.
+Do not rewrite old receipts or backfill identity merely by replaying them.
+
+### Ordered source slices and acceptance
+
+- [x] Land this source-interface/replay amendment through ordinary plan review
+  in #7568.
+- [x] Implement shared-selection derivation and actual create/system/bridge/
+  paired producers behind the internal legacy-default mode, with negative
+  pre-effect cases and unchanged legacy output controls in #7572.
+- [x] Wire complete launch admission, creation-key replay and retained tail
+  repair; exercise both old receipts and new tuple receipts without allocating
+  a replacement on retry or refusal in #7582.
+- [x] Wire new anchor and external-adoption records through the same opt-in
+  boundary; prove existing records are returned byte-for-byte unchanged in #7588.
+- [x] Prove source one-term equivalence through actual creation/lookup/resume
+  entry points: declared shorthand, physical plus explicit environment, custom
+  execution key and configured aliases agree where permitted. Retain exact-key
+  precedence, ambiguity, conflicting-environment and foreign-space refusals in #7592.
+- [x] Cover actual producer-to-tracking-to-JSON and pair/controller/reference
+  flows for Windows, WSL and Linux. Include a physical name ending in a
+  platform-like suffix, repeated historical prefixes, both suffix lengths,
+  changed current registry spelling, removed checkout, pending reservation,
+  changed nonce and competing if-absent creation. The source map below names
+  the reviewed regressions; installed acceptance remains separate.
+- [x] Run bounded source validation and required CI, review the final source
+  diff, and release through normal unit-only promotion. Pure decisions are unit
+  candidates only when the actual effect/coverage closure admits them; real
+  SQLite/filesystem/Git, cross-process and installed/native cases stay in
+  existing bounded development/periodic lanes, not promotion prerequisites.
+  The final equivalence slice is included in natural qualification
+  `39602465019` for source `68b58730fb829745c5ed351b6623833e2637638b`;
+  its recorded Main landing has the exact qualified tree.
+- [x] Verify released, installed reader acceptance in every relevant consumer
+  before proposing ordinary producer-default activation. Source fixtures,
+  merged adapters and artifact publication are not installed acceptance.
+  Deployed Worktrees, Dispatch, Bridge and Manager passed 69 guarded
+  synthetic-wire cases on WSL and 69 on native Windows through their actual
+  installed boundaries, including legacy, versioned tuple, malformed and
+  cross-environment refusal cases. Imported modules and the codec originate
+  inside each selected runtime; no live records or services were modified by
+  the probes. This does not close the live Manager-source, creation/resume or
+  later activation gates below.
+- [ ] Review any ordinary-default activation separately, only after retained
+  replay, one-term equivalence and installed-reader gates pass. Actual rollout
+  remains separately authorized; no historical-record migration is implied.
+  Installed preflight exposed the initial gated implementation's unnecessary
+  registry precondition. The operator explicitly rejected requiring map entries
+  or cross-project bindings for basic local operation. Correct that assumption
+  through the [local-identity amendment](manifest-independent-local-identity.md),
+  rather than copying registries, inferring authority from suffixes or silently
+  retaining a legacy new-record format.
+
+### Reviewed source coverage map
+
+All test paths below are under `plugins/agent-worktrees/tests/`; this is source
+coverage, not native or installed-consumer acceptance.
+
+| Obligation | Reviewed source coverage |
+|---|---|
+| Actual new session/bridge/system producers, tracking and JSON; physical names ending in a platform suffix | `test_tuple_creation.py` (#7572) |
+| Complete daemon admission, old/new receipt replay, removed checkout, owner/nonce/pair changes and partial tuple refusals | `test_launch_allocation.py` (#7582) |
+| Retained actual-Git paired repair, Windows/WSL/Linux metadata, both suffix lengths, historical prefixes, changed legacy registry spelling and repeated repair bytes | `test_retained_allocation_repair.py` (#7582) |
+| Pending/interrupted requests remain inspect-only; no repeated effects | `test_creation_requests.py`, exercised in the #7582 affected portfolio |
+| Actual new anchor/external adoption, YAML/JSON/controller/reference flows, retained history and competing if-absent winners | `test_tuple_adoption.py` (#7588) |
+| Actual one-term new/short-ID preview lookup/resume, alias and exact-key precedence, conflicting/foreign-space refusals | `test_tuple_resolve_equivalence.py` (#7592) |
+
 ## Validation Plan
 
-- [ ] The same configured physical machine is reported in Windows and WSL;
+- [x] The same configured physical machine is reported in Windows and WSL;
   environment and compact execution ID differ explicitly and OS hostname is
   independent metadata.
 - [ ] Physical deployment selectors admit the already-declared host in either

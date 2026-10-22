@@ -4,6 +4,15 @@ Shared **Windows-headless / detached / bounded-owned** process primitives for
 Copilot CLI plugins. One vendored helper keeps launch flags and finite child
 containment consistent instead of reimplementing them in each consumer.
 
+`agent_procutil.diagnostics` also supplies the pure, bounded subprocess
+diagnostic parser/redactor originally owned by Bridge's resolver. Bridge retains
+its compatibility exports and retry policy; Dispatch can use
+`safe_diagnostic_text` and `structured_diagnostic_fields` without importing a
+sibling plugin. Error/message/stage/code/reason strings are selected, not opaque
+launch envelopes. Redaction handles known credential forms and supplied known
+values after control normalization; it is best-effort, not a guarantee about
+arbitrary third-party output.
+
 ```python
 import subprocess
 import sys
@@ -43,7 +52,58 @@ ownership. Runtime code with an additional in-process survival step can use
 instead of using `DETACHED_PROCESS`, so console-subsystem grandchildren do not
 allocate a visible console.
 
+### Windows inner-base interpreter selection
+
+`windowless_python()` prefers the `pyvenv.cfg` home's physical `pythonw.exe`.
+It reads name-surrogate junction/symlink targets component by component with
+`lstat` and `readlink`, including ancestors and final executable links, before
+inspecting descendants. This avoids traversing aliases blocked by Windows RedirectionGuard;
+it does not change runtime-marker selection or disable mitigation.
+Pass `windowless_python_env()` into the child environment when using that base
+interpreter: `__PYVENV_LAUNCHER__` retains the original selected venv's import
+context. It also preserves that identity when a local GUI fallback is a link
+to an executable outside the venv. `direct_python()` returns the physical
+console interpreter plus that environment mapping; it selects `python.exe`
+from the same configured home even
+when the GUI executable is itself a link elsewhere.
+Outside a venv, an available requested console sibling takes precedence; if a
+GUI-file alias has none, its physical target's `python.exe` sibling is used.
+Windows callers that cannot accept the ordinary console fallback can request
+`windowless_python(require_windowless=True)`. Selection then refuses if neither
+GUI entry exists, while accepting a GUI entry whose physical target is renamed
+or relocated. Callers must not infer GUI intent from that target's basename.
+The default and non-Windows behavior are unchanged.
+
+The selected venv's configured home must also remain traversable by CPython:
+`__PYVENV_LAUNCHER__` causes startup to read that same `pyvenv.cfg`. A healthy
+physical executable alone does not make a blocked home usable. After the
+configuration is read, an explicit home-access check refuses WinError 448 with
+a runtime reconstruction diagnostic rather than returning a success-shaped selection.
+Runtime construction must record a usable physical home. These helpers never
+rewrite an installed configuration, substitute another venv, or override
+`PYTHONHOME`/`PYTHONPATH` to disguise an unusable one.
+
+Missing windowless interpreters retain the documented local-sibling/original
+fallback. Direct venv launches refuse unavailable base interpreters. Link
+cycles and inaccessible link metadata raise instead of being mistaken for
+absence, and no helper substitutes an unrelated PATH Python. Non-Windows
+selection is unchanged.
+
+`tests/test_interpreter.py` covers non-traversing selection and refusal.
+`tests/test_interpreter_windows.py` launches real console and GUI children twice
+each through a test-owned inner-home junction, checking venv imports, prefix,
+exit status and unchanged mitigation flags. Its enforced parameter requires
+inherited RedirectionGuard, proves blocked-home CPython startup failure and
+explicit helper refusal twice, then records a physical home only in the
+disposable fixture and checks successful launches. It skips explicitly on
+ordinary Windows workers rather than claiming enforcement or deployed recovery.
+
 ## Bounded owned children
+
+Minimal lifecycle bundles may copy only `agent_procutil/__init__.py` and load
+it directly, with or without registering the module in `sys.modules`.
+The short-lived containment helpers and their typed process-creation errors
+remain self-contained; calling `spawn_daemon` requires the full package.
 
 `agent_procutil.owned_process.run_owned()` executes a finite command with
 captured UTF-8 output, optional `input_text`, and a required positive `timeout`.
@@ -102,16 +162,24 @@ before a launched thread has assigned its identity.
 Normal early stdin closure preserves the target's result; unexpected input
 errors remain explicit.
 
-Native POSIX caller-death execution currently requires Linux `pidfd_open`,
-readable `/proc` pidfd identity, and the existing unreaped-child/default-SIGCHLD
-prerequisites. Unsupported prerequisites refuse before target launch. One finite
+Native POSIX caller-death execution uses Linux `pidfd_open` and readable `/proc`
+pidfd identity, or macOS `kqueue` process-exit events and `libproc` group census.
+Both require unreaped-child/default-SIGCHLD custody. Unsupported native API
+prerequisites refuse before target launch. macOS uses native `waitid(WNOWAIT)`
+even on Python versions that do not expose it; Linux retains its Python/native
+pidfd path. One finite
 helper owns its session/group before starting the target in that inherited
 scope. A dedicated lifetime writer belongs only to the caller; EOF, including
 caller `SIGTERM`/`SIGKILL`, retires that group. Synchronized fork callbacks close
 active lifetime writers in unrelated fork children as well as excluding them
 from exec inheritance. The caller retains unreaped custody
-of the helper through the final group sweep and poll-based pidfd exit confirmation
-before reporting completion. No caller pre-wrapping, persistent daemon,
+of the helper through the final group sweep and native exit confirmation before
+reporting completion. On macOS the guardian registers `EVFILT_PROC/NOTE_EXIT`
+against its still-live direct parent, checking parent identity on both sides of
+registration; reparenting or a native observation error refuses or retires the
+scope. `libproc` confirms there are no live members of the pinned group before
+its original leader is reaped. Individual census PIDs are never signalled.
+No caller pre-wrapping, persistent daemon,
 per-session subscription worker, network endpoint or sibling runtime is needed.
 The helper imports only the caller's selected canonical package under isolated
 Python, not an ambient CWD or `PYTHONPATH` fallback.
@@ -121,6 +189,12 @@ authorization or hostile-code sandbox. POSIX descendants must remain in the
 inherited group; deliberate session/group escape, privilege changes and
 cross-kernel execution require their own supported owner rather than a claimed
 native-tree guarantee.
+
+`tests/test_darwin_caller_owned.py` covers native API construction, parent
+identity changes, unavailable observations and wrong-member identities with
+synthetic ABI results on every host. Its macOS-only checks exercise actual
+kernel construction, bounded execution and abrupt caller death with a finite
+target and descendant. Skips on other hosts are not macOS execution evidence.
 
 The complete argument/input control request is limited to 16 MiB. POSIX
 completion frames are separately bounded from the declared stream budgets,
@@ -281,6 +355,70 @@ suspended child before it executes; the owned Job does not permit breakaway.
 Conflicting breakaway creation flags are rejected. The default
 `allow_breakaway=True` remains compatible with existing callers that deliberately
 launch survivable daemons.
+
+## Opt-in Windows commands from WSL
+
+`agent_procutil.wsl.run_windows_owned` is a separate, text-mode bounded-command
+interface. Existing Windows/POSIX spawn APIs and daemon lifetimes are unchanged.
+The caller supplies an absolute WSL-invokable **base `pythonw.exe`** path; the
+library never discovers or installs a Windows interpreter. WSL's normal
+`wslpath` mapping must make this installed package readable by that interpreter.
+The dependency-free owner starts with isolated, no-site Python flags, so an
+unavailable mapped package cannot fall back to the working directory,
+`PYTHONPATH`, user customization or another Windows installation.
+An unavailable interpreter, mapping, import or strict Windows Job refuses
+execution rather than falling back to an unowned command.
+
+```python
+from agent_procutil.wsl import run_windows_owned
+
+result = run_windows_owned(
+    windows_command,
+    windows_python=selected_windows_pythonw,
+    timeout=10,
+    input_text=request_text,
+)
+```
+
+The per-call windowless Windows owner first places **itself** in a strict
+kill-on-close Job. Target creation therefore inherits Windows ownership before
+execution, including the suspended-create/assignment interval of its nested
+ordinary bounded command. The caller keeps a dedicated input pipe open:
+caller exit, hard death or interruption closes it, and the Windows owner exits,
+releasing the self-Job and its descendants. Creation, registration and closure
+of its writer share the POSIX caller owner's fork lock and lifetime registry;
+unrelated fork children close inherited writers instead of extending ownership.
+Setup interruption also closes the pipe and waits for owner exit before
+propagating, including when the caller catches and retains the exception's
+traceback before any request has been sent.
+This is a bounded command helper,
+not a persistent service or a POSIX-group claim over Windows processes.
+
+Target stdin, stdout and stderr remain distinct. A framed request carries text
+input independently of the lifetime signal, and the result returns separate
+captured text streams and the Windows command's actual return code. Requests
+and serialized responses have explicit byte bounds; target capture retains the
+ordinary `run_owned` memory contract. No command text, input or raw exception is
+logged by the interop wrapper. Missing or interrupted completion is explicit
+and never permission to replay an uncertain command.
+
+Portable protocol tests are separate from real WSL/Windows qualification.
+Timeout, blocked-stdin, SIGINT and caller-death cases, including an unrelated
+fork child remaining alive, must inspect exact owned descendants
+before an outer fixture closes its own Job. Native Job/stdio success alone is
+not that cross-OS proof.
+The unrelated-fork control requires Linux pidfd observation and keeps the WSL
+launcher alive, so launcher exit cannot mask caller-owned retirement.
+
+The opt-in native suite uses `AGENT_PROCUTIL_WSL_TEST_DISTRO` to select an
+existing WSL distribution and runs each failure case twice while observing
+visible windows and foreground changes. It never provisions WSL or installs a
+Windows interpreter. Set `AGENT_PROCUTIL_WSL_TEST_PACKAGE_ROOT` to the
+Windows-visible `site-packages` directory of an isolated, wheel-installed
+Linux test environment to exercise the installed package instead of source.
+Run `python -m pytest libs/agent-procutil/tests/test_wsl_native.py` on Windows.
+These native cases stay opt-in; portable protocol/refusal tests remain in the
+ordinary library suite.
 
 ## Optional owned-process CPU observations
 

@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve repository class and agent preferences when removing full project adoption",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

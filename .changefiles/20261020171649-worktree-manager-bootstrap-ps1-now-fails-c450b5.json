@@ -1,5 +1,5 @@
 {
-  "comment": "Worktree Manager bootstrap.ps1 now fails when uv, git or tar fails instead of exiting 0 with no binstub installed.",
+  "comment": "Worktree Manager bootstrap.ps1 now fails when its git fetch/clone or tarball extraction fails instead of continuing with a missing or stale payload.",
   "changes": [
     {
       "plugin": "worktree-manager",

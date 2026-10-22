@@ -43,7 +43,70 @@ def state_path(name: str) -> Path:
 
 
 def read_state(name: str) -> dict[str, Any] | None:
-    return _STORE.read(name)
+    state = _STORE.read(name)
+    embedded = (state or {}).get("pending_deliveries") or {}
+    if not isinstance(embedded, dict):
+        raise RuntimeError("Invalid embedded pending delivery journal")
+    pending = {**embedded, **_read_pending_deliveries(name)}
+    if pending:
+        return {**(state or {}), "pending_deliveries": pending}
+    return state
+
+
+def _delivery_store() -> KeeperStore:
+    return KeeperStore(_STORE.state_dir / "pending-deliveries")
+
+
+def pending_delivery_path(name: str) -> Path:
+    return _delivery_store().state_path(name)
+
+
+def _read_pending_deliveries(name: str) -> dict[str, Any]:
+    path = pending_delivery_path(name)
+    data = _delivery_store().read(name)
+    if data is None:
+        if path.exists():
+            raise RuntimeError("Pending delivery journal is unreadable; refusing to discard ownership")
+        return {}
+    if type(data.get("version")) is not int or data["version"] != 1 or not isinstance(
+        data.get("pending_deliveries"), dict,
+    ):
+        raise RuntimeError("Unsupported pending delivery journal")
+    return dict(data["pending_deliveries"])
+
+
+def _write_pending_deliveries(name: str, pending: dict[str, Any]) -> None:
+    if pending:
+        _delivery_store().write(name, {"version": 1, "pending_deliveries": pending})
+    else:
+        _delivery_store().remove(name)
+
+
+def _migrate_pending_deliveries_locked(name: str, state: dict[str, Any]) -> dict[str, Any]:
+    """Move the unreleased embedded format before any disposable-state removal."""
+    embedded = state.get("pending_deliveries")
+    if embedded is None:
+        return state
+    if not isinstance(embedded, dict):
+        raise RuntimeError("Invalid embedded pending delivery journal")
+    pending = {**embedded, **_read_pending_deliveries(name)}
+    _write_pending_deliveries(name, pending)
+    state = {key: value for key, value in state.items() if key != "pending_deliveries"}
+    _STORE.write(name, state)
+    return state
+
+
+def record_pending_delivery(name: str, hold_id: str, pending: dict | None) -> None:
+    with _keeper_lock(name):
+        state = _migrate_pending_deliveries_locked(name, _STORE.read(name) or {})
+        ledger = _read_pending_deliveries(name)
+        if hold_id not in _read_holds(state) and hold_id not in ledger:
+            raise RuntimeError("Pending delivery has no owning forward-keeper hold")
+        if pending is None:
+            ledger.pop(hold_id, None)
+        else:
+            ledger[hold_id] = pending
+        _write_pending_deliveries(name, ledger)
 
 
 def _holds() -> KeeperHoldStore:
@@ -129,9 +192,11 @@ def ensure_running(
     """Start a keeper unless a live one already owns this container forward."""
     holds = _holds()
     hold_id = hold_id or mux
+    with holds.lock(name):
+        _migrate_pending_deliveries_locked(name, _STORE.read(name) or {})
     holds.prune_snapshot(name, probe=mux_alive)
     with holds.lock(name):
-        existing = read_state(name) or {}
+        existing = _migrate_pending_deliveries_locked(name, _STORE.read(name) or {})
         current_holds = holds.read_holds(existing)
         current_holds, hold_added, hold_updated_at = holds.refresh_hold_with_status(
             current_holds,
@@ -163,6 +228,14 @@ def ensure_running(
             }
         if existing:
             _STORE.stop(name)
+        # Keep surviving holds available if process creation fails. There is no
+        # pid here, so this snapshot cannot claim a replacement is running.
+        _STORE.write(name, {
+            "keeper_protocol": _KEEPER_PROTOCOL, "container": name, "holds": current_holds,
+            "venue_port": existing.get("venue_port"),
+            "relay_port": existing.get("relay_port"),
+            "host_relay_port": existing.get("host_relay_port"),
+        })
         argv = [
             windowless_python(),
             "-m",
@@ -201,7 +274,7 @@ def ensure_running(
             popen=popen,
             popen_kwargs=windowless_daemon_kwargs(breakaway=True),
         )
-        latest_holds = holds.read_holds(read_state(name) or {})
+        latest_holds = holds.read_holds(_STORE.read(name) or {})
         latest_holds.update(current_holds)
         state = holds.state_with_holds({**state, "holds": latest_holds}, latest_holds)
         _STORE.write(name, state)
@@ -220,6 +293,8 @@ def stop_keeper(
     mux_alive: HoldProbe | None = None,
     expected_updated_at: float | None = None,
 ) -> bool:
+    with _keeper_lock(name):
+        _migrate_pending_deliveries_locked(name, _STORE.read(name) or {})
     return _holds().release_hold(
         name,
         hold_id=hold_id,
@@ -245,6 +320,8 @@ def _write_self_state(args: argparse.Namespace) -> None:
 
 
 def _remove_self_state(name: str) -> None:
+    with _keeper_lock(name):
+        _migrate_pending_deliveries_locked(name, _STORE.read(name) or {})
     _holds().remove_self_state(name)
 
 

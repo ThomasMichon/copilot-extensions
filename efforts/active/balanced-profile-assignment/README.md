@@ -2,7 +2,7 @@
 
 - **Slug:** `balanced-profile-assignment`
 - **Repo:** copilot-extensions
-- **Branch(es):** Serialized per-phase PR worktrees to `main`
+- **Branch(es):** Serialized per-phase PR worktrees; new contributions target `dev`
 - **Created:** 2026-09-01
 - **Status:** Active
 - **Vision:** `visions/plugins/agent-worktrees` — explicit, replayable session launch assignment; `visions/picker` — manual selection remains the default
@@ -112,8 +112,11 @@ profile; handoff successors are new session generations and draw again.
 - [x] Add release notes and examples using generic profile names and synthetic
   models.
 - [x] Bump agent-worktrees versions in plugin, package, and marketplace files.
-- [ ] Land through the repository PR flow and deploy through the unified update
-  command.
+- [x] Land through the repository PR flow: #1574 merged as
+  `ce427938cdf651dbbb07d7a46b91fa26bc2cc89c`.
+- [ ] Deploy through the unified update command and verify the installed
+  source/runtime identity. Deployment acceptance remains unverified; merged
+  source and the closed implementation issue are not installed-state evidence.
 
 ## Validation Plan
 
@@ -167,6 +170,19 @@ user's profile set.
 The state is local-first by design. Multiple machines each maintain their own
 bag; downstream systems may aggregate records, but selection never depends on a
 shared coordinator.
+
+## Remaining acceptance
+
+The Maintainer retains the deployment gate above. This effort remains Active;
+the historical test results below are not a new installed qualification.
+Deployment must follow the current repository contribution/install policy and
+the target's authorization requirements. No rollout or policy arming is
+authorized by this reconciliation.
+
+The open usage/deprecation discussion #4871 is separate. Persisted
+model/effort/context defaults do not replace named backend selection or balanced
+assignment. That proposal is not an accepted removal decision, and this effort
+does not change either capability or its default-off safety.
 
 ## Journal
 
@@ -331,3 +347,16 @@ shared coordinator.
   because no forbidden-identifier inventory is configured on this host.
 - Existing versions remain consistent at agent-worktrees `1.5.3-dev701` and
   marketplace `1.7.5-dev725`. No PR, merge, or deployment was performed.
+
+### 2026-10-21 - Reconcile source publication without inferring deployment
+
+- Provider evidence confirms #1574 merged on September 1 as
+  `ce427938cdf651dbbb07d7a46b91fa26bc2cc89c`; implementation issue #1564 is
+  closed. Split the stale combined land/deploy item so the completed source
+  gate no longer obscures the still-unverified deployment acceptance.
+- Preserve the original request, implementation and validation checklists, and
+  historical journal. Those receipts do not establish current installation,
+  new test execution, retirement authority or a completed effort.
+- Retain #4871 as the existing usage/deprecation decision rather than treating
+  ordinary launch-default reinforcement as permission to remove or re-arm
+  named-profile assignment. No runtime, configuration or version change.

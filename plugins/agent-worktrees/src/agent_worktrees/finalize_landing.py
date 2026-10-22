@@ -132,7 +132,7 @@ def _explain(record, repo, worktree_path: str, anchor: str) -> dict:
     return {
         "worktree_id": record.worktree_id,
         "content_ref": content_ref,
-        "created_from": creation_point(content_ref, cwd) if content_ref else "",
+        "created_from": creation_point(content_ref, cwd, published_bases=tuple(bases)) if content_ref else "",
         "bases": [b.removeprefix("refs/remotes/") for b in bases],
         "missing_bases": [b.removeprefix("refs/remotes/") for b in bases
                           if not git_ops.ref_exists(b, cwd=cwd)],

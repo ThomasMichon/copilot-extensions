@@ -123,6 +123,7 @@ resolve_runtime() {
     AGENT_RT_PY=""
     AGENT_RT_ROOT="$RUNTIME_ROOT"
     export AGENT_RT_ROOT
+    local AGENT_RT_RESOLVE_TRACE_MODE="${1:-ready}"
     # shellcheck source=/dev/null
     . "$RUNTIME_RESOLVER"
 }
@@ -229,6 +230,11 @@ if { [[ "$RESOLUTION_STATUS" = ready &&
         printf '[agent-logger] requested installation context is not active.\n' >&2
         exit 126
     fi
+    RUNTIME_ROOT="$(json_get "$RESOLUTION" "$(json_path legacy root)" 2>/dev/null || true)"
+    if [[ "$RUNTIME_ROOT" != /* ]]; then
+        printf '[agent-logger] installation context is missing the canonical legacy root.\n' >&2
+        exit 126
+    fi
 elif { [[ "$RESOLUTION_STATUS" = ready &&
           "$RESOLUTION_REASON" = namespaced-active ]]; } ||
      [[ "$RESOLUTION_STATUS" = deactivation-required ]]; then
@@ -288,6 +294,31 @@ if [[ -n "${AGENT_LOGGER_NO_SELFPROVISION:-}" ]]; then
     exit 1
 fi
 
+PUBLICATION_ARGS=(
+    probe-plugin-publication --payload-root "$PAYLOAD_ROOT"
+    --plugin-id agent-logger --legacy-root "$RUNTIME_ROOT"
+)
+if [[ -n "$CONTEXT" ]]; then
+    PUBLICATION_ARGS+=(--context "$CONTEXT" --durable-home "$VALIDATION_DURABLE_HOME")
+fi
+PUBLICATION="" PUBLICATION_RC=0
+PUBLICATION="$(bash "$MODE_RUNNER" "${PUBLICATION_ARGS[@]}")" || PUBLICATION_RC=$?
+PUBLICATION_ROOT_PATH="$(json_path legacy root)"
+[[ -z "$CONTEXT" ]] || PUBLICATION_ROOT_PATH="$(json_path runtimeRoot)"
+if [[ "$PUBLICATION_RC" != 0 ||
+      "$(json_type "$PUBLICATION" "$(json_path deployment allowPluginPublication)" 2>/dev/null || true)" != boolean ||
+      "$(json_get "$PUBLICATION" "$(json_path deployment allowPluginPublication)" 2>/dev/null || true)" != true ||
+      "$(json_get "$PUBLICATION" "$PUBLICATION_ROOT_PATH" 2>/dev/null || true)" != "$RUNTIME_ROOT" ||
+      "$(json_get "$PUBLICATION" "$(json_path deployment path)" 2>/dev/null || true)" != "$RUNTIME_ROOT/runtime-deployment.json" ]]; then
+    printf '[agent-logger] Runtime publication refused: %s Use explicit installation management to install or repair this runtime.\n' \
+        "$PUBLICATION" >&2
+    exit 3
+fi
+
+resolve_runtime normal
+if [[ -n "${AGENT_RT_PY:-}" ]]; then
+    run_runtime "$@"
+fi
 mkdir -p "$RUNTIME_ROOT"
 STATUS_PATH="$RUNTIME_ROOT/.provision-status"
 _lock_link=""

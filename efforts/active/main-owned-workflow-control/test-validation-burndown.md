@@ -65,6 +65,12 @@ that coverage selection, schedules or repair supervision are already live.
 
 ## Initial measured evidence
 
+The requested contract and this bounded audit merged through #7275 at
+`2026-10-19T22:20:54Z` as `3c8aeb12428f8b8f2c4f37b2242ee915132d0c2a`.
+This closes the initial evidence/plan publication, not unit classification,
+coverage selection, integration scheduling, repair supervision or live timing
+acceptance. See the [delivery journal](journal/2026/10.19-test-burndown.md).
+
 The read-only promotion sample contains 60 newest runs from October 18-19,
 not the entire requested seven-day population; the API reported 294 matching
 runs. Twelve job inventories and four failure logs were examined. Source
@@ -123,3 +129,212 @@ Ranked evidence was delivered to the retained implementation owner on #7249.
 Its former complete-corpus proposal is explicitly superseded and held as a
 draft; it is not the current activation policy. This audit does not take over
 its runner, coverage, candidate-controller or workflow files.
+
+## Current unit census and periodic acceptance - October 21
+
+This is a bounded source-and-execution audit, not an enrollment change or a
+claim that the parent acceptance criteria are complete. The pinned source is
+Dev `1538d76d8dbbdf0470344118d2878eafce21f477`; the independently resolved Main
+control snapshot is `dd4284a4c7caf7cfb7689f44e6f412734d92ee6c`.
+
+### Exact packet completeness is not a complete unit census
+
+Both snapshots declare **236 parameterized nodes in nine test modules** under
+`tools/promotion_unit_tests/`, with 28 declared source files, 18 production
+coverage targets and a 300-second whole-packet budget. All 18 targets are
+repository tools; no plugin or shared-library production module is listed.
+The collector, admission contract and packet verifier have identical Git blobs
+in these two snapshots.
+
+The contract correctly requires exact admitted collection, passing setup/call/
+teardown, no skips or prohibited effects, unchanged admitted source bytes and
+production call coverage. Retain those controls. They prove the declared
+packet, not a bijection between every historical unit and a release-executed
+node. The manifest has no full-corpus classification or original-node mapping.
+
+The raw trees contain 2,111 and 2,940 Python `test_*.py` paths respectively.
+These are different snapshots/layouts, including materialized copies, not
+deduplicated unit populations. They exclude other languages and do not account
+for parameterization or dynamic collection. Do not turn them into unit counts
+or coverage percentages.
+
+One concrete out-of-packet review candidate is
+`libs/lazy-cli-dispatch/tests/test_dispatch.py`: fourteen unchanged cases cover
+the actual dispatcher, `self_override` and `core_helper`, using fake modules,
+callbacks and captured parser output. Neither these identities nor the
+production module is admitted by the current packet. The inspected test and
+production bytes match the pinned source.
+
+This is a **candidate**, not an eligibility certificate. A supplemental
+contained Windows run with the unchanged `UnitRun` observer was rejected
+before collection: pytest's `colorama` startup attempted `ctypes.dlopen`.
+It supplied no passing test or unit-eligibility result. No preload, observer
+exception, test move, manifest change or CI enrollment was used to manufacture
+a positive result.
+
+The remaining unit gate is an owner-reviewed, deduplicated classification and
+identity map: every unit must map to release execution, with unknown and
+unavailable closure explicit. Review the candidate cohort's actual fixture/
+import/effect closure before admitting it. A nine-module packet or a
+filename/tier label cannot stand in for that census.
+
+### Subsequent bounded shared-library mapping
+
+The fourteen lazy-dispatch cases now have positive native Linux effect/closure
+evidence, rather than only the rejected Windows startup probe. The original
+test bodies pass all 42 phases with zero effects and actual production call
+contexts for every case under the unchanged `UnitRun` observer. Their opened/
+imported local closure is the original test, library production, contract and
+observer; no production preload or observer exemption was used.
+
+The reviewed-source candidate maps those bodies into the existing packet
+through `tools/promotion_unit_tests/test_lazy_dispatch.py`. Its three exported
+classes are the original class/function objects, not copied assertion bodies.
+Replace only the original node's file prefix
+`libs/lazy-cli-dispatch/tests/test_dispatch.py` with the adapter path to obtain
+each exact manifest node. All fourteen class/method suffixes remain unchanged.
+The original test file and library source join the hash-bound import closure,
+and the library joins production coverage. The path-only library conftest is
+unneeded; no collection-root or effect-observer restriction is widened.
+
+The full candidate packet passes **422 nodes**, retaining all original 408
+identities in order, with 1,266 passing phases and zero effects in 13.748 seconds.
+The same 300-second budget covers 40 source files and 25 production targets.
+The canonical three-file packet verifies, including each aliased case's actual
+library call coverage. Removing the original test from the admitted closure
+fails during collection; changing original library bytes fails source
+verification. Neither negative emits a success proof.
+
+These results qualify only this source and its explicit mapping. #7749 merged
+after current-head Copilot approval and complete configured source CI; exact
+hosted run `39717216680` executed all 422 cases successfully in a 10.495-second
+packet. Actual qualified release remains a separate gate.
+The historical census above stays pinned evidence, not a current packet count.
+The complete historical-unit bijection, other library families, Windows
+first-touch and periodic/native acceptance remain open with their existing
+owners; fourteen mapped cases do not complete that broader census.
+
+### Bounded fleet-contracts cohort
+
+Both original `libs/fleet-contracts/tests/test_records.py` and
+`test_responses.py` are reviewed together with their complete import and fixture
+closure. The conftest only inserts the canonical library source path. The tests
+use fifty original functions with unchanged parameterization, covering 201
+cases; there is no process, network, native-loader, thread or sleep operation.
+The positive eligibility result comes from actual execution under the unchanged
+observer, not this source inspection alone.
+
+A separate contained process collects the original identities so no production
+module is preloaded into the observer process. With observation active before
+collection, all 201 cases/603 phases pass with zero effects in 2.151 seconds.
+Each case contributes real `records.py` call coverage; all thirty-nine response
+cases also reach `responses.py`. Opened/imported local closure is precisely
+the two original tests, three canonical production modules and the existing
+contract/effect observer.
+
+The packet adapter re-exports those original function objects without copying,
+moving or rewriting bodies. Replacing either original node's file prefix with
+`tools/promotion_unit_tests/test_fleet_contracts.py` gives its exact release
+identity. Original function names are disjoint, making that mapping injective;
+a duplicate name fails collection rather than overwriting another case.
+The original test modules and all three production files join the hash-bound
+closure, with both implementation files added as coverage targets. No conftest,
+packet root, observer, production import or deadline changes.
+
+The source candidate executes 646 nodes/1,938 phases with zero effects in
+16.467 seconds and independently verifies its actual three-file packet.
+All 445 current-base identities remain in order; forty-eight sources,
+twenty-eight targets and the same 300-second budget cover the combined pass.
+Full collection matches the manifest, and all fifty exported functions retain
+their exact original objects and code-file origins. Removing either original
+test from source admission, altering either implementation's bytes, or
+introducing a duplicate original function name fails without a passing proof.
+Native Windows executes the same 201 aliases successfully in 0.52 seconds;
+that is not a Windows effect-observed whole-packet result.
+
+This qualifies only the bounded library source mapping. #7781 actually merged
+after current-head approval and complete configured required-check verification.
+Hosted source run `39727829569` executes all 646 nodes successfully in a
+13.666-second packet. Qualified release, the remaining library/plugin census
+and accountable periodic/native repair remain separate parent gates.
+
+### Bounded config-migrate cohort and native-loader residual
+
+All 24 original functions in `libs/config-migrate/tests/test_config_migrate.py`
+retain their parameterization, yielding 29 cases. The original module,
+path-only conftest and four canonical production modules were inspected.
+A separate collection process establishes the original identities; the fresh
+observer process imports production only after observation begins. All 87
+phases pass with zero effects in 2.211 seconds. Every case has actual production
+call coverage; the on-disk cases use only synthetic temporary storage, retaining
+their actual atomic-write, backup, interruption and idempotency assertions.
+
+The adapter `tools/promotion_unit_tests/test_config_migrate.py` re-exports
+those exact functions. Replace only each original node's file prefix with
+the adapter path to obtain its injective release identity. The original test,
+all four production modules and adapter are hash-bound; the three implementation
+modules join coverage targets. The conftest is not executed and no assertion,
+production import, observer, collection root or deadline is rewritten.
+
+Candidate `e8e0ef28ea36d9248c3cc2dd000add0a6c40cccf` retains all 718 prior
+identities in order and all 51 old source hashes. Its canonical 747-node/
+2,241-phase packet passes with zero effects in 53.094 seconds, covering
+57 sources and 32 targets under the same 300-second bound. Its actual
+three-file output independently verifies. Full collection exactly matches
+the manifest and all 24 exported objects retain their original code/global
+origins. Six actual-runner controls refuse missing original-test admission,
+each altered implementation, duplicate identity and omitted original function;
+none emits a passing proof. This is source qualification, not a controlled
+speedup, full-census, Main-release or Windows-whole-packet claim.
+
+The inspected `core-delegation` module remains outside enrollment. Its real
+transport cases use sockets and threads; even selecting only its two proposed
+in-process cases fails fresh observed collection because the canonical import
+performs `ctypes.dlopen`. No production preload, effect exemption or import
+rewrite was used to manufacture eligibility. This is an explicit first-touch
+residual, not two passing cases or permission to delete the original tests.
+
+### Scheduled execution is real; repair initiation is not yet established
+
+The current Dev and Main snapshots carry byte-identical periodic workflow and
+residual inventory declarations. They select nine default-full Linux plugin
+invocations through the hardened container route. Windows remains literally
+disabled and supplies no native-platform qualification. Independent libraries,
+root tools, standalone Manager/chat, explicit-tier/native stress, network
+first-touch and unprovided filesystem tiers remain explicit residuals.
+
+The actual scheduled [run 39439577296](https://github.com/ThomasMichon/copilot-extensions/actions/runs/39439577296)
+used control `f348e5a0cc596f69d462b454c7c60e9ff22cd30b` and separately recorded
+tested Dev `9ad401dd8c4827a44e2ca5ed1e3bcbd13f94eca8`. Six Linux jobs succeeded,
+three failed, the Windows job was skipped and the detection/report job
+succeeded. This is not a same-source flaky-test comparison.
+
+For all three failed jobs, the preserved execution record reports the actual
+wrapper invocation and tested source. The downloaded container profile and
+inventory bytes independently match that immutable Dev tree and their
+recorded SHA-256 values. Logs reached real test failures, not only a missing
+Docker/devcontainer prerequisite.
+
+| Failed job | Observed failure family | Execution boundary |
+|------------|-------------------------|--------------------|
+| [Containers](https://github.com/ThomasMichon/copilot-extensions/actions/runs/39439577296/job/118685704039) | Two `test_launch_storage.py` cleanup/refusal cases reached the test's forbidden credential/deletion callbacks | Stopped in group 1/3; that group reported 2 failed, 518 passed, 7 skipped |
+| [Logger](https://github.com/ThomasMichon/copilot-extensions/actions/runs/39439577296/job/118685703726) | Three `test_source_runtime_reselection.py` helper-copy failure/rollback cases reported state inequality | Reached group 3/3; the failing group reported 3 failed, 566 passed, 8 skipped |
+| [Worktrees](https://github.com/ThomasMichon/copilot-extensions/actions/runs/39439577296/job/118685703935) | Three POSIX first-install/namespace-health/watchdog cases failed | Reached group 5/22; the failing group reported 3 failed, 751 passed, 13 skipped |
+
+These are observations, not root-cause or platform-availability diagnoses.
+Failure-group counts are not complete-plugin pass counts; skipped cases and
+unreached groups do not become passing evidence.
+
+The report created [#7377](https://github.com/ThomasMichon/copilot-extensions/issues/7377).
+At this audit's readback it had no assignee, comment or visible agent claim;
+neither checked local repository lane contained its canonical issue key.
+That does not exclude work on another coordinator. It does mean that the
+visible detection issue and generic portfolio-owner role do not establish the
+required accepted agent repair, initiation or escalation.
+
+The direct #1303/portfolio-owner follow-through is to identify the actual
+repair task/agent and route each exact failure family without duplicating
+claimed work. Keep source, outcome, repair initiation and eventual resolution
+linked. Until that evidence exists, retain the parent scheduled-repair item
+as open. This audit changes no workflow, runner, selection, deadline, capacity
+or release gate.

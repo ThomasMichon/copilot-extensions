@@ -253,25 +253,26 @@ repos:
 # report-only findings
 # ---------------------------------------------------------------------------
 
-def test_unadopted_worktree_reported_not_fixed(home: Path):
+@pytest.mark.parametrize("repo_class", ["worktree", "singleton"])
+def test_editable_related_repo_without_project_is_consistent(
+    home: Path, repo_class: str,
+) -> None:
     repo_dir = home / "src" / "lonely"
     repo_dir.mkdir(parents=True)
     _write_repos(home, f"""
 repos:
   lonely:
-    class: worktree
+    class: {repo_class}
     linux: {repo_dir}
 """)
     _write_projects(home, {})  # not adopted
 
-    findings = doctor.diagnose()
-    f = _by_repo(findings, "lonely")
-    assert any(x.kind == "unadopted_worktree" and not x.fixable for x in f)
-
-    # --fix must NOT adopt it (side effects); finding stays unfixed.
-    after = doctor.reconcile(fix=True)
-    assert any(x.kind == "unadopted_worktree" and not x.fixed
-               for x in _by_repo(after, "lonely"))
+    registry_before = (home / ".agent-worktrees" / "repos.yaml").read_bytes()
+    projects_before = (home / ".agent-worktrees" / "projects.yaml").read_bytes()
+    assert _by_repo(doctor.diagnose(), "lonely") == []
+    assert _by_repo(doctor.reconcile(fix=True), "lonely") == []
+    assert (home / ".agent-worktrees" / "repos.yaml").read_bytes() == registry_before
+    assert (home / ".agent-worktrees" / "projects.yaml").read_bytes() == projects_before
 
 
 def test_stale_path_reported(home: Path):

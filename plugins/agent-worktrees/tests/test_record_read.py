@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -54,6 +55,123 @@ def invoke(*args):
     with output.capture_json_output() as captured:
         rc = main.main(["--project", "example-project", "record", "--worktree-id", *args, "--json"])
     return rc, json.loads(captured.getvalue())
+
+
+@pytest.mark.parametrize("case", [
+    "tracked", "untracked", "colliding-id", "foreign-project", "anchor",
+    "nested-untracked", "record-race", "symlink-root", "ambiguous-root",
+])
+def test_workspace_record_is_project_scoped_non_enrolling_and_non_activating(
+    record_fixture, monkeypatch, case,
+):
+    from agent_worktrees import execution_identity_read, front_door_cli, worktree_identity
+
+    data, path = record_fixture
+    anchor = Path(cfg._home()) / "repo"
+    admin = anchor / ".git" / "worktrees" / data["worktree_id"]
+    admin.mkdir(parents=True)
+    (admin / "commondir").write_text("../..", encoding="utf-8")
+    root = Path(data["worktree_path"])
+    (root / "nested").mkdir(parents=True)
+    (root / ".git").write_text(f"gitdir: {admin}", encoding="utf-8")
+    monkeypatch.setattr(
+        front_door_cli, "_reverse_lookup_project",
+        lambda candidate: "example-project" if candidate.resolve() == anchor else None,
+    )
+    data.update(
+        codename="example-label",
+        sessions=[{"session_id": "asserted-session", "state": "active"}],
+        head_transitions=[{"revision": 4, "session_id": "asserted-session", "reason": "registered"}],
+    )
+    path.write_text(yaml.safe_dump(data), encoding="utf-8")
+    cwd = root / "nested"
+    if case == "untracked":
+        path.unlink()
+    elif case == "colliding-id":
+        foreign = Path(cfg._home()) / ".foreign" / "worktrees" / path.name
+        foreign.parent.mkdir(parents=True)
+        foreign.write_text(yaml.safe_dump({
+            **data, "repo": "foreign", "sessions": [{"session_id": "foreign-session"}],
+            "head_transitions": [{"revision": 99, "session_id": "foreign-session"}],
+        }), encoding="utf-8")
+        monkeypatch.setattr(session_tracking_cli, "_find_tracking_file", lambda _id: foreign)
+    elif case == "foreign-project":
+        monkeypatch.setattr(front_door_cli, "_reverse_lookup_project", lambda _path: "foreign")
+    elif case == "anchor":
+        cwd = anchor
+        monkeypatch.setattr(execution_identity_read, "read_execution_identity", lambda: {
+            "schema": "agent-worktrees.execution-identity", "version": 1, "status": "ready",
+            "configured": True, "source": "project-machine-config",
+            "machine": "example-machine", "project": "example-project", "platform": "windows",
+        })
+    elif case == "nested-untracked":
+        (cwd / ".git").mkdir()
+    elif case == "record-race":
+        find = tracking.list_records
+
+        def changed(*args, **kwargs):
+            result = find(*args, **kwargs)
+            path.unlink()
+            return result
+
+        monkeypatch.setattr(tracking, "list_records", changed)
+    elif case == "symlink-root":
+        link = Path(cfg._home()) / "linked-workspaces"
+        if os.name == "nt":
+            from agent_procutil import no_window_kwargs
+
+            subprocess.run(
+                [os.environ["COMSPEC"], "/c", "mklink", "/J", str(link), str(root.parent)],
+                check=True, capture_output=True, timeout=10, **no_window_kwargs(),
+            )
+        else:
+            link.symlink_to(root.parent, target_is_directory=True)
+        data["worktree_path"] = str(link / root.name)
+        path.write_text(yaml.safe_dump(data), encoding="utf-8")
+    elif case == "ambiguous-root":
+        (path.parent / "ambiguous.yaml").write_text(
+            yaml.safe_dump({**data, "worktree_id": "ambiguous"}), encoding="utf-8",
+        )
+    before = {item: item.read_bytes() for item in Path(cfg._home()).rglob("*") if item.is_file()}
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("workspace metadata read adopted, launched, published or mutated")
+
+    for module, name in (
+        (worktree_identity, "_adopt_linked_worktree"),
+        (tracking, "create_new_record_if_absent"), (tracking, "save_record"),
+        (sessions, "scan_sessions_fast"), (client, "read_current"),
+        (main, "_ensure_cluster_loaded"), (subprocess, "Popen"),
+        (Path, "mkdir"), (Path, "write_text"),
+    ):
+        monkeypatch.setattr(module, name, forbidden)
+    with output.capture_json_output() as captured:
+        rc = main.main(["--project", "example-project", "record", "--cwd", str(cwd), "--json"])
+    result = json.loads(captured.getvalue())
+    if case in {"tracked", "colliding-id", "symlink-root"}:
+        assert rc == 0 and result["ok"] is True
+        context = result["context"]
+        assert context["project"] == "example-project" and context["root"] == str(root)
+        assert context["worktree"]["codename"] == "example-label"
+        assert context["worktree"]["head"] == {
+            "version": 1, "worktree_id": data["worktree_id"], "tracked": True,
+            "head_session": "asserted-session", "active": True, "state": "active",
+            "head_revision": 4, "pending_handoffs": [],
+        }
+    elif case == "anchor":
+        assert rc == 0 and result["context"]["worktree"] is None
+        assert result["context"]["identity"]["configured"] is True
+        assert result["context"]["root"] == result["context"]["anchor"]
+    else:
+        assert rc == 1 and result["ok"] is False
+        assert result["error"]["code"] in {
+            "workspace-untracked", "workspace-ambiguous", "repository-mismatch",
+            "workspace-mismatch", "record-missing",
+        }
+    after = {item: item.read_bytes() for item in Path(cfg._home()).rglob("*") if item.is_file()}
+    if case == "record-race":
+        before.pop(path)
+    assert after == before
 
 
 @pytest.mark.parametrize("version", [1, True, 2])
@@ -144,6 +262,7 @@ def test_record_read_exact_unpublished_record_and_unchanged_list(record_fixture,
         "last_session_id": None,
         "execution_leg": None,
         "execution_leg_opaque": False,
+        "execution_leg_live": False,
         "sessions_indexed": True,
         "bound_agent": None,
         "session_backend": None,
@@ -625,6 +744,7 @@ def test_record_read_opaque_legacy_backend_is_not_sessionless(record_fixture):
     assert result["worktree"]["execution_leg"] is None
     assert result["worktree"]["session_backend"] == data["session_backend"]
     assert result["worktree"]["session_backend_opaque"] is True
+    assert result["worktree"]["execution_leg_live"] is True
 
 
 @pytest.fixture

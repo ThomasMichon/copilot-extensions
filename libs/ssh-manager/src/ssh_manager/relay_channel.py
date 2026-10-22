@@ -24,7 +24,7 @@ import signal
 import sys
 import uuid
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from .config_sources import SSHConfig
 from .forward import build_forward_ssh_args
@@ -39,6 +39,7 @@ _ESTABLISH_ATTEMPTS = 4
 # teardown can prove which processes this supervisor owns (Linux).
 _OWNER_ENV = "SSH_MANAGER_RELAY_OWNER"
 _READY_SETTLE_MAX = 0.25
+_FORWARD_DIAGNOSTIC_TAIL = 128
 _REMOTE_FORWARD_FAILURE_MARKERS = (
     "remote port forwarding failed",
     "warning: remote port forwarding failed for listen port",
@@ -54,6 +55,7 @@ class _SettleResult:
     ready: bool
     stderr: str
     remote_forward_failed: bool = False
+    raw_tail: str = field(default="", compare=False, repr=False)
 
 
 class SupervisedRelayForward:
@@ -444,12 +446,11 @@ class SupervisedRelayForward:
             return bool(await gate())
         except asyncio.CancelledError:
             raise
-        except Exception as exc:
+        except Exception:
             log.warning(
                 "Credential relay reconnect gate for %s was inconclusive; "
-                "not reconnecting this attempt: %s",
+                "not reconnecting this attempt",
                 self._config.ssh_target,
-                exc,
             )
             return None
 
@@ -508,6 +509,9 @@ class SupervisedRelayForward:
                 await self._cancel_process()
                 return self._retire(reason)
             except Exception as exc:
+                if not self._retry_establish_failure(exc):
+                    log.warning("Credential relay reconnect held: %s", exc)
+                    return False
                 failures += 1
                 delay = min(
                     self._backoff_max,
@@ -522,6 +526,10 @@ class SupervisedRelayForward:
                 )
                 await self._sleep(delay)
 
+    def _retry_establish_failure(self, exc: Exception) -> bool:
+        """Fixed-port relays retain their existing reconnect behavior."""
+        return True
+
     async def _wait_settled(
         self, proc: asyncio.subprocess.Process,
     ) -> _SettleResult:
@@ -534,13 +542,19 @@ class SupervisedRelayForward:
                 stderr_parts.append(stderr)
                 combined = "".join(stderr_parts)
                 if self._remote_forward_failed(combined):
-                    return _SettleResult(False, combined.strip(), True)
+                    return _SettleResult(
+                        False, combined.strip(), True, combined[-_FORWARD_DIAGNOSTIC_TAIL:],
+                    )
             combined = "".join(stderr_parts)
             if proc.returncode is not None:
-                return _SettleResult(False, combined.strip(), False)
+                return _SettleResult(
+                    False, combined.strip(), False, combined[-_FORWARD_DIAGNOSTIC_TAIL:],
+                )
             remaining = deadline - asyncio.get_running_loop().time()
             if remaining <= 0:
-                return _SettleResult(True, combined.strip(), False)
+                return _SettleResult(
+                    True, combined.strip(), False, combined[-_FORWARD_DIAGNOSTIC_TAIL:],
+                )
             await asyncio.sleep(min(0.05, remaining))
 
     @staticmethod

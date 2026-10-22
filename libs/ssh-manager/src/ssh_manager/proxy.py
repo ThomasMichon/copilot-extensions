@@ -8,7 +8,6 @@ import ctypes
 import getpass
 import hmac
 import logging
-import ntpath
 import os
 import re
 import secrets
@@ -113,9 +112,7 @@ async def _resolve_shell(executable: str) -> str | None:
 
 
 def _client_command(port: int, capability: str, *, shell: bool = False) -> str:
-    python = windowless_python()
-    if ntpath.basename(python).casefold() != "pythonw.exe":
-        raise RuntimeError("Windows SSH proxies require the runtime's pythonw.exe")
+    python = windowless_python(require_windowless=True)
     args = [
         python, str(Path(__file__).with_name("proxy_client.py")), str(port), capability,
     ]

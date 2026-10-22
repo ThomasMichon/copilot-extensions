@@ -104,7 +104,9 @@ def _reservation(
     binding: Any, primitive: Any, root: Path, owner: dict[str, Any],
 ) -> dict[str, Any]:
     path = root / "deploy-manifest.json"
-    manifest = primitive.read_json(path) if path.exists() else {
+    manifest = getattr(
+        primitive, "read_deployment_manifest", primitive.read_json,
+    )(path) if path.exists() else {
         "schema_version": 3, "service": owner["pluginId"],
     }
     previous = manifest.get("commandLifecycle")

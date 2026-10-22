@@ -1253,7 +1253,7 @@ def test_session_register_deregister_fence_raced_fresh_foreign_record(
     """The authority-aware generation fencing ``session_conclude``/
     ``session_link_succession`` already carry must also cover
     ``session_register``/``session_deregister`` -- the same ledger-
-    mutating hook verbs, now bumped to generation 2 and fenced with the
+    mutating hook verbs, now at generation 3 and fenced with the
     identical raced-lock-then-foreign-record proof those siblings use."""
     from agent_worktrees import (
         tracking_session_deregistration_write, tracking_session_registration_write,
@@ -1295,7 +1295,7 @@ def test_session_register_deregister_fence_raced_fresh_foreign_record(
             assert fields["tracking_write_verb_versions"][verb] == 3
             result = tracking_write.dispatch(
                 verb, args, read_lock_data=lambda: fields,
-                ensure_monitor=None, min_version=2,
+                ensure_monitor=None, min_version=3,
             )
         finally:
             server.close()

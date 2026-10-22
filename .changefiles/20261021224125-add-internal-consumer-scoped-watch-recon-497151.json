@@ -1,0 +1,9 @@
+{
+  "comment": "Add internal consumer-scoped watch reconciliation and durable pull replay transactions without activating a remote service",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}

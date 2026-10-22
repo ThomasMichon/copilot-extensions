@@ -11,6 +11,19 @@ STANDALONE_CONSUMERS = (
 )
 
 
+def standalone_build_resources(component: str, *, source_root: Path) -> tuple[Path, ...]:
+    """Declare non-project inputs needed by a standalone distribution's build."""
+    if component not in STANDALONE_CONSUMERS:
+        raise ValueError(f"unknown standalone component: {component}")
+    resources = (source_root / "libs" / "versioned-runtime",)
+    if component == "fleet-manager":
+        resources += (
+            source_root / "libs" / "installer-engine",
+            source_root / "libs" / "agent-procutil" / "src" / "agent_procutil",
+        )
+    return resources
+
+
 def local_dependency_source(project: Path, dependency: str, *, source_root: Path) -> Path:
     """Select an unambiguous declared path without substituting canonical copies.
 

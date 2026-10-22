@@ -14,11 +14,42 @@ from ..prompt_models import (
 )
 from ..session_manager import DaemonDrainingError, ProviderTargetRefreshError
 from ..session_status import SessionStatus
+from ..native_keyed_admission import KeyedNativePrompt, submit as keyed_submit
+from ..acquisition_contract import AcquisitionRefused
 
 if TYPE_CHECKING:
     from ..session_manager import SessionManager
 
 router = APIRouter()
+
+
+async def _keyed(session_id: str, req: KeyedNativePrompt, request: Request, *, read_only: bool):
+    try:
+        result = await keyed_submit(
+            request.app.state.session_manager, session_id, req, read_only=read_only,
+        )
+    except KeyError as exc:
+        raise HTTPException(404, detail={"code": "native_session_unavailable"}) from exc
+    except DaemonDrainingError as exc:
+        raise HTTPException(503, detail={"code": "draining"}) from exc
+    except AcquisitionRefused as exc:
+        raise HTTPException(409, detail={"code": exc.code}) from exc
+    except ValueError as exc:
+        raise HTTPException(409, detail={"code": str(exc)}) from exc
+    if result is None:
+        raise HTTPException(404, detail={"code": "native_receipt_missing"})
+    return result
+
+
+@router.post("/{session_id}/turns/native-bound/keyed")
+async def submit_keyed_native(session_id: str, req: KeyedNativePrompt, request: Request):
+    return await _keyed(session_id, req, request, read_only=False)
+
+
+@router.post("/{session_id}/turns/native-bound/keyed/receipt")
+async def read_keyed_native(session_id: str, req: KeyedNativePrompt, request: Request):
+    """Read past admission only; never calls fresh admission on a miss."""
+    return await _keyed(session_id, req, request, read_only=True)
 
 
 @router.post("/{session_id}/turns", response_model=SubmitPromptResponse)

@@ -21,6 +21,12 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from _manager_constructor_fixture import apply_constructor_fixture
+
+
+@pytest.fixture(autouse=True)
+def _unit_constructor(monkeypatch):
+    apply_constructor_fixture(monkeypatch)
 
 import worktree_manager.self_install as si
 from worktree_manager import source_config as sc
@@ -168,7 +174,7 @@ def test_self_update_fetches_local_remote_and_publishes_new_slot(tmp_path, monke
     # The immutable older slot is retained.
     assert version_slot("1.0.0", root).is_dir()
     # The published slot carries the fetched payload.
-    assert (version_slot("9.9.9", root) / "src" / "worktree_manager" / "__init__.py").exists()
+    assert (version_slot("9.9.9", root) / "payload" / "src" / "worktree_manager" / "__init__.py").exists()
 
 
 def test_self_update_reports_error_and_cleans_up_when_pointer_unresolvable(tmp_path, monkeypatch, mock_cutover):

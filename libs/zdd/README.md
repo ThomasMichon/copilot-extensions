@@ -11,6 +11,34 @@ multiple consumers reuse one implementation instead of reinventing it.
 
 ## What's inside
 
+### `zdd.lifecycle` -- durable transition history
+
+`record()` appends structured lifecycle events to `<config_dir>/lifecycle.log`,
+with one retained rotation generation. The `record` CLI is also executable as
+`python -I <payload>/libs/zdd/src/zdd/lifecycle.py record ...` before a service
+venv exists. A dropped CLI record warns on stderr while retaining the existing
+advisory zero exit status; it must not hide or replace the operation's outcome.
+
+Bridge and Dispatch's Bash and PowerShell installers record a `begin` and
+`ok`/`fail` for explicit `install`, `update`, `start` and `stop` commands.
+`provision` is recorded as `install`; inspection, stamping and uninstall do not
+write this history. Dispatch honors its routing-directory override. Records
+include the installer PID, so the two events do not appear to come from
+unrelated Python helper processes. An interrupted or forcibly terminated
+installer can leave only `begin`; that is not success.
+Recorder execution uses each installer's existing bootstrap interpreter
+resolver, retaining runtime-only Bash and launcher/signed-base Windows support;
+it does not introduce another PATH-only discovery policy.
+
+These are **installer command outcomes**, not independent health or activation
+proof. Existing no-op, superseded-build, forwarded-route, cutover and rollback
+policies are unchanged. The command-boundary regressions execute real shells,
+the actual dispatch/emission source and the actual durable recorder, with
+construction/service effects stubbed. They are not a full fresh-install,
+native-Windows, release or deployed-runtime qualification.
+Launcher/signature observations in the isolated PowerShell regression are
+synthetic; only the final recorder child and durable write execute for real.
+
 ### `zdd.routing` -- the routing table (no proxy)
 
 A file-based, client-read routing table (`active.json`) that decouples *which
@@ -96,8 +124,10 @@ routing fence remains held. Legacy signal-only callbacks, nonboolean evidence
 and unconfirmed exits are blocked outcomes, not successful retirement.
 Read-only Linux liveness uses a native pidfd exit probe when available:
 an exited child whose parent has not reaped its PID no longer owns live
-retention custody. Failure to obtain native evidence preserves the existing
-conservative PID-existence fallback; a failed exit probe does not imply exit.
+retention custody. Portable Python builds without `os.pidfd_open` reuse the
+same canonical libc adapter as identity-bound termination. Failure to obtain
+native evidence preserves the existing conservative PID-existence fallback;
+a failed exit probe does not imply exit.
 An unavailable or failed process census is never an empty inventory; occupied
 slot replacement remains refused when native candidate absence is unverified.
 Ordinary cutover also refuses unreadable or unknown recovery states rather than

@@ -25,12 +25,10 @@ REPO = PLUGIN.parents[1]
 ENGINE = REPO / "libs" / "installer-engine"
 PWSH = shutil.which("pwsh") or shutil.which("powershell")
 LIBRARIES = {
-    "agent-zdd": "zdd",
-    "agent-procutil": "agent-procutil",
-    "agent-dropin-registry": "dropin-registry",
-    "agent-plugin-resolve": "plugin-resolve",
-    "agent-single-instance-lease": "single-instance-lease",
-    "agent-plugin-activation": "plugin-activation",
+    package: Path(source["path"]).name
+    for package, source in tomllib.loads(
+        (PLUGIN / "pyproject.toml").read_text(encoding="utf-8"),
+    )["tool"]["uv"]["sources"].items()
 }
 
 
@@ -373,7 +371,7 @@ def _signed_venv_block() -> str:
     block = start + text.split(start, 1)[1].split(
         "    # The selected MCP extra", 1
     )[0]
-    return block + "}\n"
+    return f". '{PLUGIN / 'scripts' / 'base-python.ps1'}'\n" + block + "}\n"
 
 
 @pytest.mark.parametrize("ext", ["sh", "ps1"])
@@ -444,6 +442,10 @@ $script:RuntimeConstructionReuse=$false
 $pythonCmd='{tmp_path / "forbidden-python.ps1"}'
 function py {{ $global:LASTEXITCODE=0; '{signed}' }}
 function Get-AuthenticodeSignature {{ param($Path) return @{{ Status='Valid' }} }}
+function Invoke-Hidden {{
+    param($FilePath, $ArgList, [ref]$ErrorOutput)
+    & $FilePath @ArgList
+}}
 function Invoke-VersionedSlotClean {{ throw 'reserved slot must not be cleaned after signed bootstrap' }}
 function Remove-Item {{ throw 'reserved slot or receipt must not be raw-deleted' }}
 function Test-DispatchVenv {{
@@ -817,8 +819,12 @@ if (@(Get-ChildItem (Join-Path $InstallDir 'snapshots') -Directory).Count -ne {1
     assert project["tool"]["uv"]["sources"] == {
         package: {"path": f"libs/{lib}"} for package, lib in LIBRARIES.items()
     }
-    for lib in LIBRARIES.values():
-        assert (snapshot / "libs" / lib / "pyproject.toml").is_file()
+    for package, lib in LIBRARIES.items():
+        embedded = snapshot / "libs" / lib
+        assert (embedded / "pyproject.toml").is_file()
+        assert (embedded / "src/fixture.py").read_bytes() == (
+            plugin / sources[package]["path"] / "src/fixture.py"
+        ).read_bytes()
     nested = tomllib.loads((snapshot / "libs/plugin-activation/pyproject.toml").read_text())
     assert nested["tool"]["uv"]["sources"]["agent-dropin-registry"] == {
         "path": "../dropin-registry"
@@ -931,20 +937,20 @@ if ($script:InstallerDependencyPolicy -cne $originalPolicy) {{ throw 'caller pol
         assert not Path(env["TEST_UV_LOG"]).exists()
         return
     calls = [json.loads(line) for line in Path(env["TEST_UV_LOG"]).read_text().splitlines()]
-    assert len(calls) == (7 if acquired_uv else 8)
+    assert len(calls) == (8 if acquired_uv else 9)
     expected_sources = set(json.loads(env["TEST_UV_EXPECTED_SOURCES"]).values()) | {f"{snapshot}[mcp]"}
     sources = [
         next(arg for arg in call if arg in expected_sources)
         for call in calls
     ]
-    assert sources[:6] == [
+    assert sources[:7] == [
         str(snapshot / "libs" / lib)
         for lib in (
             "zdd", "dropin-registry", "plugin-resolve",
-            "single-instance-lease", "agent-procutil", "plugin-activation",
+            "single-instance-lease", "agent-procutil", "worktree-identity", "plugin-activation",
         )
     ]
-    assert sources[6:] == [f"{snapshot}[mcp]"] * (1 if acquired_uv else 2)
+    assert sources[7:] == [f"{snapshot}[mcp]"] * (1 if acquired_uv else 2)
     for call in calls:
         assert "--exclude-newer" in call
         cutoff = datetime.fromisoformat(call[call.index("--exclude-newer") + 1].replace("Z", "+00:00"))

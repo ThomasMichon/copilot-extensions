@@ -1269,6 +1269,73 @@ def source_project(path, name="fixture-source", sources="", dependencies=""):
     return path
 
 
+@pytest.fixture(params=[
+    PATH,
+    PATH.parents[2] / "worktree-manager" / "scripts" / "installer_dependency_policy.py",
+], ids=["canonical", "manager"])
+def bundled_policy(request):
+    spec = importlib.util.spec_from_file_location("bundled_installer_dependency_policy", request.param)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.mark.parametrize("change", ["none", "bytes", "package", "project", "filename"])
+def test_bundled_dbus_next_exception_is_exact(tmp_path, change, bundled_policy):
+    name = "other" if change == "package" else "dbus-next"
+    filename = "other.whl" if change == "filename" else "dbus_next-0.2.3-py3-none-any.whl"
+    source = source_project(
+        tmp_path / "manager",
+        name="other" if change == "project" else "copilot-extensions-worktree-manager",
+        sources=f'{name} = {{path="vendor/{filename}"}}',
+    )
+    wheel = source / "vendor" / filename
+    wheel.parent.mkdir()
+    bundled = PATH.parents[2] / "worktree-manager" / "vendor" / "dbus_next-0.2.3-py3-none-any.whl"
+    wheel.write_bytes(b"changed" if change == "bytes" else bundled.read_bytes())
+    if change == "none":
+        bundled_policy._check_project(source, (tmp_path,), set())
+    else:
+        with pytest.raises(bundled_policy.DependencyPolicyError, match="local UV artifacts"):
+            bundled_policy._check_project(source, (tmp_path,), set())
+
+
+def test_native_bundled_dbus_next_installs_through_retained_policy_offline(tmp_path, bundled_policy):
+    uv = shutil.which("uv")
+    assert uv, "native UV is required for the bundled wheel contract"
+    source = source_project(
+        tmp_path / "manager", name="copilot-extensions-worktree-manager",
+        sources='dbus-next = {path="vendor/dbus_next-0.2.3-py3-none-any.whl"}',
+        dependencies='"dbus-next==0.2.3"',
+    )
+    wheel = source / "vendor" / "dbus_next-0.2.3-py3-none-any.whl"
+    wheel.parent.mkdir()
+    shutil.copyfile(PATH.parents[2] / "worktree-manager" / "vendor" / wheel.name, wheel)
+    environment = offline_environment(tmp_path)
+    target = tmp_path / "venv"
+    created = subprocess.run(
+        [uv, "venv", "--python", sys._base_executable, str(target)],
+        env=environment, capture_output=True, text=True, timeout=30,
+        creationflags=policy._HEADLESS,
+    )
+    assert created.returncode == 0, created.stderr
+    python = target / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    installed = bundled_policy.run_uv_install(
+        uv, ["--no-config", "--offline", "--python", str(python), str(source)],
+        env=environment, cwd=tmp_path, trusted_source_roots=(source,),
+        capture_output=True, text=True, timeout=30,
+    )
+    assert installed.returncode == 0, installed.stdout + installed.stderr
+    imported = subprocess.run(
+        [str(python), "-c",
+         "from dbus_next.aio import MessageBus; from dbus_next.auth import AuthExternal; "
+         "assert isinstance(MessageBus.connected, property)"],
+        env=environment, capture_output=True, text=True, timeout=10,
+        creationflags=policy._HEADLESS,
+    )
+    assert imported.returncode == 0, imported.stderr
+
+
 def test_retained_transaction_exposes_only_admitted_inputs_until_context_exit(tmp_path, monkeypatch):
     source = source_project(tmp_path / "source")
     original = (source / "pyproject.toml").read_bytes()
@@ -1317,6 +1384,56 @@ def test_retained_transaction_refuses_copy_mutation_before_execution(tmp_path, m
             env={}, cwd=tmp_path, now=NOW, trusted_source_roots=(source,),
         ):
             pytest.fail("mutated input cannot reach the admitted execution boundary")
+
+
+@pytest.mark.parametrize("outcome", ["nonzero", "checked", "success", "admission"])
+def test_real_retained_graph_preserves_primary_failure_on_cleanup(tmp_path, monkeypatch, capsys, outcome):
+    source = source_project(tmp_path / "source")
+    temporary_directory = policy.tempfile.TemporaryDirectory
+    retained_paths = []
+    allocations = []
+    primary = subprocess.CalledProcessError(17, ["uv"], output="output", stderr="error")
+
+    class CleanupFailure:
+        def __init__(self, **kwargs):
+            self.temporary = temporary_directory(**kwargs)
+            self.name = self.temporary.name
+            allocations.append(Path(self.name))
+
+        def cleanup(self):
+            self.temporary.name = self.name
+            self.temporary.cleanup()
+            raise PermissionError("injected retained cleanup failure")
+
+    def run(command, **kwargs):
+        if "--show-settings" in command:
+            if outcome == "admission" and allocations:
+                raise primary
+            return CompletedProcess(command, 0, settings(), "")
+        retained_paths.append(Path(next(value for value in command if (Path(value) / "pyproject.toml").is_file())))
+        assert retained_paths[0] != source
+        if kwargs.get("check"):
+            raise primary
+        return CompletedProcess(command, 0 if outcome == "success" else 17, "output", "error")
+
+    monkeypatch.setattr(policy.tempfile, "TemporaryDirectory", CleanupFailure)
+    monkeypatch.setattr(policy.subprocess, "run", run)
+    options = dict(env={}, cwd=tmp_path, now=NOW, trusted_source_roots=(source,))
+    if outcome in {"checked", "admission"}:
+        with pytest.raises(subprocess.CalledProcessError) as caught:
+            policy.run_uv_install("uv", ["--no-config", str(source)], check=True, **options)
+        assert caught.value is primary
+    elif outcome == "success":
+        with pytest.raises(policy.RetainedInputCleanupError):
+            policy.run_uv_install("uv", ["--no-config", str(source)], **options)
+    else:
+        result = policy.run_uv_install("uv", ["--no-config", str(source)], **options)
+        assert (result.returncode, result.stdout, result.stderr) == (17, "output", "error")
+    assert source.is_dir()
+    assert allocations and all(not path.exists() for path in allocations)
+    assert all(not path.exists() for path in retained_paths if path != source)
+    diagnostic = capsys.readouterr().err
+    assert diagnostic.count("retained-input-cleanup:") == (0 if outcome == "success" else 1)
 
 
 def offline_environment(tmp_path):

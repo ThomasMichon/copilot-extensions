@@ -10,6 +10,66 @@ import pytest
 from venue_copilot import refs as venue_refs
 
 
+def test_prepared_delivery_retains_unknown_after_timeout_even_if_retry_refuses():
+    import json
+    import subprocess
+    from types import SimpleNamespace
+    calls = []
+    def run(argv, **kwargs):
+        calls.append((argv, kwargs["input"]))
+        if len(calls) == 1:
+            raise subprocess.TimeoutExpired(argv, kwargs["timeout"])
+        return SimpleNamespace(returncode=69, stdout=json.dumps({
+            "owned_delivery_version": 1, "admission_status": "not_admitted",
+        }))
+    result = venue_refs.deliver_note(
+        "native", "owned", run=run, operation="operation",
+        prepared_context={"version": 1, "cwd": "/workspace", "plugins": []},
+    )
+    assert result.status == "unknown" and len(calls) == 2
+    assert calls[0] == calls[1]
+    assert "--expected-session-id" in calls[0][0]
+
+
+def test_prepared_delivery_requires_structured_admission_or_confirmed_refusal():
+    import json
+    from types import SimpleNamespace
+    context = {"version": 1, "cwd": "/workspace", "plugins": []}
+    refused = venue_refs.deliver_note(
+        "native", "owned", operation="operation", prepared_context=context,
+        run=lambda *args, **kwargs: SimpleNamespace(returncode=69, stdout=json.dumps({
+            "owned_delivery_version": 1, "admission_status": "not_admitted",
+        })),
+    )
+    assert refused.status == "refused"
+    bare_success = venue_refs.deliver_note(
+        "native", "owned", operation="operation", prepared_context=context,
+        run=lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout=""),
+    )
+    assert bare_success.status == "unknown"
+
+
+def test_confirmed_admission_recovery_never_resends_after_native_session_exits():
+    context = {"version": 1, "cwd": "/workspace", "plugins": []}
+    pending = {
+        **venue_refs.owned_result(
+            False, session_id="native", operation="operation", note="owned", context=context,
+        ).recovery(),
+        "status": "admitted", "message_id": 17,
+        "envelope": {"prompt": "owned", "plugin_context": context},
+    }
+    result = venue_refs.reconcile_owned_delivery(
+        pending, run=lambda *a, **kw: pytest.fail("confirmed admission cannot be resent"),
+    )
+    assert result.status == "admitted" and result.message_id == 17
+    with pytest.raises(ValueError, match="inputs changed"):
+        venue_refs.reconcile_owned_delivery({
+            **pending, "envelope": {"prompt": "different", "plugin_context": context},
+        })
+    with pytest.raises(ValueError, match="valid message ID"):
+        venue_refs.reconcile_owned_delivery({**pending, "message_id": None})
+
+
 def _members(payload: bytes) -> dict[str, bytes]:
     tf = tarfile.open(fileobj=io.BytesIO(base64.b64decode(payload)), mode="r:gz")
     return {m.name: tf.extractfile(m).read() for m in tf.getmembers() if m.isfile()}

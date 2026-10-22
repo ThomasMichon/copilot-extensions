@@ -198,6 +198,8 @@ if (-not $env:COPILOT_PLUGIN_INSTALL_STAGED -or
                 $__wdChild = Start-Process -FilePath $__selfStageExe -PassThru -NoNewWindow `
                     -WorkingDirectory $env:USERPROFILE `
                     -ArgumentList $__selfStageArgs
+                # Windows PowerShell must retain the handle before waiting to preserve ExitCode.
+                $null = $__wdChild.Handle
                 if ($__wdDeadline -gt 0 -and -not $__wdChild.WaitForExit($__wdDeadline * 1000)) {
                     try { & taskkill.exe /PID $__wdChild.Id /T /F 2>&1 | Out-Null } catch {}
                     try { Stop-Process -Id $__wdChild.Id -Force -ErrorAction SilentlyContinue } catch {}
@@ -485,7 +487,8 @@ function Get-BootstrapPython {
     $sb = Get-SignedBasePython
     if ($sb) { return $sb }
     foreach ($cand in 'python3', 'python') {
-        $c = Get-Command $cand -ErrorAction SilentlyContinue
+        $c = Get-Command $cand -CommandType Application -ErrorAction SilentlyContinue |
+            Where-Object { $_.Source -notmatch 'WindowsApps' } | Select-Object -First 1
         if ($c) { return $c.Source }
     }
     return $null
@@ -2134,16 +2137,21 @@ function Write-Binstubs {
     }
     $rootLit = $InstallDir -replace "'", "''"
     $ps1 = @'
+$ProgressPreference = 'SilentlyContinue'
 $env:PYTHONUTF8 = '1'
 $_root = '__ROOT__'
 $_resolver = Join-Path $_root 'bin\resolve-runtime.ps1'
+# Windows PowerShell marks -File's redirected stdin as pipeline input, but
+# that invocation has no caller line. Defer reading object input so the raw
+# native pipe is never eagerly decoded by a reference to the automatic variable.
+$_pipelineInput = $MyInvocation.ExpectingInput -and $MyInvocation.Line
 function _Resolve-Py {
     $AgentRtPy = $null
     if (Test-Path -LiteralPath $_resolver) { $env:AGENT_RT_ROOT = $_root; . $_resolver }
     return $AgentRtPy
 }
 $_py = _Resolve-Py
-if ($_py) { if ($MyInvocation.ExpectingInput) { $input | & $_py -m agent_bridge @args } else { & $_py -m agent_bridge @args }; exit $LASTEXITCODE }
+if ($_py) { if ($_pipelineInput) { (Get-Variable input -ValueOnly) | & $_py -m agent_bridge @args } else { & $_py -m agent_bridge @args }; exit $LASTEXITCODE }
 if ($env:AGENT_BRIDGE_NO_SELFPROVISION) { [Console]::Error.WriteLine('[agent-bridge] runtime not provisioned (AGENT_BRIDGE_NO_SELFPROVISION set).'); exit 1 }
 $_snap = ''
 try { $_snap = ([IO.File]::ReadAllText((Join-Path $_root 'payload-dir'))).Trim() } catch {}
@@ -2155,7 +2163,7 @@ $_pwsh = Get-Command pwsh -ErrorAction SilentlyContinue
 $_exe = if ($_pwsh) { $_pwsh.Source } else { 'powershell.exe' }
 & $_exe -NoProfile -ExecutionPolicy Bypass -File $_inst provision 2>&1 | ForEach-Object { [Console]::Error.WriteLine($_) }
 $_py = _Resolve-Py
-if ($_py) { if ($MyInvocation.ExpectingInput) { $input | & $_py -m agent_bridge @args } else { & $_py -m agent_bridge @args }; exit $LASTEXITCODE }
+if ($_py) { if ($_pipelineInput) { (Get-Variable input -ValueOnly) | & $_py -m agent_bridge @args } else { & $_py -m agent_bridge @args }; exit $LASTEXITCODE }
 [Console]::Error.WriteLine('[agent-bridge] provisioning did not yield a runtime. See the log above; retry, or run the snapshot installer manually.')
 exit 1
 '@ -replace '__ROOT__', $rootLit
@@ -2202,6 +2210,7 @@ function Materialize-SnapshotVendoredLibs {
         'plugin-activation'    = (Resolve-VendoredLib -LibName 'plugin-activation')
         'remote-login-shell'   = (Resolve-VendoredLib -LibName 'remote-login-shell')
         'machine-transport'    = (Resolve-VendoredLib -LibName 'machine-transport')
+        'worktree-identity'    = (Resolve-VendoredLib -LibName 'worktree-identity')
     }
     foreach ($entry in $sources.GetEnumerator()) {
         $source = $entry.Value
@@ -2231,6 +2240,7 @@ function Materialize-SnapshotVendoredLibs {
             'agent-plugin-activation'    = 'plugin-activation'
             'agent-remote-login-shell'   = 'remote-login-shell'
             'agent-machine-transport'    = 'machine-transport'
+            'agent-worktree-identity'    = 'worktree-identity'
         }
         foreach ($entry in $rewrites.GetEnumerator()) {
             $oldLine = '{0} = {{ path = "../../libs/{1}", editable = true }}' -f $entry.Key, $entry.Value
@@ -2472,7 +2482,7 @@ function Invoke-InstallSlotBuild {
     # else. uv's local-path build cache is keyed by source path, not source
     # content -- see the matching install.sh comment / #2863 for the
     # confirmed incident this class of gap caused.
-    $bridgeResult = Invoke-UvPipInstallResilient @('--python', $VenvPython, "$PluginDir", '--reinstall-package', 'agent-bridge', '--refresh-package', 'agent-bridge', '--reinstall-package', 'agent-procutil', '--refresh-package', 'agent-procutil', '--reinstall-package', 'agent-plugin-resolve', '--refresh-package', 'agent-plugin-resolve', '--reinstall-package', 'agent-dropin-registry', '--refresh-package', 'agent-dropin-registry', '--reinstall-package', 'agent-plugin-activation', '--refresh-package', 'agent-plugin-activation', '--reinstall-package', 'agent-remote-login-shell', '--refresh-package', 'agent-remote-login-shell', '--reinstall-package', 'agent-machine-transport', '--refresh-package', 'agent-machine-transport', '--quiet')
+    $bridgeResult = Invoke-UvPipInstallResilient @('--python', $VenvPython, "$PluginDir", '--reinstall-package', 'agent-bridge', '--refresh-package', 'agent-bridge', '--reinstall-package', 'agent-procutil', '--refresh-package', 'agent-procutil', '--reinstall-package', 'agent-plugin-resolve', '--refresh-package', 'agent-plugin-resolve', '--reinstall-package', 'agent-dropin-registry', '--refresh-package', 'agent-dropin-registry', '--reinstall-package', 'agent-plugin-activation', '--refresh-package', 'agent-plugin-activation', '--reinstall-package', 'agent-remote-login-shell', '--refresh-package', 'agent-remote-login-shell', '--reinstall-package', 'agent-machine-transport', '--refresh-package', 'agent-machine-transport', '--reinstall-package', 'agent-worktree-identity', '--refresh-package', 'agent-worktree-identity', '--quiet')
     $bridgeOut = $bridgeResult.Output
     $installResult = $bridgeResult.ExitCode
     $ErrorActionPreference = $prevEAP
@@ -2492,9 +2502,7 @@ function Invoke-InstallSlotBuild {
 }
 
 function Invoke-Install {
-    Write-Host ''
-    Write-Host '=== agent-bridge install ===' -ForegroundColor Cyan
-    Write-Host ''
+    Write-Step 'agent-bridge install'
 
     if (-not (Ensure-Uv)) { exit 1 }
 
@@ -3184,7 +3192,7 @@ function Invoke-UpdateSlotBuild {
     }
     # --refresh-package agent-procutil: see the matching comment in the
     # initial-install path above.
-    $bridgeResult = Invoke-UvPipInstallResilient @('--python', $VenvPython, '--reinstall-package', 'agent-bridge', '--refresh-package', 'agent-bridge', '--reinstall-package', 'agent-procutil', '--refresh-package', 'agent-procutil', '--reinstall-package', 'agent-plugin-resolve', '--refresh-package', 'agent-plugin-resolve', '--reinstall-package', 'agent-dropin-registry', '--refresh-package', 'agent-dropin-registry', '--reinstall-package', 'agent-plugin-activation', '--refresh-package', 'agent-plugin-activation', '--reinstall-package', 'agent-remote-login-shell', '--refresh-package', 'agent-remote-login-shell', '--reinstall-package', 'agent-machine-transport', '--refresh-package', 'agent-machine-transport', "$PluginDir", '--quiet')
+    $bridgeResult = Invoke-UvPipInstallResilient @('--python', $VenvPython, '--reinstall-package', 'agent-bridge', '--refresh-package', 'agent-bridge', '--reinstall-package', 'agent-procutil', '--refresh-package', 'agent-procutil', '--reinstall-package', 'agent-plugin-resolve', '--refresh-package', 'agent-plugin-resolve', '--reinstall-package', 'agent-dropin-registry', '--refresh-package', 'agent-dropin-registry', '--reinstall-package', 'agent-plugin-activation', '--refresh-package', 'agent-plugin-activation', '--reinstall-package', 'agent-remote-login-shell', '--refresh-package', 'agent-remote-login-shell', '--reinstall-package', 'agent-machine-transport', '--refresh-package', 'agent-machine-transport', '--reinstall-package', 'agent-worktree-identity', '--refresh-package', 'agent-worktree-identity', "$PluginDir", '--quiet')
     $bridgeOut = $bridgeResult.Output
     $updateResult = $bridgeResult.ExitCode
     $ErrorActionPreference = $prevEAP
@@ -3221,9 +3229,7 @@ function Invoke-ServingRuntimeReconcile {
 }
 
 function Invoke-Update {
-    Write-Host ''
-    Write-Host '=== agent-bridge update ===' -ForegroundColor Cyan
-    Write-Host ''
+    Write-Step 'agent-bridge update'
 
     if (-not (Ensure-Uv)) { exit 1 }
 
@@ -3498,6 +3504,40 @@ function Invoke-Update {
 
 # -- Dispatch ----------------------------------------------------------------
 
+function Write-InstallerLifecycle {
+    param([string]$Outcome)
+
+    $savedExit = Get-Variable LASTEXITCODE -Scope Global -ValueOnly -ErrorAction SilentlyContinue
+    try {
+        $python = Get-BootstrapPython
+        $recorder = Join-Path $PluginDir 'libs/zdd/src/zdd/lifecycle.py'
+        if (-not (Test-Path -LiteralPath $recorder -PathType Leaf)) {
+            $recorder = Join-Path $PluginDir '../../libs/zdd/src/zdd/lifecycle.py'
+        }
+        if (-not $python -or -not (Test-Path -LiteralPath $recorder -PathType Leaf)) {
+            [Console]::Error.WriteLine('[WARN] Lifecycle record unavailable: bootstrap Python or payload recorder is missing')
+            return
+        }
+        $diagnostic = ''
+        $arguments = @('-I', $recorder, 'record', '--config-dir', $InstallDir,
+            '--service', 'agent-bridge', '--action', $script:InstallerLifecycleAction,
+            '--outcome', $Outcome, '--pid', "$PID", '--version', "$SrcVersion")
+        $null = Invoke-Hidden -FilePath $python -ArgList $arguments -ErrorOutput ([ref]$diagnostic)
+        if ($diagnostic) { [Console]::Error.Write($diagnostic) }
+        if ($LASTEXITCODE -ne 0) {
+            [Console]::Error.WriteLine('[WARN] Lifecycle recorder failed; installer outcome is unchanged')
+        }
+    } catch {
+        [Console]::Error.WriteLine("[WARN] Lifecycle recorder unavailable: $($_.Exception.Message)")
+    } finally {
+        $global:LASTEXITCODE = $savedExit
+    }
+}
+
+$script:InstallerLifecycleAction = if ($Action -in @('install', 'provision')) { 'install' }
+    elseif ($Action -in @('update', 'start', 'stop')) { $Action } else { '' }
+$script:InstallerLifecycleOutcome = 'fail'
+if ($script:InstallerLifecycleAction) { Write-InstallerLifecycle begin }
 try {
     Initialize-SourceRuntime
     switch ($Action) {
@@ -3510,14 +3550,23 @@ try {
         'stamp'     { Invoke-Stamp }
         'provision' { Invoke-Provision }
     }
+    $script:InstallerLifecycleOutcome = 'ok'
 } finally {
     try {
-        if (Test-Path -LiteralPath 'Function:\Stop-RuntimeConstruction') {
-            Stop-RuntimeConstruction
+        try {
+            if (Test-Path -LiteralPath 'Function:\Stop-RuntimeConstruction') {
+                Stop-RuntimeConstruction
+            }
+        } finally {
+            # Release the install lock even when construction cleanup fails.
+            Exit-InstallLock
         }
+    } catch {
+        $script:InstallerLifecycleOutcome = 'fail'
+        throw
     } finally {
-    # Release the install lock on any exit path (the OS also drops it on process
-    # death, so an `exit`/crash never strands it).
-    Exit-InstallLock
+        if ($script:InstallerLifecycleAction) {
+            Write-InstallerLifecycle $script:InstallerLifecycleOutcome
+        }
     }
 }

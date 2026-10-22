@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve scoped plugin preparation through the shared remote launch contract",
+  "changes": [
+    {
+      "plugin": "agent-ssh",
+      "type": "patch"
+    }
+  ]
+}

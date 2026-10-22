@@ -710,6 +710,14 @@ class TestPaneWrapperInitialPrompt:
                 pytest.skip("pwsh is required for the Windows pane wrapper")
             wrapper = wrapper_dir / "pane-wrapper.ps1"
             shutil.copy2(root / "bin" / "pane-wrapper.ps1", wrapper)
+            if (
+                os.environ.get("PROFILE_DURATIONS") == "true"
+                or os.environ.get("RUNNER_DEBUG") == "1"
+            ):
+                wrapper.write_text(
+                    "Set-PSDebug -Trace 1\n" + wrapper.read_text(encoding="utf-8"),
+                    encoding="utf-8",
+                )
             shutil.copy2(root / "bin" / "pane-launch.ps1", wrapper.with_name("pane-launch.ps1"))
             cmd = sessions._mux_pane_cmd(
                 "id",
@@ -719,7 +727,8 @@ class TestPaneWrapperInitialPrompt:
                 initial_prompt=prompt,
                 prompt_receipt=str(receipt),
             )
-            cmd = [pwsh, "-NoProfile", "-Command", " ".join(cmd)]
+            assert cmd[:4] == ["pwsh.exe", "-NoProfile", "-NoLogo", "-File"]
+            cmd = [pwsh, "-NoProfile", "-NoLogo", "-Command", "& " + " ".join(cmd[4:])]
         else:
             bash = shutil.which("bash")
             if not bash:
@@ -736,15 +745,128 @@ class TestPaneWrapperInitialPrompt:
             )
 
         receipt.unlink(missing_ok=True)
-        result = subprocess.run(
-            cmd, env=env, capture_output=True, text=True, timeout=15,
-        )
+        try:
+            result = subprocess.run(
+                cmd, env=env, capture_output=True, text=False, timeout=15,
+                creationflags=(
+                    subprocess.CREATE_NO_WINDOW if platform.system() == "Windows" else 0
+                ),
+            )
+        except subprocess.TimeoutExpired as exc:
+            receipt_state = receipt.read_text("utf-8") if receipt.exists() else "absent"
+            captured_args = output.read_text("utf-8") if output.exists() else "absent"
+            pytest.fail(
+                "Pane wrapper exceeded its 15-second budget: "
+                f"receipt={receipt_state!r}; child_args={captured_args!r}; "
+                f"stdout_tail={(exc.stdout or b'')[-4096:]!r}; "
+                f"stderr_tail={(exc.stderr or b'')[-4096:]!r}"
+            )
         assert result.returncode == 0, result.stderr
         assert json.loads(output.read_text("utf-8")) == [
             "--interactive", prompt,
         ]
         assert receipt.read_text("utf-8") == "launching"
         receipt.unlink()
+
+    def test_wrapper_trace_is_diagnostic_only(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(platform, "system", lambda: "Windows")
+        monkeypatch.setattr(subprocess, "CREATE_NO_WINDOW", 0x08000000, raising=False)
+        monkeypatch.setattr(shutil, "which", lambda *_args: "diagnostic-pwsh")
+        original = (
+            Path(__file__).resolve().parents[3] / "worktree-manager" / "bin" / "pane-wrapper.ps1"
+        )
+        for profile, runner_debug, diagnostic in (
+            ("false", "0", False),
+            ("true", "0", True),
+            ("false", "1", True),
+        ):
+            case = tmp_path / f"{profile}-{runner_debug}"
+            case.mkdir()
+            monkeypatch.setenv("PROFILE_DURATIONS", profile)
+            monkeypatch.setenv("RUNNER_DEBUG", runner_debug)
+
+            def timeout(cmd, **kwargs):
+                wrapper = case / "wrapper with spaces" / "pane-wrapper.ps1"
+                if diagnostic:
+                    assert wrapper.read_text("utf-8") == (
+                        "Set-PSDebug -Trace 1\n" + original.read_text("utf-8")
+                    )
+                else:
+                    assert wrapper.read_bytes() == original.read_bytes()
+                raise subprocess.TimeoutExpired(cmd, 15)
+
+            monkeypatch.setattr(subprocess, "run", timeout)
+            with pytest.raises(pytest.fail.Exception, match="15-second budget"):
+                self.test_wrapper_appends_native_interactive_prompt(case)
+
+    @pytest.mark.parametrize("stage", ["before-receipt", "before-child", "after-child"])
+    def test_wrapper_timeout_reports_launch_stage(self, tmp_path, monkeypatch, stage):
+        monkeypatch.setattr(shutil, "which", lambda *_args: "diagnostic-shell")
+        stdout = b"discarded stdout prefix" + b"x" * 4096 + b"last wrapper statement"
+        stderr = b"discarded stderr prefix" + b"y" * 4096 + b"child stderr"
+
+        def timeout(cmd, **kwargs):
+            assert kwargs["timeout"] == 15
+            assert kwargs["creationflags"] == (
+                subprocess.CREATE_NO_WINDOW if platform.system() == "Windows" else 0
+            )
+            if stage != "before-receipt":
+                receipt = tmp_path / "receipt path" / "wrappertest"
+                receipt.parent.mkdir()
+                receipt.write_text("launching", encoding="utf-8")
+            if stage == "after-child":
+                (tmp_path / "args.json").write_text('["--interactive"]', encoding="utf-8")
+            raise subprocess.TimeoutExpired(
+                cmd, 15, output=stdout, stderr=stderr
+            )
+
+        monkeypatch.setattr(subprocess, "run", timeout)
+        with pytest.raises(pytest.fail.Exception) as failure:
+            self.test_wrapper_appends_native_interactive_prompt(tmp_path)
+        message = str(failure.value)
+        assert ("receipt='absent'" in message) == (stage == "before-receipt")
+        assert ("child_args='absent'" in message) == (stage != "after-child")
+        assert "last wrapper statement" in message
+        assert "child stderr" in message
+        assert f"stdout_tail={stdout[-4096:]!r}" in message
+        assert f"stderr_tail={stderr[-4096:]!r}" in message
+        assert "discarded stdout prefix" not in message
+        assert "discarded stderr prefix" not in message
+
+    def test_wrapper_timeout_bounds_real_child_streams(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(shutil, "which", lambda *_args: "diagnostic-shell")
+        stdout = b"discarded stdout prefix" + b"\xc3\xa9" * 4096 + b"stdout-end"
+        stderr = b"discarded stderr prefix" + b"\xe2\x82\xac" * 4096 + b"stderr-end"
+        child = (
+            "import os,time\n"
+            "os.write(1, b'discarded stdout prefix' + b'\\xc3\\xa9' * 4096 + b'stdout-end')\n"
+            "os.write(2, b'discarded stderr prefix' + b'\\xe2\\x82\\xac' * 4096 + b'stderr-end')\n"
+            "time.sleep(30)\n"
+        )
+        original_run = subprocess.run
+        calls = []
+
+        def run(cmd, **kwargs):
+            calls.append(cmd)
+            assert kwargs["timeout"] == 15
+            assert kwargs["text"] is False
+            try:
+                return original_run([sys.executable, "-c", child], **kwargs)
+            except subprocess.TimeoutExpired as exc:
+                assert isinstance(exc.stdout, bytes)
+                assert isinstance(exc.stderr, bytes)
+                raise
+
+        monkeypatch.setattr(subprocess, "run", run)
+        with pytest.raises(pytest.fail.Exception) as failure:
+            self.test_wrapper_appends_native_interactive_prompt(tmp_path)
+        message = str(failure.value)
+        assert len(calls) == 1
+        assert "receipt='absent'; child_args='absent'" in message
+        assert f"stdout_tail={stdout[-4096:]!r}" in message
+        assert f"stderr_tail={stderr[-4096:]!r}" in message
+        assert "discarded stdout prefix" not in message
+        assert "discarded stderr prefix" not in message
 
 
 class TestMuxRetirePane:

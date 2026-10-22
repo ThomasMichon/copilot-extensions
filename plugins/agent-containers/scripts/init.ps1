@@ -30,6 +30,13 @@ param(
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
+
+if ($env:COPILOT_EXTENSIONS_HUMAN_UTF8 -eq '1') {
+    if (-not [IO.File]::Exists((Join-Path $PSScriptRoot 'installer-human-output.ps1'))) {
+        throw 'Required installer human-output initializer is unavailable.'
+    }
+    . (Join-Path $PSScriptRoot 'installer-human-output.ps1')
+}
 . (Join-Path $PSScriptRoot 'versioned_runtime_native.ps1')
 
 if ($InstallDir) {
@@ -168,6 +175,8 @@ if (-not $env:COPILOT_PLUGIN_INSTALL_STAGED -or
                 $__wdChild = Start-Process -FilePath $__selfStageExe -PassThru -NoNewWindow `
                     -WorkingDirectory $env:USERPROFILE `
                     -ArgumentList $__selfStageArgs
+                # Windows PowerShell must retain the handle before waiting to preserve ExitCode.
+                $null = $__wdChild.Handle
                 if ($__wdDeadline -gt 0 -and -not $__wdChild.WaitForExit($__wdDeadline * 1000)) {
                     try { & taskkill.exe /PID $__wdChild.Id /T /F 2>&1 | Out-Null } catch {}
                     try { Stop-Process -Id $__wdChild.Id -Force -ErrorAction SilentlyContinue } catch {}
@@ -629,21 +638,16 @@ Write-Ok "Python: $pythonCmd"
 
 if (Get-Command docker -ErrorAction SilentlyContinue) {
     $dockerPath = (Get-Command docker -ErrorAction Stop).Source
-    $dockerStart = [Diagnostics.ProcessStartInfo]::new()
-    $dockerStart.FileName = $dockerPath
-    if ($dockerStart.PSObject.Properties.Name -contains 'ArgumentList') {
-        [void]$dockerStart.ArgumentList.Add('--version')
+    $dockerError = $null
+    $dockerVer = Invoke-Hidden -FilePath $dockerPath -ArgList @('--version') -ErrorOutput ([ref]$dockerError)
+    $dockerExit = $LASTEXITCODE
+    if ($dockerError) { [Console]::Error.Write($dockerError) }
+    if ($dockerExit -eq 0) {
+        Write-Ok "Docker: $($dockerVer.Trim())"
     } else {
-        $dockerStart.Arguments = '--version'
+        if ($dockerVer) { Write-Warn "Docker: $($dockerVer.Trim())" }
+        Write-Warn "docker --version failed (exit $dockerExit) -- agent-containers fleet operations unavailable on this machine (non-fatal)"
     }
-    $dockerStart.UseShellExecute = $false
-    $dockerStart.CreateNoWindow = $true
-    $dockerStart.RedirectStandardOutput = $true
-    $dockerStart.RedirectStandardError = $false
-    $dockerProcess = [Diagnostics.Process]::Start($dockerStart)
-    $dockerVer = $dockerProcess.StandardOutput.ReadToEnd().Trim()
-    $dockerProcess.WaitForExit()
-    Write-Ok "Docker: $dockerVer"
 } else {
     # Non-fatal: an installer must not fail on a missing prerequisite other than
     # Python/uv. Docker is only needed for *runtime* fleet operations; the CLI +

@@ -15,7 +15,8 @@
   [#1478](https://github.com/ThomasMichon/copilot-extensions/issues/1478)
   (manual mux restoration for unreachable active sessions),
   [#2062](https://github.com/ThomasMichon/copilot-extensions/issues/2062)
-  (relocate Mux + AHP execution mechanics out of agent-worktrees),
+  (historical completed Mux/AHP relocation; unfinished #2053 architecture
+  acceptance remains directly in the Plan below after reviewed intake),
   [#3359](https://github.com/ThomasMichon/copilot-extensions/issues/3359)
   (vendor worktree-manager's own agent-procutil/dropin-registry/plugin-activation
   copies instead of borrowing agent-worktrees' live — fixed, PR
@@ -391,8 +392,10 @@ bindings still resolve correctly through the compatibility view.
 This is not a claim of complete provider-neutral hosting or production AHP/mux
 parity. `#5898` retains the separately excluded presentation follow-up; direct
 handoff choreography and the intentional standalone remux/restore lane require
-their own ownership reconciliation under `#2062`, not removal or an inferred
-reopening of this relocation slice.
+their own ownership reconciliation in the direct retained #2062/#2053 section
+below, not removal or an inferred reopening of this relocation slice. Normal
+reviewed intake and full live readback precede source-tracker retirement;
+the same effort Journal/open bounded-source process preserves current owners.
 
 ### Phase 3c — Picker non-blocking I/O (Done — Steps 1-5 landed; optional progress-envelope follow-up tracked in #4274)
 - [x] Make every I/O-touching Picker surface — pivot loads (built-in and
@@ -838,6 +841,61 @@ worktree-manager.
       automated/scripted case) is deliberately non-mux by design (a script
       edits in its own process), so it correctly never needs one either.
 
+### Phase 4a - New-worktree transaction and retained progress (#1548)
+
+<!-- backlog-reconciliation:7556:transfer:1548:to:efforts/active/worktree-manager-control-plane/README.md -->
+
+This is the complete retained acceptance from #1548, including the deferred
+`resilient-interactive-session-startup` conditions, not implemented progress.
+Normal reviewed intake and current full-section readback must precede tracker
+consolidation. The historical issue is not a live coordination dependency:
+future work uses this effort's Journal and an eligible open bounded-source
+claim under the repository contribution policy.
+
+Preserve assigned #1193 contribution migration, assigned #1239 disposition,
+engine/Manager/mux/session owners, #6600 timing/configuration and separate
+startup/feed/release owners. This does not reopen completed transplant or
+bundled retirement, shift source/resource custody or make the Picker mandatory.
+
+- [ ] Keep agent-worktrees mechanics and authoritative lifecycle/state separate
+  from Manager-owned interactive progress/choices. Expose a structured
+  create/mux-attempt/backoff/readiness/attach/recoverable-failure/cancel/retry
+  transaction, not a parallel launcher or UI importing engine internals.
+- [ ] Preserve mux-independent `create --json` and fully usable direct
+  `resolve --new`/standalone launch without Manager. Noninteractive callers
+  never wait for human input and receive stable structured recoverable failure.
+- [ ] Keep the optional local New Picker alive through actual worktree creation
+  and mux readiness; paint attempt/retry/backoff/recovery without blocking.
+  Selecting New or spawning a child is not the cutover boundary.
+- [ ] Cut over only after confirmed readiness OR explicit failure/cancel
+  returning to a usable fleet view. Failure/cancel/exhaustion preserves one
+  visible, discoverable worktree with accurate state and no falsely-live
+  session/mux record.
+- [ ] Reuse one exact worktree/session transaction for repeated or uncertain
+  requests: retry recoverable launch or join its ready mux without allocating
+  another worktree/conversation. Preserve request/seed/task/installation
+  authority and refuse contradictory identities.
+- [ ] Retain bounded standalone retry/recovery and the inherited deterministic
+  PSMux/tmux seam for transient failure, partial residue, eventual success and
+  exhaustion. Preserve actual bounds/diagnostics; transient success creates
+  exactly one worktree/session pair within the configured bound.
+- [ ] Settle only positively owned partial processes/resources BEFORE retry;
+  preserve unrelated, live or concurrently-won sessions and hold uncertain
+  observations. UI cancel is not deletion, task finality or claim settlement.
+- [ ] Offer explicit retry/cancel on exhaustion and retain the worktree recovery
+  path and independent direct launch. Retire duplicate presentation prompts
+  only after UI parity, never the underlying reliability primitive.
+- [ ] Cover local, nested mux, SSH/ConPTY fallback and cross-environment/remote
+  paths. Preserve the original remote alternative: prove compatible behavior OR
+  name a requirement-preserving tracked follow-up and owner; no implied remote
+  parity or unrelated mandatory every-host campaign.
+- [ ] Assert actual success/transient/exhaustion/cancel/idempotent-retry UI
+  behavior: visible before readiness, success-only cutover, one discoverable
+  worktree and usable fleet after failure. Distinguish exact source/synthetic/
+  native/installed proof, retaining original platform/containment gates and
+  declared exceptions. No launch, cleanup, native test or rollout is authorized
+  by this acceptance transfer.
+
 ### Phase 5 — Configurator: adoption, discovery, per-plugin config (Planned — #356 / #357)
 The [Configuration workbench plan](phase-5-configuration-workbench.md) applies
 the revised [canonical vision](../../../visions/installer/configurator/README.md).
@@ -1068,6 +1126,68 @@ _(agent-recommended)_ realizations of that operator-approved boundary.
       selection and existing cutover ownership. This is a bounded slice, not
       ownership of the entire update-flow repair or this umbrella.
 
+### Phase 7b - Unresolved human-command and suite-update ownership (#1238)
+
+<!-- backlog-reconciliation:7556:transfer:1238:to:efforts/active/worktree-manager-control-plane/README.md -->
+
+This preserves #1238's complete proposal for reviewed design reconciliation,
+not a declaration of implementation or a silent change to standing intent.
+Full reviewed intake and current readback precede tracker consolidation;
+future coordination uses this effort's Journal and eligible open bounded-source
+claims, not a closed #1238 token. If full scope or custody is rejected, retain
+the source issue.
+
+Preserve #6812 telemetry/audit, #6820/resilient-update-sequencing's historical
+migration/profile/preparation/readiness and paused original-owner handshake,
+#1110 cell attribution, #7743's fresh pre-runtime entry, durable execution/
+first-use owners, package/install/cutover authority and participant/resource
+custody. A prerequisite merge does not lift a pause or transfer those lanes.
+
+- [ ] Preserve the original proposed CWD-first agent conduct: canonical
+  `agent-*` in the target worktree; cross-repo work resolves its registered
+  path, explicitly changes that invocation's directory, then uses its canonical
+  plugin CLI. Human `<repo>` shortcuts are not the preferred agent-addressing
+  dependency. Retain direct project arguments at genuine CWD-neutral
+  service/process boundaries.
+- [ ] Reconcile this change AGAINST retained named-project Agent Fabric and
+  project-scoped-invocation intent through reviewed vision/pattern decisions
+  BEFORE implementation. A router is not fulfillment; unchanged policy is not
+  silent abandonment. Attribute any accepted refinement and preserve target
+  resolution, autonomy, concurrency and provenance.
+- [ ] Move HUMAN repository-binstub creation/refresh/doctor/removal to Manager,
+  preserving bare human `<repo>` Picker and optional routing migration safety.
+  Plugin installation and ordinary agent conduct remain independent of these
+  convenience commands and Manager availability.
+- [ ] Establish bounded migration and single ownership. Retire Worktrees'
+  binstub lifecycle only after Manager equivalents and safe rollback/adoption
+  are proved. Preserve known lineage/receipt checks, changed/foreign/ownerless
+  protection, installation cells, project identities, argv/exit semantics,
+  both Windows siblings and POSIX forms; no blanket `--transfer`, destructive
+  cleanup or silent ownership rewrite.
+- [ ] Preserve whole-suite Manager self-update, every enabled payload refresh,
+  each plugin's OWN update/reinstall boundary and truthful alignment/partial
+  failure reporting without package imports or duplicate installers. Credit
+  durable shared execution/custody without calling it full ownership migration.
+- [ ] Make each canonical plugin update SELF-only and attributable to its
+  selected source/runtime, rebuilding/restarting only its scope. Resolve
+  compatibility before removing recursive sibling/Manager orchestration;
+  distinguish an intentional suite participant from independent sibling
+  orchestration. Preserve transaction context and installer/cutover owners.
+- [ ] Coherently revise agent-fabric, Installer/Manager and plugin-service
+  intent, project-scoped-invocation patterns, agent-facing skills, generated
+  guidance and examples under the accepted model. Keep explicit CWD-neutral
+  service context and compatibility; do not teach removed/unintended routers.
+- [ ] Exercise actual human bare launch, neutral/foreign-CWD cross-repo
+  selection, Manager absent/present, changed/foreign/old commands, project/
+  installation/account/source identity and independent plugins. Verify suite
+  versus self-only update composition, exact argv/env/exit and truthful
+  failure/alignment without bypassing package policy or another owner's pause.
+- [ ] Distinguish reviewed intent, merged implementation, promoted release and
+  authorized installed/running migration. Retain original per-consumer/native/
+  installed gates and custody without inventing unrelated all-parent
+  Configurator/runtime completion. This section performs no command transfer,
+  registry/runtime/credential/service mutation, claim release or deployment.
+
 ### Phase 8 — Reconcile deferred backlog
 
 - [ ] Accept manager and worktree-control candidates only through
@@ -1171,7 +1291,78 @@ _Correlated via a facility-driven sweep of open `bug`-labeled issues against act
   - Fixed via [PR #5413](https://github.com/ThomasMichon/copilot-extensions/pull/5413)
     (see Journal, 2026-10-05); closes the issue.
 
+### Agency-versus-hosting realization retained from #2062/#2053
+
+<!-- backlog-reconciliation:7556:transfer:2062:to:efforts/active/worktree-manager-control-plane/README.md -->
+
+Add this direct unchecked remainder under the EXISTING reviewed Active Manager/provider
+effort, with corresponding Validation rows, before administrative closure of #2062.
+Obtain the actual reviewed merge and independently read back the current LIVE full
+section. Update live references that currently send remaining agency/provider
+reconciliation to #2062 to this accepted section and existing Journal/open-slice
+claiming process; keep #2062 as immutable historical proof, not a closed live token. If
+full scope or ownership cannot be accepted, retain it.
+
+Credit completed Phase3b physical AHP/Mux relocation, backend/presentation selection
+independence, legacy binding compatibility and the original bounded native
+relocated-launcher/AHP lifecycle witnesses. Do NOT reopen that completed slice,
+resurrect deleted copies or infer all-provider realization from it. Keep #5898
+production AHP/mux presentation, #5936 provider-observed recovery, current
+handoff/transparent-Windows/native/standalone implementers and all
+agency/source/resource/activation owners unchanged. This does not absorb their
+independent acceptance or create a new host owner.
+
+- [ ] Keep durable repository/worktree identity, current head, succession, claims,
+  obligations, disposition and source-control completion with the agency/ground
+  lifecycle authority. The selected owning host/provider controls the exact physical
+  process/session/pane lifetime and verifies the identity it acts on; neither side gains
+  a rival head/claims ledger.
+- [ ] Reconcile GENERIC orchestration with explicit provider-resolution/dispatch OR
+  legitimately co-packaged OWNING adapters on actual launch, observation, handoff and
+  retirement paths. File/directory location alone proves neither conformance nor
+  arbitrary foreign control; do not mandate deletion of every agency-side helper merely
+  to satisfy a layering label.
+- [ ] Preserve intentional no-Manager/no-provider standalone remux/restore and manual
+  recovery, accepted handoff/acknowledgement fences, exact identity/ownership/liveness
+  checks and fail-safe uncertainty. A stale/missing binding, failed lookup or unfamiliar
+  leg cannot authorize guessing another host or retiring an arbitrary process/pane.
+- [ ] Preserve backend versus terminal-presentation independence and legacy
+  session_backend/execution-leg binding compatibility. Actual injected capability
+  selection tests and historical relocated-launcher proof are bounded credits, not
+  current production four-way AHP/mux or whole-provider acceptance.
+- [ ] Leave #5898's exact attach-plan-preserving production presentation capability,
+  one-worktree identity and supported native-combination proof with its owner; do not
+  clobber an already-owned AHP plan by blindly re-resolving through a different
+  launcher. Preserve direct no-mux and standalone/non-AHP paths.
+- [ ] Leave #5936's attributable host-instance-ended observation and explicitly
+  confirmed current-head recovery batch with its provider/Manager owners. Do not infer
+  host death from stale rows or turn ordinary terminal closes into bulk recovery; its
+  original supported-host native proof remains separate.
+- [ ] For this remaining architecture row, identify actual owning adapters/authority and
+  test real source-to-host consumers, rejection/partial outcomes, legacy/standalone
+  behavior and applicable provider/native gates. Do not equate process receipt, file
+  move, injected capability, source merge or old live slice with complete cross-provider
+  conformance or authorized rollout.
+- [ ] Resolve every directly retained #2053 agency/hosting clause and name any
+  legitimate separately accepted residual before declaring this architecture realized.
+  Preserve exact source/claim/lease ownership and physical/durable authority boundaries
+  throughout; do not require unrelated entire Manager phases as a new gate on finite
+  components.
+
+No provider, AHP, mux, terminal, handoff, process census, claim/head write, remux,
+retirement, native test, deployment or new control-plane dependency is authorized or
+performed by this tracker consolidation.
+
 ## Validation Plan
+
+- [ ] Complete every directly retained #2062 Plan/Validation clause above at its original evidence tier and bounds; preserve current owners, holds and accepted deferrals. Administrative supersession is not completion.
+
+- [ ] Complete every Phase 4a transaction/progress/recovery and inherited
+      standalone/platform acceptance row; UI/source milestones alone do not
+      prove actual readiness, retry safety or installed behavior.
+- [ ] Complete every Phase 7b ownership/migration/compatibility row after
+      explicit reviewed reconciliation with standing intent. Tracker
+      consolidation is neither an architectural decision nor implementation.
 
 - [ ] Complete the [platform-local runtime validation matrix](phase-7-platform-local-runtime.md#validation-plan),
       including an actual generated launcher from a standalone installed slot,
@@ -1246,6 +1437,34 @@ overlapping work before it diverges, rather than relying on issue-comment
 claiming discipline alone.
 
 ## Journal
+
+### 2026-10-22 - Complete retained acceptance from #2062
+
+- Retained the full #2062 remainder directly in the Plan and Validation,
+  preserving delivered partials, existing source/resource custodians and gates.
+  Reviewed actual merge and current full readback precede administrative
+  supersession; no capability, native trial or adoption is declared complete.
+
+- **2026-10-22** - Materialized full #1548 New-worktree transaction/progress
+  acceptance in Phase 4a and unresolved #1238 command/update ownership in
+  Phase 7b. All outcomes remain unchecked; reviewed intent reconciliation
+  precedes architectural changes. Preserve assigned migration, launcher,
+  update/preparation and resource owners, with existing Journal/open-slice
+  coordination. Actual reviewed merge and full current readback must precede
+  source tracker supersession; this does not implement either feature.
+
+- **2026-10-21** - Reconciled the first native Repositories Configuration
+  consumer: #6725 merged on October 18 as
+  `1911d28ad9de2fbb15f287440d72ab279f51344e`, from reviewed head
+  `ea47cc28b81b228bd0f50edd3ff036ba32d02dff`. Native provider status
+  confirms approval and successful checks. The owner CLI and production Manager
+  UI exercise registration/route/binding/tracked-pair inspection, revisioned
+  machine-local Copilot preference set/reset, native inheritance, ordinary
+  concurrent-writer conflicts and source safety. This closes #6721's bounded
+  consumer, not the whole Wave 1/2, presets, domain panels or installed/live
+  acceptance. The source worktree is being closed at the operator's request;
+  its Phase 5 binding is released back to this canonical effort for a separately
+  claimed continuation. No rollout, service or pool activation is claimed.
 
 - **2026-10-20** - Implemented explicit exact-original survivor inspection in
   the owner and Manager for the [focused recovery slice](machine-restart-recovery.md).

@@ -17,6 +17,12 @@ from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
 import pytest
+from _manager_constructor_fixture import apply_constructor_fixture
+
+
+@pytest.fixture(autouse=True)
+def _unit_constructor(monkeypatch):
+    apply_constructor_fixture(monkeypatch)
 
 from worktree_manager import __main__ as wm
 from worktree_manager import engine_client as ec
@@ -781,7 +787,8 @@ def test_fetch_remote_version_non_github_source_is_none(tmp_path):
 
 
 
-def test_self_update_reports_updated(monkeypatch, tmp_path):
+@pytest.mark.parametrize("generation", ["0.1.0-dev9", "0.1.0-dev9+repair.fixture"])
+def test_self_update_reports_updated(monkeypatch, tmp_path, generation):
     from worktree_manager.self_install import SelfInstallResult
     monkeypatch.setattr("worktree_manager.update_auth.environment", lambda _, **kwargs: None)
     monkeypatch.setattr(self_install.shutil, "which", lambda name: "/usr/bin/git")
@@ -789,12 +796,18 @@ def test_self_update_reports_updated(monkeypatch, tmp_path):
                         lambda *a, **k: subprocess.CompletedProcess(a[0], 0))
     # Pretend the fetched payload exists and self_install reports an install.
     monkeypatch.setattr(self_install.Path, "is_file", lambda self: True)
-    monkeypatch.setattr(self_install, "self_install",
-                        lambda **kw: SelfInstallResult(version="0.1.0-dev9",
-                                                       action="installed", root=str(tmp_path)))
+    monkeypatch.setattr(self_install, "payload_version", lambda *_: "0.1.0-dev9")
+    retained = []
+    def installed(**kw):
+        retained.append(True)
+        kw["_after_activate"](self_install.version_slot(generation, tmp_path))
+        retained.pop()
+        return SelfInstallResult(version="0.1.0-dev9", action="installed", root=str(tmp_path))
+    monkeypatch.setattr(self_install, "self_install", installed)
     seen = {}
 
     def _fake_cutover(**kw):
+        assert retained == [True]
         seen.update(kw)
         return {"action": "cutover", "result": {"ok": True}}
 
@@ -804,8 +817,8 @@ def test_self_update_reports_updated(monkeypatch, tmp_path):
     assert res.version == "0.1.0-dev9"
     assert res.cutover == {"action": "cutover", "result": {"ok": True}}
     assert seen["root"] == tmp_path
-    assert seen["version"] == "0.1.0-dev9"
-    assert seen["slot"] == self_install.version_slot("0.1.0-dev9", tmp_path)
+    assert seen["version"] == generation
+    assert seen["slot"] == self_install.version_slot(generation, tmp_path)
 
 
 def test_self_update_runs_cutover_even_when_already_current(monkeypatch, tmp_path):
@@ -817,11 +830,11 @@ def test_self_update_runs_cutover_even_when_already_current(monkeypatch, tmp_pat
         self_install.subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(a[0], 0)
     )
     monkeypatch.setattr(self_install.Path, "is_file", lambda self: True)
-    monkeypatch.setattr(
-        self_install,
-        "self_install",
-        lambda **kw: SelfInstallResult(version="0.1.0-dev9", action="already-current", root=str(tmp_path)),
-    )
+    monkeypatch.setattr(self_install, "payload_version", lambda *_: "0.1.0-dev9")
+    def already_current(**kw):
+        kw["_after_activate"](self_install.version_slot("0.1.0-dev9", tmp_path))
+        return SelfInstallResult(version="0.1.0-dev9", action="already-current", root=str(tmp_path))
+    monkeypatch.setattr(self_install, "self_install", already_current)
     seen = {}
 
     def _fake_cutover(**kw):

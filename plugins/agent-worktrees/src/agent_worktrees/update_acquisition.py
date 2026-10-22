@@ -111,7 +111,7 @@ def _numeric_refusal(detail: str) -> str | None:
     if update_events._marker(low, update_events._ERRNO, 5) or update_events._os_error(
         low, posix=(5,),
     ):
-        return "I/O failure"
+        return "I/O error"
     if (
         update_events._marker(low, update_events._WINERROR, 5)
         or any(update_events._marker(low, update_events._ERRNO, code) for code in (1, 13))
@@ -121,12 +121,15 @@ def _numeric_refusal(detail: str) -> str | None:
     return None
 
 
-def _numeric_contention(detail: str) -> bool:
+def _contention_marker(detail: str) -> str | None:
     low = detail.lower()
-    return (
-        any(update_events._marker(low, update_events._WINERROR, code) for code in (32, 33))
-        or update_events._os_error(low, windows=(32, 33))
-    )
+    for code in (33, 32):
+        if (
+            update_events._marker(low, update_events._WINERROR, code)
+            or update_events._os_error(low, windows=(code,))
+        ):
+            return f"WinError {code}"
+    return None
 
 
 def acquire(
@@ -255,8 +258,12 @@ def _acquire(
             )
             refusal_reason = _refusal_reason(detail)
             refused = refusal_reason is not None
-            reason = f"refused ({refusal_reason}, exit {result.returncode})" if refused else (
+            contention = _contention_marker(detail)
+            failure = f"failed ({contention}, exit {result.returncode})" if contention else (
                 f"failed (exit {result.returncode})"
+            )
+            reason = f"refused ({refusal_reason}, exit {result.returncode})" if refused else (
+                failure
             )
             status = f"plugin {verb} {reason}: {update_events.bounded(detail, 200, tail=True)}"
             if verb == "install" and result.returncode == installer_run._WATCHDOG_EXIT:
@@ -267,7 +274,7 @@ def _acquire(
                 and bool(missing_ledger_pattern.search(detail))
             )
             retryable = not refused and (
-                bool(_TRANSIENT.search(detail)) or _numeric_contention(detail)
+                bool(_TRANSIENT.search(detail)) or contention is not None
             )
 
         if attempt == 1 or not (retryable or missing_ledger):

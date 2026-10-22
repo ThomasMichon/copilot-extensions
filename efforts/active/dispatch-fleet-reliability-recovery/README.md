@@ -9,8 +9,11 @@
 - **Vision:** agent-dispatch durable results, task/session attachment history and
   recoverable goals; plugin-services bounded work and single-owner lifecycle;
   registry-resolved configuration.
-- **Umbrella issue:** #6466
-- **Sub-issues:** #6467, #6470, #6471, #6793; coordinate #6185 and #6407.
+- **Historical category issue:** #6466 (closed; not a live claim token).
+- **Continuing supervision coordination:** #6467 and this Active Plan,
+  Validation Plan and Journal; bounded source issues retain existing owners.
+- **Sub-issues:** #6467, #6470, #6471, #6793; proposed Phase 7: #7486;
+  coordinate #6185 and #6407.
 
 ## Guiding Intent
 
@@ -30,6 +33,7 @@ Preserve the owning ground-layer, installer and configuration authorities.
 | Registry implementer | Named repository/resource bindings and validation | Dedicated implementation worktree for #6470 |
 | Source safety implementer | Trusted ownership snapshots and optional scoped GitHub authentication | `jittery-latch`, #6793 |
 | Existing scalar-repair owner | Preserve ownership of #6407 and its existing #6421 PR | Existing PR and its current source worktree |
+| Ordinary startup admission proposer | Prepare the proposed Phase 7 contract and bounded regression evidence; implementation remains review-gated | Coordinator and the existing #7486 public claim |
 
 ## Coordination
 
@@ -43,8 +47,20 @@ Preserve the owning ground-layer, installer and configuration authorities.
   unresolved acceptance criteria. The coordinator retains the parent objective.
 - **Existing ownership:** Do not supersede #6421. Feed relevant evidence to its
   owner and compose its released repair capability.
+- **Retained maintenance/recovery intake:** Keep #2207 and #2395 acceptance
+  directly below after tracker supersession, with #6467's live bounded
+  integration and all existing source/service/installer custodians unchanged.
+  Use this Plan/Validation/Journal and eligible open bounded source issues for
+  concrete overlap; no closed issue is a live ownership token, new assignment
+  or permission for cleanup, restart, native execution or rollout.
 - **Lifecycle owners:** Compose #5301 and #5655; do not add a competing watchdog,
   cleanup daemon, reservation store or repository registry.
+- **Proposed Phase 7:** Coordinate the bounded ordinary native-startup admission
+  amendment through #7486. Preserve #6467's master-supervisor scope and #6793's
+  source-safety scope, plus acquisition #6076, head-resume #6934 and remote
+  relationship #7237. Represented admission #1453 and remote-carrier response
+  loss #5843 remain separate owners. No implementation is authorized before
+  this amendment clears normal public review and merge.
 
 ## Context
 
@@ -102,6 +118,16 @@ Public-safe summary of the subsequently authorized repair:
 - Allow a source to explicitly select existing repository-scoped GitHub
   authentication, without switching global accounts, persisting credentials or
   exporting one account into the shared supervisor environment.
+
+### Proposed ordinary native-startup amendment
+
+Public-safe settled request summary, coordinated in #7486: preserve one ordinary
+startup turn across a lost response, including a response lost after the turn
+settled. Retain original allocation/session identity, distinguish historical
+receipt reads from permission for fresh work, and leave intentional unkeyed
+follow-up turns unchanged. The bounded design and validation matrix are in
+[ordinary-startup-admission.md](ordinary-startup-admission.md).
+This is a proposal, not an implementation or rollout authorization.
 
 ## Plan
 
@@ -186,7 +212,215 @@ Public-safe summary of the subsequently authorized repair:
 - [x] Leave task transfer (#6189), PR-ground-truth reconciliation (#2798),
   broader account-aware operations, and unrelated recovery owners unchanged.
 
+### Phase 7 - Ordinary native-startup keyed admission
+
+- [x] Review and merge the [bounded contract](ordinary-startup-admission.md)
+  before runtime implementation; preserve every existing owner above.
+- [x] Persist a stable invocation and exact fully rendered prompt with ready-agent
+  intent before first send; retain original allocation lineage across attempts.
+- [x] Reuse the existing unique turn-delivery key and atomically persist immutable
+  binding facts and the admission receipt with the turn, without a new ledger or
+  delivery state machine.
+- [x] Separate historical receipt reads from fresh permission: a queued g0
+  admission remains historical truth after a legitimate g1 claim.
+- [x] Add capability-gated keyed native send without unkeyed fallback; retain
+  existing creation and protocol-floor preflight, not a new CREATE route.
+  These implementation checks describe the local candidate, not publication,
+  release, adoption or permission to activate an adopter.
+- [ ] Preserve the exact one-turn counterexample assertion, unkeyed follow-ups,
+  source/native safeguards and bounded supervision; qualify the reviewed fix
+  through the sibling validation matrix.
+- [ ] Keep normal publication, containing release and authorized rollout separate;
+  plan approval alone does not authorize deployment or clear acceptance.
+
+### Spawn-attempt exhaustion reporting and single-task recovery from #1145
+
+<!-- backlog-reconciliation:7556:transfer:1145:to:efforts/active/dispatch-fleet-reliability-recovery/README.md -->
+
+Place this direct unchecked acceptance under Phase3 supervision/recovery and its
+Validation Plan. It is still-open work, not a completed feature or a new authority.
+Preserve existing coordinator/supervisor, startup/ground-owner, scalar-repair and
+held-cleanup source owners, claims and effect gates; no reservation, resource or
+implementation custody is transferred.
+
+- [ ] Reconcile handleless/stale RESERVING through a bounded race-safe original-startup
+  check. A missing handle, expired timestamp, failed probe or UNKNOWN verdict is not
+  absence; require the existing exact owner/operation evidence and prevent a late launch
+  before freeing capacity. Preserve live/unknown/unreachable and captured-history
+  blockers.
+- [ ] Do not consume the hard failed-attempt budget for EXPLICITLY retryable
+  dependency/capacity unavailability. Distinguish safe pre-admission refusal from
+  uncertain accepted work; never use this classification as permission for duplicate
+  effect replay or clearing held startup authority.
+- [ ] Make generic task/list/health/status report the SAME exhausted-spawn blockage,
+  count and supported recovery, rather than only a loop log while presenting an ordinary
+  runnable queue. Preserve retired task-status DEAD_LETTER compatibility/migration
+  separately; do not restore that status or confuse queued spawn diagnostics with
+  terminal task retirement.
+- [ ] Provide one-task explicit permissioned/audited retry/reset without globally
+  raising attempt limits. Keep current
+  owner/generation/native-history/startup/cleanup/exclusivity fences; coherent
+  configured attempt bounds must not strand a task below an unrelated recovery minimum.
+- [ ] Preserve append-only diagnosis and all original reservation keys, outcomes, errors
+  and lifecycle events. Audited current-state transitions must not erase historical
+  failure or synthesize missing launch/completion evidence.
+- [ ] Qualify daemon restart, transient dependency outage, stale/handleless reserving,
+  exhausted budget, queued-versus-blocked views and manual single-task recovery,
+  including probe/write/late-start races. Preserve ordinary queued behavior and UNKNOWN
+  conservatism; no all-host/model or whole-effort completion is added to this finite
+  repair.
+
+Delivered atomic rearm and positive-absence recovery are baseline, not all1145
+acceptance. Keep assigned terminal-startup capacity and other active source scopes with
+their existing owners; this block neither closes them nor sweeps held rows. Normal
+source review/current test-portfolio routing applies, not a new ACK rendezvous. Close
+duplicate1145 ONLY after this COMPLETE named Plan/Validation block is merged/read back
+in this existing reviewed Active effort; link-only journal text or a closed/Draft
+receiver is insufficient. Preserve first-pass history and retain1145 if delivery or
+custody conditions fail.
+
+### Released exclusive key versus held cleanup from #2207
+
+<!-- backlog-reconciliation:7556:transfer:2207:to:efforts/active/dispatch-fleet-reliability-recovery/README.md -->
+
+This direct Plan/Validation subcase remains at the existing Phase3 supervision/Phase5
+housekeeping boundary, preserving the whole current effort,1145 acceptance, Phase7
+native-admission fences and existing owners. The title-only report is not a verified
+universal release defect; classification remains open. Current6542 recovery is credited,
+not authorization to sweep held rows.
+
+#### Plan
+
+- [ ] Classify/reproduce the exact alleged held-cleanup/released-key fence with task,
+  allocation revision, active reservation state and actual logical release distinguished
+  from diagnostic cleanup metadata. Do not infer a failure or repair authority from a
+  Summary heading.
+- [ ] A genuinely released logical key must not fence an otherwise safe DIFFERENT task
+  solely because historical cleanup metadata remains. Preserve
+  SAME-task/workspace/allocation-revision, live body, retained ownership and uncertain
+  native-send/effect reconciliation fences; logical key release is not allocation
+  disposal or permission to duplicate admitted work.
+- [ ] Preserve full settled/pending/held cleanup history and visible reasons. Require
+  existing exact confirmed-absence/conclusion evidence for safe settlement; RELEASING,
+  unknown/live holder, missing handle or elapsed age never implies release permission.
+- [ ] Recovery remains exact
+  reservation/generation/creating-host/provenance/newer-allocation/lease/preview/audit
+  under existing authorities. Terminal housekeeping recovery does not reset nonterminal
+  attempt/business work or change results/attempt/history; retired old failures do not
+  become new allocation authority.
+- [ ] Keep assigned #1918 per-attempt/no-handle/old-held custody, #1488 task-terminal
+  resolution, #1666 ground liveness and scalar/native-startup owners separate. No
+  unassignment, expiry, blanket force clear, new orphan collector or competing recovery
+  actor is introduced.
+
+#### Validation
+
+- [ ] Exercise positive valid-release/different-task and negative
+  same-task/workspace/revision, live/unknown/RELEASING, pending native effect and racing
+  newer-allocation cases through the actual existing reservation/recovery consumers.
+  Preserve exact historical flags/metadata while asserting the correct current safety
+  outcome.
+- [ ] Restart, repeated/lost-response recovery, cleanup failure and concurrent attempt
+  cases keep one allocation/effect, full failure history and truthful held state. Credit
+  existing confirmed-absence/preview recovery without claiming all title symptoms
+  complete or requiring whole-parent/native-program completion.
+- [ ] Close duplicate2207 only after normal reviewed ACTUAL merge and CURRENT FULL
+  direct Plan/Validation/custody readback in this existing Active effort. Until then
+  retain2207. This proposal performs no cleanup, reservation release, test or native
+  action.
+
+Sources: https://github.com/ThomasMichon/copilot-extensions/issues/2207 ;
+https://github.com/ThomasMichon/copilot-extensions/pull/6472 ;
+https://github.com/ThomasMichon/copilot-extensions/pull/6542 ;
+https://github.com/ThomasMichon/copilot-extensions/pull/3264 .
+
+### Retained Phase3 acceptance — temporary per-unit watchdog maintenance from #2395
+
+<!-- backlog-reconciliation:7556:transfer:2395:to:efforts/active/dispatch-fleet-reliability-recovery/README.md -->
+
+This tracker-only amendment requires normal review of the full existing effort,
+successful required checks, ACTUAL MERGE and readback of the complete current Active
+Plan/Validation/Coordination before superseding #2395. A title link, unmerged patch,
+generic maintenance state or body presence is not delivery. If any original owner/gate
+cannot be preserved, KEEP THE SOURCE OPEN.
+
+#### Coordination and scope
+
+Preserve the existing Coordinator/Supervisor roles and #6467's live bounded
+supervision/progress integration; #5301/#5655 and each service/installer/other-watchdog
+owner keep their existing source, custody and rollout. Record #6466 as closed historical
+category work, not a live claim token. This accepted future slice introduces no
+implementation assignee, source handoff, parallel daemon, reservation store or service
+restart authority. Normal review/concrete overlap coordination applies, not a new
+generic ACK ceremony or takeover of the broader lifecycle programmes.
+
+#### Unchecked Plan — per-unit restart inhibition
+
+- [ ] Inventory the actual dtssh companion_gate/supervise restart boundary and
+  applicable other watchdog consumers. Reuse their existing supervision/lifecycle
+  authority for an attributable, narrowly addressed temporary interval; do not introduce
+  another watchdog or mandate one filesystem marker/backend for all services.
+- [ ] Enter the interval before the targeted install/update/maintenance stop. Restart
+  decisions observe it before relaunch, preventing the one target's immediate revival
+  while unrelated units keep their existing desired-state, health and progress behavior.
+  Do not kill or disable the whole supervisor tree to create a replacement window.
+- [ ] Integrate actual install/update success, failure and interruption. Use owned
+  cleanup and/or safe expiry/recovery so an abandoned operation cannot leave the unit
+  permanently disabled. A finally-only happy path or an unbounded stale flag is not the
+  interrupted-operation proof; preserve concurrent live-owner safety and existing
+  selection/readiness/recovery fences.
+- [ ] Support explicit scoped temporary operator use through the same documented
+  authority, without mutating persistent operator-off overrides or clearing another
+  updater's maintenance. Handle overlap/reentrancy, stale-versus-current state and
+  invalid/foreign inputs explicitly; absence of a local task or elapsed agent-claim age
+  is not ownership release.
+- [ ] Expose entered/held/expired/released/recovery/error and restart-resumption
+  outcomes truthfully. A timeout, process-exit receipt, maintained status word or
+  permission sidecar is not completed maintenance or safe rollback. Keep failed primary
+  installation and inhibitor cleanup failures distinguishable.
+- [ ] Preserve all applicable consumers and the original dtssh/Dispatch causal case,
+  with exact source/service/installation identity and no unrelated-unit disruption.
+  Installation-context maintenance authorization, task categories, optional Manager
+  enrollment, default-only no-expiry killswitch and per-installer watchdog deadlines
+  remain distinct mechanisms.
+
+#### Unchecked Validation Plan
+
+- [ ] Prove the actual target stops without immediate unwanted restart during
+  maintenance and resumes normally after the interval safely ends; other supervised
+  units remain live/progressing.
+- [ ] Exercise automatic success/failure/interruption/owner-loss and manual temporary
+  paths, concurrent holders, delayed/stale observations and failed cleanup/expiry.
+  Preserve current owners and ensure neither a stale flag permanently disables a unit
+  nor one participant clears another's live interval.
+- [ ] Verify actual native dtssh/Dispatch restart and applicable other-watchdog
+  integration, plus meaningful supported-platform positives/negatives and bounded
+  process/pipe cleanup. Source flags, a category test or mocked successful stop alone is
+  not the effect evidence; do not invent an all-host or full-parent completion
+  requirement.
+- [ ] Preserve persistent operator overrides, source/configured-runtime/readiness
+  identity, existing child ownership/health/backoff and retained failure history. Do not
+  weaken another lifecycle or maintenance contract to obtain a green result.
+- [ ] Keep every old Phase3/#6467 progress/uncertain-operation item and #5301/#5655
+  responsibility intact. This future acceptance is not proof of complete independent
+  custody or whole-update rollback and authorizes no current native/service/test
+  operation.
+- [ ] After actual reviewed merge, read back all rows, Active status, live coordination
+  and unchanged owners. Close #2395 only as duplicate tracking after complete accepted
+  delivery, never as an implemented maintenance capability or expired claim.
+
+No host process, service, marker, override, watchdog, permission, credential or runtime
+is changed by this consolidation.
+
 ## Validation Plan
+
+- [ ] Complete every directly retained #2395 Plan/Validation clause above at its original evidence tier and bounds; preserve current owners, holds and unfinished acceptance. Tracker consolidation is not implementation.
+
+- [ ] Complete every directly retained #2207 Plan/Validation clause above at its original evidence tier and bounds; preserve current owners, holds and unfinished acceptance. Tracker consolidation is not implementation.
+
+- [ ] Complete every directly retained #1145 Plan/Validation row above at its
+  original evidence tier and bounds, preserving existing owners and holds.
+  Tracker consolidation is not implementation or native acceptance.
 
 - [ ] Request read-back preserves category-only scope, no pruning, audit retention,
   registry authority and existing schema-fix ownership.
@@ -222,6 +456,12 @@ Public-safe summary of the subsequently authorized repair:
   Record native Windows results and available Linux CI separately from live
   adopter proof; a mock or source pass is not installed-consumer evidence.
 - [ ] Resolve or explicitly transfer every plan/validation item before Done.
+- [ ] Phase 7 proposal read-back preserves the g0/g1 distinction, original lineage,
+  exact prompt, atomic turn receipt, capability refusal and existing owners;
+  execute the [bounded matrix](ordinary-startup-admission.md#validation-matrix)
+  after this plan amendment clears review and merge, and before the runtime
+  repair lands. Retain the scoped passing control and honest failing
+  counterexample without publishing a known failing test as a completed repair.
 
 ## Proposal
 
@@ -236,6 +476,64 @@ named-resource resolution so an older peer cannot silently accept but ignore a
 requested contract.
 
 ## Journal
+
+### 2026-10-22 - Complete retained acceptance from #2395
+
+- Retained the complete #2395 scope directly in the Plan and Validation,
+  without declaring feature completion or transferring source/resource custody.
+  Normal reviewed merge and current full readback precede administrative
+  supersession; all substantive acceptance remains unfinished.
+
+### 2026-10-22 - Complete retained acceptance from #2207
+
+- Retained the complete #2207 scope directly in the Plan and Validation,
+  without declaring feature completion or transferring source/resource custody.
+  Normal reviewed merge and current full readback precede administrative
+  supersession; all substantive acceptance remains unfinished.
+
+### 2026-10-22 - Complete retained acceptance from #1145
+
+- Materialized the complete #1145 residual directly in the Plan and
+  Validation, preserving existing source/resource custody and partial delivery.
+  Normal reviewed merge and current full readback precede administrative
+  source supersession; no behavior, native run or rollout is declared complete.
+
+### 2026-10-21 - Phase 7 local review corrections
+
+- The local candidate now reads historical g0 admission after a real g1 claim
+  without readiness/allocation writes or fresh sends. One-shot and supervisor
+  entry points share the canonical original-lineage, lane-aware seed.
+  Created/resumed storage retains immutable intent transactionally, and
+  changed requested agent/charter selection conflicts before any delivery.
+- The focused Dispatch caller/intent portfolio passes 140 cases with one
+  native concurrency case deliberately outside this in-process batch.
+  The original preamble, finite two-poll settled-response-loss case and Unicode
+  real-stdio case pass together: three cases, no skips, one inbound prompt each.
+  Their identities remain compatibility-only and native-source unqualified;
+  queued task state is not task completion or verification.
+- Corrected semantic HTTP-45 families and the owned current-authority recapture
+  pass 218 focused Bridge cases. The registry audit passes with 456 fixtures;
+  historical HTTP vectors and capability floors remain unchanged. Shared new
+  operation evidence is explicit, not relabeled independent runtime capture.
+- The inspected offline UV-loop fixture now uses existing bounded process-tree
+  and pipe ownership with its original 30-second limit. Its exact six-library
+  order includes worktree identity. Both local and canonical-source cases pass
+  in separate targeted runs; earlier timeout and stale-five-library failures
+  are retained, not waived. No production installer/deadline changes were made.
+- Broader portfolio approval, independent OS-isolated qualification, final
+  code review, normal publication, containing release and authorized rollout
+  remain separate and outstanding. No adopter activation is claimed.
+
+### 2026-10-21 - Phase 7 proposal reviewed
+
+- Plan-only PR #7522 merged to `dev`; the ordinary startup admission contract
+  cleared normal review and required checks. This closes only the plan-review
+  gate, not implementation, validation, release or adoption.
+- The local test-only passing control and honest settled-response-loss
+  counterexample remain the starting evidence for #7486. Preserve the exact
+  one-turn assertion and original owner boundaries during the authorized
+  implementation slice; no creation-intent recovery or native-guard repair is
+  included.
 
 ### 2026-10-16 - Bounded complete-suite CI sharding
 

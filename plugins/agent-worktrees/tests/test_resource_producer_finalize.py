@@ -4,20 +4,44 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
 
 import pytest
 
+from conftest import _published_seed_environment, _seed_directory
 from agent_worktrees import config as cfg, finalize, tracking
 from test_resource_producer import absence, call
-from test_transitive_finalize_integration import _env, _save_worktree
+from test_transitive_finalize_integration import MACHINE, PROJECT, _env, _git, _save_worktree
 
 
-@pytest.fixture
-def final_owner(tmp_path, monkeypatch):
-    root, records, config = _env.__wrapped__(tmp_path, monkeypatch)
+@pytest.fixture(scope="session")
+def _final_owner_seed(tmp_path_factory):
+    with _seed_directory(tmp_path_factory, "resource-producer-finalize") as (seed, build):
+        if build:
+            with _published_seed_environment(tmp_path_factory) as patch:
+                _env.__wrapped__(seed, patch)
+        return seed
+
+
+def _copy_final_owner(seed, root, monkeypatch):
+    for name in ("anchor", "origin.git"):
+        shutil.copytree(seed / name, root / name, copy_function=shutil.copyfile)
+    records = root / f".{PROJECT}" / "worktrees"
+    records.mkdir(parents=True)
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: records)
+    monkeypatch.setattr(cfg, "project_dir", lambda name=None: root / f".{PROJECT}")
+    monkeypatch.setattr(cfg, "install_dir", lambda: root / ".agent-worktrees")
+    _git("remote", "set-url", "origin", str(root / "origin.git"), cwd=root / "anchor")
+    config = cfg.Config(
+        srcroot=str(root), machine=MACHINE, platform="linux",
+        repo_name=PROJECT, repos={PROJECT: cfg.RepoConfig(
+            anchor=str(root / "anchor"), worktree_root=str(root),
+            default_branch="base", remote="origin",
+        )},
+    )
     _save_worktree(records, "owner")
     path = records / "owner.yaml"
     record = tracking.load_record(path)
@@ -28,9 +52,86 @@ def final_owner(tmp_path, monkeypatch):
     return root, path, config
 
 
+@pytest.fixture
+def final_owner(tmp_path, monkeypatch, _final_owner_seed):
+    return _copy_final_owner(_final_owner_seed, tmp_path, monkeypatch)
+
+
 def _reserve(path, config):
     return call(path, "reserve", {"kind": "container", "namespace": "raw-resource", "recovery": {}},
                 ref=tracking.format_claim_ref(config.machine, config.repo_name, "owner"))
+
+
+def _owner_snapshot(root):
+    return {path.relative_to(root): path.read_bytes()
+            for path in root.rglob("*") if path.is_file()}
+
+
+@pytest.mark.parametrize("attempt", range(2))
+def test_final_owner_copies_keep_git_and_owner_state_private(_final_owner_seed, tmp_path, attempt):
+    from agent_worktrees import claim_providers
+
+    seed = _final_owner_seed
+    seed_before = _owner_snapshot(seed)
+    first_root = tmp_path / f"first-{attempt}"
+    second_root = tmp_path / f"second-{attempt}"
+    with pytest.MonkeyPatch.context() as patch:
+        _, first_path, first_config = _copy_final_owner(seed, first_root, patch)
+    with pytest.MonkeyPatch.context() as patch:
+        _, second_path, second_config = _copy_final_owner(seed, second_root, patch)
+        assert cfg.tracking_dir() == second_path.parent
+        assert cfg.project_dir() == second_path.parent.parent
+        assert cfg.install_dir() == second_root / ".agent-worktrees"
+        assert cfg.load_config() is second_config
+    second_before = _owner_snapshot(second_root)
+    for root, path, config in (
+        (first_root, first_path, first_config), (second_root, second_path, second_config),
+    ):
+        anchor = root / "anchor"
+        assert config.default_repo.anchor == str(anchor)
+        assert config.default_repo.worktree_root == config.srcroot == str(root)
+        assert _git("remote", "get-url", "origin", cwd=anchor) == str(root / "origin.git")
+        assert _git("rev-parse", "HEAD", cwd=anchor) == _git(
+            "--git-dir", str(root / "origin.git"), "rev-parse", "base", cwd=root,
+        )
+        assert (anchor / "base.txt").read_text() == "base\n"
+        record = tracking.load_record(path)
+        assert record.status == "active" and record.resources == []
+        assert record.worktree_path == str(root / "gone-owner")
+        for relative, data in seed_before.items():
+            if relative.parts[0] in {"anchor", "origin.git"}:
+                copied = root / relative
+                if relative.parts != ("anchor", ".git", "config"):
+                    assert copied.read_bytes() == data
+                assert not copied.samefile(seed / relative)
+                assert relative.name != "alternates"
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(cfg, "tracking_dir", lambda: first_path.parent)
+        patch.setattr(cfg, "project_dir", lambda name=None: first_path.parent.parent)
+        patch.setattr(cfg, "install_dir", lambda: first_root / ".agent-worktrees")
+        patch.setattr(cfg, "load_project_config", lambda *a, **k: first_config)
+        patch.setattr(cfg, "load_config", lambda *a, **k: first_config)
+        anchor = first_root / "anchor"
+        _git("config", "fixture.private", "first-only", cwd=anchor)
+        (anchor / ".git" / "info" / "exclude").write_text("first-only\n")
+        (anchor / "private.txt").write_text("first copy only\n")
+        _git("add", "-A", cwd=anchor)
+        _git("commit", "-q", "-m", "private copy mutation", cwd=anchor)
+        _git("push", "-q", "origin", "HEAD:refs/heads/private-copy", cwd=anchor)
+        result = _reserve(first_path, first_config)
+        assert result["phase"] == "pending"
+        assert finalize.validate_and_finalize("owner", first_config) is False
+        patch.setattr(claim_providers, "resolve_claim_status", lambda ref: absence(ref))
+        assert call(first_path, "close", {"token": result["token"]},
+                    ref=result["owner"])["phase"] == "closed"
+        patch.setattr(finalize, "_warn_of_codespace_claims_for_worktree", lambda *a: None)
+        patch.setattr(finalize, "_warn_of_dev_slot_claims_for_worktree", lambda *a: None)
+        assert finalize.validate_and_finalize("owner", first_config) is True
+        assert tracking.load_record(first_path).status == "finalized"
+    assert _owner_snapshot(seed) == seed_before
+    assert _owner_snapshot(second_root) == second_before
+    assert first_config.repos is not second_config.repos
+    assert first_config.default_repo is not second_config.default_repo
 
 
 @pytest.mark.parametrize("mode", ["off", "warn", "block"])

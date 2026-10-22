@@ -11,6 +11,14 @@ clean room. It isolates *everything* under test (no `~/.agent-*`, no
 `~/.local/bin`, no marketplace, a stock login-shell PATH) while reusing your
 Copilot **login** (auth is not what we're validating).
 
+Canonical Linux scenario containers use Docker's existing `--init` support.
+The long-lived `sleep infinity` command is not an orphan reaper: without an
+init process, exited orphan children can remain as PID-1-owned zombies and
+prevent native teardown from proving PID absence. The injected init forwards
+signals and reaps adopted children; it needs no package installation or image
+change. Native cleanup assertions and deadlines remain unchanged. This applies
+to the Linux starts in both host wrappers, not the Windows container arm.
+
 > **First time on this machine? → [`SETUP.md`](SETUP.md)** walks you from "no
 > Docker" to a green smoke-test (install Docker per OS → verify → build → auth →
 > run). This README is the reference for everything after that.
@@ -137,6 +145,13 @@ host-driven Tier-P lane with one Gateway, two outbound service connectors and
 an observer on an internal network. It builds exact committed source and uses
 synthetic credentials, non-root containers and no privileged admission, host
 socket, published ports or cloud login. It is not selected through `-Scenario`.
+
+The [Authelia profile qualification](authelia-profile-qualification/README.md)
+is a separate opt-in, host-driven provider interoperability lane. It uses real
+vendor-issued tokens with throwaway credentials and verified TLS, without
+changing the shared verifier or claiming enrollment, human-login or production
+qualification. Incompatible profiles are explicit evidence, not a bearer
+fallback. It is not selected through `-Scenario` or required PR CI.
 
 The [restricted-dispatch proof](restricted-dispatch/README.md) is an opt-in,
 host-driven Tier-P lane with separate fresh central and restricted worker
@@ -291,6 +306,7 @@ check — proving the substrate generalises without an internal dependency.
 | Scenario | Tier | What it validates |
 |----------|------|-------------------|
 | [`generic-single-plugin`](scenarios/generic-single-plugin/) | P | The reference: register the marketplace + install ONE (configurable) plugin on a fresh box; assert the filesystem outcomes of install → bootstrap → binstub → plugin-load → register. |
+| [`fleet-manager-client-admission`](scenarios/fleet-manager-client-admission/) | P | An exact archived candidate prepares through governed dependencies, then its freshly installed thin-client console initializes/admits/retries/reopens durable client state and refuses revoked policy without hosting, network use or checkout-helper fallback. Requires `-HarnessMount` pointing to a directory containing `candidate.tar`; no account tokens. |
 | [`agent-worktrees-solo`](scenarios/agent-worktrees-solo/) | P | The **worktree base** stands up solo: provisions, binstub reports a real version, read verbs enumerate, and a worktree **round-trips** (register → create → finalize). |
 | [`worktree-manager-bootstrap`](scenarios/worktree-manager-bootstrap/) | P | The **out-of-plugin bootstrap one-liner** on a **pristine** box (no uv): it **self-provisions** uv (user-local), fetches the payload, and publishes the versioned slot + `current-version` marker + the `~/.local/bin/worktree-manager` binstub — then the binstub runs on a stock login-shell PATH. Falsifies "the bootstrap dead-ends without a pre-installed toolchain." |
 | [`agent-bridge-solo`](scenarios/agent-bridge-solo/) | P | **agent-bridge without an agent-worktrees base** — the degrade-safe contract: it provisions, exposes a versioned binstub, and its read verbs (agents/machines/sessions) answer rather than crash on a missing base. |

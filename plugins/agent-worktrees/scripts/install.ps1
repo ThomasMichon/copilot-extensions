@@ -318,7 +318,7 @@ if ($ContextualInstall) {
         $contextDurableHome = Split-Path -Parent $contextDurableHome
     }
     $hostExe = (Get-Process -Id $PID).Path
-    $validatedJson = & $hostExe -NoProfile -ExecutionPolicy Bypass -File $contextHelper validate `
+    $validatedJson = & $contextHelper validate `
         -Context $contextPath `
         -DurableHome $contextDurableHome `
         -ExpectedPluginId 'agent-worktrees' `
@@ -338,16 +338,15 @@ if ($ContextualInstall) {
         Write-Error '-InstallDir does not match validated installation context.'
         exit 1
     }
-    $contextStatusArgs = @(
-        '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $contextHelper,
-        'status',
-        '-PayloadRoot', $contextPayload,
-        '-PluginId', 'agent-worktrees',
-        '-LegacyRoot', (Join-Path $env:USERPROFILE '.agent-worktrees'),
-        '-Context', $contextPath,
-        '-DurableHome', $contextDurableHome
-    )
-    $contextStatusJson = @(& $hostExe @contextStatusArgs)
+    $contextStatusArgs = @{
+        Action = 'status'
+        PayloadRoot = $contextPayload
+        PluginId = 'agent-worktrees'
+        LegacyRoot = (Join-Path $env:USERPROFILE '.agent-worktrees')
+        Context = $contextPath
+        DurableHome = $contextDurableHome
+    }
+    $contextStatusJson = @(& $contextHelper @contextStatusArgs)
     if ($LASTEXITCODE -ne 0) {
         Write-Error 'Installation governance could not be resolved.'
         exit 1
@@ -381,16 +380,55 @@ if ($ContextualInstall) {
         exit 1
     }
 
+    function Assert-ContextPublication {
+        if ($env:COPILOT_EXTENSIONS_RUNTIME_PUBLICATION) {
+            if (-not $BootstrapPython) {
+                throw 'Runtime publication management requires explicit -BootstrapPython.'
+            }
+            $managementHelper = Join-Path $PSScriptRoot 'installation-context\installation_context.py'
+            $managementJson = @(& $BootstrapPython -I -B -X utf8 $managementHelper probe-management-publication `
+                --context $contextPath --durable-home $contextDurableHome `
+                --payload-root $contextPayload --plugin-id agent-worktrees `
+                --legacy-root (Join-Path $env:USERPROFILE '.agent-worktrees'))
+            if ($LASTEXITCODE -ne 0) {
+                throw 'Runtime publication management custody was refused.'
+            }
+            $management = ($managementJson -join "`n") | ConvertFrom-Json -ErrorAction Stop
+            if ($management.managementPublication -isnot [bool] -or
+                -not $management.managementPublication -or
+                [string]$management.runtimeRoot -cne $InstallDir) {
+                throw 'Runtime publication management returned an invalid decision.'
+            }
+            return
+        }
+        $publicationArgs = $contextStatusArgs.Clone()
+        $publicationArgs.Action = 'probe-plugin-publication'
+        $publicationJson = @(& $contextHelper @publicationArgs)
+        $publicationExit = $LASTEXITCODE
+        try {
+            $publication = ($publicationJson -join "`n") | ConvertFrom-Json -ErrorAction Stop
+        } catch {
+            throw 'Runtime publication probe returned an invalid decision.'
+        }
+        if ($publicationExit -ne 0 -or
+            $publication.deployment.allowPluginPublication -isnot [bool] -or
+            -not $publication.deployment.allowPluginPublication -or
+            [string]$publication.runtimeRoot -cne $InstallDir) {
+            throw ("Runtime publication refused: " + ($publicationJson -join ' ') +
+                ' Use explicit installation management to install or repair this runtime.')
+        }
+    }
+    if ($Action -ne 'status') { Assert-ContextPublication }
+
     function Test-ContextGovernanceUnchanged {
-        $currentJson = @(& $hostExe @contextStatusArgs)
+        $currentJson = @(& $contextHelper @contextStatusArgs)
         if ($LASTEXITCODE -ne 0) { return $false }
         try {
             $current = ($currentJson -join "`n") | ConvertFrom-Json
         } catch {
             return $false
         }
-        $currentValidationJson = & $hostExe -NoProfile -ExecutionPolicy Bypass `
-            -File $contextHelper validate `
+        $currentValidationJson = & $contextHelper validate `
             -Context $contextPath `
             -DurableHome $contextDurableHome `
             -ExpectedPluginId 'agent-worktrees' `
@@ -685,6 +723,8 @@ if (-not $env:COPILOT_PLUGIN_INSTALL_STAGED -or
                 $__wdChild = Start-Process -FilePath $__selfStageExe -PassThru -NoNewWindow `
                     -WorkingDirectory $env:USERPROFILE `
                     -ArgumentList $__selfStageArgs
+                # Windows PowerShell must retain the handle before waiting to preserve ExitCode.
+                $null = $__wdChild.Handle
                 if ($__wdDeadline -gt 0 -and -not $__wdChild.WaitForExit($__wdDeadline * 1000)) {
                     try { & taskkill.exe /PID $__wdChild.Id /T /F 2>&1 | Out-Null } catch {}
                     try { Stop-Process -Id $__wdChild.Id -Force -ErrorAction SilentlyContinue } catch {}
@@ -2753,12 +2793,14 @@ function Deploy-PythonRuntime {
     $originPayload = if ($env:COPILOT_PLUGIN_STAGED_FROM) {
         $env:COPILOT_PLUGIN_STAGED_FROM
     } else { $PluginDir.ToString() }
+    if ($ContextualInstall) { Assert-ContextPublication }
     $resultDir = Join-Path $InstallDir '.installer-inputs'
     Ensure-InstallDir $resultDir
     $resultPath = Join-Path $resultDir ("result-$PID-" + [Guid]::NewGuid().ToString('N') + '.json')
     $modeArgs = @()
+    if ($Action -eq 'update') { $modeArgs += '--recover-adopted-manager' }
     if ($Action -in @('repair', 'dev', 'dev-release')) { $modeArgs = @('--mode', $Action) }
-    $runtimeInputs = if ($modeArgs.Count) { $RuntimeInputPlugin } else { $PluginDir.ToString() }
+    $runtimeInputs = if ($Action -in @('repair', 'dev', 'dev-release')) { $RuntimeInputPlugin } else { $PluginDir.ToString() }
     if ($Owner) { $modeArgs += @('--owner', $Owner) }
     if ($Action -ne 'dev-release') {
         $scope = if ($Action -in @('install', 'update')) { 'wrappers' } else { 'resolvers' }
@@ -2769,7 +2811,7 @@ function Deploy-PythonRuntime {
     try {
         Assert-SourceRuntime
         $sourcePin = if ($SourceRuntimeIdentity) { $SourceRuntimeIdentity } else { '{}' }
-        $arguments = @('-I', '-B', (Join-Path $ScriptDir 'runtime_install.py'),
+        $arguments = @('-I', '-B', '-X', 'utf8', (Join-Path $ScriptDir 'runtime_install.py'),
             '--root', $InstallDir, '--plugin', $runtimeInputs,
             '--payload', $originPayload, '--uv', $uvPath, '--base-python', $base,
             '--result', $resultPath, '--expected-source-identity', $sourcePin) + $modeArgs
@@ -3721,12 +3763,8 @@ function Deploy-CopilotPlugin {
         $copilotPrefix = @($copilotCommand[1..($copilotCommand.Count - 1)])
     }
 
-    # Detect if we are running from the installed plugin directory.
-    # When cmd_update invokes us, it sets cwd to the plugin dir and
-    # has already done the plugin update -- re-running it would EBUSY
-    # on Windows because copilot CLI tries to rmdir our own cwd.
-    $installedPluginsDir = Join-Path $env:USERPROFILE '.copilot\installed-plugins'
-    $runningFromInstalled = $PluginDir.Path -like "$installedPluginsDir*"
+    # Self-staging changes PluginDir, not the original payload's source kind.
+    $runningFromInstalled = (Get-SourceKind -PluginPath $PluginDir.Path) -eq 'marketplace'
 
     # 1. Register marketplace if not present
     $marketplaces = (& $copilotExecutable @copilotPrefix plugin marketplace list 2>$null) -join "`n"
@@ -4022,7 +4060,7 @@ switch ($Action) {
             throw 'Helper publication requires its admitted plan, digest and base interpreter.'
         }
         $nativeError = ''
-        $arguments = @('-I', '-B', (Join-Path $ScriptDir 'runtime_install.py'),
+        $arguments = @('-I', '-B', '-X', 'utf8', (Join-Path $ScriptDir 'runtime_install.py'),
             '--root', $InstallDir, '--plugin', $PluginDir.ToString(),
             '--inspect-helper-publication', $RuntimePublicationPlan,
             '--publication-digest', $RuntimePublicationDigest)
@@ -4044,7 +4082,7 @@ switch ($Action) {
             }
             Deploy-GlobalBinstub
         }
-        $arguments = @('-I', '-B', (Join-Path $ScriptDir 'runtime_install.py'),
+        $arguments = @('-I', '-B', '-X', 'utf8', (Join-Path $ScriptDir 'runtime_install.py'),
             '--root', $InstallDir, '--plugin', $PluginDir.ToString(),
             '--complete-helper-publication', $RuntimePublicationPlan,
             '--publication-digest', $RuntimePublicationDigest)

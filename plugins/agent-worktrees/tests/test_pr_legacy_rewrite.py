@@ -9,7 +9,7 @@ from agent_worktrees import config as cfg
 from agent_worktrees import finalize_cli, git_ops, pr_ops, pr_publish, pr_rewrite, tracking
 from agent_worktrees import __main__ as cli
 from agent_worktrees.providers.base import PullResult
-from test_pr_rewrite import git, publish_and_rebase, record_for
+from test_pr_rewrite import git, record_for
 
 pytestmark = [
     pytest.mark.contract("agent_worktrees.pr_publish.legacy_rewrite"),
@@ -36,8 +36,8 @@ def legacy_record(wid, *, state="active", defect=""):
 
 
 @pytest.mark.parametrize("scheme", ["snapshot", "refspec"])
-def test_legacy_rewrite_single_public_command_after_rebase(pr_repo, scheme, monkeypatch):
-    config, wid, wt, remote, old = publish_and_rebase(pr_repo, scheme)
+def test_legacy_rewrite_single_public_command_after_rebase(rebased_pr_repo, scheme, monkeypatch):
+    config, wid, wt, remote, old = rebased_pr_repo
     legacy_record(wid)
     rec = record_for(wid)
     assert rec.active_pr().state == "active"
@@ -61,8 +61,8 @@ def test_legacy_rewrite_single_public_command_after_rebase(pr_repo, scheme, monk
 
 
 @pytest.mark.parametrize("revision", [1, 17])
-def test_revised_legacy_record_can_intentionally_rewrite_its_own_head(pr_repo, revision, monkeypatch):
-    config, wid, wt, remote, old = publish_and_rebase(pr_repo, "refspec")
+def test_revised_legacy_record_can_intentionally_rewrite_its_own_head(rebased_refspec_pr_repo, revision, monkeypatch):
+    config, wid, wt, remote, old = rebased_refspec_pr_repo
     path = legacy_record(wid, defect="corrected")
     data = yaml.safe_load(path.read_text())
     data["prs"][-1]["pr_revision"] = revision
@@ -87,8 +87,8 @@ def test_revised_legacy_record_can_intentionally_rewrite_its_own_head(pr_repo, r
 
 
 @pytest.mark.parametrize("defect", ["number", "branch", "destination", "moved", "shared"])
-def test_revised_legacy_rewrite_requires_exact_live_authority(pr_repo, defect, monkeypatch):
-    config, wid, wt, remote, old = publish_and_rebase(pr_repo, "refspec")
+def test_revised_legacy_rewrite_requires_exact_live_authority(rebased_refspec_pr_repo, defect, monkeypatch):
+    config, wid, wt, remote, old = rebased_refspec_pr_repo
     path = legacy_record(wid, defect="corrected")
     rec = record_for(wid)
     observed = PullResult(number=42, head_sha=old, head_ref=rec.pr.branch, head_url=str(remote))
@@ -115,8 +115,8 @@ def test_revised_legacy_rewrite_requires_exact_live_authority(pr_repo, defect, m
 
 
 @pytest.mark.parametrize("defect", ["unattested", "partial", "provider-moved", "shared"])
-def test_legacy_rewrite_refuses_incompatible_evidence(pr_repo, defect, monkeypatch):
-    config, wid, wt, remote, old = publish_and_rebase(pr_repo, "refspec")
+def test_legacy_rewrite_refuses_incompatible_evidence(rebased_refspec_pr_repo, defect, monkeypatch):
+    config, wid, wt, remote, old = rebased_refspec_pr_repo
     path = legacy_record(wid, defect=defect)
     rec = record_for(wid)
     if defect == "shared":

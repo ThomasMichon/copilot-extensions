@@ -6,7 +6,9 @@
 - **Created:** 2026-09-03
 - **Status:** Active
 - **Vision:** [`repository-owned-aggregate-configuration`](../../../visions/plugins/agent-logger/README.md#repository-owned-aggregate-configuration) · [`explainable-machine-plan`](../../../visions/plugins/agent-logger/README.md#explainable-machine-plan) · [`resolve-before-side-effects`](../../../visions/plugins/agent-logger/README.md#resolve-before-side-effects) · [`reject-cross-repository-collisions`](../../../visions/plugins/agent-logger/README.md#reject-cross-repository-collisions) · [`configuration-is-authorization`](../../../visions/plugins/agent-logger/README.md#configuration-is-authorization)
-- **Umbrella issue:** #1817
+- **Continuing coordination:** This Active Plan, Validation Plan and Journal;
+  #1817 is historical tracking after complete reviewed intake. Independent
+  implementation slices retain eligible open public issues and their owners.
 - **Sub-issues:** #1831 · #1832 · #1833 · #1834 · #1835
 
 ## Guiding Intent
@@ -36,15 +38,20 @@ which repository wins.
 - **Host (owns PRs):** Primary contributor.
 - **Delegates:** None initially; bounded implementation or review slices may be added here before dispatch.
 - **Handoff:** The effort README, issue state, merged pull requests, and Journal are the durable relay.
+- **Continuing intake:** Keep all remaining phases and validation here. Claim
+  concrete overlapping implementation through an eligible open bounded source
+  issue and this Journal, preserving the primary contributor and existing
+  source, collection, rendering and operational custody. A closed historical
+  umbrella never serves as a live claim or evidence of completed acceptance.
 
 ## Context
 
 The revised [agent-logger vision](../../../visions/plugins/agent-logger/README.md)
 defines repository-owned declarations, same-repository precedence,
 collision-free cross-repository composition, an explainable normalized machine
-plan, and fail-closed authorization before side effects. #1817 is the public
-coordination issue for closing the delta between that intent and the current
-runtime.
+plan, and fail-closed authorization before side effects. The continuing
+Plan/Validation/Journal below owns that delta; #1817 records its historical
+tracking origin, not a live implementation claim or completed contract.
 
 Current reality is centered on one layered `Config`:
 
@@ -130,7 +137,104 @@ particular control-repository name, machine inventory, or private topology.
 - [ ] Bump all required agent-logger versions with each implementation pull request.
 - [ ] Deploy the merged runtime through the unified update flow and validate a passive machine before enabling real collection policy.
 
+### Direct aggregate authorization and adoption acceptance from #1817
+
+<!-- backlog-reconciliation:7556:transfer:1817:to:efforts/active/agent-logger-aggregate-configuration/README.md -->
+
+This direct Plan/Validation supplement retains acceptance within the existing reviewed
+Active effort, preserving its entire current contract, completed phases1-3, primary contributor,
+Coordination and every current claim. It includes ALL accepted1834/1835 clauses, not a
+link to closed wrappers. Source compiler/diagnostics remain credited without claiming
+effecting/native/adoption completion. Only after normal review, actual merge and CURRENT
+FULL public Plan/Validation/custody readback may1817 become historical; otherwise retain
+it. The effort stays open until its own full completion gate is met.
+
+#### Plan
+
+- [ ] Preserve intent-level vision for deterministic repository defaults/machine
+  selectors/scoped overrides, canonical repository/source identities, separate
+  collection/rendered-log ownership, rejected cross-repository overlap and one
+  normalized explainable doctor plan before effects. Do not freeze operational key names
+  into the vision.
+- [ ] Preserve existing admitted authoritative clean-checkout trust, inert
+  unadmitted/secondary worktrees, duplicate/same-basename identity handling and bounded
+  presentation-only config. Scoped overrides affect only their owner; no cwd/environment
+  input may manufacture or suppress claims.
+- [ ] Preserve exact/wildcard/exclusion/cession/unclassified ownership algebra,
+  canonical logical-resource/target aliases, fallback collision analysis,
+  machine-specific precedence/tie rejection, unknown-schema quarantine and explicit
+  error/provenance. Disable/quarantine is not silent ownership transfer.
+- [ ] Translate legacy sync allow/deny, chronicler routes/skips/default sinks into
+  provenance-bearing compatibility claims; mark substring-derived/nondecidable claims
+  unenforceable rather than silently granting capture authority.
+- [ ] Ship actual observe-only legacy-versus-normalized
+  routing/ownership/ambiguity/future-collision comparison before changing execution,
+  without collection, scheduling, pruning or rendering through the new plan during
+  comparison; preserve the documented legacy window.
+- [ ] Provide explicit machine-local enforcement selection and documented rollback to
+  legacy while preserving declarations, admission, overrides, diagnostics and audit.
+  Installation/update cannot enable enforcement or write committed repository policy.
+- [ ] Sync consumes authorized collection claims only; chronicler construction/routing
+  consumes authorized rendered-log claims, sinks and landing policies only. No implicit
+  cross-repository precedence or wildcard capture.
+- [ ] In enforcement mode, invalidate the WHOLE plan before scheduling/dispatch,
+  filesystem/network copying, pruning, reservation/journal mutation, manifest/render
+  writes, commit/push/PR effects. Force/recovery/catch-up cannot bypass. Read-only
+  diagnosis remains available; an empty authorized enforced plan is passive success.
+- [ ] Preserve input fences, catch-up idempotency, transaction rollback and landing
+  serialization. Ownership changes apply to newly due work only; historical landed logs
+  and completed reservation/journal evidence stay stable unless separately authorized
+  attributable/idempotent migration moves them.
+- [ ] Publish synthetic examples of portable declarations, canonical
+  admission/authoritative checkouts, default/machine/scoped override, exclusion/cession,
+  logical resource bindings, sink readiness, collision repair and quarantine without
+  credentials/private topology.
+- [ ] Architecture/config docs distinguish legacy runtime, bounded log presentation and
+  aggregate authorization. Document stable resolved-plan schema, provenance/errors,
+  observe/enforce and rollback. Adoption/admission/migration follows repository-reviewed
+  intent; install/update never edits committed policy.
+- [ ] Follow current changefile/release policy, current bounded unit admission and
+  explicit integration/native lanes with truthful unavailable outcomes. Historical
+  full-suite descriptions are not permission to restore retired CI gates or expand
+  deadlines. Validate passive behavior before separately authorized
+  collection/enforcement rollout and preserve operational claims/state through
+  deployment/rollback.
+
+#### Validation
+
+- [ ] Retain the COMPLETE existing validation matrix: discovery order/cwd/environment
+  independence; canonical duplicate-worktree/same-basename/prefix identities;
+  exact/wildcard/exclusion/unclassified and target-alias/fallback collisions; machine
+  specificity/ambiguity and scoped overrides; independent collection/rendering
+  dimensions; schema/quarantine; empty/passive plans; deterministic secret-free
+  byte-stable JSON; bounded presentation/legacy compatibility; no-force bypass;
+  ownership changes without historical-record mutation.
+- [ ] Demonstrate no side effects for unauthorized, invalid, unavailable or conflicting
+  plans at every effecting boundary, not merely a diagnostic exit or observe/enforce
+  enum. Prove sync and actual chronicler consumers use their authorized dimensions
+  before mutation.
+- [ ] Demonstrate actual Windows/Linux path, identity, override, normalized-plan AND
+  effecting-consumer parity, plus relevant disposable clean-room adoption. Source
+  inspection, deterministic units and diagnostic-only execution keep their bounded tiers
+  and are not a new native acceptance pass.
+- [ ] Verify observe-only comparison is genuinely passive, explicit enforcement/rollback
+  preserves policy/evidence and newly active ownership does not rewrite completed
+  records. Preserve claimed-input, catch-up, rollback and serialized landing invariants.
+- [ ] Keep the current primary contributor and every claim/hold/operational owner;
+  broader intelligence/accounting composes with this policy, not a replacement. No new
+  ACK/all-parent native ceremony or resource transfer is introduced; every own
+  Plan/Validation item must resolve or transfer to a named objective before Done.
+
+Sources: https://github.com/ThomasMichon/copilot-extensions/issues/1817 ;
+https://github.com/ThomasMichon/copilot-extensions/pull/1828 ;
+https://github.com/ThomasMichon/copilot-extensions/pull/1839 ;
+https://github.com/ThomasMichon/copilot-extensions/pull/1852 ;
+https://github.com/ThomasMichon/copilot-extensions/pull/1857 ;
+https://github.com/ThomasMichon/copilot-extensions/pull/5671 .
+
 ## Validation Plan
+
+- [ ] Complete every directly retained #1817 Plan/Validation clause above at its original evidence tier and bounds; preserve current owners, holds and unfinished acceptance. Tracker consolidation is not implementation.
 
 - [ ] Two disjoint repository declarations resolve identically regardless of discovery order.
 - [ ] A declaration in an unadmitted checkout is inert and reported as unadmitted.
@@ -163,6 +267,13 @@ particular control-repository name, machine inventory, or private topology.
 Reviewed and merged in #1828. Implementation is authorized against this plan.
 
 ## Journal
+
+### 2026-10-22 - Complete retained acceptance from #1817
+
+- Retained the complete #1817 scope directly in the Plan and Validation,
+  without declaring feature completion or transferring source/resource custody.
+  Normal reviewed merge and current full readback precede administrative
+  supersession; all substantive acceptance remains unfinished.
 
 ### 2026-09-03 — Kickoff
 

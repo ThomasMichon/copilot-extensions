@@ -10,15 +10,16 @@ The Worktree Manager is delivered out-of-plugin, but its install flow follows th
 * a **binstub** in ``~/.local/bin/`` (``worktree-manager`` + ``.cmd``/``.ps1`` on
   Windows) that resolves the marker and runs the active slot.
 
-This is *convention* reuse, not code reuse: nothing here imports the plugin's
-versioned-runtime helper, so the out-of-plugin, dependency-free boundary holds.
-The install is idempotent and **version-gated** — re-running with the same
-payload version is a no-op; a newer payload publishes a new slot + marker.
+The standalone payload ships canonical installer-engine/versioned-runtime
+helpers independently of any plugin. Its adapter constructs and health-gates
+an installed candidate before publication; legacy or damaged selected slots
+require distinct repair generations rather than in-place rebuilding.
 """
 
 from __future__ import annotations
 
 import json
+import importlib.util
 import os
 import re
 import shutil
@@ -148,7 +149,26 @@ def control_plane_providers_dir() -> Path:
 def running_payload_dir() -> Path:
     """The project dir of the currently-running payload (has pyproject.toml)."""
     # .../worktree-manager/src/worktree_manager/self_install.py -> parents[2] == project.
-    return Path(worktree_manager.__file__).resolve().parents[2]
+    package = Path(worktree_manager.__file__).resolve()
+    retained = Path(sys.prefix) / "payload"
+    if package.is_relative_to(Path(sys.prefix).resolve()) and (retained / "pyproject.toml").is_file():
+        return retained
+    return package.parents[2]
+
+
+def _runtime_installer():
+    script = running_payload_dir() / "scripts" / "runtime_install.py"
+    name = "_manager_runtime_install"
+    existing = sys.modules.get(name)
+    if existing is not None and Path(existing.__file__).resolve() == script.resolve():
+        return existing
+    spec = importlib.util.spec_from_file_location(name, script)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("Manager canonical installer adapter is unavailable")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 def payload_version(payload_dir: Path | None = None) -> str | None:
@@ -188,27 +208,22 @@ def _mark_slot_complete(slot: Path) -> None:
 
 
 def _slot_is_complete(slot: Path) -> bool:
-    """``True`` only when ``slot`` is proven complete by its own marker --
-    published solely as the last step of a fully successful payload copy
-    and pointer materialization -- AND still carries the key files the
-    shipped binstubs need to launch (``uv run --project <slot> python -m
-    worktree_manager``: ``pyproject.toml``, ``src/worktree_manager/
-    __init__.py``, and ``src/worktree_manager/__main__.py``).
+    """Check canonical completion, interpreter and retained payload availability.
 
-    The marker alone proves the install completed; it does not prove the
-    slot hasn't been damaged since (a file removed by something outside
-    this module's control after a genuinely successful install). The key
-    files remain a cheap, independent second check against that later
-    damage. Directory existence, or any subset of files present without
-    the marker, proves nothing: a slot can exist, and even partially
-    survive a failed ``_copy_payload()`` recopy (one that imports or
-    materialized libraries it depends on at runtime may still be missing),
-    while still being unlaunchable (``No module named worktree_manager``
-    or an equivalent failure at run time).
+    Payload assembly alone never establishes runtime readiness. Apply/reuse
+    additionally runs the canonical installed-origin and CLI health probe under
+    candidate custody; this read-only status check does not reconstruct a slot.
     """
-    return (slot / _SLOT_COMPLETE_MARKER).is_file() and all(
-        (slot / rel).is_file() for rel in _SLOT_KEY_FILES
-    )
+    payload = slot / "payload"
+    try:
+        runtime = _runtime_installer().runtime
+        return (
+            runtime.is_complete(slot.parent.parent, slot.name)
+            and runtime.slot_python(slot.parent.parent, slot.name) is not None
+            and all((payload / rel).is_file() for rel in _SLOT_KEY_FILES)
+        )
+    except (OSError, ValueError, ImportError, RuntimeError):
+        return False
 
 
 def _binstub_files() -> list[str]:
@@ -376,7 +391,11 @@ class SelfInstallStatus:
 
     @property
     def installed(self) -> bool:
-        return self.installed_version is not None and _core_install_satisfied(self.installed_version, Path(self.root))
+        if self.installed_version is None:
+            return False
+        root = Path(self.root)
+        version = payload_version(version_slot(self.installed_version, root) / "payload")
+        return version is not None and _core_install_satisfied(version, root)
 
 
 def status(root: Path | None = None) -> SelfInstallStatus:
@@ -389,12 +408,25 @@ def status(root: Path | None = None) -> SelfInstallStatus:
     )
 
 
+def _selected_runtime_slot(root: Path) -> Path | None:
+    selected = current_version(root)
+    if not selected:
+        return None
+    try:
+        _runtime_installer().runtime._validate_dev_previous_version(selected)
+    except (OSError, ImportError, RuntimeError, ValueError):
+        return None
+    return version_slot(selected, root)
+
+
 def _core_install_satisfied(version: str, root: Path | None = None) -> bool:
-    """Marker/slot/binstubs match ``version`` -- independent of the manifest."""
+    """A valid selection, slot and binstubs match the requested package."""
     r = root or default_root()
+    slot = _selected_runtime_slot(r)
     return (
-        current_version(r) == version
-        and _slot_is_complete(version_slot(version, r))
+        slot is not None
+        and payload_version(slot / "payload") == version
+        and _slot_is_complete(slot)
         and binstub_present() is not None
         and not _binstubs_are_stale()
     )
@@ -414,11 +446,17 @@ def _core_install_satisfied_gaps(version: str, root: Path | None = None) -> list
     r = root or default_root()
     gaps: list[str] = []
     cur = current_version(r)
-    if cur != version:
+    valid_selection = _selected_runtime_slot(r)
+    selected = valid_selection or version_slot(version, r)
+    matching_payload = payload_version(selected / "payload") == version
+    if valid_selection is None:
+        gaps.append(f"current-version marker is missing, empty or invalid: {cur!r}")
+    elif cur != version and not matching_payload:
         gaps.append(f"current-version marker is {cur!r}, not {version!r}")
-    if not _slot_is_complete(version_slot(version, r)):
+    target = selected if matching_payload else version_slot(version, r)
+    if not _slot_is_complete(target):
         gaps.append(
-            f"slot {version_slot(version, r)} is missing its completion marker "
+            f"slot {target} is missing its completion marker "
             "or a key file"
         )
     stub = binstub_present()
@@ -462,41 +500,10 @@ def needs_install(version: str, root: Path | None = None) -> bool:
     )
 
 
-# ── binstub content (resolves the marker each run; matches ~/.local/bin) ─────
-
-def _sh_binstub() -> str:
-    return (
-        "#!/usr/bin/env bash\n"
-        "# worktree-manager binstub (versioned) — resolves the current-version marker.\n"
-        'set -euo pipefail\n'
-        'root="${WORKTREE_MANAGER_ROOT:-$HOME/.worktree-manager}"\n'
-        'ver="$(cat "$root/current-version")"\n'
-        'exec uv run --quiet --project "$root/versions/$ver" python -m worktree_manager "$@"\n'
-    )
-
-
-def _cmd_binstub() -> str:
-    return (
-        "@echo off\r\n"
-        "setlocal\r\n"
-        'set "PYTHONUTF8=1"\r\n'
-        'if "%WORKTREE_MANAGER_ROOT%"=="" set "WORKTREE_MANAGER_ROOT=%USERPROFILE%\\.worktree-manager"\r\n'
-        'set /p VER=<"%WORKTREE_MANAGER_ROOT%\\current-version"\r\n'
-        'uv run --quiet --project "%WORKTREE_MANAGER_ROOT%\\versions\\%VER%" '
-        "python -m worktree_manager %*\r\n"
-    )
-
-
-def _ps1_binstub() -> str:
-    return (
-        "# worktree-manager binstub (versioned) — resolves the current-version marker.\n"
-        "$env:PYTHONUTF8 = '1'\n"
-        '$root = if ($env:WORKTREE_MANAGER_ROOT) { $env:WORKTREE_MANAGER_ROOT } '
-        'else { Join-Path $env:USERPROFILE ".worktree-manager" }\n'
-        '$ver = (Get-Content (Join-Path $root "current-version") -Raw).Trim()\n'
-        '$slot = Join-Path (Join-Path $root "versions") $ver\n'
-        "uv run --quiet --project $slot python -m worktree_manager @args\n"
-    )
+# Preserve existing test/caller seams while native rendering has its own owner.
+from .runtime_launchers import _cmd_binstub as _cmd_binstub
+from .runtime_launchers import _ps1_binstub as _ps1_binstub
+from .runtime_launchers import _sh_binstub as _sh_binstub
 
 
 def _deploy_binstubs() -> list[Path]:
@@ -569,7 +576,7 @@ def _acquire_install_cutover_lease(root: Path):
     return lease, mux_daemon_cutover
 
 
-from .self_install_recovery import reap_stranded_cutover_passive as _reap_stranded_cutover_passive
+from .self_install_recovery import reap_stranded_cutover_passive as _reap_stranded_cutover_passive  # noqa: F401 -- compatibility test seam
 
 
 # ── legacy artifact recognition + cleanup ────────────────────────────────
@@ -734,18 +741,47 @@ class SelfInstallResult:
     cleaned: tuple[str, ...] = ()
 
 
+def _complete_candidate(
+    ready, payload: Path, root: Path, *, previous: str | None,
+    was_current: bool, before_publish=None, after_activate=None,
+    transactional_activation: bool = False,
+) -> SelfInstallResult:
+    slot = ready.slot
+    version = payload_version(payload)
+    if before_publish is not None:
+        before_publish()
+    cleaned = tuple(clean_legacy_artifacts(root))
+    stubs = _deploy_binstubs()
+    _write_control_plane_provider_manifest(payload, root=root)
+    installer = _runtime_installer()
+    if transactional_activation:
+        installer.activate(
+            root, slot.name, expected=previous,
+            after_publish=(lambda: after_activate(slot)) if after_activate is not None else None,
+        )
+    else:
+        installer.activate(root, slot.name, expected=previous)
+    if after_activate is not None and not transactional_activation:
+        after_activate(slot)
+    return SelfInstallResult(
+        version=version, action="already-current"
+        if was_current and ready.reused and previous == slot.name else "installed",
+        root=str(root), slot=str(slot), marker=slot.name,
+        binstubs=tuple(str(stub) for stub in stubs), cleaned=cleaned,
+    )
+
+
 def self_install(
     payload_dir: Path | None = None,
     *,
     root: Path | None = None,
     dry_run: bool = True,
+    _after_activate=None,
+    _before_publish=None,
+    _transactional_activation: bool = False,
 ) -> SelfInstallResult:
-    """Install the running (or given) payload into the versioned layout.
-
-    Idempotent + version-gated: a no-op when the marker already names this
-    version and its slot + binstub exist. Dry-run by default.
-    """
-    r = root or default_root()
+    """Construct and health-gate with the canonical engine before selection."""
+    r = (root or default_root()).resolve()
     pd = payload_dir or running_payload_dir()
     version = payload_version(pd)
     if version is None:
@@ -759,92 +795,21 @@ def self_install(
                                      slot=str(slot), marker=version, cleaned=would_clean)
         return SelfInstallResult(version=version, action="planned", root=str(r),
                                  slot=str(slot), reason="dry-run", cleaned=would_clean)
-    cleaned = tuple(clean_legacy_artifacts(r))
-    if not needs_install(version, r):
-        return SelfInstallResult(version=version, action="already-current", root=str(r),
-                                 slot=str(slot), marker=version, cleaned=cleaned)
-    if _core_install_satisfied(version, r):
-        # Only the manifest is stale -- repair it directly rather than
-        # falling through to the lease-guarded _copy_payload below, which
-        # would pointlessly rmtree + recopy an already-good (possibly
-        # in-use) version slot.
-        _write_control_plane_provider_manifest(pd, root=r)
-        return SelfInstallResult(
-            version=version, action="installed", root=str(r), slot=str(slot),
-            marker=version, cleaned=cleaned,
-        )
-    # Hold the cutover lease across BOTH the stale-passive reap AND
-    # _copy_payload itself -- releasing it in between (or skipping it on a
-    # busy timeout or missing dependency) would reopen the exact race this
-    # closes: a concurrent cutover's spawn_passive could stand a new
-    # passive up inside the very slot _copy_payload is about to rmtree. A
-    # genuinely busy lock, or an unavailable cutover machinery, means this
-    # cannot be proven safe; defer rather than mutate the slot unprotected
-    # (docs/patterns/graceful-daemon-cutover.md).
+    previous = current_version(r)
+    was_current = not needs_install(version, r)
     try:
-        lease, mux_daemon_cutover = _acquire_install_cutover_lease(r)
-    except _CutoverLockBusy as exc:
-        return SelfInstallResult(version=version, action="error", root=str(r),
-                                 slot=str(slot), reason=str(exc), cleaned=cleaned)
-    try:
-        # Re-check under the lease: a concurrent self_install()/self_update()
-        # could have finished installing (and even activated) this EXACT
-        # version while this call was waiting to acquire it -- without this
-        # recheck, we would blindly rmtree + recopy a slot that is now the
-        # live, already-active install, racing whatever is currently running
-        # out of it. The lock-free check above only proves the version was
-        # needed at that point in time, not that it still is now.
-        if not needs_install(version, r):
-            return SelfInstallResult(version=version, action="already-current", root=str(r),
-                                     slot=str(slot), marker=version, cleaned=cleaned)
-        if _currently_running_from(slot):
-            # This process's own interpreter lives inside `slot`.
-            # `_core_install_satisfied` disagreeing with what `doctor`
-            # reports healthy is the commonest trigger (see
-            # `_core_install_satisfied_gaps` below) -- without this guard
-            # that disagreement falls through to a full reinstall that
-            # tries to overwrite the currently-executing slot, which
-            # Windows cannot satisfy (WinError 5 on the open `python.exe`)
-            # and which leaves the install permanently wedged (#5219).
-            # Refuse clearly instead: the process already proves this
-            # exact version runs, so there is nothing a reinstall could
-            # fix here anyway.
-            gaps = _core_install_satisfied_gaps(version, r)
-            reason = (
-                f"already running worktree-manager {version} from {slot} -- "
-                "refusing to reinstall over the currently-executing slot"
+        installer = _runtime_installer()
+        with installer.candidate(pd, r, assemble=_copy_payload) as ready:
+            slot = ready.slot
+            return _complete_candidate(
+                ready, pd, r, previous=previous, was_current=was_current,
+                before_publish=_before_publish, after_activate=_after_activate,
+                transactional_activation=_transactional_activation,
             )
-            if gaps:
-                reason += f" (would-be reinstall triggers: {'; '.join(gaps)})"
-            return SelfInstallResult(version=version, action="already-current", root=str(r),
-                                     slot=str(slot), marker=current_version(r),
-                                     reason=reason, cleaned=cleaned)
-        refusal = _reap_stranded_cutover_passive(r, slot, mux_daemon_cutover)
-        if refusal is not None:
-            return SelfInstallResult(version=version, action="error", root=str(r),
-                                     slot=str(slot), reason=refusal, cleaned=cleaned)
-        try:
-            _copy_payload(pd, slot)
-        except RuntimeError as e:
-            # _copy_payload builds the replacement entirely in a sibling
-            # staging directory and only atomically swaps it into `slot`
-            # once proven complete (#5219) -- any failure along that path
-            # (an unresolvable vendor-pointer copy, a missing key file, a
-            # transient OS error) leaves a previously-good `slot`
-            # untouched (or still absent, for a fresh install), so there
-            # is nothing to clean up here; just report the failure
-            # (self_update's own contract is best-effort/non-fatal).
-            return SelfInstallResult(version=version, action="error", root=str(r),
-                                     slot=str(slot), reason=str(e), cleaned=cleaned)
-    finally:
-        lease.release()
-    stubs = _deploy_binstubs()
-    _write_marker(r, version)  # publish last, so the marker only names a ready slot
-    _write_control_plane_provider_manifest(pd, root=r)
-    return SelfInstallResult(
-        version=version, action="installed", root=str(r), slot=str(slot),
-        marker=version, binstubs=tuple(str(s) for s in stubs), cleaned=cleaned,
-    )
+    except (OSError, ImportError, RuntimeError, ValueError, subprocess.SubprocessError) as error:
+        return SelfInstallResult(
+            version=version, action="error", root=str(r), slot=str(slot), reason=str(error),
+        )
 
 
 @dataclass(frozen=True)
@@ -1079,22 +1044,26 @@ def self_update(
         return SelfUpdateResult(action="error", previous=previous,
                                 reason=f"fetched payload not found at {payload}")
 
-    res = self_install(payload_dir=payload, root=r, dry_run=dry_run)
-    if res.action == "error":
-        return SelfUpdateResult(action="error", version=res.version,
-                                previous=previous, reason=res.reason)
     cutover = None
-    if not dry_run and res.version is not None:
+
+    def after_activate(slot: Path) -> None:
+        nonlocal cutover
         try:
             from . import mux_daemon_cutover
 
             cutover = mux_daemon_cutover.activate_after_update(
-                root=r,
-                slot=version_slot(res.version, r),
-                version=res.version,
+                root=r, slot=slot, version=slot.name,
             )
-        except Exception as error:  # noqa: BLE001 -- best-effort like fetch/install
+        except Exception as error:  # noqa: BLE001 -- existing best-effort cutover boundary
             cutover = {"action": "error", "reason": f"mux cutover failed: {error}"}
+
+    res = self_install(
+        payload_dir=payload, root=r, dry_run=dry_run,
+        _after_activate=after_activate if not dry_run else None,
+    )
+    if res.action == "error":
+        return SelfUpdateResult(action="error", version=res.version,
+                                previous=previous, reason=res.reason)
     if res.action == "already-current":
         return SelfUpdateResult(
             action="already-current",

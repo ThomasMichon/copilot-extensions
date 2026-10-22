@@ -1,0 +1,9 @@
+{
+  "comment": "Reuse private published-and-advanced Git fixtures for recovery cases while retaining original title, legacy setup and seed isolation",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

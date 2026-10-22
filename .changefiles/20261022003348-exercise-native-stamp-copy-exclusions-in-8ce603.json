@@ -1,0 +1,9 @@
+{
+  "comment": "Exercise native stamp-copy exclusions independently in Windows PowerShell and PowerShell.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

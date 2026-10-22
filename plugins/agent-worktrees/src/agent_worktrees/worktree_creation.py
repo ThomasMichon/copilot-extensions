@@ -23,8 +23,6 @@ this band makes the call, exactly as the handoff-cutover slice's own
 
 from __future__ import annotations
 
-import re
-
 import argparse
 from collections.abc import Callable
 import os
@@ -49,7 +47,8 @@ from . import (
 )
 from . import config as cfg
 from .launch_progress import step
-from .worktree_naming import session_worktree_id
+from .creation_allocation import AdmittedAllocation, creation_parameters
+from .creation_identity import IdentityMode, new_machine_identity, require_same_machine_identity, validate_mode
 from .worktree_machine_identity import WorktreeMachineIdentity
 
 
@@ -154,6 +153,7 @@ def _carve_paired_knowledge(
     plat: str,
     plat_short: str,
     machine_identity: WorktreeMachineIdentity | None = None,
+    legacy_machine: str | None = None,
 ) -> dict | None:
     """Carve/stamp the citadel knowledge-repo PAIR for a stateless harness (#957).
 
@@ -191,7 +191,10 @@ def _carve_paired_knowledge(
     knowledge_name = res.repo
     knowledge_anchor = res.path
     pair_id = f"{timestamp}-{suffix}"
-    harness_ref = tracking.format_claim_ref(config.machine, config.repo_name or "?", harness_id)
+    execution_machine = (
+        machine_identity.execution_machine if machine_identity is not None else legacy_machine or config.machine
+    )
+    harness_ref = tracking.format_claim_ref(execution_machine, config.repo_name or "?", harness_id)
     entry = repos_mod.find_repo(knowledge_name)
     is_worktree_class = bool(entry) and repos_mod.normalize_class(entry.repo_class) in (
         "worktree", "knowledge",
@@ -212,7 +215,7 @@ def _carve_paired_knowledge(
     if not is_worktree_class:
         # Non-worktree-class knowledge -> operate on the anchor (no 2nd carve).
         anchor_ref = tracking.format_claim_ref(
-            config.machine,
+            execution_machine,
             knowledge_name,
             os.path.basename(knowledge_anchor.rstrip("/\\")) or "anchor",
         )
@@ -231,7 +234,7 @@ def _carve_paired_knowledge(
     knowledge_branch = f"worktree/{knowledge_id}"
     knowledge_wt_root = cfg.derive_worktree_root(knowledge_anchor)
     knowledge_wt_path = str(Path(knowledge_wt_root) / knowledge_id)
-    knowledge_ref = tracking.format_claim_ref(config.machine, knowledge_name, knowledge_id)
+    knowledge_ref = tracking.format_claim_ref(execution_machine, knowledge_name, knowledge_id)
     knowledge_tracking_path = cfg.project_dir(knowledge_name) / "worktrees"
 
     # pr-attribution-codenames Phase 2 (#2838): assign the paired knowledge worktree's own
@@ -339,7 +342,7 @@ def _carve_paired_knowledge(
             branch=knowledge_branch,
             worktree_path=knowledge_wt_path,
             repo=knowledge_name,
-            machine=machine_identity.machine if machine_identity is not None else config.machine,
+            machine=machine_identity.machine if machine_identity is not None else execution_machine,
             platform_name=plat,
             machine_identity=machine_identity,
             tracking_path=knowledge_tracking_path,
@@ -554,8 +557,10 @@ def _create_worktree_core(
     pending_seed: str | None = None,
     pending_seed_id: str | None = None,
     allocation: tuple[str, str] | None = None,
+    admitted_allocation: AdmittedAllocation | None = None,
     creation_key: str | None = None,
     creation_intent: Callable[[dict], None] | None = None,
+    identity_mode: IdentityMode = "legacy",
 ) -> dict:
     """Create a new worktree and return a dict with worktree info + launch plan.
 
@@ -583,9 +588,10 @@ def _create_worktree_core(
     Raises ``RuntimeError`` on failure.
     """
     core = _core()
-    from .execution_spaces import require_current_execution_space
+    from .execution_spaces import require_current_execution_space, require_record_mutation
 
     require_current_execution_space(config)
+    validate_mode(identity_mode)
     if creation_key is not None:
         from . import creation_requests
 
@@ -600,11 +606,23 @@ def _create_worktree_core(
             "no_pair": no_pair, "pending_seed": pending_seed,
             "defer_projections": defer_projections,
             "pending_seed_id": pending_seed_id, "allocation": allocation,
+            "identity_mode": identity_mode, "admitted_allocation": admitted_allocation,
         }
         return creation_requests.create(
             config, creation_key, creation_requests.allocation_facts(config, **options),
             lambda reserve: _create_worktree_core(config, **options, creation_intent=reserve),
+            validate_record=lambda record: require_record_mutation(record, config),
         )
+    if admitted_allocation is not None:
+        if allocation is not None or kind != "session":
+            raise ValueError("Complete admitted allocation requires a session and no partial allocation")
+        admitted_allocation.require_current(config)
+    elif allocation is not None and identity_mode != "legacy":
+        raise ValueError("tuple creation requires complete admitted allocation identity, not timestamp/suffix")
+    machine_identity = (
+        admitted_allocation.machine_identity if admitted_allocation is not None
+        else new_machine_identity(config, identity_mode)
+    )
     # Stage D: local-shadow deferred names via _self_override (keeps create/worktree_ops_cli cluster-free).
     from . import claims_cli as _claims_cli
     from . import resolve_launch_cli as _resolve_launch_cli
@@ -631,28 +649,19 @@ def _create_worktree_core(
     plat = cfg.detect_platform()
     plat_short = "win" if plat == "windows" else plat
 
-    if allocation is None:
+    if admitted_allocation is not None:
+        timestamp, suffix = admitted_allocation.timestamp, admitted_allocation.suffix
+    elif allocation is None:
         timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
         suffix = secrets.token_hex(2)
     else:
         timestamp, suffix = allocation
-        if (
-            kind != "session"
-            or re.fullmatch(r"\d{8}-\d{6}", timestamp) is None
-            or re.fullmatch(r"[0-9a-f]{4}|[0-9a-f]{32}", suffix) is None
-        ):
-            raise ValueError("Invalid admitted worktree allocation")
-    if kind == "system":
-        # Recognizable id for daemon worktrees: sys-<name>-<ts>-<suffix>.
-        slug = _slugify(name or owner or "daemon")
-        worktree_id = f"sys-{slug}-{timestamp}-{suffix}"
-    else:
-        worktree_id = session_worktree_id(
-            config.machine, plat, timestamp, suffix,
-            legacy=allocation is not None and len(suffix) == 32,
-        )
-    branch = f"worktree/{worktree_id}"
-    worktree_path = str(Path(repo.worktree_root) / worktree_id)
+    worktree_id, branch, worktree_path = creation_parameters(
+        config, kind=kind, machine_identity=machine_identity, timestamp=timestamp, suffix=suffix,
+        partial=allocation is not None,
+        system_slug=_slugify(name or owner or "daemon") if kind == "system" else "",
+        admitted=admitted_allocation,
+    )
     if owner_ref:
         parsed_owner = tracking.parse_claim_ref(owner_ref)
         if parsed_owner is None or not parsed_owner.is_qualified:
@@ -798,6 +807,10 @@ def _create_worktree_core(
             codename_source=fresh_codename_source,
             source_attribution_configured=fresh_sac,
         )
+        if admitted_allocation is not None:
+            admitted_allocation.require_current(fresh_config)
+        elif machine_identity is not None:
+            require_same_machine_identity(fresh_config, machine_identity)
         new_codename = codename_tracking.assign_new_codename(
             tracking_path, codename_tracking.wordlist_for_repo(fresh_wordlist_config)
         )
@@ -840,7 +853,8 @@ def _create_worktree_core(
                 branch=branch,
                 worktree_path=worktree_path,
                 repo=config.repo_name,
-                machine=config.machine,
+                machine=machine_identity.machine if machine_identity is not None else config.machine,
+                **({"machine_identity": machine_identity} if machine_identity is not None else {}),
                 platform_name=plat,
                 tracking_path=tracking_path,
                 kind=kind,
@@ -856,7 +870,7 @@ def _create_worktree_core(
                         attempt=int(dispatch_attempt["attempt"]),
                         driver=str(dispatch_attempt["driver"]),
                         supervisor=str(dispatch_attempt["supervisor"]),
-                        creator_machine=config.machine,
+                        creator_machine=machine_identity.execution_machine if machine_identity is not None else config.machine,
                     )
                     if dispatch_attempt is not None
                     else None
@@ -907,6 +921,7 @@ def _create_worktree_core(
                     pair_stamp = core._carve_paired_knowledge(
                         config, harness_id=worktree_id, timestamp=timestamp,
                         suffix=suffix, plat=plat, plat_short=plat_short,
+                        **({"machine_identity": machine_identity} if machine_identity is not None else {}),
                     )
             except codename_tracking.CodenameAttributionPolicyError:
                 raise

@@ -338,7 +338,8 @@ def test_legacy_native_bytes_and_file_arguments_pass_through(shell, tmp_path):
 
 
 @pytest.mark.parametrize("shell", ["powershell", "pwsh"])
-def test_real_unrequested_entrypoint_smoke_needs_no_output_helper(shell, tmp_path):
+@pytest.mark.parametrize("plugin", ["agent-worktrees", "agent-containers", "agent-mcp", "budget-guidance"])
+def test_real_unrequested_entrypoint_smoke_needs_no_output_helper(shell, plugin, tmp_path):
     from agent_worktrees.installer_capabilities import HUMAN_UTF8_ENV
 
     if os.name != "nt":
@@ -346,11 +347,16 @@ def test_real_unrequested_entrypoint_smoke_needs_no_output_helper(shell, tmp_pat
     host = shutil.which(shell)
     if host is None:
         pytest.skip(f"{shell} is not installed")
-    source = Path(__file__).resolve().parents[1]
+    source = Path(__file__).resolve().parents[2] / plugin
     payload = tmp_path / "payload"
     scripts = payload / "scripts"
     scripts.mkdir(parents=True)
-    shutil.copyfile(source / "scripts" / "install.ps1", scripts / "install.ps1")
+    entrypoint = "install.ps1" if plugin in {"agent-worktrees", "budget-guidance"} else "init.ps1"
+    assets = [entrypoint, "versioned_runtime_native.ps1"]
+    if plugin == "agent-worktrees":
+        assets.append("source-runtime.ps1")
+    for name in assets:
+        shutil.copyfile(source / "scripts" / name, scripts / name)
     shutil.copyfile(source / "plugin.json", payload / "plugin.json")
     home = tmp_path / "home"
     home.mkdir()
@@ -363,24 +369,99 @@ def test_real_unrequested_entrypoint_smoke_needs_no_output_helper(shell, tmp_pat
         environment.pop(key, None)
     result = subprocess.run(
         [host, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
-         str(scripts / "install.ps1"), "status"],
+         str(scripts / entrypoint), "status" if plugin == "agent-worktrees" else "stamp"],
         env=environment, cwd=tmp_path, capture_output=True, timeout=10,
         creationflags=subprocess.CREATE_NO_WINDOW,
     )
-    assert result.returncode == 0, result.stderr
-    receipt = json.loads((home / ".agent-worktrees" / "smoke.json").read_text("utf-8-sig"))
+    assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
+    smoke = home / f".{plugin}" / "smoke.json"
+    receipt = json.loads(smoke.read_text("utf-8-sig"))
     assert receipt["ran_from"] == str(scripts)
     assert not (scripts / "installer-human-output.ps1").exists()
-    (home / ".agent-worktrees" / "smoke.json").unlink()
+    smoke.unlink()
     environment[HUMAN_UTF8_ENV] = "1"
     requested = subprocess.run(
         [host, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
-         str(scripts / "install.ps1"), "status"],
+         str(scripts / entrypoint), "status" if plugin == "agent-worktrees" else "stamp"],
         env=environment, cwd=tmp_path, capture_output=True, timeout=10,
         creationflags=subprocess.CREATE_NO_WINDOW,
     )
     assert requested.returncode != 0
-    assert not (home / ".agent-worktrees" / "smoke.json").exists()
+    assert "Required installer human-output initializer is unavailable." in (
+        requested.stderr.decode("utf-8", errors="replace")
+    )
+    assert not smoke.exists()
+
+
+@pytest.mark.parametrize("shell", ["powershell", "pwsh"])
+@pytest.mark.parametrize("plugin", ["agent-containers", "agent-mcp", "budget-guidance"])
+@pytest.mark.real_installer_processes
+def test_real_standalone_first_stamp_uses_declared_human_adapter(shell, plugin, tmp_path, capsys):
+    from agent_worktrees.installer_capabilities import powershell_human_utf8_supported
+    from update_telemetry.human import HumanOperation
+
+    if os.name != "nt":
+        pytest.skip("Windows native entrypoint")
+    host = shutil.which(shell)
+    if host is None:
+        pytest.skip(f"{shell} is not installed")
+    source = Path(__file__).resolve().parents[2] / plugin
+    home = tmp_path / "home"
+    home.mkdir()
+    payload = (
+        home / ".copilot" / "installed-plugins" / "fixture" / plugin
+        if plugin == "budget-guidance" else tmp_path / "payload"
+    )
+    scripts = payload / "scripts"
+    scripts.mkdir(parents=True)
+    entrypoint = "install.ps1" if plugin == "budget-guidance" else "init.ps1"
+    assets = [
+        entrypoint, Path(entrypoint).with_suffix(".human-output.json").name,
+        "installer-human-output.ps1",
+        "versioned_runtime_native.ps1",
+    ]
+    if plugin == "agent-mcp":
+        assets.append("source-runtime.ps1")
+    for name in assets:
+        shutil.copyfile(source / "scripts" / name, scripts / name)
+    if plugin == "budget-guidance":
+        shutil.copyfile(source / "plugin.json", payload / "plugin.json")
+        dependency = payload / "libs" / "agent-procutil"
+        dependency.mkdir(parents=True)
+        (dependency / "pyproject.toml").write_text(
+            '[project]\nname = "agent-procutil"\nversion = "1.0.0"\n', encoding="ascii",
+        )
+    (payload / "pyproject.toml").write_text('version = "1.0.0"\n', encoding="ascii")
+    root = tmp_path / "runtime caf\u00e9"
+    script = scripts / entrypoint
+    assert powershell_human_utf8_supported(script)
+    environment = {
+        key: value for key, value in os.environ.items()
+        if not key.startswith(("COPILOT_PLUGIN_", "AGENT_CONTAINERS_", "AGENT_MCP_",
+                               "BUDGET_GUIDANCE_"))
+        and key not in {"COPILOT_EXTENSIONS_CONTEXT", "COPILOT_EXTENSIONS_HUMAN_UTF8"}
+    }
+    environment.update(
+        USERPROFILE=str(home), HOME=str(home), COPILOT_EXTENSIONS_TEST_CONTAINED="1",
+    )
+    with HumanOperation("update/engine") as flow:
+        result = runtime._run_human_installer(
+            [host, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script),
+             "-Action", "stamp", "-InstallDir", str(root)],
+            label=plugin, env=environment, timeout=20,
+        )
+        flow.complete("done" if result.returncode == 0 else "failed")
+    assert result.returncode == 0
+    assert (root / "stamped-version").read_text(encoding="utf-8") == "1.0.0"
+    assert powershell_human_utf8_supported(root / "snapshots" / "1.0.0" / "scripts" / entrypoint)
+    assert not (root / "versions").exists()
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "retaining inherited installer streams" not in captured.err
+    assert all(line.startswith("[") for line in captured.err.splitlines())
+    assert f"Stamped: {plugin} binstub on PATH" in captured.err
+    assert "[elapsed " in captured.err
+    assert f"{plugin} done exit 0 [duration " in captured.err
 
 
 @pytest.mark.parametrize("telemetry", ["no-run", "missing-library", "broken-store"])
@@ -409,15 +490,14 @@ def test_human_required_failure_without_telemetry(telemetry, monkeypatch, capsys
     assert current_operation() is None
 
 
-@pytest.mark.parametrize("flag", ["--json", "--quiet"])
-def test_update_entrypoint_does_not_invent_protocol_flags(flag, monkeypatch, capsys):
+def test_update_entrypoint_rejects_undeclared_quiet_flag(monkeypatch, capsys):
     monkeypatch.setattr(m, "_resolve_active_project", lambda _project: ("fixture", None))
     monkeypatch.setattr(
         m, "_cmd_update_in_plugin",
         lambda *a: pytest.fail("unsupported option reached the effectful updater"),
     )
     with pytest.raises(SystemExit) as error:
-        m.main(["update", "--no-manager", flag])
+        m.main(["update", "--no-manager", "--quiet"])
     assert error.value.code == 2
     captured = capsys.readouterr()
     assert captured.out == ""
@@ -425,7 +505,30 @@ def test_update_entrypoint_does_not_invent_protocol_flags(flag, monkeypatch, cap
     assert update_events._run is None
 
 
-def test_reconcile_apply_entrypoint_retains_json_stdout(tmp_path, monkeypatch, capsys):
+def test_update_json_is_routed_to_the_request_owner(monkeypatch, capsys):
+    from agent_worktrees import update_driver_cli
+
+    requests = []
+    monkeypatch.setattr(m, "_resolve_active_project", lambda _project: ("fixture", None))
+
+    def request(args):
+        requests.append(args)
+        return 17
+
+    monkeypatch.setattr(update_driver_cli, "cmd_update_request", request)
+    monkeypatch.setattr(
+        update_cli, "cmd_update",
+        lambda *_: pytest.fail("request flag reached the installer executor"),
+    )
+    assert m.main(["update", "--no-manager", "--json"]) == 17
+    assert len(requests) == 1 and requests[0].json is True
+    captured = capsys.readouterr()
+    assert captured.out == captured.err == ""
+    assert update_events._run is None
+
+
+def test_reconcile_apply_executor_retains_json_stdout(tmp_path, monkeypatch, capsys):
+    from agent_worktrees import update_cli
     from update_telemetry.human import current_operation
 
     summary = {"action": "continue", "executed": []}
@@ -435,8 +538,9 @@ def test_reconcile_apply_entrypoint_retains_json_stdout(tmp_path, monkeypatch, c
         return summary
 
     monkeypatch.setattr(reconcile, "apply_plan", apply)
-    monkeypatch.setattr(m, "_resolve_active_project", lambda _project: ("fixture", None))
-    assert m.main(["reconcile-plugins", "--repo", str(tmp_path), "--apply"]) == 0
+    assert update_cli.cmd_reconcile_plugins(argparse.Namespace(
+        repo=str(tmp_path), apply=True, machine=None, status=None, with_payload_refresh=False,
+    )) == 0
     captured = capsys.readouterr()
     assert json.loads(captured.out) == summary
     assert captured.err == "synthetic reconciliation diagnostic\n"
@@ -720,15 +824,28 @@ def test_target_selection_precedes_acquisition_and_self_refresh_is_not_repeated(
     assert calls == ["collect", "engine", "registered"]
 
 
+@pytest.mark.parametrize(("diagnostic", "exit_code", "outcome", "attempts"), [
+    ("", 1, ut.COMMAND_FAILED, 1),
+    ("[WinError 32]", 5, ut.BLOCKED_BY_LOCK, 2),
+    ("[WinError 33]", 5, ut.BLOCKED_BY_LOCK, 2),
+    ("[Errno 5]", 1, ut.COMMAND_FAILED, 1),
+])
 def test_real_failed_acquisition_process_never_enters_runtime_stage(
-    monkeypatch, tmp_path, _update_home,
+    monkeypatch, tmp_path, _update_home, diagnostic, exit_code, outcome, attempts,
 ):
+    from agent_worktrees import update_acquisition
+
     marker = tmp_path / "acquired"
+    detail = diagnostic + "\n" + "trailing context " * 80
     (tmp_path / "plugin").write_text(
+        "import sys\n"
         "from pathlib import Path\n"
-        "Path('acquired').write_text('attempted')\n"
+        "with Path('acquired').open('a', encoding='utf-8') as stream:\n"
+        "    stream.write('attempted')\n"
+        f"print({detail!r}, file=sys.stderr)\n"
         "raise SystemExit(1)\n", encoding="utf-8",
     )
+    monkeypatch.setattr(update_acquisition, "sleep", lambda seconds: None)
     monkeypatch.setattr(m, "_resolve_copilot", lambda: sys.executable)
     monkeypatch.setattr(m, "_invocation_update_context", lambda: tmp_path)
     monkeypatch.setattr(m, "_registered_plugin_targets", lambda: {})
@@ -737,9 +854,9 @@ def test_real_failed_acquisition_process_never_enters_runtime_stage(
         m, "_find_installed_plugin_dir",
         lambda: pytest.fail("Real acquisition failure reached runtime planning"),
     )
-    assert m.cmd_update(_args()) == 1
-    assert marker.read_text(encoding="utf-8") == "attempted"
-    assert _status(_update_home)["run"]["outcome"] == ut.COMMAND_FAILED
+    assert m.cmd_update(_args()) == exit_code
+    assert marker.read_text(encoding="utf-8") == "attempted" * attempts
+    assert _status(_update_home)["run"]["outcome"] == outcome
 
 
 def test_auth_required_exit_4(_update_home):
@@ -992,6 +1109,60 @@ def test_recovered_payload_preserves_attempt_history_without_failing_run(
     assert len(events) == 2
     assert events[0]["details"]["required"] is False
     assert events[1]["details"]["required"] is True
+
+
+@pytest.mark.parametrize(("diagnostic", "windows", "outcome", "code", "retryable"), [
+    ("[WinError 32]", False, ut.BLOCKED_BY_LOCK, ut.SHARING_VIOLATION, True),
+    ("[WinError 33]", True, ut.BLOCKED_BY_LOCK, "lock_violation", True),
+    ("(os error 32)", True, ut.BLOCKED_BY_LOCK, ut.SHARING_VIOLATION, True),
+    ("(os error 33)", True, ut.BLOCKED_BY_LOCK, "lock_violation", True),
+    ("[WinError 5]", True, ut.COMMAND_FAILED, ut.PERMISSION_DENIED, False),
+    ("[Errno 13]", False, ut.COMMAND_FAILED, ut.PERMISSION_DENIED, False),
+    ("[Errno 5]", False, ut.COMMAND_FAILED, ut.IO_ERROR, False),
+    ("(os error 5)", False, ut.COMMAND_FAILED, ut.IO_ERROR, False),
+])
+@pytest.mark.parametrize("recover", [False, True])
+def test_long_payload_diagnostic_keeps_failure_class_and_attempt_history(
+    monkeypatch, _update_home, diagnostic, windows, outcome, code, retryable, recover,
+):
+    from agent_worktrees import update_acquisition
+
+    monkeypatch.setattr(reconcile, "core_installed_payload_dir", lambda name: Path("/payload"))
+    monkeypatch.setattr(update_events, "_WINDOWS", windows)
+    monkeypatch.setattr(update_acquisition, "sleep", lambda seconds: None)
+    attempts = []
+    detail = diagnostic + " localized diagnostic\n" + "trailing context " * 80
+
+    def run(argv, **kwargs):
+        attempts.append(list(argv))
+        rc = 0 if recover and len(attempts) == 2 else 1
+        return subprocess.CompletedProcess(argv, rc, "", detail)
+
+    monkeypatch.setattr(subprocess, "run", run)
+    update_events.start("engine")
+    update_events.enter("payload_refresh")
+    status = update_acquisition.acquire("agent-example", "copilot-extensions", "copilot")
+    update_events.record("payload_refresh", "agent-example@copilot-extensions", status)
+    recovered = recover and retryable
+    assert status.startswith("OK") is recovered
+    assert len(attempts) == (2 if retryable else 1)
+    assert {argv[2] for argv in attempts} == {"update"}
+    assert len(status) < 300
+    assert update_events.finish(0 if recovered else 1) == (
+        0 if recovered else 5 if outcome == ut.BLOCKED_BY_LOCK else 1
+    )
+    events = [event for event in _events(_update_home)
+              if event["component"] == "agent-example@copilot-extensions"]
+    assert len(events) == len(attempts)
+    for event in events[:1] if recovered else events:
+        assert event["outcome"] == outcome
+        assert event["error"]["code"] == code
+    assert events[-1]["details"]["required"] is True
+    if retryable:
+        assert events[0]["details"]["required"] is False
+    assert _status(_update_home)["run"]["outcome"] == (
+        ut.VERIFIED_CURRENT if recovered else outcome
+    )
 
 
 def test_missing_engine_installer_is_configuration_exit_3(wired, tmp_path, _update_home):

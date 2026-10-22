@@ -12,10 +12,12 @@ import secrets
 import sys
 from datetime import datetime
 from pathlib import Path
+from types import SimpleNamespace
 
 from . import config as cfg
-from . import launch_admission, launch_seed_state, tracking, tracking_write
-from .execution_spaces import ExecutionSpaceError, require_project_record_mutation
+from . import creation_allocation, launch_admission, launch_seed_state, tracking, tracking_write
+from .creation_identity import IdentityMode, validate_mode
+from .execution_spaces import ExecutionSpaceError, project_record_config, require_project_record_mutation
 from .worktree_naming import parse_session_worktree_id, session_worktree_id
 
 MAX_REQUEST_BYTES = 7 * 1024
@@ -99,6 +101,27 @@ def _validate_admission(receipt: object, request_id: str) -> dict:
         allocation = parse_session_worktree_id(wid)
         if allocation is None or allocation[1:] != (receipt["timestamp"], receipt["suffix"]):
             raise ValueError("Invalid stored launch admission allocation")
+    if "allocation" in receipt:
+        allocation = creation_allocation.AdmittedAllocation.from_fields(receipt["allocation"])
+        if (
+            receipt["kind"] != "new" or allocation.worktree_id != wid
+            or allocation.timestamp != receipt["timestamp"] or allocation.suffix != receipt["suffix"]
+        ):
+            raise ValueError("Invalid stored launch admission complete allocation")
+    if (
+        ("allocation" in receipt and receipt.get("creation_complete") and (
+            "creation_nonce" not in receipt or "record_identity" not in receipt
+        ))
+        or ("creation_nonce" in receipt and (
+            "allocation" not in receipt or not receipt.get("creation_complete")
+            or not isinstance(receipt["creation_nonce"], str) or not receipt["creation_nonce"]
+        ))
+    ):
+        raise ValueError("Invalid stored launch admission creation nonce")
+    if "record_identity" in receipt:
+        if "allocation" not in receipt or not receipt.get("creation_complete"):
+            raise ValueError("Invalid stored launch admission record identity")
+        creation_allocation.validate_record_evidence(receipt["record_identity"])
     return receipt
 
 
@@ -116,6 +139,17 @@ def _require_replay_identity(receipt: dict, args: dict) -> None:
         raise ValueError("Launch request identity was reused for different intent")
 
 
+def _require_complete_record(receipt: dict, record: tracking.WorktreeRecord) -> None:
+    if not receipt.get("creation_complete"):
+        raise ValueError("Admitted New creation is incomplete; inspect before launch")
+    allocation = creation_allocation.AdmittedAllocation.from_fields(receipt["allocation"])
+    allocation.require_current(project_record_config(record))
+    allocation.require_record(record, nonce=receipt["creation_nonce"])
+    creation_allocation.require_record_evidence(record, receipt["record_identity"])
+    if record.status in ("finalized", "archived") or not Path(allocation.path).is_dir():
+        raise ValueError("Stored New allocation checkout is unavailable or retired; inspect, do not recreate")
+
+
 def _apply_admit(args: dict) -> dict:
     directory = Path(args["tracking_dir"])
     path = _admission_path(directory, args["request_id"])
@@ -124,27 +158,40 @@ def _apply_admit(args: dict) -> dict:
         try:
             receipt = _read_admission(directory, args["request_id"])
         except FileNotFoundError:
-            record_path = directory / f"{args['worktree_id']}.yaml"
-            prior_revision = (
-                tracking.load_record(record_path).pending_seed_revision
-                if record_path.exists() else 0
-            )
             receipt = {
                 "version": 1, "request_id": args["request_id"],
                 "fingerprint": args["fingerprint"], "kind": args["kind"],
                 "worktree_id": args["worktree_id"], "timestamp": args["timestamp"],
                 "suffix": args.get("suffix", args["request_id"]), "seed_id": args["request_id"],
-                "prior_revision": prior_revision,
+                "prior_revision": 0,
             }
+            if "allocation_request" in args:
+                selection = args["allocation_request"]
+                if (
+                    args["kind"] != "new" or not isinstance(selection, dict)
+                    or set(selection) != {"project", "identity_mode"}
+                    or not isinstance(selection["project"], str) or not selection["project"]
+                ):
+                    raise ValueError("Invalid launch allocation request")
+                config = project_record_config(SimpleNamespace(repo=selection["project"]))
+                allocation = creation_allocation.admit(
+                    config, receipt["timestamp"], receipt["suffix"], selection["identity_mode"],
+                )
+                receipt["allocation"] = allocation.to_fields()
+                receipt["worktree_id"] = allocation.worktree_id
             _validate_admission(receipt, args["request_id"])
+            record_path = directory / f"{receipt['worktree_id']}.yaml"
+            if "allocation" not in receipt and record_path.exists():
+                receipt["prior_revision"] = tracking.load_record(record_path).pending_seed_revision
             tracking._atomic_write(path, json.dumps(receipt) + "\n")
         _require_replay_identity(receipt, args)
         return receipt
 
 
-def execute(config, request: dict) -> dict:
+def execute(config, request: dict, *, identity_mode: IdentityMode = "legacy") -> dict:
     """Admit once; recover the same worktree after a lost response."""
     directory = cfg.tracking_dir()
+    validate_mode(identity_mode)
     detected_platform = cfg.detect_platform()
     request_id = request["request_id"]
     # Reuse a prior New admission's allocation when one already exists (a
@@ -177,6 +224,10 @@ def execute(config, request: dict) -> dict:
         "fingerprint": fingerprint, "kind": request["kind"],
         "worktree_id": wid, "timestamp": timestamp, "suffix": suffix,
     }
+    if request["kind"] == "new":
+        admission_args["allocation_request"] = {
+            "project": config.repo_name, "identity_mode": identity_mode,
+        }
     receipt = _dispatch("launch_request_admit", admission_args)
     wid = receipt["worktree_id"]
     path = directory / f"{wid}.yaml"
@@ -184,6 +235,12 @@ def execute(config, request: dict) -> dict:
     with tracking._RecordLock(execution_lock, require_sidecar=True):
         receipt = _read_admission(directory, request_id)
         _require_replay_identity(receipt, admission_args)
+        admitted = (
+            creation_allocation.AdmittedAllocation.from_fields(receipt["allocation"])
+            if "allocation" in receipt else None
+        )
+        if admitted is not None:
+            admitted.require_current(config)
         if not path.exists():
             if receipt.get("accepted") or receipt.get("creation_started"):
                 raise ValueError(
@@ -192,16 +249,19 @@ def execute(config, request: dict) -> dict:
                 )
             if request["kind"] != "new":
                 raise ValueError("Requested Resume worktree does not exist")
-            expected_wid = session_worktree_id(
-                config.machine, detected_platform, receipt["timestamp"], receipt["suffix"],
-                legacy=len(receipt["suffix"]) == 32,
-            )
-            if wid != expected_wid:
-                raise ValueError(
-                    "Stored New allocation no longer matches this machine/platform; "
-                    "inspect its original worktree identity instead of creating another"
+            if admitted is None:
+                # Old receipts contain only the historical spelling and allocation
+                # stub. Preserve that format; a conflict is not a new admission.
+                expected_wid = session_worktree_id(
+                    config.machine, detected_platform, receipt["timestamp"], receipt["suffix"],
+                    legacy=len(receipt["suffix"]) == 32,
                 )
-            work_dir = Path(config.default_repo.worktree_root) / wid
+                if wid != expected_wid:
+                    raise ValueError(
+                        "Stored New allocation no longer matches this machine/platform; "
+                        "inspect its original worktree identity instead of creating another"
+                    )
+            work_dir = Path(admitted.path) if admitted else Path(config.default_repo.worktree_root) / wid
             if work_dir.exists():
                 raise RuntimeError(
                     f"Creation {request_id} is incomplete at {wid}; inspect that existing "
@@ -215,7 +275,9 @@ def execute(config, request: dict) -> dict:
             })
             _create_worktree_core(
                 config, no_mux=request["no_mux"], inherit_parent_session=False,
-                allocation=(receipt["timestamp"], receipt["suffix"]),
+                **({"admitted_allocation": admitted} if admitted is not None else {
+                    "allocation": (receipt["timestamp"], receipt["suffix"]),
+                }),
                 pending_seed=request["text"], pending_seed_id=request_id,
             )
             _dispatch("launch_request_creation_finish", {
@@ -224,6 +286,10 @@ def execute(config, request: dict) -> dict:
             })
         elif request["kind"] == "new" and not receipt.get("creation_complete"):
             raise ValueError("Admitted New creation is incomplete; inspect before launch")
+        if admitted is not None:
+            record = tracking.load_record(path)
+            completed = _read_admission(directory, request_id)
+            _require_complete_record(completed, record)
         _dispatch("launch_request_stage", {
             "tracking_dir": str(directory), "request_id": request_id,
             "fingerprint": fingerprint, "text": request["text"],
@@ -245,7 +311,10 @@ def _apply_stage(args: dict) -> dict:
         with launch_admission.guard(path, timeout=2.0), tracking._RecordLock(
             path, require_sidecar=True,
         ):
-            require_project_record_mutation(tracking.load_record(path))
+            record = tracking.load_record(path)
+            require_project_record_mutation(record)
+            if "allocation" in receipt:
+                _require_complete_record(receipt, record)
             seed = launch_seed_state.peek(path)
             if receipt.get("accepted"):
                 if seed is None or seed.seed_id != receipt["seed_id"]:
@@ -281,6 +350,9 @@ def _apply_creation_start(args: dict) -> dict:
         receipt = _read_admission(Path(args["tracking_dir"]), args["request_id"])
         if receipt["fingerprint"] != args["fingerprint"]:
             raise ValueError("Launch request identity mismatch")
+        if "allocation" in receipt:
+            allocation = creation_allocation.AdmittedAllocation.from_fields(receipt["allocation"])
+            allocation.require_current(project_record_config(SimpleNamespace(repo=allocation.project)))
         receipt["creation_started"] = True
         tracking._atomic_write(path, json.dumps(receipt) + "\n")
     return {"started": True}
@@ -292,6 +364,21 @@ def _apply_creation_finish(args: dict) -> dict:
         receipt = _read_admission(Path(args["tracking_dir"]), args["request_id"])
         if receipt["fingerprint"] != args["fingerprint"] or not receipt.get("creation_started"):
             raise ValueError("Launch creation identity mismatch")
+        if "allocation" in receipt:
+            allocation = creation_allocation.AdmittedAllocation.from_fields(receipt["allocation"])
+            record_path = Path(args["tracking_dir"]) / f"{allocation.worktree_id}.yaml"
+            with tracking._RecordLock(record_path, require_sidecar=True):
+                record = tracking.load_record(record_path)
+                if receipt.get("creation_complete"):
+                    _require_complete_record(receipt, record)
+                    return {"created": True}
+                require_project_record_mutation(record)
+                allocation.require_current(project_record_config(record))
+                allocation.require_record(record)
+                if not record.creation_nonce:
+                    raise ValueError("Created allocation has no authoritative creation nonce")
+                receipt["creation_nonce"] = record.creation_nonce
+                receipt["record_identity"] = creation_allocation.record_evidence(record)
         receipt["creation_complete"] = True
         tracking._atomic_write(path, json.dumps(receipt) + "\n")
     return {"created": True}
@@ -341,6 +428,8 @@ def inspect(request_id: str) -> dict:
     directory = cfg.tracking_dir()
     receipt = _read_admission(directory, request_id)
     path = directory / f"{receipt['worktree_id']}.yaml"
+    if "allocation" in receipt and receipt.get("creation_complete"):
+        _require_complete_record(receipt, tracking.load_record(path))
     seed = launch_seed_state.peek(path)
     creation_complete = receipt["kind"] == "resume" or bool(receipt.get("creation_complete"))
     available = (
@@ -362,7 +451,7 @@ def inspect(request_id: str) -> dict:
 
 def _dispatch(verb: str, args: dict) -> dict:
     result = launch_seed_state._dispatch(
-        verb, args, min_version=5 if verb == "launch_request_stage" else 3,
+        verb, args, min_version=6,
     )
     if result.get("error"):
         raise ValueError(result["error"])
@@ -379,7 +468,7 @@ def _guard(handler):
     return apply
 
 
-tracking_write.register_verb("launch_request_admit", _guard(_apply_admit), version=3)
-tracking_write.register_verb("launch_request_stage", _guard(_apply_stage), version=5)
-tracking_write.register_verb("launch_request_creation_start", _guard(_apply_creation_start), version=3)
-tracking_write.register_verb("launch_request_creation_finish", _guard(_apply_creation_finish), version=3)
+tracking_write.register_verb("launch_request_admit", _guard(_apply_admit), version=6)
+tracking_write.register_verb("launch_request_stage", _guard(_apply_stage), version=6)
+tracking_write.register_verb("launch_request_creation_start", _guard(_apply_creation_start), version=6)
+tracking_write.register_verb("launch_request_creation_finish", _guard(_apply_creation_finish), version=6)

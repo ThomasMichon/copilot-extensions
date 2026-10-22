@@ -3879,6 +3879,15 @@ def test_dispatch_client_skips_tls_setup_only_for_plain_http(monkeypatch):
 # -- headless-ACP embody backend ---------------------------------------------
 
 
+def _headless_task(task_id, **fields):
+    return {
+        "id": task_id,
+        "spawn_reservation_key": "reservation",
+        "_spawn_client": SimpleNamespace(get_reservation=lambda key: {"key": key}),
+        **fields,
+    }
+
+
 def test_make_headless_spawn_uses_bridge_with_autopilot_seed(monkeypatch):
     """The headless backend embodies via agent-bridge, delivering the SAME
     autopilot seed the CLI backend uses (parity: identical driving, different
@@ -3907,7 +3916,7 @@ def test_make_headless_spawn_uses_bridge_with_autopilot_seed(monkeypatch):
     )
 
     spawn = make_headless_spawn(agent="review-worker")
-    ok, handle = spawn({"id": "task-1"})
+    ok, handle = spawn(_headless_task("task-1"))
 
     assert ok is True
     assert handle["worktree"] == "wt-1"
@@ -4097,7 +4106,7 @@ def test_make_headless_spawn_reports_failure_on_nonzero(monkeypatch, stderr):
     def fail(*args, **kwargs):
         raise ordinary_bridge.CreatedAgentUnrecorded(stderr)
     monkeypatch.setattr(ordinary_bridge, "start", fail)
-    ok, handle = make_headless_spawn()({"id": "t"})
+    ok, handle = make_headless_spawn()(_headless_task("t"))
     assert ok is False
     assert "failed-123" in handle["error"]
     assert handle["retained"] is True
@@ -4127,13 +4136,12 @@ def test_make_headless_spawn_reuses_carried_session(monkeypatch):
     monkeypatch.setattr(ordinary_bridge, "start", acquire)
 
     ok, handle = make_headless_spawn()(
-        {
-            "id": "next-task",
+        _headless_task("next-task", **{
             "repo": TEST_REPO,
             "spawn_worktree": "wt-review",
             "spawn_worktree_path": "/tmp/wt-review",
             "spawn_session_handle": "local-body:session-old",
-        }
+        })
     )
 
     assert ok is True
@@ -4162,12 +4170,11 @@ def test_make_headless_spawn_does_not_replace_live_busy_session(monkeypatch):
     monkeypatch.setattr(ordinary_bridge, "start", acquire)
 
     ok, handle = make_headless_spawn()(
-        {
-            "id": "next-task",
+        _headless_task("next-task", **{
             "spawn_worktree": "wt-review",
             "spawn_worktree_path": "/tmp/wt-review",
             "spawn_session_handle": "local-body:session-busy",
-        }
+        })
     )
 
     assert ok is False
@@ -4201,12 +4208,11 @@ def test_make_headless_spawn_does_not_replace_confirmed_gone_session(monkeypatch
     monkeypatch.setattr(ordinary_bridge, "start", acquire)
 
     ok, handle = make_headless_spawn()(
-        {
-            "id": "next-task",
+        _headless_task("next-task", **{
             "spawn_worktree": "wt-review",
             "spawn_worktree_path": "/tmp/wt-review",
             "spawn_session_handle": "local-body:session-gone",
-        }
+        })
     )
 
     assert ok is False
@@ -4230,12 +4236,11 @@ def test_make_headless_spawn_holds_on_unknown_carried_session(monkeypatch):
     monkeypatch.setattr(ordinary_bridge, "start", acquire)
 
     ok, handle = make_headless_spawn()(
-        {
-            "id": "next-task",
+        _headless_task("next-task", **{
             "spawn_worktree": "wt-review",
             "spawn_worktree_path": "/tmp/wt-review",
             "spawn_session_handle": "local-body:session-unknown",
-        }
+        })
     )
 
     assert ok is False
@@ -4253,7 +4258,7 @@ def test_make_headless_spawn_degrades_when_bridge_absent(monkeypatch):
         raise bridge.BridgeUnavailable("no agent-bridge on PATH")
 
     monkeypatch.setattr(ordinary_bridge, "start", _boom)
-    ok, handle = make_headless_spawn()({"id": "t"})
+    ok, handle = make_headless_spawn()(_headless_task("t"))
     assert ok is False
     assert "agent-bridge" in handle["error"]
 

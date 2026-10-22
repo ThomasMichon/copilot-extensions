@@ -1,0 +1,9 @@
+{
+  "comment": "Respect installation-owned deployment policy in bootstrap and staged runtime-update planning without suppressing marketplace refreshes or independent bootstrap services.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

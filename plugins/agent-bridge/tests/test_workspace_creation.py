@@ -28,6 +28,12 @@ pytestmark = pytest.mark.contract("agent_bridge.workspace_creation")
 
 @pytest.fixture
 def creation_rig(rig, monkeypatch, tmp_path):
+    from agent_bridge import local_launch_preparation
+
+    async def resolve(target, **_kwargs):
+        return ["copilot", "--acp", "--stdio"], target.cwd, {}
+
+    monkeypatch.setattr(local_launch_preparation, "resolve_local_launch", resolve)
     row = {
         "id": "worktree-a", "repo": "test-project", "path": str(tmp_path),
         "creation_nonce": "original-allocation", "session_count": 0, "status": "active",
@@ -741,8 +747,11 @@ async def test_native_dispatch_lost_allocation_response_retains_execution_owner(
     rig, monkeypatch, native_owner, new_generation,
 ):
     from types import SimpleNamespace
-    from agent_bridge import acquisition_runtime
+    from agent_bridge import acquisition_runtime, transport
     from agent_bridge.acquisition_contract import AcquisitionRequest
+    from agent_bridge.plugin_readiness import prepared_readiness
+    from agent_bridge.session_manager import SessionManager
+    from plugin_resolve.registration import atomic_json
 
     repository = Path(__file__).resolve().parents[3]
     monkeypatch.syspath_prepend(str(repository / "plugins" / "agent-dispatch" / "src"))
@@ -811,6 +820,32 @@ async def test_native_dispatch_lost_allocation_response_retains_execution_owner(
         return SpawnTarget(type="local", project="fixture")
 
     rig.resolver.resolve_async = resolve
+    checkout = Path(recorded.worktree_path)
+    settings = checkout / ".github" / "copilot" / "settings.json"
+    settings.parent.mkdir(parents=True, exist_ok=True)
+    atomic_json(settings, {
+        "extraKnownMarketplaces": {}, "enabledPlugins": {},
+    })
+    monkeypatch.setenv("COPILOT_PATH", sys.executable)
+    prepared_connections = []
+
+    async def prepared_connect(self, target, **kwargs):
+        args, cwd, _environment = await transport.resolve_local_launch(
+            target, session_id=kwargs["session_id"],
+        )
+        assert target.local_plugin_preparation
+        assert Path(cwd).resolve() == checkout.resolve()
+        expectation = prepared_readiness(
+            target.prepared_plugins, cwd=str(checkout),
+            session_id=rig.client.acp_session_id,
+        )
+        assert expectation.plugins == []
+        assert target.prepared_plugins["logical_payloads"] == {}
+        assert not rig.db.execute_read("SELECT * FROM turns")
+        prepared_connections.append((args, cwd, expectation))
+        return rig.client, rig.client.acp_session_id
+
+    monkeypatch.setattr(SessionManager, "_connect_via_session_host", prepared_connect)
     request = AcquisitionRequest(
         version=2, target="task-worker", mode="acp", task_id=task.id, task_generation=0,
         worktree_id=recorded.worktree, allocation="created", conversation_retired=False,
@@ -822,6 +857,7 @@ async def test_native_dispatch_lost_allocation_response_retains_execution_owner(
     assert result.worktree_id == prepared["worktree"]
     assert len(list((root / "worktrees").iterdir())) == 1
     assert len(rig.manager.list_sessions()) == len(rig.db.execute_read("SELECT * FROM turns")) == 1
+    assert len(prepared_connections) == 1
     assert attempts[0][attempts[0].index("--dispatch-reservation-key") + 1] == first.key
     assert attempts[1][attempts[1].index("--dispatch-reservation-key") + 1] == first.key
     await asyncio.sleep(0)

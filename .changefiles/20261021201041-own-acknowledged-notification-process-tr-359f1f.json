@@ -1,0 +1,9 @@
+{
+  "comment": "Own acknowledged notification process trees through timeout before retrying delivery",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}

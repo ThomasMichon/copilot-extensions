@@ -2,7 +2,13 @@
 
 Supporting proposal for [Main-Owned Workflow Control](README.md), tracked by
 #6865. Related: the [materialized candidate gate](materialized-candidate-validation.md),
-#6848's current outage, and #6849's merged attribution repair.
+#6848's original outage, and #6849's merged attribution repair.
+
+**Status:** Complete for the bounded bootstrap-independence objective under the
+reviewed [unit-only release contract](../dev-branch-release-pipeline/promotion-burndown.md).
+The original generated/native candidate-execution strategy below is historical;
+#7255 explicitly superseded it as a promotion requirement. Client adoption and
+periodic integration remain with #3336/#6237 and their existing owners.
 
 ## Request
 
@@ -29,9 +35,11 @@ attribution and recursive validation. Both paths retain the same canonical
 resolver, seven-day/configured cutoff, selected index, hashes, retained-input
 comparison and source-refusal rules.
 
-## Proposed narrow implementation
+## Original narrow implementation proposal
 
-The following decomposition is agent-recommended, pending review.
+The following agent-recommended decomposition was reviewed in #6866. Its
+candidate-execution strategy was subsequently refined by #7255; it is not
+authority to restore full/native integration as a release prerequisite.
 
 1. Add an explicit registry-only mode to the existing canonical seasoning CLI.
    Use its existing Python API semantics with no trusted local source roots;
@@ -73,7 +81,7 @@ review precedes activation; a development merge alone is not deployment.
 
 ## Plan and validation
 
-- [ ] Review this supporting contract and confirm non-overlapping integration
+- [x] Review this supporting contract and confirm non-overlapping integration
       with the existing release-control and emergency-repair owners.
 - [x] Prove the default path still discovers and validates canonical sources;
       registry-only admission never calls product-graph discovery.
@@ -85,20 +93,27 @@ review precedes activation; a development merge alone is not deployment.
 - [x] Exercise a real fresh UV/venv consumer with a valid pinned registry
       requirement while the materialized product graph is deliberately broken.
       No mocked resolver or pre-provisioned environment substitutes for this.
-- [ ] Require the actual immutable candidate bootstrap recipe in the existing
-      pre-merge gate; demonstrate refusal before main changes for broken
-      bootstrap, unsupported helper mode and missing/failed evidence.
-- [ ] Review and merge the source repair, then activate through the existing
+- [x] Resolve the original candidate-execution obligation through the reviewed
+      #7255/#7269 replacement: actual trusted recipes retain deny-local bootstrap,
+      while exact source-unit job/upload/archive and Dev/candidate byte-equivalence
+      admission reject unsupported, missing, failed or mismatched evidence.
+      The superseded generated/native integration matrix remains periodic work,
+      not an additional promotion gate.
+- [x] Review and merge the source repair, then activate through the existing
       authorized control path and observe a normal repair/release cycle.
-- [ ] Record source, control and installed identities separately; transfer
-      unexercised platform or broader recovery obligations to named objectives.
+- [x] Record source, control and published release identities separately, without
+      claiming installed client adoption. Broader client, native, periodic and
+      recovery acceptance remains tracked by #3336/#6237 under their current
+      contracts and owners.
 
 ## Completion
 
-Complete only when deny-local bootstrap independence and exact-candidate
-qualification are implemented, reviewed and live-proven through the existing
-release owner. A temporary main seed, a merged plan, a passing development
-test, or a relaxed admission rule is not completion.
+The bounded objective requires deny-local bootstrap independence and the current
+reviewed candidate-admission contract to be implemented, reviewed and proven
+through the existing release owner. A temporary Main seed, merged support alone,
+passing development test or relaxed admission rule is not completion. The
+qualified release and natural-cycle evidence below resolves this objective,
+not the whole Main-control effort or installed client acceptance.
 
 ## Implementation evidence
 
@@ -119,5 +134,32 @@ remain failures.
 All thirteen independent policy copies are synchronized. Touched Python lint,
 module-size and install-contract checks pass. No workflow, validator, signer,
 release trigger, main branch, runtime selection or client preference changed.
-Source review, owned caller/candidate-gate integration and normal live release
-acceptance remain open; this evidence is not activation.
+Those support results alone did not establish caller integration or activation;
+the subsequent completion evidence below supplies those distinct outcomes.
+
+## Reviewed integration and release completion
+
+- Support #6868 actually merged as
+  `aae202b31b0026e162a766bd000ae795dfa78ac7`. The canonical CLI selects empty
+  trusted roots before product discovery; ordinary source installation and all
+  configured-source, hash, age and retained-input checks remain unchanged.
+- Reviewed policy #7255 and source-unit engine #7269 replaced the old full,
+  generated and native promotion matrix. Source controller #7281 and independently
+  reviewed Main #7282 installed the current contract without candidate signing
+  authority. Actual Main `4186ffb4a19caca118b0a2c5dcaeb2ee6c6b985d`
+  retains `--registry-only` in all four metadata-validator provisioning recipes,
+  with binary-only, configured-index and required-hash restrictions.
+- Canary `39344826377` qualified the actual v2 source packet, published and
+  read back immutable assets, and merged promotion #7285 to Main
+  `5ee1468f15967fd6e76a0be08ee3dc69da2551bb`. The annotated
+  `promote-dev-6e2e59ceed9a5cb822bd02906f5d4e1173aeae71` tag points to that
+  exact commit at `2026-10-20T00:09:51Z`. This was an authorized manual canary,
+  not a natural-cycle claim or another emergency seed.
+- Canonical state-only resume #7287 merged as
+  `3aca996a9c712a86dc4b2cb0c3c649f3b150b621`. Natural
+  `repository_dispatch` run `39348986302`, attempt 1 from that control,
+  completed successfully from `00:40:01Z` to `00:51:39Z` on October 20.
+  The governing burndown records subsequent qualified natural cycles separately.
+- This closes #6865's bootstrap catch-22 and accepted release-integration
+  objective. It does not certify installed clients, every periodic/native
+  portfolio, arbitrary future registry failures or completion of #3336/#6237.

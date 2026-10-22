@@ -4,7 +4,7 @@ Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue
 Remove-Item Env:PYTHONHOME -ErrorAction SilentlyContinue
 $OutputEncoding = [Console]::OutputEncoding = New-Object Text.UTF8Encoding($false)
 
-$forwardArgs = @($args)
+$forwardArgs = [string[]]@($args)
 $payloadRoot = [Environment]::GetEnvironmentVariable('AGENT_CODESPACES_PAYLOAD_ROOT', 'Process')
 if (-not $payloadRoot -or -not (Test-Path -LiteralPath $payloadRoot -PathType Container)) {
     [Console]::Error.WriteLine('[agent-codespaces] owning payload root is unavailable.')
@@ -28,6 +28,10 @@ if (
     [Console]::Error.WriteLine(
         '[agent-codespaces] installation-context runtime support is unavailable.'
     )
+    exit 126
+}
+if (-not (Select-String -LiteralPath $runtimeResolver -SimpleMatch '# Trace contract: normal/read-only/ready-v1' -Quiet)) {
+    [Console]::Error.WriteLine('[agent-codespaces] read-only runtime resolver is unavailable. Re-enable/update the plugin, then retry.')
     exit 126
 }
 
@@ -159,15 +163,23 @@ else {
     exit 126
 }
 
+if (-not $context) {
+    $runtimeRoot = [string]$resolution.legacy.root
+    if (-not $runtimeRoot -or -not [IO.Path]::IsPathRooted($runtimeRoot)) {
+        [Console]::Error.WriteLine('[agent-codespaces] installation context is missing the canonical legacy root.')
+        exit 126
+    }
+}
+
 function Resolve-RuntimePython {
+    param([string]$TraceMode = 'ready')
     $script:AgentRtPy = $null
     $env:AGENT_RT_ROOT = $runtimeRoot
-    . $runtimeResolver
+    . $runtimeResolver -TraceMode $TraceMode
     return $AgentRtPy
 }
 
-function Invoke-Runtime {
-    param([Parameter(Mandatory)][string]$Python)
+function Set-RuntimeEnvironment {
     $env:AGENT_CODESPACES_HOME = $runtimeRoot
     $env:AGENT_CODESPACES_PAYLOAD_ROOT = $payloadRoot
     if ($context) {
@@ -175,6 +187,11 @@ function Invoke-Runtime {
     } else {
         Remove-Item Env:COPILOT_EXTENSIONS_CONTEXT -ErrorAction SilentlyContinue
     }
+}
+
+function Invoke-Runtime {
+    param([Parameter(Mandatory)][string]$Python)
+    Set-RuntimeEnvironment
     # Relax EAP for just this forwarding call: the wrapped module's own
     # exit code is the only contract this dispatcher relays, so a
     # legitimate stderr diagnostic from a non-zero exit must never become
@@ -182,7 +199,16 @@ function Invoke-Runtime {
     $previousEap = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
-        & $Python -m agent_codespaces @forwardArgs
+        if ($PSVersionTable.PSVersion -lt [version]'7.3' -or
+            (Get-Variable PSNativeCommandArgumentPassing -ValueOnly -ErrorAction SilentlyContinue) -eq 'Legacy') {
+            # Legacy native argument passing retokenizes embedded quotes.
+            $json = ConvertTo-Json -InputObject @($forwardArgs) -Compress
+            $encoded = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($json))
+            $bootstrap = "import base64,json,runpy,sys;sys.argv=['agent_codespaces']+json.loads(base64.b64decode(sys.argv[1]));runpy.run_module('agent_codespaces',run_name='__main__',alter_sys=True)"
+            & $Python -c $bootstrap $encoded
+        } else {
+            & $Python -m agent_codespaces @forwardArgs
+        }
     } finally {
         $ErrorActionPreference = $previousEap
     }
@@ -201,6 +227,40 @@ if ($env:AGENT_CODESPACES_NO_SELFPROVISION) {
     exit 1
 }
 
+$publicationArgs = @(
+    '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $modeRunner,
+    'probe-plugin-publication', '-PayloadRoot', $payloadRoot,
+    '-PluginId', 'agent-codespaces', '-LegacyRoot', $runtimeRoot
+)
+if ($context) {
+    $publicationArgs += @('-Context', $context, '-DurableHome', $validationDurableHome)
+}
+$publicationJson = @(& $hostExe @publicationArgs)
+$publicationCode = $LASTEXITCODE
+try {
+    $publication = ($publicationJson -join "`n") | ConvertFrom-Json -ErrorAction Stop
+    $publicationRoot = if ($context) {
+        [string]$publication.runtimeRoot
+    } else { [string]$publication.legacy.root }
+    if ($publicationCode -ne 0 -or
+        $publication.deployment.allowPluginPublication -isnot [bool] -or
+        -not $publication.deployment.allowPluginPublication -or
+        $publicationRoot -cne $runtimeRoot -or
+        [string]$publication.deployment.path -cne
+            (Join-Path $runtimeRoot 'runtime-deployment.json')) {
+        throw ($publicationJson -join ' ')
+    }
+} catch {
+    [Console]::Error.WriteLine(
+        "[agent-codespaces] Runtime publication refused: $($_.Exception.Message) " +
+        'Use explicit installation management to install or repair this runtime.'
+    )
+    exit 3
+}
+$runtimePython = Resolve-RuntimePython -TraceMode normal
+if ($runtimePython) {
+    Invoke-Runtime -Python $runtimePython
+}
 New-Item -ItemType Directory -Force -Path $runtimeRoot | Out-Null
 $statusPath = Join-Path $runtimeRoot '.provision-status'
 $_lockPath = Join-Path $runtimeRoot '.provision.lock'
@@ -234,8 +294,15 @@ try {
                 Set-Content -LiteralPath $statusPath -Encoding utf8
         } catch {}
 
-        & $hostExe -NoProfile -ExecutionPolicy Bypass -File $installer provision -InstallDir $runtimeRoot 2>&1 |
-            ForEach-Object { [Console]::Error.WriteLine($_) }
+        Set-RuntimeEnvironment
+        $previousEap = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        try {
+            & $hostExe -NoProfile -ExecutionPolicy Bypass -File $installer provision -InstallDir $runtimeRoot 2>&1 |
+                ForEach-Object { [Console]::Error.WriteLine($_) }
+        } finally {
+            $ErrorActionPreference = $previousEap
+        }
         $_provisionRc = $LASTEXITCODE
         if ($_provisionRc -eq 0) {
             $_provisionedPy = Resolve-RuntimePython

@@ -21,6 +21,7 @@ from ..pr_review_policy import (
     normalized_review_time,
     outstanding_change_requests,
 )
+from .github_bar import ReadError, read_thread_resolution
 
 _POLICY_QUERY = """
 query($owner:String!,$name:String!,$ref:String!) {
@@ -89,6 +90,21 @@ def _target_parts(repo: str, number: int) -> list[str]:
     if type(number) is not int or number <= 0:
         raise RequiredChecksError("required-check verification needs a positive PR number")
     return parts
+
+
+def _require_resolved_threads(
+    repo: str, number: int, *, head: str, base_ref: str, host: str,
+    invoke: Callable[[list[str]], subprocess.CompletedProcess[str]],
+) -> None:
+    try:
+        resolved = read_thread_resolution(
+            repo, number, head=head, base_ref=base_ref, host=host,
+            run=lambda argv, **_kwargs: invoke(argv),
+        )
+    except ReadError as exc:
+        raise ReviewSafetyError(f"review-thread verification failed: {exc}") from exc
+    if not all(resolved):
+        raise ReviewSafetyError("unresolved review threads prevent merge")
 
 
 def _protected_merge_head(
@@ -291,14 +307,15 @@ def review_exception_evidence(
     rules_fingerprint = _fingerprint(pages)
     codeowner_rulesets: set[int] = set()
     review_rulesets: set[int] = set()
+    requires_thread_resolution = False
     for page in pages:
         if not isinstance(page, list):
             raise ReviewSafetyError("effective branch rules page is invalid")
         for raw in page:
             rule = obj(raw, "branch rule")
             kind = rule.get("type")
-            if kind in ("deletion", "non_fast_forward"):
-                # A PR merge neither deletes nor force-updates its base ref.
+            if kind in ("deletion", "non_fast_forward", "copilot_code_review"):
+                # Base-ref protections and review-request automation do not gate a PR merge.
                 # Keep these rules in the fingerprint rechecked before writing.
                 continue
             if kind == "required_status_checks":
@@ -343,8 +360,9 @@ def review_exception_evidence(
                 raise ReviewExceptionIneligible(
                     "additional required reviewers are not a CODEOWNER-only exception"
                 )
+            requires_thread_resolution |= threads
             if not codeowner:
-                if count not in (0, 1) or threads or last_push:
+                if count not in (0, 1) or last_push:
                     raise ReviewExceptionIneligible(
                         "another pull-request review requirement is active"
                     )
@@ -352,7 +370,7 @@ def review_exception_evidence(
                     continue
                 # A separate one-vote layer needs its own actor-scoped authority;
                 # CODEOWNER bypass alone must not waive an independent approval.
-            elif count not in (0, 1) or threads or last_push:
+            elif count not in (0, 1) or last_push:
                 raise ReviewExceptionIneligible(
                     "CODEOWNER approval is not the only remaining review requirement"
                 )
@@ -426,6 +444,10 @@ def review_exception_evidence(
             raise ReviewExceptionIneligible(
                 f"acting identity is not authorized to bypass {requirement} ruleset {ruleset_id}"
             )
+    if requires_thread_resolution:
+        _require_resolved_threads(
+            repo, number, head=head, base_ref=base, host=host, invoke=invoke,
+        )
     if identity() != (head, base):
         raise ReviewSafetyError("PR head/base or mutation gates changed during review verification")
     return ReviewExceptionEvidence(
@@ -566,6 +588,7 @@ def verified_merge_head(
         raise RequiredChecksError("effective branch rules are unavailable or invalid")
     if expected_rules_fingerprint and _fingerprint(pages) != expected_rules_fingerprint:
         raise RequiredChecksError("effective branch rules changed after review verification")
+    requires_thread_resolution = False
     for rules in pages:
         if not isinstance(rules, list):
             raise RequiredChecksError("effective branch rules page is unavailable or invalid")
@@ -574,6 +597,12 @@ def verified_merge_head(
             kind = rule.get("type")
             if not isinstance(kind, str) or not kind.strip():
                 raise RequiredChecksError("branch rule type is unavailable or invalid")
+            if kind == "pull_request":
+                parameters = rule.get("parameters")
+                if isinstance(parameters, dict):
+                    requires_thread_resolution |= (
+                        parameters.get("required_review_thread_resolution") is True
+                    )
             if kind != "required_status_checks":
                 continue
             checks = obj(rule.get("parameters"), "required-check rule").get("required_status_checks")
@@ -652,6 +681,10 @@ def verified_merge_head(
                     "required integration-bound checks are missing or incomplete: "
                     + ", ".join(f"{name} (app {app})" for name, app in sorted(bound - observed))
                 )
+    if requires_thread_resolution:
+        _require_resolved_threads(
+            repo, number, head=head, base_ref=base, host=host, invoke=invoke,
+        )
     if identity() != (head, base):
         raise RequiredChecksError("PR head/base changed during check verification; revalidate before merging")
     return head

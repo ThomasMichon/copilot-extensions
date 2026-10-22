@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 
 from textual.app import App, ComposeResult
 from textual.events import Key
-from textual.widgets import DataTable, Footer, Header, Static, Tab, Tabs
+from textual.widgets import Button, DataTable, Footer, Header, Static, Tab, Tabs
 
 from . import demo, demo_engine
 from . import engine_client as ec
@@ -212,6 +212,7 @@ class WorktreeManagerApp(App):
     Screen { layout: vertical; }
     Tabs { height: 3; }
     #status { color: $text-muted; padding: 0 1; height: auto; }
+    #view-actions { height: auto; }
     DataTable { height: 1fr; }
     """
     BINDINGS = [
@@ -274,6 +275,12 @@ class WorktreeManagerApp(App):
             id="pivots",
         )
         yield Static("", id="status")
+        from textual.containers import Horizontal
+        yield Horizontal(*(
+            Button(action.label, id=f"view-{descriptor.key}-{action.key}")
+            for descriptor in self._pivots for action in descriptor.pivot.view_actions
+            if action.kind == "command" and action.run
+        ), id="view-actions")
         table: DataTable = DataTable(zebra_stripes=True, cursor_type="row")
         yield table
         yield Footer()
@@ -515,6 +522,47 @@ class WorktreeManagerApp(App):
         table.clear()
         self._render_pivot_rows(table, descriptor, state)
         self._set_status(self._status_text(descriptor, state))
+        self._render_view_actions(descriptor)
+
+    def _render_view_actions(self, descriptor):
+        from .production_picker.picker_tui.pivot_actions import entry_matches
+        from textual.containers import Horizontal
+
+        container = self.query_one("#view-actions", Horizontal)
+        summary = self._states[descriptor.key].summary
+        actions = [
+            action for action in descriptor.pivot.view_actions
+            if action.kind == "command" and action.available
+            and action.run and entry_matches(action.when, summary)
+        ]
+        container.display = bool(actions)
+        visible = {f"view-{descriptor.key}-{action.key}" for action in actions}
+        for button in container.query(Button):
+            button.display = button.id in visible
+
+    def on_button_pressed(self, event: Button.Pressed):
+        from .pivot_progress import PivotProgressScreen
+        from .production_picker.picker_tui.pivot_actions import entry_matches
+        from .production_picker.picker_tui.tasks import RegisteredPivotRuntime
+        from .production_picker.picker_tui.engine_action_confirm import confirm_then
+
+        descriptor = self._active_pivot()
+        state = self._states[descriptor.key]
+        action = next((
+            action for action in descriptor.pivot.view_actions
+            if action.kind == "command"
+            and event.button.id == f"view-{descriptor.key}-{action.key}" and action.available
+            and action.run and entry_matches(action.when, state.summary)
+        ), None)
+        if action is None:
+            return
+        event.stop()
+        runtime = RegisteredPivotRuntime(descriptor.pivot)
+        confirm_then(self, action, lambda: self.push_screen(PivotProgressScreen(
+                runtime, action, state.summary,
+                completed=lambda: self._start_load(descriptor, force=True),
+                close_runtime=True,
+            )))
 
     def _render_pivot_rows(
         self,
@@ -553,6 +601,8 @@ class WorktreeManagerApp(App):
     ) -> str:
         cached = len(state.rows)
         pivot = descriptor.pivot
+        if state.summary.get("banner_text"):
+            return str(state.summary["banner_text"])
         if state.status == "loading":
             return (
                 f"{pivot.label} · refreshing {cached} cached entr{'y' if cached == 1 else 'ies'}…"

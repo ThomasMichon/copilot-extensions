@@ -1,0 +1,82 @@
+{
+  "captured_from": {
+    "commit": "c9c688139f8582496a83c1c7632f3d426fa7b855",
+    "plugin_version": "0.4.1-dev3",
+    "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktree_entry.py",
+    "source_git_blob": "ae794db6b2223ecee04abf4c0280875883c1314c",
+    "protocol_generation": 45,
+    "source_sha256": "8c07a9783129cccd9ba2e19d7de84e89b4c4b9e49f8d0f4febb84be5bea5a68e"
+  },
+  "response": {
+    "protocol_version": 45,
+    "min_protocol_version": 1
+  },
+  "capability": {
+    "required_protocol_version": 37,
+    "metadata_version": 1,
+    "render_wall_goal_seconds": 2,
+    "live_wall_wait_seconds": 10,
+    "legacy_cold_request_blocks": true,
+    "caller_expiry_releases_holder": false,
+    "source_live_option": "--fresh",
+    "queued_live_native_overlap": false
+  },
+  "requests": {
+    "render": {
+      "method": "GET",
+      "path": "/api/v1/worktrees",
+      "params": {
+        "render": "true"
+      }
+    },
+    "refresh": {
+      "method": "GET",
+      "path": "/api/v1/worktrees",
+      "params": {
+        "refresh": "true"
+      }
+    }
+  },
+  "cold_projection": {
+    "groups": {},
+    "discovery": {
+      "version": 1,
+      "freshness": "unknown",
+      "completeness": "unknown",
+      "refresh_pending": true,
+      "warming": true
+    }
+  },
+  "rendered_row": {
+    "id": "w1",
+    "agent_name": "local",
+    "machine": "local",
+    "path": "/sample",
+    "branch": "topic",
+    "status": "active",
+    "title": null,
+    "started_at": null,
+    "resume_count": 0,
+    "session_count": 0,
+    "turn_count": 0,
+    "mux_session": true,
+    "mux_clients": null,
+    "mux_attached": false,
+    "interactive_cli": "at-rest",
+    "interface": null,
+    "origin": null,
+    "picker_hidden": false,
+    "follow_up": false,
+    "summary": null,
+    "status_note_at": null,
+    "live_intent": null,
+    "live_intent_at": null,
+    "live_intent_idle": false,
+    "closure": null,
+    "bound_agent": null
+  },
+  "reattested_from": {
+    "path": "plugins/agent-bridge/contract/fixtures/http/current/worktree-render-worktree_entry-generation-44.json",
+    "sha256": "e9b6ba6a43fceacce8aa43aa5b13ef3ab2b52b0c9fc812dbea4536c4813d9b2f"
+  }
+}

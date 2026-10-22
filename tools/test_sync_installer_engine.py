@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import importlib.util
+import io
 import json
 import os
+import re
 import shutil
 import stat
 import subprocess
@@ -55,11 +57,98 @@ def test_human_output_declarations_bind_real_packaged_entrypoints():
     source = REPO / "libs" / "installer-engine" / contract.HUMAN_HELPER
     supports = _human_admission()
     for name in contract.human_output_adopters(REPO, contract.ADOPTERS):
-        script = REPO / "plugins" / name / "scripts" / "install.ps1"
+        script = contract.human_output_entrypoint(REPO / "plugins" / name)
         assert (script.parent / contract.HUMAN_HELPER).read_bytes() == source.read_bytes()
         assert supports(script), name
         declaration = json.loads(script.with_suffix(".human-output.json").read_text("utf-8"))
         assert declaration == contract.human_output_declaration(script)
+
+
+@pytest.mark.parametrize("shell", ["bash", "pwsh", "powershell"])
+def test_installer_action_identity_uses_existing_progress_helpers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, shell: str,
+) -> None:
+    if shell == "bash" and os.name == "nt":
+        pytest.skip("exercise POSIX installers on a POSIX host")
+    executable = shutil.which(shell)
+    if not executable:
+        pytest.skip(f"{shell} unavailable")
+    powershell = shell != "bash"
+    suffix = ".ps1" if powershell else ".sh"
+    markers = {"running": "...   ", "done": "[OK]  ", "skipped": "[SKIP]"}
+    helpers = (
+        {"running": "Write-Step", "done": "Write-Ok", "skipped": "Write-Skip"}
+        if powershell else {"running": "_step", "done": "_ok", "skipped": "_skip"}
+    )
+    fragments = []
+    expected = []
+    states = []
+    for plugin in (
+        "agent-dispatch", "agent-vault", "agent-pull-requests", "agent-ssh", "budget-guidance",
+    ):
+        source = (REPO / "plugins" / plugin / "scripts" / ("install" + suffix)).read_text(
+            encoding="utf-8",
+        )
+        source_lines = source.splitlines()
+        actions = ["install", "update"] if plugin in {"agent-dispatch", "agent-vault"} \
+            else ["install"]
+        cases = [(state, f"{plugin} {action}") for action in actions
+                 for state in ("running", "done")]
+        if plugin == "agent-dispatch":
+            cases.append(("skipped", "agent-dispatch install (superseded by a newer concurrent build)"))
+        for state, message in cases:
+            helper = helpers[state]
+            declaration = f"function {helper} " if powershell else helper + "()"
+            fragments.append(next(
+                line for line in source_lines if line.startswith(declaration)
+            ))
+            invocation = re.search(
+                rf"^[ \t]*{re.escape(helper)}[ \t]+(['\"]){re.escape(message)}\1[ \t]*$",
+                source, re.M,
+            )
+            assert invocation is not None, (plugin, state, message)
+            index = source_lines.index(invocation[0])
+            for neighbor in source_lines[max(0, index - 1):index] + source_lines[index + 1:index + 2]:
+                assert neighbor.strip() not in {"Write-Host ''", 'Write-Host ""', "echo ''", 'echo ""'}
+            fragments.append(invocation[0])
+            expected.append(f"  {markers[state]} {message}")
+            states.append(f"{state} {message}")
+    harness = tmp_path / ("identities" + suffix)
+    harness.write_text(
+        ("$ErrorActionPreference = 'Stop'\n" if powershell else "set -euo pipefail\n")
+        + "\n".join(fragments) + "\n", encoding="utf-8",
+    )
+    argv = (
+        [executable, "-NoProfile", "-NonInteractive", "-File", str(harness)]
+        if powershell else [executable, str(harness)]
+    )
+    options = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+    standalone = subprocess.run(
+        argv, capture_output=True, text=True, timeout=10, check=False, **options,
+    )
+    assert standalone.returncode == 0, standalone.stderr
+    assert standalone.stderr == ""
+    assert standalone.stdout.splitlines() == expected
+
+    monkeypatch.syspath_prepend(str(REPO / "libs" / "update-telemetry" / "src"))
+    from update_telemetry.human import HumanOperation, native_output
+
+    output = io.StringIO()
+    with HumanOperation("installers", stream=output) as operation:
+        with native_output() as sink:
+            result = subprocess.run(
+                argv, stdout=sink, stderr=sink, timeout=10, check=False, **options,
+            )
+        operation.complete("done" if result.returncode == 0 else "failed", f"exit {result.returncode}")
+    assert result.returncode == 0
+    lines = output.getvalue().splitlines()
+    assert len(lines) == len(states) + 2, lines
+    for line, message in zip(lines[1:-1], states, strict=True):
+        assert re.fullmatch(
+            rf"\[\d{{2}}:\d{{2}}:\d{{2}}\.\d{{3}}Z\] installers "
+            rf"{re.escape(message)} \[elapsed \d+\.\d+s\]", line,
+        )
+    assert "installers done exit 0 [duration " in lines[-1]
 
 
 def _copy_real_installer_engine(root: Path) -> None:
@@ -99,13 +188,14 @@ def _real_human_consumer(root: Path, name: str, layout: str) -> Path:
     contract = sync_installer_engine.ier
     consumer = root / "plugins" / name
     scripts = _mk_plugin_scripts(root, name)
-    for asset in ("install.ps1", "install.sh", contract.HUMAN_HELPER):
+    entrypoint = contract.human_output_entrypoint(consumer)
+    for asset in (entrypoint.name, entrypoint.with_suffix(".sh").name, contract.HUMAN_HELPER):
         shutil.copyfile(REPO / "plugins" / name / "scripts" / asset, scripts / asset)
     for ext in ("ps1", "sh"):
-        script = scripts / f"install.{ext}"
+        script = entrypoint.with_suffix(f".{ext}")
         ref = contract.find_engine_ref(script, ext)
         if ref is None:
-            assert name == "agent-worktrees"
+            assert name in contract.HUMAN_STANDALONE_ENTRYPOINTS
             continue
         old_line = (
             contract.local_line(ext) if contract.is_local_ref(ref, consumer)
@@ -122,7 +212,7 @@ def _real_human_consumer(root: Path, name: str, layout: str) -> Path:
         assert contract.is_canonical_ref(
             contract.find_engine_ref(script, ext), consumer, repo_root=root,
         )
-    script = scripts / "install.ps1"
+    script = entrypoint
     script.with_suffix(".human-output.json").write_text(
         contract.human_output_json(script), encoding="utf-8",
     )
@@ -234,31 +324,41 @@ def test_whole_payload_human_contract(
         report = materialize_main.build(destination, source_root=source_root)
     assert not [line for line in report if line.startswith("SKIP")], report
     supports = _human_admission()
-    assert len(names) == 9
+    assert len(names) == 12
     for name in names:
-        script = destination / "plugins" / name / "scripts" / "install.ps1"
+        script = contract.human_output_entrypoint(destination / "plugins" / name)
         assert supports(script), name
         assert (script.parent / contract.HUMAN_HELPER).read_bytes() == (
             REPO / "libs" / "installer-engine" / contract.HUMAN_HELPER
         ).read_bytes()
 
 
-@pytest.mark.parametrize("asset", [
-    "install.ps1", "install.human-output.json", "installer-human-output.ps1",
-])
-def test_same_root_invalid_human_source_fails_before_any_rewrite(tmp_path, monkeypatch, asset):
+@pytest.mark.parametrize(
+    ("plugin", "entrypoint"),
+    [("agent-bridge", "install.ps1"), ("agent-containers", "init.ps1"),
+     ("agent-mcp", "init.ps1"), ("budget-guidance", "install.ps1")],
+)
+@pytest.mark.parametrize("asset", ["entrypoint", "declaration", "initializer"])
+def test_same_root_invalid_human_source_fails_before_any_rewrite(
+    tmp_path, monkeypatch, plugin, entrypoint, asset,
+):
     import materialize_main
 
     root = tmp_path / "source"
-    source = REPO / "plugins" / "agent-bridge" / "scripts"
-    scripts = root / "plugins" / "agent-bridge" / "scripts"
+    source = REPO / "plugins" / plugin / "scripts"
+    scripts = root / "plugins" / plugin / "scripts"
     scripts.mkdir(parents=True)
-    for name in ("install.ps1", "install.human-output.json", "installer-human-output.ps1"):
+    assets = {
+        "entrypoint": entrypoint,
+        "declaration": Path(entrypoint).with_suffix(".human-output.json").name,
+        "initializer": "installer-human-output.ps1",
+    }
+    for name in assets.values():
         shutil.copyfile(source / name, scripts / name)
     canonical = root / "libs" / "installer-engine"
     canonical.mkdir(parents=True)
     shutil.copyfile(source / "installer-human-output.ps1", canonical / "installer-human-output.ps1")
-    with (scripts / asset).open("a", encoding="ascii") as stream:
+    with (scripts / assets[asset]).open("a", encoding="ascii") as stream:
         stream.write("\n# invalid original source\n")
     before = {path: path.read_bytes() for path in root.rglob("*") if path.is_file()}
     monkeypatch.setattr(
@@ -522,7 +622,7 @@ def test_verify_rejects_mixed_local_and_canonical_forms(fake_repo):
     assert any("mixes installer-engine forms" in p for p in problems)
 
 
-def test_verify_rejects_symlinked_canonical_engine(fake_repo):
+def test_verify_rejects_symlinked_canonical_engine(fake_repo, native_file_symlink):
     scripts = _mk_plugin_scripts(fake_repo, "agent-registered")
     _write_canonical_refs(scripts)
     real = fake_repo / "outside"
@@ -531,14 +631,14 @@ def test_verify_rejects_symlinked_canonical_engine(fake_repo):
     (real / "installer-engine.sh").write_text("canonical sh\n", encoding="utf-8")
     for name in ("installer-engine.ps1", "installer-engine.sh"):
         (fake_repo / "libs" / "installer-engine" / name).unlink()
-        (fake_repo / "libs" / "installer-engine" / name).symlink_to(real / name)
+        native_file_symlink(fake_repo / "libs" / "installer-engine" / name, real / name)
 
     problems = sync_installer_engine.verify()
 
     assert any("is a symlink -- refusing" in p for p in problems)
 
 
-def test_verify_rejects_symlinked_canonical_engine_in_local_mode(fake_repo):
+def test_verify_rejects_symlinked_canonical_engine_in_local_mode(fake_repo, native_file_symlink):
     scripts = _mk_plugin_scripts(fake_repo, "agent-registered")
     _write_local_refs(scripts)
     (scripts / "installer-engine.ps1").write_text("canonical ps1\n", encoding="utf-8")
@@ -549,7 +649,7 @@ def test_verify_rejects_symlinked_canonical_engine_in_local_mode(fake_repo):
     (real / "installer-engine.sh").write_text("canonical sh\n", encoding="utf-8")
     for name in ("installer-engine.ps1", "installer-engine.sh"):
         (fake_repo / "libs" / "installer-engine" / name).unlink()
-        (fake_repo / "libs" / "installer-engine" / name).symlink_to(real / name)
+        native_file_symlink(fake_repo / "libs" / "installer-engine" / name, real / name)
 
     problems = sync_installer_engine.verify()
 
@@ -632,7 +732,7 @@ def test_sync_repairs_python_support_in_both_wrapper_modes(fake_repo, mode, init
     assert sync_installer_engine.sync() == []
 
 
-def test_sync_refuses_symlinked_canonical_engine_in_local_mode(fake_repo):
+def test_sync_refuses_symlinked_canonical_engine_in_local_mode(fake_repo, native_file_symlink):
     scripts = _mk_plugin_scripts(fake_repo, "agent-registered")
     _write_local_refs(scripts)
     real = fake_repo / "outside"
@@ -641,7 +741,7 @@ def test_sync_refuses_symlinked_canonical_engine_in_local_mode(fake_repo):
     (real / "installer-engine.sh").write_text("canonical sh\n", encoding="utf-8")
     for name in ("installer-engine.ps1", "installer-engine.sh"):
         (fake_repo / "libs" / "installer-engine" / name).unlink()
-        (fake_repo / "libs" / "installer-engine" / name).symlink_to(real / name)
+        native_file_symlink(fake_repo / "libs" / "installer-engine" / name, real / name)
 
     with pytest.raises(RuntimeError, match="symlink -- refusing"):
         sync_installer_engine.sync()
@@ -650,7 +750,9 @@ def test_sync_refuses_symlinked_canonical_engine_in_local_mode(fake_repo):
 @pytest.mark.parametrize("mode", ["canonical", "local"])
 @pytest.mark.parametrize("name", sync_installer_engine.ier.SUPPORT_FILES)
 @pytest.mark.parametrize("target_state", ["different", "matching", "dangling"])
-def test_sync_refuses_linked_support_without_touching_target(fake_repo, mode, name, target_state):
+def test_sync_refuses_linked_support_without_touching_target(
+    fake_repo, native_file_symlink, mode, name, target_state,
+):
     scripts = _mk_plugin_scripts(fake_repo, "agent-registered")
     writer = _write_canonical_refs if mode == "canonical" else _write_local_refs
     writer(scripts)
@@ -670,7 +772,7 @@ def test_sync_refuses_linked_support_without_touching_target(fake_repo, mode, na
         )
         target.chmod(0o600)
     destination = scripts / name
-    destination.symlink_to(target)
+    native_file_symlink(destination, target)
     original_link = os.readlink(destination)
     before = (
         target.read_bytes(), stat.S_IMODE(target.stat().st_mode), target.stat().st_mtime_ns,

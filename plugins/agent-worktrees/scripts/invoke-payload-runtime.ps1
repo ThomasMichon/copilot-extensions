@@ -404,8 +404,42 @@ function Resolve-AgentWorktreesRuntime {
         $env:COPILOT_EXTENSIONS_BOOT_TRACE_PLUGIN = 'agent-worktrees'
     }
     $env:AGENT_RT_ROOT = $runtimeRoot
-    . $runtimeResolver
+    . $runtimeResolver -TraceMode ready
     return $AgentRtPy
+}
+
+function Assert-PluginRuntimePublication {
+    $probeArgs = @{}
+    foreach ($key in $statusArgs.Keys) { $probeArgs[$key] = $statusArgs[$key] }
+    $probeArgs.Action = 'probe-plugin-publication'
+    $probeArgs.Remove('WithContextValidation')
+    $probe = @(& $modeRunner @probeArgs)
+    $probeCode = $LASTEXITCODE
+    try {
+        $decision = ($probe -join "`n") | ConvertFrom-Json -ErrorAction Stop
+        $expectedRoot = if ($actualMode -ceq 'legacy' -or $simplePolicyLegacy) {
+            [string]$resolution.legacy.root
+        } else {
+            [string]$resolution.runtimeRoot
+        }
+        if ($probeCode -eq 0 -and
+            [string]$decision.actualMode -ceq $actualMode -and
+            $decision.deployment.allowPluginPublication -is [bool] -and
+            $decision.deployment.allowPluginPublication -and
+            [string]$decision.deployment.path -ceq
+                (Join-Path $expectedRoot 'runtime-deployment.json')) {
+            return
+        }
+    } catch {
+        [Console]::Error.WriteLine(
+            '[agent-worktrees] Runtime publication probe returned an invalid decision.'
+        )
+    }
+    [Console]::Error.WriteLine(
+        "[agent-worktrees] Runtime publication refused: $($probe -join ' ') " +
+        'Use explicit installation management to install or repair this runtime.'
+    )
+    exit 126
 }
 
 function Invoke-AgentWorktreesRuntime([string]$Python) {
@@ -435,6 +469,9 @@ function Invoke-AgentWorktreesRuntime([string]$Python) {
 }
 
 $python = Resolve-AgentWorktreesRuntime
+if (-not $python -and -not $env:AGENT_WORKTREES_NO_SELFPROVISION) {
+    Assert-PluginRuntimePublication
+}
 # Commit to self-provisioning (and, in doing so, permit the boot-trace
 # writer to eagerly create a not-yet-existing legacy root) as soon as we
 # actually know provisioning will happen -- i.e. no runtime resolved AND
@@ -499,14 +536,16 @@ try {
         exit 126
     }
     $python = Resolve-AgentWorktreesRuntime
-    Write-BootTrace 'resolver-loaded'
     if ($python) {
         $lock.Dispose()
         $lock = $null
+        Write-BootTrace 'resolver-loaded'
         Write-BootTrace 'dispatch' 'locked-fast'
         Invoke-AgentWorktreesRuntime $python
     }
 
+    Assert-PluginRuntimePublication
+    Write-BootTrace 'resolver-loaded'
     if ($actualMode -ceq 'namespaced') {
         if (
             $resolutionStatus -cne 'ready' -or

@@ -167,7 +167,16 @@ Implementation sequencing below is **agent-recommended**:
   The common authenticated byte-stage prerequisite is merged in #6569.
   [Client lifecycle admission](client-lifecycle-admission.md) proposes the next
   serial durable-admission, construction and owned-activation/removal gates;
-  it does not deliver a managed installer or authorize a live rollout.
+  durable admission is merged in #7459; construction and compatibility/local
+  health are merged in #7804; physically attributed local runtime-selector
+  activation and bounded forward retry are merged in #7847; explicit physically
+  attributed client command registration is merged in #7866; physically proved
+  registered/pending command withdrawal with durable retry is merged in #7882.
+  The next serial candidate adds owned selector withdrawal after settled command
+  unregistration; it preserves every runtime and the admission floor.
+  Torn-producer-journal recovery, completed-runtime removal, retained-good recovery
+  and a managed installer remain open. None of these local prerequisites
+  authorizes a live rollout.
   [Installation repair conductor](installation-repair-conductor.md) is the
   agent-recommended #6464 setup prerequisite proposal. Its ordinary-owner
   source implementation is merged in #6944; fresh-environment/native acceptance
@@ -189,6 +198,9 @@ Implementation sequencing below is **agent-recommended**:
   first readiness, remaining attended prerequisites and non-secret outcomes.
 
 ### Phase 3 - Named role deployment
+- [x] Supply explicit configuration-selected role/provider reference planning
+  in the installed SDK, preserving custom declarations and bootstrap evidence
+  requirements. This is not an external manager mutation or installed role.
 - [ ] Publish independently runnable role artifacts using existing service
   distributions and lifecycle contracts, without a Copilot process dependency.
 - [ ] Resolve named role placement through the manager's declared deployment
@@ -599,3 +611,436 @@ These bounded Windows selections are not a new full Windows-suite claim.
   lifecycle, authorization, useful roles, persistence and safe cutover remain
   unresolved. No plugin/runtime update, enrollment, capacity acquisition or
   service migration is authorized or performed by this journal update.
+
+### 2026-10-21 - Explicit role/provider planning boundary
+- Added strict optional role bindings to the preserved adopter configuration,
+  immutable provider contracts and an explicit installed-package module CLI.
+  Providers are registered by trusted code, never imported from configuration.
+  The default client entry point and dependency set remain unchanged.
+- The first Komodo projection names a Stack and its selected references.
+  It does not contact Core, create resources, construct artifacts, acquire keys
+  or execute deployment. Manager bootstrap remains an independently owned,
+  unverified requirement rather than a fabricated installation receipt.
+- Unknown implementations/capabilities, aliased controller references, duplicate
+  resource writers, dependency cycles and unadmitted/stale placement refuse or
+  block. Unbound roles/providers remain preserved without new bootstrap work.
+- The focused role/provider and retained planner portfolio passed 138 cases,
+  including a real built wheel installed without dependencies and exercised
+  with source and ambient site packages excluded. Network/process effects were
+  forbidden in that installed consumer proof.
+- The complete required fast SDK portfolio passed 1,829 cases with three
+  platform skips and sixteen existing full-portfolio exclusions in 98.49 seconds,
+  under its unchanged 120-second boundary; owned cleanup completed. These are
+  planning/packaging contracts, not manager or production adoption evidence.
+- Existing artifact publisher/assembly, release authentication, client
+  construction/admission, shared CLI, operation and credential owners retain
+  their paths. Actual Core/Gateway execution, installed health, useful real
+  services and every live activation gate remain open under this campaign.
+- Review exposed diagnostic expansion beyond the shared collection bound for
+  valid high-cardinality inputs. Blockers now group every distinct code by
+  fleet/provider/role subject, fitting at most 513 groups without increasing
+  shared limits or truncating diagnoses. The 172/256-provider cases and actual
+  CLI serialization preserve blocked output and saved-plan refusal.
+- Updated only the explicit package-module allowlist in the existing
+  exact-source Gateway witness, admitting the new SDK modules and the
+  already-merged client-admission source. A committed-tree regression and all
+  89 retained runner/native-selection/probe guards pass. This fixes package
+  closure, not a new native container or production qualification claim;
+  Docker definitions, privileges and deadlines remain unchanged.
+
+### 2026-10-21 - Durable selected client admission merged
+- #7459 merged into `dev` at `2026-10-21T02:25:47Z`, commit
+  `ad37a0df743b8121e4811b2f7c0a4f9e0e235378`. The actual current-head Balanced
+  review approved `a6aa69e611dc0a20741da233327c5ca9a0ed1d3b`; its required CI
+  and source-attribution checks succeeded.
+- The delivered `client-state initialize/inspect/admit` operations reuse the
+  shared `ReleaseSelection` and authenticated immutable stage. They persist a
+  monotonic installation-owned floor, not an execution grant. Reports retain
+  constructed, healthy, active, activation-authorized and live-readiness fields
+  as false. No runtime, service, enrollment, credential or selector was changed.
+- Native Windows and Linux source/installed-consumer contracts cover actual
+  signatures, owner privacy, interrupted initialization and admission, hot
+  rollback-journal CLI recovery, concurrent transactions and durable reopen.
+  Linux additionally proves retained reader locks, WAL refusal without sidecar
+  mutation, publication/ownership sync ordering and actual quarantine failures.
+  Complete selected Linux files passed 43 admission, 60 staging, 51 planning,
+  33 diagnostics and 82 shared-selection cases, with two explicit platform skips.
+  These are not a full development-suite or fresh Docker qualification claim.
+- Full local development preparation remains refused by the configured index's
+  per-file age metadata under the unchanged dependency policy. Equivalent bytes
+  carrying different source-index timestamps do not authorize an index switch,
+  metadata override, lower floor or local waiver. The previously recorded
+  fresh-box package-feed failure remains uncredited; qualification and release/
+  installed adoption are distinct from the source merge.
+- The next retained #6424 slice is authenticated candidate construction,
+  explicit compatibility and actual client health through the canonical
+  versioned-runtime owner before any selector activation. Preserve the active
+  client, accepted admission floor and unrelated configuration on every failure.
+  The merged #7083/#7087 SSH leaves remain policy/runtime dependencies, not
+  managed-apply hooks. Shared construction/lifecycle stays with this campaign;
+  Chat architecture and artifact work remains separately owned under #7238.
+- The campaign and routing foundation remain Active. Reviewed source work
+  continues in dependency order; live installation, enrollment, migration and
+  activation still require their actual source, identity and resource gates.
+
+### 2026-10-21 - Construction source qualification; publication remains gated
+- The retained #6424 continuation implements explicit client construction,
+  current API/config/retained-data compatibility and actual installed console
+  health as local source WIP. It does not advance admission or activate a
+  runtime. Owner-side `construction` tooling remains an explicit optional
+  dependency; the candidate receives only the dependency-free client wheel.
+- Standard canonical slots, construction/retention ownership and completion
+  are reused. Candidate intent is stored outside the removable tree so an
+  interrupted or partial removal cannot erase the sole ownership receipt.
+  Reuse proves actual bytes and fresh health without rewriting completion;
+  failed health preserves the accepted floor, prior selectors and user config.
+- Current bounded Linux selections passed 26 construction, four independent
+  process/installed-console, 35 diagnostics, 60 staging, 43 admission and 18
+  selected wheel/sdist/resource cases; the staging/admission selections each
+  have one explicit Windows-only skip. Native Windows separately passed the
+  real construction/reuse pair, retry/partial-removal, independent installed
+  owners, actual console initialize/admit/construct, failed-doctor preservation
+  and caller-death cleanup fencing. Windows regressions passed 55 staging
+  with six platform skips, 39 admission with five platform skips, 35
+  diagnostics and 18 selected distribution cases. These are separate
+  portfolios, not a combined full development-suite result.
+- Earlier native timeout and post-read stability failures were not converted
+  into a deadline, dependency-policy or integrity waiver. Fixed helpers retain
+  one owning-SDK RECORD snapshot and recheck their bytes; SDK discovery stays
+  qualified to the imported package. The unexplained earlier snapshot refusal
+  remains an investigation, not an accepted flake: strict checks now name a
+  bounded reason, and the owned-wheel 64-read stability contract passes.
+  Qualification detail and the outstanding source gate are recorded on #6424.
+- The canonical shared child-custody draft remains frozen and unpublished
+  pending the actual retained source owner's interface agreement on #5472.
+  Consumer success is not that grant. No vendored propagation, signing,
+  enrollment, selector publication, live install, updater or service migration
+  was performed. Fresh-box/full-profile acceptance and normal release/adoption
+  remain separate gates.
+- The read-only install-contract audit refuses publication on precisely the
+  two canonical/shared-process differences from the agent-worktrees vendored
+  engine. The existing #5472 coordination request has no response as of this
+  audit. No sync, source publication or gate waiver was used to clear it.
+- The reviewed Machine Fleet amendment #7513 and #6681's handback preserve the
+  existing ordered lifecycle/setup-consumer integration. They require an
+  explicit broader artifact-publisher/module-integration assignment, not a
+  parallel controller or an implicit promotion of these client prerequisites
+  into an executor. The campaign and routing foundation remain Active.
+
+### 2026-10-22 - Use actual claims for PR ownership
+- Correct the prior coordination interpretation: an issue or PR comment is
+  not a source-custody lease, and waiting for a reply does not establish a
+  publication hold. Discover competing PR ownership from actual worktree
+  claim records on the relevant machines over SSH, then trace their owner
+  references and liveness. Cross-check provider state independently; local
+  tracked "open" records can outlive the actual PR.
+- The accessible claim inventories identify other live owners for the
+  matching currently open PRs. Those PRs remain with their owners; this
+  campaign does not adopt, supersede or merge them. An unavailable machine
+  or an unsupported query is unknown coverage, not evidence of abandonment
+  or a repository-wide lock.
+- The client implementation worktree has no outstanding PR claim: its plan
+  and admission claims are released. Construction remains unpublished WIP.
+  The real install-contract drift still needs ordinary source integration,
+  propagation and qualification before publication; the absence of a comment
+  reply is no longer treated as a separate authority gate. Review, required CI,
+  release, authorized adoption and the campaign's remaining lifecycle gates
+  are unchanged.
+
+### 2026-10-22 - Construction integration and native qualification
+- Integrated the client constructor with current shared child-launch/timeout
+  outcomes and propagated the canonical engine to both vendored consumers.
+  The finite Windows guardian retains the existing candidate lease through
+  native Job settlement, including caller death. Success, child failure,
+  launch refusal and settled deadline outcomes have native Windows contracts.
+  No resident service or alternate installer framework was introduced.
+- Current isolated Linux selections passed 26 construction, four installed/
+  independent-process, 35 diagnostics, 60 staging and 43 admission cases,
+  with the two existing Windows-only skips. Native Windows ARM64 passed the
+  construction/reuse, retry, failed-doctor, installed-console, independent-owner
+  and caller-death selections; shared guardian contracts passed 11 cases with
+  one POSIX-only skip. Diagnostics passed 35 and admission passed 39 with five
+  platform skips.
+- The complete Windows staging membership passed 55 cases with six platform
+  skips in explicit bounded groups. A prior whole-file attempt exceeded its
+  aggregate deadline; it is not credited as a pass. No item or group deadline,
+  integrity check, dependency age or configured index was weakened.
+- Earlier emulated-interpreter timeouts and executable cleanup errors were
+  not treated as native qualification. Restart Manager identified the Windows
+  translation-cache process holding a failed fixture executable. Qualification
+  used an already installed, signed native interpreter; no OS service was
+  stopped or reconfigured. Its admitted binary dependencies remained within
+  the declared ranges and unchanged seasoning policy.
+- A real pinned Gateway package build exposed missing newly bundled process
+  resources. The existing Docker recipe, closed-world source materializer and
+  regression now carry the exact companions and new client module. Both
+  repository and pinned-context wheel builds and a repository-independent
+  sdist rebuild pass. This repairs the shared package closure, not Gateway
+  deployment or native container qualification.
+- The client remains construction-only and unpublished at this journal point.
+  Current-head review/CI, actual merge, release and authorized installed
+  adoption remain separate. Activation/removal and the broader campaign's
+  useful-service, persistence and continuity obligations remain open.
+- Review exposed a parent-only teardown injection that no longer crossed the
+  new guardian boundary. The regression now injects inside the actual Job
+  owner and records frozen inputs, construction/retention exclusion, live
+  writers before the first accounting failure and settled descendants before
+  release. The recovered teardown still refuses publication. Complete shared
+  engine membership passed 43 cases with one POSIX-only skip in bounded groups.
+- The opt-in native desktop regression passed timeout and owner-cancellation
+  cases from the real windowless Python image, with two console/descendant
+  cycles each. Native window/focus observation found no visible or Default
+  Terminal windows and no foreground transitions; process handles and cleanup
+  custody prove settlement. This remains outside the fast required lane.
+- A further review found two missed consumer boundaries: normal standalone
+  preparation omitted the process companions, and the guardian omitted the
+  explicit Windows application path. Both failures were reproduced before
+  correction. The preparation regression now exercises the actual entry point
+  and retained wheel bytes after original-input mutation; the interpreter
+  regression executes from an owning venv beyond `MAX_PATH`.
+- Complete native guardian/preparation regression membership passed 79 cases
+  with seven platform skips; guardian plus real windowless cases passed 14
+  with one POSIX skip. The refreshed installed CLI and caller-death consumer
+  cases passed. Normal full Windows x64 SDK preparation and 35 diagnostics
+  passed; default native ARM64 full-development preparation still requires
+  OpenSSL for its selected cryptography source build. That broader prerequisite
+  remains under #6424; targeted native binary qualification is not a full
+  fresh-platform readiness claim. No toolchain or dependency-policy override
+  was installed to conceal it.
+
+### 2026-10-22 - Admitted client construction merged
+- #7804 merged into `dev` at `2026-10-22T08:48:10Z`, commit
+  `668d96fbb4f7d4db309dbd04c05a35d534ae97e5`. Current-head Copilot review
+  `5611508962` reported no open issues on
+  `5ef1bd7ce2183180f4554fe9cb9d94ed4c5edff9`; all four concrete findings
+  were fixed and resolved, and required CI/source attribution succeeded.
+- The delivered slice constructs only the supplied durably admitted portable
+  client, freshly checks compatibility and local installed health, and binds
+  immutable completion to actual bytes. Canonical Windows child retention,
+  explicit long-path execution and complete retained build-resource closure
+  are included; this is not selector activation or a full installer.
+- Normal standalone and Index test preparation share the same declared build
+  resource closure. Native Windows and Linux qualification, windowless/caller
+  death and retained-source mutation witnesses remain distinct from full
+  fresh-platform, release and installed-adoption readiness.
+- The next serial source obligation is owned client activation/removal under
+  the reviewed lifecycle plan: reacquire canonical ownership, revalidate current
+  selection/policy/compatibility and preserve foreign registrations, retained
+  state and the accepted floor. No live client activation, enrollment, signing,
+  service migration or updater invocation follows from this merge.
+- The campaign and routing foundation remain Active. No broad Phase 2 or
+  Validation Plan checkbox is closed by this construction prerequisite alone.
+
+### 2026-10-22 - Owned client runtime selectors merged
+- #7847 merged into `dev` at `2026-10-22T10:18:49Z`, commit
+  `7675c529ace83933c9af01a2cfdbd300525ff708`. Current-head Copilot review
+  `5612639052` approved `087a2e65436c2753194b921b4785831214ecc281`
+  with no open issues; required CI and source attribution succeeded.
+- `client-state activate-runtime` reacquires the existing installation,
+  candidate and publication custody, freshly authenticates the exact admitted
+  selection, checks compatibility and actual completed bytes, and runs installed
+  local health before publishing canonical, physically attributed selectors.
+  Durable intent and complete producer receipts permit bounded forward retry
+  of the same candidate/target; foreign or incomplete evidence refuses.
+  The accepted floor, previous candidate and user configuration are preserved.
+- Native Windows ARM64 passed 57 ownership/recovery/target/diagnostics controls,
+  real independent installed-owner serialization, and the actual installed
+  console lifecycle outside the checkout. The exact published Linux source
+  passed 21 activation, 37 diagnostics, two package-context builds and 40
+  pinned-source controls. Constructor regressions and repository-independent
+  wheel/sdist proofs remain distinct from fresh-OS qualification.
+- The command publishes only local runtime selectors, not a frontdoor, PATH
+  registration, service, controller or fleet role. Frontdoor attribution and
+  owned removal are the next serial client obligations under #6424; retained-good
+  rollback and whole-install identity retirement still need their own supported
+  policy/fencing proof. No shared publisher or installer is replaced.
+- The campaign remains Active with every broader setup, useful-service,
+  persistence and continuity gate retained. Release promotion and authorized
+  installed adoption are unobserved; no updater, live activation, credential
+  change, enrollment or service migration follows from this source merge.
+
+### 2026-10-22 - Owned client commands qualified for review
+- The next #6424 slice implements `client-state register-commands` for an
+  explicit existing private command directory. It requires the exact admitted,
+  completed and physically selected client, fresh policy and compatibility,
+  real local console health and canonical created-file publication custody.
+  POSIX and Windows command families select a fixed candidate and run the
+  canonical slot-local retention bootstrap before site imports. No PATH,
+  profile, service, controller, credential or selector is modified.
+- Registration retains physical producer proofs and an installation-bound
+  receipt. Exact reruns revalidate without rewriting; updates replace only
+  owned commands in the same directory. Foreign same-byte replacements and
+  incomplete evidence refuse. Interrupted publication or acknowledgement keeps
+  pending evidence and reports uncertainty; automatic crash recovery, owned
+  unregister/runtime removal and identity retirement remain separate work.
+- Native qualification reproduced the previously investigated snapshot
+  instability: direct kernel evidence showed Windows read-side metadata-change
+  time advancing while creation time, write time, size and named identity
+  stayed stable. The integrity/staging reader now denies existing and new
+  write/delete handles while permitting readers, checks stable creation/write
+  metadata and retains every byte bound, identity and authenticated hash check.
+  POSIX retains its change-time check. Native controls prove the actual sharing
+  fence, released custody and interrupted descriptor cleanup; no integrity,
+  dependency-age, feed or timeout waiver was used.
+- Final Linux qualification passed 35 artifact controls, 60 staging controls,
+  19 frontdoor tests, 27 construction tests, six native-process/installed-CLI
+  cases, 37 diagnostics, all 27 wheel/sdist/context tests and 40 pinned-source
+  controls, with three explicit platform skips. Native Windows ARM64 passed
+  34 artifact controls, 55 staging controls, 98 combined client safety controls,
+  real independent installed-owner serialization through both Windows launchers
+  and the actual installed command-registration CLI. Native platform/privilege
+  skips were explicit. The shared install-contract check passed all 13 plugins.
+- These are fresh isolated SDK/fixture and native-consumer proofs, not a fresh
+  OS, full fleet or deployed-service claim. Fresh-host qualification remains
+  open under #6424; live fleet activation is not authorized by this source
+  slice. The broader Phase 2 and Validation Plan remain open, and this
+  implementation still needs current-head review, CI and a real merge before
+  it is delivered. Release promotion and authorized rollout remain separate.
+
+### 2026-10-22 - Preserve non-ASCII Windows launcher paths
+- Current-head review of #7866 identified a real code-page dependency:
+  Windows PowerShell 5.1 can decode BOM-less script paths as ANSI, and a batch
+  wrapper containing literal UTF-8 paths depends on its active code page.
+  The PowerShell command now has a UTF-8 BOM; the batch command is ASCII-only,
+  using `%SystemRoot%` and its `%~dp0` sibling rather than embedded paths.
+- Native Windows proved independent installed owners and both entry points
+  with non-ASCII installation and command directories, the actual installed
+  lifecycle CLI with those directories, and 18 command ownership/encoding
+  controls. Linux passed all 19 frontdoor, 27 constructor and six native-process
+  cases with the Unicode fixture, plus both package-context builds. The
+  implementation and broader campaign still await their own remaining gates.
+
+### 2026-10-22 - Scope Windows wrapper execution policy to the child
+- The next #7866 review found the missing process execution-policy option in
+  the PowerShell registration probe and batch compatibility command. Both now
+  pass `-ExecutionPolicy Bypass`, matching the shared installer wrapper without
+  changing persistent host policy or overriding Group Policy.
+- Native coverage injects `Restricted` into the actual returned sanitized
+  probe environments, not just the parent session. A real no-option primary
+  control refuses with `UnauthorizedAccess`; the explicit primary and batch
+  invocations pass, including Unicode paths, independent owners and verified
+  reuse. All 19 native frontdoor cases passed within the existing 120-second
+  portfolio budget; all 19 Linux cases passed too. No policy or timeout
+  waiver, live activation or completed-campaign claim follows.
+
+### 2026-10-22 - Owned client command registration merged
+- #7866 merged into `dev` at `2026-10-22T12:31:28Z`, commit
+  `e7109dca14223df0bb49b2f4622ba16c47606cd7`. Current-head Copilot review
+  `5614097873` approved `a93a3aa0c86ba2e69e6779a3e77f13a3efc2468c`
+  with no open issues. Both Windows findings were fixed and their threads
+  resolved; required CI, source attribution and authorized completion passed.
+- This delivers the explicit client command-registration transition and the
+  native read-custody correction described above, not a complete installer.
+  No PATH/profile/service or live fleet role was changed. Promotion and
+  authorized installed adoption are unobserved; merging source did not invoke
+  an updater, enroll a host or authorize activation.
+- The next serial client work is owned pending-command recovery and removal,
+  using the existing installation and physical publication receipts. Preserve
+  the accepted floor, user configuration, foreign artifacts, backups and retained
+  runtimes. Restoring an older executable is not ordinary removal and still
+  requires the separately scoped retained-good compatibility/rollback policy.
+- The campaign remains Active. Every broader Phase 2, useful-service,
+  persistence, continuity and Validation Plan obligation remains open; this
+  worktree continues the owning effort rather than finalizing after one slice.
+
+### 2026-10-22 - Owned command withdrawal qualified for review
+- The next serial source slice adds explicit `unregister-commands` against an
+  existing installation identity and the same private command directory.
+  It verifies registered/pending intents and canonical physical producer
+  receipts, then uses the shared native recovery primitive with a separate
+  empty-backup removal context. It does not restore the copy backups or an
+  older executable. A durable removal marker blocks registration and lets a
+  fresh owner retry after process death or partial metadata settlement.
+- Present foreign replacements, corrupt/truncated producer proofs and changed
+  installation scope refuse. Complete caught-failure recovery receipts permit
+  withdrawal of an interrupted update whether it left new commands or restored
+  physically proved old commands. Torn/incomplete producer-journal repair and
+  forward completion of a pending registration are not supplied by this slice.
+- Native Windows and isolated Linux ownership/fault suites pass, including an
+  abrupt exit after the first unlink followed by a distinct installed owner.
+  Actual installed CLI registration/withdrawal/no-op flows pass on both
+  platforms with non-ASCII paths. A separately installed owner with no optional
+  dependencies withdraws commands without executing a candidate. Native
+  wheel/RECORD and repository-removed sdist rebuild controls pass.
+- The first withdrawal test exposed a failed registration acknowledgement's
+  shared `.tmp` filename blocking later registration. Acknowledgement and
+  removal-marker staging are now attempt-local; old staging/evidence is retained
+  rather than guessed away. Rerun, pending-update and foreign-replacement
+  controls pass after that correction.
+- Validation tiers: unit/fault and simple installed end-to-end contracts pass.
+  The Linux lane creates an isolated fresh source/SDK and new private client
+  state, not a fresh-OS clean-room or live fleet receipt. No live deployment
+  lane is authorized for this local withdrawal prerequisite; controller/node
+  provisioning, credentials, service migration and shared updaters remain
+  outside its scope. Required source guards and current-head review/CI remain
+  publication/merge gates, not claimed by these local results.
+- Documentation-impact review updated the existing client-command reference,
+  its README entry and this lifecycle plan; no top-level hub, adoption/runtime
+  policy, independent installer or new pattern is introduced. This closes
+  another part of machine-fleet `unified-coordination-product` using the
+  reviewed standalone-system lifecycle and existing versioned-runtime
+  ownership/publication patterns.
+- The accepted floor, runtime selectors, retained candidates, user settings,
+  backups and foreign artifacts remain intact. Runtime removal, retained-good
+  rollback, identity retirement/reinstall fencing, the full managed installer
+  and broader fleet Plan/Validation obligations remain open. Source qualification
+  and a future merge do not authorize promotion, rollout or live activation.
+
+### 2026-10-22 - Owned client command withdrawal merged
+- #7882 merged into `dev` at `2026-10-22T13:29:53Z`, commit
+  `7d42f525c5f99f09f4a1d4eb9660faf24e5e31ff`. Current-head Copilot review
+  `5614965766` approved `f3c6c08b8477babb7a5ca0297f4218cf1b38236c`
+  with no open issues or inline findings. Required CI, source attribution
+  and the repository-authorized managed completion path passed.
+- This closes only physically attributed command withdrawal and retry, including
+  pending attempts with complete durable producer proofs. It does not repair
+  torn producer journals, withdraw runtime selectors, remove retained runtimes,
+  retire installation identity or implement the full installer. No live machine,
+  service, enrollment, credential, PATH/profile or updater was changed.
+  Promotion and authorized installed rollout remain unobserved.
+- Re-read the canonical Plan/Validation Plan after merging. The parent campaign
+  remains Active; client runtime removal and the remaining lifecycle gates are
+  the next serial work, with retained-good compatibility/rollback still separate.
+  Preserve the accepted floor and retained evidence through that work. Broader
+  controller/node assembly, useful services, persistence and continuity remain
+  unresolved; no phase or effort completion is claimed.
+
+### 2026-10-22 - Owned selector withdrawal qualified for review
+- The next serial source slice adds explicit `deactivate-runtime`. It refuses
+  registered/pending/unsettled command state, verifies the installation owner
+  and complete native selector producer proofs, and uses an empty-backup
+  native removal context. Present foreign replacements and corrupt/torn
+  producer receipts refuse before selector effects.
+- A durable intent snapshots active and pending activation references before
+  removal. It blocks activation/registration until a fresh owner settles both
+  absent selectors and clears the acknowledgements. Mixed pending upgrades,
+  first activation without previous ownership, partial metadata settlement,
+  abrupt owner death and foreign replacement after interruption are covered.
+  It does not restore older selectors, stop a client or release live retention.
+- Unit/fault suites pass natively on Windows and in isolated Linux source/SDK
+  environments. A distinct installed process retries after abrupt death; an
+  independently installed dependency-free owner performs withdrawal. Real
+  installed Unicode-path console flows cover construction, activation, command
+  registration/unregistration, selector deactivation and exact no-op on both
+  platforms. Wheel/RECORD and repository-removed sdist rebuild controls pass.
+- The first implementation nested the selector target lease inside the same
+  non-reentrant publication lease. The bounded test caught the contention;
+  withdrawal now takes the canonical grouped target lease once. Test files run
+  in separate bounded portfolios rather than enlarging aggregate timeouts or
+  bypassing qualification-environment ownership.
+- Validation tiers: real local installed-consumer and fresh isolated source/SDK
+  checks were exercised. A full fresh OS and live fleet/controller venue were
+  not exercised: this is a local selector transition, not host bootstrap,
+  runtime deletion, fleet enrollment or deployment authority. Full hosting
+  extras and live readiness are not claimed.
+- Documentation-impact review: the standalone owner README, exact activation/
+  deactivation contract, frontdoor sequencing and this lifecycle plan are
+  updated. The suite architecture already delegates product detail to that
+  owner; no new plugin, service or generic installer mechanism is introduced.
+- The campaign remains Active. Completed-runtime removal still owes exclusive
+  construction/retention/reference/liveness fencing and durable partial-delete
+  recovery; it must not clear completion evidence to call failed-candidate
+  cleanup or raw-GC an installation. Retained-good rollback policy, identity
+  retirement/reinstall fencing, full installer, useful services and all broader
+  unresolved Plan/Validation items remain open. Merge, promotion and authorized
+  rollout remain distinct.

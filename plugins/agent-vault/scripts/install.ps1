@@ -187,6 +187,8 @@ if (-not $env:COPILOT_PLUGIN_INSTALL_STAGED -or
                 $__wdChild = Start-Process -FilePath $__selfStageExe -PassThru -NoNewWindow `
                     -WorkingDirectory $env:USERPROFILE `
                     -ArgumentList $__selfStageArgs
+                # Windows PowerShell must retain the handle before waiting to preserve ExitCode.
+                $null = $__wdChild.Handle
                 if ($__wdDeadline -gt 0 -and -not $__wdChild.WaitForExit($__wdDeadline * 1000)) {
                     try { & taskkill.exe /PID $__wdChild.Id /T /F 2>&1 | Out-Null } catch {}
                     try { Stop-Process -Id $__wdChild.Id -Force -ErrorAction SilentlyContinue } catch {}
@@ -377,7 +379,8 @@ function Invoke-VersionedActivate {
     if ($script:SourceRuntimeIdentity) { Publish-SourceSnapshot | Out-Null }
     Assert-SourceRuntime
     if (-not $VersionedRuntime) { return $true }
-    if ((Test-Path $LinkDir) -and -not (Test-VenvIsLink $LinkDir)) {
+    $legacyVenv = Join-Path $InstallDir '.venv'
+    if ((Test-Path $legacyVenv) -and -not (Test-VenvIsLink $legacyVenv)) {
         Write-Step 'Releasing legacy .venv for versioned migration (stopping daemon)...'
         Invoke-Stop | Out-Null
     }
@@ -684,6 +687,7 @@ function Test-KeePassXCCli {
 }
 
 function Write-Binstubs {
+    param([string]$SnapshotSourcePath)
     foreach ($name in @('resolve-runtime.ps1', 'resolve-runtime.sh')) {
         if (-not (Test-Path -LiteralPath (Join-Path $PSScriptRoot $name) -PathType Leaf)) {
             throw "Required Vault runtime helper is unavailable: $name"
@@ -701,7 +705,8 @@ function Write-Binstubs {
         -SnapshotInstallerPath 'scripts\install.ps1' `
         -NoSelfProvisionEnv 'AGENT_VAULT_NO_SELFPROVISION' `
         -ResolverPs1Source (Join-Path $PSScriptRoot 'resolve-runtime.ps1') `
-        -ResolverShSource (Join-Path $PSScriptRoot 'resolve-runtime.sh')
+        -ResolverShSource (Join-Path $PSScriptRoot 'resolve-runtime.sh') `
+        -SnapshotSourcePath $SnapshotSourcePath
     } catch {
         [Console]::Error.WriteLine("Vault binstub publication failed: $($_.Exception.Message)")
         throw
@@ -1078,8 +1083,8 @@ function Invoke-Stamp {
     }
     $snapDir = Join-Path (Join-Path $InstallDir 'snapshots') $SrcVersion
     Assert-SourceRuntime
-    Write-Binstubs
     if ($script:SourceRuntimeIdentity) {
+        Write-Binstubs
         Publish-SourcePayload
         Write-Ok 'Stamped: agent-vault binstub on PATH; runtime provisions on first use.'
         return
@@ -1093,6 +1098,7 @@ function Invoke-Stamp {
     }
     Materialize-SnapshotLibs -SnapshotDir $snapTmp
     Materialize-SnapshotInstallerEngine -SnapshotDir $snapTmp
+    Write-Binstubs -SnapshotSourcePath $snapTmp
     if (Test-Path $snapDir) { Remove-Item $snapDir -Recurse -Force -ErrorAction SilentlyContinue }
     Move-Item -LiteralPath $snapTmp -Destination $snapDir -Force
     [System.IO.File]::WriteAllText((Join-Path $InstallDir 'payload-dir'), $snapDir, $utf8NoBom)
@@ -1161,14 +1167,14 @@ function Stop-VaultDaemonGraceful {
 }
 
 function Invoke-Install {
-    Write-Host ''; Write-Host '=== agent-vault install ===' -ForegroundColor Cyan; Write-Host ''
+    Write-Step 'agent-vault install'
     Install-Runtime
     Register-AgentVaultTask
-    Write-Host ''; Write-Host '=== agent-vault install complete ===' -ForegroundColor Cyan
+    Write-Ok 'agent-vault install'
 }
 
 function Invoke-Update {
-    Write-Host ''; Write-Host '=== agent-vault update ===' -ForegroundColor Cyan; Write-Host ''
+    Write-Step 'agent-vault update'
     Invoke-DowngradeGuard
     Install-Runtime
     # Thread B (lightest tier; docs/patterns/graceful-daemon-cutover.md): a version
@@ -1181,7 +1187,7 @@ function Invoke-Update {
     # starts the new daemon on the now-free endpoint.
     if (-not $NoService) { [void](Stop-VaultDaemonGraceful) }
     Register-AgentVaultTask
-    Write-Host ''; Write-Host '=== agent-vault update complete ===' -ForegroundColor Cyan
+    Write-Ok 'agent-vault update'
 }
 
 function Invoke-Start {

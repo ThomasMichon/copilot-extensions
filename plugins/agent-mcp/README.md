@@ -29,6 +29,13 @@ Windows setup probes optional Python-launcher versions quietly when choosing a
 signed base interpreter. Unavailable candidates are verbose diagnostics; actual
 venv creation and package-install failures retain their normal error reporting.
 
+The Windows `init.ps1` installer declares its requested UTF-8 human-output
+boundary for the updater's existing timed adapter. Construction-shell and GC
+count diagnostics pass through the existing dual-stream native helper without
+changing native decoding, stdin, arguments or construction ownership. Direct
+installer invocation keeps its original encoding. This declaration does not
+format the MCP bridge, CLI JSON or stdio protocol.
+
 1. Enable/install the `agent-mcp` plugin. Session-facing skills receive an exact
    payload-local command through the session command catalog; static MCP
    frontmatter and generated materialized fleets continue using the

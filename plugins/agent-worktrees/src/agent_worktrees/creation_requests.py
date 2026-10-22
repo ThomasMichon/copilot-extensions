@@ -10,7 +10,7 @@ from pathlib import Path
 import sqlite3
 import stat
 
-from . import config as cfg, tracking
+from . import config as cfg, creation_allocation, tracking
 
 SCHEMA_VERSION = 1
 
@@ -64,7 +64,10 @@ def allocation_facts(config: cfg.Config, **options) -> dict:
         "no_pair": options["no_pair"] or bool(os.environ.get("AGENT_WORKTREES_NO_PAIR")),
         "seed_sha256": hashlib.sha256((options["pending_seed"] or "").encode()).hexdigest(),
         "pending_seed_id": options.get("pending_seed_id"),
-        "allocation": options.get("allocation"),
+        "allocation": (
+            options["admitted_allocation"].to_fields() if options.get("admitted_allocation") is not None
+            else options.get("allocation")
+        ),
         # Attempt provenance is evidence about the original allocation, not a
         # logical revision authorizing another one.
         "dispatch_task_id": (options["dispatch_attempt"] or {}).get("task_id"),
@@ -117,10 +120,17 @@ def _owner_record(worktree: dict, records: Path, project: str) -> tracking.Workt
         raise CreationRequestFailure("conflict", "The original allocation's owner identity changed", worktree)
     if not record.creation_nonce:
         raise CreationRequestFailure("pending", "The allocation has no authoritative creation nonce", worktree)
+    try:
+        creation_allocation.require_result_identity(record, worktree)
+    except ValueError as exc:
+        raise CreationRequestFailure("conflict", str(exc), worktree) from exc
     return record
 
 
-def _replay(row: tuple, facts: str, records: Path, project: str) -> dict:
+def _replay(
+    row: tuple, facts: str, records: Path, project: str,
+    validate_record: Callable[[tracking.WorktreeRecord], None] | None = None,
+) -> dict:
     version, saved_facts, status, saved_worktree = row
     if version != SCHEMA_VERSION:
         raise CreationRequestFailure("unsupported", "Unsupported creation journal version")
@@ -145,6 +155,13 @@ def _replay(row: tuple, facts: str, records: Path, project: str) -> dict:
     record = _owner_record(worktree, records, project)
     if record.creation_nonce != receipt.get("creation_nonce"):
         raise CreationRequestFailure("conflict", "The original allocation was replaced", worktree)
+    if "record_identity" in receipt:
+        try:
+            creation_allocation.require_record_evidence(record, receipt["record_identity"])
+        except ValueError as exc:
+            raise CreationRequestFailure("conflict", str(exc), worktree) from exc
+    if validate_record is not None:
+        validate_record(record)
     return {
         "worktree": worktree,
         "creation": {"version": SCHEMA_VERSION, "status": "complete", "replayed": True},
@@ -156,6 +173,8 @@ def create(
     key: str,
     facts: dict,
     allocate: Callable[[Callable[[dict], None]], dict],
+    *,
+    validate_record: Callable[[tracking.WorktreeRecord], None] | None = None,
 ) -> dict:
     """Persist intent before effects; only the insert winner may allocate."""
     if not isinstance(key, str) or not key.strip() or len(key) > 1024:
@@ -178,7 +197,7 @@ def create(
             )
             if row is not None and not retry_refused:
                 try:
-                    return _replay(row, encoded_facts, records, config.repo_name)
+                    return _replay(row, encoded_facts, records, config.repo_name, validate_record)
                 except CreationRequestFailure as exc:
                     if exc.status == "terminal":
                         connection.execute(
@@ -220,6 +239,8 @@ def create(
             raise
         worktree = result["worktree"]
         record = _owner_record(worktree, records, config.repo_name)
+        if validate_record is not None:
+            validate_record(record)
         with connection:
             saved_identity = connection.execute(
                 "SELECT worktree FROM creations WHERE key_digest=? AND status='pending'",
@@ -235,6 +256,7 @@ def create(
                 "WHERE key_digest=? AND status='pending'",
                 (json.dumps({
                     "worktree": worktree, "creation_nonce": record.creation_nonce,
+                    "record_identity": creation_allocation.record_evidence(record),
                 }, sort_keys=True), digest),
             ).rowcount
             if changed != 1:

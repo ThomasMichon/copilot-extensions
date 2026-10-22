@@ -15,10 +15,13 @@ import os
 import platform
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 from . import config as cfg, output
 from . import control_plane_providers as _cpp
+from .update_events import bounded
 
 _WORKTREE_MANAGER_BIN = "worktree-manager"
 _WORKTREE_MANAGER_MIN_PICKER_VERSION = (0, 1, 0, 21)
@@ -63,23 +66,42 @@ def _core_helper(name: str, local):
 
 
 def _select_control_plane_provider_manifest() -> _ControlPlaneProviderManifest | None:
-    manifests = _core_helper(
+    manifest, _ = _control_plane_provider_selection()
+    return manifest
+
+
+def _control_plane_provider_selection(
+    *, directory: Path | None = None,
+) -> tuple[_ControlPlaneProviderManifest | None, str]:
+    # Preserve the upstream selection result; recovery also binds the standalone
+    # machine registry explicitly, as the Terminal-profile consumer already does.
+    discover = _core_helper(
         "_discover_control_plane_provider_manifests",
         _discover_control_plane_provider_manifests,
-    )()
+    )
+    manifests = discover(directory=directory) if directory is not None else discover()
     selected = os.environ.get(_CONTROL_PLANE_PROVIDER_ENV, "").strip()
     if selected:
-        return manifests.get(selected)
+        manifest = manifests.get(selected)
+        diagnostic = "" if manifest is not None else (
+            f"Selected control-plane provider {bounded(selected, 120)!r} is not registered."
+        )
+        return manifest, diagnostic
     if len(manifests) == 1:
-        return next(iter(manifests.values()))
-    return None
+        return next(iter(manifests.values())), ""
+    if manifests:
+        return None, (
+            "Multiple control-plane providers are registered; set "
+            f"{_CONTROL_PLANE_PROVIDER_ENV} to select one."
+        )
+    return None, ""
 
 
 def _provider_command_display_name(
     manifest: _ControlPlaneProviderManifest,
 ) -> tuple[str, str]:
     if manifest.provider == _WORKTREE_MANAGER_BIN:
-        return f"'{_WORKTREE_MANAGER_BIN}'", "on PATH"
+        return f"'{_WORKTREE_MANAGER_BIN}'", f"via {manifest.source_path}"
     return f"registered control-plane provider '{manifest.provider}'", f"via {manifest.source_path}"
 
 
@@ -139,50 +161,54 @@ def _probe_worktree_manager_version(
     return None, None
 
 
-def _usable_worktree_manager() -> tuple[str, ...] | None:
-    """The selected control-plane provider command, when invocable (DQ8 guard)."""
-    override = _core_helper("_usable_worktree_manager", _usable_worktree_manager)
-    if override is not _usable_worktree_manager:
-        return override()
-    manifest = _core_helper(
-        "_select_control_plane_provider_manifest", _select_control_plane_provider_manifest
-    )()
+@dataclass(frozen=True)
+class _ManagerHealth:
+    state: Literal["absent", "failed", "ready"]
+    command: tuple[str, ...] | None = None
+    diagnostic: str = ""
+
+
+def _worktree_manager_health() -> _ManagerHealth:
+    """Distinguish first-run absence from a selected provider's failed probe."""
+    manifest, selection_error = _control_plane_provider_selection()
+    if selection_error:
+        return _ManagerHealth("failed", diagnostic=selection_error)
     if manifest is None:
-        return None
+        return _ManagerHealth("absent")
     version, proc = _core_helper(
         "_probe_worktree_manager_version", _probe_worktree_manager_version
     )([*manifest.command, "--version"])
     display_name, display_source = _provider_command_display_name(manifest)
-    command0 = manifest.command[0]
+    source = bounded(f"{display_name} {display_source} ({manifest.command[0]})", 240)
     if proc is None:
-        output.err(
-            f"Ignoring an unusable {display_name} {display_source} ({command0}): "
-            "it could not be run. Falling back to the bundled picker."
+        reason = "its --version health check could not complete (could not start or timed out)"
+    elif proc.returncode != 0:
+        reason = f"its --version health check failed (exit {proc.returncode})"
+    elif version is None:
+        reason = "its --version output did not include a supported version"
+    elif version < manifest.minimum_version:
+        reason = (
+            "production Picker handoff requires "
+            f"{bounded(manifest.minimum_version_text, 80)} or newer"
         )
-        return None
-    if version is None and proc.returncode != 0:
-        output.err(
-            f"Ignoring a broken {display_name} {display_source} ({command0}): it "
-            f"failed a --version health check (exit {proc.returncode}). This is "
-            "usually a stale binstub from an old install; reinstall or remove "
-            "it. Falling back to the bundled picker."
-        )
-        return None
-    if version is None:
-        output.err(
-            f"Ignoring an incompatible {display_name} {display_source} ({command0}): "
-            "its --version output did not include a supported version. Falling "
-            "back to the bundled picker."
-        )
-        return None
-    if version < manifest.minimum_version:
-        output.err(
-            f"Ignoring an older {display_name} {display_source} ({command0}): "
-            f"production Picker handoff requires {manifest.minimum_version_text} or newer. "
-            "Falling back to the bundled picker."
-        )
-        return None
-    return manifest.command
+    else:
+        return _ManagerHealth("ready", command=manifest.command)
+    detail = f"Cannot use {source}: {reason}."
+    if proc is not None and proc.stderr and proc.stderr.strip():
+        detail += f" stderr: {bounded(proc.stderr.strip(), 400)}"
+    return _ManagerHealth("failed", diagnostic=detail)
+
+
+def _usable_worktree_manager() -> tuple[str, ...] | None:
+    """Compatibility command-or-None view of the selected provider's health."""
+    override = _core_helper("_usable_worktree_manager", _usable_worktree_manager)
+    if override is not _usable_worktree_manager:
+        return override()
+    health = _core_helper("_worktree_manager_health", _worktree_manager_health)()
+    if health.diagnostic:
+        with output.stdout_to_stderr():
+            output.err(health.diagnostic)
+    return health.command
 
 
 def _worktree_manager_root() -> Path:
@@ -218,11 +244,26 @@ def _usable_worktree_manager_launcher_dir() -> Path | None:
     )
     if slot is None:
         return None
+    bootstrap = slot / ".runtime-bootstrap" / "runtime_launcher.py"
+    if bootstrap.is_file():
+        python = next(
+            (path for path in (slot / "bin" / "python", slot / "Scripts" / "python.exe") if path.is_file()),
+            None,
+        )
+        if python is None:
+            output.warn(f"Ignoring an incomplete Worktree Manager runtime at {slot}")
+            return None
+        command = [
+            str(python), "-I", "-S", "-B", "-X", "utf8", str(bootstrap),
+            "-m", "worktree_manager", "--version",
+        ]
+        launcher_dir = slot / "payload" / "bin"
+    else:
+        command = ["uv", "run", "--quiet", "--project", str(slot), "python", "-m", "worktree_manager", "--version"]
+        launcher_dir = slot / "bin"
     version, proc = _core_helper(
         "_probe_worktree_manager_version", _probe_worktree_manager_version
-    )(
-        ["uv", "run", "--quiet", "--project", str(slot), "python", "-m", "worktree_manager", "--version"]
-    )
+    )(command)
     if proc is None:
         output.warn(
             "Ignoring an unusable Worktree Manager install at "
@@ -242,7 +283,7 @@ def _usable_worktree_manager_launcher_dir() -> Path | None:
             f"{slot}: its --version output did not include a supported version."
         )
         return None
-    return slot / "bin"
+    return launcher_dir
 
 
 def _agent_worktrees_launch_command(project: str | None) -> list[str]:
@@ -324,7 +365,7 @@ def _run_direct_launch_fallback(project: str | None, passthrough: list[str]) -> 
             if not isinstance(ssh_alias, str) or not isinstance(remote_cmd, str):
                 output.err("Remote launch plan is missing ssh handoff details.")
                 return 1
-            proc = subprocess.Popen(["ssh", "-t", ssh_alias, remote_cmd])
+            proc = subprocess.Popen(["ssh", "-t", ssh_alias, remote_cmd])  # headless-guard: allow interactive SSH in caller's console
             return _wait_for_launch_child(proc)
         if action != "exec":
             output.err(f"Unknown launch action: {action}")
@@ -395,6 +436,10 @@ def _exec_worktree_manager(
         **os.environ,
         _WORKTREE_MANAGER_ENGINE_ARGV_ENV: json.dumps([sys.executable, "-m", "agent_worktrees"]),
     }
+    if subcommand and subcommand[0] == "update":
+        from update_driver import participant_environment
+
+        env.update(participant_environment())
     if platform.system() == "Windows":
         from agent_procutil import spawn_sync_in_kill_on_close_job
 
@@ -539,7 +584,7 @@ def dispatch_bare_invocation(has_project: bool) -> int:
     help_unrouted = _core_helper("cmd_help_unrouted", _fdc.cmd_help_unrouted)
     is_headless = _core_helper("_is_headless_project", _is_headless_project)
     headless_bare = _core_helper("cmd_headless_bare", cmd_headless_bare)
-    usable_manager = _core_helper("_usable_worktree_manager", _usable_worktree_manager)
+    manager_health = _core_helper("_worktree_manager_health", _worktree_manager_health)
     exec_worktree_manager = _core_helper("_exec_worktree_manager", _exec_worktree_manager)
     bundled_picker_available = _core_helper("_bundled_picker_available", _bundled_picker_available)
     manager_install_trigger = _core_helper(
@@ -552,15 +597,18 @@ def dispatch_bare_invocation(has_project: bool) -> int:
     if has_project:
         if is_headless():
             return headless_bare()
-        mgr = usable_manager()
-        if mgr:
-            return exec_worktree_manager(mgr, cfg.active_project())
-        if bundled_picker_available():
-            return _core().cmd_launch([])
-        return manager_install_trigger(cfg.active_project())
-    mgr = usable_manager()
-    if mgr:
-        return exec_worktree_manager(mgr, None)
+    health = manager_health()
+    project = cfg.active_project() if has_project else None
+    if health.command:
+        return exec_worktree_manager(health.command, project)
+    if health.diagnostic:
+        with output.stdout_to_stderr():
+            output.err(health.diagnostic)
     if bundled_picker_available():
-        return help_unrouted()
-    return manager_install_trigger(None)
+        if has_project:
+            output.warn("Launching the bundled picker.")
+            return _core().cmd_launch([])
+        rc = help_unrouted()
+    else:
+        rc = manager_install_trigger(project)
+    return (rc or 1) if health.state == "failed" else rc

@@ -67,6 +67,116 @@ print(result.stdout)
 await manager.disconnect("my-server")
 ```
 
+## Optional finite reverse-forward selection
+
+`ssh_manager.reverse_candidates.FiniteReverseForward` subclasses the existing
+`SupervisedRelayForward` process and monitor owner; it does not start a second
+keeper. Existing fixed-port consumers and their constructor remain unchanged.
+This opt-in boundary is for the constrained reverse-SSH grants described in
+`docs/patterns/service-transport.md`, not ordinary local service allocation.
+
+Supply a unique tuple of one to sixteen `ReverseEndpoint(host, port)` values,
+an explicit printable `request_id`, and async
+`observe(ReverseAttempt) -> ReverseEvidence`. Endpoints are exact `localhost`,
+`127.0.0.1` or `::1` literals and positive TCP ports. Their spelling is
+preserved in SSH arguments, not treated as interchangeable permission grants.
+Both `permitlisten` and any peer `permitopen` must already be authorized by the
+existing enrollment/policy owner. This parser and the observation callback do
+not create that authority.
+
+Each real SSH attempt has a distinct `attempt_id`, the original request
+correlation, endpoint, target port and owned process PID. `process_settled`
+reports only the existing settle check, **not SSH acceptance or authenticated
+readiness**. The trusted observer must independently bind server-side ownership
+and end-to-end serving to that actual attempt. It returns the same attempt ID
+with `ready`, `occupied`, `refused` or `unknown`. A TCP accept, an alive SSH
+process, or a caller-supplied generation alone is insufficient evidence.
+Evidence may additionally carry an allowlisted reason: `collision`,
+`authentication`, `host-key`, `permission`, `transport`, `readiness` or
+`unclassified`. Arbitrary exception/credential text is not accepted as a reason.
+
+Only a positive owner classification of `occupied` **and** SSH's failed-forward
+result advance to the next candidate. Exit255 and OpenSSH's generic failure
+warning cannot distinguish collision from permission refusal, so they do not
+permit rotation by themselves. The successful SSH process/listener remains
+held throughout observation and return. No free-port probe is closed and later
+rebound. The existing target-port resolver, headless proxy owner, process-tree
+cleanup and reconnect gate are reused.
+The default local target remains the initially supplied target port when the
+remote listener changes; a failing/invalid explicit resolver is refused rather
+than silently forwarding to another candidate port. Every monitor-driven
+candidate rechecks the reconnect gate. A stopped venue retires the owner;
+an inconclusive gate defers connection through the existing backoff.
+The finite owner bounds each gate wait by the available operation budget,
+accepts only actual boolean results and redacts provider exceptions in its
+diagnostics. Invalid gate data remains unknown rather than becoming a truthy
+permission or a false stopped-venue report. A synchronous target-port resolver
+must supply an immediate local value, not perform blocking I/O.
+The existing fixed-port gate also omits raw provider exception values from its
+warning, without changing that path's routing or retry behavior.
+Late failure parsing retains a hidden, untrimmed 128-character carry and inspects
+at most sixteen additional 4 KiB stderr chunks within the remaining deadline.
+This preserves markers split across settle/read boundaries without logging or
+exposing the raw diagnostic in the result.
+
+`establish()`/`start()` retain their awaitable shape; inspect immutable
+`reverse_status` afterward. `ready` supplies the exact attempt for the existing
+fleet owner's generation-checked discovery publication. A dead/retired process
+cannot retain a ready status. Exhaustion yields `ReverseForwardError` with
+`status.state == "unavailable"` and `reason == "candidates-exhausted"`.
+Other bounded result states distinguish refusal, stopped ownership and unknown
+outcomes; raw adapter errors are not rendered in their messages.
+
+An observer error, timeout, wrong correlation or interruption latches `unknown`
+under the original request. The existing monitor stops rather than allocating
+another candidate; `stop()` cleans owned transports but does not settle that
+unknown. The caller must reconcile through its original operation/authority
+before any replacement request or instance. Every non-cancellation observer
+exception, including a provider-raised `ReverseForwardError`, is normalized to
+the original operation's unknown result rather than trusted as local control
+state. The observer verifies readiness only; fleet publication remains outside
+this callback. Interrupted spawn ownership is
+retained through eventual cleanup, with a separate five-second cleanup wait;
+pending cleanup remains explicitly owned rather than discarded at that wait.
+The operation itself has one finite deadline across all candidates.
+Retirement, candidate establishment and monitor-driven replacement share one
+task-owned lifecycle boundary. A concurrent caller receives an explicit
+`unavailable/lifecycle-busy` error without altering the active operation's
+status; it does not install a replacement during another attempt's cleanup.
+Stored readiness is invalidated before an exited transport is replaced.
+`stop()` cancels an in-flight owner operation and waits for its owned cleanup;
+an interrupted attempt remains unknown, not a fabricated successful release.
+Concurrent stops join the same shutdown completion rather than cancelling
+another shutdown's caller. Cancellation is reserved for establishment or
+reconnect work, and `stop_nowait()` cooperates with an already-running shutdown.
+Shutdown waits for lifecycle ownership to be released, not for the entire caller
+task to finish: that caller can safely join shutdown from its own `finally`.
+For generation-bound consumer cleanup, use `await stop_attempt(attempt_id)`:
+the match and local retirement share that lifecycle boundary. A stale attempt
+returns `None` without stopping a reconnected successor. A matching attempt
+returns its final `ReverseStatus`, including any still-unknown observation.
+If unconditional shutdown is already running, attempt-specific cleanup joins it
+before acquiring lifecycle ownership, then rechecks the attempt. A caller's
+fenced `finally` cleanup cannot block the shutdown it is joining.
+This local fence does not replace the fleet owner's publication/enrollment
+generation checks; unconditional `stop()` remains explicit owner shutdown.
+All detached cleanup stays tracked until it finishes. A `stop_nowait()` followed
+by `start()` is refused with `cleanup-pending` while old retirement could still
+sweep descendants. Cancellation during refusal cleanup latches unknown, and a
+late-spawn process whose termination fails remains referenced so a later explicit
+stop can retry its owned cleanup. Completing that cleanup does not settle an
+unknown remote observation or publication.
+Retirement is confirmed only when the captured process has an observed exit
+code. A helper returning without raising is insufficient; an unconfirmed exit
+keeps the process reference, records unknown and prevents replacement.
+
+This library supplies no authenticated production observer, enrollment
+projection, fleet publication ledger, installer or adoption. Local socket and
+process tests qualify resource retention/cleanup, **not OpenSSH permissions,
+remote authentication or deployed recovery**. Real OpenSSH qualification needs
+an explicitly supplied isolated fixture with existing credentials; no key or
+system sshd configuration is provisioned by this API or its tests.
+
 ## Windows proxy lifecycle
 
 Managed commands, forwards, and probes use
@@ -91,6 +201,10 @@ inheritance. POSIX environment handling is unchanged.
 The broker lives in the calling process and closes with its SSH root.
 `terminate_ssh_process_tree` also awaits broker cleanup on timeout or
 cancellation. No persistent broker service or cached loopback port is created.
+The Windows client requests strict GUI selection from `agent_procutil`.
+Renamed or relocated physical GUI targets are accepted based on that selection
+intent, not a filename check; an unavailable GUI interpreter is refused rather
+than substituting the ordinary console fallback.
 POSIX transports retain native ProxyCommand execution.
 
 ## As a Dependency

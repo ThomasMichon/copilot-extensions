@@ -22,6 +22,7 @@
 # pre-commit/pre-push shims run there): POSIX slots keep python at bin/python,
 # Windows slots at Scripts/python.exe.
 AW_PY=""
+_aw_trace_buffer=""
 _awr="${AGENT_RT_ROOT:-$HOME/.agent-worktrees}"
 _awv=""
 _aw_trace_source=""
@@ -67,6 +68,7 @@ _aw_boot_trace_iso() {
 }
 
 _aw_boot_trace_log() {
+  [ "${AGENT_RT_RESOLVE_TRACE_MODE:-}" != read-only ] || return 0
   [ -n "${_aw_bt_log_path:-}" ] || return 0
   [ -d "$_awr" ] || return 0
   _aw_phase="$1"
@@ -77,9 +79,6 @@ _aw_boot_trace_log() {
   _aw_version="${6-}"
   _aw_dispatch_path="${7-}"
   _aw_bt_log_dir="${_aw_bt_log_path%/*}"
-  if [ ! -d "$_aw_bt_log_dir" ]; then
-    mkdir -p "$_aw_bt_log_dir" 2>/dev/null || return 0
-  fi
   _aw_bt_line="{\"ts\":\"$(_aw_boot_trace_iso)\",\"event\":\"boot_trace\",\"plugin\":\"$_aw_bt_plugin\",\"phase\":\"$_aw_phase\",\"t_ms\":$_aw_now_ms,\"pid\":$$"
   if [ -n "${HOSTNAME:-}" ]; then
     _aw_bt_line="$_aw_bt_line,\"host\":\"$HOSTNAME\""
@@ -98,6 +97,14 @@ _aw_boot_trace_log() {
     _aw_bt_line="$_aw_bt_line,\"path\":\"$_aw_dispatch_path\""
   fi
   _aw_bt_line="$_aw_bt_line}"
+  if [ "${AGENT_RT_RESOLVE_TRACE_MODE:-}" = ready ]; then
+    _aw_trace_buffer="$_aw_trace_buffer$_aw_bt_line
+"
+    return 0
+  fi
+  if [ ! -d "$_aw_bt_log_dir" ]; then
+    mkdir -p "$_aw_bt_log_dir" 2>/dev/null || return 0
+  fi
   { printf '%s\n' "$_aw_bt_line" >> "$_aw_bt_log_path"; } 2>/dev/null || true
 }
 
@@ -250,7 +257,14 @@ else
   _aw_boot_trace resolver-slot-result resolver none miss
 fi
 AGENT_RT_PY="$AW_PY"
+if [ "${AGENT_RT_RESOLVE_TRACE_MODE:-}" = ready ] &&
+   [ -n "$AW_PY" ] && [ -n "$_aw_trace_buffer" ]; then
+  if mkdir -p "$_aw_bt_log_dir" 2>/dev/null; then
+    { printf '%s' "$_aw_trace_buffer" >> "$_aw_bt_log_path"; } 2>/dev/null || true
+  fi
+fi
 unset _awr _awv _awlkg _sub _slot _aw_source_present _aw_trace_source _aw_trace_version \
+  _aw_trace_buffer \
   _aw_bt_raw _aw_bt_plugin _aw_bt_extra _aw_bt_log_path _aw_bt_log_dir \
   _aw_bt_line _aw_bt_iso _aw_phase _aw_now_ms _aw_emitter \
   _aw_resolution_source _aw_result _aw_version _aw_dispatch_path \

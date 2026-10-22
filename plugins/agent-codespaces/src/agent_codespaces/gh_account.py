@@ -77,8 +77,16 @@ def _account_for_repo(slug: str | None) -> str | None:
 
 def token_for_account(login: str | None) -> str | None:
     """Avoid reusing credentials across explicit installation contexts."""
-    if worktrees.explicit_context():
+    explicit = worktrees.explicit_context()
+    if explicit:
         worktrees.validate_context()
+    if login:
+        from .picker_auth import credential_token
+
+        provider_token = credential_token(login)
+        if provider_token is not None:
+            return provider_token
+    if explicit:
         return _token_for_account.__wrapped__(login)
     return _token_for_account(login)
 
@@ -120,6 +128,11 @@ def env_for_account(login: str | None, base: dict | None = None) -> dict:
         # GH_TOKEN wins in gh; drop a stale GITHUB_TOKEN so it can't shadow it.
         env["GH_TOKEN"] = token
         env.pop("GITHUB_TOKEN", None)
+    elif login:
+        from .picker_auth import credential_env
+
+        if credential_env(login) is not None:
+            raise RuntimeError(f"CodeSpace credential for {login} is unavailable; authorize again.")
     return env
 
 

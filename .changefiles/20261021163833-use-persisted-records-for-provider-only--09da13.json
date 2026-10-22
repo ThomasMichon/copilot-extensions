@@ -1,0 +1,9 @@
+{
+  "comment": "Use persisted records for provider-only test setup while retaining publication integrations",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

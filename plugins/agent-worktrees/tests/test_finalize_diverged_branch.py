@@ -20,7 +20,12 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from agent_worktrees import finalize
+
+
+pytestmark = pytest.mark.usefixtures("git_only_mux")
 
 
 def _git(*args: str, cwd: Path) -> str:

@@ -1,0 +1,55 @@
+{
+  "captured_from": {
+    "commit": "632cac7b9de4c42ef2c765053a783fbead0bbff0",
+    "plugin_version": "0.4.1-dev3",
+    "source_path": "plugins/agent-bridge/src/agent_bridge/live_message_models.py",
+    "source_git_blob": "688e638d85cef69b4e4b285e1280bdba8cf02f5d",
+    "protocol_generation": 44,
+    "source_sha256": "56b6a27d9142b1ccd26dd22ea5f3bc4e4c4e3cb4df900f0c55da1623e0bfd4ed"
+  },
+  "capability": {
+    "operation": "GET /api/v1/live-sessions/{session_id}/messages/{message_id}/receipt",
+    "required_protocol_version": 39,
+    "unsupported_status": 426
+  },
+  "request": {
+    "sender": "example-peer",
+    "body": "continue",
+    "idempotency_key": "example-message"
+  },
+  "accepted_model": {
+    "sender": "example-peer",
+    "body": "continue",
+    "reply_to": null,
+    "kind": "prompt",
+    "delivery": "steer",
+    "wait": false,
+    "wait_timeout": 120.0,
+    "expected_session_id": null,
+    "idempotency_key": "example-message"
+  },
+  "response": {
+    "ok": true,
+    "session_id": "example-session",
+    "message_id": 1,
+    "duplicate": false,
+    "receipt": {
+      "session_id": "example-session",
+      "message_id": 1,
+      "stage": "admitted",
+      "admitted_at": 100.0,
+      "sdk_accepted_at": null,
+      "consumed_at": null
+    },
+    "receipt_current": true,
+    "receipt_error": null,
+    "reply_correlation": null,
+    "replied": false,
+    "reply": null,
+    "stop_reason": null
+  },
+  "reattested_from": {
+    "path": "plugins/agent-bridge/contract/fixtures/http/current/live-message-receipt-generation-43.json",
+    "sha256": "5fe006fcb6cfc5bab622ac59917e23acbd5d0abb43dfedcf1b1161850b074380"
+  }
+}

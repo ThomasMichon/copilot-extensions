@@ -59,10 +59,21 @@ reusable artifact or slot paths. `read_artifact(component, current_policy)`
 reads a bounded ordinary-file snapshot through a held descriptor, re-verifies
 current policy and staged integrity, and compares that snapshot with the
 authenticated component hash and size before returning immutable `bytes`.
+On Windows the shared integrity/staging reader holds a native read-only handle
+that permits other readers but denies existing and new write/delete handles
+until the read settles. It compares size, write time and stable creation time;
+metadata-change time can advance during read-side access updates and is not a
+content revision. POSIX retains its no-follow/nonblocking open and change-time
+check. Both paths keep the byte bounds, identity checks and authenticated hashes.
 Replacing a path after verification cannot substitute what the consumer reads;
 each new read independently authenticates its own snapshot. At most one
 64 MiB component is materialized per call. Returned bytes remain an immutable
 snapshot, not a lifetime, freshness or execution grant.
+`artifact_filenames` exposes a fresh mapping of portable component filenames,
+not their stage paths. `read_manifest(current_policy)` returns the exact
+immutable manifest bytes only after fresh in-context authentication. Neither
+surface authorizes construction; the separate lifecycle owner still admits
+its own installation, selected release and compatibility.
 `reverify(current_policy)` re-reads the
 frozen manifest, authenticates it under the supplied current policy and clock,
 and hashes selected frozen artifacts again. It does not trust a saved report,

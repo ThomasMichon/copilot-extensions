@@ -535,7 +535,7 @@ def test_python_lock_release_gives_each_windows_operation_a_retry_window(
     original_unlink = Path.unlink
     original_rmdir = Path.rmdir
     attempts = {"unlink": 0, "rmdir": 0}
-    moments = iter((0.0, 0.6, 0.9, 1.0, 1.5))
+    moments = iter((0.0, 0.0, 0.6, 0.9, 1.0, 1.5))
 
     def flaky_unlink(path: Path, *args: object, **kwargs: object) -> None:
         if path == lock.owner_path:

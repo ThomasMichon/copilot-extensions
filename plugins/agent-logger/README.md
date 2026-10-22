@@ -66,6 +66,28 @@ session-to-log pipeline out of any single bespoke service:
 
 ## Source-qualified runtimes
 
+Native `stamp`, `provision`, `install` and `update` admit publication before
+creating or reclaiming staging directories. An available bootstrap Python uses
+the [shared source-qualified lifecycle](../../libs/payload-invocation/README.md#source-qualified-command-binding),
+including live management-purpose custody and revalidation by the staged child.
+PowerShell accepts `-BootstrapPython` to select an existing absolute interpreter.
+Absent Python, the canonical native deployment probe preserves missing-policy
+and explicit standalone stamping and refuses managed or invalid policy without
+installing an interpreter. Staged probes revalidate the original payload's
+source and the canonical addressed root, including relative and trailing-slash
+spellings. No environment boolean or staged-origin hint grants management
+permission. Scoped installations check their own addressed root; command
+catalogs and non-publication actions retain their existing contracts.
+Waiting supervisors release replaceable payload working directories and script
+handles while retaining the launch project's read context. Windows Bash retains
+its existing requirement to launch outside the payload (for example from HOME);
+the unsafe payload-CWD form refuses before staging, rather than pinning an
+outer shell throughout installation.
+PowerShell captures its filesystem provider location before rerooting, including
+interactive `Set-Location` and relative install roots. Bash retains the exact
+selected Python and Bash executables as absolute paths before leaving the launch
+directory; a relative `PATH` entry cannot silently select another interpreter.
+
 Both native installers accept a canonically prepared `runtime-source.json`
 payload. They pin its full identity before the installation lock and revalidate
 it before construction, completion and activation. Source generations are
@@ -75,6 +97,21 @@ ordinary package-only installs retain their existing version identity.
 Deferred stamps retain the complete verified payload and vendor closure in an
 immutable source snapshot, so first-use provisioning and the `session-sync`
 command family remain usable after the publisher checkout is unavailable.
+Legacy snapshots retain
+[canonical frozen source evidence](../../libs/installation-context/README.md)
+for fresh-process policy admission, including stamps made without Python.
+The live deployment policy is never cached as permission in that evidence.
+Generated compatibility wrappers and payload-local commands resolve a healthy
+runtime before considering publication. Cold misses defer durable resolver
+tracing until the live canonical deployment decision admits publication, before
+any provision status or orchestration-lock write. Payload-local commands check
+the validated selected installation root, including namespaced cells; they do
+not substitute legacy-root policy. Healthy managed runtimes remain callable
+without invoking an installer, and retain their normal resolution trace.
+An older deployed resolver without the deferred-trace contract, or a cold
+snapshot without the admission helper, returns an explicit readiness error
+without writing runtime state; update/re-enable the plugin or use explicit
+installation management rather than falling back to unguarded provisioning.
 Identical inputs reuse snapshots and completion evidence. Recovery requires an
 exact current or last-known-good selector rather than ordering source hashes.
 `agent-logger version` reports the selected source generation without changing

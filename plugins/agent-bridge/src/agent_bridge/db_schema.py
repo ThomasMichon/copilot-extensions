@@ -40,6 +40,10 @@ class _SchemaMixin:
                 "CREATE UNIQUE INDEX IF NOT EXISTS idx_turn_acquisition_delivery "
                 "ON turns(acquisition_delivery_id) WHERE acquisition_delivery_id IS NOT NULL"
             )
+            if "native_admission_json" not in {
+                item[1] for item in conn.execute("PRAGMA table_info(turns)")
+            }:
+                conn.execute("ALTER TABLE turns ADD COLUMN native_admission_json TEXT")
             live_columns = {
                 row[1]
                 for row in conn.execute(

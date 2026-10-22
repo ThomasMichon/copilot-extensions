@@ -251,19 +251,44 @@ async def start(
                     except AcquisitionRefused:
                         store.release_workspace_gate(worktree_id, delivery_id)
                         raise
-                    _update(db, digest, state="launching")
                     target = replace(target, worktree_id=worktree_id, cwd=saved["path"], explicit_cwd=True)
                     from .session_manager import DaemonDrainingError
+                    from .local_launch_preparation import LocalLaunchPreparationError
 
+                    async def before_launch() -> None:
+                        try:
+                            current, current_head = await _workspace(
+                                target.project, worktree_id, expected=saved,
+                            )
+                            if not _sessionless(manager, current, current_head, worktree_id):
+                                raise AcquisitionRefused("live_holder", "workspace changed during launch preparation")
+                        except AcquisitionRefused:
+                            _update(db, digest, state="allocated")
+                            raise
+                        _update(db, digest, state="launching")
+
+                    _update(db, digest, state="preparing")
                     try:
                         session = await manager.start_session(
                             target, creation_session_id=operation["session_id"],
+                            creation_before_launch=before_launch,
                             **{**options, "caller_id": f"acquisition:{delivery_id}"},
                         )
                     except DaemonDrainingError as exc:
                         _update(db, digest, state="allocated")
                         store.release_workspace_gate(worktree_id, delivery_id)
                         raise AcquisitionRefused("creation_draining", str(exc), effect="not_started") from exc
+                    except LocalLaunchPreparationError as exc:
+                        _update(db, digest, state="allocated")
+                        raise AcquisitionRefused(
+                            "creation_preparation_failed", str(exc), effect="not_started",
+                        ) from exc
+                    finally:
+                        state = db.execute_read(
+                            "SELECT state FROM workspace_embodiments WHERE key_digest=?", (digest,),
+                        )[0]["state"]
+                        if state == "allocated":
+                            store.release_workspace_gate(worktree_id, delivery_id)
                 if (
                     session is None or not session.acp_session_id
                     or session.status not in {SessionStatus.IDLE, SessionStatus.RUNNING, SessionStatus.STOPPED}

@@ -162,6 +162,7 @@ def _assert_snapshot_dependency_sources(snapshot: Path) -> None:
     spec = importlib.util.spec_from_file_location("snapshot_dependency_policy", helper)
     policy = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(policy)
+    assert policy._anchor_roots() == (snapshot.resolve(),)
     for manifest in [snapshot / "pyproject.toml", *snapshot.glob("libs/*/pyproject.toml")]:
         sources = policy._toml(manifest).get("tool", {}).get("uv", {}).get("sources", {})
         for source in sources.values():

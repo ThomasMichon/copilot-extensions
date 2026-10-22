@@ -11,6 +11,20 @@ from collections.abc import Mapping, Sequence
 from .daemon_broker import WindowsDaemonProcess, spawn_brokered_daemon
 
 
+def _validated_daemon_argv(argv: object) -> list[str]:
+    # A bare string (or path) is itself a Sequence: iterating it would launch
+    # its first character as the executable.
+    if isinstance(argv, (str, bytes, bytearray, os.PathLike)):
+        raise TypeError(
+            "spawn_daemon argv must be a sequence of arguments, not a single "
+            f"{type(argv).__name__}; pass [executable, *args]"
+        )
+    command = [os.fspath(part) for part in argv]  # type: ignore[union-attr]
+    if not command:
+        raise ValueError("spawn_daemon requires a non-empty argv")
+    return command
+
+
 def spawn_daemon(
     argv: Sequence[str | os.PathLike[str]],
     *,
@@ -39,7 +53,7 @@ def spawn_daemon(
     """
     import agent_procutil as pu
 
-    command = pu._validated_daemon_argv(argv)
+    command = _validated_daemon_argv(argv)
     extra_creationflags = pu._validated_extra_creationflags(extra_creationflags)
     cwd_path = pu._validated_daemon_cwd(cwd)
     log_file = pu._validated_daemon_log_path(log_path)

@@ -31,6 +31,7 @@ def test_monitor_direct_interpreter_preserves_venv_and_console_root(tmp_path, mo
     base.mkdir()
     console = base / "python.exe"
     console.touch()
+    (tmp_path / "venv" / "pyvenv.cfg").write_text(f"home = {base}\n", encoding="utf-8")
     calls = []
 
     def select(source):

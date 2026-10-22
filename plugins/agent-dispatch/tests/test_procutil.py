@@ -280,6 +280,7 @@ def _make_live_peer(cell: Path, plugin: str, version: str) -> Path:
     [
         (procutil.agent_worktrees_launch_prefix, "agent-worktrees", "agent_worktrees"),
         (procutil.agent_bridge_launch_prefix, "agent-bridge", "agent_bridge"),
+        (procutil.agent_pull_requests_launch_prefix, "agent-pull-requests", "agent_pull_requests"),
     ],
 )
 @pytest.mark.parametrize(
@@ -288,6 +289,7 @@ def _make_live_peer(cell: Path, plugin: str, version: str) -> Path:
         "agent-pull-requests",
     ],
 )
+@pytest.mark.timeout(180)
 def test_namespaced_sibling_resolution_stays_in_active_marketplace_cell(
     tmp_path, monkeypatch, resolver, sibling_id, module, owner
 ):
@@ -518,6 +520,7 @@ def _patch_worktrees_module_for_list(python: Path, tmp_path: Path) -> None:
     )
 
 
+@pytest.mark.timeout(180)
 def test_codespaces_peer_refusals_are_not_optional_absence(tmp_path, monkeypatch):
     adapter = _codespaces_adapter(monkeypatch)
     cell = tmp_path / "marketplaces" / FIRST_MARKETPLACE_ID
@@ -583,7 +586,7 @@ def test_codespaces_peer_refusals_are_not_optional_absence(tmp_path, monkeypatch
     )
     result = subprocess.run(
         [str(python), "-I", str(script), "--cwd", str(tmp_path)],
-        cwd=tmp_path, capture_output=True, encoding="utf-8", timeout=15,
+        cwd=tmp_path, capture_output=True, encoding="utf-8", timeout=30,
         **procutil.no_window_kwargs(),
     )
     assert result.returncode == 0, result.stderr

@@ -114,16 +114,17 @@ if ($HaveGit) {
 
 Push-Location (Join-Path $PayloadParent 'worktree-manager')
 try {
-    # Version-install the fetched payload (idempotent, version-gated): publishes
-    # the versions/<ver> slot + current-version marker + ~/.local/bin binstub.
-    # uv is native: $ErrorActionPreference does not stop on its exit code, and
-    # `pwsh -File` would otherwise report success. Throw (not exit) so the
-    # documented `iex (irm ...)` one-liner never closes the caller's shell.
-    uv run --quiet python -m worktree_manager self-install --apply
-    if ($LASTEXITCODE -ne 0) { throw "Worktree Manager self-install failed (uv exit $LASTEXITCODE)." }
-    # Then run whatever the caller asked for through the freshly-installed app.
-    uv run --quiet python -m worktree_manager @args
-    if ($LASTEXITCODE -ne 0) { throw "Worktree Manager exited with code $LASTEXITCODE." }
+    $Python = $null
+    try { $Python = & uv python find --no-project '>=3.11' 2>$null }
+    catch { $Python = $null }
+    if ($LASTEXITCODE -ne 0 -or -not $Python) {
+        & uv python install 3.11
+        if ($LASTEXITCODE -ne 0) { throw 'Manager base Python acquisition failed.' }
+        $Python = & uv python find --no-project '>=3.11'
+    }
+    if ($LASTEXITCODE -ne 0 -or -not $Python) { throw 'Manager needs Python 3.11 or newer.' }
+    & $Python -I -S -B -X utf8 (Join-Path $PWD 'scripts\runtime_install.py') --root $Root --payload $PWD -- @args
+    if ($LASTEXITCODE -ne 0) { throw "Manager construction or command failed ($LASTEXITCODE)." }
 } finally {
     Pop-Location
 }

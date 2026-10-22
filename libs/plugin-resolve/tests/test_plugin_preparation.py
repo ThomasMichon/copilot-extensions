@@ -56,6 +56,164 @@ def local_plan(root, name="sample", marketplace="local"):
     return build_plan([{"source": f"{name}@{marketplace}"}], [root])
 
 
+def test_reference_mode_is_direct_repeatable_and_never_writes_source_catalog(tmp_path):
+    host, target = tmp_path / "host", tmp_path / "target"
+    local_plan(host)
+    init_checkout(target)
+    catalog = host / ".ai" / "marketplace.json"
+    before = catalog.read_bytes()
+    plan = build_plan([{"source": "sample@local"}], [host], local_mode="reference")
+    item = plan["plugins"][0]
+    assert "archive" not in item and "local_path" not in item
+    request = {"repo": str(target), **plan, "local_mode": "reference"}
+    expected = {"sample@local": str((host / ".ai" / "sample").resolve())}
+    assert prepare(request) == expected
+    assert prepare(request) == expected
+    assert catalog.read_bytes() == before
+    assert not list((target / ".git").rglob("snapshots"))
+    assert not list((target / ".git").rglob("marketplace.json"))
+    assert resolve_repo_plugins(target).resolved == {
+        source: Path(path) for source, path in expected.items()
+    }
+    # Independent consumer reads the actual disk overlay, not the prepare result.
+    result = subprocess.run(
+        [sys.executable, "-c",
+         "import json,sys; from plugin_resolve.resolve import resolve_repo_plugins; "
+         "r=resolve_repo_plugins(sys.argv[1]); assert not r.unresolved; "
+         "print(json.dumps({k:str(v) for k,v in r.resolved.items()}))", str(target)],
+        env={**os.environ, "PYTHONPATH": str(Path(__file__).parents[1] / "src")},
+        capture_output=True, text=True, check=True, timeout=10,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    assert json.loads(result.stdout) == expected
+    path = target / ".github" / "copilot" / "settings.local.json"
+    value = json.loads(path.read_text())
+    value["enabledPlugins"]["sample@local"] = False
+    atomic_json(path, value)
+    assert prepare(request) == {}
+
+
+def test_reference_mode_native_authority_and_recovery(tmp_path):
+    host, target = tmp_path / "host", tmp_path / "target"
+    local_plan(host)
+    local_plan(target)
+    init_checkout(target)
+    plan = build_plan([{"source": "sample@local"}], [host], local_mode="reference")
+    request = {"repo": str(target), **plan, "local_mode": "reference"}
+    expected = {"sample@local": str((target / ".ai" / "sample").resolve())}
+    assert prepare(request) == expected
+    assert prepare({"repo": str(target), "plugins": [], "local_mode": "reference"}) == expected
+
+
+def test_reference_requires_opt_in_and_validates_again_before_publication(tmp_path):
+    host, target = tmp_path / "host", tmp_path / "target"
+    local_plan(host)
+    init_checkout(target)
+    plan = build_plan([{"source": "sample@local"}], [host], local_mode="reference")
+    with pytest.raises(ValueError, match="explicit reference mode"):
+        prepare({"repo": str(target), **plan})
+    (host / ".ai" / "marketplace.json").unlink()
+    with pytest.raises(ValueError, match="reference no longer resolves"):
+        prepare({"repo": str(target), **plan, "local_mode": "reference"})
+    assert not (target / ".github" / "copilot" / "settings.local.json").exists()
+
+
+def test_explicit_environment_reaches_git_and_installer_without_mutating_host(tmp_path, monkeypatch):
+    from plugin_resolve import preparation as module
+
+    target = tmp_path / "target"
+    init_checkout(target)
+    calls = []
+    run = module.subprocess.run
+
+    def capture(*args, **kwargs):
+        calls.append(kwargs["env"])
+        return run(*args, **kwargs)
+
+    monkeypatch.setattr(module.subprocess, "run", capture)
+    environment = {**os.environ, "VENUE_EXPLICIT_ENV": "child-only", "GIT_DIR": "invalid"}
+    prepare({"repo": str(target), "plugins": []}, environment=environment)
+    assert calls and all(env["VENUE_EXPLICIT_ENV"] == "child-only" for env in calls)
+    assert all("GIT_DIR" not in env for env in calls)
+    assert "VENUE_EXPLICIT_ENV" not in os.environ
+
+    calls.clear()
+    environment["VENUE_CALL_LOG"] = str(tmp_path / "installer-calls.jsonl")
+    environment["VENUE_EXPECTED_SETTINGS_SHA256"] = hashlib.sha256(
+        (target / ".github" / "copilot" / "settings.local.json").read_bytes(),
+    ).hexdigest()
+    origin = {"source": {"source": "github", "repo": "example/synthetic"}}
+    command = (sys.executable, str(Path(__file__).parent / "fixtures" / "venue_installer.py"))
+    result = prepare({
+        "repo": str(target), "plugins": [{"source": "sample@remote", "enable": True, "marketplace": origin}],
+    }, environment=environment, copilot_command=command)
+    assert "sample@remote" in result
+    assert all(env["VENUE_EXPLICIT_ENV"] == "child-only" for env in calls)
+    assert [json.loads(line)["argv"][:2] for line in
+            Path(environment["VENUE_CALL_LOG"]).read_text().splitlines()] == [
+        ["plugin", "install"],
+    ]
+
+
+def test_reference_concurrent_registration_retains_both_selected_sets(tmp_path, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    import threading
+    from plugin_resolve import preparation as module
+
+    host, target = tmp_path / "host", tmp_path / "target"
+    local_plan(host)
+    init_checkout(target)
+    catalog = host / ".ai" / "marketplace.json"
+    value = json.loads(catalog.read_text())
+    extra = host / ".ai" / "extra"
+    extra.mkdir()
+    atomic_json(extra / "plugin.json", {"name": "extra", "version": "1.0.0"})
+    value["plugins"].append({"name": "extra", "source": "extra"})
+    atomic_json(catalog, value)
+    barrier = threading.Barrier(2, timeout=10)
+    register = module.register_prepared
+
+    def overlap(*args, **kwargs):
+        barrier.wait()
+        return register(*args, **kwargs)
+
+    monkeypatch.setattr(module, "register_prepared", overlap)
+    requests = [
+        {"repo": str(target), **build_plan([{"source": source}], [host], local_mode="reference"),
+         "local_mode": "reference"}
+        for source in ("sample@local", "extra@local")
+    ]
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(prepare, requests))
+    assert all(results)
+    assert set(resolve_repo_plugins(target).resolved) == {"sample@local", "extra@local"}
+
+
+def test_reference_atomic_failure_keeps_previous_overlay(tmp_path, monkeypatch):
+    from plugin_resolve import registration
+
+    host, target = tmp_path / "host", tmp_path / "target"
+    local_plan(host)
+    init_checkout(target)
+    path = target / ".github" / "copilot" / "settings.local.json"
+    path.parent.mkdir(parents=True)
+    atomic_json(path, {"unrelated": "preserved"})
+    before = path.read_bytes()
+    original = registration.os.replace
+
+    def fail(source, destination):
+        if Path(destination) == path:
+            raise OSError("synthetic interrupted publication")
+        return original(source, destination)
+
+    monkeypatch.setattr(registration.os, "replace", fail)
+    plan = build_plan([{"source": "sample@local"}], [host], local_mode="reference")
+    with pytest.raises(OSError, match="interrupted publication"):
+        prepare({"repo": str(target), **plan, "local_mode": "reference"})
+    assert path.read_bytes() == before
+    assert not list(path.parent.glob("*.pending"))
+
+
 @pytest.mark.parametrize("value, expected", [
     ("sample@local", {"source": "sample@local", "enable": True}),
     ("/p/one with spaces=false", {"source": "/p/one with spaces=false", "enable": True}),
@@ -113,7 +271,7 @@ def test_every_native_remote_layer_overrides_overlapping_host_origin(tmp_path, m
     assert list((target / ".git").rglob(".installation-complete.json"))
     assert prepare({"repo": str(target), **host}, copilot_command=command) == first
     receipt = json.loads((target / ".git" / "copilot-venue-plugins" / "ownership.json").read_text())
-    assert ("remote" in receipt["marketplaceOrigins"]) == (layer == SETTINGS_RELS[-1])
+    assert "remote" not in receipt["marketplaceOrigins"]
 
     # A lower, still-authored file changes in place; a generated projection is
     # not authority to retain the previous origin.
@@ -465,7 +623,7 @@ def test_local_origin_change_during_install_refuses_before_publication(tmp_path,
     atomic_json(manifest, data)
     state = target / ".git" / "copilot-venue-plugins"
     settings = target / ".github" / "copilot" / "settings.local.json"
-    catalog = state / "marketplaces" / "local" / "marketplace.json"
+    catalog = target / ".ai" / "marketplace.json"
     receipt = state / "ownership.json"
     before = settings.read_bytes(), catalog.read_bytes(), receipt.read_bytes()
     _expect_installer_settings(monkeypatch, target)
@@ -589,8 +747,9 @@ def test_operator_enable_during_install_is_validated_before_any_publication(
         assert written
         assert read_repo_settings(target).enabled[source] is enabled
         assert (source in result) is enabled
-        assert set(resolve_repo_plugins(target).resolved) == set(result)
-        assert resolve_repo_plugins(target).unresolved == []
+        resolution = resolve_repo_plugins(target)
+        assert set(resolution.resolved) | set(resolution.unresolved) == set(result)
+        assert resolution.unresolved == ["remote@synthetic"]
         assert any(
             item["dependency"] == "unselected-companion@local" and item["status"] == "outside-selection"
             for item in diagnostics
@@ -621,6 +780,10 @@ def test_late_enabled_owned_projection_requires_current_origin_proof(tmp_path, m
     state = target / ".git" / "copilot-venue-plugins"
     local = target / ".github" / "copilot" / "settings.local.json"
     catalog = state / "marketplaces" / "local" / "marketplace.json"
+    if mode in {"changed-remote", "inactive-remote", "cached-remote"}:
+        catalog = next((state / "marketplaces" / "local" / "installation").glob(
+            "*/.installation-complete.json",
+        ))
     receipt = state / "ownership.json"
     before = local.read_bytes(), catalog.read_bytes(), receipt.read_bytes()
     assert read_repo_settings(target).enabled["sample@local"] is False
@@ -664,7 +827,8 @@ def test_late_enabled_owned_projection_requires_current_origin_proof(tmp_path, m
         result = prepare(_remote_request(target), copilot_command=command)
         assert edits
         assert ("sample@local" in result) is (mode != "inactive-remote")
-        assert set(resolve_repo_plugins(target).resolved) == set(result)
+        resolution = resolve_repo_plugins(target)
+        assert set(resolution.resolved) | set(resolution.unresolved) == set(result)
         if mode == "cached-remote":
             assert "installation" in Path(result["sample@local"]).parts
             assert json.loads((Path(result["sample@local"]) / "plugin.json").read_text())["version"] == "2.3.4"
@@ -703,22 +867,22 @@ def test_remote_installed_catalog_and_entry_survive_without_plugin_authorship(
     original_request = json.dumps(request)
     result = prepare(request, copilot_command=command)
     root = target / ".git" / "copilot-venue-plugins" / "marketplaces" / "synthetic"
-    published = json.loads((root / "marketplace.json").read_text())
+    home = Path(result["remote@synthetic"]).parents[2]
+    receipt_path = home / ".installation-complete.json"
+    receipt = json.loads(receipt_path.read_text())
+    published = {**receipt["catalog"], "plugins": [receipt["entry"]]}
     assert published["owner"] == catalog["owner"]
     assert published["description"] == catalog["description"]
     assert published["metadata"] == {"tag": "retained"}
     entry = next(item for item in published["plugins"] if item["name"] == "remote")
-    assert {k: v for k, v in entry.items() if k != "source"} == {
-        k: v for k, v in catalog["plugins"][0].items() if k != "source"
-    }
-    home = Path(result["remote@synthetic"]).parents[2]
+    assert entry == catalog["plugins"][0]
     assert home.name != "installed-plugins"
-    assert (home / "cache" / "marketplaces").is_dir()
-    import shutil
-    shutil.rmtree(home / "cache")
+    assert not (home / "cache").exists()
     monkeypatch.setenv("VENUE_FAIL_INSTALL", "1")
     assert prepare(json.loads(original_request), copilot_command=command) == result
-    assert json.loads((root / "marketplace.json").read_text()) == published
+    assert json.loads(receipt_path.read_text()) == receipt
+    assert not (root / "marketplace.json").exists()
+    assert read_repo_settings(target).marketplaces["synthetic"] == {"source": origin}
 
 
 def _remote_request(target):
@@ -750,19 +914,16 @@ def test_remote_cache_uses_native_catalog_over_distinct_legacy_and_nested_lookal
     command = (sys.executable, str(Path(__file__).parent / "fixtures" / "venue_installer.py"))
     first = prepare(_remote_request(target), copilot_command=command)
     home = Path(first["remote@synthetic"]).parents[2]
-    clone = home / "cache" / "marketplaces" / "opaque-clone"
-    assert json.loads((clone / ".github" / "plugin" / "marketplace.json").read_text()) != (
-        json.loads((clone / ".claude-plugin" / "marketplace.json").read_text())
-    )
-    published_path = home.parents[1] / "marketplace.json"
-    published = json.loads(published_path.read_text())
+    assert catalogs[0][1] != catalogs[1][1]
+    publication = json.loads((home / ".installation-complete.json").read_text())
+    published = {**publication["catalog"], "plugins": [publication["entry"]]}
     assert published["owner"] == catalogs[0][1]["owner"]
     assert published["description"] == "native catalog"
     entry = next(item for item in published["plugins"] if item["name"] == "remote")
     assert entry["description"] == "native entry"
     assert entry["keywords"] == ["native"] and entry["strict"] is False
     assert prepare(_remote_request(target), copilot_command=command) == first
-    assert json.loads(published_path.read_text()) == published
+    assert json.loads((home / ".installation-complete.json").read_text()) == publication
 
 
 def test_installed_metadata_ignores_nested_only_clones_and_cache_files(tmp_path):
@@ -830,6 +991,13 @@ def _recorded_native_calls(path):
     return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
 
 
+def _legacy_native_cache(home):
+    receipt = json.loads((home / ".installation-complete.json").read_text())
+    catalog = home / "cache" / "marketplaces" / "legacy-clone" / ".github" / "plugin"
+    catalog.mkdir(parents=True)
+    atomic_json(catalog / "marketplace.json", {**receipt["catalog"], "plugins": [receipt["entry"]]})
+
+
 @pytest.mark.parametrize("available_catalog", [True, False])
 def test_source_only_receipt_hydrates_without_duplicate_registration_or_install(
     tmp_path, monkeypatch, available_catalog,
@@ -845,6 +1013,7 @@ def test_source_only_receipt_hydrates_without_duplicate_registration_or_install(
     # Reproduce the actual old operation receipt; native registration, payload
     # and catalog were produced by the installation subprocess boundary.
     receipt = home / ".installation-complete.json"
+    _legacy_native_cache(home)
     atomic_json(receipt, {"source": "remote@synthetic"})
     native_settings = (home / "settings.json").read_bytes()
     payload_manifest = (payload / "plugin.json").read_bytes()
@@ -881,7 +1050,7 @@ def test_partial_install_retry_retains_registration_and_retries_only_install(tmp
         prepare(_remote_request(target), copilot_command=command)
     first_calls = _recorded_native_calls(log)
     assert [call["argv"][:3] for call in first_calls] == [
-        ["plugin", "marketplace", "add"], ["plugin", "install", "remote@synthetic"],
+        ["plugin", "install", "remote@synthetic"],
     ]
     home = next((target / ".git" / "copilot-venue-plugins" / "marketplaces" / "synthetic"
                  / "installation").iterdir())
@@ -889,7 +1058,7 @@ def test_partial_install_retry_retains_registration_and_retries_only_install(tmp
         _remote_request(target)["plugins"][0]["marketplace"]
     )
     assert not (home / ".installation-complete.json").exists()
-    assert (home / "cache" / "marketplaces").is_dir()
+    assert not (home / "cache").exists()
     assert (home / "installed-plugins" / "synthetic" / "remote" / "partial-marker").read_text() == "retained"
     monkeypatch.delenv("VENUE_FAIL_INSTALL")
     log.write_text("", encoding="utf-8")
@@ -958,6 +1127,7 @@ def test_legacy_catalog_refresh_failure_is_explicit_and_keeps_existing_state(tmp
     payload = Path(result["remote@synthetic"])
     home = payload.parents[2]
     receipt = home / ".installation-complete.json"
+    _legacy_native_cache(home)
     atomic_json(receipt, {"source": "remote@synthetic"})
     (home / "cache").rename(home / "prior-native-cache")
     settings = target / ".github" / "copilot" / "settings.local.json"
@@ -1003,13 +1173,239 @@ def test_same_named_plugins_remain_marketplace_qualified(tmp_path):
     assert len(set(result.values())) == 2
 
 
-def test_native_plugins_in_the_same_marketplace_remain_resolvable(tmp_path):
+@pytest.mark.parametrize("mode", ["copy", "reference"])
+def test_native_plugins_in_the_same_marketplace_remain_resolvable(tmp_path, mode):
     target = tmp_path / "target"
     local_plan(target, name="native")
     init_checkout(target)
-    plan = local_plan(tmp_path / "host")
-    result = prepare({"repo": str(target), **plan})
+    host = tmp_path / "host"
+    plan = local_plan(host)
+    if mode == "reference":
+        plan = build_plan([{"source": "sample@local"}], [host], local_mode=mode)
+    request = {"repo": str(target), **plan, "local_mode": mode}
+    original_catalogs = [(root / ".ai" / "marketplace.json").read_bytes() for root in (host, target)]
+    result = prepare(request)
     assert set(result) == {"sample@local", "native@local"}
+    assert prepare(request) == result
+    if mode == "reference":
+        assert Path(result["sample@local"]) == host / ".ai" / "sample"
+        assert Path(result["native@local"]) == target / ".ai" / "native"
+        assert [(root / ".ai" / "marketplace.json").read_bytes() for root in (host, target)] == original_catalogs
+        settings = read_repo_settings(target)
+        assert settings.marketplaces["local"]["source"]["path"] == "./.ai"
+        assert settings.enabled["native@local"] is True
+        alias = next(source for source in settings.enabled if source.startswith("sample@"))
+        assert alias != "sample@local"
+        assert settings.marketplaces[alias.split("@")[1]]["source"]["manifestName"] == "local"
+        assert resolve_repo_plugins(target).resolved == {
+            alias: host / ".ai" / "sample", "native@local": target / ".ai" / "native",
+        }
+        assert not list((target / ".git").rglob("marketplace.json"))
+        assert not list((target / ".git").rglob("snapshots"))
+
+
+def test_mixed_reference_alias_operator_choices_and_owned_cleanup(tmp_path):
+    host, target = tmp_path / "host", tmp_path / "target"
+    local_plan(host)
+    local_plan(target, name="native")
+    init_checkout(target)
+    plan = build_plan([{"source": "sample@local"}], [host], local_mode="reference")
+    request = {"repo": str(target), **plan, "local_mode": "reference"}
+    prepare(request)
+    settings_path = target / ".github" / "copilot" / "settings.local.json"
+    settings = json.loads(settings_path.read_text())
+    alias = next(source for source in settings["enabledPlugins"] if source.startswith("sample@"))
+    settings["enabledPlugins"][alias] = False
+    atomic_json(settings_path, settings)
+    assert set(prepare(request)) == {"native@local"}
+    assert json.loads(settings_path.read_text())["enabledPlugins"][alias] is False
+
+    replacement = tmp_path / "replacement"
+    local_plan(replacement)
+    settings = json.loads(settings_path.read_text())
+    settings["extraKnownMarketplaces"][alias.split("@")[1]]["source"]["path"] = str(replacement / ".ai")
+    settings["enabledPlugins"][alias] = True
+    atomic_json(settings_path, settings)
+    assert Path(prepare(request)["sample@local"]) == replacement / ".ai" / "sample"
+    assert Path(prepare(request)["sample@local"]) == replacement / ".ai" / "sample"
+    base = target / ".github" / "copilot" / "settings.json"
+    value = json.loads(base.read_text())
+    value["enabledPlugins"]["sample@local"] = False
+    atomic_json(base, value)
+    settings = json.loads(settings_path.read_text())
+    settings["enabledPlugins"][alias] = False
+    atomic_json(settings_path, settings)
+    assert "sample@local" not in prepare(request)
+
+
+def test_reference_alias_cleanup_does_not_keep_selection_alive(tmp_path):
+    host, target = tmp_path / "host", tmp_path / "target"
+    local_plan(host)
+    local_plan(target, name="native")
+    init_checkout(target)
+    plan = build_plan([{"source": "sample@local"}], [host], local_mode="reference")
+    prepare({"repo": str(target), **plan, "local_mode": "reference"})
+    result = prepare({"repo": str(target), "plugins": [], "local_mode": "reference"})
+    assert set(result) == {"native@local"}
+    settings = read_repo_settings(target)
+    assert not any("-venue-" in source for source in settings.enabled)
+    assert not any("-venue-" in source for source in settings.marketplaces)
+
+
+@pytest.mark.parametrize("related", [False, True])
+def test_reference_installed_inventory_uses_child_home_without_network_or_catalog_writes(
+    tmp_path, related,
+):
+    target, home, cache = tmp_path / "target", tmp_path / "child-home", tmp_path / "child-cache"
+    init_checkout(target)
+    payload = home / "installed-plugins" / "catalog" / "helper"
+    payload.mkdir(parents=True)
+    atomic_json(payload / "plugin.json", {"name": "helper"})
+    if related:
+        plan = build_plan([{"source": "helper@catalog"}], [], local_mode="reference")
+    else:
+        directory = target / ".github" / "copilot"
+        directory.mkdir(parents=True)
+        atomic_json(directory / "settings.json", {"enabledPlugins": {"helper@catalog": True}})
+        plan = {"plugins": []}
+    environment = {**os.environ, "COPILOT_HOME": str(home), "COPILOT_CACHE_HOME": str(cache)}
+    request = {"repo": str(target), **plan, "local_mode": "reference"}
+    for _ in range(2):
+        result = prepare(request, environment=environment, copilot_command=("must-not-run",))
+        assert result == {"helper@catalog": str(payload)}
+        assert read_repo_settings(target).enabled["helper@catalog"] is True
+        assert read_repo_settings(target).marketplaces == {}
+    assert not list(target.rglob("marketplace.json"))
+    assert not list(home.rglob("marketplace.json"))
+    assert not list(target.rglob("snapshots"))
+
+
+@pytest.mark.parametrize("bad", ["missing", "name", "namespace", "manifest", "registration", "catalog"])
+def test_reference_installed_inventory_rejects_bad_qualified_metadata(tmp_path, bad):
+    target, home, cache = tmp_path / "target", tmp_path / "home", tmp_path / "cache"
+    init_checkout(target)
+    payload = home / "installed-plugins" / "catalog" / "helper"
+    payload.mkdir(parents=True)
+    manifest = {"name": "helper"}
+    if bad == "name":
+        manifest["name"] = "other"
+    if bad == "namespace":
+        manifest["marketplace"] = "other"
+    if bad != "missing":
+        atomic_json(payload / "plugin.json", manifest)
+    else:
+        payload.rmdir()
+    if bad == "manifest":
+        (payload / "plugin.json").write_text("{broken")
+    if bad == "registration":
+        atomic_json(home / "settings.json", {"extraKnownMarketplaces": {"catalog": {"source": "invalid"}}})
+    if bad == "catalog":
+        catalog = cache / "marketplaces" / "opaque"
+        catalog.mkdir(parents=True)
+        atomic_json(catalog / "marketplace.json", {
+            "name": "catalog", "owner": {"name": "Synthetic"}, "plugins": [],
+        })
+    plan = build_plan([{"source": "helper@catalog"}], [], local_mode="reference")
+    with pytest.raises(ValueError):
+        prepare(
+            {"repo": str(target), **plan, "local_mode": "reference"},
+            environment={**os.environ, "COPILOT_HOME": str(home), "COPILOT_CACHE_HOME": str(cache)},
+            copilot_command=("must-not-run",),
+        )
+    assert not (target / ".github" / "copilot" / "settings.local.json").exists()
+
+
+def test_reference_installed_inventory_validates_available_local_catalog_and_operator_disable(tmp_path):
+    target, home, cache = tmp_path / "target", tmp_path / "home", tmp_path / "cache"
+    init_checkout(target)
+    original = tmp_path / "original"
+    local_plan(original, name="helper", marketplace="catalog")
+    payload = home / "installed-plugins" / "catalog" / "helper"
+    payload.mkdir(parents=True)
+    atomic_json(payload / "plugin.json", {"name": "helper", "version": "1.2.3"})
+    atomic_json(home / "settings.json", {
+        "extraKnownMarketplaces": {"catalog": {"source": {"source": "directory", "path": str(original / ".ai")}}},
+    })
+    plan = build_plan([{"source": "helper@catalog"}], [], local_mode="reference")
+    request = {"repo": str(target), **plan, "local_mode": "reference"}
+    environment = {**os.environ, "COPILOT_HOME": str(home), "COPILOT_CACHE_HOME": str(cache)}
+    assert prepare(request, environment=environment) == {
+        "helper@catalog": str(original / ".ai" / "helper"),
+    }
+    path = target / ".github" / "copilot" / "settings.local.json"
+    value = json.loads(path.read_text())
+    value["enabledPlugins"]["helper@catalog"] = False
+    atomic_json(path, value)
+    assert prepare(request, environment=environment) == {}
+    # An explicit target origin remains authoritative over that installed copy.
+    value["enabledPlugins"]["helper@catalog"] = True
+    value["extraKnownMarketplaces"]["catalog"] = {
+        "source": {"source": "directory", "path": str(original / ".ai")},
+    }
+    atomic_json(path, value)
+    assert prepare(request, environment=environment) == {
+        "helper@catalog": str(original / ".ai" / "helper"),
+    }
+
+
+def test_child_registered_live_local_catalog_needs_no_installed_copy_and_reloads_home(tmp_path):
+    target = tmp_path / "target"
+    init_checkout(target)
+    directory = target / ".github" / "copilot"
+    directory.mkdir(parents=True)
+    atomic_json(directory / "settings.json", {"enabledPlugins": {"helper@catalog": True}})
+    request = {"repo": str(target), "plugins": [], "local_mode": "reference"}
+    for name in ("first", "second"):
+        original, home = tmp_path / name / "original", tmp_path / name / "home"
+        local_plan(original, name="helper", marketplace="catalog")
+        home.mkdir()
+        atomic_json(home / "settings.json", {
+            "extraKnownMarketplaces": {
+                "catalog": {"source": {"source": "directory", "path": str(original / ".ai")}},
+            },
+        })
+        environment = {**os.environ, "COPILOT_HOME": str(home), "COPILOT_CACHE_HOME": str(home / "cache")}
+        for _ in range(2):
+            assert prepare(request, environment=environment, copilot_command=("must-not-run",)) == {
+                "helper@catalog": str(original / ".ai" / "helper"),
+            }
+        assert not (home / "installed-plugins").exists()
+        assert resolve_repo_plugins(target).resolved == {"helper@catalog": original / ".ai" / "helper"}
+    legacy_home = tmp_path / "legacy"
+    payload = legacy_home / "installed-plugins" / "catalog" / "helper"
+    payload.mkdir(parents=True)
+    atomic_json(payload / "plugin.json", {"name": "helper"})
+    assert prepare(
+        request, copilot_command=("must-not-run",),
+        environment={**os.environ, "COPILOT_HOME": str(legacy_home), "COPILOT_CACHE_HOME": str(legacy_home / "cache")},
+    ) == {"helper@catalog": str(payload)}
+    assert read_repo_settings(target).marketplaces == {}
+
+
+@pytest.mark.parametrize("native", [False, True])
+def test_declared_remote_selection_reuses_matching_qualified_local_inventory(tmp_path, native):
+    target, home = tmp_path / "target", tmp_path / "home"
+    init_checkout(target)
+    payload = home / "installed-plugins" / "catalog" / "helper"
+    payload.mkdir(parents=True)
+    atomic_json(payload / "plugin.json", {"name": "helper"})
+    definition = {"source": {"source": "github", "repo": "example/registered"}}
+    atomic_json(home / "settings.json", {"extraKnownMarketplaces": {"catalog": definition}})
+    if native:
+        directory = target / ".github" / "copilot"
+        directory.mkdir(parents=True)
+        atomic_json(directory / "settings.json", {
+            "enabledPlugins": {"helper@catalog": True}, "extraKnownMarketplaces": {"catalog": definition},
+        })
+    plan = build_plan(
+        [{"source": "helper@catalog"}], [], marketplaces={"catalog": definition}, local_mode="reference",
+    )
+    assert prepare(
+        {"repo": str(target), **plan, "local_mode": "reference"},
+        environment={**os.environ, "COPILOT_HOME": str(home), "COPILOT_CACHE_HOME": str(home / "cache")},
+        copilot_command=("must-not-run",),
+    ) == {"helper@catalog": str(payload)}
+    assert read_repo_settings(target).marketplaces["catalog"] == definition
 
 
 def test_documentation_links_do_not_expand_payload_closure(tmp_path):
@@ -1117,6 +1513,10 @@ def test_object_dependencies_and_native_publication_schema(tmp_path):
     assert set(result) == {"sample@local", "support@local", "external@remote"}
     local = json.loads((target / ".github" / "copilot" / "settings.local.json").read_text())
     for name, definition in local["extraKnownMarketplaces"].items():
+        if definition["source"]["source"] in {"github", "git", "url", "git-subdir"}:
+            assert definition == settings["extraKnownMarketplaces"][name]
+            assert Path(result[f"external@{name}"], "plugin.json").exists()
+            continue
         catalog = json.loads((Path(definition["source"]["path"]) / "marketplace.json").read_text())
         # These fields are required by the native consumer even though the
         # shared path resolver deliberately accepts a smaller reading surface.
@@ -1191,7 +1591,7 @@ def test_host_disable_and_explicit_target_enable_have_distinct_authority(tmp_pat
     assert "sample@local" in prepare({"repo": str(target), **plan})
 
 
-def test_target_native_external_marketplace_retains_its_actual_copy_base(tmp_path):
+def test_target_native_external_marketplace_retains_its_original_path(tmp_path):
     native = tmp_path / "native"
     local_plan(native, name="native")
     target = tmp_path / "target"
@@ -1206,7 +1606,7 @@ def test_target_native_external_marketplace_retains_its_actual_copy_base(tmp_pat
     })
     result = prepare({"repo": str(target), "plugins": []})
     assert set(result) == {"native@local"}
-    assert Path(result["native@local"]).is_relative_to(target / ".git")
+    assert Path(result["native@local"]) == native / ".ai" / "native"
 
 
 def test_git_file_checkout_keeps_all_generated_state_in_its_git_metadata(tmp_path):
@@ -1358,9 +1758,9 @@ def test_native_remote_origin_in_local_settings_is_preserved_and_localized(
     assert json.loads((Path(result["native@remote"]) / "plugin.json").read_text())["version"] == "2.3.4"
     value = json.loads(path.read_text())
     assert value["unrelated"] == {"retained": True}
-    assert value["extraKnownMarketplaces"]["remote"]["source"]["source"] == "directory"
+    assert value["extraKnownMarketplaces"]["remote"] == origin
     receipt = json.loads((target / ".git" / "copilot-venue-plugins" / "ownership.json").read_text())
-    assert receipt["marketplaceOrigins"]["remote"] == origin
+    assert "remote" not in receipt["marketplaceOrigins"]
     assert any(item["status"] == "native-origin-preserved" for item in diagnostics)
     assert prepare({"repo": str(target), **plan}, copilot_command=command) == result
 
@@ -1435,8 +1835,7 @@ def test_two_plugins_localize_one_operator_origin_without_deactivating_it(tmp_pa
     first = prepare({"repo": str(target), "plugins": []}, copilot_command=installer, diagnostics=diagnostics)
     receipt_path = target / ".git" / "copilot-venue-plugins" / "ownership.json"
     receipt = json.loads(receipt_path.read_text())
-    assert receipt["marketplaceOrigins"]["remote"] == origin
-    assert receipt["marketplaceOriginActive"]["remote"] is True
+    assert "remote" not in receipt["marketplaceOrigins"]
     assert sum(item["status"] == "native-origin-preserved" for item in diagnostics) == 1
     host = local_plan(tmp_path / "host", name="a", marketplace="remote")
     again = prepare({"repo": str(target), **host}, copilot_command=installer)
@@ -1494,7 +1893,6 @@ def test_new_native_selection_uses_active_origin_and_respects_changed_local_over
     assert json.loads(path.read_text())["extraKnownMarketplaces"]["remote"] == override
     receipt = json.loads((target / ".git" / "copilot-venue-plugins" / "ownership.json").read_text())
     if origin_file == "settings.local.json":
-        assert receipt["marketplaceOrigins"]["remote"] == origin
-        assert receipt["marketplaceOriginActive"]["remote"] is False
+        assert "remote" not in receipt["marketplaceOrigins"]
     else:
         assert json.loads((directory / origin_file).read_text())["extraKnownMarketplaces"]["remote"] == origin

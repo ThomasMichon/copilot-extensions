@@ -1,0 +1,9 @@
+{
+  "comment": "Prepare independently copied terminal-worker Git inputs with fresh lifecycle records.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

@@ -29,6 +29,82 @@ the [agent-fabric](../../../visions/agent-fabric/README.md) vision's
 a spun-off agent with a shared record) and `recover-not-lose` (an interrupted
 spawn is reconciled, never silently double-run or lost).
 
+## Coordinator, supervisor daemon and worker lanes
+
+These are roles within `agent-dispatch`, not three independent task authorities:
+
+| Role | Current responsibility |
+|------|------------------------|
+| Coordinator (`serve`) | Queue database, API, atomic claims, reservations, durable events and verification |
+| Supervisor daemon (`supervise serve`) | Reconcile registrations and own emitter, schedule and supervised-lane child processes |
+| Worker-lane supervisor (`supervise`) | Reserve eligible tasks, prepare their workspaces and invoke the selected worker backend |
+
+Evaluator registrations are consulted by the coordinator on verification
+triggers; they do not launch an evaluator child in the supervisor daemon.
+Bridge owns session hosting and native resume, while Worktrees owns workspace
+allocation. The lane orchestrates those capabilities rather than replacing them.
+
+The installer manages the coordinator and supervisor daemon as separate local
+services. Coordinator cutover deliberately leaves the supervisor running;
+clients reconnect through endpoint discovery/routing to the retained task store.
+The supervisor has its own singleton and upgrade lifecycle. It is not an
+ordinary child whose lifetime is tied to the current coordinator process.
+
+The [logical-machine vision](../../../visions/plugins/agent-dispatch/README.md#logical-machines-and-local-execution-authority)
+extends that ownership model to self-contained container environments. Existing
+remote-pool and central-authority options are not proof of a container-local
+coordinator or coordinator-to-coordinator federation. Container composition,
+authenticated supervisor execution enrollment and running adoption must be
+qualified separately; this description does not install or activate them.
+
+## Ordinary ACP startup invocation
+
+The ordinary Bridge backend freezes a versioned startup invocation with ready
+agent facts in the existing generation/reservation-fenced coordinator transaction.
+It reads that intent back before first send. The identity uses task/admission
+generation plus ORIGINAL allocation lineage, creation key and revision, never the
+current retry attempt or a prompt digest. Worker labels and the complete prompt,
+including assignment and native-owner suffix, remain exact across deferral.
+One-shot ordinary spawn and the supervisor use the same lane-aware,
+original-lineage seed builder. Requested agent/charter selection is immutable
+coordinator intent; changing it conflicts before receipt lookup or send.
+Selection is not an ignored extra Bridge wire field.
+
+Coordinator errors reading the seed reservation use the existing deferred
+outcome in both callers, preserving the original diagnostic without allocating
+or sending. Missing metadata and prompt-rendering errors are not converted.
+
+Native metadata and prompt use the Bridge UTF-8 file/stdin codec. New storage
+fields are explicit in the created/resumed-agent API request: older receivers
+that reject or ignore them cannot pass required intent read-back. Unknown
+historical intent never becomes a newly minted retry key. A positively
+sessionless allocation is still governed by the existing keyed creation checks;
+this does not reconstruct missing historical creation arguments or change their
+facts hash.
+
+After an uncertain send, the same stored invocation can read the original
+Bridge admission receipt before attempting fresh work. Matching RUNNING/settled
+receipts do not send another prompt. The fresh ordinary path retains QUEUED,
+unowned, hold, reservation, native, workspace and retirement fences. A separate
+receipt-only read of a historical g0 admission remains valid after an actual g1
+claim without changing task state or granting fresh permission. Missing original
+intent or receipt does not authorize a readiness write for a claimed task.
+Receipt lookup itself performs no allocation/readiness refresh, owner command,
+resume or fresh send. A receipt transport timeout or OS error defers with its
+original diagnostic; it is never treated as a missing receipt or permission to
+send. A later attempt reads the same historical invocation and native identity.
+Both created and resumed storage compare persisted
+immutable intent transactionally; only compatible mutable resumed SessionInfo
+can refresh without replacing or erasing it. Missing original
+intent in a legacy acquisition is an explicit reconciliation boundary, not
+permission to migrate or send automatically.
+
+Bridge protocol 45 is required before existing keyed create and by keyed send.
+No unkeyed fallback or replacement backend is selected on unsupported peers.
+An admitted turn is not proof the model executed it or completed/verified its
+task. This source contract requires both producer and receiver support; rollout
+is separately authorized.
+
 ## The problem
 
 `agent-dispatch create --spawn` (and any watcher that "sees a queued task and

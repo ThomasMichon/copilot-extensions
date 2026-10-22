@@ -7,6 +7,8 @@ import logging
 from collections.abc import Callable
 
 from .queue import TaskError, TaskQueue
+from .coordinator_execution_wakes import deliver_execution_wake
+from .queue_execution_custody import ExecutionSendUnresolved
 from .queue_run_waiter_transition_cleanup import CLAIM_RELEASE_SENDER
 
 DeliverWake = Callable[[str, str, str, str, str, str | None], bool]
@@ -53,6 +55,7 @@ async def drain_run_waiter_wakes(
     retry_base: float = 1.0,
     is_active: WakeActive | None = None,
     delivery_lease: float = 60.0,
+    execution_incarnation: str | None = None,
 ) -> None:
     """Drain pending detached-waiter wake deliveries until cancelled."""
     while True:
@@ -82,15 +85,20 @@ async def drain_run_waiter_wakes(
                 delivered = True
             else:
                 delivered = await asyncio.to_thread(
-                    deliver,
-                    wake.owner,
-                    wake.task_id,
-                    wake.message,
-                    wake.id,
-                    wake.sender,
-                    wake.owner_session_id,
+                    deliver_execution_wake, queue, wake, execution_incarnation,
+                    lambda: deliver(
+                        wake.owner, wake.task_id, wake.message, wake.id, wake.sender,
+                        wake.owner_session_id,
+                    ),
                 )
             delivery_error = None if delivered else "bridge delivery unavailable"
+        except ExecutionSendUnresolved as exc:
+            log.info("run-waiter wake transport deferred for %s: %s", wake.id, exc)
+            try:
+                await asyncio.to_thread(queue.defer_execution_wake, wake, detail=str(exc))
+            except TaskError:
+                log.info("run-waiter wake delivery ownership changed for %s", wake.id)
+            continue
         except Exception as exc:
             log.warning("run-waiter wake delivery raised for %s", wake.id, exc_info=True)
             delivered = False

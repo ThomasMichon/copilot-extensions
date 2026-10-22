@@ -90,6 +90,16 @@ the completed receipt was persisted; another request's gate is never released.
 A typed drain refusal at the session manager's pre-effect guard restores the
 retained allocation and releases its own gate, allowing same-key continuation
 after cutover. Unknown native-start exceptions remain pending instead.
+Keyed local starts prepare the exact launch arguments before registering the
+Bridge session. A positively returned preparation failure restores the journal's
+allocated state and releases only that creation's gate; same-key replay keeps
+the original workspace and reserved Bridge identity. After preparation, the
+owner and holder checks run again before the journal records `launching`.
+The Session Host consumes that identity-bound prepared plan without resolving
+plugins a second time. Cancellation, interruption or an unknown outcome stays
+pending. Historical failed starts already recorded as launching are not
+retroactively classified as pre-launch, even when their error resembles a
+preparation failure.
 An established cold native conversation is strictly resumed only to admit
 its still-unadmitted original prompt, with recreation disabled.
 The journal composes the existing per-worktree async lock and OS executor lease;

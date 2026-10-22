@@ -17,6 +17,7 @@ from .db_live_session_aliases import (
     PROCESS_START_TOLERANCE_SECONDS,
     register_live_session_atomic,
 )
+from .db_live_controls import LiveControlsMixin
 
 LIVE_MESSAGE_DELIVERIES = {"queue", "steer", "interrupt"}
 
@@ -28,7 +29,7 @@ def _validate_live_message_delivery(delivery: str | None) -> str:
     return value
 
 
-class _LiveSessionsMixin:
+class _LiveSessionsMixin(LiveControlsMixin):
     """Extension-backed live-session registry and delivery helpers."""
 
     def register_live_session(
@@ -891,73 +892,6 @@ class _LiveSessionsMixin:
             (session_id, session_id),
         )
         return [dict(r) for r in rows]
-
-    def claim_live_controls(
-        self, session_id: str, now: float, max_age: float
-    ) -> list[dict[str, Any]]:
-        """Claim a session's pending controls for its extension to apply.
-
-        One transaction selects the unclaimed controls and stamps
-        ``claimed_at``, so each control goes to exactly one poll, and a
-        claimed control can no longer be withdrawn by its requester's timeout
-        (see :meth:`withdraw_live_control`). Controls older than ``max_age``
-        are expired instead: their requester is gone (e.g. the daemon
-        restarted mid-wait), so they must never apply late.
-        """
-        with self._write_lock:
-            conn = self._get_conn()
-            conn.execute("BEGIN IMMEDIATE")
-            try:
-                session_id = conn.execute(
-                    f"SELECT {_CANON}", (session_id, session_id)
-                ).fetchone()[0]
-                conn.execute(
-                    "UPDATE live_messages SET delivered_at=?, outcome='expired' "
-                    "WHERE session_id=? AND kind LIKE 'control:%' "
-                    "AND delivered_at IS NULL AND claimed_at IS NULL AND created_at < ?",
-                    (now, session_id, now - max_age),
-                )
-                rows = [dict(r) for r in conn.execute(
-                    "SELECT * FROM live_messages WHERE session_id=? "
-                    "AND kind LIKE 'control:%' AND delivered_at IS NULL "
-                    "AND claimed_at IS NULL ORDER BY id ASC",
-                    (session_id,),
-                ).fetchall()]
-                if rows:
-                    placeholders = ",".join("?" for _ in rows)
-                    conn.execute(
-                        f"UPDATE live_messages SET claimed_at=? WHERE id IN ({placeholders})",
-                        (now, *(r["id"] for r in rows)),
-                    )
-                conn.commit()
-            except Exception:
-                conn.rollback()
-                raise
-        return rows
-
-    def withdraw_live_control(self, session_id: str, control_id: int, now: float) -> bool:
-        """Withdraw a control nobody has claimed yet; True when withdrawn.
-
-        False means the extension already claimed it (it may be applying it
-        now) or it already has an outcome -- the requester must then report
-        that outcome, or that the change is in flight, never "not applied".
-        """
-        cur = self.execute_write(
-            "UPDATE live_messages SET delivered_at=?, outcome='withdrawn' "
-            f"WHERE session_id={_CANON} AND id=? AND kind LIKE 'control:%' "
-            "AND delivered_at IS NULL AND claimed_at IS NULL",
-            (now, session_id, session_id, control_id),
-        )
-        return cur.rowcount == 1
-
-    def live_control_state(self, session_id: str, control_id: int) -> dict[str, Any] | None:
-        """A control's ``claimed_at`` and ``outcome`` (``None`` if unknown)."""
-        rows = self.execute_read(
-            "SELECT claimed_at, outcome FROM live_messages "
-            f"WHERE session_id={_CANON} AND id=? AND kind LIKE 'control:%'",
-            (session_id, session_id, control_id),
-        )
-        return dict(rows[0]) if rows else None
 
     def ack_live_messages(
         self,

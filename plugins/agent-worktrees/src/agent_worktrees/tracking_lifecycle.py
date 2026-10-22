@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import secrets
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -662,6 +663,8 @@ def create_new_record_if_absent(
     origin: tracking.WorktreeOrigin | None = None,
     checkout_managed: bool = True,
     machine_identity: WorktreeMachineIdentity | None = None,
+    machine_identity_factory: Callable[[], WorktreeMachineIdentity | None] | None = None,
+    pair_kind: str | None = None,
 ) -> tuple[tracking.WorktreeRecord, bool]:
     tracking = _tracking()
     path = tracking_path / f"{worktree_id}.yaml"
@@ -669,6 +672,12 @@ def create_new_record_if_absent(
     with tracking._RecordLock(path, require_sidecar=True):
         if path.exists():
             return tracking.load_record(path), False
+        if machine_identity_factory is not None:
+            if machine_identity is not None:
+                raise ValueError("new record identity requires either a value or a factory, not both")
+            machine_identity = machine_identity_factory()
+            if machine_identity is not None:
+                machine = machine_identity.machine
         now = tracking._now_iso()
         record = tracking.WorktreeRecord(
             worktree_id=worktree_id,
@@ -690,8 +699,10 @@ def create_new_record_if_absent(
             interface=interface,
             origin=origin,
             checkout_managed=checkout_managed,
+            pair_kind=pair_kind or None,
             creation_nonce=secrets.token_hex(8),
         )
         tracking._save_record_unlocked(record, path)
+    record._loaded_from = path
     tracking._flush_session_projections(record)
     return record, True

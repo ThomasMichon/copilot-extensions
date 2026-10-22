@@ -105,6 +105,8 @@ Optional sync controls:
 - `sync.notify` — target-independent best-effort HTTP `POST` after any
   successful push (`url`, optional `bearer_token_file`, `timeout`). Notify
   failures are logged only in verbose runs and do not fail the sync.
+- `sync.redact_secrets`, `sync.session_files` — opt-in output protection for
+  `local`/`onedrive`; see [Protected publication](#protected-publication).
 
 ### Repo-owned sync opt-in (`sync.require_repo_opt_in`)
 
@@ -151,6 +153,18 @@ This is an *additional* requirement layered on top of
 > silently ignore `require_repo_opt_in` for rescue publication, it is
 > intentionally treated as unresolvable and every rescued session is
 > rejected while the gate is enabled, regardless of `repo_allowlist`.
+
+### Protected publication
+
+Opt-in, honored only by `local`/`onedrive` (other targets refuse them):
+`sync.redact_secrets: true` replaces known secret shapes with `[REDACTED]` in
+each pushed copy; `sync.session_files: essential` publishes only a fixed list
+of session files. With redaction on, an incomplete or malformed transcript is
+deferred whole (`partial`, retried next run), never published raw. A settings
+change reconciles once, replacing differing selected files of still-synced
+sessions; it removes no copy, so other raw copies are **not retroactively
+protected** (`doctor` warns). `run --dry-run --verbose` prints the scope and
+writes nothing; see [protected publication](references/protected-publication.md).
 
 ## Repo-local log organization
 

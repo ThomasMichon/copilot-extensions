@@ -3,7 +3,7 @@
 - **Subject:** A driver-based fleet of machines and services coordinated through an optional central Gateway controller.
 - **Scope:** branch (cross-cutting child of agent-fabric)
 - **Status:** Active
-- **Last revised:** 2026-10-19
+- **Last revised:** 2026-10-20
 - **Reality docs:** [`docs/architecture.md`](../../docs/architecture.md), [`docs/configuration.md`](../../docs/configuration.md)
 
 ## Purpose & Intent
@@ -104,6 +104,21 @@ Connectors establish authenticated outbound reach, advertise approved services,
 report freshness and outcomes, and reconcile locally permitted desired state.
 A logical controller may have a recoverable deployment without making its
 current network connection the lifetime owner of remote work.
+
+### Portable connectivity and communication
+
+The shared suite owns the generic machine-set, Gateway and connector engines,
+native OpenSSH integration, and optional reverse-SSH reachability through
+public Azure Bastion. These are reusable capabilities, not a required cloud
+substrate or a private adopter's permanent backend. The selected transport
+owner supplies reachability to existing SSH consumers; Gateway service routing
+does not introduce a second SSH registry.
+
+The complete Chat capability belongs in the shared suite: independently runnable
+service, installable client and optional Copilot plugin. Its
+[conversation vision](../plugins/agent-chat/README.md) governs communication;
+fleet placement and routing preserve its membership, history and service
+authority rather than implementing a separate chat backend.
 
 ### Integrated coordination product
 
@@ -310,6 +325,21 @@ through trusted local declarations and the existing installer/update authorities
 Broadcast means an explicit set of recipients with individual acknowledgements
 and outcomes, not arbitrary command execution or a claim that every host updated.
 
+### declarative-setup-modules
+
+Gateway and Vault setup are declared Fleet Manager modules, composed through the
+normal service, plugin and Worktree Manager lifecycle. Modules express selected
+roles and configuration while the existing installer, supervisor, credential
+provider and service owners perform their own work. A declarative loadout does
+not require Kubernetes, a new controller or a parallel installation engine.
+Standalone service and client adoption remains supported without Worktree
+Manager or Copilot.
+
+Adopter repositories hold private inventory, deployment policy and credential
+references. Organization-specific resource acquisition, CLI and identity
+bindings stay in external adapters; the reusable machine, connectivity,
+credential-renewal and communication engines remain shared upstream.
+
 ### capability-scoped-credential-access
 
 Registered consumers can borrow only the credentials appropriate to their
@@ -428,6 +458,38 @@ An operator client may maintain one logical Gateway connection without becoming
 a feeder or per-target keepalive owner. Required attended credential-provider
 dependencies are reported honestly rather than implying unattended availability.
 
+User-owned interactive machine connectivity is available during the user's
+logon lifetime; fleet adoption does not require prelogin operation, a SYSTEM
+account or another privileged service identity. User logout makes that
+capability explicitly unavailable without discarding its declared configuration
+or accepted work. Separately adopted service-host roles retain their own
+availability and supervision contract.
+
+### directional-connectivity-and-credential-continuity
+
+Inbound and outbound connectivity are independent declared permissions for each
+logical machine. A reverse connection can provide an admitted inbound route
+without granting outbound SSH, arbitrary forwarding or exposure of every local
+service. Constrained guests use only explicitly supported, authorized host
+mediation; reachability does not invent a missing capability or transfer the
+host's identity.
+
+Credential sources renew through their normal provider-owned issuance and
+custody contracts. A reconnect or expired credential is not permission to copy
+credentials into fleet configuration, bypass enrollment or replace an attended
+identity decision. Declared roles and directions survive reconnect without
+silently widening access.
+
+### qualified-migration-to-shared-owners
+
+Adopter-specific generic prototypes converge onto the shared engines rather than
+remaining permanent parallel backends. Migration preserves working consumers,
+accepted work, durable state, scoped credential custody and explicit ownership.
+A replacement must qualify state continuity, reconnection and compatible
+rollback before the corresponding prototype is retired. A new declaration or
+the removal of an old requirement alone never authorizes teardown, data loss or
+an immediate cutover.
+
 ### authenticated-scoped-and-revocable
 
 Routing and control are encrypted and authorized per principal, service,
@@ -471,6 +533,9 @@ replacement.
   operator into the local fleet or merge the fleets' private stores.
 - No required provider, cloud substrate, tunnel product, identity vendor, or
   adopter-specific inventory in the portable controller.
+- No permanent adopter-private duplicate of the generic Gateway, connector,
+  transport or Chat engine; private loadout and organization-specific bindings
+  extend shared capabilities instead of replacing their ownership.
 - No mandatory Gateway dependency for standalone services or existing direct/
   SSH workflows, and no automatic migration of unrelated fleets.
 - No competing task queue or worktree registry beside an existing authority;

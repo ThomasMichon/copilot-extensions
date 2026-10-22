@@ -506,7 +506,7 @@ function Start-Container {
         )
         Write-Host "block-public-feeds: pypi.org, files.pythonhosted.org, registry.npmjs.org, download.pytorch.org null-routed" -ForegroundColor DarkGray
     }
-    docker run -d --name $Container `
+    docker run -d --init --name $Container `
         --label $CleanRoomLabel `
         -v "${scenDir}:/home/operator/scenario:ro" `
         -v "${libDir}:/home/operator/lib:ro" `

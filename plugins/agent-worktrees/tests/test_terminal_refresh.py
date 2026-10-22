@@ -61,6 +61,21 @@ def test_refresh_uses_one_narrow_call_without_installer(manager, monkeypatch):
     assert kwargs["timeout"] == 60
 
 
+def test_refresh_binds_registered_manager_root(manager, monkeypatch, tmp_path):
+    manager.provider_root = str(tmp_path / "registered-manager")
+    monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(tmp_path / "wrong-manager"))
+    observed = []
+
+    def run(argv, **kwargs):
+        observed.append(kwargs["env"]["WORKTREE_MANAGER_ROOT"])
+        return SimpleNamespace(returncode=0, stdout=json.dumps(SUCCESS), stderr="")
+
+    monkeypatch.setattr(m.subprocess, "run", run)
+    assert m._refresh_terminal_profiles()
+    assert observed == [manager.provider_root]
+    assert os.environ["WORKTREE_MANAGER_ROOT"] == str(tmp_path / "wrong-manager")
+
+
 def test_explicit_registration_target_does_not_require_active_context(manager, monkeypatch):
     def no_context():
         raise AssertionError("active project lookup must not run for an explicit target")

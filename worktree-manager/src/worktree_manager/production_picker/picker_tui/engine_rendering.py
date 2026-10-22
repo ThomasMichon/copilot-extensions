@@ -846,6 +846,10 @@ class PickerScreenRenderingMixin(PickerNavigationRenderingMixin):
                 reg = self._reg_pivot()
                 label = reg.create_action.label if reg and reg.create_action else "entry"
                 return (f"Enter: {label} · Tab region · ^◀▶ machine")
+            if btn and btn.startswith("VA:"):
+                actions = self._pivot_view_actions()
+                index = int(btn.split(":")[1])
+                return f"Enter: {actions[index].label} · Tab region" if index < len(actions) else ""
             return ""
         if zone == "L":
             rec = self._selected_record()

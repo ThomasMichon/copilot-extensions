@@ -2,10 +2,16 @@
 # Executed into installation_context.py's shared module globals.
 from __future__ import annotations
 
+def _lock_openprocess_failure_means_live(last_error: int) -> bool:
+    return last_error != 87  # ERROR_INVALID_PARAMETER is the absent-PID result.
+
+
 def _pid_is_live(pid: int) -> bool:
     if pid < 1:
         return False
     if os.name == "nt":
+        if pid > 0xFFFFFFFF:
+            return True
         import ctypes
         from ctypes import wintypes
 
@@ -30,7 +36,7 @@ def _pid_is_live(pid: int) -> bool:
             pid,
         )
         if not handle:
-            return _openprocess_denied_means_live(ctypes.get_last_error())
+            return _lock_openprocess_failure_means_live(ctypes.get_last_error())
         try:
             wait_result = kernel32.WaitForSingleObject(handle, 0)
             if wait_result == wait_object_0:
@@ -47,7 +53,7 @@ def _pid_is_live(pid: int) -> bool:
     except PermissionError:
         return True
     except OSError:
-        return False
+        return True
     return True
 
 
@@ -96,7 +102,35 @@ class _DirectoryLock(AbstractContextManager["_DirectoryLock"]):
             _fail(f"Installation lock owner receipt '{self.owner_path}' is incomplete.")
         return owner
 
+    def _create(self, deadline: float) -> None:
+        with _lock_mutation_guard(self.path, deadline=deadline):
+            self.path.mkdir()
+            owner = {
+                "schema": LOCK_SCHEMA,
+                "version": LOCK_VERSION,
+                "kind": self.kind,
+                "marketplaceId": self.marketplace_id,
+                "pluginId": self.plugin_id or "",
+                "token": self.token,
+                "host": self.host,
+                "pid": os.getpid(),
+                "acquiredAt": _utc_now(),
+            }
+            birth = _runtime_publication_process_identity(os.getpid())
+            if birth is not None:
+                owner["processIdentity"] = birth
+            try:
+                _atomic_write_json(self.owner_path, owner)
+            except BaseException:
+                if self.owner_path.exists():
+                    self.owner_path.unlink()
+                self.path.rmdir()
+                raise
+            self.acquired = True
+
     def acquire(self) -> None:
+        self.path = _lock_path(self.path)
+        self.owner_path = self.path / "owner.json"
         self.path.parent.mkdir(parents=True, exist_ok=True)
         deadline = time.monotonic() + self.timeout_seconds
         while True:
@@ -113,7 +147,7 @@ class _DirectoryLock(AbstractContextManager["_DirectoryLock"]):
                         )
                 _fail(f"Installation lock '{self.path}' remained busy.")
             try:
-                self.path.mkdir()
+                self._create(deadline)
             except FileExistsError:
                 if not self.owner_path.exists():
                     try:
@@ -142,25 +176,25 @@ class _DirectoryLock(AbstractContextManager["_DirectoryLock"]):
                 owner_host = _string_property(owner, "host")
                 owner_pid = _property(owner, "pid")
                 if owner_host == self.host:
-                    if not _pid_is_live(owner_pid):
-                        time.sleep(LOCK_POLL_SECONDS)
-                        try:
-                            current_owner = self._owner()
-                        except _FileIdentityChanged:
-                            time.sleep(LOCK_POLL_SECONDS)
-                            continue
-                        except InstallationContextError:
-                            if not self.path.exists() or not self.owner_path.exists():
+                    if _lock_owner_state(owner) == "stale":
+                        with _lock_mutation_guard(self.path, deadline=deadline):
+                            try:
+                                current_owner = self._owner()
+                            except _FileIdentityChanged:
                                 continue
-                            raise
-                        if _string_property(current_owner, "token") != _string_property(
-                            owner, "token"
-                        ):
-                            continue
-                        _fail(
-                            f"Installation lock '{self.path}' has a stale owner "
-                            f"(host={owner_host}, pid={owner_pid}); explicit repair is required."
-                        )
+                            except InstallationContextError:
+                                if not self.path.exists() or not self.owner_path.exists():
+                                    continue
+                                raise
+                            if current_owner != owner or _lock_owner_state(current_owner) != "stale":
+                                continue
+                            _fail(
+                                f"Installation lock '{self.path}' has a stale owner; "
+                                "the owner's descendants must be independently confirmed inactive. "
+                                "Use installation_context.py lock-inspect, then lock-repair with "
+                                "--expected-evidence and --inactive-owner-evidence; "
+                                "see recovering-operational-locks."
+                            )
                     if time.monotonic() >= deadline:
                         _fail(f"Installation lock '{self.path}' remained busy.")
                     time.sleep(LOCK_POLL_SECONDS)
@@ -170,25 +204,6 @@ class _DirectoryLock(AbstractContextManager["_DirectoryLock"]):
                     f"(host={owner_host}, pid={owner_pid})."
                 )
             else:
-                owner = {
-                    "schema": LOCK_SCHEMA,
-                    "version": LOCK_VERSION,
-                    "kind": self.kind,
-                    "marketplaceId": self.marketplace_id,
-                    "pluginId": self.plugin_id or "",
-                    "token": self.token,
-                    "host": self.host,
-                    "pid": os.getpid(),
-                    "acquiredAt": _utc_now(),
-                }
-                try:
-                    _atomic_write_json(self.owner_path, owner)
-                except BaseException:
-                    if self.owner_path.exists():
-                        self.owner_path.unlink()
-                    self.path.rmdir()
-                    raise
-                self.acquired = True
                 return
 
     def assert_owned(self) -> None:
@@ -201,6 +216,10 @@ class _DirectoryLock(AbstractContextManager["_DirectoryLock"]):
     def release(self) -> None:
         if not self.acquired:
             return
+        with _lock_mutation_guard(self.path, deadline=time.monotonic() + 1):
+            self._release_directory()
+
+    def _release_directory(self) -> None:
         self.assert_owned()
         deadline = time.monotonic() + 1.0
         while True:
@@ -642,6 +661,77 @@ def _resolve_directory_evidence(
     return None
 
 
+def _resolve_legacy_snapshot_evidence(
+    payload: Path, requested_plugin_id: str | None,
+) -> dict[str, Any] | None:
+    receipt_path = payload / SNAPSHOT_PROVENANCE_FILE
+    if not os.path.lexists(receipt_path):
+        return None
+    receipt = read_json(receipt_path)
+    if not isinstance(receipt, Mapping) or _property(receipt, "schema") != (
+        "copilot-extensions.legacy-snapshot-source"
+    ):
+        return None
+    version = _property(receipt, "version")
+    if type(version) is not int or version not in (1, 2):
+        _fail("Legacy snapshot source has an unsupported version.")
+    snapshots = payload.parent
+    root = snapshots.parent
+    if snapshots.name != "snapshots" or _is_link_or_junction(receipt_path):
+        _fail("Legacy snapshot source must be an ordinary snapshot-local file.")
+    selected = _read_regular_file_bytes(
+        root / "payload-dir", label="Legacy snapshot redirect", require_stable_identity=True,
+    ).decode("utf-8").strip()
+    stamped = _read_runtime_marker(root / "stamped-version", "Legacy snapshot version")
+    snapshot_id = payload.name
+    payload_version = payload.name
+    if version == 2:
+        snapshot_id = _string_property(receipt, "snapshotId")
+        payload_version = _string_property(receipt, "payloadVersion")
+        if not snapshot_id or not payload_version:
+            _fail("Legacy snapshot source requires snapshot identity and payload version.")
+    if (
+        not _path_is_fully_qualified(selected)
+        or not paths_equal(selected, payload)
+        or snapshot_id != payload.name
+        or stamped != payload_version
+    ):
+        _fail("Legacy snapshot source does not describe the selected snapshot.")
+    resolution = _property(receipt, "resolution")
+    if (
+        not isinstance(resolution, Mapping)
+        or _property(resolution, "action") != "resolve"
+        or _property(resolution, "operative") is not False
+        or _property(resolution, "rebindRequired") is not False
+    ):
+        _fail("Legacy snapshot source requires a canonical read-only resolution.")
+    plugin = _string_property(resolution, "pluginId")
+    _assert_plugin_id(plugin)
+    if requested_plugin_id and plugin != requested_plugin_id:
+        _fail("Legacy snapshot source identifies another plugin.")
+    manifest = read_json(payload / "plugin.json")
+    if not isinstance(manifest, Mapping) or _property(manifest, "name") != plugin:
+        _fail("Legacy snapshot source does not match its payload plugin.")
+    captured_source = _property(resolution, "source")
+    if not isinstance(captured_source, Mapping):
+        _fail("Legacy snapshot source identity is missing.")
+    normalized = normalize_source(captured_source, from_receipt=True)
+    marketplace = _string_property(resolution, "marketplaceId")
+    _validate_marketplace_id(marketplace)
+    readable = marketplace.rsplit("--", 1)[0]
+    identity = source_identity(normalized, readable)
+    if (
+        identity["marketplaceId"] != marketplace
+        or identity["fingerprint"] != _string_property(resolution, "sourceFingerprint")
+        or identity["record"] != _string_property(captured_source, "record")
+    ):
+        _fail("Legacy snapshot source identity does not match its canonical fingerprint.")
+    return {
+        "source": normalized, "pluginId": plugin,
+        "readableName": readable, "locator": None,
+    }
+
+
 def resolve_payload_source(
     *,
     payload_root: str | os.PathLike[str] | None = None,
@@ -691,6 +781,8 @@ def resolve_payload_source(
         }
     else:
         evidence = _resolve_installed_evidence(payload, copilot, project)
+        if evidence is None:
+            evidence = _resolve_legacy_snapshot_evidence(payload, plugin_id)
         if evidence is None:
             evidence = _resolve_directory_evidence(payload, plugin_id)
         if evidence is None:

@@ -20,6 +20,11 @@ first accepted candidate and reuses it only within that installer process,
 checking its existence and Authenticode signature on each use. An unsuccessful
 lookup is not cached, and required native-operation failures remain visible.
 
+Both installers identify install/update with one ordinary progress line instead
+of a blank/banner/blank block. Standalone output retains the action name; an
+existing timed parent renders that line as running progress, not completion.
+Other diagnostics and empty lines are not filtered.
+
 Both installers co-deploy the canonical Python runtime resolver and its lease
 and construction companions into the Bridge installation's `scripts/` directory,
 alongside the existing native-shell resolver deployment in `bin/`. Native
@@ -360,11 +365,113 @@ execution/ACP capability limits.
 
 ## Responsibility boundary
 
+The [projection acceptance examples](docs/plugin-projection-examples.md) map
+controller declarations and execution locations to target-local settings and
+ACP directory arguments, including source preservation, repository scoping and
+target-owned relocation. They distinguish the required outputs from adapters
+whose integration remains open in the active effort.
+
+The [host/child projection atlas](docs/plugin-projection-atlas.html) adds an
+offline relationship matrix and diagrams. In particular, a same-repository
+child worktree uses its own target-native local marketplace, not its parent's
+or the repository anchor's revision.
+
+Ordinary static local ACP targets prepare plugins after real Worktrees
+allocation (or an explicit existing cwd), before either the raw child or local
+Session Host starts. Related selection and payload declarations prefer the
+verified controller worktree over configured anchors. Target-native settings
+retain authority. Already-local payloads are direct filesystem references:
+preparation never snapshots them or writes catalogs into source marketplaces.
+Selected remote sources use the shared verified, checkout-isolated installer
+before the atomic repository-local registration barrier.
+
+ACP gets every effective prepared directory. Structured resolver provenance
+replaces only automatic plugin arguments; configured and request arguments
+remain verbatim, and prepared argv is not persisted onto the target. Gitless
+legacy directories have no registration surface and retain their old launch.
+The final child environment also selects the native installer and accompanies
+Git/installer subprocesses, without modifying daemon globals. An explicit
+`copilot_path` wins over environment discovery for a direct local launch's
+installer, matching that launch's executable precedence. Cancellation waits
+for bounded in-flight preparation to quiesce before propagating.
+
+For managed Worktrees launches, the merged target and resolved plan environment
+selects the **packaging CLI** through `COPILOT_PATH` or `PATH`, as in the shared
+remote preparation engine. It is independent of an opaque runtime/setup wrapper:
+Bridge never invokes that wrapper's argv as the plugin installer and does not
+assert installer/runtime binary identity. Installation verifies the selected
+payloads and registration before returning the unchanged runtime command.
+An unavailable or invalid packaging CLI fails when installation requires it;
+direct-reference-only preparation does not invoke it. This contract adds no
+Worktrees launch-plan metadata or configuration.
+
+Ordinary local CLI acquisition is integrated through the existing Worktrees
+owner after its profile-environment merge and before mux creation. Bridge-owned
+task delivery requires protocol 44 and confirmation of the compiled native
+plugin selection; live reuse requires preparation evidence bound to that same
+native session. See the [startup-readiness contract](docs/startup-plugin-readiness.md).
+Ordinary operator launches are not retrofitted with this task gate.
+This capability floor does not raise the minimum-supported protocol or narrow
+the compatibility range of existing operations.
+
+Ordinary static SSH ACP targets use the same controller-selection and native
+target-precedence rules. The existing SSH owner first resolves the real remote
+worktree, including when a stored target already carries an id and cwd, then
+streams the shared stdlib preparation engine to the receiver's Python 3.10+.
+Local controller payloads are reflected into that execution world; Git sources
+retain their declarations. The receiver registers the complete effective set
+before Bridge opens productive ACP stdio, passing every effective directory
+without replacing explicit configuration/request flags. The existing project
+binstub, account/profile, authentication hooks and launch environment remain
+the launch authority. Explicit Gitless directories retain their legacy behavior.
+
+Preparation payloads travel on stdin, not SSH argv. POSIX uses `python3`;
+Windows uses a short encoded PowerShell command and a hidden Python process
+with both output pipes drained concurrently. The streamed receiver bounds its
+worker to 540 seconds and contains installer descendants in a POSIX process
+group or a Windows kill-on-close Job. A POSIX keeper retains group ownership
+until cleanup on success, error or timeout; its own bounded fallback also
+handles a lost supervisor. Windows starts an independent worker-owned Job
+deadline before executing preparation, so losing the supervisor does not
+remove the deadline. Cancellation waits for the bounded
+channel to settle before propagating: killing a local SSH client alone does not
+prove that the remote writer stopped. A failed or cancelled preparation never
+opens productive ACP stdio. This is ACP preparation integration, not proof of
+headed SSH CLI parity or of a deployed/running release.
+
+The receiver verifies the Git repository root separately from the productive
+execution directory. Registration and its raw compiled context belong to that
+root; the launch retains the resolved execution cwd, including nested
+directories. Prepared launch metadata carries both identities rather than
+requiring an execution subdirectory to equal the repository root.
+The probe removes the same inherited Git selectors as the shared engine and
+uses its canonical execution lookup. Git queries and target-ownership discovery
+resolve the native binary through the execution environment, including Windows
+quoted/relative PATH entries, rather than falling back to a daemon's toolchain.
+
+Remaining exclusions are command wrappers, privileged
+configurations (including POSIX `requires_admin`), sub-daemon relays and
+receiver-local Session Host runners. Their existing launch behavior remains
+unchanged. Host-backed loopback preparation additionally
+checks the configured effective SSH login against the current login, retaining
+the actual SSH target's environment-user-before-agent-user precedence. An unset
+login may resolve through SSH alias configuration; neither it nor a different
+explicit account proves ordinary local preparation. Login comparison remains
+exact, without introducing account-name normalization. Platform/machine routing
+is unchanged.
+
 Trusted-venue plugin preparation uses the dispatcher's controller worktree,
 not the daemon's launch directory or the remote product checkout when controller
 context is supplied. A declared `caller_owner_ref` resolves through the
 Worktrees owner to its local, nonterminal checkout; any supplied controller
 path must agree, and a `#session` qualifier must match `caller_session_id`.
+Explicit version-1 Worktrees rows are decoded by the shared dependency-free
+identity codec: the owner reference must match the separate execution owner,
+not the physical host shared by native and guest environments. Physical and
+environment metadata remains unchanged. Malformed explicit tuples refuse
+before plugin-provider or transport effects; unversioned rows keep their
+historical owner interpretation. Standalone snapshots embed the codec and
+do not require a sibling Worktrees runtime.
 Without declared ownership, an absolute existing `caller_worktree` directory
 is accepted without Worktrees adoption. With neither, legacy configured
 provider discovery remains unchanged; opaque affinity IDs are not paths.
@@ -446,8 +553,18 @@ contracts.
 Agent-facing sessions receive an exact payload-local command through the
 session command catalog. That command resolves and, when necessary, provisions
 the runtime from its own payload without searching `PATH` for another
-marketplace's same-named plugin. On Windows the catalog publishes the native
-`.cmd` entry so prompt bodies sent through stdin remain intact.
+marketplace's same-named plugin. On Windows the catalog publishes the direct
+`.ps1` entry. PowerShell-aware callers use that entry; native process callers
+invoke it through their PowerShell host's script boundary. PowerShell 7 accepts
+`-File`; Windows PowerShell 5.1 rejects a standalone `-` in that host argument
+list, so native callers submitting `--prompt-file -` use a safely quoted
+`-Command`/`-EncodedCommand` invocation instead. Prompt bytes still travel only
+through stdin. The `.cmd` entry
+remains for CMD-compatible callers, including the remote carrier command.
+Both paths retain normal runtime selection and admission. Native stdin is
+inherited as bytes, including framed carrier traffic and quoted, multiline
+`--prompt-file -` bodies; an actual PowerShell object pipeline remains text
+input rather than a binary transport.
 
 The legacy global wrappers remain explicit compatibility and management
 boundaries for callers that do not inherit session catalogs: daemon and service
@@ -812,6 +929,37 @@ are never echoed as failure diagnostics.
 Known-value filtering also uses the supplied local resolver environment or
 configured SSH target environment. Overlapping values are replaced longest-first
 in one pass; this does not fetch the target's full remote environment.
+
+Acquisition worktree-owner failures use the same formatter, retain the observed
+exit code, and cap the final message at 1,500 characters after redaction.
+Typed preparation/pending outcomes, timeout uncertainty and successful-response
+validation are unchanged. Before propagating a captured failure, the
+`agent-bridge` logger emits one `worktree_owner_failure` record: an allowlisted
+operation name, a generated diagnostic correlation ID (not an owner identity or
+receipt), reason, observed exit code, elapsed milliseconds, capture-completeness
+and stream byte counts, bounded structured `owner_error`, and separately bounded
+`stderr`. Timeout, cancellation and capture errors log unavailable streams as
+null; capture completeness or a process exit never proves the native effect.
+Successful responses are not dumped.
+
+Records use the existing formatter's error/message/stage/code allowlist,
+normalization and credential redaction before its bounds: 800 message characters,
+80 per stage/code label and 400 stderr characters, plus truncation indicators.
+Records use ASCII-safe JSON, preserving valid escapes with legacy Windows
+stderr encodings as well as UTF-8. After redaction and the character bounds,
+JSON-escaped string budgets are 4,608 bytes for `owner_error` and 2,048 for
+`stderr`; oversized fields elide their middle, retaining the error lead-in and
+trailing stage/code labels. Each diagnostic record remains below 8 KiB encoded
+as UTF-8 or through an ASCII-compatible sink. Raw envelopes, opaque stdout,
+argument lists and environment dictionaries are not serialized.
+The existing CLI logging configuration routes these records to stderr; the
+installed Windows supervisor redirects it to `agent-bridge-err.log` beside its
+PID file. Standard logging handler flushing/error handling and the service's
+existing log-file lifetime apply: this adds no rotation, aggregate size bound,
+fsync guarantee or permanent receipt history, and a service relaunch may replace
+the file. An operator disabling the logger or a failed logging sink still limits
+observability. This improves future evidence retention; it does not reconstruct
+lost output, prove no launch occurred, or authorize retrying an uncertain operation.
 
 Version-skew fallback never drops a supplied `--owner-ref` or
 `--caller-worktree`. Such requests fail closed when the resolver rejects their

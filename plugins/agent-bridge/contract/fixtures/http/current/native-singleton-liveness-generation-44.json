@@ -1,0 +1,30 @@
+{
+  "captured_from": {
+    "commit": "632cac7b9de4c42ef2c765053a783fbead0bbff0",
+    "plugin_version": "0.4.1-dev3",
+    "source_path": "plugins/agent-bridge/src/agent_bridge/singleton_resume.py",
+    "source_git_blob": "44ae0445dae3347199a200f8d119e8ffb75eeaa5",
+    "protocol_generation": 44,
+    "source_sha256": "1f0ee4f1599af18cdf3f1184af115eb660a2f8d1ff23db812cfac342667132f5"
+  },
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/worktrees/example@anchor/resume/acp"
+  },
+  "retained_execution": {
+    "status": "idle",
+    "client_is_running": true,
+    "local_host_child_alive": false
+  },
+  "recovery": {
+    "reconcile_host_before_client_readiness": true,
+    "settle_dead_session": "stopped",
+    "load_existing_native": true,
+    "allow_recreate": false,
+    "native_history_replacement": false
+  },
+  "reattested_from": {
+    "path": "plugins/agent-bridge/contract/fixtures/http/current/native-singleton-liveness-generation-43.json",
+    "sha256": "5e1a220be8e5a3cb445e11ae00a608b421d283e5c400ffaa5286f3590a788174"
+  }
+}

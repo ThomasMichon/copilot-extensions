@@ -5,22 +5,98 @@ from __future__ import annotations
 import subprocess
 import shlex
 import hashlib
+import logging
+import json
+import os
+import shutil
 from pathlib import Path
 
 from agent_procutil import no_window_flags
 from plugin_resolve.payload import is_harness_only
 from plugin_resolve.reflection import (
-    build_plan, build_prepare_script, parse_execution_checkout, parse_prepared, selection_spec,
+    build_plan, build_prepare_script, parse_execution_checkout, parse_prepared, parse_prepared_context, selection_spec,
 )
+from plugin_resolve.target import github_repository_slug, requires_repository_binding
 
 
-def _script(args, target, *, run_input=None, remote_env=None, relay_port=None, prepared_context=None):
+def _worktrees_registry(arguments) -> dict | None:
+    from . import _peer_launch
+    from .config import _installation_owner
+
+    own = _installation_owner()
+    if own is not None:
+        peer = Path(own["cellRoot"]) / "plugins" / "agent-worktrees"
+        if not peer.exists() and not peer.is_symlink():
+            return None
+        prefix = _peer_launch.launch_prefix(
+            "agent-containers", Path(own["pluginRoot"]),
+            os.environ[_peer_launch.CONTEXT_ENV], "agent-worktrees",
+        )
+    else:
+        executable = shutil.which("agent-worktrees")  # marketplace-isolation: allow no-context legacy registry lookup; explicit context selects the attributable peer
+        if not executable:
+            return None
+        prefix = [executable]
+    result = subprocess.run(
+        [*prefix, *arguments], capture_output=True, encoding="utf-8", timeout=30,
+        creationflags=no_window_flags(),
+    )
+    if result.returncode:
+        raise RuntimeError("Target plugin ownership registry command failed: " + result.stderr.strip())
+    data = json.loads(result.stdout)
+    if not isinstance(data, dict):
+        raise RuntimeError("Target plugin ownership registry returned no object")
+    return data
+
+
+def _registered_source_roots(repository: str) -> list[Path]:
+    inventory = _worktrees_registry(["repos", "list", "--strict", "--json"])
+    if inventory is None:
+        logging.getLogger("agent-containers").warning(
+            "Target-relative plugin ownership is unavailable without the repository registry",
+        )
+        return []
+    if inventory.get("inventory_authority") != "complete" or not isinstance(inventory.get("repos"), list):
+        raise RuntimeError("Target plugin ownership requires a complete repository registry")
+    roots = []
+    for row in inventory["repos"]:
+        if not isinstance(row, dict) or not isinstance(row.get("name"), str):
+            raise RuntimeError("Repository registry returned an invalid target binding")
+        slug = github_repository_slug(row.get("remote", ""))
+        if repository not in {row["name"], row.get("remote")} and not (
+            slug and repository.casefold() == slug.casefold()
+        ):
+            continue
+        found = _worktrees_registry(["repos", "find", row["name"], "--registered-only", "--json"])
+        if (
+            found is None or found.get("registration") != "ready"
+            or found.get("name") != row["name"] or found.get("remote") != row.get("remote")
+            or not isinstance(found.get("path"), str) or not Path(found["path"]).is_absolute()
+        ):
+            raise RuntimeError("Registered target plugin ownership changed during resolution")
+        roots.append(Path(found["path"]).resolve(strict=True))
+    return roots
+
+
+def _script(args, target, *, run_input=None, remote_env=None, relay_port=None, prepared_context=None,
+            include_compiled_context=False):
     if target.actual_profile != "trusted":
         raise RuntimeError("Restricted containers cannot receive plugin projection")
     specs = [selection_spec(value) for value in getattr(args, "stage_plugins", [])]
+    specs = [spec for spec in specs if not is_harness_only(spec["source"])]
+    roots = [Path(root) for root in getattr(args, "plugin_roots", [])]
+    repository = (
+        getattr(getattr(target, "info", None), "repo", None)
+        or getattr(getattr(target, "fleet", None), "repo", None)
+    )
+    binding = {}
+    if repository and requires_repository_binding(specs, roots):
+        bound_roots = _registered_source_roots(repository)
+        if bound_roots:
+            binding = {"target_repository": repository, "target_source_roots": bound_roots}
     plan = build_plan(
-        [spec for spec in specs if not is_harness_only(spec["source"])],
-        [Path(root) for root in getattr(args, "plugin_roots", [])],
+        specs, roots,
+        **binding,
     )
     if run_input is None:
         from .ssh_transport import build_ssh_command, prepare_ssh_config
@@ -46,7 +122,9 @@ def _script(args, target, *, run_input=None, remote_env=None, relay_port=None, p
         if rc:
             raise RuntimeError("Venue could not resolve the explicit execution worktree")
         workspace = parse_execution_checkout(output)
-    script = build_prepare_script(plan, workspace)
+    script = build_prepare_script(
+        plan, workspace, **({"include_prepared_context": True} if include_compiled_context else {}),
+    )
     prefix = "set -e\n"
     if remote_env:
         prefix += f". {shlex.quote(remote_env)};\n"
@@ -62,13 +140,20 @@ def _script(args, target, *, run_input=None, remote_env=None, relay_port=None, p
     return prefix + script, run_input
 
 
-def prepare_plugins(args, target, *, run_input=None, remote_env=None, relay_port=None) -> list[str]:
+def prepare_plugins(args, target, *, run_input=None, remote_env=None, relay_port=None,
+                    prepared_context=None) -> list[str]:
     script, run_input = _script(
         args, target, run_input=run_input, remote_env=remote_env, relay_port=relay_port,
+        prepared_context=prepared_context,
+        include_compiled_context=prepared_context is not None,
     )
     rc, output, error = run_input("bash -ls", script.encode(), timeout=600)
     if rc:
         raise RuntimeError(f"Required target plugin preparation failed: {error.strip()}")
+    if prepared_context is not None:
+        prepared_context["plugin_context"] = parse_prepared_context(
+            output, expected_repo=prepared_context["workspace"],
+        )
     return parse_prepared(output)
 
 

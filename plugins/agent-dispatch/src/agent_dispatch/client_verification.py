@@ -35,6 +35,8 @@ class VerificationClientMixin:
         reason: str,
         resume_worktree: str,
         command: list[str],
+        kind: str = "process",
+        delegation: dict | None = None,
     ) -> dict:
         return self._unwrap(
             self._http.post(
@@ -45,6 +47,7 @@ class VerificationClientMixin:
                     "reason": reason,
                     "resume_worktree": resume_worktree,
                     "command": command,
+                    **({"kind": kind, "delegation": delegation} if kind != "process" else {}),
                 },
             )
         )
@@ -111,3 +114,20 @@ class VerificationClientMixin:
                 },
             )
         )
+
+    def delegated_preparation(self, task_id: str, preparation_id: str) -> dict:
+        return self._unwrap(self._http.get(
+            f"/tasks/{task_id}/run-waiter/preparation/{preparation_id}",
+        ))
+
+    def arm_delegated_waiter(self, task_id: str, *, generation: int, delegation: dict) -> dict:
+        return self._unwrap(self._http.post(
+            f"/tasks/{task_id}/run-waiter/arm",
+            json={"kind": "delegated", "generation": generation, "delegation": delegation},
+        ))
+
+    def finish_delegated_waiter(self, task_id: str, *, generation: int, delegation: dict, event: dict) -> dict:
+        return self._unwrap(self._http.post(
+            f"/tasks/{task_id}/run-waiter/finish",
+            json={"kind": "delegated", "generation": generation, "delegation": delegation, "event": event},
+        ))

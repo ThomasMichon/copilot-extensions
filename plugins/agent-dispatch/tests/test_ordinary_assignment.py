@@ -54,6 +54,7 @@ def assigned(tmp_path, monkeypatch, request):
         "durable_session_id": "native-a", "worktree_id": "worktree-a",
         "project": "execution-project", "target_dir": worktree_path,
         "status": "idle", "read_only": False, "at_rest": True, "liveness": None,
+        "turn_count": 0,
     }
     calls = []
 
@@ -92,14 +93,19 @@ def assigned(tmp_path, monkeypatch, request):
             )
         assert argv[0] == "bridge" and argv[1] == "--json"
         command = argv[2]
-        calls.append(command)
+        calls.append("receipt" if "--receipt-only" in argv else command)
         if command == "resume":
-            assert argv == ["bridge", "--json", "resume", "worktree-a", "--strict"]
+            saved = queue.get_reservation(snapshot["spawn_reservation_key"])
+            target = saved.agent_info["session_id"] if saved.agent_info else "worktree-a"
+            assert argv == ["bridge", "--json", "resume", target, "--strict"]
             assert kwargs.get("input") is None
             return subprocess.CompletedProcess(argv, 0, json.dumps({
                 "session_id": response["session_id"], "status": "idle", "verb": "loaded",
             }), "")
         if command == "status":
+            if "--full" not in argv:
+                assert argv == ["bridge", "--json", "status", "bridge-a"]
+                return subprocess.CompletedProcess(argv, 0, json.dumps({"status": response["status"]}), "")
             assert argv == ["bridge", "--json", "status", "bridge-a", "--full"]
             return subprocess.CompletedProcess(argv, 0, json.dumps(response), "")
         if command == "create":
@@ -111,19 +117,28 @@ def assigned(tmp_path, monkeypatch, request):
             record.update(last_session_id="native-a", session_count=1)
             return subprocess.CompletedProcess(argv, 0, json.dumps({
                 "session_id": "bridge-a", "ready": True, "status": "awaiting_first_prompt",
+                "creation": {"worktree": {"creation_nonce": record["creation_nonce"]}},
                 "connection": {"worktree_id": "worktree-a", "repo": "execution-project",
                                "target_dir": worktree_path, "native_session_id": "native-a"},
             }), "")
         assert command == "send"
+        invocation = json.loads(kwargs["input"])
+        assert "--native-invocation-file" in argv
+        if "--receipt-only" in argv:
+            return subprocess.CompletedProcess(argv, 69, json.dumps({
+                "outcome": "refused_unavailable", "reason": "native_receipt_missing",
+            }), "")
         saved = queue.get_reservation(snapshot["spawn_reservation_key"])
         assert saved.agent_info["session_id"] == response["session_id"]
         assert saved.worktree == "worktree-a"
         assert argv[3] == response["session_id"]
         assert argv[argv.index("--expected-native-session-id") + 1] == response["acp_session_id"]
-        assert f"--owner-session-id {response['acp_session_id']}" in kwargs["input"]
+        assert f"--owner-session-id {response['acp_session_id']}" in invocation["prompt"]
         return subprocess.CompletedProcess(argv, 0, json.dumps({
             "session_id": response["session_id"], "native_session_id": response["acp_session_id"],
-            "outcome": "delivered", "turn_index": 1,
+            "outcome": "delivered", "turn_index": invocation["binding"]["expected_turn_index"],
+            "version": 1, "invocation_key": invocation["invocation_key"],
+            "admission": "accepted", "queued": False,
         }), "")
 
     monkeypatch.setattr(ordinary_bridge, "agent_bridge_launch_prefix", lambda: ["bridge"])
@@ -156,11 +171,90 @@ def _start(assigned):
     )
 
 
+@pytest.mark.parametrize("change", ["prompt", "omitted", "unknown-history", "selection"])
+def test_resumed_storage_cannot_replace_or_erase_frozen_intent(assigned, change):
+    from agent_dispatch.ordinary_agent_storage import record_resumed_agent
+    queue, task, _, record, _, _ = assigned
+    _start(assigned)
+    key = task["spawn_reservation_key"]
+    before = asdict(queue.get_reservation(key))
+    info = copy.deepcopy(before["agent_info"])
+    invocation = info.pop("startup_invocation")
+    if change == "prompt":
+        invocation["prompt"] += " changed"
+    elif change == "omitted":
+        invocation = None
+    elif change == "selection":
+        invocation["selection"]["charter"] = "different"
+    else:
+        # A historical row from an unsupported writer must not be repaired by a new request.
+        historical = copy.deepcopy(before["agent_info"])
+        historical["startup_invocation"]["version"] = 2
+        with queue._connect() as conn:
+            conn.execute("UPDATE spawn_reservations SET agent_info=? WHERE key=?",
+                         (json.dumps(historical), key))
+        before = asdict(queue.get_reservation(key))
+    with pytest.raises(TaskError):
+        record_resumed_agent(queue, key, task_generation=0, session_info=info,
+                             worktree_record=record, startup_invocation=invocation)
+    assert asdict(queue.get_reservation(key)) == before
+
+
+def test_resumed_storage_refreshes_only_mutable_session_info_with_same_intent(assigned):
+    from agent_dispatch.ordinary_agent_storage import record_resumed_agent
+    queue, task, _, record, _, _ = assigned
+    _start(assigned)
+    key = task["spawn_reservation_key"]
+    before = queue.get_reservation(key)
+    info = {**before.agent_info, "turn_count": 1, "at_rest": False, "liveness": "active"}
+    refreshed = record_resumed_agent(
+        queue, key, task_generation=0, session_info=info, worktree_record=record,
+        startup_invocation=before.agent_info["startup_invocation"],
+    )
+    assert refreshed.agent_info["startup_invocation"] == before.agent_info["startup_invocation"]
+    assert refreshed.agent_info["liveness"] == "active"
+    assert refreshed.agent_info["turn_count"] == 1
+
+
+def test_resumed_g0_receipt_read_survives_real_g1_claim_without_owner_or_ready_writes(assigned, monkeypatch):
+    queue, task, client, _, _, calls = assigned
+    first = _start(assigned)
+    claimed = queue.claim_one("worker", task_id=task["id"])
+    assert claimed.generation == 1
+    before = asdict(queue.get_reservation(task["spawn_reservation_key"]))
+    calls.clear()
+
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("historical receipt read may not refresh ownership/readiness")
+
+    monkeypatch.setattr(client, "record_resumed_agent", forbidden)
+    monkeypatch.setattr(client, "record_spawn_allocation", forbidden)
+
+    def receipt(argv, **kwargs):
+        assert argv[0] == "bridge" and "--receipt-only" in argv
+        assert json.loads(kwargs["input"])["binding"]["admission_generation"] == 0
+        calls.append("receipt")
+        return subprocess.CompletedProcess(argv, 0, json.dumps(first["session_info"]), "")
+
+    monkeypatch.setattr(ordinary_bridge.subprocess, "run", receipt)
+    recovered = ordinary_bridge.start(
+        {**asdict(claimed), "spawn_reservation_key": task["spawn_reservation_key"]},
+        client=client, agent="local", project="changed-routing", prompt="assigned work",
+    )
+    assert recovered["session_info"] == first["session_info"]
+    assert calls == ["receipt"]
+    assert asdict(queue.get_reservation(task["spawn_reservation_key"])) == before
+
+
 @pytest.mark.parametrize("legacy", [False, True])
 def test_ordinary_assignment_resumes_same_native_before_one_send(assigned, legacy):
     queue, task, _, _, response, calls = assigned
     if legacy:
         _legacy(queue, task)
+        with pytest.raises(bridge.BridgeCarriedSessionBusy, match="immutable ordinary invocation"):
+            _start(assigned)
+        assert calls == ["record"]
+        return
     with queue._connect() as conn:
         before = list(conn.execute("SELECT * FROM acquisition_receipts"))
     before_task = queue.get(task["id"])
@@ -180,9 +274,12 @@ def test_ordinary_assignment_resumes_same_native_before_one_send(assigned, legac
 
 
 def test_ordinary_assignment_same_legacy_bridge_handle_is_retained(assigned):
-    queue, task, _, _, _, _ = assigned
+    queue, task, _, _, _, calls = assigned
     _legacy(queue, task, handle="bridge-a")
-    assert _start(assigned)["session"] == "local-body:bridge-a"
+    with pytest.raises(bridge.BridgeCarriedSessionBusy, match="immutable ordinary invocation"):
+        _start(assigned)
+    assert calls == ["record"]
+    assert queue.get_reservation(task["spawn_reservation_key"]).session_handle == "local-body:bridge-a"
 
 
 def test_ordinary_assignment_positive_sessionless_creation_keeps_original_key(assigned):
@@ -226,7 +323,8 @@ def test_ordinary_assignment_distinguishes_released_exclusivity_from_native_reti
     assigned, retirement_requested,
 ):
     queue, task, _, _, _, calls = assigned
-    _legacy(queue, task)
+    _start(assigned)
+    calls.clear()
     with queue._connect() as conn:
         conn.execute(
             "UPDATE spawn_reservations SET state='failed',release_requested=?,"
@@ -244,7 +342,7 @@ def test_ordinary_assignment_distinguishes_released_exclusivity_from_native_reti
         assert calls == ["record"]
     else:
         _start(assigned)
-        assert calls.count("resume") == calls.count("send") == 1
+        assert calls.count("send") == 1 and "resume" not in calls
         assert "create" not in calls
 
 
@@ -268,16 +366,16 @@ def test_ordinary_assignment_current_head_respects_unretired_not_retired_old_nat
     assert current.conversation_retired is old_retired
     assert current.session_handle == (None if old_retired else "local-body:legacy-bridge")
     if old_retired:
-        _start(assigned)
-        assert calls.count("resume") == calls.count("send") == 1
-        assert "create" not in calls
-        assert queue.get_reservation(current.key).agent_info["acp_session_id"] == "native-b"
-        assert queue.get_reservation(current.key).conversation_retired is False
+        with queue._connect() as conn:
+            legacy_before = list(conn.execute("SELECT * FROM acquisition_receipts"))
+        with pytest.raises(bridge.BridgeCarriedSessionBusy, match="immutable ordinary invocation"):
+            _start(assigned)
+        assert calls == ["record"]
+        assert queue.get_reservation(current.key).agent_info is None
+        assert queue.get_reservation(current.key).conversation_retired is True
         assert queue.get_reservation(current.key).creation_key == current.creation_key
         with queue._connect() as conn:
-            validate_start(conn, queue.get(task["id"]), "native-b", None)
-            with pytest.raises(TaskError):
-                validate_start(conn, queue.get(task["id"]), "native-a", None)
+            assert list(conn.execute("SELECT * FROM acquisition_receipts")) == legacy_before
     else:
         with pytest.raises(bridge.BridgeCarriedSessionBusy, match="known or retired"):
             _start(assigned)
@@ -320,13 +418,11 @@ def test_ordinary_assignment_reconciles_missing_metadata_from_exact_current_owne
     monkeypatch.setattr(
         bridge, "registered_agent_project", lambda *_a, **_kw: "execution-project",
     )
-    _start(assigned)
+    with pytest.raises(bridge.BridgeCarriedSessionBusy, match="immutable ordinary invocation"):
+        _start(assigned)
     stored = queue.get_reservation(task["spawn_reservation_key"])
-    assert stored.allocation_project == "execution-project"
-    assert stored.worktree_path == record["path"]
-    assert stored.agent_info["acp_session_id"] == "native-a"
-    assert calls.count("resume") == calls.count("send") == 1
-    assert "create" not in calls
+    assert stored.agent_info is None
+    assert "resume" not in calls and "send" not in calls and "create" not in calls
 
 
 @pytest.mark.parametrize("flag", ["sessions_indexed", "execution_leg_opaque", "session_backend_opaque"])

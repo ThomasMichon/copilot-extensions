@@ -35,7 +35,28 @@ def _selected_payload(payload: Path, environment: Mapping[str, str]):
 
 def finish(payload: Path, platform_name: str, environment: Mapping[str, str]) -> bool:
     """Required local outputs cannot be downgraded to advisory skipped work."""
+    from .manager_recovery import recover
+
     update_events.enter("binstubs")
+    recovery_started = time.monotonic()
+    try:
+        # The installer also covers an old running updater during self-upgrade.
+        with _selected_payload(payload, environment):
+            recovery = recover()
+        status = {
+            "current": "SKIPPED (current)",
+            "not-adopted": "SKIPPED (Manager not adopted)",
+            "recovered": "OK (Manager recovered)",
+        }.get(recovery["status"])
+        if status is None:
+            raise ValueError("Manager recovery returned an invalid status")
+    except (OSError, ValueError, RuntimeError) as error:
+        output.err(f"Adopted Manager recovery failed: {error}")
+        update_events.record("binstubs", "manager-recovery", f"failed: {error}", started=recovery_started)
+        return False
+    update_events.record(
+        "binstubs", "manager-recovery", status, started=recovery_started,
+    )
     started = time.monotonic()
     current = True
     try:
@@ -55,7 +76,7 @@ def finish(payload: Path, platform_name: str, environment: Mapping[str, str]) ->
     else:
         status = "OK"
     update_events.record("binstubs", "project-commands", status, started=started)
-    if platform_name == "windows":
+    if platform_name == "windows" and recovery["status"] != "not-adopted":
         started = time.monotonic()
         with _selected_payload(payload, environment):
             profiles_current = picker_profiles_cli._refresh_terminal_profiles()

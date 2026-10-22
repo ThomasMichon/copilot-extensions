@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve failed provider diagnostics and distinguish bare launch failures from first-run onboarding",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

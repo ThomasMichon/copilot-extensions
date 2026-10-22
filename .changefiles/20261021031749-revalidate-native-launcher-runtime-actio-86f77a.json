@@ -1,0 +1,13 @@
+{
+  "comment": "Revalidate native launcher runtime actions through installation-owned execution admission",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

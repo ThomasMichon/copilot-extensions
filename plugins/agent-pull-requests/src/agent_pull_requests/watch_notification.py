@@ -72,7 +72,7 @@ def default_notify(event) -> int | None:
     argv = spec.get("argv") if isinstance(spec, dict) else None
     if not argv or not isinstance(argv, list):
         return None
-    if event.key.worktrees_command:
+    if event.key.worktrees_command or event.subscriber.acknowledged:
         result = run_owned(
             [str(a) for a in argv], timeout=spec.get("timeout", CALLBACK_TIMEOUT),
             input_text=json.dumps(event_payload(event)), capture=False,

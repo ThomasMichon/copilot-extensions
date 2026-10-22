@@ -26,9 +26,11 @@ dependencies = [
     "agent-plugin-activation",
     "agent-plugin-resolve",
     "agent-single-instance-lease",
+    "agent-worktree-identity",
 ]
 
 [tool.uv.sources]
+agent-worktree-identity = { path = "../../libs/worktree-identity", editable = true }
 # zero-downtime cutover primitives -- the routing table + cutover orchestrator
 # (module ``zdd``). This is a `uv`-editable canonical reference
 # (vendor-pointer-generalization effort, Phase 1): `path` escapes this

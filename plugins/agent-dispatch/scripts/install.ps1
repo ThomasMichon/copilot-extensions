@@ -243,6 +243,8 @@ if (-not $env:COPILOT_PLUGIN_INSTALL_STAGED -or
                 $__wdChild = Start-Process -FilePath $__selfStageExe -PassThru -NoNewWindow `
                     -WorkingDirectory $env:USERPROFILE `
                     -ArgumentList $__selfStageArgs
+                # Windows PowerShell must retain the handle before waiting to preserve ExitCode.
+                $null = $__wdChild.Handle
                 if ($__wdDeadline -gt 0 -and -not $__wdChild.WaitForExit($__wdDeadline * 1000)) {
                     try { & taskkill.exe /PID $__wdChild.Id /T /F 2>&1 | Out-Null } catch {}
                     try { Stop-Process -Id $__wdChild.Id -Force -ErrorAction SilentlyContinue } catch {}
@@ -706,9 +708,11 @@ function Remove-ConsoleTrampolines {
 # === install-contract:v4 marker/toss helpers (#935) ===
 function Get-BootstrapPython {
     <# A python to run the stdlib-only versioned_runtime.py helper (#935).
-       Prefers a base Python via the launcher or PATH, avoiding Windows
+       Honors the validated Dispatch selection before launcher or PATH, avoiding Windows
        Store aliases, then considers an existing slot interpreter.
        Returns $null if none. #>
+    $selected = Resolve-DispatchBasePython
+    if ($selected) { return $selected }
     $launcher = Get-Command py -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($launcher) {
         $exe = (Invoke-Hidden -FilePath $launcher.Source -ArgList @('-3', '-c', 'import sys; print(sys.executable)') | Out-String).Trim()
@@ -1168,6 +1172,7 @@ function Materialize-DispatchSnapshot {
         'agent-dropin-registry' = 'dropin-registry'
         'agent-plugin-resolve' = 'plugin-resolve'
         'agent-single-instance-lease' = 'single-instance-lease'
+        'agent-worktree-identity' = 'worktree-identity'
         'agent-plugin-activation' = 'plugin-activation'
     }
     $libsDir = Join-Path $SnapshotDir 'libs'
@@ -1504,7 +1509,8 @@ function Deploy-SelfProvisioningBinstub {
     # (uniform-runtime-resolution, #765).
     $binDir = Join-Path $InstallDir 'bin'
     if (-not (Test-Path $binDir)) { New-Item -ItemType Directory -Path $binDir -Force | Out-Null }
-    foreach ($r in @('resolve-runtime.ps1', 'resolve-runtime.sh')) {
+    foreach ($r in @('resolve-runtime.ps1', 'resolve-runtime.sh',
+            'delegated-waiter-callback.ps1', 'delegated-waiter-callback.sh')) {
         $rSrc = Join-Path $PSScriptRoot $r
         if (Test-Path $rSrc) { Copy-Item $rSrc (Join-Path $binDir $r) -Force }
     }
@@ -1656,6 +1662,7 @@ function Test-DispatchVenv {
 
 function Install-Runtime {
     Assert-SourceRuntime
+    $selectedBasePython = Resolve-DispatchBasePython
     if (-not (Test-Path $PkgSrcDir)) {
         Write-Fail "Package source not found at $PkgSrcDir"
         exit 1
@@ -1698,13 +1705,15 @@ function Install-Runtime {
     }
 
     # Find a Python interpreter (skip Windows Store aliases that aren't real)
-    $pythonCmd = $null
-    foreach ($candidate in @('python', 'python3', 'py')) {
-        $found = Get-Command $candidate -ErrorAction SilentlyContinue | Select-Object -First 1
-        if ($found) {
-            $probe = Invoke-NativeCapture { & $found.Source --version }
-            if ($probe.ExitCode -eq 0 -and $probe.Output -match 'Python') { $pythonCmd = $found.Source }
-            if ($pythonCmd) { break }
+    $pythonCmd = $selectedBasePython
+    if (-not $pythonCmd) {
+        foreach ($candidate in @('python', 'python3', 'py')) {
+            $found = Get-Command $candidate -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($found) {
+                $probe = Invoke-NativeCapture { & $found.Source --version }
+                if ($probe.ExitCode -eq 0 -and $probe.Output -match 'Python') { $pythonCmd = $found.Source }
+                if ($pythonCmd) { break }
+            }
         }
     }
     if (-not $pythonCmd) {
@@ -1725,13 +1734,16 @@ function Install-Runtime {
     Write-Ok "Directories: $InstallDir"
 
     [void](Invoke-VersionedSlotClean)
+    if ($selectedBasePython -and (Test-Path -LiteralPath $VenvPython -PathType Leaf)) {
+        Assert-DispatchCandidateBase -Python $VenvPython -BasePython $selectedBasePython
+    }
     if (-not $script:RuntimeConstructionReuse) {
     # -- venv (SAC-trusted signed base python preferred; then uv; then venv) --
     if (-not (Test-DispatchVenv -Dir $VenvDir -Python $VenvPython)) {
         $prevEAP = $ErrorActionPreference
         $ErrorActionPreference = 'Continue'
-        $signedBase = $null
-        if ($env:OS -eq 'Windows_NT' -and (Get-Command py -ErrorAction SilentlyContinue)) {
+        $signedBase = $selectedBasePython
+        if (-not $signedBase -and $env:OS -eq 'Windows_NT' -and (Get-Command py -ErrorAction SilentlyContinue)) {
             foreach ($v in '3.13', '3.12', '3.11') {
                 $cand = (& py "-$v" -c "import sys;print(sys.executable)" 2>$null | Out-String).Trim()
                 if ($LASTEXITCODE -eq 0 -and $cand -and (Test-Path $cand)) {
@@ -1740,7 +1752,9 @@ function Install-Runtime {
             }
         }
         if ($signedBase) {
-            $signedResult = Invoke-NativeCapture { & $signedBase -m venv --copies $VenvDir }
+            $signedError = ''
+            $signedOutput = Invoke-Hidden -FilePath $signedBase -ArgList @('-I', '-B', '-m', 'venv', '--copies', $VenvDir) -ErrorOutput ([ref]$signedError)
+            $signedResult = @{ ExitCode = $LASTEXITCODE; Output = "$signedOutput$signedError" }
             if (-not (Test-DispatchVenv -Dir $VenvDir -Python $VenvPython)) {
                 $ErrorActionPreference = $prevEAP
                 Write-Fail "Signed Python venv failed validation (exit $($signedResult.ExitCode)); construction aborted"
@@ -1772,6 +1786,7 @@ function Install-Runtime {
     } else {
         Write-Skip 'Venv already exists'
     }
+    Assert-DispatchCandidateBase -Python $VenvPython -BasePython $selectedBasePython
 
     # The selected MCP extra is part of this candidate's required closure.
     $prevEAP = $ErrorActionPreference
@@ -1830,6 +1845,7 @@ function Install-Runtime {
         @{ Dir = 'plugin-resolve'; Pkg = 'agent-plugin-resolve'; Display = 'plugin-resolve' },
         @{ Dir = 'single-instance-lease'; Pkg = 'agent-single-instance-lease'; Display = 'single-instance-lease' },
         @{ Dir = 'agent-procutil'; Pkg = 'agent-procutil'; Display = 'agent-procutil' },
+        @{ Dir = 'worktree-identity'; Pkg = 'agent-worktree-identity'; Display = 'worktree-identity' },
         @{ Dir = 'plugin-activation'; Pkg = 'agent-plugin-activation'; Display = 'plugin-activation' }
     )) {
         $libDir = Resolve-VendoredLib -LibName $lib.Dir -LibRoot $BuildSrcDir
@@ -1870,8 +1886,8 @@ function Install-Runtime {
     # again -- covering agent-dispatch itself AND its own local
     # `[tool.uv.sources]` workspace path deps (agent-procutil, agent-zdd,
     # agent-dropin-registry, agent-plugin-activation, agent-plugin-resolve,
-    # agent-single-instance-lease), which are equally local PATH sources and
-    # equally vulnerable. #2863 also flagged a second, same-class ImportError
+    # agent-single-instance-lease, agent-worktree-identity), which are equally
+    # local PATH sources and vulnerable. #2863 also flagged a same-class ImportError
     # in the self-update fallback (`from agent_procutil import ...`) --
     # agent-procutil is exactly one of these.
     $StaleCacheRefreshPackages = @(
@@ -1881,7 +1897,8 @@ function Install-Runtime {
         'agent-dropin-registry',
         'agent-plugin-activation',
         'agent-plugin-resolve',
-        'agent-single-instance-lease'
+        'agent-single-instance-lease',
+        'agent-worktree-identity'
     )
     $installPkg = {
         param([string]$Spec)
@@ -2077,6 +2094,7 @@ function Install-Runtime {
             # The Picker materializes templates only from its verified active
             # payload roots; this installer does not publish shared pivot data.
             Register-PickerPivot
+            Publish-DispatchBasePython -Python $selectedBasePython
         } finally {
             [void]$publishMutex.ReleaseMutex()
             $publishMutex.Dispose()
@@ -3665,6 +3683,11 @@ function Invoke-SupervisorStart {
         [Parameter(Mandatory)][string]$Label
     )
     $task = Get-ScheduledTask -TaskName $Name -ErrorAction SilentlyContinue
+    if ($task -and $task.State -eq 'Disabled') {
+        Invoke-SupervisorAudit -Event selection -Reason prior-native-disabled -Name $Name -EnvFile $EnvFile -Outcome skipped
+        Write-Skip "$Label remains disabled; explicit native enablement is required"
+        return
+    }
     if ($task -and $task.State -ne 'Disabled') {
         Invoke-SupervisorTaskAction -Operation start -Name $Name -Reason lifecycle-start
         if ($script:SupervisorActionSucceeded) { Write-Ok "$Label started" }
@@ -3673,7 +3696,8 @@ function Invoke-SupervisorStart {
     $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
     $auto = Get-ItemProperty -Path $runKey -Name $Name -ErrorAction SilentlyContinue
     $launcher = Join-Path $InstallDir 'supervise-service.ps1'
-    if ($auto -and (Test-Path $launcher) -and (Test-SupervisorLabelsConfigured -EnvFile $EnvFile)) {
+    $mode = Get-SupervisorMode -EnvFile $EnvFile
+    if ($auto -and (Test-Path $launcher) -and ($mode -eq 'serve' -or (Test-SupervisorLabelsConfigured -EnvFile $EnvFile))) {
         Install-SupervisorLogonAutostart -Name $Name -Launcher $launcher -EnvFile $EnvFile
     }
 }
@@ -3905,7 +3929,7 @@ function Invoke-Stamp {
 
 
 function Invoke-Install {
-    Write-Host ''; Write-Host '=== agent-dispatch install ===' -ForegroundColor Cyan; Write-Host ''
+    Write-Step 'agent-dispatch install'
     Install-Runtime
     if (Test-ActivationSupersededNow) {
         # A concurrent, newer install already activated -- either caught at
@@ -3919,7 +3943,7 @@ function Invoke-Install {
         # own (older, losing) $VenvPython build -- proceeding would
         # misreport a perfectly healthy, already-newer coordinator as
         # serving a stale build. Nothing else to do for this invocation.
-        Write-Host ''; Write-Host '=== agent-dispatch install complete (superseded by a newer concurrent build) ===' -ForegroundColor Cyan
+        Write-Skip 'agent-dispatch install (superseded by a newer concurrent build)'
         return
     }
     Install-CoordinatorTask
@@ -3927,7 +3951,7 @@ function Invoke-Install {
     Install-SupervisorTask
     if (-not $NoService) { Confirm-CoordinatorRunning }
     Invoke-SupervisorAudit -Event installer-reconcile -Reason invocation-returned -Outcome ok
-    Write-Host ''; Write-Host '=== agent-dispatch install complete ===' -ForegroundColor Cyan
+    Write-Ok 'agent-dispatch install'
 }
 
 function Test-CoordinatorRouted {
@@ -3978,7 +4002,7 @@ function Invoke-CoordinatorCutover {
 }
 
 function Invoke-Update {
-    Write-Host ''; Write-Host '=== agent-dispatch update ===' -ForegroundColor Cyan; Write-Host ''
+    Write-Step 'agent-dispatch update'
     # Mark the live-service update lifecycle as in-progress (ce#5066) so a
     # local liveness watchdog never force-restarts a daemon that is
     # legitimately, briefly mid-cutover. try/finally (not a trap, which
@@ -4073,7 +4097,7 @@ function Invoke-Update {
         Install-SupervisorTask
     }
     Invoke-SupervisorAudit -Event installer-reconcile -Reason invocation-returned -Outcome ok
-    Write-Host ''; Write-Host '=== agent-dispatch update complete ===' -ForegroundColor Cyan
+    Write-Ok 'agent-dispatch update'
     } finally {
         Clear-UpdateMarker
     }
@@ -4264,11 +4288,47 @@ $ScriptDir = $PSScriptRoot
 . (Join-Path $PSScriptRoot 'source-runtime.ps1')
 $PackageVersion = $SrcVersion
 $script:SourceRuntimeIdentity = $null
+
+function Write-InstallerLifecycle {
+    param([string]$Outcome)
+
+    $savedExit = Get-Variable LASTEXITCODE -Scope Global -ValueOnly -ErrorAction SilentlyContinue
+    try {
+        $python = Get-BootstrapPython
+        $recorder = Join-Path $PluginDir 'libs/zdd/src/zdd/lifecycle.py'
+        if (-not (Test-Path -LiteralPath $recorder -PathType Leaf)) {
+            $recorder = Join-Path $PluginDir '../../libs/zdd/src/zdd/lifecycle.py'
+        }
+        if (-not $python -or -not (Test-Path -LiteralPath $recorder -PathType Leaf)) {
+            [Console]::Error.WriteLine('[WARN] Lifecycle record unavailable: bootstrap Python or payload recorder is missing')
+            return
+        }
+        $routingDir = if ($env:AGENT_DISPATCH_ROUTING_DIR) { $env:AGENT_DISPATCH_ROUTING_DIR } else { $InstallDir }
+        $diagnostic = ''
+        $arguments = @('-I', $recorder, 'record', '--config-dir', $routingDir,
+            '--service', 'agent-dispatch', '--action', $script:InstallerLifecycleAction,
+            '--outcome', $Outcome, '--pid', "$PID", '--version', "$SrcVersion")
+        $null = Invoke-Hidden -FilePath $python -ArgList $arguments -ErrorOutput ([ref]$diagnostic)
+        if ($diagnostic) { [Console]::Error.Write($diagnostic) }
+        if ($LASTEXITCODE -ne 0) {
+            [Console]::Error.WriteLine('[WARN] Lifecycle recorder failed; installer outcome is unchanged')
+        }
+    } catch {
+        [Console]::Error.WriteLine("[WARN] Lifecycle recorder unavailable: $($_.Exception.Message)")
+    } finally {
+        $global:LASTEXITCODE = $savedExit
+    }
+}
+
+$script:InstallerLifecycleAction = if ($Action -in @('install', 'provision')) { 'install' }
+    elseif ($Action -in @('update', 'start', 'stop')) { $Action } else { '' }
+$script:InstallerLifecycleOutcome = 'fail'
+if ($script:InstallerLifecycleAction) { Write-InstallerLifecycle begin }
+try {
 if ($Action -in @('install', 'update', 'provision', 'stamp')) {
     Initialize-SourceRuntime
     Assert-SourceRuntime
 }
-try {
 switch ($Action) {
     'install'   { Invoke-Install }
     'update'    { Invoke-Update }
@@ -4279,10 +4339,20 @@ switch ($Action) {
     'stamp'     { Invoke-Stamp }
     'provision' { Invoke-Install }
 }
+$script:InstallerLifecycleOutcome = 'ok'
 exit 0
 
 } finally {
-    if (Test-Path -LiteralPath 'Function:\Stop-RuntimeConstruction') {
-        Stop-RuntimeConstruction
+    try {
+        if (Test-Path -LiteralPath 'Function:\Stop-RuntimeConstruction') {
+            Stop-RuntimeConstruction
+        }
+    } catch {
+        $script:InstallerLifecycleOutcome = 'fail'
+        throw
+    } finally {
+        if ($script:InstallerLifecycleAction) {
+            Write-InstallerLifecycle $script:InstallerLifecycleOutcome
+        }
     }
 }

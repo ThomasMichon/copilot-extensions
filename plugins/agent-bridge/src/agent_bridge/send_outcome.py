@@ -136,6 +136,15 @@ def run_send(args: Any, send: Callable[[Any], None]) -> None:
             with contextlib.redirect_stdout(sys.stderr) if as_json else contextlib.nullcontext():
                 send(args)
         except BridgeClientError as exc:
+            if (
+                getattr(args, "plugin_context_stdin", False) and as_json
+                and exc.status == 409 and isinstance(exc.detail, dict)
+                and exc.detail.get("code") == "plugins_not_ready"
+            ):
+                raise SendRefused(
+                    "refused_unavailable", reason="plugins_not_ready", error=str(exc.detail),
+                    retryable=True, target=target,
+                ) from exc
             if exc.status != 404:
                 raise
             # The target vanished after it was resolved (e.g. while resuming it).
@@ -145,7 +154,13 @@ def run_send(args: Any, send: Callable[[Any], None]) -> None:
         refused.target = refused.target or target
         print(f"[FAIL] {refused.error}", file=sys.stderr)
         if as_json:
-            emit(refused.payload())
+            payload = refused.payload()
+            if getattr(args, "plugin_context_stdin", False) and refused.reason in {
+                "startup_input", "startup_target", "startup_protocol", "unsupported_protocol",
+                "plugins_not_ready",
+            }:
+                payload.update(owned_delivery_version=1, admission_status="not_admitted")
+            emit(payload)
         sys.exit(refused.exit_code)
     except SystemExit as exc:
         if as_json and exc.code == SEND_BUSY_EXIT:

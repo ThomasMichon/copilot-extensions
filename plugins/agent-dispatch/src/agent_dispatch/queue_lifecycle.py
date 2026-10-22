@@ -30,6 +30,7 @@ from .queue_common import (
     _task_transition_spec,
 )
 from .queue_progress import QueueProgressMixin
+from .queue_execution_handoff import require_execution_admission
 from .queue_records import SpawnState, Status, TaskError
 
 # marketplace-isolation: allow release-verb (a business verb, "release from
@@ -774,6 +775,8 @@ class QueueLifecycleMixin(QueueProgressMixin):
                 raise TaskError(
                     f"cannot {note or to} a {task.status!r} task (allowed: {sorted(allowed_set)})"
                 )
+            if to == Status.STARTED:
+                require_execution_admission(conn, task_id)
             if require_owner and worker_id is not None and task.owner not in (None, worker_id):
                 conn.execute("COMMIT")
                 raise TaskError(f"task {task_id!r} owned by {task.owner!r}, not {worker_id!r}")

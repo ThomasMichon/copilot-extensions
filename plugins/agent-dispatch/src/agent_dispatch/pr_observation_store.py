@@ -35,10 +35,11 @@ import os
 import sqlite3
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from .github_provider_adapter import PRObservation
+if TYPE_CHECKING:
+    from .github_provider_adapter import PRObservation
 from .config import default_db_path
-from .provider_state_machine import ApprovalStatus, HoldReason, Mergeability, Revision
 
 _BUSY_TIMEOUT_MS = 5000
 
@@ -107,6 +108,8 @@ class PRObservationStore:
 
     @staticmethod
     def _from_row(row: sqlite3.Row) -> PRObservation:
+        from .github_provider_adapter import PRObservation
+        from .provider_state_machine import ApprovalStatus, HoldReason, Mergeability, Revision
         return PRObservation(
             number=int(row["number"]),
             approval_status=ApprovalStatus(row["approval_status"]),

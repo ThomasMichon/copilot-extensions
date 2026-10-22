@@ -2,7 +2,7 @@
 
 - **Slug:** `agent-bridge-cli-mode-sessions`
 - **Repo:** copilot-extensions
-- **Branch(es):** per-phase `pr/<slug>` worktrees → landed to `main`
+- **Branch(es):** per-phase `pr/<slug>` worktrees → landed to `dev`
 - **Created:** 2026-09-19
 - **Status:** Active
 - **Vision:** [`visions/remote-interactive-sessions`](../../../visions/remote-interactive-sessions/README.md)
@@ -26,7 +26,7 @@
   discoverable through #2530's primitives like any other) but neither depends
   on the other.
 - **Related design input (picker-side, deferred implementation):**
-  [`picker-venue-pivots` Phase 5 design note](../picker-venue-pivots/phase5-new-venue-embody-design.md)
+  [`picker-venue-pivots` Phase 5 design note](../../2026/09/26%20picker-venue-pivots/phase5-new-venue-embody-design.md)
   — records the venue-picker contract for **New codespace / New container**
   (target-info prompt -> provider provision call -> hand off to the existing
   venue `copilot` path). That note is intentionally design-only there; this
@@ -709,7 +709,49 @@ _Correlated via a facility-driven sweep of open `bug`-labeled issues against act
 - [ ] **#1167** agent-bridge: project-scoped Windows SSH dispatch can launch at C:\ after resolver bootstrap failure
   - Project-scoped Windows SSH dispatch landing at the wrong cwd is exactly this effort's CWD-keyed discovery scope.
 
+### Exact Windows SSH project/CWD bootstrap acceptance from #1167
+
+<!-- backlog-reconciliation:7556:transfer:1167:to:efforts/active/agent-bridge-cli-mode-sessions/README.md -->
+
+Expand the existing1167 bug-sweep reference into this direct unchecked CWD/acquisition
+Plan/Validation block. Keep all existing CLI/ACP, explicit opt-in, native resume, phase
+deferrals, task/reservation and platform owners/claims unchanged; no new phase-wide ACK
+or rollout authorization.
+
+- [ ] A project-scoped SSH attempt EITHER resolves/creates its exact isolated
+  named-repository worktree and launches ACP with that concrete CWD OR fails BEFORE
+  Copilot starts with actionable WORKTREE/resolver-stage cause. Never admit a
+  success-shaped root/unmanaged-directory session after bootstrap provision/re-entry
+  failure.
+- [ ] Exercise BOTH --project <repo> and <repo>@<machine> forms with a successful
+  isolated checkout; actual remote git rev-parse root and retained session/worktree
+  metadata must agree. A pre-populated stale configured CWD is not replacement proof for
+  an incomplete owner plan.
+- [ ] Qualify actual WINDOWS SSH first-use with an initially unprovisioned far-side
+  Worktrees payload, the failed provision/re-entry boundary and a successful provisioned
+  retry. Constructed/mock plan/argv tests and an unrelated native profile or resume pass
+  are partial source coverage, not this native acceptance.
+- [ ] Propagate resolver nonzero/timeout/no-JSON/incomplete id/path as a truthful launch
+  failure before child creation, preserving caller/owner metadata and no ambiguous fresh
+  fallback. Keep underlying sanitized error/stage visible rather than reclassifying it
+  as ACP timeout/auth failure.
+- [ ] Failed resolution leaves no misleading idle success or untracked remote workspace
+  obligation. Preserve any actual allocated/uncertain native history and resource
+  custody; do not clear fences or remove a worktree merely to make retries pass.
+
+4864 fail-closed source is implemented baseline. This annex remains OPEN until the exact
+native consumer gate is qualified, not until every future phase of this effort is Done.
+Source, containing release, installed/native subject and actual effect remain distinct.
+Close duplicate1167 only AFTER this COMPLETE direct Plan/Validation block is merged/read
+back in the existing reviewed Active receiver; the old link-only bug row is
+insufficient. No live SSH, bootstrap, model, task or source operation is authorized by
+this tracking change.
+
 ## Validation Plan
+
+- [ ] Complete every directly retained #1167 Plan/Validation row above at its
+  original evidence tier and bounds, preserving existing owners and holds.
+  Tracker consolidation is not implementation or native acceptance.
 
 - [ ] Run the [Phase 6 acquisition matrix](dispatch-session-acquisition.md#validation-plan),
       including actual conversation-ID continuity across process exit, CLI/ACP
@@ -803,6 +845,13 @@ symmetric venue-launch surface (needed once a venue's own daemon differs
 from the host's).
 
 ## Journal
+
+### 2026-10-22 - Complete retained acceptance from #1167
+
+- Materialized the complete #1167 residual directly in the Plan and
+  Validation, preserving existing source/resource custody and partial delivery.
+  Normal reviewed merge and current full readback precede administrative
+  source supersession; no behavior, native run or rollout is declared complete.
 
 ### 2026-10-16 - Remote ACP integration and native backend evidence
 

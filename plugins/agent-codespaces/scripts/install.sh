@@ -766,94 +766,87 @@ do_dev() (
 # === end mutable-dev-slot ===
 
 deploy_binstub() {
-    mkdir -p "$INSTALL_DIR/bin"
     local resolver
     for resolver in resolve-runtime.sh resolve-runtime.ps1; do
-        cp -f "$SCRIPT_DIR/$resolver" "$INSTALL_DIR/bin/$resolver"
+        [[ -f "$SCRIPT_DIR/$resolver" ]] || {
+            _fail "Required Codespaces runtime helper is unavailable: $resolver"
+            return 1
+        }
     done
-    mkdir -p "$LOCAL_BIN"
     local stub_path="$LOCAL_BIN/agent-codespaces"
+    [[ ! -d "$stub_path" ]] || {
+        _fail "Binstub destination must be a file: $stub_path"
+        return 1
+    }
+    mkdir -p "$INSTALL_DIR/bin" || return 1
+    for resolver in resolve-runtime.sh resolve-runtime.ps1; do
+        [[ ! -d "$INSTALL_DIR/bin/$resolver" ]] || {
+            _fail "Runtime helper destination must be a file: $resolver"
+            return 1
+        }
+    done
+    local resolver_tmp resolver_path
+    for resolver in resolve-runtime.sh resolve-runtime.ps1; do
+        resolver_path="$INSTALL_DIR/bin/$resolver"
+        resolver_tmp="$(mktemp "$INSTALL_DIR/bin/.$resolver.XXXXXX")" || return 1
+        if ! cp -f "$SCRIPT_DIR/$resolver" "$resolver_tmp" ||
+           ! { [[ ! -d "$resolver_path" ]] && mv -f "$resolver_tmp" "$resolver_path" &&
+               [[ ! -e "$resolver_tmp" && ! -L "$resolver_tmp" && -f "$resolver_path" ]]; }; then
+            rm -f -- "$resolver_tmp"
+            _fail "Runtime helper publication failed: $resolver_path"
+            return 1
+        fi
+    done
+    mkdir -p "$LOCAL_BIN" || return 1
+    local stub_tmp
+    stub_tmp="$(mktemp "$LOCAL_BIN/.agent-codespaces.XXXXXX")" || return 1
     # Self-provisioning binstub (install-on-first-use). When the runtime venv is
     # present it is a thin exec (fast path). When it is NOT, the shim provisions
     # the runtime on first use -- announcing LOUDLY (never a silent block) with a
     # machine-readable signal so a caller can extend its timeout instead of
     # killing us -- then execs. Concurrent first-invocations are serialized.
-    cat > "$stub_path" << 'STUB'
-#!/usr/bin/env bash
+    local runtime_root_literal
+    printf -v runtime_root_literal '%q' "$INSTALL_DIR"
+    if ! {
+        printf '#!/usr/bin/env bash\n_root=%s\n' "$runtime_root_literal"
+        cat << 'STUB'
 # agent-codespaces binstub -- self-provisioning (install-on-first-use).
 export PYTHONUTF8=1
 _name="agent-codespaces"
-_root="$HOME/.$_name"
-_marker_valid() {
-    [ -n "$1" ] || return 1
-    awk -v expected="$1" '
-      NR != 1 { bad = 1 }
-      NR == 1 {
-        if ($0 !~ /^\{"version": "[^"\\]+", "completed_at": "[^"\\]+", "pid": (0|[1-9][0-9]*)(, "payload_hash": "[^"\\]+")?\}$/) {
-          bad = 1; next
-        }
-        version = $0
-        sub(/^\{"version": "/, "", version)
-        sub(/".*$/, "", version)
-      }
-      END { exit !(NR == 1 && !bad && version == expected) }
-    ' "$_root/versions/$1/.install-complete.json" 2>/dev/null
-}
-_version_key() {
-    awk '
-      {
-        original = $0
-        if (original ~ /^[0-9]+\.[0-9]+\.[0-9]+(-dev[0-9]+)?$/) {
-          count = split(original, part, /[.-]/)
-          phase = (count == 4) ? 0 : 1
-          dev = (count == 4) ? part[4] : "dev0"
-          sub(/^dev/, "", dev)
-          printf "0:%020d.%020d.%020d.%d.%020d\t%s\n", \
-            part[1] + 0, part[2] + 0, part[3] + 0, phase, dev + 0, original
-          next
-        }
-        key = ""; rest = $0
-        while (match(rest, /[0-9]+/)) {
-          key = key substr(rest, 1, RSTART - 1)
-          number = substr(rest, RSTART, RLENGTH)
-          key = key sprintf("%020d", number + 0)
-          rest = substr(rest, RSTART + RLENGTH)
-        }
-        print "1:" key rest "\t" original
-      }
-    '
-}
+export AGENT_CODESPACES_HOME="$_root"
+_resolver="$_root/bin/resolve-runtime.sh"
+if [[ ! -f "$_resolver" ]] ||
+   ! grep -Fq '# Trace contract: normal/read-only/ready-v1' "$_resolver"; then
+    printf '[%s] read-only runtime resolver is unavailable. Re-enable/update the plugin, then retry.\n' "$_name" >&2
+    exit 126
+fi
 _resolve_python() {
-    if [[ -f "$_root/bin/resolve-runtime.sh" ]]; then
-        AGENT_RT_ROOT="$_root"
-        AGENT_RT_PY=""
-        source "$_root/bin/resolve-runtime.sh"
-        [[ -n "$AGENT_RT_PY" ]] && printf '%s\n' "$AGENT_RT_PY"
-        return
-    fi
-    for _marker in current-version last-known-good; do
-        _ver=""
-        [ -f "$_root/$_marker" ] && _ver="$(tr -d ' \t\r\n' < "$_root/$_marker")"
-        _candidate="$_root/versions/$_ver/bin/python"
-        if [ -n "$_ver" ] && _marker_valid "$_ver" && [ -x "$_candidate" ]; then
-            printf '%s\n' "$_candidate"
-            return
-        fi
-    done
-    for _ver in $(
-      for _slot in "$_root"/versions/*; do
-        [ -d "$_slot" ] || continue
-        printf '%s\n' "${_slot##*/}"
-      done | _version_key | LC_ALL=C sort | cut -f2-
-    ); do
-        _candidate="$_root/versions/$_ver/bin/python"
-        _marker_valid "$_ver" &&
-            [ -x "$_candidate" ] && _resolved="$_candidate"
-    done
-    [ -n "${_resolved:-}" ] && printf '%s\n' "$_resolved"
+    AGENT_RT_ROOT="$_root"
+    AGENT_RT_PY=""
+    local AGENT_RT_RESOLVE_TRACE_MODE="${1:-ready}"
+    source "$_resolver"
+    [[ -z "$AGENT_RT_PY" ]] || printf '%s\n' "$AGENT_RT_PY"
 }
 _python="$(_resolve_python)"
 # Fast path: runtime already provisioned.
+[ -n "$_python" ] && exec "$_python" -m agent_codespaces "$@"
+if [[ -n "${AGENT_CODESPACES_NO_SELFPROVISION:-}" ]]; then
+    printf '[agent-codespaces] runtime not provisioned (AGENT_CODESPACES_NO_SELFPROVISION set).\n' >&2
+    exit 1
+fi
+_snapshot="$(cat "$_root/payload-dir" 2>/dev/null || true)"
+_install="$_snapshot/scripts/install.sh"
+if [[ ! -f "$_install" ]]; then
+    printf '[%s] cannot self-provision: owning snapshot installer unavailable: %s\n' "$_name" "$_install" >&2
+    exit 127
+fi
+_probe="$_snapshot/scripts/installation-context/plugin-publication-probe.sh"
+if [[ ! -f "$_probe" ]]; then
+    printf '[%s] Runtime publication refused: snapshot admission helper is unavailable. Re-enable/update the plugin, then retry.\n' "$_name" >&2
+    exit 126
+fi
+bash "$_probe" "$_snapshot" "$_name" "$_root" || exit $?
+_python="$(_resolve_python normal)"
 [ -n "$_python" ] && exec "$_python" -m agent_codespaces "$@"
 # --- not provisioned: self-install on first use --------------------------
 mkdir -p "$_root"
@@ -862,13 +855,6 @@ _status="$_root/.provision-status"
 # caller seeing ::agent-provisioning:: should extend its timeout, not kill us.
 printf '%s\n' "[$_name] runtime not provisioned -- provisioning on first use (may take ~30-120s: acquires uv + builds a venv). Do not kill; extend your timeout." >&2
 printf '::agent-provisioning:: plugin=%s eta_seconds=120 reason=first-use status=%s\n' "$_name" "$_status" >&2
-# Locate the plugin payload installer (recorded at stamp; else glob the marketplace).
-_install="$(cat "$_root/payload-dir" 2>/dev/null)/scripts/install.sh"
-[ -f "$_install" ] || _install="$(ls "$HOME"/.copilot/installed-plugins/*/"$_name"/scripts/install.sh 2>/dev/null | head -n1)"
-if [ ! -f "$_install" ]; then
-    printf '%s\n' "[$_name] cannot self-provision: installer not found in plugin payload. Ensure the plugin is enabled, then retry." >&2
-    exit 127
-fi
 # Serialize concurrent first-invocations (avoid a thundering-herd double-build).
 _lock="$_root/.provision.lock"
 exec 9>"$_lock"
@@ -877,7 +863,7 @@ command -v flock >/dev/null 2>&1 && flock 9 2>/dev/null
 _python="$(_resolve_python)"
 [ -n "$_python" ] && exec "$_python" -m agent_codespaces "$@"
 printf 'provisioning %s\n' "$(date -u +%FT%TZ 2>/dev/null)" > "$_status" 2>/dev/null || true
-bash "$_install" provision >&2
+bash "$_install" provision --install-dir "$_root" >&2
 _rc=$?
 _python="$(_resolve_python)"
 if [ "$_rc" -eq 0 ] && [ -n "$_python" ]; then
@@ -893,7 +879,13 @@ else
 fi
 exit "$_rc"
 STUB
-    chmod +x "$stub_path"
+    } > "$stub_tmp" || ! chmod +x "$stub_tmp" ||
+       ! { [[ ! -d "$stub_path" ]] && mv -f "$stub_tmp" "$stub_path" &&
+           [[ ! -e "$stub_tmp" && ! -L "$stub_tmp" && -f "$stub_path" ]]; }; then
+        rm -f -- "$stub_tmp"
+        _fail "Binstub publication failed: $stub_path"
+        return 1
+    fi
     _ok "Binstub: $stub_path (self-provisioning)"
 }
 
@@ -1256,6 +1248,7 @@ do_stamp() {
     _header "$SERVICE_NAME Stamp (defer runtime to first use)"
     mkdir -p "$INSTALL_DIR" "$LOCAL_BIN"
     _assert_source_runtime || return 1
+    deploy_binstub || return 1
     # Record the REAL payload dir so the binstub can find this installer on first
     # use. Under the install-contract:v4 self-stage, $PLUGIN_DIR is an ephemeral
     # per-invocation staging copy that gets reaped -- COPILOT_PLUGIN_STAGED_FROM
@@ -1265,7 +1258,6 @@ do_stamp() {
     else
         printf '%s\n' "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" > "$INSTALL_DIR/payload-dir"
     fi
-    deploy_binstub
     _ok "Stamped: binstub on PATH; runtime provisions on first use."
 }
 
@@ -1274,7 +1266,7 @@ do_stamp() {
 # first use, so it must not touch the running shim.
 do_provision() {
     _header "$SERVICE_NAME Provision (runtime)"
-    mkdir -p "$INSTALL_DIR" "$LOCAL_BIN"
+    mkdir -p "$INSTALL_DIR"
     deploy_venv || return 1
     deploy_package || return 1
     _versioned_activate || return 1

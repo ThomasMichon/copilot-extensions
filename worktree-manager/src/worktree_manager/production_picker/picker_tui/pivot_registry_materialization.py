@@ -116,6 +116,16 @@ def _payload_command(root: Path | None, command: str) -> Path | None:
                 return candidate
         except OSError:
             continue
+    try:
+        declaration = json.loads((root / "payload-invocation.json").read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return None
+    except (OSError, ValueError) as exc:
+        raise ManifestError(f"Payload command declaration is unreadable: {exc}") from exc
+    if not isinstance(declaration, dict):
+        raise ManifestError("Payload command declaration must be an object")
+    if declaration.get("command") == command:
+        return candidates[0]
     return None
 
 
@@ -168,6 +178,7 @@ def _rewrite_manifest_commands(
     *,
     root: Path | None,
     require_targets: bool,
+    reject_unusable: bool = False,
 ) -> dict[str, object]:
     """Validate executable targets and bind absolute invocation paths."""
     from worktree_manager.configuration_preview import validate_preview_actions
@@ -181,6 +192,7 @@ def _rewrite_manifest_commands(
         value = container.get(key)
         if value is None:
             return
+        value = _as_argv(value, where=f"`{key}`")
         try:
             container[key] = _resolve_command(
                 cast(Sequence[str], value),
@@ -189,8 +201,14 @@ def _rewrite_manifest_commands(
         except ManifestError:
             raise
         except (FileNotFoundError, OSError, TargetUnusableError) as exc:
-            if require_targets and not optional:
+            if not optional and (
+                require_targets or (reject_unusable and isinstance(exc, TargetUnusableError))
+            ):
                 raise
+            if root is not None:
+                declared = _payload_command(root, cast(Sequence[str], value)[0])
+                if declared is not None:
+                    container[key] = [str(declared.absolute()), *cast(Sequence[str], value)[1:]]
             if optional and root is not None:
                 first = cast(Sequence[str], value)[0]
                 candidate = Path(first).expanduser()
@@ -211,7 +229,7 @@ def _rewrite_manifest_commands(
             # and must always propagate unconverted, regardless of
             # `require_targets` (e.g. `_resolve_command`'s own empty-argv
             # check).
-            if require_targets and not optional:
+            if (require_targets or reject_unusable) and not optional:
                 raise TargetUnusableError(str(exc)) from exc
             if optional:
                 container["_preview_error"] = f"Preview command unusable: {exc}"
@@ -240,17 +258,17 @@ def _rewrite_manifest_commands(
         data.get("list"), (str, bytes)
     ):
         rewrite(data, "list")
-    for collection in ("actions", "worktree_actions", "config_sections"):
+    for collection in ("actions", "view_actions", "worktree_actions", "config_sections"):
         entries = data.get(collection)
         if not isinstance(entries, list):
             continue
         for item in entries:
             if not isinstance(item, dict) or "run" not in item:
                 continue
-            if collection == "actions" and item.get("kind") in {"internal", "card"}:
+            if collection in {"actions", "view_actions"} and item.get("kind") in {"internal", "card"}:
                 continue
             rewrite(item, "run")
-            if collection == "actions" and "preview" in item:
+            if collection in {"actions", "view_actions"} and "preview" in item:
                 item.pop("_preview_error", None)
                 item["preview"] = list(_as_argv(item["preview"], where="`actions[].preview`"))
                 rewrite(item, "preview", optional=True)

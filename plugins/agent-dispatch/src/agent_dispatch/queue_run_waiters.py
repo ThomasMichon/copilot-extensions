@@ -9,11 +9,17 @@ from typing import Any
 
 from .queue_common import PROGRESS_SUMMARY_MAX, RunWaiterWakeOperation, Task, _clip
 from .queue_records import Status, TaskError
+from .queue_execution_wakes import wake_custody_clear_sql
 from .queue_run_waiter_transition_cleanup import CLAIM_RELEASE_SENDER
+from .queue_delegated_waiters import DelegatedWaiterBindingMixin
+from .queue_run_waiter_records import run_waiter_from_row, select_waiter_row
 
 
-class QueueRunWaitersMixin:
+class QueueRunWaitersMixin(DelegatedWaiterBindingMixin):
     """Detached-run waiter and event-note helpers for :class:`TaskQueue`."""
+
+    _run_waiter_from_row = staticmethod(run_waiter_from_row)
+    _select_waiter_row = staticmethod(select_waiter_row)
 
     def prepare_run_waiter(
         self,
@@ -24,6 +30,8 @@ class QueueRunWaitersMixin:
         command: list[str],
         host: str | None = None,
         reason: str,
+        kind: str = "process",
+        delegation: dict | None = None,
         now: float | None = None,
     ) -> dict[str, Any]:
         ts = self._now(now)
@@ -31,8 +39,22 @@ class QueueRunWaitersMixin:
         meaningful = _clip(reason, PROGRESS_SUMMARY_MAX) or "hibernating"
         if not resume_worktree:
             raise TaskError("run waiter preparation requires a resume_worktree")
+        delegation = self._validate_waiter_preparation(kind, delegation)
+        if delegation is not None:
+            command = []
+            meaningful = f"PR watch {delegation['repo']}#{delegation['number']}"
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
+            if delegation is not None:
+                existing = self._find_delegated_preparation(conn, task_id, delegation["preparation_id"])
+                if existing:
+                    expected = {k: v for k, v in existing["delegation"].items() if k != "registration_id"}
+                    if (expected != delegation or existing["command"] != command
+                            or existing["owner"] != worker_id or existing["host"] != host
+                            or existing["resume_worktree"] != resume_worktree):
+                        raise TaskError("delegated preparation identity conflict")
+                    conn.execute("COMMIT")
+                    return existing
             task = self._fetch(conn, task_id)
             if task is None:
                 conn.execute("COMMIT")
@@ -105,6 +127,10 @@ class QueueRunWaitersMixin:
                 worker=worker_id,
                 note=f"run waiter prepared (generation {generation})",
             )
+            conn.execute(
+                "UPDATE run_waiters SET kind = ?, delegation_json = ? WHERE task_id = ? AND generation = ?",
+                (kind, json.dumps(delegation) if delegation is not None else None, task_id, generation),
+            )
             conn.execute("COMMIT")
         self._notify_run_waiter_prepare()
         if release_enqueued:
@@ -118,6 +144,7 @@ class QueueRunWaitersMixin:
             "resume_worktree": resume_worktree,
             "command": list(command),
             "state": "preparing",
+            **({"kind": kind, "delegation": delegation} if kind == "delegated" else {}),
         }
 
     def arm_run_waiter(
@@ -125,9 +152,11 @@ class QueueRunWaitersMixin:
         task_id: str,
         *,
         generation: int,
-        pid: int,
-        host: str,
-        start_token: str,
+        pid: int | None = None,
+        host: str | None = None,
+        start_token: str | None = None,
+        kind: str = "process",
+        delegation: dict | None = None,
         now: float | None = None,
     ) -> dict[str, Any] | None:
         ts = self._now(now)
@@ -138,6 +167,8 @@ class QueueRunWaitersMixin:
                 conn.execute("COMMIT")
                 return None
             waiter = self._run_waiter_from_row(row)
+            self._validate_waiter_arm(waiter, kind=kind, delegation=delegation, pid=pid,
+                                      host=host, start_token=start_token)
             task = self._fetch(conn, task_id)
             if not self._run_waiter_matches_task(waiter, task):
                 conn.execute("COMMIT")
@@ -145,8 +176,12 @@ class QueueRunWaitersMixin:
             conn.execute(
                 "UPDATE run_waiters SET state = 'active', pid = ?, host = ?, start_token = ?,"
                 " updated_at = ? WHERE id = ? AND state = 'preparing'",
-                (int(pid), host, start_token, ts, row["id"]),
+                (int(pid or 0), host if kind == "process" else waiter["host"],
+                 start_token, ts, row["id"]),
             )
+            if delegation is not None:
+                conn.execute("UPDATE run_waiters SET delegation_json = ? WHERE id = ?",
+                             (json.dumps(delegation), row["id"]))
             if task is not None:
                 self._audit(
                     conn,
@@ -363,12 +398,14 @@ class QueueRunWaitersMixin:
         task_id: str,
         *,
         generation: int,
-        pid: int,
-        host: str | None,
-        start_token: str | None,
+        pid: int | None = None,
+        host: str | None = None,
+        start_token: str | None = None,
         reason: str,
         message: str,
         sender: str,
+        delegation: dict | None = None,
+        event: dict | None = None,
         now: float | None = None,
     ) -> dict[str, Any] | None:
         ts = self._now(now)
@@ -378,7 +415,7 @@ class QueueRunWaitersMixin:
             row = self._select_waiter_row(
                 conn,
                 task_id,
-                states=("active",),
+                states=("active", "retired", "superseded", "cancelled") if delegation else ("active",),
                 generation=generation,
                 pid=pid,
                 host=host,
@@ -388,6 +425,9 @@ class QueueRunWaitersMixin:
                 conn.execute("COMMIT")
                 return None
             waiter = self._run_waiter_from_row(row)
+            if self._delegated_finish_is_replay(waiter, delegation, event):
+                conn.execute("COMMIT")
+                return waiter
             task = self._fetch(conn, task_id)
             if not self._run_waiter_matches_task(waiter, task):
                 conn.execute("COMMIT")
@@ -397,6 +437,9 @@ class QueueRunWaitersMixin:
                 " WHERE id = ? AND state = 'active'",
                 (ts, reason, row["id"]),
             )
+            if event is not None:
+                conn.execute("UPDATE run_waiters SET event_id = ? WHERE id = ?",
+                             (event["event_id"], row["id"]))
             wake = self._enqueue_run_waiter_wake(
                 conn,
                 waiter,
@@ -658,6 +701,7 @@ class QueueRunWaitersMixin:
             conn.execute("BEGIN IMMEDIATE")
             rows = conn.execute(
                 "SELECT * FROM run_waiter_wakes WHERE status = 'delivering'"
+                " AND COALESCE(execution_send_state, '') NOT IN ('pending', 'unknown')"
                 " AND COALESCE(delivery_expires_at, updated_at + ?) <= ?",
                 (max(0.01, lease_seconds), ts),
             ).fetchall()
@@ -684,8 +728,13 @@ class QueueRunWaitersMixin:
             while True:
                 row = conn.execute(
                     "SELECT * FROM run_waiter_wakes WHERE status = 'pending' AND not_before <= ?"
+                    " AND (sender = ? OR execution_send_state = 'sent' OR ("
+                    + wake_custody_clear_sql("run_waiter_wakes") +
+                    " AND NOT EXISTS (SELECT 1 FROM execution_admission_closures c"
+                    " JOIN tasks t ON t.repo = c.repo AND t.source = c.source"
+                    " WHERE t.id = run_waiter_wakes.task_id)))"
                     " ORDER BY created_at ASC, id ASC LIMIT 1",
-                    (ts,),
+                    (ts, CLAIM_RELEASE_SENDER),
                 ).fetchone()
                 if row is None:
                     conn.execute("COMMIT")
@@ -737,6 +786,9 @@ class QueueRunWaitersMixin:
             if wake.status != "delivering" or wake.delivery_token != delivery_token:
                 conn.execute("COMMIT")
                 raise TaskError(f"run waiter wake {wake_id!r} is not held by this delivery")
+            if row["execution_send_state"] in {"pending", "unknown"}:
+                conn.execute("COMMIT")
+                return wake
             task = self._fetch(conn, wake.task_id)
             if not self._run_waiter_wake_is_current(conn, task, wake):
                 conn.execute(
@@ -936,57 +988,3 @@ class QueueRunWaitersMixin:
         )
         row = conn.execute("SELECT * FROM run_waiter_wakes WHERE id = ?", (wake_id,)).fetchone()
         return RunWaiterWakeOperation._from_row(row)
-
-    @staticmethod
-    def _select_waiter_row(
-        conn: sqlite3.Connection,
-        task_id: str,
-        *,
-        states: tuple[str, ...],
-        generation: int | None = None,
-        pid: int | None = None,
-        host: str | None = None,
-        start_token: str | None = None,
-    ) -> sqlite3.Row | None:
-        placeholders = ",".join("?" for _ in states)
-        clauses = ["task_id = ?", f"state IN ({placeholders})"]
-        params: list[object] = [task_id]
-        params.extend(states)
-        if generation is not None:
-            clauses.append("generation = ?")
-            params.append(int(generation))
-        if pid is not None:
-            clauses.append("pid = ?")
-            params.append(int(pid))
-        if host is not None:
-            clauses.append("host = ?")
-            params.append(host)
-        if start_token is not None:
-            clauses.append("start_token = ?")
-            params.append(start_token)
-        query = (
-            "SELECT * FROM run_waiters WHERE "
-            + " AND ".join(clauses)
-            + " ORDER BY generation DESC LIMIT 1"
-        )
-        return conn.execute(query, params).fetchone()
-
-    @staticmethod
-    def _run_waiter_from_row(row: sqlite3.Row) -> dict[str, Any]:
-        return {
-            "id": row["id"],
-            "task_id": row["task_id"],
-            "generation": row["generation"],
-            "task_generation": row["task_generation"],
-            "owner": row["owner"],
-            "owner_session_id": row["owner_session_id"],
-            "pid": row["pid"],
-            "host": row["host"],
-            "start_token": row["start_token"],
-            "resume_worktree": row["resume_worktree"],
-            "command": json.loads(row["command_json"] or "[]"),
-            "state": row["state"],
-            "retired_reason": row["retired_reason"],
-            "created_at": row["created_at"],
-            "updated_at": row["updated_at"],
-        }

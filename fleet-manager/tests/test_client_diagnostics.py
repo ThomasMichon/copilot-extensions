@@ -29,7 +29,8 @@ def installed(tmp_path, monkeypatch):
     for name in (
         "__init__.py", "_versioned_runtime.py",
         "versioned_runtime_leases.py", "versioned_runtime_construction.py",
-        "versioned_runtime_source.py",
+        "versioned_runtime_source.py", "versioned_runtime_publication.py",
+        "_installer_process.py", "_construction_procutil.py", "_runtime_launcher.py",
     ):
         data = b"resource bytes\n"
         (package / name).write_bytes(data)
@@ -39,7 +40,11 @@ def installed(tmp_path, monkeypatch):
         locate_file=lambda entry: tmp_path / str(entry),
     )
     monkeypatch.setattr(client_diagnostics, "__file__", str(package / "client_diagnostics.py"))
-    monkeypatch.setattr(client_diagnostics.metadata, "distribution", lambda _: distribution)
+    def discover(**arguments):
+        assert arguments == {"name": "fleet-manager", "path": [str(tmp_path)]}
+        return iter([distribution])
+
+    monkeypatch.setattr(client_diagnostics.metadata.Distribution, "discover", discover)
     return distribution, package
 
 
@@ -52,7 +57,8 @@ def test_client_evidence_does_not_claim_release_or_controller_readiness(installe
     assert set(report["runtime_resource_sha256s"]) == {
         "__init__.py", "_versioned_runtime.py",
         "versioned_runtime_leases.py", "versioned_runtime_construction.py",
-        "versioned_runtime_source.py",
+        "versioned_runtime_source.py", "versioned_runtime_publication.py",
+        "_installer_process.py", "_construction_procutil.py", "_runtime_launcher.py",
     }
     assert report["runtime_resource_sha256s"]["_versioned_runtime.py"] == report["runtime_resource_sha256"]
 
@@ -64,7 +70,7 @@ def installed_runtime(installed, monkeypatch):
     library = Path(__file__).resolve().parents[2] / "libs" / "versioned-runtime"
     for name in (
         "_versioned_runtime.py", "versioned_runtime_leases.py", "versioned_runtime_construction.py",
-        "versioned_runtime_source.py",
+        "versioned_runtime_source.py", "versioned_runtime_publication.py",
     ):
         source = "versioned_runtime.py" if name == "_versioned_runtime.py" else name
         content = (library / source).read_bytes()
@@ -78,7 +84,7 @@ def installed_runtime(installed, monkeypatch):
 
 @pytest.mark.parametrize("member", [
     "_versioned_runtime.py", "versioned_runtime_leases.py", "versioned_runtime_construction.py",
-    "versioned_runtime_source.py",
+    "versioned_runtime_source.py", "versioned_runtime_publication.py",
 ])
 def test_runtime_and_companion_replacement_after_admission_is_refused(installed, monkeypatch, member):
     staging, package = installed_runtime(installed, monkeypatch)
@@ -97,6 +103,7 @@ def test_runtime_and_companion_replacement_after_admission_is_refused(installed,
 
 @pytest.mark.parametrize("member", [
     "versioned_runtime_leases.py", "versioned_runtime_construction.py", "versioned_runtime_source.py",
+    "versioned_runtime_publication.py",
 ])
 def test_companions_execute_only_retained_bytes_across_late_replacement(installed, monkeypatch, member):
     import sys
@@ -115,13 +122,15 @@ def test_companions_execute_only_retained_bytes_across_late_replacement(installe
         prefix = runtime.__name__
         for name in (
             "versioned_runtime_leases.py", "versioned_runtime_construction.py",
-            "versioned_runtime_source.py",
+            "versioned_runtime_source.py", "versioned_runtime_publication.py",
         ):
             (package / name).write_text("raise AssertionError('late code executed')\n")
         assert runtime.ConstructionTimeout.__module__ == prefix + "_versioned_runtime_leases"
         assert "_runtime_construction_channels_close" in runtime.construction_shell_helpers("sh")
         assert runtime._runtime_component("versioned_runtime_construction").__name__ in sys.modules
         assert runtime._runtime_component("versioned_runtime_source").__name__ in sys.modules
+        publication = runtime._runtime_component("versioned_runtime_publication")
+        assert publication.lease_component() is runtime._leases
     assert not any(name == prefix or name.startswith(prefix + "_") for name in sys.modules)
 
 
@@ -165,10 +174,7 @@ def test_missing_conflicting_or_tampered_installed_evidence_fails(installed, fai
 
 
 def test_missing_distribution_is_not_silently_source_checkout_success(monkeypatch):
-    def absent(name):
-        raise client_diagnostics.metadata.PackageNotFoundError(name)
-
-    monkeypatch.setattr(client_diagnostics.metadata, "distribution", absent)
+    monkeypatch.setattr(client_diagnostics.metadata.Distribution, "discover", lambda **_: iter(()))
     with pytest.raises(PlanError, match="distribution is not installed"):
         client_diagnostics.diagnose_client()
 
@@ -184,10 +190,27 @@ def test_malformed_or_unreadable_inventory_reports_bounded_cause(installed, monk
         def files(self):
             raise error
 
-    monkeypatch.setattr(client_diagnostics.metadata, "distribution", lambda _: BrokenInventory())
+    monkeypatch.setattr(client_diagnostics.metadata.Distribution, "discover",
+                        lambda **_: iter([BrokenInventory()]))
     with pytest.raises(PlanError, match="distribution metadata could not be read") as exc:
         client_diagnostics.diagnose_client()
     assert "private metadata" not in str(exc.value)
+
+
+def test_ambient_metadata_discovery_is_never_a_fallback(installed, monkeypatch):
+    def ambient(*args, **kwargs):
+        raise AssertionError("ambient metadata search was attempted")
+
+    monkeypatch.setattr(client_diagnostics.metadata, "distribution", ambient)
+    assert client_diagnostics.diagnose_client()["status"] == "installed"
+
+
+def test_duplicate_local_distributions_are_refused(installed, monkeypatch):
+    distribution, _ = installed
+    monkeypatch.setattr(client_diagnostics.metadata.Distribution, "discover",
+                        lambda **_: iter([distribution, distribution]))
+    with pytest.raises(PlanError, match="ambiguous local metadata"):
+        client_diagnostics.diagnose_client()
 
 
 def test_resource_read_error_is_nonsecret(installed, monkeypatch):

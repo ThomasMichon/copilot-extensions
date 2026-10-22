@@ -18,23 +18,29 @@ authentication, operation and SSH owners remain authoritative.
 
 This is an integration slice of the existing Linux Role Fleet, Fleet Control V2
 and routing campaigns, not a replacement for their implementation or ownership.
+The governing [Machine Fleet vision](../../../visions/machine-fleet/README.md)
+places reusable Gateway, native OpenSSH, optional public Azure Bastion
+reachability and the complete Chat capability in the shared suite. Adopters
+supply inventory, loadout, policy and secret references; organization-specific
+resource acquisition and identity bindings remain external adapters.
 
 ## Participants
 
 | Participant | Role | Reached via |
 |-------------|------|-------------|
-| `ticking-wrench` | Evidence-to-contract plan and proposed integration slice | #6681 and this effort |
+| `ticking-wrench` | Completed integration proposal, policy/pair prerequisites and bounded artifact-assembly source slice | Merged source; remaining integration backlog is #6681 / #6030 |
 | Existing #6030 / #6240 / #6424 owners | Construction, role lifecycle and installation | Retained owner accepted the exclusive source leaves; ordered shared wiring remains with that owner |
 | Existing #5789 / #6443 / #6804 owners | Routing, authentication, enrollment and Gateway integration | Their existing issue threads |
 | Existing #6241 owner | Operation admission and receipt authority | Existing Fleet Control V2 coordination |
-| `wobbly-contraption` | Retained construction/admission/lifecycle integration | Existing #6030 / #6240 / #6424 source custody |
+| `wobbly-contraption` | Retained construction/admission/lifecycle and setup-consumer integration, not generic artifact publication | Existing #6030 / #6240 / #6424 source custody |
 
 ## Coordination
 
 - **Topology:** independent worktrees and per-slice PRs, after explicit interface
   and file agreement.
-- **Host:** `ticking-wrench` owns this proposal, not another participant's runtime
-  or deployment.
+- **Host:** `ticking-wrench` owns the proposal and bounded assembly/publisher
+  integration source, not another participant's runtime lifecycle, operational
+  signing custody or deployment.
 - **Delegates:** no new runtime writer is assigned by this plan.
 - **Handoff:** name the accepted owner, exact scope and unresolved validation;
   source publication, installed state and live convergence are separate facts.
@@ -50,6 +56,22 @@ and routing campaigns, not a replacement for their implementation or ownership.
   integration participant. Shared CLI, staging, admission, manifests and
   lifecycle files remain with the construction owner. Source-leaf acceptance
   is not deployment or an implemented setup hook.
+- The artifact-assembly/publisher-integration source appointment belongs to
+  `ticking-wrench`, reserved under #6681/#6030. Its first new source/test/docs
+  seam produces the existing role/release schema from actual artifact bytes.
+  Shared verification, staging, client admission, construction, default CLI,
+  publisher workflow and agent-ssh files remain outside that reservation.
+- Privileged publication must use an existing approved mechanism with compatible
+  provenance verification. Source appointment, construction lineage, pure
+  policy/runtime leaves and client admission do not grant a signing purpose,
+  new credentials or permission to bypass a refused proof method.
+- Use existing owner contacts for operation reservations. Publishing a contract
+  amendment does not transfer the source or effect authority described by those
+  reservations.
+- The closing source participant releases its worktree responsibility to the
+  existing tracked objective #6681. Broader publication/proof interoperability,
+  provider/setup/lifecycle and live adoption remain in this active plan and
+  #6030/#6240/#6424/#5861; no replacement writer or runtime authority is inferred.
 
 ## Context
 
@@ -62,6 +84,14 @@ The current fleet-manager surfaces distinguish planning, authenticated artifact
 staging, operation journals and credential-controller subscriptions from
 managed role installation and desired-state execution. A setup flow cannot
 truthfully be assembled by renaming those existing surfaces as apply.
+
+Reuse the reviewed service-role Gateway, connector and container specifications
+and their [adoption-readiness record](../../../fleet-manager/docs/gateway-adoption-readiness.md).
+The [native qualification campaign](../../2026/10/20%20gateway-native-qualification/README.md)
+proves exact-source amd64/ARM64 isolated behavior. Those retained images are not
+released registry artifacts, an installation or a managed migration. New setup
+must consume the owning release and lifecycle contracts rather than rebuild
+that Gateway or convert its witness into a deployment mechanism.
 
 This closes the machine-fleet vision's driver-selected reachability,
 owner-directed named reconciliation and recoverable lifecycle intent, while
@@ -83,6 +113,53 @@ The following contract decomposition and validation techniques are
 **agent-recommended** implementation proposals, not additional operator grants.
 
 ## Proposed Contract
+
+### Portable setup modules and operation ownership
+
+Gateway and Vault setup are Fleet Manager modules composed through normal
+role selection, installation, supervision, credential providers and optional
+plugin/Worktree Manager clients. An installed client or enabled plugin does not
+host a service, enroll a machine, authorize a publisher or create another
+supervisor. Independently runnable services and standalone clients remain
+supported without Worktree Manager or Copilot.
+
+The Gateway module consumes the selected shared Gateway and connector
+distribution, existing routing/authentication owners and explicit transport
+policy. No relay product is mandatory: native OpenSSH, a supported Bastion path
+or another selected provider must qualify its own contract without a silent
+fallback. The Vault module composes its existing custody and service lifecycle;
+it does not create a new credential issuer, export long-lived secrets or turn
+fleet membership into credential authority.
+
+| Operation | Retained owner or prerequisite |
+|-----------|-------------------------------|
+| Release selection and complete role closure | #6240's existing contract; pure release-selection data is not publication |
+| Artifact assembly and publisher-integration source | `ticking-wrench`, reserved under #6681/#6030 |
+| Privileged publication and signing | Existing approved mechanism only; verify the actual compatible release/proof seam before invoking it |
+| Ordered construction, admission, lifecycle and later setup-hook wiring | `wobbly-contraption`, within retained #6424/#6240 scope |
+| Routing, authentication, enrollment and provider interoperability | Existing #5789/#6443/#6804 owners |
+| Target-local profile emission, source audit and canonical aliases | Existing agent-ssh owner |
+| Operation admission, uncertainty and receipts | Existing #6241 owner |
+
+Before effectful integration, the appointed source owner and setup consumer must
+agree the actual release/source seam: selected immutable input, role/platform
+closure, provenance and verification, supported distribution and compatible
+rollback. Source assembly uses the existing `fleet-manager.release` schema;
+it does not require a new consumer protocol. The existing approved Python
+publisher's hosted attestation and the Fleet verifier's pinned-key-only support
+remain a concrete proof-compatibility boundary, not permission to select another
+method or create a signer. Historical
+Python artifact pipeline failures under #6535/#6632 or trusted-control ownership
+under #6237 are not current generic transport-artifact publication receipts.
+Do not infer custody from their mere presence or create another publisher to
+fill the gap.
+
+Adopter-private generic prototypes migrate into the shared implementation and
+are retired only after qualified replacement, preserved state, reconnect and
+compatible rollback. Retain the working predecessor until those gates pass;
+removing configuration or a requirement does not authorize immediate teardown.
+Complete Chat implementation remains with #7238 and its existing service,
+client and plugin owners, not a second backend in this integration slice.
 
 ### Accepted source-leaf boundary
 
@@ -182,6 +259,11 @@ onboarded merely because its source is published.
 - Client-only, interactive-session, headless-service and constrained-guest roles
   have explicit supported behavior. An unavailable or unsupported role is not
   silently omitted or given another transport as an unapproved fallback.
+- User-owned interactive connections follow the user's logon lifetime; no
+  prelogin, SYSTEM or privileged service account is required. Separately adopted
+  service-host roles retain their own availability contract. Normal provider
+  issuance/relay renewal connects authorized donors and consumers without
+  copying accounts, widening direction policy or granting new identity rights.
 
 ### Setup, persistence and reconciliation
 
@@ -235,14 +317,25 @@ onboarded merely because its source is published.
 ### Phase 1 - Reviewed integration and ownership
 
 - [x] Reconcile this proposal with the existing parent plans and current source.
-- [x] Obtain the retained setup/construction/admission/execution owners' exact
-  interface and exclusive-file agreement.
+- [x] Obtain the retained construction/admission owner's exact policy/runtime
+  leaf interface and exclusive-file agreement.
 - [x] Turn available adopter evidence into public synthetic failure fixtures;
   retain private machine inventory only in its private elaboration.
 - [x] Clear this proposal's normal review/publication gate before runtime work.
+- [x] Adopt #7513's reviewed portable ownership, module and qualified-migration
+  intent without a duplicate vision or private engine.
+- [x] Reserve the appointed artifact-assembly/publisher-integration source
+  participant and exact new-file seam under #6681/#6030.
+- [ ] Verify the approved publication mechanism and compatible #6240
+  release/source/proof seam before privileged publication or setup wiring.
+- [x] Review the coherent integration-contract amendment against retained
+  lifecycle, routing, authentication, credential and Chat scopes.
 
 ### Phase 2 - Driver and directional policy
 
+- [x] Implement the first bounded artifact-to-release producer in the existing
+  SDK and qualify actual source-independent package/role-consumer behavior.
+  This does not sign, publish, authenticate or activate a release.
 - [x] Publish the accepted pure per-target policy leaf and focused installed
   consumer contracts; source merge does not close configuration or setup.
 - [x] Review and implement the explicit harness/knowledge declaration,
@@ -286,6 +379,12 @@ onboarded merely because its source is published.
 - [ ] Unit/schema: controller/provider selection, mutually exclusive canonical
   aliases, directional allow/deny rules, constrained guest hops and unsupported
   role refusal.
+- [ ] Artifact/source boundary: require the accepted publisher reservation and
+  actual selected role/platform/provenance input; reject data-only admission,
+  source merge or isolated image proof as publication or execution authority.
+- [ ] Module composition: Gateway/Vault use their existing installation,
+  supervision and credential owners; thin-client/plugin/Manager selection has
+  no implicit hosting, enrollment, credential export or alternate executor.
 - [ ] Native Windows and Linux first-touch; include architecture/interpreter
   differences and a thin-client-only negative test with no hosting effects.
 - [ ] Real provider module -> registry -> agent-ssh emitter/audit -> ordinary
@@ -441,3 +540,99 @@ takeover or implementation completion is asserted.
   pending. These focused
   validation items do not complete the parent integration, provider, setup,
   admission, lifecycle or controlled-adoption plans.
+
+### 2026-10-21 - Reviewed portable intent and integration operation boundaries
+
+- #7513 merged the existing Machine Fleet vision amendment as
+  `a2aaad649fab7c98cbfd4a7079e9503f4a0c3f64` after exact-head approval and
+  required CI. This effort consumes that canonical intent rather than opening
+  another vision or implementing a replacement controller.
+- Retained `wobbly-contraption` construction/lifecycle custody identifies the
+  setup consumer, not a generic artifact publisher. The publisher participant
+  and operation reservation remain an explicit pre-execution gate.
+- Inspected #6240's pure release-selection receipt and the historical
+  #6535/#6632 pipeline failure records; none establishes current generic
+  Gateway/OpenSSH/Bastion artifact publication. #6237's trusted-control role
+  likewise does not appoint this slice's publisher.
+- Reused the existing Gateway source and native qualification/readiness
+  boundaries. Separate exact-source native images are useful prior art, not
+  released artifact, managed installation or live adoption proof.
+- The binding implementation is now published in harness-knowledge
+  `0.1.2-dev1`; its effect-free version-1 preservation/pair capability is
+  available. Earlier paused-Main and unavailable-1.1 journal entries remain
+  historical. Installed selection and actual adopter rollout remain separate.
+- Reconciled Gateway/Vault module consumption, user-logon availability,
+  independent directions, normal credential renewal and qualified prototype
+  retirement while retaining existing source and effect owners. No executor,
+  artifact signing grant, enrollment, credential action or rollout occurred.
+
+### 2026-10-21 - Integration amendment reviewed and tracker aligned
+
+- #7537 merged as `0430fbc259153bd90105e386703aaba0ee496306` after
+  exact-head approval `5595997783`, required CI and no open findings.
+- Re-read the Plan and Validation Plan after merge and resolved only the
+  contract-review item. The artifact publisher participant, accepted release
+  seam, setup wiring and actual qualification remain open.
+- Aligned #6681's title and body with the reviewed portable module/transport
+  contract. No relay product is mandatory and no new source, signing,
+  credential, enrollment or deployment authority is assigned.
+
+### 2026-10-22 - Artifact assembly and installed consumer qualification
+
+- Implemented the reserved unprivileged `release_assembly` producer in the
+  existing SDK. It validates and snapshots explicit contracts and complete role
+  closures before artifact access, hashes the bounded actual streams, and emits
+  existing canonical schema-v1 release bytes without writes or publication.
+- Refreshed onto current source, including the existing compatible optional
+  dependency floor. Normal governed standalone preparation now succeeds;
+  no feed, seasoning, dependency-set or timeout override was introduced.
+- All 31 focused assembly cases pass. The existing release/artifact
+  compatibility selection passes 116 cases with one native FIFO case skipped
+  on Windows. A real built wheel is installed offline into a fresh target;
+  copied SDK/library source is removed before isolated producer and all three
+  role consumers run. Link/tamper refusal, package removal and unrelated user
+  state preservation pass. Synthetic SSH/Bastion bytes are not runtime proof.
+- Required unit-packet execution exposed a Windows framework-bootstrap defect:
+  pytest's existing Colorama I/O initialization attempted its native load only
+  after unit observation started. The narrow correction initializes that
+  framework adapter before observation; unit-side native-load rejection is
+  unchanged. Added admitted platform/error cases and a fresh native negative
+  counterpart, which passes against a real attempted Windows DLL load.
+- The exact admitted packet now passes all 759 cases with per-unit production
+  call coverage, no skips and no forbidden effects. Platform-dependent
+  open-flag IDs are semantic, and the descriptor mock uses a portable opaque
+  bit. The runner is an explicit required coverage target for its new cases;
+  no existing node, target, observation or timeout check was removed.
+- Source review and merge remain pending. Local unit evidence is not Main
+  qualification, artifact publication or installed fleet adoption.
+- The existing committed-SDK roster guard caught the producer missing from the
+  Gateway witness's closed-world source materializer. Included only this module
+  in that existing roster; the same guard checks the exact committed closure,
+  without changing Docker, execution privileges or witness grants.
+- Existing release/authentication/staging/admission, default CLI, publisher
+  workflow, credentials and SSH registry/profile owners remain untouched.
+  Hosted-attestation versus pinned-key verification interoperability is still
+  a separate pre-publication gate, not a reason to create keys or another proof
+  method. No setup wiring, live service, enrollment or deployment is claimed.
+
+### 2026-10-22 - Bounded source completed; remaining integration stays tracked
+
+- #7848 merged at `5f13a07986365de28ba912ad912947e435385ccc`,
+  10:32:01Z, from head `725878f823243f558ab154d06bf8e4bcb0f8534b`.
+  Current-head review `5612711282` approved; the sole Low documentation-impact
+  finding was addressed in the description and its thread resolved. Refreshed
+  required checks passed before the normal managed self-merge.
+- Reread this Plan and Validation Plan and resolved only the bounded
+  artifact-to-release producer/package-consumer item. The source includes the
+  unchanged canonical manifest contract, actual byte integrity and installed
+  first-touch coverage, plus the narrowly required Windows unit-bootstrap and
+  closed-world witness-roster corrections.
+- The source worktree's remaining effort responsibility transfers to the
+  existing tracked objective #6681 for the still-open integration items.
+  #6030, #6240/#6424 and #5861 retain their existing deployment, lifecycle and
+  reconciliation scopes. This records backlog custody, not another contributor's
+  acceptance or an invented implementation owner.
+- Keep the shared effort Active. Source completion does not establish release,
+  authentication/proof compatibility, managed setup, live transport, migration
+  or fleet adoption. No keys, credentials, installation, runtime update, service
+  restart or deployment were performed by this source slice.

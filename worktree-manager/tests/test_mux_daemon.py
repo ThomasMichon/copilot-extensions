@@ -1727,6 +1727,7 @@ def test_runtime_health_reports_version_attached_clients_and_busy(tmp_path):
         assert health == {
             "status": "ready",
             "version": __version__,
+            "runtime_generation": mux_daemon.running_generation(),
             "attached_clients": 0,
             "busy": False,
             "restart_recovery": {

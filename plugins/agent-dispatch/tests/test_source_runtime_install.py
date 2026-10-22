@@ -11,6 +11,7 @@ import subprocess
 import sys
 from contextlib import contextmanager
 from pathlib import Path
+from types import ModuleType
 
 import pytest
 
@@ -62,9 +63,12 @@ def source(tmp_path: Path):
     return api, payload, identity
 
 
-def native(source, tmp_path: Path, body: str) -> subprocess.CompletedProcess[str]:
+def native(
+    source, tmp_path: Path, body: str, *, selected_bootstrap: bool = False,
+    shell: str | None = None,
+) -> subprocess.CompletedProcess[str]:
     _, payload, _ = source
-    pwsh = shutil.which("pwsh") or shutil.which("powershell")
+    pwsh = shutil.which(shell) if shell else (shutil.which("pwsh") or shutil.which("powershell"))
     if not pwsh:
         pytest.skip("PowerShell unavailable")
     for name in (
@@ -79,6 +83,22 @@ def native(source, tmp_path: Path, body: str) -> subprocess.CompletedProcess[str
         "Enter-PluginSnapshotLock", "Invoke-VersionedActivate", "Get-VerTuple", "Test-VersionLt",
         "New-PluginBuildSnapshot",
     ))
+    bootstrap = f"\nfunction Get-BootstrapPython {{ return '{sys.executable}' }}\n"
+    if selected_bootstrap:
+        bootstrap = _function("ps1", "Get-BootstrapPython") + f"""
+$env:AGENT_DISPATCH_BASE_PYTHON = '{sys._base_executable}'
+function Get-AuthenticodeSignature {{
+    param($LiteralPath)
+    $cert = New-Object PSObject
+    $cert | Add-Member ScriptMethod GetNameInfo {{ param($type,$issuer) return 'Python Software Foundation' }}
+    return [pscustomobject]@{{Status='Valid';SignerCertificate=$cert}}
+}}
+function Get-Command {{
+    param($Name,$CommandType,$ErrorAction)
+    if ($Name -in @('py','python','python3')) {{ return $null }}
+    Microsoft.PowerShell.Core\\Get-Command @PSBoundParameters
+}}
+"""
     harness.write_text(
         "$ErrorActionPreference = 'Stop'\n"
         f"$PSScriptRoot = '{SCRIPTS}'\n$ScriptDir = '{SCRIPTS}'\n"
@@ -91,7 +111,7 @@ def native(source, tmp_path: Path, body: str) -> subprocess.CompletedProcess[str
         "function Get-VersionedCurrent { return 'healthy' }\n"
         f". '{SCRIPTS / 'versioned_runtime_native.ps1'}'\n"
         + definitions
-        + f"\nfunction Get-BootstrapPython {{ return '{sys.executable}' }}\n"
+        + bootstrap
         + "Initialize-SourceRuntime\nAssert-SourceRuntime\n"
         + "New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null\n"
         + "[IO.File]::WriteAllText((Join-Path $InstallDir 'current-version'), 'healthy')\n"
@@ -107,6 +127,36 @@ def native(source, tmp_path: Path, body: str) -> subprocess.CompletedProcess[str
         [pwsh, "-NoProfile", "-NonInteractive", "-File", str(harness)],
         capture_output=True, text=True, timeout=40, creationflags=HEADLESS,
     )
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows interpreter selection")
+@pytest.mark.parametrize("shell", ["pwsh", "powershell"])
+def test_selected_base_bootstraps_source_and_construction_without_discovery(
+    source: tuple[ModuleType, Path, object], tmp_path: Path, shell: str,
+) -> None:
+    result = native(source, tmp_path, """
+$selected = $env:AGENT_DISPATCH_BASE_PYTHON
+if ((Get-BootstrapPython) -cne $selected) { throw 'selected base did not bootstrap source payload' }
+[void](Invoke-VersionedSlotClean)
+if ($script:RuntimeConstructionReuse) { throw 'fixture did not enter fresh construction' }
+$preference = @{version=1;python=$selected} | ConvertTo-Json -Compress
+[IO.File]::WriteAllText((Join-Path $InstallDir 'base-python.json'), $preference)
+$env:AGENT_DISPATCH_BASE_PYTHON = $null
+$SrcVersion = $PackageVersion
+Initialize-SourceRuntime
+Assert-SourceRuntime
+if ((Get-BootstrapPython) -cne $selected) { throw 'stored base did not bootstrap source payload' }
+$aborted = $false
+try { Stop-RuntimeConstruction } catch {
+    if ($_.Exception.Message -cne 'Runtime construction aborted; the owned incomplete candidate was reclaimed') { throw }
+    $aborted = $true
+}
+if (-not $aborted -or (Test-Path -LiteralPath $VenvDir)) { throw 'bootstrap fixture did not reclaim its incomplete slot' }
+if ([IO.File]::ReadAllText((Join-Path $InstallDir 'current-version')) -cne 'healthy') { throw 'bootstrap probe changed active selection' }
+Write-Output 'selected-source-construction-bootstrap'
+""", selected_bootstrap=True, shell=shell)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "selected-source-construction-bootstrap" in result.stdout
 
 
 def test_native_redirect_commit_does_not_revalidate_mutable_origin(source, tmp_path):

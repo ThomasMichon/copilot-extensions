@@ -2822,7 +2822,8 @@ async def test_far_side_runner_resolves_and_hosts(tmp_path, monkeypatch):
         async def resolve_async(self, name, sender_repo=None):
             return SpawnTarget(type="local", cwd=str(tmp_path))
 
-    async def _fake_resolve(target, *, tracker=None, session_id=""):
+    async def _fake_resolve(target, *, tracker=None, session_id="", prepare_plugins=True):
+        assert prepare_plugins is False
         return [sys.executable, str(agent_script)], str(tmp_path), dict(os.environ)
 
     monkeypatch.setattr("agent_bridge.transport.resolve_local_launch", _fake_resolve)

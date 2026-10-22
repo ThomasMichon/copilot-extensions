@@ -10,6 +10,8 @@ from pathlib import Path
 
 import pytest
 
+from pr_test_helpers import _stub_remote_target
+
 from agent_worktrees import pr_break_glass as recovery
 from agent_worktrees import config as cfg, finalize, finalize_cli, git_ops, pr_ops, pr_publish, pr_rewrite, tracking
 from agent_worktrees.providers.base import PullResult
@@ -193,7 +195,7 @@ def _recovered_pr(pr_repo, monkeypatch: pytest.MonkeyPatch, *, stub_attribution=
     from test_pr_rewrite import publish_and_rebase
 
     monkeypatch.setattr(git_ops, "remote_slug", lambda *a, **k: "example/project")
-    monkeypatch.setattr(pr_publish, "push_slug", lambda *a, **k: "example/project")
+    _stub_remote_target(monkeypatch, None, "example/project")
     if attribution is not None or provider != "gitea":
         config, wid, wt, remote = pr_repo
         config = replace(config, repos={
@@ -243,7 +245,7 @@ def test_azure_recovery_preview_matches_ssh_destination(
     destination = pr_publish._identity("git@ssh.dev.azure.com:v3/example/team/project", str(wt))
     record.pr.rewrite_identity = destination
     tracking.save_record(record)
-    monkeypatch.setattr(pr_publish, "push_identity", lambda *a, **k: destination)
+    _stub_remote_target(monkeypatch, None, "example/project", destination)
     monkeypatch.setattr(pr_rewrite, "observe_pr", lambda *a: PullResult(
         number=42, head_sha=old, head_ref=branch,
         head_url=f"https://dev.azure.com/example/team/_git/{source_repository}",

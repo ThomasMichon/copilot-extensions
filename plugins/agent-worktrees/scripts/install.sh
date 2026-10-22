@@ -157,7 +157,7 @@ if [[ -n "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
     esac
     __aw_context_query() {
         if [[ -n "$__aw_context_python" ]]; then
-            "$__aw_context_python" -I -B "$SCRIPT_DIR/installation-context/installation_context.py" "$@"
+            "$__aw_context_python" -I -B -X utf8 "$SCRIPT_DIR/installation-context/installation_context.py" "$@"
         else
             bash "$__aw_context_helper" "$@"
         fi
@@ -275,6 +275,54 @@ if [[ -n "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
             "ERROR: installation receipt generation does not match governance" >&2
         exit 1
     }
+    context_publication_allowed() {
+        local publication allowed allowed_type publication_root
+        if [[ -n "${COPILOT_EXTENSIONS_RUNTIME_PUBLICATION:-}" ]]; then
+            local management_python="" management_index
+            for ((management_index=0; management_index<${#__aw_args[@]}; management_index++)); do
+                if [[ "${__aw_args[$management_index]}" == --runtime-publication-python ]]; then
+                    management_python="$(__aw_shell_path "${__aw_args[$((management_index+1))]}")" || return 1
+                fi
+            done
+            [[ -n "$management_python" ]] || {
+                printf '%s\n' 'ERROR: Runtime publication management requires explicit --runtime-publication-python' >&2
+                return 1
+            }
+            publication="$("$management_python" -I -B -X utf8 \
+                "$SCRIPT_DIR/installation-context/installation_context.py" \
+                probe-management-publication "${__aw_status_args[@]:1}")" || return 1
+            allowed="$(__aw_context_value "$publication" managementPublication)" || return 1
+            allowed_type="$(LC_ALL=C awk -f "$__aw_json_query" -v mode=type \
+                -v query_path=managementPublication <<<"$publication")" || return 1
+            publication_root="$(__aw_context_value "$publication" runtimeRoot)" || return 1
+            publication_root="$(__aw_shell_path "$publication_root")" || return 1
+            [[ "$allowed_type" == boolean && "$allowed" == true &&
+               "$publication_root" == "$__aw_status_root" ]] || {
+                printf '%s\n' 'ERROR: Runtime publication management returned an invalid decision' >&2
+                return 1
+            }
+            return
+        fi
+        publication="$(__aw_context_query probe-plugin-publication "${__aw_status_args[@]:1}")" || {
+            printf 'ERROR: Runtime publication refused: %s. Use explicit installation management.\n' \
+                "$publication" >&2
+            return 1
+        }
+        allowed="$(__aw_context_value "$publication" $'deployment\034allowPluginPublication')" || return 1
+        allowed_type="$(LC_ALL=C awk -f "$__aw_json_query" -v mode=type \
+            -v query_path=$'deployment\034allowPluginPublication' <<<"$publication")" || return 1
+        publication_root="$(__aw_context_value "$publication" runtimeRoot)" || return 1
+        publication_root="$(__aw_shell_path "$publication_root")" || return 1
+        [[ "$allowed_type" == boolean && "$allowed" == true &&
+           "$publication_root" == "$__aw_status_root" ]] || {
+            printf 'ERROR: Runtime publication probe returned an invalid decision: %s\n' \
+                "$publication" >&2
+            return 1
+        }
+    }
+    if [[ "$__aw_action" != status ]]; then
+        context_publication_allowed || exit $?
+    fi
     context_governance_unchanged() {
         local current current_status current_reason current_mode current_root
         local current_context current_activation current_namespace current_install
@@ -1079,7 +1127,7 @@ _bootstrap_python() {
             __resolved_bin_real="$(cd "$(dirname "$__resolved")" 2>/dev/null && pwd -P)"
             [[ -n "$__resolved_bin_real" && "$__resolved_bin_real" == "$venv_real"/* ]] && continue
         fi
-        __resolved="$("$__resolved" -I -B -c \
+        __resolved="$("$__resolved" -I -B -X utf8 -c \
             'import sys; assert sys.version_info >= (3, 11); print(sys.executable)' 2>/dev/null)" \
             || continue
         case "${OSTYPE:-}" in
@@ -1104,6 +1152,7 @@ _deploy_python_runtime() {
             ;;
     esac
     [[ -z "$OWNER_ARG" ]] || mode_args+=(--owner "$OWNER_ARG")
+    [[ "$ACTION" != update ]] || mode_args+=(--recover-adopted-manager)
     base="$(_bootstrap_python exclude-venv-dir)" || {
         err "The Python-owned installer requires a base Python 3.11+ outside the target slot"
         return 1
@@ -1120,6 +1169,7 @@ _deploy_python_runtime() {
             if [[ "$uv_path" != *.exe && -f "$uv_path.exe" ]]; then uv_path="$uv_path.exe"; fi ;;
     esac
     origin_payload="${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}"
+    if $CONTEXTUAL_INSTALL; then context_publication_allowed || return $?; fi
     result_dir="$INSTALL_DIR/.installer-inputs"
     mkdir -p "$result_dir"
     result_path="$(mktemp "$result_dir/result-$$-XXXXXX")" || return 1
@@ -1134,12 +1184,12 @@ _deploy_python_runtime() {
         case "${OSTYPE:-}" in
             msys*|cygwin*) [[ "$publisher" == *.exe || ! -f "$publisher.exe" ]] || publisher+=".exe" ;;
         esac
-        publisher="$("$base" -I -c 'import pathlib,sys; print(pathlib.Path(sys.argv[1]).resolve())' "$publisher")" || return 1
+        publisher="$("$base" -I -X utf8 -c 'import pathlib,sys; print(pathlib.Path(sys.argv[1]).resolve())' "$publisher")" || return 1
         local frontend
-        frontend="$("$base" -I -c 'import json,sys; print(json.dumps({"shell":"sh","executable":sys.argv[1],"scope":sys.argv[2]}))' "$publisher" "$scope")" || return 1
+        frontend="$("$base" -I -X utf8 -c 'import json,sys; print(json.dumps({"shell":"sh","executable":sys.argv[1],"scope":sys.argv[2]}))' "$publisher" "$scope")" || return 1
         mode_args+=(--frontend "$frontend")
     fi
-    "$base" -I -B "$SCRIPT_DIR/runtime_install.py" \
+    "$base" -I -B -X utf8 "$SCRIPT_DIR/runtime_install.py" \
         --root "$INSTALL_DIR" --plugin "$runtime_inputs" \
         --payload "$origin_payload" --uv "$uv_path" --base-python "$base" \
         --result "$result_path" --expected-source-identity "$source_pin" \
@@ -1149,7 +1199,7 @@ _deploy_python_runtime() {
         err "Python runtime lifecycle failed"
         return "$runtime_rc"
     fi
-    parsed="$("$base" -I -c '
+    parsed="$("$base" -I -X utf8 -c '
 import json, sys
 result = json.load(open(sys.argv[1], encoding="utf-8"))
 assert result.get("deployment_manifest_published") is True, \
@@ -3104,12 +3154,10 @@ deploy_copilot_plugin() {
         return
     fi
 
-    # Detect if we are running from the installed plugin directory
-    local installed_plugins_dir="$HOME/.copilot/installed-plugins"
     local running_from_installed=false
-    case "$PLUGIN_DIR" in
-        "$installed_plugins_dir"*) running_from_installed=true ;;
-    esac
+    if [[ "$(_source_kind "$PLUGIN_DIR")" == marketplace ]]; then
+        running_from_installed=true
+    fi
 
     # 1. Register marketplace if not present
     if ! "$copilot_path" plugin marketplace list 2>/dev/null | grep -q 'copilot-extensions'; then
@@ -3228,11 +3276,11 @@ fi
 
 case "$ACTION" in
     publish-runtime-helpers)
-        publication="$("$RUNTIME_PUBLICATION_PYTHON" -I -B "$SCRIPT_DIR/runtime_install.py" \
+        publication="$("$RUNTIME_PUBLICATION_PYTHON" -I -B -X utf8 "$SCRIPT_DIR/runtime_install.py" \
             --root "$INSTALL_DIR" --plugin "$PLUGIN_DIR" \
             --inspect-helper-publication "$RUNTIME_PUBLICATION_PLAN" \
             --publication-digest "$RUNTIME_PUBLICATION_DIGEST")" || exit 1
-        fields="$("$RUNTIME_PUBLICATION_PYTHON" -I -c \
+        fields="$("$RUNTIME_PUBLICATION_PYTHON" -I -X utf8 -c \
             'import json,sys; d=json.loads(sys.argv[1]); print(d["scope"]); print(d["python"]); print(d["copies"])' "$publication")" || exit 1
         fields="${fields//$'\r'/}"
         scope="${fields%%$'\n'*}"; fields="${fields#*$'\n'}"
@@ -3253,7 +3301,7 @@ case "$ACTION" in
             done
             deploy_tool_binstub || exit 1
         fi
-        "$RUNTIME_PUBLICATION_PYTHON" -I -B "$SCRIPT_DIR/runtime_install.py" \
+        "$RUNTIME_PUBLICATION_PYTHON" -I -B -X utf8 "$SCRIPT_DIR/runtime_install.py" \
             --root "$INSTALL_DIR" --plugin "$PLUGIN_DIR" \
             --complete-helper-publication "$RUNTIME_PUBLICATION_PLAN" \
             --publication-digest "$RUNTIME_PUBLICATION_DIGEST" || exit 1

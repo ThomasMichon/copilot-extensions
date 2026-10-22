@@ -1,0 +1,9 @@
+{
+  "comment": "Correlate Bash fallback logs without invented elapsed timing",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

@@ -3,14 +3,45 @@
 Canonical, dependency-light management foundation for marketplace installation
 cells. Mutation remains explicit and non-automatic:
 
+The Python directory-lock primitive records native process birth where supported.
+An admitting parent's death does not prove its installer descendants stopped:
+normal acquisition remains fail-closed and names the supported recovery entry.
+Explicit repair requires independent inactivity assessment for the owner and
+its descendants before quarantining residue. New mutation/repair writers share
+a short kernel-held guard that releases on death/reboot; it is not a lifetime
+lease on those descendants. Live legacy owners and foreign/unknown owners are
+not stolen. The Python recovery entry below also repairs compatible native-shell
+directory receipts without changing their interpreter prerequisites.
+
+The standalone `installation_context.py lock-inspect` and `lock-repair` actions
+work even when normal command dispatch is blocked. They require the exact lock
+path/kind/marketplace/plugin and bind repair to the inspection's
+`expectedEvidence`. Original bytes remain under a unique sibling
+`<lock>.recovery-<id>/lock`, with a prepared/completed `recovery.json`.
+`--inactive-owner-evidence` is required for every repair, not only malformed
+receipts. `--allow-incomplete` inspection adds a manual path for missing/malformed
+owners, including an empty or invalid ownership token. Supplied scope fields
+must still match, and a recorded live or foreign owner remains protected.
+Clean owner release is rechecked under the mutation guard before a contender
+reports stale residue. The evidence text is the authorized repairer's assertion, not automatic
+proof. It cannot override a valid live/foreign/unknown owner or
+unsafe/changed contents. See
+[`recovering-operational-locks`](../../plugins/agent-conduct-guidance/skills/recovering-operational-locks/SKILL.md)
+for authority and executable recipes. Never unlink permanent `.mutation-guard`
+files. A coordination repair never proves an interrupted update succeeded or
+its whole working set rolled back.
+
 - `installation_context.py` provides the stdlib-only management/runtime API and
   CLI composition root; its sibling `_installation_context_*.py` fragments keep
   the canonical Python implementation componentized while the sync tool vendors
   the same self-contained file set into every consuming plugin.
 - `installation-context.sh` plus `json-query.awk` provides a Bash bootstrap that
-  does not require Python or `jq`. The Linux/WSL bootstrap requires Bash 4.4+
-  plus `awk`, a SHA-256 command (`sha256sum`, `shasum`, or `openssl`), and a
-  physical-path command (`realpath -m` or `readlink -f`).
+  does not require Python or `jq`. Read-only `status`, `deployment-status`,
+  `probe-plugin-publication` and `probe-legacy` support stock macOS Bash 3.2;
+  installation-management actions still require Bash 4.4+. Native dependencies
+  include `awk`, `sh` and a SHA-256 command (`sha256sum`, `shasum`, or `openssl`).
+  Physical-path resolution uses `realpath -m`, `readlink -f` or the canonical
+  shell fallback.
 - `installation-context.ps1` provides the PowerShell 5.1+/pwsh bootstrap.
   Missing native types compile in one batch to bound cold diagnostic startup;
   re-entry retains already-loaded types rather than recompiling them.
@@ -21,6 +52,32 @@ cells. Mutation remains explicit and non-automatic:
   conservative legacy-footprint evidence from `payload-invocation.json` and
   gate installer/bootstrap mutation through the read-only `probe-legacy`
   decision.
+- `plugin-publication-probe.sh` and `plugin-publication-probe.ps1` compose the
+  existing read-only `probe-plugin-publication` and `probe-legacy` decisions.
+  Both publication and installation-mode admission must allow mutation of the
+  same legacy root. They emit no success output, diagnose refusal on stderr
+  and exit 3 without publishing, provisioning or installing an interpreter.
+  The CodeSpaces/Logger/Pull Requests/Vault family and the
+  Bridge/Dispatch/Containers/MCP/Budget Guidance bootstraps call this adapter
+  before first stamping or drift-reconcile reaping, locking and dispatch.
+  Machines uses it for legacy publication and probes its independently
+  validated selected cell directly; context selection alone is not permission.
+  Healthy current runtimes remain a read-only no-op; independent session hooks
+  retain their separate invocation. An older helperless bootstrap retains
+  standalone behavior only when its deployment policy is absent.
+  Logger and the shared Pull Requests/SSH/Vault installed first-use wrappers also
+  call this adapter before cold trace or provisioning-lock writes. Their
+  [ready-only resolver probes](../versioned-runtime/README.md) retain healthy
+  managed dispatch without granting cold publication. Vault's payload dispatcher
+  instead probes publication against its independently validated selected cell
+  or canonical legacy root; a legacy-only adapter never admits a namespaced cell.
+
+On-demand stock-shell regressions use an actual Bash 3.2 interpreter selected by
+`INSTALLATION_CONTEXT_BASH32` (or stock `/bin/bash` for bootstrap cases). They
+cover cold and drift admission across bootstrap adopters, including Budget
+Guidance without Python. Canonical deployment-adapter cases also exercise that
+interpreter when explicitly selected. This is interpreter compatibility
+coverage, not a substitute for native macOS platform qualification.
 
 All three normalize marketplace source descriptors, derive source fingerprints
 and marketplace ids, resolve payload provenance, compute the approved durable
@@ -31,8 +88,9 @@ read-only `snapshot-validate` provenance actions plus read-only `status` and
 never publish a `runtime-root` file; existing advisory files are left untouched.
 Command discovery uses attributable catalogs or explicit lifecycle launchers,
 not a status-query side effect. The Python `resolve_payload_source(...)` API
-reuses installed-declaration and directory-catalog provenance resolution without
-reading installation policy, activation, receipts, or the cell tree. It returns
+reuses installed-declaration, directory-catalog and selected legacy-snapshot
+provenance resolution without reading installation policy, activation, cell
+receipts or the cell tree. It returns
 normalized source, fingerprint, marketplace identity, plugin identity, payload
 root, and locator only; it does not prove runtime ownership, readiness, or select
 an installation. An ambient installation-context pointer is deliberately outside
@@ -42,6 +100,31 @@ callers may supply a source descriptor. `resolve_context(...)` composes the same
 source resolver with its existing receipt and cell-ownership checks; those checks
 remain mandatory when selecting or managing a cell. Catalog integration is a
 separate consumer change, not implied by this API's presence.
+
+Selected legacy snapshots may retain `snapshot-provenance.json` with schema
+`copilot-extensions.legacy-snapshot-source` and a `resolution` captured
+from the canonical read-only `resolve` operation at publication. All three
+adapters require an ordinary sidecar under the selected `snapshots/<id>`, matching
+ordinary `payload-dir` and `stamped-version` markers, the payload's plugin name,
+and a re-normalized source whose record, fingerprint and marketplace id agree.
+Version 1 requires `<id>` to equal the stamped package version. Version 2
+separately binds string `snapshotId` and `payloadVersion` fields to that selected
+directory and version marker, preserving SSH's timestamped immutable snapshot
+IDs without changing package-version drift detection. Unsupported versions,
+missing fields and array-shaped selection values are refused, not coerced.
+The original publisher and declaration need not remain available. Captured cell
+paths are documentary, not context receipts or management authority. This
+evidence preserves source identity only: the live installation/environment owner,
+mode, deployment policy and lifecycle custody still govern every mutation.
+Namespaced snapshots retain their existing separate provenance contract.
+The canonical installer engine owns legacy sidecar publication for Logger and
+the shared Pull Requests/SSH/Vault wrapper producers. Producers explicitly name
+their prepared candidate; the wrapper writer never infers a new source from the
+previous `payload-dir`. Evidence is captured only in retained runtime snapshots,
+never in an ordinary publisher payload. Stamps publish their wrapper before
+changing redirects or replacing a selected fixed-name snapshot, so failed
+wrapper publication preserves the prior selection and its source evidence.
+
 `stamp` creates or
 updates only `namespace.json` and `install.json`. `activation-cas` explicitly
 publishes only `installation-activation.json` after pinning the caller-observed
@@ -64,16 +147,78 @@ selected snapshot to their exact payload root and version. Every mutation
 requires an explicit `--context` / `-Context`; it never adopts an ambient
 `COPILOT_EXTENSIONS_CONTEXT` as authorization.
 
-JSON inputs use one strict language on every entry point: UTF-8 without BOM,
+Installation-context protocol JSON inputs use one strict language on every entry point: UTF-8 without BOM,
 case-sensitive and non-duplicated object names, escaped control characters, and
 string types for identity, path, payload-version, locator, and manifest fields.
 Filesystem plugin ids are portable across both platforms, including rejection
 of Windows device basenames.
 
+The Python `read_deployment_manifest` compatibility reader also accepts the
+single UTF-8 BOM emitted by existing PowerShell 5.1 deployment writers.
+Lifecycle manifest reads use that reader without changing protocol receipts or
+`read_json`'s strict language. Duplicate keys, invalid UTF-8 and malformed JSON
+still refuse; digest evidence continues to describe the original file bytes.
+
 ## CLI
 
 All successful actions emit one JSON object. Ambiguous or mismatched evidence
 writes an actionable error to stderr and exits nonzero.
+
+### Explicit runtime publication custody (Python)
+
+`runtime_publication_lease(**mode_arguments)` is an explicit management context
+manager for an already selected namespaced installation. It requires an
+explicit `context`, the existing payload/plugin/legacy-root resolution inputs
+and canonical installation policy. It holds the existing genesis then install
+locks; it does not create another lock namespace, choose runtime source, run an
+installer or enable maintenance.
+
+The yielded environment patch carries the context and a ticket selecting those
+live owners. Pass it to the caller's existing installer process flow and wait
+for that flow to finish before leaving the context manager.
+`borrow_runtime_publication(**mode_arguments)` authenticates the owners without
+acquiring or releasing them. Its returned lock handles are borrowed inspection
+handles, never caller-owned locks to release. Durable management/publication
+purpose binds the source, installation, context and receipt/activation
+generations; both owners must have the exact tokens, same live local PID and
+native process birth, and current valid governance. Linux custody uses the
+kernel's boot/start identity and nonterminal process state; Windows uses a live
+query/synchronization handle and its creation time. An exited but unreaped
+process is not a live management owner. Unavailable native identity refuses
+management admission before lock writes or refuses borrowing; the conservative
+PID-existence probe used elsewhere is not publication authority.
+A ticket alone, a stale or reused PID, another purpose or an invalid deployment
+policy cannot authorize publication.
+
+The Python-only `probe-management-publication` CLI action exposes the same
+read-only borrower check with the usual mode-resolution arguments. Worktrees'
+native installers call it only for an explicit management ticket, using the
+caller's existing `-BootstrapPython` or `--runtime-publication-python`. Ordinary
+standalone native installation gains no interpreter prerequisite. The backend
+borrows the same locks through construction, retained candidate handover and
+native helper callbacks; it never reacquires an outer manager's locks.
+Publication adapters acquire namespace custody before any service cutover lock,
+including ordinary standalone callers addressing the same cell. Nested
+settlement retains that custody until cutover authority has been released;
+a standalone waiter must not hold cutover while waiting for a manager's
+namespace owners.
+Manager/source-selection integration remains separate from this custody API.
+
+The bounded `payload-invocation` portfolio contains T2 borrower/native-admission
+regressions and explicit T3 real construction/callback tests. From the repository
+root:
+
+```text
+python tools/run-plugin-tests.py payload-invocation --test-file tests/test_cell_management.py
+python tools/run-plugin-tests.py payload-invocation --test-file tests/test_cell_publication_overlap.py
+python tools/run-plugin-tests.py payload-invocation --allow-explicit-tiers --test-file tests/test_cell_management_install.py -k pwsh
+```
+
+For real construction select one native shell at a time (`pwsh`,
+`powershell.exe` or `bash`) to retain the per-run wall limit.
+These tests require that shell and `uv`, use synthetic installation cells, and
+assert immutable completion/selection, native resolver publication, predecessor
+preservation and continued ownership of the outer management locks.
 
 PowerShell callers may opt into `status -WithContextValidation`, with both
 `-ExpectedPluginId` and `-ExpectedPayloadRoot`. For an eligible namespaced

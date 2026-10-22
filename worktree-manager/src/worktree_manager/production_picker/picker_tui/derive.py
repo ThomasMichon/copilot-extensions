@@ -14,6 +14,7 @@ from __future__ import annotations
 import datetime as _dt
 
 from rich.cells import cell_len
+from worktree_identity import parse_machine_identity
 
 from .. import prune
 from . import reciprocal
@@ -636,6 +637,7 @@ def norm(
     source_capabilities=None,
 ):
     """Normalize one raw worktree dict into the engine's record shape."""
+    identity = parse_machine_identity(w)
     source_id = source_identity.resolve_id(
         source_kind, source_id, machine=str(machine), env=str(env)
     )
@@ -718,7 +720,7 @@ def norm(
     # ``_state_style()`` (which must agree on whether HANDOFF actually won)
     # and reused below rather than recomputed for the ``relation`` field.
     relation_label = reciprocal.short_label(reciprocal_relation)
-    return {
+    record = {
         "id": w["id"],
         "id4": id4,
         "selection_id": f"{source_id}\x1f{w['id']}",
@@ -839,6 +841,9 @@ def norm(
         "hidden": bool(w.get("picker_hidden", kind in ("system", "bridge"))),
         "raw": w,
     }
+    if identity is not None:
+        record["machine_identity"] = identity.to_record_fields()
+    return record
 
 
 def for_machine(wts, machine, env):

@@ -1,0 +1,9 @@
+{
+  "comment": "Reuse privately copied resource-owner Git fixture inputs without caching finalization authority.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

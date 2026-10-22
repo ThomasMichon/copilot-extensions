@@ -3,7 +3,7 @@
 - **Subject:** the repository-wide portfolio of automated tests for plugins and shared libraries
 - **Scope:** leaf (concrete cross-cutting capability)
 - **Status:** Active
-- **Last revised:** 2026-10-19
+- **Last revised:** 2026-10-21
 - **Reality docs:** [`TESTING.md`](../../TESTING.md)
 
 ## Purpose & Intent
@@ -44,10 +44,14 @@ structural guards, hermetic units, contained components, disposable clean-room
 validation, and explicitly targeted end-to-end checks. Higher-fidelity tiers
 complement lower ones; they do not silently join the default developer loop.
 
-Promotion admits unit tests only and collects their coverage in that execution.
+Promotion's test packet admits unit tests only and collects their coverage in that execution.
 Required PR CI conditionally selects eligible units by impact. Actual-Git,
-multi-process, native and end-to-end integration belongs to periodic
-containerized validation, never a transitive promotion dependency.
+multi-process, native and end-to-end integration generally belongs to periodic
+containerized validation, not a transitive promotion dependency. The sole bounded
+exception is the release vision's
+[configured-feed construction and installed first-launch qualification](../release-pipeline/README.md#configured-feed-construction-and-first-launch).
+That separate qualification does not change unit eligibility, supply unit
+coverage or restore the general integration portfolio.
 
 ### containment boundary
 
@@ -136,8 +140,9 @@ coverage are consolidated or removed rather than preserved for count.
 
 ### reductions preserve assurance
 
-Critical contracts retain explicit ownership across the portfolio, but their
-integration tests need not block a release. Recovery can aggressively move
+Critical contracts retain explicit ownership across the portfolio. Apart from
+the bounded construction/launch qualification, their integration tests need not
+block a release. Recovery can aggressively move
 blocking, slow or inappropriate cases out of the gate while preserving periodic
 container execution. That routing change does not wait for a full-corpus
 equivalence exercise or a replacement unit.
@@ -169,7 +174,8 @@ force unrelated contributors to debug an entire subsystem.
   definition of value.
 - **No ban on subprocess or end-to-end tests.** Side-effecting tests remain when
   they detect unique failures, but run periodically in containers, not promotion
-  or required PR CI.
+  or required PR CI, apart from the release vision's bounded configured-feed
+  construction and installed first-launch qualification.
 - **No integration hidden by a unit label.** Enrollment follows actual fixture
   and execution behavior, not a marker or runner name alone.
 - **No replacement for clean-room validation.** The clean room continues to

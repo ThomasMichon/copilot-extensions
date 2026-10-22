@@ -44,6 +44,14 @@
   },
   "residuals": [
     {
+      "id": "contributor-regression-boundaries",
+      "status": "not-enrolled",
+      "scope": "Complete real-boundary acceptance for reports #7412, #5611, #7116, #6584, #6564 and #5773 is not supplied by the Python unit cohort. Ordinary Linux plugin selection includes front-door, mux and anchor controls, but does not imply cold installer, native Windows, real Git-lock, SDK forwarding or JavaScript delivery acceptance.",
+      "destination": "Existing Linux full plugin route plus the dedicated installer/clean-room, native and JavaScript periodic families; map and execute the missing counterparts under their existing containment and capacity declarations",
+      "owner": "Portfolio #1303 and affected plugin/platform specialists; #7500 source fix remains with its reporter",
+      "handling": "Retain actual failures and explicit unenrolled/unavailable status. Do not relabel integration, add a release dependency, weaken immutable-slot policy or invent an idle startup state."
+    },
+    {
       "id": "explicit-t3-t4",
       "status": "not-enrolled",
       "scope": "Explicit-tier and environment-gated cases are not implied exercised by default full runs",

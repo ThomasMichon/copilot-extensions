@@ -191,7 +191,7 @@ def prepare_launch(
             directory_guard(posixpath.dirname(staged_auth)) +
             auth_directory + move +
             directory_guard(posixpath.dirname(directory), create=True, require_ram=False) +
-            f"mkdir {shlex.quote(directory)} && "
+            f"mkdir -m 700 -- {shlex.quote(directory)} && "
             f"cat > {shlex.quote(directory + '/copilot')} && "
             f"chmod 700 {shlex.quote(directory + '/copilot')}",
         ], input_text=script)

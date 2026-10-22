@@ -293,7 +293,7 @@ def main(argv: list[str] | None = None) -> int:
                     detail = parsed
             except ValueError:
                 pass
-        record(
+        written = record(
             args.config_dir,
             args.action,
             service=args.service,
@@ -304,8 +304,13 @@ def main(argv: list[str] | None = None) -> int:
             pid=args.pid,
             detail=detail,
         )
-        # Fail-open: a dropped record is not a hard error for the caller (the
-        # installer must proceed regardless), so always exit 0.
+        if written is None:
+            print(
+                f"[WARN] lifecycle: could not append {args.action}/{args.outcome} "
+                f"to {log_path(args.config_dir)}",
+                file=sys.stderr,
+            )
+        # Logging remains advisory, but a lost record must not be silent.
         return 0
 
     if args.cmd == "show":

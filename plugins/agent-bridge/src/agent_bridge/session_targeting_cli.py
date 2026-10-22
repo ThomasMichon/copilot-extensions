@@ -1,6 +1,7 @@
 """Prompt submission and target-resolution commands for ``agent-bridge``."""
 
 from __future__ import annotations
+import json
 
 import argparse
 import os
@@ -101,6 +102,11 @@ def _send(args: argparse.Namespace) -> None:
     from .send_outcome import SendRefused
 
     core = _core()
+    if getattr(args, "native_invocation_file", None) is not None:
+        from .native_keyed_client import send, validate_options
+        validate_options(args)
+        send(args, core._get_client())
+        return
     if getattr(args, "new", False):
         print(
             "[FAIL] `agent-bridge send --new` has been removed. `send` always "
@@ -111,9 +117,18 @@ def _send(args: argparse.Namespace) -> None:
         )
         sys.exit(2)
 
+    if getattr(args, "receipt_only", False) and not getattr(args, "native_invocation_file", None):
+        raise SendRefused("refused_invalid", reason="native_invocation_required",
+                          retryable=False, target=args.target,
+                          error="--receipt-only requires --native-invocation-file")
     client = core._get_client()
     min_protocol = getattr(args, "min_daemon_protocol", None)
     if min_protocol and not client.daemon_supports(min_protocol):
+        if getattr(args, "plugin_context_stdin", False):
+            raise SendRefused(
+                "refused_unavailable", reason="unsupported_protocol", retryable=False,
+                target=args.target, error="prepared startup requires daemon protocol 41",
+            )
         print(f"[FAIL] The running bridge daemon predates protocol {min_protocol}; "
               "update agent-bridge, restart its daemon, then send again.", file=sys.stderr)
         sys.exit(3)
@@ -121,6 +136,36 @@ def _send(args: argparse.Namespace) -> None:
         _hold_protocol_floor(client, min_protocol)
     target = args.target
     prompt = _resolve_prompt(args, required=True)
+    if getattr(args, "plugin_context_stdin", False):
+        from .plugin_readiness import PluginReadinessRequest
+        from .protocol import PLUGIN_READINESS_PROTOCOL_VERSION
+        if getattr(args, "expected_native_session_id", None) is not None:
+            raise SendRefused("refused_invalid", reason="startup_target", retryable=False,
+                              target=target, error="prepared startup is a live CLI message, not an ACP turn")
+
+        if getattr(args, "prompt_file", None) != "-" or not getattr(args, "idempotency_key", None):
+            raise SendRefused("refused_invalid", reason="startup_input", retryable=False,
+                              target=target, error="plugin context requires stdin and an operation key")
+        try:
+            envelope = json.loads(prompt)
+            context = envelope["plugin_context"]
+            prompt = envelope["prompt"]
+            if (
+                type(context.get("version")) is not int or context["version"] != 1
+                or context.get("acp_only_sources") or not isinstance(prompt, str)
+            ):
+                raise ValueError("invalid native CLI context")
+            args.plugin_readiness = PluginReadinessRequest(
+                owner="bridge", cwd=context["cwd"], plugins=context["plugins"],
+            ).model_dump()
+        except (ValueError, KeyError, TypeError, AttributeError) as exc:
+            raise SendRefused("refused_invalid", reason="startup_input", retryable=False,
+                              target=target, error="invalid prepared plugin context") from exc
+        if not client.daemon_supports(PLUGIN_READINESS_PROTOCOL_VERSION):
+            raise SendRefused("refused_unavailable", reason="startup_protocol", retryable=False,
+                              target=target, error="prepared startup requires daemon protocol 41")
+        _hold_protocol_floor(client, PLUGIN_READINESS_PROTOCOL_VERSION)
+        args.delivery = "queue"
 
     if getattr(args, "expected_native_session_id", None) is not None:
         if any(getattr(args, option, False) for option in ("force", "queue", "new")):
@@ -162,6 +207,9 @@ def _send(args: argparse.Namespace) -> None:
         _deliver_to_live_session(client, args, live["session_id"], prompt)
         return
     if address is not None:
+        if getattr(args, "plugin_context_stdin", False):
+            raise SendRefused("refused_unavailable", reason="startup_target", retryable=False,
+                              target=target, error="prepared startup requires the registered native session")
         _deliver_to_live_session(client, args, target, prompt, remote_address=address)
         return
     if getattr(args, "expected_session_id", None):
@@ -170,6 +218,9 @@ def _send(args: argparse.Namespace) -> None:
             error=f"Target {target!r} has no live session matching {args.expected_session_id!r}.",
         )
 
+    if getattr(args, "plugin_context_stdin", False):
+        raise SendRefused("refused_unavailable", reason="startup_target", retryable=False,
+                          target=target, error="prepared startup cannot fall back to ACP or create a session")
     caller_id = core._caller_id_for(args)
     session_id = core._resolve_target(client, target, force=getattr(args, "force", False))
     if not getattr(args, "full_history", False):
@@ -231,119 +282,11 @@ def _live_message_delivery(args: argparse.Namespace) -> str:
 
 def _deliver_to_live_session(client, args: argparse.Namespace, session_id: str, prompt: str,
                              *, remote_address=None) -> None:
-    from .client import BridgeClientError
-    from .live_message_models import validate_live_reply_timeout
-    from .send_outcome import SendRefused, emit, live_outcome, refusal_from_live_error
+    from .live_message_cli import deliver_to_live_session
 
-    core = _core()
-    wait = getattr(args, "wait_reply", False) and not getattr(args, "no_wait", False)
-    wait_timeout = getattr(args, "reply_timeout", 120.0)
-    if wait:
-        try:
-            wait_timeout = validate_live_reply_timeout(wait_timeout)
-        except ValueError as exc:
-            raise SendRefused(
-                "refused_invalid", reason="reply_timeout", error=f"--reply-timeout {exc}",
-                retryable=False, target=session_id,
-            ) from exc
-    sender = core._live_sender_label(args)
-    reply_to = core._live_reply_to(args)
-    kind = core._live_message_kind(args)
-    delivery = core._live_message_delivery(args)
-    idempotency = getattr(args, "idempotency_key", None)
-    expected_session_id = getattr(args, "expected_session_id", None)
-    delivery_options = {}
-    if idempotency:
-        delivery_options["idempotency_key"] = idempotency
-    if expected_session_id:
-        delivery_options["expected_session_id"] = expected_session_id
-    try:
-        if remote_address is not None:
-            from .live_peer_address import send_remote_peer
-            result = send_remote_peer(
-                client, args, remote_address, sender=sender, reply_to=reply_to,
-                kind=kind, delivery=delivery, prompt=prompt,
-            )
-        else:
-            result = client.send_live_message(
-                session_id,
-                sender=sender,
-                body=prompt,
-                reply_to=reply_to,
-                kind=kind,
-                delivery=delivery,
-                wait=wait,
-                wait_timeout=wait_timeout,
-                **delivery_options,
-            )
-    except BridgeClientError as exc:
-        refused = refusal_from_live_error(exc, session_id)
-        if refused is None:
-            raise
-        raise refused from exc
-    session_id = result.get("session_id", session_id)
-    if args.json:
-        # A daemon that reports duplicates always includes the field; an older
-        # one omits it, so a keyed retry can't be told from a first delivery.
-        duplicate_known = not idempotency or "duplicate" in result
-        receipt = result.get("receipt") or {}
-        stage = receipt.get("stage")
-        payload = {"delivered": stage == "consumed" if stage else None,
-                   "accepted": True, "target": session_id, **result,
-                   "outcome": live_outcome(result, delivery, duplicate_known=duplicate_known)}
-        if not duplicate_known:
-            payload["duplicate"] = None
-        emit(payload)
-        return
-    mid = result.get("message_id")
-    kind_note = "" if kind == "prompt" else f", kind {kind}"
-    delivery_note = "" if delivery == "queue" else f", delivery {delivery}"
-    print(
-        f"[>] Accepted by live session inbox {result.get('session_id', session_id)} "
-        f"(message {mid}, from {sender}{kind_note}{delivery_note})"
+    return deliver_to_live_session(
+        client, args, session_id, prompt, core=_core(), remote_address=remote_address,
     )
-    receipt = result.get("receipt") or {}
-    print(f"    receipt: {receipt.get('stage') or 'unavailable (delivery evidence unavailable)'}")
-    if result.get("receipt_error"):
-        print(f"    receipt evidence unavailable: {result['receipt_error']}", file=sys.stderr)
-    observe = (
-        f"observe on hosting machine {remote_address.machine}"
-        if remote_address is not None else "observe"
-    )
-    if receipt.get("stage") and result.get("receipt_current") is True:
-        print(f"    {observe}: agent-bridge read {session_id} --message-id {mid} --json")
-    else:
-        print(f"    {observe}: agent-bridge read {session_id} --json")
-        if receipt.get("stage"):
-            print("    (message receipt observation is unavailable; inspect session state instead)")
-        else:
-            from .protocol import LIVE_MESSAGE_RECEIPT_PROTOCOL_VERSION
-
-            print(
-                "    (message receipt observation requires daemon protocol "
-                f"{LIVE_MESSAGE_RECEIPT_PROTOCOL_VERSION} or newer)"
-            )
-    if reply_to:
-        print(f"    reply-to: {reply_to}")
-    else:
-        print("    (no reply-to: this sender is not a live session; reply won't route)")
-    if not wait:
-        return
-    if result.get("duplicate"):
-        print(
-            "\n[..] Duplicate request; no additional reply wait was started "
-            "(inspect the existing message receipt rather than resend)."
-        )
-        return
-    if result.get("replied"):
-        reply = result.get("reply")
-        print(f"\n[<] Reply from {session_id}:")
-        print(reply if reply else "    (turn completed with no assistant text)")
-    else:
-        print(
-            f"\n[..] No reply within {wait_timeout:g}s "
-            "(send remains accepted; inspect its receipt rather than resend)."
-        )
 
 
 def _handed_off_unnamed(client, session_id: str) -> bool:
@@ -961,9 +904,13 @@ def register_session_targeting_commands(sub: argparse._SubParsersAction) -> None
     send_p.add_argument("--force", action="store_true", help="If the target's session is busy running a turn, terminate that in-flight turn and start a fresh session to deliver this prompt (discards the in-flight turn's work). Without --force, a busy target is rejected with guidance to wait/observe or end it.")
     send_p.add_argument("--queue", action="store_true", help="If the target's session is busy, durably queue this prompt server-side (in the bridge's pending_prompts table) for FIFO delivery when the current turn settles -- surviving a caller remount and a bridge/host restart -- instead of rejecting it. The opposite of --force: it preserves the in-flight turn.")
     send_p.add_argument("--idempotency-key", help="stable producer key; retries return the original live-message id instead of enqueuing a duplicate")
+    send_p.add_argument("--plugin-context-stdin", action="store_true",
+                        help="Read a Bridge-owned prompt/prepared-context JSON envelope from --prompt-file -")
     send_p.add_argument("--expected-session-id", help="deliver only if the target still resolves to this exact live session id (checked again atomically when enqueuing)")
     send_p.add_argument("--min-daemon-protocol", type=int, default=None, metavar="N", help="send nothing (exit 3) unless the running daemon advertises HTTP protocol N or newer")
     send_p.add_argument("--expected-native-session-id", default=None, metavar="UUID", help="Admit an immediate prompt only to this exact running native conversation; never resume, recreate, queue, or hand off")
+    from .native_keyed_client import add_arguments as add_native_keyed_arguments
+    add_native_keyed_arguments(send_p)
     core._add_stream_args(send_p)
     send_p.set_defaults(func=_cmd_send)
 
