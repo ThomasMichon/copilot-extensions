@@ -809,6 +809,10 @@ class AgentResolver(_ProviderDiscoveryMixin):
             user=ssh_env.user or config.ssh_user,
             copilot_path=config.copilot_path,
             copilot_args=config.copilot_args,
+            static_plugin_args=(
+                {"base": list(config.copilot_args), "automatic": []}
+                if not config.requires_admin else None
+            ),
             env=config.env,
             project=config.project,
             ssh_shell=ssh_env.shell,

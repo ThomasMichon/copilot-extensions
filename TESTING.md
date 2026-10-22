@@ -7,6 +7,24 @@ How to run the plugin test suites, the fast gates to run before a push, and the
 > keeps only a short inline summary; the per-plugin release/versioning rules live
 > in [`docs/pipelines.md`](docs/pipelines.md).
 
+## Static SSH plugin preparation
+
+Bridge's `tests/test_ssh_plugin_preparation.py` executes the streamed stdlib
+receiver against isolated synthetic checkouts, without installing Bridge or
+starting Copilot. It covers target-native marketplace authority, disablement and
+missing-payload refusal; a payload larger than Windows argv limits; UTF-8/spaced
+paths; hidden Windows Python with concurrent stdout/stderr drains; and bounded
+installer-descendant cleanup.
+
+Two live SSH controls additionally require
+`AGENT_BRIDGE_TEST_SAME_FILESYSTEM_SSH=<configured-profile>`. Select an existing
+profile that reaches the test runner's own filesystem and OS; the fixture checks
+access to its isolated temporary checkout before proceeding. It never changes
+SSH profiles, installs a remote runtime, starts an agent or changes global
+plugin preferences. The controls prove actual SSH streaming and cancellation
+quiescence, not cross-machine native plugin discovery. Leave this opt-in unset
+for ordinary contained test runs.
+
 ## Native file-link prerequisites
 
 `tools/test_dependency_uv_executable_native.py` qualifies both absolute and

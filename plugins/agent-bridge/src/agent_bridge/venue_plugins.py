@@ -256,10 +256,10 @@ async def _registered_target_binding(repository: str) -> dict:
     } if bound_roots else {}
 
 
-async def prepare_venue_plugins(
-    target: dict, transport, workspace: str, *, prelude: str = "", remote_env: str | None = None,
-    caller=None, controller_cwd: str | None = None,
-) -> list[str]:
+async def venue_plugin_plan(
+    target: dict, *, caller=None, controller_cwd: str | None = None, codespace: bool = False,
+) -> dict:
+    """Select current-controller plugins independently of the receiver transport."""
     from .related_plugins import control_plane_anchors, is_harness_plugin, related_plugins_for_repo
     from .session_host.container_transport import _run_provider
     from .transport import _reresolve_stale_interpreter
@@ -270,7 +270,7 @@ async def prepare_venue_plugins(
         controller_cwd = await resolve_controller_cwd(caller)
     plan = {"plugins": []}
     provider = target.get("provider_command")
-    codespace = target.get("plugin_plan") or getattr(transport, "boundary", None) == "codespace"
+    codespace = target.get("plugin_plan") or codespace
     if codespace and not provider:
         from .provider_sources import discover_provider_manifests
         manifest = discover_provider_manifests().get("codespace")
@@ -326,6 +326,17 @@ async def prepare_venue_plugins(
             "marketplaces": {**plan.get("marketplaces", {}), **related.get("marketplaces", {})},
             **({"target_repository": related["target_repository"]} if related.get("target_repository") else {}),
         }
+    return plan
+
+
+async def prepare_venue_plugins(
+    target: dict, transport, workspace: str, *, prelude: str = "", remote_env: str | None = None,
+    caller=None, controller_cwd: str | None = None,
+) -> list[str]:
+    plan = await venue_plugin_plan(
+        target, caller=caller, controller_cwd=controller_cwd,
+        codespace=getattr(transport, "boundary", None) == "codespace",
+    )
     environment = f". {shlex.quote(remote_env)};\n" if remote_env else ""
     script = environment + prelude + "\n" + build_prepare_script(plan, workspace)
     rc, output, error = await transport.run(

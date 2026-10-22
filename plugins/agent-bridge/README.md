@@ -414,7 +414,28 @@ Ordinary operator launches are not retrofitted with this task gate.
 This capability floor does not raise the minimum-supported protocol or narrow
 the compatibility range of existing operations.
 
-Remaining exclusions are genuine SSH, command wrappers, privileged
+Ordinary static SSH ACP targets use the same controller-selection and native
+target-precedence rules. The existing SSH owner first resolves the real remote
+worktree, including when a stored target already carries an id and cwd, then
+streams the shared stdlib preparation engine to the receiver's Python 3.10+.
+Local controller payloads are reflected into that execution world; Git sources
+retain their declarations. The receiver registers the complete effective set
+before Bridge opens productive ACP stdio, passing every effective directory
+without replacing explicit configuration/request flags. The existing project
+binstub, account/profile, authentication hooks and launch environment remain
+the launch authority. Explicit Gitless directories retain their legacy behavior.
+
+Preparation payloads travel on stdin, not SSH argv. POSIX uses `python3`;
+Windows uses a short encoded PowerShell command and a hidden Python process
+with both output pipes drained concurrently. The streamed receiver bounds its
+worker to 540 seconds and contains installer descendants in a POSIX process
+group or a Windows kill-on-close Job. Cancellation waits for the bounded
+channel to settle before propagating: killing a local SSH client alone does not
+prove that the remote writer stopped. A failed or cancelled preparation never
+opens productive ACP stdio. This is ACP preparation integration, not proof of
+headed SSH CLI parity or of a deployed/running release.
+
+Remaining exclusions are command wrappers, privileged
 configurations (including POSIX `requires_admin`), sub-daemon relays and
 receiver-local Session Host runners. Their existing launch behavior remains
 unchanged. Host-backed loopback preparation additionally

@@ -354,7 +354,10 @@ class _SessionStartMixin:
                 and target.container.get("name")
                 else None
             )
-            if cs_target is not None or container_target is not None or target.local_plugin_preparation:
+            if (
+                cs_target is not None or container_target is not None or target.local_plugin_preparation
+                or (target.type == "ssh" and target.static_plugin_args is not None)
+            ):
                 from .venue_plugins import with_controller_origin
                 target = with_controller_origin(
                     target, controller_origin, caller_session_id=session.caller_session_id,

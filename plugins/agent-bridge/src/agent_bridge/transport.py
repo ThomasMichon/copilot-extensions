@@ -606,20 +606,22 @@ async def resolve_local_launch(
         replacement = await prepare_local_plugins(target, work_dir, env, prepared_context=prepared_context)
         target.prepared_plugins = prepared_context
         if replacement is not None:
-            prefix = target.static_plugin_args
-            if not isinstance(prefix, dict):
-                raise RuntimeError("Static plugin argument provenance is missing")
-            base, automatic = prefix["base"], prefix["automatic"]
-            original = [*base, *automatic]
-            if target.copilot_args[:len(original)] != original:
-                raise RuntimeError("Static plugin argument provenance no longer matches launch")
-            # Only this resolver's automatic span is replaced. Request/config
-            # flags, including repeated --plugin-dir flags, remain verbatim.
-            trailing = target.copilot_args[len(original):]
             launch_prefix = args[:-len(target.copilot_args)] if target.copilot_args else args
-            args = [*launch_prefix, *base, *replacement, *trailing]
+            args = [*launch_prefix, *_prepared_plugin_args(target, replacement)]
     args = _wrap_batch_for_windows(args, env)
     return args, work_dir, env
+
+
+def _prepared_plugin_args(target: SpawnTarget, replacement: list[str]) -> list[str]:
+    prefix = target.static_plugin_args
+    if not isinstance(prefix, dict):
+        raise RuntimeError("Static plugin argument provenance is missing")
+    base, automatic = prefix["base"], prefix["automatic"]
+    original = [*base, *automatic]
+    if target.copilot_args[:len(original)] != original:
+        raise RuntimeError("Static plugin argument provenance no longer matches launch")
+    # Replace only the resolver's automatic span, never explicit/request flags.
+    return [*base, *replacement, *target.copilot_args[len(original):]]
 
 
 async def spawn_local(
@@ -980,10 +982,14 @@ async def spawn_ssh(
     # ``target.cwd`` (e.g. a static ``cwd:`` carried from agent config): a
     # stale or unrelated configured cwd must never silently substitute for the
     # just-resolved worktree checkout.
+    plan_environment = {}
     if (
         target.project
         and (not target.explicit_cwd or target.native_resume_id)
-        and (not target.worktree_id or not target.cwd)
+        and (
+            not target.worktree_id or not target.cwd
+            or target.static_plugin_args is not None
+        )
     ):
         tracker.started(ConnectStage.WORKTREE, f"resolve project={target.project}")
         try:
@@ -1001,6 +1007,7 @@ async def spawn_ssh(
                 raise ConnectError(ConnectStage.WORKTREE, msg, retryable=False)
             target.worktree_id = wt_id
             target.cwd = work_dir
+            plan_environment = launch.get("env", {})
             log.info(
                 "Bound remote worktree for %s: id=%s cwd=%s",
                 target.host, wt_id, target.cwd,
@@ -1044,9 +1051,24 @@ async def spawn_ssh(
                 ConnectStage.WORKTREE, msg, retryable=False, cause=exc,
             ) from exc
 
+    launch_target = target
+    if target.static_plugin_args is not None and not target.elevated:
+        from dataclasses import replace
+        from .ssh_plugin_preparation import prepare_ssh_plugins
+
+        environment = {**target.env, **plan_environment}
+        if target.copilot_path and (
+            not target.project or (target.explicit_cwd and not target.native_resume_id)
+        ):
+            environment["COPILOT_PATH"] = target.copilot_path
+        with tracker.stage(ConnectStage.TARGET_BINSTUB, "prepare receiver repository plugins"):
+            replacement = await prepare_ssh_plugins(target, manager, environment=environment)
+        if replacement is not None:
+            launch_target = replace(target, copilot_args=_prepared_plugin_args(target, replacement))
+
     # Stages 5-7 happen remotely inside the binstub; the device breadcrumb
     # (in the remote command) is the on-device proof of arrival.
-    remote_cmd = _build_remote_cmd(target, session_id=session_id)
+    remote_cmd = _build_remote_cmd(launch_target, session_id=session_id)
     log.info("Spawning SSH agent on %s: %s", target.host, remote_cmd)
 
     proc = await manager.open_stdio_channel(target.host, remote_cmd)

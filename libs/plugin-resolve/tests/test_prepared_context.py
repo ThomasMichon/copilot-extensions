@@ -9,7 +9,9 @@ from pathlib import Path
 import pytest
 
 from plugin_resolve.preparation import prepare
-from plugin_resolve.reflection import build_plan, build_prepare_script, parse_prepared, parse_prepared_context
+from plugin_resolve.reflection import (
+    build_plan, build_prepare_python, build_prepare_script, parse_prepared, parse_prepared_context,
+)
 from plugin_resolve.registration import atomic_json
 from test_plugin_preparation import init_checkout, local_plan
 from test_source_preserving_preparation import git_origin as git_origin_fixture
@@ -124,14 +126,17 @@ def test_legacy_installed_only_availability_is_not_native_cli_origin_proof(tmp_p
     assert context["acp_only_sources"] == ["helper@legacy"]
 
 
-def test_context_transport_executes_with_only_stdlib_and_actual_receiver_checkout(tmp_path):
+@pytest.mark.parametrize("transport", ["python", "posix"])
+def test_context_transport_executes_with_only_stdlib_and_actual_receiver_checkout(tmp_path, transport):
     target, home = tmp_path / "target", tmp_path / "home"
     init_checkout(target)
     local_plan(target)
     plan = build_plan([{"source": "sample@local"}], [target], local_mode="reference")
     plan["repo"] = str(tmp_path / "not-the-allocated-checkout")
-    script = build_prepare_script(plan, str(target), include_prepared_context=True)
-    code = script.split("<<'VENUE_PLUGIN_PREPARE'\n", 1)[1].rsplit("VENUE_PLUGIN_PREPARE", 1)[0]
+    code = build_prepare_python(plan, str(target), include_prepared_context=True)
+    if transport == "posix":
+        script = build_prepare_script(plan, str(target), include_prepared_context=True)
+        code = script.split("<<'VENUE_PLUGIN_PREPARE'\n", 1)[1].rsplit("VENUE_PLUGIN_PREPARE", 1)[0]
     environment = {**os.environ, "HOME": str(home), "USERPROFILE": str(home), "COPILOT_HOME": str(home / ".copilot")}
     result = subprocess.run(
         [sys.executable, "-I", "-S", "-"], input=code, cwd=target, env=environment,
@@ -142,6 +147,20 @@ def test_context_transport_executes_with_only_stdlib_and_actual_receiver_checkou
     assert context["cwd"] == str(target)
     assert context["logical_payloads"] == {"sample@local": str(target / ".ai" / "sample")}
     assert parse_prepared(result.stdout) == [str(target / ".ai" / "sample")]
+
+
+@pytest.mark.parametrize("builder", [build_prepare_python, build_prepare_script])
+@pytest.mark.parametrize("repo", [None, "", "   ", Path("checkout")])
+def test_preparation_transport_requires_explicit_execution_checkout(builder, repo):
+    with pytest.raises(ValueError, match="execution checkout"):
+        builder({}, repo)
+
+
+def test_python_transport_has_no_shell_syntax_and_context_remains_opt_in():
+    code = build_prepare_python({}, "/callee")
+    compile(code, "<plugin-preparation>", "exec")
+    assert "__VENUE_PLUGIN_CONTEXT__" not in code
+    assert "__VENUE_PLUGIN_CONTEXT__" in build_prepare_python({}, "/callee", include_prepared_context=True)
 
 
 def test_context_uses_final_complete_frame_not_earlier_preparation():

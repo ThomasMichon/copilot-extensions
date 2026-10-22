@@ -119,7 +119,12 @@ typed selections through enabled-only resolution results. `build_plan` retains
 its qualified-identity checks and first-selection-wins ordering; callers compose
 provider/related precedence before passing their selections.
 
-`build_prepare_script` carries that plan over an existing script/stdin transport.
+`build_prepare_python` emits the self-contained stdlib-only Python program for
+streaming to the receiver's Python stdin, independent of its shell or OS.
+`build_prepare_script` wraps the same program in the existing POSIX `python3`
+heredoc for script/stdin transports. Both require the actual execution checkout
+and support the same opt-in prepared-context frame; neither starts a transport
+or changes the productive process's account or environment.
 An explicitly selected qualified source whose marketplace is unknown on the
 host is a deferred target lookup, not an invented marketplace or a host-cache
 fallback. Preparation resolves it against the target's own settings/catalog,
