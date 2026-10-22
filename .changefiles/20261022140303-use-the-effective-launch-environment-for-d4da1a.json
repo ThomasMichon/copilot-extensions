@@ -1,0 +1,9 @@
+{
+  "comment": "Use the effective launch environment for initial Bridge plugin-preparation Git probes.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

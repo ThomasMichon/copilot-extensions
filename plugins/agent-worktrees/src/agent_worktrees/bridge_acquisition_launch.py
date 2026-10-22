@@ -46,10 +46,11 @@ def prepare_plugins(args, worktree_id: str, work_dir: str, environment: dict[str
     from plugin_resolve.reflection import plan_digest
     if not getattr(args, "bridge_acquisition", None):
         raise ValueError("Plugin preparation belongs only to typed Bridge acquisition")
+    env = {**os.environ, **environment}
     repo = Path(work_dir).resolve(strict=True)
-    if Path(_git(repo, "rev-parse", "--show-toplevel", environment=environment)).resolve() != repo:
+    if Path(_git(repo, "rev-parse", "--show-toplevel", environment=env)).resolve() != repo:
         raise ValueError("Plugin preparation requires the actual allocated repository root")
-    git_dir = Path(_git(repo, "rev-parse", "--absolute-git-dir", environment=environment)).resolve(strict=True)
+    git_dir = Path(_git(repo, "rev-parse", "--absolute-git-dir", environment=env)).resolve(strict=True)
     path = Path(raw).resolve(strict=True)
     expected = git_dir / "copilot-venue-plugins" / "launch-requests"
     if path.name != "request.json" or path.parent.parent != expected:
@@ -63,8 +64,6 @@ def prepare_plugins(args, worktree_id: str, work_dir: str, environment: dict[str
         or not math.isfinite(request["deadline"]) or request["deadline"] > time.time() + 240
     ):
         raise ValueError("Plugin producer request does not match the allocated checkout")
-    env = {**os.environ, **environment}
-
     def check_cancelled():
         if path.with_suffix(".cancel").exists() or time.time() >= request["deadline"]:
             raise InterruptedError("Bridge plugin preparation cancelled or timed out")

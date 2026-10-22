@@ -5,6 +5,8 @@ from __future__ import annotations
 import argparse
 import json
 import os
+from pathlib import Path
+import shutil
 import subprocess
 import sys
 import time
@@ -84,8 +86,14 @@ def test_finalizing_record_refuses_both_preflight_and_locked_admission(monkeypat
     assert "finalizing" in launch.refusal(args, record, "worktree-a")
 
 
-@pytest.mark.parametrize("cancel", [False, True])
-def test_preparation_uses_real_owner_environment_and_checks_cancel_before_launch(tmp_path, monkeypatch, cancel):
+@pytest.mark.parametrize("cancel,path_override", [
+    pytest.param(False, False, id="False"),
+    pytest.param(True, False, id="True"),
+    pytest.param(False, True, id="explicit-path"),
+])
+def test_preparation_uses_real_owner_environment_and_checks_cancel_before_launch(
+    tmp_path, monkeypatch, cancel, path_override,
+):
     from plugin_resolve import preparation
     from plugin_resolve.registration import atomic_json
 
@@ -118,17 +126,35 @@ def test_preparation_uses_real_owner_environment_and_checks_cancel_before_launch
     )
     profile = str(tmp_path / "actual-profile")
     environment = {"COPILOT_HOME": profile, "COPILOT_PATH": sys.executable}
+    if path_override:
+        git = shutil.which("git")
+        assert git is not None
+        environment["PATH"] = str(Path(git).parent)
+        monkeypatch.setenv("PATH", str(tmp_path / "absent-executables"))
     original = preparation.prepare
+    original_git = preparation._git
     observed = []
+    git_environments = []
 
     def prepare(*args, **kwargs):
         observed.append(kwargs["environment"]["COPILOT_HOME"])
         return original(*args, **kwargs)
 
+    def probe(*args, **kwargs):
+        git_environments.append(dict(kwargs["environment"]))
+        return original_git(*args, **kwargs)
+
     monkeypatch.setattr(preparation, "prepare", prepare)
+    monkeypatch.setattr(preparation, "_git", probe)
     before = dict(os.environ)
     context, check_cancelled = launch.prepare_plugins(args, "worktree-a", str(tmp_path), environment)
     assert observed == [profile] and dict(os.environ) == before
+    assert all(
+        env["PATH"] == environment.get("PATH", before["PATH"])
+        and env["COPILOT_HOME"] == profile and env["COPILOT_PATH"] == sys.executable
+        for env in git_environments[:2]
+    )
+    assert len(git_environments) >= 2
     assert context["plugins"] == [{
         "projected_source": "helper@local", "logical_source": "helper@local",
         "version": "2.0.0", "live_marketplace_root": str(tmp_path / ".ai"),
