@@ -174,7 +174,13 @@ an exit of zero does not replace the second reconciliation pass.
 Bootstrap updates likewise retain runtime re-resolution and their fresh
 staleness check. Child stdout and stderr go through the same setup-log sink,
 including an unterminated final line; a nested canonical frame is not prefixed
-with another installer label. PowerShell restores the action's environment and
+with another installer label. Unqualified native progress uses the same state
+vocabulary: leading `[OK]`, `[SKIP]`, `[WARN]`, `[FAIL]` and `...` become
+`done`, `skipped`, `warning`, `failed` and `running`. These remain elapsed
+diagnostics, not completed-step durations or changes to a child's actual exit
+outcome. Explicit owner states, completion messages, unknown/embedded markers
+and canonical records are preserved on both native paths.
+PowerShell restores the action's environment and
 native-error preferences even when spawning fails. Bash obtains the installer's
 exit code from the command, not its output consumer, and decodes staged metadata
 with NUL-delimited fields so an empty optional value cannot shift the installer

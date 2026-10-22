@@ -394,6 +394,36 @@ def test_human_operation_clocks_nesting_and_outcomes():
 
 
 @pytest.mark.guard
+def test_human_legacy_progress_uses_one_state_vocabulary_without_changing_outcomes():
+    import io
+    from datetime import datetime, timezone
+
+    from update_telemetry.human import HumanOperation
+
+    sink = io.StringIO()
+    wall = datetime(2026, 1, 1, 12, 0, 1, 120000, tzinfo=timezone.utc)
+    canonical = "[01:02:03.004Z] child warning [WARN] retained [elapsed 2.0s]"
+    with HumanOperation("update", stream=sink, wall=lambda: wall, monotonic=lambda: 10.0) as flow:
+        flow.progress("  [OK] ready\n  [SKIP] unchanged\n  [WARN] notice\n  [FAIL] bad\n  ...    resolving")
+        flow.progress("plain after failure")
+        flow.progress("  [MAYBE] literal")
+        flow.progress("embedded [OK] literal")
+        flow.progress("  [OK] explicit owner", state="warning")
+        flow.progress(canonical)
+        flow.complete("done", "exit 0")
+    bodies = [
+        "starting", "done ready", "skipped unchanged", "warning notice",
+        "failed bad", "running resolving", "plain after failure",
+        "  [MAYBE] literal", "embedded [OK] literal", "warning   [OK] explicit owner",
+    ]
+    assert sink.getvalue().splitlines() == [
+        *(f"[12:00:01.120Z] update {body} [elapsed 0.0s]" for body in bodies),
+        canonical,
+        "[12:00:01.120Z] update done exit 0 [duration 0.0s]",
+    ]
+
+
+@pytest.mark.guard
 def test_human_completion_duration_excludes_multiline_sink_delay():
     import io
 

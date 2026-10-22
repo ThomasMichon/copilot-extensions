@@ -49,6 +49,7 @@ function Format-SetupLine {
         [string]$State = '',
         [switch]$Completed
     )
+    $explicitState = [bool]$State
     if (-not $State) {
         $State = switch ($Level) { 'WARN' { 'warning' } 'ERROR' { 'failed' } default { 'running' } }
     }
@@ -60,7 +61,17 @@ function Format-SetupLine {
         if ($line -cmatch '^\[\d{2}:\d{2}:\d{2}\.\d{3}Z\] .+ \[(?:elapsed|duration) \d+\.\d+s\]$') {
             $line
         } else {
-            "[$stamp] $Scope $State $line [$kind ${secondsText}s]"
+            $lineState = $State
+            if (-not $Completed -and -not $explicitState -and $Level -eq 'INFO' -and
+                $line -cmatch '^[ \t]*(?:\[(OK|SKIP|WARN|FAIL)\]|(\.\.\.))[ \t]+(.*)$') {
+                $marker = if ($Matches[1]) { $Matches[1] } else { $Matches[2] }
+                $line = $Matches[3]
+                $lineState = switch ($marker) {
+                    'OK' { 'done' } 'SKIP' { 'skipped' } 'WARN' { 'warning' }
+                    'FAIL' { 'failed' } '...' { 'running' }
+                }
+            }
+            "[$stamp] $Scope $lineState $line [$kind ${secondsText}s]"
         }
     }
 }

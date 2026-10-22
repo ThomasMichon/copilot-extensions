@@ -133,12 +133,14 @@ matrix below are _(agent-recommended)_ implementation details.
 - [x] Replace routine raw-command echoes with passthrough/pane/direct argument counts
   and existing timed action labels, preserving native argument values (#7708).
 - [x] Make early/late Bash fallback diagnostics UTC-correlated and explicit
-  about unavailable elapsed timing outside finite renderer scopes.
+  about unavailable elapsed timing outside finite renderer scopes (#7727).
 - [ ] Finish the remaining standalone installer output boundaries through
   their actual output owners.
 - [ ] Prefix every human-readable install/update line with a wall-clock time;
   suffix it with honestly labeled monotonic elapsed time or completed-step
   duration. Do not represent arbitrary child-line arrival as execution cost.
+- [x] Normalize known legacy native progress markers to the shared human state
+  vocabulary without changing owner states, completion or structured outcomes.
 - [ ] Consolidate banners, status names, nesting and error presentation;
   preserve useful detail without duplicate timestamps, repeated status
   prefixes or contradictory aggregate success.
@@ -241,6 +243,58 @@ Bridge serving-version gap and supervisor framing defect survived that
 bounded source delta inspection.
 
 ## Journal
+
+### 2026-10-21 - Normalize native progress markers at their existing sinks
+
+- The reviewed presentation rule already names one state vocabulary. Existing
+  captured native helper lines still carried `[OK]`, `[SKIP]`, `[WARN]`,
+  `[FAIL]` and `...`. Python's human renderer and the native PowerShell
+  setup formatter now translate only leading, unqualified progress markers
+  to `done`, `skipped`, `warning`, `failed` and `running`.
+- This is presentation, not new result inference: a child diagnostic remains
+  an elapsed progress line. It does not complete its operation or override
+  actual exit codes/structured outcomes. Explicit owner states, completion
+  messages, unknown/embedded markers and canonical child envelopes are
+  unchanged. Recognition follows existing redaction and physical-line
+  splitting; state is local to each line.
+- Three failing-first cases reproduced the mixed vocabulary in the shared
+  Python renderer and both native Windows hosts. The real maintenance
+  producer now emits a helper marker and verifies one normalized frame while
+  retaining its argument, environment, exit and fresh-replanning checks.
+- Complete contained shared-telemetry, native launch-preparation and fresh
+  bootstrap-output suites passed 225 cases on Windows (45 platform skips,
+  185.91 seconds) and 189 on Linux (81 platform skips, 42.67 seconds). Item,
+  group and resource limits remain unchanged. Fresh isolated bootstrap
+  helpers and real native consumers are exercised; full runtime construction
+  and installed rollout are not claimed by this presentation-only slice.
+- Regenerated the three shipped bootstrap-helper copies from canonical
+  source: Logger's script package and Worktrees' script/runtime packages.
+  No generated command invocation, admission, lifecycle, wait or updater
+  owner changes. Other standalone/context output, banner convergence and
+  equivalent whole-flow/installed qualification remain open.
+- Documentation impact: the shared human-output reference and Manager's
+  launch-preparation reference now state the exact marker mapping and its
+  outcome-preservation limit. This is a below-altitude correction under the
+  existing reviewed plan, not a new architecture or daemon. Required source
+  review, CI and merge remain pending.
+
+### 2026-10-21 - Fallback correlation merged; retain the broader timing gate
+
+- #7727 merged as `5fc3ba92858c545cf61a20c9f83a427d7b6c4627` after
+  Copilot approved exact head `ec9b55c8964a9887a0d18ce188b85409ec99c92d`,
+  the actual review reported no findings, no inline threads remained and
+  current-head required CI passed. This is source completion only.
+- Re-read the Plan and Validation Plan after actual merge. Recorded the
+  fallback-correlation checkbox only; explicitly unavailable elapsed time is
+  not evidence of measured install/update cost. Retained the published tip
+  on a backup and advanced only confirmed merged history.
+- The next standalone trace follows Index's existing native self-stage parent.
+  Its PowerShell encoding initializer is not a formatter or wait owner, and
+  its native watchdog is not the Worktrees command lifecycle. Reuse the actual
+  owner rather than adding a competing lease/watchdog for presentation.
+- Other standalone/context output, banners, equivalent whole-flow costs and
+  promoted installed qualification remain open. No deployment, release-policy,
+  activation, existing hold or ownership state changed.
 
 ### 2026-10-21 - Correlate Bash fallback diagnostics without invented timing
 

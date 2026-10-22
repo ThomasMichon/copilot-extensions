@@ -24,6 +24,10 @@ _FRAMED = re.compile(
 _STATES = frozenset({
     "starting", "running", "done", "current", "skipped", "disabled", "warning", "failed",
 })
+_LEGACY_PROGRESS = re.compile(r"^[ \t]*(?:\[(OK|SKIP|WARN|FAIL)\]|(\.\.\.))[ \t]+(.*)$")
+_LEGACY_STATES = {
+    "OK": "done", "SKIP": "skipped", "WARN": "warning", "FAIL": "failed", "...": "running",
+}
 
 
 def _available(fd: int) -> int:
@@ -115,8 +119,14 @@ class HumanOperation:
                     body = body[:-len(framed[3])]
                 rendered = framed[1] + body + framed[3]
             else:
-                if state is not None:
-                    line = f"{state} {line}".rstrip()
+                line_state = state
+                if not completed and line_state is None:
+                    legacy = _LEGACY_PROGRESS.fullmatch(line)
+                    if legacy is not None:
+                        line_state = _LEGACY_STATES[legacy[1] or legacy[2]]
+                        line = legacy[3]
+                if line_state is not None:
+                    line = f"{line_state} {line}".rstrip()
                 now = self.wall().astimezone(timezone.utc)
                 stamp = now.strftime("%H:%M:%S.") + f"{now.microsecond // 1000:03d}Z"
                 seconds = self.monotonic() - self.started if elapsed is None else elapsed

@@ -215,6 +215,7 @@ def test_native_maintenance_reports_outcomes_and_replans(tmp_path, shell, curren
         "while not gate.exists() and time.monotonic()<deadline: time.sleep(.02)\n"
         "assert gate.exists(), 'progress was buffered'\n"
         "print('action-diagnostic', file=sys.stderr, flush=True)\n"
+        "print('  [OK] native-helper-ready', flush=True)\n"
         f"print({canonical!r}, flush=True)\n"
         "print('native-last-line', end='', flush=True)\n"
         "sys.exit(int(sys.argv[2]))\n"
@@ -388,6 +389,8 @@ def test_native_maintenance_reports_outcomes_and_replans(tmp_path, shell, curren
         return
     assert gate.exists(), report
     assert "action-diagnostic" in report
+    assert report.count("done native-helper-ready [elapsed ") == 2
+    assert "[OK] native-helper-ready" not in report
     assert report.splitlines().count(canonical) == 2
     assert report.count("native-last-line [elapsed ") == 2
     assert re.search(r"failed.*exit 7.*continuing.*duration [0-9.]+s", report)
@@ -883,6 +886,10 @@ def test_native_setup_formatter_has_independent_clocks_and_physical_lines(tmp_pa
         "Format-SetupLine '[12:00:00.000Z] not a canonical envelope' -Timestamp $first -Seconds 4",
         "Format-SetupLine 'problem' 'ERROR' -Timestamp $first -Seconds 5",
         "Format-SetupLine 'notice' 'WARN' -Timestamp $first -Seconds 6",
+        "Format-SetupLine \"  [OK] ready`n  [SKIP] unchanged`n  [WARN] notice`n  [FAIL] bad`n  ...    resolving`nplain after failure\" -Timestamp $first -Seconds 2",
+        "Format-SetupLine '  [MAYBE] literal' -Timestamp $first -Seconds 2",
+        "Format-SetupLine 'embedded [OK] literal' -Timestamp $first -Seconds 2",
+        "Format-SetupLine '  [OK] explicit owner' -State warning -Timestamp $first -Seconds 2",
     ]))
     result = subprocess.run(
         [shell, "-NoProfile", "-File", str(fixture)],
@@ -901,6 +908,15 @@ def test_native_setup_formatter_has_independent_clocks_and_physical_lines(tmp_pa
         "[12:00:01.234Z] launch running [12:00:00.000Z] not a canonical envelope [elapsed 4.0s]",
         "[12:00:01.234Z] launch failed problem [elapsed 5.0s]",
         "[12:00:01.234Z] launch warning notice [elapsed 6.0s]",
+        "[12:00:01.234Z] launch done ready [elapsed 2.0s]",
+        "[12:00:01.234Z] launch skipped unchanged [elapsed 2.0s]",
+        "[12:00:01.234Z] launch warning notice [elapsed 2.0s]",
+        "[12:00:01.234Z] launch failed bad [elapsed 2.0s]",
+        "[12:00:01.234Z] launch running resolving [elapsed 2.0s]",
+        "[12:00:01.234Z] launch running plain after failure [elapsed 2.0s]",
+        "[12:00:01.234Z] launch running   [MAYBE] literal [elapsed 2.0s]",
+        "[12:00:01.234Z] launch running embedded [OK] literal [elapsed 2.0s]",
+        "[12:00:01.234Z] launch warning   [OK] explicit owner [elapsed 2.0s]",
     ]
 
 
