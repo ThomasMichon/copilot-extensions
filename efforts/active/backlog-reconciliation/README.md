@@ -51,6 +51,10 @@ it does not implement fixes, change product behavior, or declare deployment.
   requirement-preserving aggregation are authorized. No implementation,
   deployment, service changes, administrative bypass, owner reassignment,
   deletion, abandonment of ideas or weakening of acceptance gates.
+- **Completed exception:** The operator separately authorized the bounded
+  CI-installer repair #7746 while journal publication was blocked. It merged
+  and reached normal Main release; research/tracker-only authority is restored.
+  This grants no further implementation, runtime update or deployment authority.
 - **Protected lanes:** An active owner, hold, contested requirement or incomplete
   rollout obligation is not stale merely because its issue is old. Preserve its
   responsibility and route any proposed consolidation through the existing
