@@ -9,7 +9,9 @@
 - **Vision:** agent-dispatch durable results, task/session attachment history and
   recoverable goals; plugin-services bounded work and single-owner lifecycle;
   registry-resolved configuration.
-- **Umbrella issue:** #6466
+- **Historical category issue:** #6466 (closed; not a live claim token).
+- **Continuing supervision coordination:** #6467 and this Active Plan,
+  Validation Plan and Journal; bounded source issues retain existing owners.
 - **Sub-issues:** #6467, #6470, #6471, #6793; proposed Phase 7: #7486;
   coordinate #6185 and #6407.
 
@@ -45,6 +47,12 @@ Preserve the owning ground-layer, installer and configuration authorities.
   unresolved acceptance criteria. The coordinator retains the parent objective.
 - **Existing ownership:** Do not supersede #6421. Feed relevant evidence to its
   owner and compose its released repair capability.
+- **Retained maintenance/recovery intake:** Keep #2207 and #2395 acceptance
+  directly below after tracker supersession, with #6467's live bounded
+  integration and all existing source/service/installer custodians unchanged.
+  Use this Plan/Validation/Journal and eligible open bounded source issues for
+  concrete overlap; no closed issue is a live ownership token, new assignment
+  or permission for cleanup, restart, native execution or rollout.
 - **Lifecycle owners:** Compose #5301 and #5655; do not add a competing watchdog,
   cleanup daemon, reservation store or repository registry.
 - **Proposed Phase 7:** Coordinate the bounded ordinary native-startup admission
@@ -271,7 +279,144 @@ in this existing reviewed Active effort; link-only journal text or a closed/Draf
 receiver is insufficient. Preserve first-pass history and retain1145 if delivery or
 custody conditions fail.
 
+### Released exclusive key versus held cleanup from #2207
+
+<!-- backlog-reconciliation:7556:transfer:2207:to:efforts/active/dispatch-fleet-reliability-recovery/README.md -->
+
+This direct Plan/Validation subcase remains at the existing Phase3 supervision/Phase5
+housekeeping boundary, preserving the whole current effort,1145 acceptance, Phase7
+native-admission fences and existing owners. The title-only report is not a verified
+universal release defect; classification remains open. Current6542 recovery is credited,
+not authorization to sweep held rows.
+
+#### Plan
+
+- [ ] Classify/reproduce the exact alleged held-cleanup/released-key fence with task,
+  allocation revision, active reservation state and actual logical release distinguished
+  from diagnostic cleanup metadata. Do not infer a failure or repair authority from a
+  Summary heading.
+- [ ] A genuinely released logical key must not fence an otherwise safe DIFFERENT task
+  solely because historical cleanup metadata remains. Preserve
+  SAME-task/workspace/allocation-revision, live body, retained ownership and uncertain
+  native-send/effect reconciliation fences; logical key release is not allocation
+  disposal or permission to duplicate admitted work.
+- [ ] Preserve full settled/pending/held cleanup history and visible reasons. Require
+  existing exact confirmed-absence/conclusion evidence for safe settlement; RELEASING,
+  unknown/live holder, missing handle or elapsed age never implies release permission.
+- [ ] Recovery remains exact
+  reservation/generation/creating-host/provenance/newer-allocation/lease/preview/audit
+  under existing authorities. Terminal housekeeping recovery does not reset nonterminal
+  attempt/business work or change results/attempt/history; retired old failures do not
+  become new allocation authority.
+- [ ] Keep assigned #1918 per-attempt/no-handle/old-held custody, #1488 task-terminal
+  resolution, #1666 ground liveness and scalar/native-startup owners separate. No
+  unassignment, expiry, blanket force clear, new orphan collector or competing recovery
+  actor is introduced.
+
+#### Validation
+
+- [ ] Exercise positive valid-release/different-task and negative
+  same-task/workspace/revision, live/unknown/RELEASING, pending native effect and racing
+  newer-allocation cases through the actual existing reservation/recovery consumers.
+  Preserve exact historical flags/metadata while asserting the correct current safety
+  outcome.
+- [ ] Restart, repeated/lost-response recovery, cleanup failure and concurrent attempt
+  cases keep one allocation/effect, full failure history and truthful held state. Credit
+  existing confirmed-absence/preview recovery without claiming all title symptoms
+  complete or requiring whole-parent/native-program completion.
+- [ ] Close duplicate2207 only after normal reviewed ACTUAL merge and CURRENT FULL
+  direct Plan/Validation/custody readback in this existing Active effort. Until then
+  retain2207. This proposal performs no cleanup, reservation release, test or native
+  action.
+
+Sources: https://github.com/ThomasMichon/copilot-extensions/issues/2207 ;
+https://github.com/ThomasMichon/copilot-extensions/pull/6472 ;
+https://github.com/ThomasMichon/copilot-extensions/pull/6542 ;
+https://github.com/ThomasMichon/copilot-extensions/pull/3264 .
+
+### Retained Phase3 acceptance — temporary per-unit watchdog maintenance from #2395
+
+<!-- backlog-reconciliation:7556:transfer:2395:to:efforts/active/dispatch-fleet-reliability-recovery/README.md -->
+
+This tracker-only amendment requires normal review of the full existing effort,
+successful required checks, ACTUAL MERGE and readback of the complete current Active
+Plan/Validation/Coordination before superseding #2395. A title link, unmerged patch,
+generic maintenance state or body presence is not delivery. If any original owner/gate
+cannot be preserved, KEEP THE SOURCE OPEN.
+
+#### Coordination and scope
+
+Preserve the existing Coordinator/Supervisor roles and #6467's live bounded
+supervision/progress integration; #5301/#5655 and each service/installer/other-watchdog
+owner keep their existing source, custody and rollout. Record #6466 as closed historical
+category work, not a live claim token. This accepted future slice introduces no
+implementation assignee, source handoff, parallel daemon, reservation store or service
+restart authority. Normal review/concrete overlap coordination applies, not a new
+generic ACK ceremony or takeover of the broader lifecycle programmes.
+
+#### Unchecked Plan — per-unit restart inhibition
+
+- [ ] Inventory the actual dtssh companion_gate/supervise restart boundary and
+  applicable other watchdog consumers. Reuse their existing supervision/lifecycle
+  authority for an attributable, narrowly addressed temporary interval; do not introduce
+  another watchdog or mandate one filesystem marker/backend for all services.
+- [ ] Enter the interval before the targeted install/update/maintenance stop. Restart
+  decisions observe it before relaunch, preventing the one target's immediate revival
+  while unrelated units keep their existing desired-state, health and progress behavior.
+  Do not kill or disable the whole supervisor tree to create a replacement window.
+- [ ] Integrate actual install/update success, failure and interruption. Use owned
+  cleanup and/or safe expiry/recovery so an abandoned operation cannot leave the unit
+  permanently disabled. A finally-only happy path or an unbounded stale flag is not the
+  interrupted-operation proof; preserve concurrent live-owner safety and existing
+  selection/readiness/recovery fences.
+- [ ] Support explicit scoped temporary operator use through the same documented
+  authority, without mutating persistent operator-off overrides or clearing another
+  updater's maintenance. Handle overlap/reentrancy, stale-versus-current state and
+  invalid/foreign inputs explicitly; absence of a local task or elapsed agent-claim age
+  is not ownership release.
+- [ ] Expose entered/held/expired/released/recovery/error and restart-resumption
+  outcomes truthfully. A timeout, process-exit receipt, maintained status word or
+  permission sidecar is not completed maintenance or safe rollback. Keep failed primary
+  installation and inhibitor cleanup failures distinguishable.
+- [ ] Preserve all applicable consumers and the original dtssh/Dispatch causal case,
+  with exact source/service/installation identity and no unrelated-unit disruption.
+  Installation-context maintenance authorization, task categories, optional Manager
+  enrollment, default-only no-expiry killswitch and per-installer watchdog deadlines
+  remain distinct mechanisms.
+
+#### Unchecked Validation Plan
+
+- [ ] Prove the actual target stops without immediate unwanted restart during
+  maintenance and resumes normally after the interval safely ends; other supervised
+  units remain live/progressing.
+- [ ] Exercise automatic success/failure/interruption/owner-loss and manual temporary
+  paths, concurrent holders, delayed/stale observations and failed cleanup/expiry.
+  Preserve current owners and ensure neither a stale flag permanently disables a unit
+  nor one participant clears another's live interval.
+- [ ] Verify actual native dtssh/Dispatch restart and applicable other-watchdog
+  integration, plus meaningful supported-platform positives/negatives and bounded
+  process/pipe cleanup. Source flags, a category test or mocked successful stop alone is
+  not the effect evidence; do not invent an all-host or full-parent completion
+  requirement.
+- [ ] Preserve persistent operator overrides, source/configured-runtime/readiness
+  identity, existing child ownership/health/backoff and retained failure history. Do not
+  weaken another lifecycle or maintenance contract to obtain a green result.
+- [ ] Keep every old Phase3/#6467 progress/uncertain-operation item and #5301/#5655
+  responsibility intact. This future acceptance is not proof of complete independent
+  custody or whole-update rollback and authorizes no current native/service/test
+  operation.
+- [ ] After actual reviewed merge, read back all rows, Active status, live coordination
+  and unchanged owners. Close #2395 only as duplicate tracking after complete accepted
+  delivery, never as an implemented maintenance capability or expired claim.
+
+No host process, service, marker, override, watchdog, permission, credential or runtime
+is changed by this consolidation.
+
 ## Validation Plan
+
+- [ ] Complete every directly retained #2395 Plan/Validation clause above at its original evidence tier and bounds; preserve current owners, holds and unfinished acceptance. Tracker consolidation is not implementation.
+
+- [ ] Complete every directly retained #2207 Plan/Validation clause above at its original evidence tier and bounds; preserve current owners, holds and unfinished acceptance. Tracker consolidation is not implementation.
 
 - [ ] Complete every directly retained #1145 Plan/Validation row above at its
   original evidence tier and bounds, preserving existing owners and holds.
@@ -331,6 +476,20 @@ named-resource resolution so an older peer cannot silently accept but ignore a
 requested contract.
 
 ## Journal
+
+### 2026-10-22 - Complete retained acceptance from #2395
+
+- Retained the complete #2395 scope directly in the Plan and Validation,
+  without declaring feature completion or transferring source/resource custody.
+  Normal reviewed merge and current full readback precede administrative
+  supersession; all substantive acceptance remains unfinished.
+
+### 2026-10-22 - Complete retained acceptance from #2207
+
+- Retained the complete #2207 scope directly in the Plan and Validation,
+  without declaring feature completion or transferring source/resource custody.
+  Normal reviewed merge and current full readback precede administrative
+  supersession; all substantive acceptance remains unfinished.
 
 ### 2026-10-22 - Complete retained acceptance from #1145
 
