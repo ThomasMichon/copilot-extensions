@@ -20,6 +20,25 @@ from .worktree_head import parse_head_payload
 log = logging.getLogger("agent-bridge")
 
 
+def _bounded_log_text(text: str | None, limit: int) -> str | None:
+    if text is None or len(json.dumps(text, ensure_ascii=True)) <= limit:
+        return text
+
+    def clipped(keep: int) -> str:
+        # Keep the error lead-in and trailing stage/code labels after redaction.
+        tail = keep // 2
+        return text[:keep - tail] + "..." + (text[-tail:] if tail else "")
+
+    low, high = 0, len(text)
+    while low < high:
+        middle = (low + high + 1) // 2
+        if len(json.dumps(clipped(middle), ensure_ascii=True)) <= limit:
+            low = middle
+        else:
+            high = middle - 1
+    return clipped(low)
+
+
 async def worktree_command(args: list[str], project: str | None) -> dict[str, Any]:
     try:
         prefix = _agent_worktrees_launch_prefix()
@@ -53,13 +72,13 @@ async def worktree_command(args: list[str], project: str | None) -> dict[str, An
             "capture_complete": stdout is not None and stderr is not None,
             "stdout_bytes": len(stdout) if stdout is not None else None,
             "stderr_bytes": len(stderr) if stderr is not None else None,
-            "owner_error": structured_resolver_error(
+            "owner_error": _bounded_log_text(structured_resolver_error(
                 stdout.decode(errors="replace"), environment=env,
-            ) if stdout is not None else None,
-            "stderr": resolver_failure_detail(
+            ), 4608) if stdout is not None else None,
+            "stderr": _bounded_log_text(resolver_failure_detail(
                 "", stderr.decode(errors="replace"), environment=env,
-            ) if stderr else None,
-        }, ensure_ascii=False))
+            ), 2048) if stderr else None,
+        }, ensure_ascii=True))
 
     try:
         if "--bridge-plugin-request" in args:

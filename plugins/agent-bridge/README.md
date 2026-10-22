@@ -895,8 +895,13 @@ Successful responses are not dumped.
 Records use the existing formatter's error/message/stage/code allowlist,
 normalization and credential redaction before its bounds: 800 message characters,
 80 per stage/code label and 400 stderr characters, plus truncation indicators.
-Each diagnostic record is below 8 KiB encoded as UTF-8. Raw envelopes, opaque
-stdout, argument lists and environment dictionaries are not serialized.
+Records use ASCII-safe JSON, preserving valid escapes with legacy Windows
+stderr encodings as well as UTF-8. After redaction and the character bounds,
+JSON-escaped string budgets are 4,608 bytes for `owner_error` and 2,048 for
+`stderr`; oversized fields elide their middle, retaining the error lead-in and
+trailing stage/code labels. Each diagnostic record remains below 8 KiB encoded
+as UTF-8 or through an ASCII-compatible sink. Raw envelopes, opaque stdout,
+argument lists and environment dictionaries are not serialized.
 The existing CLI logging configuration routes these records to stderr; the
 installed Windows supervisor redirects it to `agent-bridge-err.log` beside its
 PID file. Standard logging handler flushing/error handling and the service's

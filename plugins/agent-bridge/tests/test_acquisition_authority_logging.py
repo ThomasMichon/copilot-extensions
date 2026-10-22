@@ -20,9 +20,11 @@ pytestmark = pytest.mark.contract("agent_bridge.acquisition.worktree_owner")
 
 
 @pytest.fixture
-def durable_log(tmp_path, monkeypatch):
+def durable_log(tmp_path, monkeypatch, request):
     path = tmp_path / "agent-bridge-err.log"
-    handler = logging.FileHandler(path, encoding="utf-8")
+    handler = logging.FileHandler(
+        path, encoding=getattr(request, "param", "utf-8"), errors="backslashreplace",
+    )
     handler.setFormatter(logging.Formatter("%(asctime)s [%(name)s] %(levelname)s: %(message)s"))
     logger = logging.getLogger("agent-bridge")
     monkeypatch.setattr(logger, "handlers", [handler])
@@ -118,6 +120,31 @@ async def test_durable_log_bounds_wide_unicode_fields(owner_process, durable_log
         await authority.worktree_command(["record"], "project-a")
     record = failure_record(durable_log)
     assert len(record["owner_error"]) < 1000 and len(record["stderr"]) <= 403
+    assert len(json.dumps(record["owner_error"], ensure_ascii=True)) <= 4608
+    assert len(json.dumps(record["stderr"], ensure_ascii=True)) <= 2048
+    assert "stage=" in record["owner_error"] and "code=" in record["owner_error"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("durable_log", ["cp1252", "ascii"], indirect=True, ids=["cp1252", "ascii"])
+async def test_legacy_sink_preserves_json_and_encoded_record_bound(owner_process, durable_log):
+    owner_process(
+        json.dumps({"error": "owner é " + "😀" * 2000, "stage": "bind", "code": "denied"}).encode(),
+        ("warning é " + "😀" * 2000).encode(),
+    )
+    with pytest.raises(AcquisitionRefused):
+        await authority.worktree_command(["record"], "project-a")
+    raw = durable_log.read_bytes()
+    encoding = logging.getLogger("agent-bridge").handlers[0].encoding
+    try:
+        record = json.loads(raw.decode(encoding).split("worktree_owner_failure ", 1)[1])
+    except json.JSONDecodeError:
+        record = None
+    observations = {"valid_json": isinstance(record, dict), "bytes": len(raw), "ascii_only": raw.isascii()}
+    assert observations["valid_json"] and observations["bytes"] < 8192 and observations["ascii_only"], observations
+    assert "owner é " in record["owner_error"]
+    assert "stage=bind" in record["owner_error"] and "code=denied" in record["owner_error"]
+    assert "warning é " in record["stderr"] and record["exit_code"] == 7
 
 
 @pytest.mark.asyncio
@@ -247,12 +274,16 @@ async def test_real_child_failure_is_read_from_disk_by_fresh_process(monkeypatch
         }, indent=2), encoding="utf-8")
 
 
-def test_default_cli_logging_reaches_redirected_service_file(tmp_path):
+@pytest.mark.parametrize("encoding", ["utf-8", "cp1252"], ids=["utf8", "legacy-cp1252"])
+def test_default_cli_logging_reaches_redirected_service_file(tmp_path, encoding):
     log_path = tmp_path / "agent-bridge-err.log"
     owner = tmp_path / "synthetic_owner.py"
+    message = "synthetic default-logging rejection"
+    if encoding == "cp1252":
+        message += " é " + "😀" * 2000
     owner.write_text(
         "import json,sys\n"
-        "print(json.dumps({'error':'synthetic default-logging rejection'}))\n"
+        f"print(json.dumps({{'error': {message!r}, 'stage': 'bind', 'code': 'denied'}}))\n"
         "sys.stderr.write('synthetic default-logging warning\\n')\n"
         "raise SystemExit(7)\n", encoding="utf-8",
     )
@@ -266,7 +297,7 @@ def test_default_cli_logging_reaches_redirected_service_file(tmp_path):
         "authority._agent_worktrees_launch_prefix=lambda:[sys.executable,'-I',sys.argv[3]]\n"
         "authority._agent_worktrees_environment=lambda:os.environ.copy()\n"
         "assert not logging.getLogger().handlers\n"
-        "with open(sys.argv[2],'a',encoding='utf-8') as output,contextlib.redirect_stderr(output):\n"
+        "with open(sys.argv[2],'a',encoding=sys.argv[5],errors='backslashreplace') as output,contextlib.redirect_stderr(output):\n"
         " cli.main([])\n"
         " assert logging.getLogger().handlers[0].stream is output\n"
         " try: asyncio.run(authority.worktree_command(['bind-session'],'project-a'))\n"
@@ -276,7 +307,7 @@ def test_default_cli_logging_reaches_redirected_service_file(tmp_path):
     )
     result = run_caller_owned([
         sys.executable, "-I", str(producer), json.dumps(sys.path),
-        str(log_path), str(owner), str(authority.__file__),
+        str(log_path), str(owner), str(authority.__file__), encoding,
     ], timeout=15, max_stdout_bytes=65536, max_stderr_bytes=4096)
     assert result.returncode == 0 and not result.stderr
     reader = run_caller_owned([
@@ -290,9 +321,14 @@ def test_default_cli_logging_reaches_redirected_service_file(tmp_path):
     proof = json.loads(reader.stdout)
     assert "synthetic default-logging rejection" in proof["text"]
     assert "synthetic default-logging warning" in proof["text"]
-    assert failure_record(log_path)["exit_code"] == 7
+    record = failure_record(log_path)
+    assert record["exit_code"] == 7
+    assert "stage=bind" in record["owner_error"] and "code=denied" in record["owner_error"]
+    assert log_path.read_bytes().isascii()
     if report := os.environ.get("DIAGNOSTIC_STDIO_PROOF_REPORT"):
-        Path(report).write_text(json.dumps({
+        report_path = Path(report)
+        report_path = report_path.with_stem(report_path.stem + "-" + encoding)
+        report_path.write_text(json.dumps({
             **proof, "producer_returned_before_read": True, "production_cli_logging": True,
-            "shared_service_used": False,
+            "shared_service_used": False, "sink_encoding": encoding,
         }, indent=2), encoding="utf-8")
