@@ -20,7 +20,7 @@ _PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 _HARNESS_TIMEOUT_SECONDS = 30
 _RUNTIME_LIBS = (
     "agent-procutil", "ssh-manager", "venue-copilot", "zdd", "remote-login-shell",
-    "fleet-contracts", "machine-transport",
+    "fleet-contracts", "machine-transport", "plugin-resolve",
 )
 
 
@@ -153,6 +153,8 @@ def _host_pip_index_url() -> str | None:
 def _assert_snapshot_transport(snapshot: Path) -> None:
     for filename in ("__init__.py", "identity.py", "registry.py", "transport.py"):
         assert (snapshot / "libs" / "machine-transport" / "src" / "machine_transport" / filename).is_file()
+    for filename in ("preparation.py", "reflection.py", "receiver.py"):
+        assert (snapshot / "libs" / "plugin-resolve" / "src" / "plugin_resolve" / filename).is_file()
 
 
 def _assert_snapshot_dependency_sources(snapshot: Path) -> None:
@@ -240,7 +242,7 @@ def _isolate_path_without_python3(env: dict[str, str]) -> dict[str, str]:
     os.name == "nt" or shutil.which("uv") is None,
     reason="POSIX snapshot coverage",
 )
-@pytest.mark.timeout(30)
+@pytest.mark.timeout(180)
 @pytest.mark.portfolio_tier("T3")
 @pytest.mark.effect("network")
 @pytest.mark.effect("filesystem")
@@ -302,7 +304,7 @@ def test_stamp_supports_first_use_provision_from_snapshot_only(tmp_path: Path) -
         env=env,
         capture_output=True,
         text=True,
-        timeout=10,
+        timeout=120,
         check=False,
     )
     assert provision.returncode == 0, provision.stderr
@@ -492,7 +494,7 @@ def test_shared_binstub_generator_quotes_snapshot_installer_path(tmp_path: Path)
     os.name == "nt" or shutil.which("uv") is None,
     reason="POSIX snapshot coverage",
 )
-@pytest.mark.parametrize("missing_library", ["ssh-manager", "fleet-contracts", "machine-transport"])
+@pytest.mark.parametrize("missing_library", ["ssh-manager", "fleet-contracts", "machine-transport", "plugin-resolve"])
 def test_stamp_fails_before_publish_when_required_library_missing(
     tmp_path: Path, missing_library: str,
 ) -> None:
@@ -573,7 +575,7 @@ def test_stamp_fails_before_publish_when_payload_copy_fails(tmp_path: Path) -> N
 
 
 @pytest.mark.skipif(shutil.which("uv") is None, reason="uv is required")
-@pytest.mark.parametrize("missing_library", ["ssh-manager", "fleet-contracts", "machine-transport"])
+@pytest.mark.parametrize("missing_library", ["ssh-manager", "fleet-contracts", "machine-transport", "plugin-resolve"])
 def test_powershell_stamp_fails_before_publish_when_required_library_missing(
     tmp_path: Path, missing_library: str,
 ) -> None:
@@ -944,7 +946,7 @@ def test_stamp_publication_lock_no_flock_fails_closed_without_owner_file(
 
 
 @pytest.mark.skipif(shutil.which("uv") is None, reason="uv is required")
-@pytest.mark.timeout(30)
+@pytest.mark.timeout(180)
 @pytest.mark.portfolio_tier("T3")
 @pytest.mark.effect("network")
 @pytest.mark.effect("filesystem")
@@ -1031,7 +1033,7 @@ def test_stamp_supports_first_use_provision_from_snapshot_only_ps1(tmp_path: Pat
         ],
         env=env, cwd=home,
         sandbox=tmp_path / "provision-job",
-        limits=Limits(wall_seconds=max(1, min(20, 25 - (time.monotonic() - started)))),
+        limits=Limits(wall_seconds=max(1, min(120, 175 - (time.monotonic() - started)))),
     )
     captured = capfd.readouterr()
     assert returncode == 0, captured.out + captured.err

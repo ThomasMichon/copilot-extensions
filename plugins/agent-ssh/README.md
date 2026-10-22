@@ -60,7 +60,7 @@ command reuses that route instead of trying to bind the same remote port again.
 the caller terminal and prints a JSON handle with `status`, `observe`, `nudge`,
 `attach`, and `stop` commands; `--stop` verifies the detached session is gone and
 releases its bridge forward. The remote machine must already have `bash`, `tmux`,
-`copilot`, `agent-worktrees`, and the `agent-bridge` Copilot plugin installed.
+Python 3.10 or newer, `copilot`, `agent-worktrees`, and the `agent-bridge` Copilot plugin installed.
 Windows SSH targets are not supported yet; run the orchestrator on that machine
 and use local `agent-worktrees embody` there.
 
@@ -79,6 +79,35 @@ out.
 `--ref-file PATH` (repeatable) copies an operator file outside the checkout to
 `~/.agent-bridge/refs/<batch>/` and names it to the worker (seed for a new
 session, a message on rejoin).
+
+Both attached and detached launches use the existing shared native launch
+owner. Before starting Copilot, the SSH channel streams repository-scoped
+plugin preparation into the actual anchor checkout. Repeatable
+`--stage-plugin <name@marketplace>`, `--stage-plugin-disabled`, and
+`--plugin-root` inputs preserve controller selection, target-native sources and
+explicit target disables. Local sources are reflected, Git origins remain Git
+declarations, and registered target-owned absolute sources rebind to the
+receiver checkout. Plugin registration writes repository `settings.local.json`,
+not user-global enablement. CLI loads the merged repository settings without
+repeating those identities as `--plugin-dir`.
+
+The host Bridge must be reachable for either launch mode. Seeds are never
+typed into a pane: the owner requires a native deferred-seed receipt, then
+admits the seed through Bridge's complete prepared-plugin readiness gate.
+Attached mode only attaches the existing tmux session after that admission.
+A rejoin does not replay the original launch task. An unknown admission keeps
+the native session, forward hold and separate durable delivery journal; repeat
+the same command to reconcile the original operation before submitting new
+work. Keeper replacement does not discard that journal. Older owners without
+the receipt and installed-only payloads without native marketplace origins
+fail explicitly, without an ACP fallback or plugin reload.
+
+`namespace-target-repo <ssh-target>` is the read-only query Bridge uses to
+select related plugins from the actual remote workspace's Git origin; it does
+not infer a repository from the SSH alias. Bridge forwards that selection and
+the controller's current checkout before its fallback roots, and fences the
+launch against a changed repository. SSH CLI remains anchor-only:
+`--worktree-id` is not silently redirected to an anchor.
 
 `restore-host` exposes transport-owned host setup to declarative orchestrators
 without requiring them to know installed payload paths:

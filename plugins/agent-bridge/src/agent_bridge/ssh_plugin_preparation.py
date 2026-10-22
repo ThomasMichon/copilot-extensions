@@ -64,7 +64,7 @@ try {
 
 
 async def _run_python(manager, target, program: str, *, timeout: float = 540) -> str:
-    from . import ssh_plugin_receiver
+    from plugin_resolve import receiver as ssh_plugin_receiver
 
     supervisor = Path(ssh_plugin_receiver.__file__).read_text(encoding="utf-8")
     encoded = base64.b64encode(program.encode("utf-8")).decode("ascii")

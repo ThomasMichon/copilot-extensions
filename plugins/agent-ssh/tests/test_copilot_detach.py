@@ -37,11 +37,20 @@ def _args(**kw):
     return argparse.Namespace(**base)
 
 
+@pytest.fixture(autouse=True)
+def native_owner(monkeypatch):
+    monkeypatch.setattr("agent_ssh.copilot_plugins.resolve_launch", lambda *a: None)
+
+
 @pytest.fixture
-def seams(monkeypatch):
+def seams(monkeypatch, tmp_path):
     # Hermetic: never read the developer's own ~/.copilot/settings.json model.
     monkeypatch.setattr(detach, "with_supervisor", lambda venue, ref=None: dict(venue))
     monkeypatch.setattr(detach, "model_copilot_args", lambda existing: [])
+    monkeypatch.setattr(detach, "_STORE", detach.KeeperStore(tmp_path / "keepers"))
+    context = {"version": 1, "cwd": "/workspaces/repo", "plugins": [], "logical_payloads": {}}
+    monkeypatch.setattr("agent_ssh.copilot_plugins.prepare", lambda *a: dict(context))
+    monkeypatch.setattr("venue_copilot.refs.deliver_note", lambda *a, **kw: True)
     calls = types.SimpleNamespace(
         remote=[],
         reserve=[],
@@ -88,7 +97,8 @@ def seams(monkeypatch):
         "ok": True,
         "created": True,
         "resumed": False,
-        "seed_submitted": True,
+        "seed_submitted": False,
+        "bridge_seed_deferred": True,
         "session": "wt-anchor-repo",
     })
 
@@ -139,7 +149,45 @@ def test_detach_success_reserves_ssh_venue_and_reports_handle(seams, capsys):
     assert seams.release == [("anchor-repo@devbox", "r1")]
 
 
-def test_attached_default_uses_venue_copilot_over_ssh(seams, monkeypatch):
+@pytest.mark.parametrize("attached", [False, True])
+def test_preparation_failure_prevents_native_launch_and_attach(seams, monkeypatch, attached):
+    def refuse(*a):
+        raise RuntimeError("required plugin absent")
+    monkeypatch.setattr("agent_ssh.copilot_plugins.prepare", refuse)
+    monkeypatch.setattr(detach.subprocess, "Popen", lambda *a, **kw: pytest.fail("must not attach"))
+    args = _args(detach=not attached, copilot_args=[] if attached else ["--no-ask-user"])
+    assert (detach.cmd_attached(args) if attached else detach.cmd_detach(args)) == 1
+    assert not any("agent-worktrees embody" in command for command in seams.remote)
+    assert seams.stop_keeper
+
+
+@pytest.mark.parametrize("attached", [False, True])
+def test_unknown_seed_admission_retains_session_keeper_and_journal(seams, monkeypatch, attached):
+    from agent_ssh import copilot_delivery
+    monkeypatch.setattr("venue_copilot.refs.deliver_note", lambda *a, **kw: False)
+    monkeypatch.setattr(detach.subprocess, "Popen", lambda *a, **kw: pytest.fail("must not attach"))
+    args = _args(detach=not attached, copilot_args=[] if attached else ["--no-ask-user"])
+    assert (detach.cmd_attached(args) if attached else detach.cmd_detach(args)) == 75
+    assert seams.stop_keeper == [] and seams.release == []
+    assert not any("tmux kill-session" in command for command in seams.remote)
+    pending = copilot_delivery.read("devbox", "anchor-repo@devbox")
+    assert pending["status"] == "unknown"
+    assert pending["envelope"]["prompt"] == "do the task"
+    assert pending["requested_workspace"] == "/workspaces/repo"
+
+
+def test_legacy_worktrees_receipt_refuses_unproven_typed_seed(seams, monkeypatch):
+    def remote(_cfg, command, *, timeout=60):
+        seams.remote.append(command)
+        if "agent-worktrees embody" in command:
+            return 0, json.dumps({"ok": True, "created": True, "seed_submitted": True}), ""
+        return 0, "", ""
+    monkeypatch.setattr(detach, "_remote", remote)
+    assert detach.cmd_detach(_args()) == 1
+    assert any("tmux kill-session" in command for command in seams.remote)
+
+
+def test_attached_prepares_and_admits_before_mux_attach(seams, monkeypatch):
     monkeypatch.setattr(
         detach,
         "_ssh_config",
@@ -154,13 +202,7 @@ def test_attached_default_uses_venue_copilot_over_ssh(seams, monkeypatch):
     monkeypatch.setattr(detach, "_ensure_posix", lambda _cfg: None)
     monkeypatch.setattr(detach, "_ensure_remote_tooling", lambda _cfg: None)
     monkeypatch.setattr(detach, "resolve_daemon_port", lambda: 41234)
-    monkeypatch.setattr(detach, "resolve_local_auth_token", lambda: "tok")
     seen = {}
-
-    def fake_run_venue(identity, *, connect, **kwargs):
-        seen["identity"] = identity
-        seen["kwargs"] = kwargs
-        return connect("agent-worktrees copilot --anchor")
 
     class FakeProcess:
         pid = 999
@@ -173,7 +215,6 @@ def test_attached_default_uses_venue_copilot_over_ssh(seams, monkeypatch):
         seen["subprocess_kwargs"] = kwargs
         return FakeProcess()
 
-    monkeypatch.setattr(detach, "run_venue_copilot", fake_run_venue)
     monkeypatch.setattr(detach.subprocess, "Popen", fake_popen)
 
     rc = detach.cmd_attached(
@@ -181,32 +222,24 @@ def test_attached_default_uses_venue_copilot_over_ssh(seams, monkeypatch):
     )
 
     assert rc == 0
-    assert seen["identity"] == "anchor-repo"
-    assert seen["kwargs"] == {
-        "anchor": True,
-        "ttl_seconds": 300.0,
-        "driver": "orchestrator",
-        "seed": "do the task",
-        "ensure_mux": True,
-    }
+    assert seams.reserve[0][0] == "anchor-repo@devbox"
     argv = seen["ssh_argv"]
     assert "-t" in argv
     assert "-R" not in argv
     assert seams.keeper[0][1].items() >= {
         "venue_port": 41234,
         "mux": "wt-anchor-repo",
-        "hold_pid": os.getpid(),
     }.items()
     assert seams.keeper[0][1]["hold_id"].startswith(f"attached:{os.getpid()}:")
     assert seams.stop_keeper == [("devbox", seams.keeper[0][1]["hold_id"])]
     remote_command = argv[-1]
     assert remote_command.startswith("bash -lc ")
-    assert "cd /workspaces/repo" in remote_command
-    assert "trustedFolders" in remote_command
-    assert "agent-worktrees copilot --anchor" in remote_command
-    assert remote_command.index("cd /workspaces/repo") < remote_command.index(
-        "agent-worktrees copilot --anchor"
-    )
+    assert "tmux attach-session -t" in remote_command
+    launch = next(command for command in seams.remote if "agent-worktrees embody" in command)
+    assert "cd /workspaces/repo" in launch
+    assert "trustedFolders" in launch
+    assert "--bridge-seed-pending" in launch
+    assert "do the task" not in launch
     assert "auth.yaml" not in remote_command
     assert any("auth.yaml" in command for command in seams.remote)
 
@@ -221,25 +254,18 @@ def test_attached_releases_its_keeper_hold_when_launch_fails(seams, monkeypatch,
     monkeypatch.setattr(detach, "_ensure_posix", lambda _cfg: None)
     monkeypatch.setattr(detach, "_ensure_remote_tooling", lambda _cfg: None)
     monkeypatch.setattr(detach, "resolve_daemon_port", lambda: 41234)
-    monkeypatch.setattr(detach, "resolve_local_auth_token", lambda: "tok")
-
-    def fake_run_venue(identity, *, connect, **kwargs):
-        if failure == "reservation":
+    if failure == "reservation":
+        def refuse(*a, **kw):
             raise detach.VenueCopilotError("reservation refused")
-        return connect("agent-worktrees copilot --anchor")
+        monkeypatch.setattr(venue_detached, "reserve_with_retry", refuse)
 
     def failing_popen(argv, **kwargs):
         raise OSError("ssh could not start")
 
-    monkeypatch.setattr(detach, "run_venue_copilot", fake_run_venue)
     monkeypatch.setattr(detach.subprocess, "Popen", failing_popen)
 
     args = _args(detach=False, workspace="/workspaces/repo", copilot_args=[])
-    if failure == "reservation":
-        assert detach.cmd_attached(args) == 1
-    else:
-        with pytest.raises(OSError):
-            detach.cmd_attached(args)
+    assert detach.cmd_attached(args) == 1
     assert seams.stop_keeper == [("devbox", seams.keeper[0][1]["hold_id"])]
 
 
@@ -258,17 +284,10 @@ def test_attached_skips_reverse_forward_when_live_keeper_holds_route(seams, monk
     monkeypatch.setattr(detach, "_ensure_posix", lambda _cfg: None)
     monkeypatch.setattr(detach, "_ensure_remote_tooling", lambda _cfg: None)
     monkeypatch.setattr(detach, "resolve_daemon_port", lambda: 41234)
-    monkeypatch.setattr(detach, "resolve_local_auth_token", lambda: "tok")
     monkeypatch.setattr(detach, "read_keeper_state", lambda target: {"venue_port": 41234})
     monkeypatch.setattr(detach._STORE, "alive", lambda key: True)
     monkeypatch.setattr(detach, "_update_keeper_hold_pid", lambda *a, **k: None)
     seen = {}
-
-    monkeypatch.setattr(
-        detach,
-        "run_venue_copilot",
-        lambda _identity, *, connect, **_kwargs: connect("agent-worktrees copilot --anchor"),
-    )
 
     class FakeProcess:
         pid = 999
@@ -761,7 +780,9 @@ def test_missing_agent_worktrees_message(seams, monkeypatch, capsys):
 def test_unsubmitted_seed_on_registered_session_is_delivered_over_bridge(seams, monkeypatch, capsys):
     from venue_copilot import refs as venue_refs
 
-    unseeded = json.dumps({"ok": True, "created": True, "seed_submitted": False})
+    unseeded = json.dumps({
+        "ok": True, "created": True, "seed_submitted": False, "bridge_seed_deferred": True,
+    })
     sent = []
     monkeypatch.setattr(venue_refs, "deliver_note", lambda sid, note, **kw: sent.append((sid, note)) or True)
 
@@ -784,7 +805,9 @@ def test_unsubmitted_seed_on_registered_session_is_delivered_over_bridge(seams, 
 
 
 def test_unsubmitted_seed_without_registration_kills_mux_and_stops_keeper(seams, monkeypatch):
-    unseeded = json.dumps({"ok": True, "created": True, "seed_submitted": False})
+    unseeded = json.dumps({
+        "ok": True, "created": True, "seed_submitted": False, "bridge_seed_deferred": True,
+    })
     monkeypatch.setattr(venue_detached, "await_claim", lambda scope, rid, timeout: None)
 
     def remote(_cfg, command, *, timeout=60.0):
@@ -807,7 +830,9 @@ def test_rejoin_reuses_keeper_and_does_not_stop_it(seams, monkeypatch, capsys):
         "ensure_keeper",
         lambda *a, **k: {"started": False, "state": {"pid": 123}},
     )
-    resumed = json.dumps({"ok": True, "created": False, "resumed": True})
+    resumed = json.dumps({
+        "ok": True, "created": False, "resumed": True, "bridge_seed_deferred": True,
+    })
 
     def remote(_cfg, command, *, timeout=60.0):
         if "agent-worktrees embody" in command:
@@ -826,7 +851,9 @@ def test_rejoin_launch_failure_does_not_release_existing_keeper_hold(seams, monk
         "ensure_keeper",
         lambda *a, **k: {"started": False, "state": {"pid": 123}},
     )
-    unseeded = json.dumps({"ok": True, "created": True, "seed_submitted": False})
+    unseeded = json.dumps({
+        "ok": True, "created": True, "seed_submitted": False, "bridge_seed_deferred": True,
+    })
 
     def remote(_cfg, command, *, timeout=60.0):
         seams.remote.append(command)
@@ -981,11 +1008,6 @@ def test_attached_reaps_ssh_child_when_hold_bookkeeping_fails(seams, monkeypatch
     monkeypatch.setattr(detach, "_ensure_posix", lambda _cfg: None)
     monkeypatch.setattr(detach, "_ensure_remote_tooling", lambda _cfg: None)
     monkeypatch.setattr(detach, "resolve_daemon_port", lambda: 41234)
-    monkeypatch.setattr(detach, "resolve_local_auth_token", lambda: "tok")
-    monkeypatch.setattr(
-        detach, "run_venue_copilot",
-        lambda _identity, *, connect, **_kwargs: connect("agent-worktrees copilot --anchor"),
-    )
     events = []
 
     class FakeProcess:
@@ -1005,8 +1027,7 @@ def test_attached_reaps_ssh_child_when_hold_bookkeeping_fails(seams, monkeypatch
 
     monkeypatch.setattr(detach, "_update_keeper_hold_pid", failing_update)
 
-    with pytest.raises(RuntimeError):
-        detach.cmd_attached(_args(detach=False, workspace="/workspaces/repo", copilot_args=[]))
+    assert detach.cmd_attached(_args(detach=False, workspace="/workspaces/repo", copilot_args=[])) == 1
     assert events == ["terminate", "wait"]
     assert seams.stop_keeper == [("devbox", seams.keeper[0][1]["hold_id"])]
 
@@ -1020,11 +1041,6 @@ def test_attached_result_survives_a_failed_final_hold_release(seams, monkeypatch
     monkeypatch.setattr(detach, "_ensure_posix", lambda _cfg: None)
     monkeypatch.setattr(detach, "_ensure_remote_tooling", lambda _cfg: None)
     monkeypatch.setattr(detach, "resolve_daemon_port", lambda: 41234)
-    monkeypatch.setattr(detach, "resolve_local_auth_token", lambda: "tok")
-    monkeypatch.setattr(
-        detach, "run_venue_copilot",
-        lambda _identity, *, connect, **_kwargs: connect("agent-worktrees copilot --anchor"),
-    )
     monkeypatch.setattr(
         detach.subprocess, "Popen",
         lambda argv, **kw: types.SimpleNamespace(pid=999, wait=lambda timeout=None: 7),

@@ -381,6 +381,7 @@ $DefaultInstallDir = $InstallDir
 $probePayload = $PluginDir
 $utf8NoBom = [Text.UTF8Encoding]::new($false)
 function Write-Ok($value) {{ }}
+function Write-Step($value) {{ }}
 function Write-Skip($value) {{ }}
 function Write-Fail($value) {{ throw $value }}
 function Write-Binstubs {{ }}

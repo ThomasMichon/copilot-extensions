@@ -130,6 +130,7 @@ def test_package_install_refuses_broken_uv_without_unrestricted_fallback(
                 f". '{ps_quote(str(payload / 'scripts' / 'installer-engine.ps1'))}'",
                 install_package,
                 "function Resolve-VenueCopilot { return '__unused__' }",
+                "function Resolve-PluginResolve { return '__unused__' }",
                 (
                     "$ok = Install-AgentSshPackage "
                     f"-Python '{ps_quote(str(python))}' "
@@ -173,30 +174,33 @@ def test_uv_receives_the_complete_local_dependency_graph_in_one_call(tmp_path: P
         INSTALLER.read_text(encoding="utf-8"), "Install-AgentSshPackage", "\n$PluginDir =",
     )
     script = tmp_path / "batch.ps1"
+    (tmp_path / "plugin").mkdir()
     script.write_text("\n".join([
         "$ErrorActionPreference = 'Stop'",
         "$script:calls = @()",
         install_package,
         "function Resolve-VenueCopilot { return 'local-venue' }",
+        "function Resolve-PluginResolve { return 'local-plugin-resolve' }",
         "function Invoke-UvPipInstallResilient {",
         "  param($UvCommand, $Arguments, $PayloadDirToScrub)",
         "  $script:calls += ,@($Arguments)",
         "  return [pscustomobject]@{ ExitCode = 0; Output = '' }",
         "}",
         "$ok = Install-AgentSshPackage -Python 'python' -Source 'plugin' "
-        "-Dependencies @('local-procutil','local-venue','local-machine-transport') -UvCommand 'uv'",
+        "-Dependencies @('local-procutil','local-venue','local-machine-transport','local-plugin-resolve') -UvCommand 'uv'",
         "if (-not $ok -or $script:calls.Count -ne 2) { throw 'expected dependency batch and plugin install' }",
-        "foreach ($source in @('pyyaml>=6.0.3','local-procutil','local-venue','local-machine-transport')) {",
+        "foreach ($source in @('pyyaml>=6.0.3','local-procutil','local-venue','local-machine-transport','local-plugin-resolve')) {",
         "  if ($script:calls[0] -notcontains $source) { throw ('missing dependency ' + $source) }",
         "}",
         "if ($script:calls[0] -notcontains 'agent-venue-copilot') { throw 'lost forced venue reinstall' }",
+        "if ($script:calls[0] -notcontains 'agent-plugin-resolve') { throw 'lost forced preparation reinstall' }",
         "if ($script:calls[1] -contains '--no-deps' -or $script:calls[1] -notcontains 'plugin') {",
         "  throw 'plugin must resolve its closure after the dependency batch'",
         "}",
     ]), encoding="utf-8")
     result = subprocess.run(
         [PWSH, "-NoProfile", "-File", str(script)],
-        capture_output=True, text=True, timeout=10, check=False,
+        cwd=tmp_path, capture_output=True, text=True, timeout=10, check=False,
     )
     assert result.returncode == 0, result.stdout + result.stderr
 
@@ -233,6 +237,8 @@ def test_shell_canonical_install_includes_vendored_dependencies(tmp_path: Path, 
     (plugin / "libs" / "fleet-contracts" / "pyproject.toml").write_text("", encoding="utf-8")
     (plugin / "libs" / "machine-transport").mkdir(parents=True)
     (plugin / "libs" / "machine-transport" / "pyproject.toml").write_text("", encoding="utf-8")
+    (plugin / "libs" / "plugin-resolve").mkdir(parents=True)
+    (plugin / "libs" / "plugin-resolve" / "pyproject.toml").write_text("", encoding="utf-8")
     marker = tmp_path / "pip-fallback-ran"
     fake_python = tmp_path / "python"
     fake_python.write_text(
@@ -257,6 +263,7 @@ def test_shell_canonical_install_includes_vendored_dependencies(tmp_path: Path, 
                 "_resolve_remote_login_shell() { _resolve_vendored_lib remote-login-shell; }",
                 "_resolve_fleet_contracts() { _resolve_vendored_lib fleet-contracts; }",
                 "_resolve_machine_transport() { _resolve_vendored_lib machine-transport; }",
+                "_resolve_plugin_resolve() { _resolve_vendored_lib plugin-resolve; }",
                 install_package,
                 f"HAVE_UV={1 if have_uv else 0}",
                 f"UV_CMD={'fixture-uv' if have_uv else ''}",
@@ -293,6 +300,7 @@ def test_shell_canonical_install_includes_vendored_dependencies(tmp_path: Path, 
     assert str(plugin / "libs" / "remote-login-shell") in fallback_args
     assert str(plugin / "libs" / "fleet-contracts") in fallback_args
     assert str(plugin / "libs" / "machine-transport") in fallback_args
+    assert str(plugin / "libs" / "plugin-resolve") in fallback_args
     assert str(plugin) in fallback_args
 
 
@@ -345,6 +353,9 @@ def test_shell_canonical_install_resolves_sources_when_local_copy_absent(tmp_pat
     canonical_machine_transport = repo_root / "libs" / "machine-transport"
     canonical_machine_transport.mkdir(parents=True)
     (canonical_machine_transport / "pyproject.toml").write_text("", encoding="utf-8")
+    canonical_plugin_resolve = repo_root / "libs" / "plugin-resolve"
+    canonical_plugin_resolve.mkdir(parents=True)
+    (canonical_plugin_resolve / "pyproject.toml").write_text("", encoding="utf-8")
 
     marker = tmp_path / "pip-fallback-ran"
     fake_python = tmp_path / "python"
@@ -370,6 +381,7 @@ def test_shell_canonical_install_resolves_sources_when_local_copy_absent(tmp_pat
                 "_resolve_remote_login_shell() { _resolve_vendored_lib remote-login-shell; }",
                 "_resolve_fleet_contracts() { _resolve_vendored_lib fleet-contracts; }",
                 "_resolve_machine_transport() { _resolve_vendored_lib machine-transport; }",
+                "_resolve_plugin_resolve() { _resolve_vendored_lib plugin-resolve; }",
                 install_package,
                 f"HAVE_UV={1 if have_uv else 0}",
                 f"UV_CMD={'fixture-uv' if have_uv else ''}",
@@ -433,3 +445,4 @@ def test_powershell_installer_resolves_uv_editable_libs_via_shared_helper() -> N
     assert "$fleetContractsDir = Resolve-FleetContracts" in installer
     assert "Resolve-VendoredLib -LibName 'machine-transport'" in installer
     assert "$machineTransportDir = Resolve-MachineTransport" in installer
+    assert "Resolve-VendoredLib -LibName 'plugin-resolve'" in installer

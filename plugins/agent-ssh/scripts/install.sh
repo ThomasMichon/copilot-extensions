@@ -83,9 +83,10 @@ _resolve_zdd() { _resolve_vendored_lib zdd; }
 _resolve_remote_login_shell() { _resolve_vendored_lib remote-login-shell; }
 _resolve_fleet_contracts() { _resolve_vendored_lib fleet-contracts; }
 _resolve_machine_transport() { _resolve_vendored_lib machine-transport; }
+_resolve_plugin_resolve() { _resolve_vendored_lib plugin-resolve; }
 
 _install_agent_ssh_package() {
-    local agent_procutil_dir ssh_manager_dir venue_copilot_dir zdd_dir remote_login_shell_dir fleet_contracts_dir machine_transport_dir
+    local agent_procutil_dir ssh_manager_dir venue_copilot_dir zdd_dir remote_login_shell_dir fleet_contracts_dir machine_transport_dir plugin_resolve_dir
     agent_procutil_dir="$(_resolve_agent_procutil)" || {
         _fail 'Cannot locate agent-procutil library'
         return 1
@@ -114,10 +115,15 @@ _install_agent_ssh_package() {
         _fail 'Cannot locate machine-transport library'
         return 1
     }
+    plugin_resolve_dir="$(_resolve_plugin_resolve)" || {
+        _fail 'Cannot locate plugin-resolve library'
+        return 1
+    }
     if [[ -n "${UV_CMD:-}" ]]; then
         local lib_out pkg_out
         if ! lib_out=$(invoke_uv_pip_install_resilient "$UV_CMD" --python "$VENV_PYTHON" \
             --reinstall-package agent-venue-copilot --quiet \
+            --reinstall-package agent-plugin-resolve --refresh-package agent-plugin-resolve \
             "pyyaml>=6.0.3" \
             "$agent_procutil_dir" \
             "$PLUGIN_DIR/libs/dropin-registry" \
@@ -126,7 +132,8 @@ _install_agent_ssh_package() {
             "$zdd_dir" \
             "$remote_login_shell_dir" \
             "$fleet_contracts_dir" \
-            "$machine_transport_dir"); then
+            "$machine_transport_dir" \
+            "$plugin_resolve_dir"); then
             [[ -n "$lib_out" ]] && printf '%s\n' "$lib_out" >&2
             _fail 'Selected dependency installation failed'
             return 1
@@ -592,7 +599,7 @@ _materialize_snapshot_vendored_libs() {
     local snapshot_dir="$1"
     mkdir -p "$snapshot_dir/libs"
     local lib source destination
-    for lib in agent-procutil ssh-manager venue-copilot zdd remote-login-shell fleet-contracts machine-transport; do
+    for lib in agent-procutil ssh-manager venue-copilot zdd remote-login-shell fleet-contracts machine-transport plugin-resolve; do
         source="$(_resolve_vendored_lib "$lib")" || {
             _fail "Cannot locate required snapshot library: $lib"
             return 1
@@ -613,7 +620,7 @@ _materialize_snapshot_vendored_libs() {
     local manifest
     for manifest in "$snapshot_dir/pyproject.toml" "$snapshot_dir"/libs/*/pyproject.toml; do
         if ! awk '
-        BEGIN { split("agent-procutil ssh-manager venue-copilot zdd remote-login-shell fleet-contracts machine-transport", libs, " ") }
+        BEGIN { split("agent-procutil ssh-manager venue-copilot zdd remote-login-shell fleet-contracts machine-transport plugin-resolve", libs, " ") }
         /^\[/ { sources = ($0 ~ /^\[tool\.uv\.sources\][[:space:]]*$/) }
         sources && $0 !~ /^[[:space:]]*#/ {
             for (i in libs) {
@@ -778,7 +785,8 @@ _snapshot_is_reusable() {
         "libs/zdd/pyproject.toml" \
         "libs/remote-login-shell/pyproject.toml" \
         "libs/fleet-contracts/pyproject.toml" \
-        "libs/machine-transport/pyproject.toml"
+        "libs/machine-transport/pyproject.toml" \
+        "libs/plugin-resolve/pyproject.toml"
     do
         [[ -f "$current_snapshot/$rel" ]] || return 1
     done

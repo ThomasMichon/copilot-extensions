@@ -1,4 +1,4 @@
-"""Streamed stdlib receiver: bound preparation and its subprocess tree."""
+"""Shared streamed stdlib receiver: bound preparation and its subprocess tree."""
 
 from __future__ import annotations
 

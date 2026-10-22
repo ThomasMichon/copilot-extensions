@@ -209,7 +209,7 @@ release or authorized-rollout gates.
   stdio. Native cross-machine skill acceptance remains in the matrix below.
 - [ ] Close supported headed static-SSH CLI integration through its existing
   owner, without introducing another launcher.
-- [ ] Resolve the privileged launch's real identity/filesystem context and
+- [x] Resolve the privileged launch's real identity/filesystem context and
   prepare through its supported channel; do not assume it shares the
   unprivileged account's home.
 - [x] Preserve loopback account/platform locality checks and existing binding
@@ -224,6 +224,15 @@ the exact `2057089fd9880843d254f3a3650f9535419f1863` Dev snapshot promoted at
 match the merged source byte-for-byte. This includes #7841 and supersedes the
 earlier publication observation, not the requirement to verify subsequent
 slices, perform only authorized rollout or prove the effective running version.
+
+The latest observed Main is `fa23f644ef2675d1c3d8da17e786d97e62d558d7`,
+whose unpaused state records Dev `74f4f08eff4a12d8fddad306a9599c10d46605b7`
+promoted at `2026-10-22T16:05:49Z`. Privileged source #7899 and the independent
+CI repair #7907 are merged to Dev, not qualified as published by that snapshot.
+Promotion PR #7905 retains ownership of an earlier ready candidate after its
+merge job was cancelled; subsequent genuine Dev workflow run `39820353625`
+explicitly deferred rather than starting a competing promotion. Publication
+and effective-running proof remain owned here, without a manual gate bypass.
 
 - [ ] Verify publication from `dev` to `main`; perform only authorized rollout
   through the unified update path and record the effective running version.
@@ -325,6 +334,75 @@ on malformed configuration. These are reliability details, not new authority
 or a reason to create a daemon.
 
 ## Journal
+
+### 2026-10-22 - Qualify the existing headed SSH CLI owner
+
+- Bridge's supported `ssh:<alias> --cli` dispatch now forwards the current
+  controller's qualified selections and roots through `agent-ssh copilot`.
+  Its read-only repository query uses the actual remote checkout, and launch
+  refuses changed repository selection or an unsupported explicit worktree
+  selector instead of silently choosing an anchor.
+- The existing Worktrees anchor owner's dry-run resolves the actual native
+  identity, mux and checkout before reservation or preparation. Its root must
+  match the configured workspace's Git root; a managed child is not silently
+  redirected to a parent anchor. A nested workspace retains the existing
+  anchor-root execution behavior.
+- Attached and detached modes share the existing native launch and owned-seed
+  runner. Shared preparation registers effective repository settings before
+  startup; child-native sources and disables win, Git origins remain Git,
+  unrelated absolute local sources reflect and registered target-owned
+  absolute sources rebind. No duplicate automatic CLI directory flags are
+  added. Tasks wait for the compiled loadout, not merely registration or a
+  visible pane; attached mode then joins the same mux.
+- Unknown seed admission retains the exact operation and native session in a
+  separate delivery journal that survives disposable keeper replacement.
+  Recovery does not prepare, reload or recreate the session, and changed native
+  identity or checkout refuses a fresh fallback. Both SSH consumers reuse the
+  same existing bounded stdlib receiver supervisor, now library-owned.
+- Source validation: the complete SSH suite passes 652 cases with 123 explicit
+  skips in smaller file groups under the unchanged item/group limits. Bridge
+  guards pass 351 with eight skips; dispatch/shared-receiver coverage passes
+  69 with two skips. Final streamed preparation coverage passes 23 with one
+  POSIX-only skip. Both contracts and all 456 frozen HTTP fixtures pass without
+  packet or capture-provenance rewrites.
+- First-touch validation explicitly opts into the existing isolated Windows
+  snapshot test: stamp, remove the original payload and dependency trees,
+  provision through the public binstub, and import the installed SSH package
+  with its new shared helper. It passes in 93 seconds without native Copilot,
+  authentication, elevation or productive rollout. The opt-in first-use
+  tests previously allowed less than 25 seconds despite the installer's
+  documented 30-120-second contract; their own bounded provisioning allowance
+  now matches that contract on both platforms. Default unit/group budgets
+  remain unchanged. Two extracted installer fixtures also now supply their
+  actual directory and logging prerequisites.
+- Documentation impact: updated both plugin READMEs, the worked settings
+  table, the HTML host/child atlas and the shared-library contract. This closes
+  the existing venue-agnostic-launch intent through established owners; no new
+  launcher, broker or standing policy is introduced. Docker is unavailable on
+  this host, so the isolated first-touch test is not a Docker clean-room claim.
+  Native cross-machine skill acceptance, the simultaneous target-user/staged
+  union, privileged/container lifecycle and authorized running-version proof
+  remain open. Review, required CI and merge still gate this source candidate.
+
+### 2026-10-22 - Land privileged receiver source and continue the parent
+
+- #7899 merged at `f850d0be2540c35046d2ea80d8066e370141cdb1` after Copilot
+  approved exact head `8129431579a37c2dc791fb5757fc342448f6a149`, every required
+  check passed and all six inline findings plus the surviving-host body
+  finding were addressed. Credited the privileged source integration only.
+- Final targeted receiver/batch/host validation passes 170 cases with four
+  existing optional skips, including 51 privileged cases. Earlier expanded
+  preference/rehydration and host/preference sets passed 396 and 234 cases;
+  both wire contracts and all 456 frozen fixtures remain unchanged.
+- The required attribution gate passed on the actual final parity head.
+  The narrow infrastructure repair #7907 remains a separate merged source
+  change until trusted Main publishes it and its actual failure-path execution
+  is qualified; a passing old-policy check does not prove that new fallback.
+- Re-read the parent Plan and Validation Plan after merge. Supported headed
+  static SSH CLI is the next source-owner slice. Privileged native elevation,
+  different-account access, combined target-user/repository capabilities,
+  trusted-container/cross-machine lifecycle and authorized installed-version
+  proof remain open. No updater, service restart or live elevation was run.
 
 ### 2026-10-22 - Integrate the actual privileged receiver in source
 

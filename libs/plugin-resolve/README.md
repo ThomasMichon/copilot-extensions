@@ -125,6 +125,14 @@ streaming to the receiver's Python stdin, independent of its shell or OS.
 heredoc for script/stdin transports. Both require the actual execution checkout
 and support the same opt-in prepared-context frame; neither starts a transport
 or changes the productive process's account or environment.
+`plugin_resolve.receiver` is the shared streamed stdlib supervisor used by
+Bridge's static SSH ACP preparation and agent-ssh's headed CLI preparation.
+Its existing bounded process-group/Job contract contains installer descendants
+and drains both pipes before returning success, error or timeout; transports
+leave time for that cleanup instead of treating local SSH-client exit as
+receiver quiescence. The module is shipped as source over the existing channel,
+not imported from a preinstalled receiver runtime.
+
 An explicitly selected qualified source whose marketplace is unknown on the
 host is a deferred target lookup, not an invented marketplace or a host-cache
 fallback. Preparation resolves it against the target's own settings/catalog,

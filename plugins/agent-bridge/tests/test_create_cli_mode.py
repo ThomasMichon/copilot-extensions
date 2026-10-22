@@ -40,7 +40,7 @@ def _ns(**kw):
 
 
 class TestCmdCreateCliDispatch:
-    @pytest.mark.parametrize("prefix", ["codespace", "container"])
+    @pytest.mark.parametrize("prefix", ["codespace", "container", "ssh"])
     @pytest.mark.parametrize("detach", [False, True])
     def test_related_enablement_reaches_native_provider(self, monkeypatch, prefix, detach):
         from types import SimpleNamespace
@@ -65,13 +65,16 @@ class TestCmdCreateCliDispatch:
             targeting._cmd_create_cli(f"{prefix}:example", None, None, detach=detach)
         assert result.value.code == 0
         assert calls[0][1:] == ["namespace-target-repo", "example"]
-        assert calls[1][3:9] == [
+        offset = 5 if prefix == "ssh" else 3
+        if prefix == "ssh":
+            assert calls[1][3:5] == ["--expected-repository", "example/project"]
+        assert calls[1][offset:offset + 6] == [
             "--stage-plugin-disabled", "disabled@synthetic",
             "--stage-plugin", "enabled@synthetic", "--plugin-root", "/controller",
         ]
         assert ("--detach" in calls[1]) is detach
 
-    @pytest.mark.parametrize("prefix", ["codespace", "container"])
+    @pytest.mark.parametrize("prefix", ["codespace", "container", "ssh"])
     @pytest.mark.parametrize("configured_anchor", [False, True])
     @pytest.mark.parametrize("detach", [False, True])
     def test_controller_repository_precedes_anchor_for_native_payloads(
@@ -130,9 +133,10 @@ class TestCmdCreateCliDispatch:
             roots = [Path(argv[i + 1]) for i, arg in enumerate(argv) if arg == "--plugin-root"]
             assert roots == [controller, *([anchor] if configured_anchor else [])]
             assert "--stage-plugin" not in argv
-            assert argv[3:5] == ["--stage-plugin-disabled", "sample@synthetic"]
+            offset = 5 if prefix == "ssh" else 3
+            assert argv[offset:offset + 2] == ["--stage-plugin-disabled", "sample@synthetic"]
             assert ("--detach" in argv) is detach
-            plan = build_plan([{"source": argv[4], "enable": False}], roots)
+            plan = build_plan([{"source": argv[offset + 1], "enable": False}], roots)
             plans.append(plan)
             item = plan["plugins"][0]
             with tarfile.open(fileobj=io.BytesIO(base64.b64decode(item["archive"]))) as archive:

@@ -494,9 +494,9 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/session_targeting_cli.py",
-          "sha256": "a7b84b3db1ec555adcd10a46ba86e0da8f386efd903e4ef9a616fcb29595a36a",
-          "semantic": true,
-          "non_semantic_reason": null
+          "sha256": "9aeaafbc754a1c69ee0c30c5f6ba2e6e4b521cc5b90a974847d6205e267bbbd8",
+          "semantic": false,
+          "non_semantic_reason": "CLI-mode SSH dispatch now forwards repository-fenced related plugin selections to the existing agent-ssh owner and refuses its unsupported explicit worktree selector. HTTP request/response fields, keyed admission packets, readiness controls and protocol floors are unchanged; CLI dispatch and shared receiver tests cover the new process-boundary behavior without recapturing HTTP fixtures."
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/workspace_creation_cli.py",

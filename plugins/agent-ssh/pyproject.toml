@@ -25,9 +25,11 @@ dependencies = [
     "agent-remote-login-shell",
     "agent-fleet-contracts",
     "agent-machine-transport",
+    "agent-plugin-resolve",
 ]
 
 [tool.uv.sources]
+agent-plugin-resolve = { path = "../../libs/plugin-resolve", editable = true }
 agent-machine-transport = { path = "../../libs/machine-transport", editable = true }
 agent-fleet-contracts = { path = "../../libs/fleet-contracts", editable = true }
 # Shared Windows-headless / detached process-spawn kwargs. This is a

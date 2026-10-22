@@ -408,6 +408,14 @@ def build_parser() -> argparse.ArgumentParser:
     copilot_config_list.add_argument("--json", action="store_true")
     copilot_config_list.set_defaults(func=_cmd_copilot_config)
 
+    from .copilot_plugins import target_repo
+    target_repo_parser = sub.add_parser(
+        "namespace-target-repo", help="Print the configured SSH workspace repository for plugin selection.",
+    )
+    target_repo_parser.add_argument("target")
+    target_repo_parser.add_argument("--workspace")
+    target_repo_parser.set_defaults(func=target_repo)
+
     from .copilot_detach import add_copilot_subparser, add_forward_keeper_subparser
 
     add_copilot_subparser(sub)

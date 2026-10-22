@@ -498,7 +498,7 @@ async def test_receiver_early_exit_reaps_mutating_descendants(receiver, tmp_path
 @pytest.mark.asyncio
 @pytest.mark.parametrize("active_past_deadline", [False, True])
 async def test_lost_supervisor_does_not_orphan_descendants(tmp_path, active_past_deadline):
-    from agent_bridge import ssh_plugin_receiver
+    from plugin_resolve import receiver as ssh_plugin_receiver
 
     heartbeat, started = tmp_path / "heartbeat", tmp_path / "started"
     program = (

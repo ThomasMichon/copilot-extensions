@@ -33,14 +33,9 @@ from ssh_manager.keeper_holds import (
     KeeperHoldStore,
 )
 from venue_copilot import (
-    DEFAULT_TTL_SECONDS,
     VenueCopilotError,
-    registration_credentials_script,
     read_seed,
     resolve_daemon_port,
-    resolve_local_auth_token,
-    run_venue_copilot,
-    trust_folder_command,
 )
 from venue_copilot.detached import launch_detached, public_plan, stop_detached
 from venue_copilot.models import model_copilot_args
@@ -498,11 +493,25 @@ def ensure_keeper(
 class _SshAdapter:
     probe_attempts = _PROBE_ATTEMPTS
 
-    def __init__(self, *, target: str, ssh_config: Any, hold_id: str | None = None) -> None:
+    def __init__(self, *, target: str, ssh_config: Any, hold_id: str | None = None, plugin_args=None) -> None:
         self.target = target
         self.ssh_config = ssh_config
         self.hold_id = hold_id
+        self.plugin_args = plugin_args
+        self.pending_delivery = False
+        self.keeper_hold_acquired = False
         self._hold_updated_at: float | None = None
+
+    def prepare(self, plan: dict) -> dict:
+        from .copilot_plugins import prepare
+        return prepare(self.plugin_args, self, plan)
+
+    def record_pending_delivery(self, plan: dict, pending: dict | None) -> None:
+        from .copilot_delivery import record
+        if pending is not None:
+            pending = {**pending, "requested_workspace": self.plugin_args.workspace}
+        record(self.target, plan["scope_id"], pending)
+        self.pending_delivery = pending is not None
 
     def run(self, command: str, *, timeout: float) -> tuple[int, str, str]:
         return _remote(self.ssh_config, _bash(command), timeout=timeout)
@@ -523,15 +532,18 @@ class _SshAdapter:
         )
         raw_updated = result.get("hold_updated_at")
         self._hold_updated_at = float(raw_updated) if raw_updated is not None else None
+        self.keeper_hold_acquired = bool(result.get("hold_added"))
         return result
 
     def stop_keeper(self) -> bool:
-        return stop_keeper(
+        result = stop_keeper(
             self.target,
             hold_id=self.hold_id,
             probe=lambda mux: _probe_hold(self.ssh_config, mux),
             expected_updated_at=self._hold_updated_at,
         )
+        self.keeper_hold_acquired = False
+        return result
 
     def attach_command(self, plan: dict[str, Any]) -> str:
         return (
@@ -544,6 +556,28 @@ class _SshAdapter:
             f"agent-ssh copilot {shlex.quote(self.target)} --stop "
             f"--workspace {shlex.quote(plan['workspace'])}"
         )
+
+
+def _launch(args, adapter, plan, *, seed, refs=None):
+    from . import copilot_delivery, copilot_plugins
+
+    copilot_plugins.resolve_launch(adapter, plan)
+    pending = copilot_delivery.read(
+        args.target, plan["scope_id"], requested_workspace=args.workspace,
+        execution_workspace=plan["workspace"],
+    )
+    if pending is not None:
+        adapter.pending_delivery = True
+        return copilot_delivery.recover(adapter, plan, pending)
+    plan["bridge_owned_seed"] = True
+    return launch_detached(
+        adapter, plan, seed=seed, driver=args.driver,
+        copilot_args=(
+            _with_caller_model(list(getattr(args, "copilot_args", None) or []))
+            if getattr(args, "detach", False) else []
+        ),
+        ensure_mux=True, register_timeout=float(args.register_timeout), progress=_progress, refs=refs,
+    )
 
 
 def cmd_detach(args: argparse.Namespace) -> int:
@@ -569,19 +603,13 @@ def cmd_detach(args: argparse.Namespace) -> int:
         return 0
     try:
         _ensure_remote_tooling(ssh_config)
-        rc, payload = launch_detached(
-            _SshAdapter(target=args.target, ssh_config=ssh_config, hold_id=plan["scope_id"]),
-            plan,
-            seed=seed,
-            driver=args.driver,
-            copilot_args=_with_caller_model(list(getattr(args, "copilot_args", None) or [])),
-            ensure_mux=True,
-            register_timeout=float(args.register_timeout),
-            progress=_progress,
-            refs=refs,
+        rc, payload = _launch(
+            args, _SshAdapter(
+                target=args.target, ssh_config=ssh_config, hold_id=plan["scope_id"], plugin_args=args,
+            ), plan, seed=seed, refs=refs,
         )
         return _emit(rc, payload)
-    except (RuntimeError, subprocess.SubprocessError) as exc:
+    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
         return _fail(str(exc), plan)
 
 
@@ -596,6 +624,11 @@ def cmd_stop(args: argparse.Namespace) -> int:
     except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as exc:
         return _fail(str(exc))
     plan = plan_for(args)
+    from .copilot_plugins import resolve_launch
+    try:
+        resolve_launch(_SshAdapter(target=args.target, ssh_config=ssh_config), plan)
+    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
+        return _fail(str(exc), plan)
     held_mux = _holds().hold_mux_or_none(_state_key(args.target), plan["scope_id"])
     if held_mux:
         plan["mux_session"] = held_mux
@@ -627,91 +660,35 @@ def cmd_attached(args: argparse.Namespace) -> int:
         return _fail(str(exc))
 
     plan = plan_for(args)
-    daemon_port = resolve_daemon_port()
-    token = resolve_local_auth_token()
-    attached_hold_id: str | None = None
-    if daemon_port and token:
-        rc, _out, err = _remote(
-            ssh_config,
-            _bash(registration_credentials_script(token, daemon_port)),
-            timeout=60.0,
-        )
-        if rc != 0:
-            return _fail(
-                "could not provision registration credentials on the SSH target"
-                + (f" ({err.strip()})" if err.strip() else ""),
-                plan,
-            )
-        attached_hold_id = f"attached:{os.getpid()}:{uuid.uuid4().hex}"
-        ensure_keeper(
-            args.target,
-            venue_port=daemon_port,
-            mux=plan["mux_session"],
-            hold_id=attached_hold_id,
-            hold_pid=os.getpid(),
-            probe=lambda mux: _probe_hold(ssh_config, mux),
-        )
-    else:
-        print(
-            "[WARN] Could not resolve the host agent-bridge daemon's live "
-            "port/token; the remote session may not register back to it.",
-            file=sys.stderr,
-        )
-
-    def connect(remote_command: str) -> int:
-        workspace = shlex.quote(plan["workspace"])
+    if getattr(args, "ttl_seconds", None) is not None:
+        plan["reservation_ttl"] = float(args.ttl_seconds)
+    adapter = _SshAdapter(
+        target=args.target, ssh_config=ssh_config,
+        hold_id=f"attached:{os.getpid()}:{uuid.uuid4().hex}", plugin_args=args,
+    )
+    try:
+        rc, payload = _launch(args, adapter, plan, seed=seed)
+        if rc:
+            return _emit(rc, payload)
         command = _bash(
-            f"cd {workspace} && {trust_folder_command(plan['workspace'])} && "
-            f"{remote_command}"
+            "tmux attach-session -t " + shlex.quote("=" + plan["mux_session"]),
         )
-        argv = build_remote_exec_args(
-            ssh_config,
-            command,
-            pty=True,
-        )
-        proc = subprocess.Popen(  # noqa: S603 - argv is built from the configured SSH profile.
-            argv,
+        proc = subprocess.Popen(
+            build_remote_exec_args(ssh_config, command, pty=True),
             creationflags=no_window_flags(),
         )
-        if attached_hold_id:
-            try:
-                _update_keeper_hold_pid(args.target, attached_hold_id, proc.pid)
-            except BaseException:
-                # Never leave the spawned SSH/Copilot child orphaned once its
-                # hold is released by the caller's cleanup.
-                _reap_child(proc)
-                raise
+        try:
+            _update_keeper_hold_pid(args.target, adapter.hold_id, proc.pid)
+        except BaseException:
+            _reap_child(proc)
+            raise
         return int(proc.wait())
-
-    # The hold is released once, whatever ends the attach: a failed reservation
-    # before ``connect`` runs, a failed ``Popen``, or the session exiting.
-    try:
-        return run_venue_copilot(
-            plan["identity"],
-            connect=connect,
-            anchor=True,
-            ttl_seconds=(
-                DEFAULT_TTL_SECONDS
-                if getattr(args, "ttl_seconds", None) is None
-                else float(args.ttl_seconds)
-            ),
-            driver=args.driver,
-            seed=seed,
-            ensure_mux=True,
-        )
-    except VenueCopilotError as exc:
-        print(f"[FAIL] {exc}", file=sys.stderr)
-        return 1
+    except (OSError, ValueError, RuntimeError, VenueCopilotError, subprocess.SubprocessError) as exc:
+        return _fail(str(exc), plan)
     finally:
-        if attached_hold_id:
-            # Best-effort, like the detached cleanup: a keeper-lock failure here
-            # must not replace the attached session's own result.
+        if adapter.keeper_hold_acquired and not adapter.pending_delivery:
             try:
-                stop_keeper(
-                    args.target,
-                    hold_id=attached_hold_id,
-                    probe=lambda mux: _probe_hold(ssh_config, mux),
-                )
+                adapter.stop_keeper()
             except (RuntimeError, OSError) as exc:
                 print(f"[WARN] could not release the attached hold: {exc}", file=sys.stderr)
 
@@ -810,6 +787,13 @@ def add_copilot_subparser(sub) -> None:
     )
     p.add_argument("--seed")
     p.add_argument("--seed-file", dest="seed_file")
+    p.add_argument("--stage-plugin", dest="stage_plugins", action="append", default=[])
+    from .copilot_plugins import disabled_plugin
+    p.add_argument(
+        "--stage-plugin-disabled", dest="stage_plugins", action="append", type=disabled_plugin,
+    )
+    p.add_argument("--plugin-root", dest="plugin_roots", action="append", default=[])
+    p.add_argument("--expected-repository", help="Refuse if the selected SSH workspace changed repository")
     p.add_argument("--copilot-arg", dest="copilot_args", action="append", default=[])
     p.add_argument(
         "--ref-file", dest="ref_files", action="append", default=[], metavar="PATH",

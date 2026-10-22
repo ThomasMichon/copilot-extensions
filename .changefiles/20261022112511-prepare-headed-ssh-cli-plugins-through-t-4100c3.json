@@ -1,0 +1,13 @@
+{
+  "comment": "Prepare headed SSH CLI plugins through the existing native owner and retain readiness-bound seed delivery",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-ssh",
+      "type": "patch"
+    }
+  ]
+}

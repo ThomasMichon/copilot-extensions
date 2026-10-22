@@ -437,7 +437,17 @@ remove the deadline. Cancellation waits for the bounded
 channel to settle before propagating: killing a local SSH client alone does not
 prove that the remote writer stopped. A failed or cancelled preparation never
 opens productive ACP stdio. This is ACP preparation integration, not proof of
-headed SSH CLI parity or of a deployed/running release.
+native skill acceptance or of a deployed/running release.
+
+Supported headed SSH CLI dispatch uses the existing
+[`agent-ssh copilot` owner](../agent-ssh/README.md), not the static ACP launcher.
+Bridge queries its actual repository, forwards current-controller selections
+and roots, and fences the selected repository. Attached and detached modes
+prepare settings before native launch and use the existing Bridge-owned
+untyped-seed readiness gate; attached mode then joins that same mux.
+Unknown admission retains a durable delivery journal and the original native
+session instead of launching a replacement. Source controls are distinct
+from live cross-machine skill proof and authorized installed rollout.
 
 The receiver verifies the Git repository root separately from the productive
 execution directory. Registration and its raw compiled context belong to that

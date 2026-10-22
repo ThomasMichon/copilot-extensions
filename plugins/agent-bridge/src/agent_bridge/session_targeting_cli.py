@@ -676,9 +676,12 @@ def _cmd_create_cli(
         )
         sys.exit(1)
     argv = [resolved, "copilot", name]
+    if worktree_id and prefix == "ssh":
+        print("[FAIL] SSH CLI selects its configured --workspace; --worktree-id is not supported.", file=sys.stderr)
+        sys.exit(2)
     if worktree_id and prefix in {"codespace", "container"}:
         argv += ["--worktree-id", worktree_id]
-    if prefix in {"codespace", "container"}:
+    if prefix in {"codespace", "container", "ssh"}:
         from .local_cache_refresh import _checkout_root
         from .related_plugins import control_plane_anchors, related_plugins_for_repo
         from agent_procutil import no_window_flags
@@ -696,6 +699,8 @@ def _cmd_create_cli(
                 [resolved, "namespace-target-repo", name], capture_output=True, text=True,
                 check=True, timeout=90, creationflags=no_window_flags(),
             ).stdout.strip()
+            if prefix == "ssh" and repository:
+                argv += ["--expected-repository", repository]
             for plugin in related_plugins_for_repo(repository, anchors=roots) if repository else []:
                 argv += selection_cli_args({"source": plugin.source, "enable": plugin.enable})
             for root in roots:

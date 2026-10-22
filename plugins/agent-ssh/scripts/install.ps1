@@ -250,6 +250,10 @@ function Install-AgentSshPackage {
             if ($resolvedVenueCopilot -and $Dependencies -contains $resolvedVenueCopilot) {
                 $dependencyArgs += @('--reinstall-package', 'agent-venue-copilot')
             }
+            $resolvedPluginResolve = Resolve-PluginResolve
+            if ($resolvedPluginResolve -and $Dependencies -contains $resolvedPluginResolve) {
+                $dependencyArgs += @('--reinstall-package', 'agent-plugin-resolve', '--refresh-package', 'agent-plugin-resolve')
+            }
             $depResult = Invoke-UvPipInstallResilient -UvCommand $UvCommand -Arguments $dependencyArgs
             if ($depResult.ExitCode -ne 0) {
                 if ($depResult.Output) { Write-Host ($depResult.Output | Out-String) }
@@ -335,6 +339,7 @@ function Resolve-Zdd { return (Resolve-VendoredLib -LibName 'zdd') }
 function Resolve-RemoteLoginShell { return (Resolve-VendoredLib -LibName 'remote-login-shell') }
 function Resolve-FleetContracts { return (Resolve-VendoredLib -LibName 'fleet-contracts') }
 function Resolve-MachineTransport { return (Resolve-VendoredLib -LibName 'machine-transport') }
+function Resolve-PluginResolve { return (Resolve-VendoredLib -LibName 'plugin-resolve') }
 
 function Ensure-UvIndex {
     if ($env:UV_INDEX_URL -or $env:UV_DEFAULT_INDEX) { return }
@@ -698,7 +703,7 @@ function Materialize-SnapshotLibs {
     param([Parameter(Mandatory)][string]$SnapshotDir)
     $libsDir = Join-Path $SnapshotDir 'libs'
     if (-not (Test-Path $libsDir)) { New-Item -ItemType Directory -Path $libsDir -Force | Out-Null }
-    foreach ($lib in @('agent-procutil', 'ssh-manager', 'venue-copilot', 'zdd', 'remote-login-shell', 'fleet-contracts', 'machine-transport')) {
+    foreach ($lib in @('agent-procutil', 'ssh-manager', 'venue-copilot', 'zdd', 'remote-login-shell', 'fleet-contracts', 'machine-transport', 'plugin-resolve')) {
         $source = Resolve-VendoredLib -LibName $lib
         if (-not $source) { throw "Cannot locate required snapshot library: $lib" }
         $destination = Join-Path $libsDir $lib
@@ -718,7 +723,7 @@ function Materialize-SnapshotLibs {
         $text = [regex]::Replace($text, '(?ms)(^\[tool\.uv\.sources\][ \t]*\r?\n)(.*?)(?=^\[|\z)', {
             param($table)
             $body = $table.Groups[2].Value
-            foreach ($lib in @('agent-procutil', 'ssh-manager', 'venue-copilot', 'zdd', 'remote-login-shell', 'fleet-contracts', 'machine-transport')) {
+            foreach ($lib in @('agent-procutil', 'ssh-manager', 'venue-copilot', 'zdd', 'remote-login-shell', 'fleet-contracts', 'machine-transport', 'plugin-resolve')) {
                 $pattern = '(?m)^(?![ \t]*#)([^\r\n]*?)path\s*=\s*"\.\./\.\./libs/' + [regex]::Escape($lib) + '"([^\r\n]*)(\r?)$'
                 $body = [regex]::Replace($body, $pattern, {
                     param($entry)
@@ -822,7 +827,8 @@ function Test-SnapshotReusable {
         'libs\zdd\pyproject.toml',
         'libs\remote-login-shell\pyproject.toml',
         'libs\fleet-contracts\pyproject.toml',
-        'libs\machine-transport\pyproject.toml'
+        'libs\machine-transport\pyproject.toml',
+        'libs\plugin-resolve\pyproject.toml'
     )) {
         if (-not (Test-Path (Join-Path $SnapshotDir $rel))) { return $false }
     }
@@ -1198,8 +1204,13 @@ $vendoredDependencies = @(
     $zddDir,
     $remoteLoginShellDir,
     $fleetContractsDir,
-    $machineTransportDir
+    $machineTransportDir,
+    (Resolve-PluginResolve)
 )
+if (-not $vendoredDependencies[-1]) {
+    Write-Fail 'Cannot locate plugin-resolve library'
+    exit 1
+}
 $pkgInstalled = Install-AgentSshPackage `
     -Python $VenvPython `
     -Source $PluginDir `
