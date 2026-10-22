@@ -390,6 +390,11 @@ or a reason to create a daemon.
   secure public-registry TLS failed on this host; the changed Python ecosystem
   passes all 329 declarations. No certificate-verification bypass or global
   package-manager configuration change was made.
+- Required CI correctly identified the shared-library publication closure:
+  every consumer shipping `plugin-resolve` needs a changefile even though
+  the extracted supervisor is only invoked by Bridge and SSH. Extended the
+  same changefile to those consumers instead of bypassing the gate or
+  hand-editing versions; their runtime behavior remains unchanged.
 
 ### 2026-10-22 - Land privileged receiver source and continue the parent
 
