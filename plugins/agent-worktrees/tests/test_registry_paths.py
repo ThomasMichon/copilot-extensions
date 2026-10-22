@@ -770,6 +770,9 @@ def test_namespaced_registration_persists_cell_config_dir(
     _register_repo("example", "https://github.com/example/repo.git")
     monkeypatch.setattr(installer.output, "ok", lambda *_args, **_kwargs: None)
 
+    with pytest.raises(ValueError, match="identity receipt is unreadable"):
+        config.project_dir("example")
+
     installer.register_project("example")
 
     entry = installer.read_projects_registry()["projects"]["example"]

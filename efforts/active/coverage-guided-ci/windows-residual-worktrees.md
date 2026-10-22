@@ -87,7 +87,47 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Admitted fixture-semantic batches
 
+### B-REGISTRY-ASSERT refusal before registration persistence
+
+Baseline: the actual #7725 merge. Before real `register_project`,
+the namespaced registration case now requires the exact
+`identity receipt is unreadable` exception from `config.project_dir`.
+It then registers and verifies that the persisted config directory
+equals the validated project directory. The complete extended function
+matches pinned preserved source.
+
+All 31 original tests, fixture dependencies, decorators and assertions
+remain. The standalone
+`test_namespaced_project_state_requires_identity_receipt` is unchanged.
+Its historical removal delta is proposed for retirement from future
+extraction, not retirement of the refusal test or identity contract.
+Keeping it preserves original selection while adding the combined
+refusal/registration transition.
+
+Complete native Windows registry-path module: 31 passed, zero skips,
+49.75 seconds pytest / 67.97 preparation-cleanup inclusive. Exactly
+two work-stealing workers retain the original 30-second item watchdog,
+all marks/resource ceilings and the 240-second diagnostic group.
+Functional integration only, not quiet-host, whole-suite or repeated
+same-head qualification.
+
+This below-altitude assertion-only extraction changes no production,
+command, configuration, installation or architecture contract.
+Documentation impact is this ledger; no adopter guide changes.
+Clean-room provisioning and external-venue lanes are inapplicable
+to this native test-only change. Other B/N and production S/F/G/P/R/A
+contracts and parent qualification remain open.
+
 ### B-LEASE-CLI renewal assertions with original cases retained
+
+Actual disposition: #7725 merged as
+`6c3ccecbfe5248fa86af2922275a7b45a0224878`; full Copilot review
+`5608509338` approved exact head
+`1c2050a64b62ab8f07a010c1e1688847b8731dd1`.
+Overview, inline/general channels and threads had no findings;
+required CI was green and the child worktree is finalized.
+The reviewed removal/rename-delta retirement below is accepted;
+every original test identity remains.
 
 Baseline: the actual #7718 merge. Extend the explicit-disposition acquire
 case with a plain renewal that must preserve `at-rest`. Extend the
@@ -99,7 +139,7 @@ Every original name, fixture dependency, decorator and assertion remains;
 the standalone `test_renew_advances_disposition_to_at_rest` and
 `test_renew_without_flags_preserves_existing_disposition` are unchanged.
 The historical removal of those two cases and rename of the acquire
-cases are proposed for retirement from future extraction, not retirement
+cases are retired from future extraction, not retirement
 of tests or contracts. Keeping them preserves the original selection
 without preventing the combined acquire/renew assertions.
 
