@@ -11,7 +11,9 @@ from types import MappingProxyType
 
 from fleet_manager.gateway_service_channel import BODY_BYTES
 from fleet_manager.gateway_service_context import identifier
-from fleet_manager.gateway_service_handler import HandlerBinding, ServiceRequest, ServiceResponse
+from fleet_manager.gateway_service_handler import (
+    HandlerBinding, RequestDisconnected, ServiceRequest, ServiceResponse,
+)
 from single_instance_lease import OperationLockedError, OperationOwnershipError
 
 from .watch_replay import MAX_BATCH, ConsumerScope
@@ -113,6 +115,10 @@ class WatchGateway:
     async def handle(self, request: ServiceRequest) -> ServiceResponse:
         if type(request) is not ServiceRequest:
             raise TypeError("expected trusted service request")
+        try:
+            request.lifetime.check()
+        except RequestDisconnected:
+            return _response(503, {"status": "uncertain", "reason": "watch_request_disconnected"})
         caller = request.context
         if (
             (caller.fleet, caller.gateway, caller.slot) != (self.fleet, self.gateway, self.slot)
@@ -146,11 +152,15 @@ class WatchGateway:
             return _response(503, {"error": "watch_service_draining"})
         if len(self._tasks) >= 8:
             return _response(503, {"error": "watch_service_busy"})
-        task = asyncio.create_task(self._execute(scope, operation, payload, caller.expires_at))
+        task = asyncio.create_task(self._execute(scope, operation, payload, request))
         self._tasks.add(task)
         task.add_done_callback(self._completed)
         # Transport cancellation cannot release an in-progress disk transaction.
-        return await asyncio.shield(task)
+        try:
+            return await asyncio.shield(task)
+        except asyncio.CancelledError:
+            request.lifetime.close()
+            raise
 
     def _completed(self, task: asyncio.Task[ServiceResponse]) -> None:
         self._tasks.discard(task)
@@ -158,12 +168,15 @@ class WatchGateway:
             _LOG.error("watch-service-failed code=unexpected-operation-failure")
 
     async def _execute(
-        self, scope: ConsumerScope, operation: str, payload: dict, expires_at: int,
+        self, scope: ConsumerScope, operation: str, payload: dict, request: ServiceRequest,
     ) -> ServiceResponse:
         try:
             value = await asyncio.to_thread(
-                self.store.execute, scope, operation, payload, expires_at=expires_at,
+                self.store.execute, scope, operation, payload,
+                expires_at=request.context.expires_at, checkpoint=request.lifetime.check,
             )
+        except RequestDisconnected:
+            return _response(503, {"status": "uncertain", "reason": "watch_request_disconnected"})
         except ReplayCallerExpired:
             return _response(403, {"error": "watch_caller_expired"})
         except OperationLockedError:

@@ -74,20 +74,25 @@ class ReplayStore:
             )
             _atomic_write_json(self.path, core.snapshot())
 
-    def _current(self, expires_at: int) -> None:
+    def _current(self, expires_at: int, checkpoint: Callable[[], None] | None) -> None:
         if type(expires_at) is not int or expires_at <= self.clock():
             raise ReplayCallerExpired("caller context expired")
+        if checkpoint is not None:
+            checkpoint()
 
     def execute(
         self, scope: ConsumerScope, operation: str, payload: dict, *, expires_at: int,
+        checkpoint: Callable[[], None] | None = None,
     ) -> dict:
-        self._current(expires_at)
+        if checkpoint is not None and not callable(checkpoint):
+            raise ValueError("invalid request checkpoint")
+        self._current(expires_at, checkpoint)
         with self._lock() as lock:
-            self._current(expires_at)
+            self._current(expires_at, checkpoint)
 
             def commit(state: dict) -> None:
                 lock.assert_owned()
-                self._current(expires_at)
+                self._current(expires_at, checkpoint)
                 _atomic_write_json(self.path, state)
 
             if self.path.is_symlink():
@@ -99,24 +104,25 @@ class ReplayStore:
                 )
             except (ValueError, UnicodeError, RecursionError):
                 raise ReplayStoreInvalid("invalid persisted replay state") from None
-            self._current(expires_at)
+            self._current(expires_at, checkpoint)
             if operation == "pending":
                 swept = core.sweep_timeouts()
                 if swept["status"] == "uncertain":
-                    return swept
-                return core.pending(scope, **payload)
-            if operation == "register":
-                return core.register(scope, **payload)
-            if operation == "inspect":
-                return core.inspect(scope, **payload)
-            if operation == "cancel":
-                return core.cancel(scope, **payload)
-            if operation == "acknowledge":
-                return core.acknowledge(scope, **payload)
-            if operation == "capabilities":
+                    result = swept
+                else:
+                    result = core.pending(scope, **payload)
+            elif operation == "register":
+                result = core.register(scope, **payload)
+            elif operation == "inspect":
+                result = core.inspect(scope, **payload)
+            elif operation == "cancel":
+                result = core.cancel(scope, **payload)
+            elif operation == "acknowledge":
+                result = core.acknowledge(scope, **payload)
+            elif operation == "capabilities":
                 from .watch_replay import MAX_BATCH, MAX_BATCH_BYTES, RETENTION_SECONDS
 
-                return {
+                result = {
                     "protocol": "agent-pull-requests.watch/v1",
                     "operations": [
                         "capabilities", "register", "inspect", "pending", "acknowledge", "cancel",
@@ -124,4 +130,7 @@ class ReplayStore:
                     "max_batch": MAX_BATCH, "max_batch_bytes": MAX_BATCH_BYTES,
                     "receipt_retention_seconds": RETENTION_SECONDS,
                 }
-            raise ValueError("unsupported replay operation")
+            else:
+                raise ValueError("unsupported replay operation")
+            self._current(expires_at, checkpoint)
+            return result

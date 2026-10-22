@@ -250,8 +250,23 @@ account/resource permissions and persistent namespace; context does not grant
 forge credentials, cross-account access or administration. Handlers must be
 asynchronous and cooperate with cancellation and the existing deadline.
 Withdrawal, expiry, disconnect and channel replacement cancel their tasks;
-the Gateway also rechecks authority before response emission. This does not
-atomically fence an external effect already performed by a handler.
+the Gateway also rechecks authority before response emission. Every
+`ServiceRequest` additionally carries its own connector-local `RequestLifetime`.
+It is never serialized or supplied by the caller. The connector closes it
+before cancelling a request or retiring a channel, and on deadline/error/normal
+request completion. Retained worker threads can call `request.lifetime.check()`
+before their lookup/commit/result boundaries; closure raises the value-free
+`RequestDisconnected`. Closing one request does not close another.
+
+Revocation has disconnect semantics, not a distributed commit barrier.
+Policy publication does not wait for an uncertain remote effect. A lifetime
+check prevents work after an already-known disconnect; a disconnect racing an
+already-started effect can still leave it committed. This signal is neither
+authorization nor rollback, and cannot establish absence or license a replacement
+mutation. Services must retain effect custody until settlement and reconcile
+original request identities under fresh authorization. The connector checks
+lifetime again before handler invocation and each response emission; a lost
+request cannot produce a successful response EOF.
 Handler programming failures produce value-free diagnostics and explicit
 backend errors, never a success-shaped empty response.
 

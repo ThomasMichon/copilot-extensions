@@ -37,11 +37,22 @@ expiry again at the operation/commit boundary. A body, query or header cannot
 select a consumer, provider account, repository, namespace or callback.
 
 Gateway retains current channel/caller-policy admission and cancellation. The
-adapter's scope configuration is fixed for its lifetime. Cancellation is not
-an atomic revocation fence on an already executing disk commit; changing
-enrollment/policy while a mutation is in flight can still require original-ID
-reconciliation. Current accepted-revision/lifecycle integration and effect-side
-revocation fencing remain required before production activation.
+adapter's scope configuration is fixed for its lifetime. Revocation uses the
+same failure contract as network disconnect, not a distributed commit barrier:
+Gateway stops admission/emission and cancels affected requests without waiting
+for remote disk effects to settle. The connector closes each request's local
+`RequestLifetime` before cancelling its handler, including channel loss,
+replacement, deadline failure and connector shutdown.
+
+The adapter checks that lifetime before lookup, commit and result delivery.
+Work queued before a known disconnect cannot start a later transaction.
+An already-started commit can still finish: cancellation is not rollback, and
+disconnection is not proof of nonacceptance. Reconcile the original request/event
+identity under fresh current authorization; never invent another wait identity,
+switch accounts or arm a process fallback. The lifetime is local cancellation
+custody, not an offline permit or a second policy/enrollment authority. Durable
+accepted-revision custody, real provider enrollment and lifecycle integration
+remain separate production requirements.
 
 ## Versioned bounded operations
 
@@ -70,7 +81,10 @@ All other replay, retention and exact-completion semantics are unchanged.
 Malformed input is `400`, unbound/expired callers are `403`, unknown paths are
 `404`, wrong methods `405`, oversized bodies `413`, and non-JSON bodies `415`.
 Draining, capacity or transaction-lock contention returns explicit `503`
-refusals. Missing, invalid or inaccessible durable state returns
+refusals. A detected request disconnect returns
+`503 {"status":"uncertain","reason":"watch_request_disconnected"}` to a
+direct embedding; a disconnected transport cannot deliver that response.
+Missing, invalid or inaccessible durable state returns
 `503 {"status":"uncertain","reason":"watch_store_unavailable"}` without
 inventing nonacceptance. A post-replace uncertain durability acknowledgement
 returns the replay core's `uncertain/state_commit_uncertain` outcome.
@@ -81,7 +95,10 @@ process fallback. Reconcile the original request/event identities.
 
 Each disk transaction uses the existing `OperationLock` across load, namespace
 validation, replay operation and complete-envelope atomic commit. It checks
-caller expiry before loading and again before committing. There is no
+caller expiry and the supplied request-lifetime checkpoint before loading,
+again before committing and before returning a result. An independent
+`ReplayStore` embedding may omit the optional `checkpoint` callback; that
+provides no connector-disconnect fencing. There is no
 in-memory core shared across independent transactions and no stale cached
 writer that can overwrite a later transaction. A second process/thread
 receives explicit contention, never overlapping writes. This is local
@@ -109,6 +126,10 @@ reconciliation, adapter/connector replacement from disk, exact ACK retry and
 policy withdrawal all cross the real serving path. A separate real child
 process proves transaction-lock contention and restart reconciliation.
 Cancellation/drain and eight-operation bounds have focused handler tests.
+The real TLS tests pause before replay lookup and inside an already-started
+atomic write, then exercise both policy withdrawal and channel loss. Publication
+does not wait for the held write. The same original request reconciles after
+reauthorization/reconnection, without replacement or loss of transaction custody.
 
 These synthetic checks are not installed-service, forge-credential, Dispatch,
 container placement, first-provision installer, live-edge or fleet acceptance.

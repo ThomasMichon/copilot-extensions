@@ -180,6 +180,59 @@ def test_cancelled_request_keeps_transaction_custody_and_drain_waits(gateway, mo
             assert json.loads(response.body) == {"error": "watch_service_draining"}
             release.set()
             await gateway.drain(timeout=3)
+            assert json.loads(gateway.store.path.read_bytes())["records"] == []
+        finally:
+            release.set()
+            await asyncio.gather(pending, return_exceptions=True)
+            await gateway.drain(timeout=3)
+    asyncio.run(scenario())
+
+
+def test_disconnected_request_refuses_before_store_lookup(gateway, monkeypatch):
+    incoming = request("register", registration())
+    incoming.lifetime.close()
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("disconnected request reached storage")
+
+    monkeypatch.setattr(gateway.store, "execute", forbidden)
+    assert call(gateway, "register", registration(), lifetime=incoming.lifetime) == (
+        503, {"status": "uncertain", "reason": "watch_request_disconnected"},
+    )
+
+
+def test_commit_already_started_at_disconnect_keeps_receipt_and_custody(gateway, monkeypatch):
+    from agent_pull_requests import watch_replay_store
+
+    async def scenario():
+        started, release = threading.Event(), threading.Event()
+        write = watch_replay_store._atomic_write_json
+        original = registration()
+
+        def held(path, state):
+            started.set()
+            assert release.wait(5)
+            write(path, state)
+
+        monkeypatch.setattr(watch_replay_store, "_atomic_write_json", held)
+        pending = asyncio.create_task(gateway.handle(request("register", original)))
+        try:
+            assert await asyncio.to_thread(started.wait, 3)
+            pending.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await pending
+            with pytest.raises(OperationLockedError):
+                with OperationLock(gateway.store.root / "watch-replay.lock"):
+                    pass
+            with pytest.raises(TimeoutError, match="not drained"):
+                await gateway.drain(timeout=0.01)
+            release.set()
+            await gateway.drain(timeout=3)
+            inspect = {key: original[key] for key in ("request_id", "issued_at")}
+            receipt = gateway.store.execute(
+                SCOPE, "inspect", inspect, expires_at=int(time.time()) + 60,
+            )
+            assert receipt["status"] == "active"
             assert len(json.loads(gateway.store.path.read_bytes())["records"]) == 1
         finally:
             release.set()

@@ -11,7 +11,8 @@ import base64
 import logging
 import time
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from threading import Event
 from typing import TYPE_CHECKING
 
 from aiohttp import ClientWebSocketResponse
@@ -26,6 +27,31 @@ PROFILE = "caller-context-v1"
 
 if TYPE_CHECKING:
     from .gateway_service_connector import Exchange
+
+
+class RequestDisconnected(TransportError):
+    """Loss of request custody is not proof that its mutation did not commit."""
+
+    def __init__(self) -> None:
+        super().__init__("request-disconnected", 503)
+
+
+class RequestLifetime:
+    """Connector-local cancellation signal, safe to check from a disk worker.
+
+    This is not a credential, policy snapshot or atomic external-effect fence.
+    A close racing an already-started effect leaves its outcome uncertain.
+    """
+
+    def __init__(self) -> None:
+        self._closed = Event()
+
+    def close(self) -> None:
+        self._closed.set()
+
+    def check(self) -> None:
+        if self._closed.is_set():
+            raise RequestDisconnected()
 
 
 @dataclass(frozen=True)
@@ -57,6 +83,7 @@ class ServiceRequest:
     target: str
     headers: tuple[tuple[str, str], ...]
     body: bytes
+    lifetime: RequestLifetime = field(default_factory=RequestLifetime, repr=False, compare=False)
 
 
 @dataclass(frozen=True)
@@ -105,6 +132,7 @@ async def respond(
     binding: HandlerBinding, request: ServiceRequest,
 ) -> None:
     """One bounded response, using the same channel ACK/backpressure contract."""
+    request.lifetime.check()
     check(request.context.expires_at > time.time(), "caller-context-expired")
     try:
         response = await binding.handle(request)
@@ -113,6 +141,7 @@ async def respond(
     except Exception:
         logging.getLogger(__name__).error("service-handler-refused code=handler-failed")
         raise TransportError("handler-failed") from None
+    request.lifetime.check()
     check(request.context.expires_at > time.time(), "caller-context-expired")
     check(type(response) is ServiceResponse, "invalid-backend-response")
     response_status(response.status)
@@ -122,6 +151,7 @@ async def respond(
     await send(ws, {"type": "headers", "id": exchange.id,
                     "status": response.status, "headers": selected})
     for offset in range(0, len(response.body), CHUNK_BYTES):
+        request.lifetime.check()
         check(request.context.expires_at > time.time(), "caller-context-expired")
         exchange.sequence += 1
         exchange.ack = asyncio.get_running_loop().create_future()
@@ -130,5 +160,6 @@ async def respond(
             "data": base64.b64encode(response.body[offset:offset + CHUNK_BYTES]).decode("ascii"),
         })
         await exchange.ack
+    request.lifetime.check()
     check(request.context.expires_at > time.time(), "caller-context-expired")
     await send(ws, {"type": "end", "id": exchange.id})

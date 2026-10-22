@@ -1,0 +1,13 @@
+{
+  "comment": "Propagate connector-local request disconnects into replay lookup, commit and result checkpoints while preserving uncertain in-flight mutations and original-identity reconciliation.",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    },
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    }
+  ]
+}

@@ -161,6 +161,46 @@ def test_expiry_is_checked_again_after_loading_before_commit(store, monkeypatch)
     assert store.path.read_bytes() == before
 
 
+@pytest.mark.parametrize("stage", ["lookup", "commit", "result"])
+def test_request_disconnect_checks_real_lookup_commit_and_result_boundary(store, monkeypatch, stage):
+    from fleet_manager.gateway_service_handler import RequestDisconnected, RequestLifetime
+
+    lifetime = RequestLifetime()
+    before = store.path.read_bytes()
+    original = payload()
+    decode, write = storage.json_object, storage._atomic_write_json
+
+    def closed_lookup(raw):
+        lifetime.close()
+        return decode(raw)
+
+    def closed_commit(core, *args, **kwargs):
+        lifetime.close()
+        return register(core, *args, **kwargs)
+
+    def closed_result(path, state):
+        write(path, state)
+        lifetime.close()
+
+    register = storage.WatchReplay.register
+    if stage == "lookup":
+        monkeypatch.setattr(storage, "json_object", closed_lookup)
+    elif stage == "commit":
+        monkeypatch.setattr(storage.WatchReplay, "register", closed_commit)
+    else:
+        monkeypatch.setattr(storage, "_atomic_write_json", closed_result)
+    with pytest.raises(RequestDisconnected):
+        store.execute(SCOPE, "register", original, expires_at=int(time.time()) + 60,
+                      checkpoint=lifetime.check)
+    if stage == "result":
+        monkeypatch.setattr(storage, "_atomic_write_json", write)
+        assert execute(store, "inspect", {
+            key: original[key] for key in ("request_id", "issued_at")
+        })["status"] == "active"
+    else:
+        assert store.path.read_bytes() == before
+
+
 @pytest.mark.parametrize("raw", [
     b'{"one":1,"one":2}', b'{"nested":{"one":1,"one":2}}',
     b'{"value":NaN}', b'{"value":Infinity}', b"[]", b"null",

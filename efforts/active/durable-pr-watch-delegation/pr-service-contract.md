@@ -131,6 +131,15 @@ active placement/lifecycle custody or an atomic enrollment-revocation fence.
 Neither component activates a production role or dispatch consumer; the full
 delivery checklist remains open.
 
+Revocation uses the same failure semantics as a network disconnect. Current
+Gateway policy stops admission and emission and cancels the affected channel
+request; publication does not wait for an uncertain service-side effect.
+Connector-owned local request lifetime must be checked before subsequent
+lookups/commits/results, including offloaded disk work. An already-started
+commit can still finish. Retain its transaction custody and original request
+identity for reconciliation under fresh authorization. No distributed revocation
+barrier, retroactive rollback or proof of nonacceptance is promised.
+
 Delegated dispatch waits retain their existing finite positive timeout
 requirement. This slice does not impose a new mandatory timeout on supported
 native subscriptions that previously allowed no timeout.
@@ -200,8 +209,10 @@ conflicts and required repository review remain binding.
   operations, actual request/response bounds, trusted backend identity and
   admission/delegation verification point.
 - [ ] Bind and exercise current policy/enrollment authority and its
-  lookup/effect/emission fencing in the real serving path; an isolated
-  snapshot/permit DTO does not count as serving authority.
+  lookup/effect/emission checkpoints in the real serving path, with the
+  disconnect semantics above; an isolated snapshot/permit DTO does not count
+  as serving authority. Prove both refusal before a later effect and original-ID
+  reconciliation of a commit already in flight at policy withdrawal.
 - [ ] Define and test the PR worker's account/repository/action binding,
   provider-result validation and renewal/revocation outcomes without reusing
   an index identity or another operator's credentials.

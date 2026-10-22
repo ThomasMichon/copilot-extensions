@@ -159,6 +159,17 @@ preserving campaign/resource boundaries and resolving actual conflicts.
 It does not grant credentials, change deployment authority or authorize a
 rollout of unrelated machine components.
 
+Revocation failure contract, verbatim:
+
+> Treat revocation like any other network disconnect
+
+This supersedes the initially selected distributed-revocation-barrier approach.
+Policy withdrawal stops admission/emission and signals request cancellation;
+it does not wait for remote effect settlement or promise rollback. A commit
+already in flight remains uncertain and must reconcile its original identity.
+Known disconnected work must not start a subsequent lookup/commit, and existing
+transaction custody must remain held until that work actually settles.
+
 ## Plan
 
 ### Governed watch-owner cutover prerequisite
@@ -217,6 +228,13 @@ _Operator-required scope; agent-recommended implementation and validation._
   durable complete-envelope disk transactions, without activating a daemon,
   credentials or placement (confirmed by #7832). Production enrollment/effect
   fencing, observation, consumer and lifecycle acceptance remain below.
+- [x] Reuse the central native PR commands for thin-client status, checkout-free
+  creation, policy-gated completion and wait, preserving the default GitHub
+  interface without another forge adapter (confirmed by #7850). Broader client,
+  serving and deployed conformance remain below.
+- [ ] Land and exercise connector-owned request lifetime through PR replay
+  lookup/commit/result boundaries. Treat current-policy withdrawal as network
+  disconnect, preserving uncertain in-flight commits and original-ID recovery.
 - [ ] Define and deliver the [PR-service consumer contract](pr-service-contract.md)
   through normal reviewed source changes, including missing shared seams and
   real serving/consumer proof. Consult related campaigns without a separate
@@ -423,11 +441,17 @@ back; no feature is declared complete or source custodian changed.
 
 All items below are **agent-recommended** acceptance checks.
 
+- [x] Native PR client: preserve provider evidence and central publication/claim/
+  merge gates; refuse invalid selection and blank pushed heads before effects;
+  prove option reparsing and final executable argument preservation (#7850).
 - [x] Unit: failing/nonzero/timeout callback stays pending; acknowledgement removes only its own registration; replay preserves event identity and payload; cancellation and re-registration are generation-safe (#6019, #7160 and #7714).
 - [x] Unit: durable event survives crash before delivery, crash after remote commit before acknowledgement, restart, and supported daemon cutover; unrelated subscribers continue to receive notifications (#6019, #7160 and #7714).
 - [x] Unit: already-terminal PR, finite timeout, polling outage, expired wait, and malformed inputs produce the intended explicit results (#6019 and #7714).
 - [x] Compatibility: old/new client, coordinator, and watch-owner combinations retain legacy schemas and a functioning process fallback; missing optional plugin affects only the optimization (#7714).
 - [ ] Credentials: explicit CLI credentials and command-backed configuration still authenticate; no credential value is persisted in callback argv, subscription state, result diagnostics, or logs.
+- [ ] Service disconnect: real Gateway policy withdrawal and channel loss stop
+  later replay work, preserve custody of already-started commits, emit no false
+  success and reconcile the same request after fresh authorization/reconnect.
 - [x] Integration: real isolated watch owner and coordinator exercise subscribe/prepare/arm/finish, coordinator outage then recovery, duplicate delivery, stale-generation callback, and registration failure without a duplicate wait owner (#7714).
 - [x] Fresh state: the supported first-touch path establishes only the owning plugin's state; two independent subscribers share one PR observation stream and need no per-task waiter process (#7714; installed adoption acceptance remains a separate prerequisite).
 - [x] Platform: bounded callback launch and shutdown/restart behavior pass on Windows and Linux, using existing contained test tooling (exact-head source acceptance `39716960139`; installed native-account proof remains open).
@@ -469,6 +493,54 @@ callback an implicit credential store.
   preserving delivered partials, existing source/resource custodians and gates.
   Reviewed actual merge and current full readback precede administrative
   supersession; no capability, native trial or adoption is declared complete.
+
+### 2026-10-22 - Treat service revocation as request disconnect
+
+- The operator clarified that revocation has ordinary network-disconnect
+  semantics, superseding a distributed revocation barrier. This closes the
+  design choice without changing the separate Gateway/service topology or
+  authorizing a listener, credential, placement or runtime rollout.
+- The connector supplies one local, non-wire request lifetime, closed before
+  cancellation/channel retirement and checked by the handler before response
+  emission. The PR adapter passes that same signal into its existing complete
+  replay transaction and retains shielded disk custody after disconnect.
+- Lookup, commit and result checkpoints refuse already-known disconnected work.
+  A write already started when withdrawal arrives may commit; response loss
+  never proves absence, resets the original deadline or permits a second wait.
+- The initial focused source run passes 106 cases; the complete affected
+  Gateway-profile and PR replay selection passes 400 cases. Real TLS/PoP/channel
+  tests withdraw policy and disconnect before lookup and inside the atomic
+  writer. They prove publication proceeds while the write is held and original-ID
+  reconciliation after reauthorization/reconnect. Review/current publication
+  gates remain pending; no production acceptance is claimed.
+
+### 2026-10-22 - Merge the native client slice and continue the service contract
+
+- #7850 merged as `a750ccc3b446f7dea85f297143a61b48b2a0bb4d` at
+  `2026-10-22T11:14:01Z`. The final published head
+  `79901927c324a4d6bbd7012168085ac6c19ead46` received current-head
+  Copilot approval with no open issues; all six review threads were resolved
+  and every required check was green. The managed merge used the documented
+  Maintainer exception for the additional CODEOWNER vote, not a CI bypass.
+- Current focused source contracts passed: 149 tests, with 10 POSIX-only
+  process-lifetime cases skipped on Windows. The real Windows boundaries
+  include all four commands through final Python, separate consumer reparsing,
+  empty/quote/multiline/Unicode preservation and old-host refusal before effects.
+  Fatal lint, module-size and install-contract checks passed.
+- A PR-description edit temporarily removed its source marker. The attribution
+  check caught the actual missing metadata; the description was repaired using
+  the managed preparation command and its assigned public codename. Current
+  required attribution passed before merge; no dummy commit or bypass was used.
+- Re-read the complete Plan and Validation Plan after merge. Only the bounded
+  native client slice is closed. Promotion, authorized installed proof, actual
+  forge/credential parity and all fleet acceptance remain open; no running
+  runtime, credential, daemon or fleet placement changed.
+- Next: close the PR service's current policy/enrollment and effect-side
+  admission fence through the actual serving boundary, reusing the fleet-owned
+  contracts rather than treating the replay store's transaction lock or a
+  caller-context SDK as deployment/effect authority. Credentials, the shared
+  dispatch consumer, independently installable lifecycle and live acceptance
+  retain their own subsequent gates. This effort remains Active.
 
 ### 2026-10-22 - Reuse central native PR operations without a second provider
 

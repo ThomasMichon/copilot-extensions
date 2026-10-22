@@ -9,9 +9,10 @@ from types import SimpleNamespace
 import pytest
 
 from fleet_manager.gateway_service_channel import BODY_BYTES, TransportError
-from fleet_manager.gateway_service_connector import ServiceConnector
+from fleet_manager.gateway_service_connector import Exchange, ServiceConnector
 from fleet_manager.gateway_service_handler import (
-    PROFILE, CallerContext, HandlerBinding, ServiceRequest, ServiceResponse,
+    PROFILE, CallerContext, HandlerBinding, RequestDisconnected, RequestLifetime,
+    ServiceRequest, ServiceResponse, respond,
 )
 from gateway_service_transport_fixtures import eventually, running
 from test_gateway_service_policy import Harness
@@ -81,6 +82,9 @@ def test_real_channel_identity_ignores_body_query_and_headers(tmp_path):
                                             "content-type": "application/octet-stream"}
             with pytest.raises(FrozenInstanceError):
                 request.context.principal = "caller-b"
+            await eventually(lambda: not rig.connectors[-1].active)
+            with pytest.raises(RequestDisconnected):
+                request.lifetime.check()
             assert rig.backends[0].requests == []
             selected = await rig.auth("/api")
             selected["X-Identity"] = "caller-a"
@@ -114,8 +118,10 @@ def test_real_caller_withdrawal_cancels_handler_before_completion(tmp_path):
     async def scenario():
         async with running(tmp_path) as rig:
             started, stopped = asyncio.Event(), asyncio.Event()
+            received = []
 
             async def handle(request):
+                received.append(request)
                 started.set()
                 try:
                     await asyncio.Event().wait()
@@ -132,9 +138,92 @@ def test_real_caller_withdrawal_cancels_handler_before_completion(tmp_path):
                     assert response.status == 403
                 await asyncio.wait_for(stopped.wait(), 3)
                 assert not rig.connectors[-1].active
+                with pytest.raises(RequestDisconnected):
+                    received[0].lifetime.check()
             finally:
                 pending.cancel()
                 await asyncio.gather(pending, return_exceptions=True)
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("loss", ["channel", "replacement", "connector"])
+def test_real_transport_loss_closes_retained_lifetime_before_cancelling_handler(tmp_path, loss):
+    async def scenario():
+        async with running(tmp_path) as rig:
+            started, stopped = asyncio.Event(), asyncio.Event()
+            received = []
+
+            async def handle(request):
+                received.append(request)
+                started.set()
+                try:
+                    await asyncio.Event().wait()
+                finally:
+                    with pytest.raises(RequestDisconnected):
+                        request.lifetime.check()
+                    stopped.set()
+
+            await connect_handler(rig, handle)
+            pending = asyncio.create_task(rig.request("/api/register", "POST"))
+            try:
+                await asyncio.wait_for(started.wait(), 3)
+                if loss == "channel":
+                    await rig.state.channels["service-a"].close()
+                elif loss == "replacement":
+                    await connect_handler(rig, handle)
+                else:
+                    rig.tasks[-1].cancel()
+                await asyncio.wait_for(stopped.wait(), 3)
+                async with await pending as response:
+                    assert response.status != 200
+                    assert await response.json() == {"error": "outcome-unknown"}
+                assert len(received) == 1
+            finally:
+                pending.cancel()
+                await asyncio.gather(pending, return_exceptions=True)
+    asyncio.run(scenario())
+
+
+def test_lifetimes_are_independent_and_never_reopen():
+    first, second = RequestLifetime(), RequestLifetime()
+    first.close()
+    first.close()
+    with pytest.raises(RequestDisconnected):
+        first.check()
+    second.check()
+
+
+@pytest.mark.parametrize("stage", ["before-handler", "before-headers", "before-end"])
+def test_disconnected_handler_cannot_emit_a_successful_response(stage):
+    async def scenario():
+        request = ServiceRequest(
+            CallerContext("fleet-a", "gateway-a", "service-a", "caller-a", 2**52),
+            "GET", "/", (), b"",
+        )
+        sent, handled = [], []
+
+        class Socket:
+            async def send_str(self, raw):
+                sent.append(raw)
+                if stage == "before-end":
+                    request.lifetime.close()
+
+        async def handle(incoming):
+            handled.append(incoming)
+            if stage == "before-headers":
+                incoming.lifetime.close()
+            return ServiceResponse(200)
+
+        if stage == "before-handler":
+            request.lifetime.close()
+        with pytest.raises(RequestDisconnected):
+            await respond(
+                Socket(), Exchange("1" * 48),
+                HandlerBinding("fleet-a", "gateway-a", handle), request,
+            )
+        assert len(handled) == (0 if stage == "before-handler" else 1)
+        assert len(sent) == (1 if stage == "before-end" else 0)
+        assert not any('"end"' in frame for frame in sent)
     asyncio.run(scenario())
 
 
