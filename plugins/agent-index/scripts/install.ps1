@@ -1728,7 +1728,7 @@ function Get-ActivationRole {
     $previousPreference = $ErrorActionPreference
     try {
         $ErrorActionPreference = 'Continue'
-        $role = (& $python.Source -E -X utf8 $resolver --repo $repoRoot --machine $me 2>$null |
+        $role = (& $python.Source -B -E -X utf8 $resolver --repo $repoRoot --machine $me 2>$null |
             Select-Object -Last 1)
         $resolverExitCode = $LASTEXITCODE
     } finally {

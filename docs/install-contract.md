@@ -1543,6 +1543,13 @@ this helper does not itself enroll an old shell installer's build lifetime.
 Installation-cell provenance/receipt governance and its receipt-only
 reservation release remain independently binding.
 
+Read-only helper execution must not mutate the admitted payload. The runtime
+primitive loads its canonical sidecar source directly without creating or
+consuming bytecode caches; Windows Index role resolution similarly suppresses
+bytecode writes. A cold first invocation must preserve the same full payload
+fingerprint through construction completion. Do not weaken the fingerprint
+by ignoring newly generated files to make an unstable constructor pass.
+
 Optional PowerShell construction cleanup probes the loaded `Function:` provider
 with `Test-Path -LiteralPath`, not `Get-Command`. Command discovery can import an
 autoloadable module even with `-ErrorAction SilentlyContinue`; a cold installer
