@@ -1048,3 +1048,9 @@ authorized installed proof remain distinct obligations.
   receipt and diagnostic before hanging; both rendered command/form paths
   show them and retain the local draft. The final contained result/transport
   selection passed 27 tests with one explicit platform skip.
+- The next review found that a text command's refresh did not invalidate an
+  older in-flight list. Apply the existing generation invalidation before
+  ensuring the originating scope; form refresh also retains that captured
+  scope instead of a later selection. Both rendered paths now hold an older
+  fetch across command completion and prove its stale result is discarded.
+  The contained result/pivot selection passed 115 tests; changed lint passed.

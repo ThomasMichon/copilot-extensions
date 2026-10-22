@@ -286,10 +286,16 @@ class PickerScreenPivotActionsMixin:
             from .configuration_form import CommandResultScreen
             scope = self._pivot_scope_key()
             argv = _pivots.format_template(action.run, ctx)
+
+            def work():
+                result = rt.run_resolved(argv, preserve_output=True)
+                rt.invalidate()
+                return result
+
             self._run_command_result(
                 action.label,
-                lambda: rt.run_resolved(argv, preserve_output=True),
-                lambda: rt.repoll(scope),
+                work,
+                lambda: rt.ensure(scope),
                 CommandResultScreen(
                     action.label, context=reg.label, return_label=f"Return to {reg.label}",
                 ),
@@ -477,6 +483,7 @@ class PickerScreenPivotActionsMixin:
         rt = self._pivot_runtime(reg)
         argv = _pivots.format_form_template(action.run, ctx, values)
         task_id = ctx.get("task_id")
+        scope = self._pivot_scope_key()
         text_result = getattr(action, "result_view", None) == "text"
         result_screen = None
 
@@ -544,7 +551,7 @@ class PickerScreenPivotActionsMixin:
                 # runtime's generation guard, a Confirmed card's status updates in
                 # the pivot the moment the coordinator round-trip lands.
                 try:
-                    rt.ensure(self._pivot_scope_key())
+                    rt.ensure(scope)
                 except Exception:
                     pass
                 self.refresh()

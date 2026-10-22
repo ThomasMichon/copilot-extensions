@@ -4,6 +4,7 @@ import asyncio
 import json
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
 import pytest
@@ -197,3 +198,63 @@ def test_ordinary_command_timeout_retains_terse_compatibility(monkeypatch):
     ]
     ok, message = tasks.RegisteredPivotRuntime(reg).run_resolved(argv)
     assert not ok and message == str(subprocess.TimeoutExpired(argv, 2))[:200]
+
+
+@pytest.mark.parametrize("form", [False, True])
+def test_completed_text_action_invalidates_an_older_inflight_list(
+    tmp_path, monkeypatch, form,
+):
+    monkeypatch.setenv("AGENT_WORKTREES_STEER_DRAFTS", str(tmp_path))
+    action = {
+        "label": "Change", "run": [sys.executable, "-c", "print('accepted')"],
+        "result_view": "text",
+    }
+    if form:
+        action.update(kind="form", fields_from="card.request_input")
+    reg = pivots.parse_manifest(_manifest(action), name="example", source_path="fixture.json")
+    runtime = tasks.RegisteredPivotRuntime(reg)
+    entered, release, finished = threading.Event(), threading.Event(), threading.Event()
+    calls = []
+
+    def listing(context):
+        calls.append(context["machine"])
+        if len(calls) == 1:
+            entered.set()
+            assert release.wait(5)
+            finished.set()
+            return "ready", [{"id": "before-command"}], "", {}
+        return "ready", [{"id": "after-command"}], "", {}
+
+    monkeypatch.setattr(runtime, "_exec_list", listing)
+
+    async def run():
+        app = PickerApp(_fixture_source(), live=False)
+        async with app.run_test() as pilot:
+            screen = app.query_one(PickerScreen)
+            await _wait_for_initial_setup(pilot, screen)
+            monkeypatch.setattr(screen, "_pivot_runtime", lambda selected: runtime)
+            monkeypatch.setattr(screen, "_pivot_scope_key", lambda: "original-scope")
+            runtime.ensure("original-scope")
+            await _wait(pilot, entered.is_set)
+            generation = runtime._gen
+            if form:
+                screen._run_pivot_form_submit(
+                    reg, reg.actions[0], {"task_id": "sample-task"}, "Sample", {},
+                )
+            else:
+                screen._run_task_action(reg, reg.actions[0], {"id": "sample-task"})
+            monkeypatch.setattr(screen, "_pivot_scope_key", lambda: "other-scope")
+            await _wait(pilot, lambda: isinstance(app.screen, CommandResultScreen) and not app.screen.pending)
+            assert runtime._gen > generation
+            release.set()
+            await _wait(pilot, lambda: finished.is_set() and runtime.get("original-scope")[0] == "idle")
+            runtime.ensure("original-scope")
+            await _wait(pilot, lambda: runtime.get("original-scope")[0] == "ready")
+            assert runtime.get("original-scope")[1] == [{"id": "after-command"}]
+            assert calls == ["original-scope", "original-scope"]
+
+    try:
+        asyncio.run(run())
+    finally:
+        release.set()
+        runtime.close()
