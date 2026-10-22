@@ -74,6 +74,11 @@ def test_released_dtssh_leaks_are_classified_before_reaping() -> None:
     assert "$scheduledHealthCheck = (Get-Date) -ge $nextHealthCheckAt" in text
     assert "$forceHealthCheck -or $scheduledHealthCheck" in text
     assert "$scheduledHealthCheck -and $tunnelId" in text
+    retry = text.index("if ($scheduledHealthCheck -and -not $tunnelId)")
+    assert text.index("$tunnelId = Resolve-TunnelId $Alias", retry) < text.index(
+        "$conns = Get-HostConnections $tunnelId", retry
+    )
+    assert "relay health monitoring enabled" in text
     assert "$sessionPressure.ActiveRoots -gt 0" in text
     assert "PRESSURE REAP deferred:" in text
     assert "PRESSURE REAP:" in text

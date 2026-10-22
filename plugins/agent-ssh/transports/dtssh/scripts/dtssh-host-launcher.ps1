@@ -60,7 +60,8 @@
     (`%LOCALAPPDATA%\dtssh\host\service-<alias>.tunnel`), falling back to matching
     the alias against `devtunnel list` descriptions. If no tunnel id can be
     resolved, the launcher degrades to process-only monitoring (restart on child
-    exit) so it never becomes worse than the old one-shot behavior.
+    exit) so it never becomes worse than the old one-shot behavior, and retries
+    resolution on every scheduled health check until relay monitoring can start.
 
     HEADLESS. The `dtssh host` child is started with a detached, redirected,
     out-of-process `Start-Process -NoNewWindow` — NOT in-process (`& $dtssh`).
@@ -679,7 +680,7 @@ try {
 
 $tunnelId = Resolve-TunnelId $Alias
 if ($tunnelId) { Write-Log "monitoring tunnel '$tunnelId' (alias $Alias): health every ${HealthCheckSec}s, pressure every ${PressureCheckSec}s, restart after $ConsecutiveFailures unhealthy checks" }
-else { Write-Log "could not resolve tunnel id for alias '$Alias' — process-only monitoring (restart on child exit)" 'WARN' }
+else { Write-Log "could not resolve tunnel id for alias '$Alias' — process-only monitoring (restart on child exit) until it resolves" 'WARN' }
 
 # Adopt an already-running host (e.g. from a prior boot) instead of duplicating.
 $hostProc = $null
@@ -812,6 +813,13 @@ try {
             # sshd from a usable one. Forced pressure-path checks stay local;
             # only the scheduled health cadence queries the remote relay.
             $relayOk = $true
+            # A first-ever host start persists its tunnel record only after the
+            # host registers, so startup resolution can miss it. Keep retrying on
+            # the relay cadence; otherwise a dead relay is never detected.
+            if ($scheduledHealthCheck -and -not $tunnelId) {
+                $tunnelId = Resolve-TunnelId $Alias
+                if ($tunnelId) { Write-Log "resolved tunnel id '$tunnelId' (alias $Alias); relay health monitoring enabled" }
+            }
             if ($scheduledHealthCheck -and $tunnelId) {
                 $conns = Get-HostConnections $tunnelId
                 if ($conns -eq 0) { $relayOk = $false }

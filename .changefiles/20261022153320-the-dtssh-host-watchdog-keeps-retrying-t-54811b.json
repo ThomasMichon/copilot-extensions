@@ -1,0 +1,9 @@
+{
+  "comment": "The dtssh host watchdog keeps retrying tunnel-id resolution on its relay health cadence, so a host whose tunnel was created after the watchdog started still restarts when its relay connection drops instead of staying unreachable.",
+  "changes": [
+    {
+      "plugin": "agent-ssh",
+      "type": "patch"
+    }
+  ]
+}
