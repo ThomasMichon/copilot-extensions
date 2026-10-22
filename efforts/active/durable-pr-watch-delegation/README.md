@@ -37,7 +37,12 @@ waiters and supported native PR operation remain working alternatives.
   `Fleet-hosted PR service expansion` slice. #5789, #6030/#5861,
   #6236/#6240/#6241 and #7051 retain routing, deployment, integrated lifecycle
   and PR-conformance ownership. This effort consumes their contracts rather
-  than taking over those campaigns.
+  than taking over those campaigns. Retained ownership does not require
+  asynchronous sign-off before source contribution: the delegation driver
+  closes consumer gaps, including narrowly scoped shared-module changes,
+  through normal review and tests. Consult related campaigns without waiting
+  for acknowledgements; coordinate concrete conflicts rather than treating
+  another issue's owner as an additional permission gate.
 - **Review sequencing:** Land the fleet vision/plan amendment before its runtime
   implementation. Keep the fleet scope separate from the installer prerequisite.
   The later operator disposition accepts reader residual #7208 and stops its
@@ -131,6 +136,16 @@ not shared tenancy. Federation implementation and concrete live deployment are
 not authorized by this plan amendment. The implementation sequencing and
 validation details below and in the linked plan are **agent-recommended**.
 
+Coordination correction, verbatim:
+
+> We need to break "retained-owner agreements"; it's causing deadlocks
+
+This removes the separate owner-agreement prerequisite for source work. The
+driver proposes and implements missing contracts through ordinary reviewed PRs,
+preserving campaign/resource boundaries and resolving actual conflicts.
+It does not grant credentials, change deployment authority or authorize a
+rollout of unrelated machine components.
+
 ## Plan
 
 ### Governed watch-owner cutover prerequisite
@@ -179,9 +194,11 @@ _Operator-required scope; agent-recommended implementation and validation._
 - [x] Review and land the first-class PR plugin/service vision, single-operator
   fleet invariant and [fleet service plan](fleet-pr-service.md) before building
   its new runtime paths (confirmed by #7189).
-- [ ] Agree the [PR-service consumer contract](pr-service-contract.md) with the
-  retained Gateway, credential, dispatch and placement owners before wiring
-  unsupported routes or treating an isolated admission API as service authority.
+- [ ] Define and deliver the [PR-service consumer contract](pr-service-contract.md)
+  through normal reviewed source changes, including missing shared seams and
+  real serving/consumer proof. Consult related campaigns without a separate
+  owner-sign-off gate; do not advertise unsupported routes or treat an isolated
+  admission API as service authority.
 - [ ] Build out the existing PR plugin as the PR-domain client/service surface;
   preserve supported worktree publication policy and provider behavior through
   shared contracts rather than another forge implementation.
@@ -255,6 +272,32 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-10-21 - Remove the retained-owner approval deadlock
+
+- The operator rejects retained-owner agreements as a source-work prerequisite.
+  Supersedes the agreement-first next-step wording in the earlier reconciliation
+  below: #7763 remains a valid inventory/release record, not permission to
+  suspend implementation until another campaign acknowledges a request.
+- The delegation driver owns concrete contract decisions, the consumer
+  implementation and narrowly scoped shared-interface contributions through
+  normal reviewed PRs. Existing owners retain their campaigns and live
+  resources; notify them, inspect overlapping work and resolve actual conflicts,
+  but absence of a separate reply is not a source-work veto.
+- Replaced the five signature-style gates with a contract delivery checklist.
+  None is marked complete: actual identity, policy/effect fencing, credential,
+  replay/ACK and persistent lifecycle behavior must be implemented and proved.
+  Required review, checks, single-operator isolation and no competing external
+  PR remain intact. Missing APIs are implementation work, not assumed support.
+- Next source slice: specify and implement bounded PR-owned request
+  reconciliation and consumer-scoped pending-event/ACK behavior using the
+  existing durable watch core, without remote callback execution. Then add the
+  necessary authenticated Gateway/credential seams through reviewed source
+  changes rather than waiting for an approval rendezvous.
+- No shared runtime, credential, placement, migration or deployment is changed
+  or authorized by this correction. Installed acceptance and explicitly
+  authorized rollout remain separate open obligations; unrelated machine
+  repairs retain their existing owner.
 
 ### 2026-10-21 - Record release and reconcile the available Gateway contract
 

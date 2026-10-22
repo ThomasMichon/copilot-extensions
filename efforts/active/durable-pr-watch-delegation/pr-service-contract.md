@@ -3,12 +3,34 @@
 Back to the [effort](README.md) and [fleet service plan](fleet-pr-service.md).
 Tracking: #7188; retained Gateway/routing owners: #6236/#5789/#6443/#6809.
 
-**Agent-recommended proposal for owner agreement, not an implemented API.**
+**Driver-owned contract proposal for normal PR review, not an implemented API.**
 The names below identify logical operations, not published routes, wire schemas
 or new `OperationIntent` commands. Review of this document does not transfer
 Gateway, authentication, credential-provider or deployment ownership.
 
-## Available transport and retained gaps
+## Coordination without an approval rendezvous
+
+The PR-service driver owns closing the consumer contract and its implementation
+gaps through ordinary reviewed source changes. Consult the related campaigns
+and inspect current contracts and overlapping unmerged work, but do not wait
+for separate owner acknowledgements before designing, testing or proposing a
+shared-interface change. Silence is neither approval nor a veto; normal review
+and required checks decide whether a concrete source change can land.
+
+Keep campaign/resource ownership distinct from contribution authority. Reuse
+existing components and contribute a missing shared seam in its owning module
+rather than inventing a parallel controller or claiming an unavailable API
+exists. Resolve actual overlapping edits, incompatible contracts or competing
+external PRs explicitly; a tracker with a retained owner is not itself such a
+conflict. Missing implementation is work to deliver, not an indefinite
+permission dependency.
+
+The checklist below records required contract decisions and executable proof,
+not signatures to collect. Runtime activation, credentials, placement and live
+resource changes still require their existing authorization; source review
+does not grant any of them.
+
+## Available transport and implementation gaps
 
 The current [opt-in service Gateway](../../../fleet-manager/docs/gateway-service-profile.md)
 supplies authenticated TLS HTTP routing through outbound service channels,
@@ -23,8 +45,9 @@ and polling must fit those limits; a Gateway request is not a durable wait.
 It strips caller credentials, cookies and client identity headers before
 forwarding to the backend. Its caller admission therefore does not, by itself,
 give a PR backend trusted consumer/account context or supply forge credentials
-to its worker. The owners must agree that context and its verification point
-before remote registrations can be attributed to a consumer.
+to its worker. Specify and implement that context and its verification point
+through reviewed source changes before attributing remote registrations to a
+consumer; do not infer authority from stripped headers or request-body labels.
 
 The [adoption readiness record](../../../fleet-manager/docs/gateway-adoption-readiness.md)
 separates generic source and isolated native amd64/ARM64 qualification from
@@ -45,7 +68,7 @@ registrations and pending terminal events. A dispatch coordinator consumes
 its own events through one shared outbound connection or bounded polling loop,
 not a process per waiting task.
 
-The PR service owns this durable event state. The Gateway routes an agreed
+The PR service owns this durable event state. The Gateway routes the reviewed
 service contract; its in-memory credential broker is not the PR queue. Native
 callbacks remain a separate supported delivery adapter for local use. Remote
 service registration accepts no callback executable, shell expression or
@@ -64,7 +87,7 @@ that operator are not additional operator tenants and do not automatically gain
 each other's subscriptions, event metadata or forge permissions.
 
 The service derives identity and allowed account/repository selection from the
-agreed authenticated route and trusted configuration. A request body cannot
+implemented authenticated route and trusted configuration. A request body cannot
 nominate a different operator, credential issuer, provider endpoint or account
 merely by supplying its name. Sharing an observation requires the same authorized
 target/account scope; a common PR number or repository string alone is insufficient.
@@ -74,9 +97,10 @@ The remote service validates its own selected identity and the scoped caller.
 The exact current `runtime_admission` API supports observation branches and
 existing operation intents, not these PR requests. Do not construct an unsupported
 intent or serialize an internal `Permit` to manufacture backend authority.
-The retained owner must agree the actual admission/delegation boundary.
+Implement and exercise the actual admission/delegation boundary; if a shared
+seam is missing, propose that extension in its owning module through normal review.
 
-## Logical operations to agree
+## Logical operations to deliver
 
 | Operation | Required semantics |
 |-----------|--------------------|
@@ -143,33 +167,37 @@ the fleet. A token label cannot downscope a provider's broader credential.
 The older Gateway enrollment/credential path is index-specific; the opt-in
 generic service profile does not add a PR-worker forge credential binding.
 A PR worker must not masquerade as `index-worker`, invent corpus/source
-values, or forward ambient credentials to bypass that gap. The retained
-owners must agree the PR-worker binding, permitted action/resource/account
-and provider-result validation before production consumption. Existing
-provider custody, expiry, revocation and provider/OS session longevity remain
-authoritative.
+values, or forward ambient credentials to bypass that gap. The implementation
+must define and validate the PR-worker binding, permitted action/resource/account
+and provider-result validation before production consumption. Existing provider
+custody, expiry, revocation and provider/OS session longevity remain authoritative.
 
 No secret enters registration state, replay records, images, manifests, argv
 or diagnostics. Actual provider challenges are visible; no periodic human
 presence check or new token issuer is introduced by this consumer.
 
-## Owner-agreement checklist
+## Contract delivery checklist
 
-- [ ] Gateway/routing owner names the versioned PR service offer, supported
-  logical operations and actual request/response bounds, plus the trusted
-  backend identity and admission/delegation verification point.
-- [ ] The serving owner identifies current policy/enrollment authority and
-  its lookup/effect/emission fencing; an isolated snapshot/permit DTO does not
-  count as serving authority.
-- [ ] Credential owners agree the PR worker's account/repository/action binding,
-  provider-result validation and renewal/revocation outcomes without reusing an
-  index identity or another operator's credentials.
-- [ ] PR and dispatch owners agree the request-reconciliation and bounded
-  consumer-scoped replay/ACK semantics, including uncertainty after retention
-  and ACK loss after a committed generation-fenced effect.
-- [ ] Placement/lifecycle owners agree the service namespace, persistent storage,
-  single active writer and supported drain/update boundary. No live migration,
-  volume sharing, rescheduling or deployment follows from this document.
+The driver closes these items with reviewed contracts and implementation evidence,
+not a separate round of owner sign-offs. Consultation is non-blocking; actual
+conflicts and required repository review remain binding.
+
+- [ ] Define and test the versioned PR service offer, supported logical
+  operations, actual request/response bounds, trusted backend identity and
+  admission/delegation verification point.
+- [ ] Bind and exercise current policy/enrollment authority and its
+  lookup/effect/emission fencing in the real serving path; an isolated
+  snapshot/permit DTO does not count as serving authority.
+- [ ] Define and test the PR worker's account/repository/action binding,
+  provider-result validation and renewal/revocation outcomes without reusing
+  an index identity or another operator's credentials.
+- [ ] Implement request reconciliation and bounded consumer-scoped replay/ACK
+  semantics in PR and dispatch, including uncertainty after retention and ACK
+  loss after a committed generation-fenced effect.
+- [ ] Supply and validate the service namespace, persistent storage, single
+  active writer and supported drain/update boundary through the existing
+  placement/lifecycle interfaces. No live migration, volume sharing,
+  rescheduling or deployment follows from this document.
 
 ## Acceptance to carry into implementation
 

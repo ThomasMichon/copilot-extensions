@@ -43,7 +43,12 @@ requirements. Review precedes implementation.
 Consume the same generic role contract as other standalone services. Index
 #5768/#6383 and dispatch #6177 remain independently owned consumers, not work
 this effort silently absorbs. Inventory current contracts and unmerged work with
-their owners before extending shared interfaces.
+those campaigns before extending shared interfaces. Their ownership is not an
+additional source-contribution approval gate: the PR-service driver proposes
+missing shared seams in their owning modules through normal PR review and tests.
+Consultation does not suspend work while waiting for acknowledgements. Resolve
+actual overlapping edits or incompatible contracts explicitly without opening
+a competing PR over another contributor's active work.
 
 ## Plugin, service and placement boundary
 
@@ -91,15 +96,17 @@ authority to add speculative replicas or a new scheduler.
 
 A local callback executable is not runnable merely because a remote service
 accepted its subscription. Preserve the existing local callback contract for
-native use. The fleet path uses the fleet owners' typed subscription/replay/ACK
-or named service-delivery contract, with dispatch committing its own
+native use. The PR service owns its typed subscription/replay/ACK contract over
+the existing Gateway transport, with dispatch committing its own
 generation-fenced effect. The PR container never accepts arbitrary subscriber
 shell commands, callback argv or arbitrary destination URLs.
 
-Agree the exact supported delivery and credential-provider interfaces with their
-owners before building against them. Mocks may unblock adapter tests, but
-unavailable runtime contracts remain explicit dependencies, not a fabricated
-ready Gateway. The service may consume renewable, scoped credentials from its
+Define the exact delivery and credential-provider interfaces and deliver any
+missing shared seams through reviewed source changes. Notify related campaigns
+without requiring a separate owner-sign-off round before implementation. Mocks
+may unblock adapter tests, but unavailable runtime contracts remain explicit
+implementation gaps, not a fabricated ready Gateway or permission dependency.
+The service may consume renewable, scoped credentials from its
 operator's admitted providers; query/subscription permission is not credential
 issuance, fleet administration or permission to mutate a PR.
 
@@ -124,7 +131,7 @@ alone is not proof of safe promotion.
 Keep storage placement and any movement explicit. Do not concurrently mount a
 live native state root into a container or infer cross-host fencing from a
 host-local file lock. The first placement may use one declared persistent volume
-on its assigned host; movement or failover requires an agreed storage-continuity
+on its assigned host; movement or failover requires a validated storage-continuity
 and writer-fencing contract before activation. Image rollback does not imply
 state-schema rollback is safe.
 
@@ -135,11 +142,13 @@ upgrade contracts where those runtimes are used.
 
 ## Implementation sequence (agent-recommended)
 
-1. Land this vision/effort amendment; agree service-role, transport, delivery and
-   credential interfaces with their retained owners using the
-   [consumer contract proposal](pr-service-contract.md). Its logical operations
-   are not implemented routes or an owner-agreement receipt. Reconcile the saved dispatch
-   integration against the broadened contract without enabling it prematurely.
+1. Land this vision/effort amendment. The driver defines service-role, transport,
+   delivery and credential interfaces using the
+   [consumer contract proposal](pr-service-contract.md), then implements them
+   in reviewable slices with the necessary shared-module changes. Owner
+   consultation is non-blocking, not an approval rendezvous. Logical operations
+   are not implemented routes; only real serving/consumer tests prove delivery.
+   Preserve the landed local dispatch integration without enabling it prematurely.
 2. Finish the existing governed owner prerequisite and canonical installation
    alignment, retaining #7208 as the explicitly accepted reader residual rather
    than continuing its recording investigation.
@@ -151,14 +160,16 @@ upgrade contracts where those runtimes are used.
    callbacks and safe process fallback where appropriate; no remote argv relay.
 5. Exercise an explicitly approved fleet placement, real credential renewal and
    client/Gateway/service/dispatch path. Native-only delegation does not satisfy
-   the expanded completion gate. Any unavailable owner contract or venue stays
-   a named blocker; it is not silently marked complete.
+   the expanded completion gate. An unavailable source contract is a named
+   implementation gap for the driver to close; an unavailable authorized live
+   venue remains an explicit deployment blocker, not successful mocked proof.
 
 ## Validation plan (agent-recommended)
 
-- [ ] Contract: agree the supported role lifecycle, Gateway route, credential
-  provider and event delivery interfaces with their current owners; resolve the
-  [owner-agreement checklist](pr-service-contract.md#owner-agreement-checklist). Unsupported
+- [ ] Contract: define, review and exercise the supported role lifecycle,
+  Gateway route, credential provider and event delivery interfaces; resolve the
+  [contract delivery checklist](pr-service-contract.md#contract-delivery-checklist).
+  Close missing source seams through normal PRs; unsupported runtime
   dependencies fail explicitly instead of inventing a parallel implementation.
 - [ ] Unit: one operator owns the fleet; wrong fleet/service/account/namespace
   refuses, PR read/watch grants cannot mutate PRs or administer the fleet, and
