@@ -324,6 +324,11 @@ authorizes critical main-path acceptance or a bounded administrative change.
   Native/Linux differential and attributed complete-guard comparisons pass;
   actual PR and natural push guards pass for all thirteen installer plugins.
   This bounded CPU reduction is not controlled hosted or release latency.
+- [x] Remove only the duplicate full Bridge registry invocation on source PRs
+  (#7979), retaining the complete diff-aware check and the non-PR full check.
+  Actual hosted PR and natural push each execute the intended checker once,
+  covering both contracts and all 456 fixtures. This removes one repeated
+  invocation per PR, not a workflow run or runner allocation.
 - [ ] Remove redundant release-shaped PR and main-push validation only where
   existing trusted gates and exact-SHA release evidence cover the removed work;
   first prove no generated-output coverage or required context is lost.

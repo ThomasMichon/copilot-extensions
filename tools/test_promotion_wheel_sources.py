@@ -318,6 +318,11 @@ def test_promotion_actions_never_receive_or_persist_the_release_pat():
         "Land the candidate branch on main via PR + squash-merge",
     }
     current = source_owned(jobs)
+    unit_profile = "source-units" in jobs
+    if unit_profile:
+        allowed.remove(
+            "Publish coverage baselines as a GitHub Release (durable evidence for this dev commit)"
+        )
     publishing = jobs["publish-python-artifacts"]
     late_pr = current and publishing.get("outputs", {}).get("pr_number") == "${{ steps.land.outputs.pr_number }}"
     if late_pr:
@@ -350,8 +355,12 @@ def test_promotion_actions_never_receive_or_persist_the_release_pat():
     if current:
         assert_source_owned_boundary(jobs)
         assert 'qualified_run = json.loads(qualification.stdout)' in wait["run"]
-        assert 'qualified_run.get("conclusion") != "success"' in wait["run"]
-    assert wait["run"].count("env=read_env") == (4 if current else 3)
+        if unit_profile:
+            assert 'unit_job.get("conclusion") != "success"' in wait["run"]
+            assert 'artifact = json.loads(artifact_result.stdout)' in wait["run"]
+        else:
+            assert 'qualified_run.get("conclusion") != "success"' in wait["run"]
+    assert wait["run"].count("env=read_env") == (6 if unit_profile else 4 if current else 3)
     assert wait["run"].count("env=merge_env") == 1
     assert '"pr", "view"' in wait["run"] and '"pr", "checks"' in wait["run"]
 

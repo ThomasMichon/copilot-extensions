@@ -262,6 +262,60 @@ The supported conclusion is narrower: fewer source-CI allocations per
 selected PR with retained actual units, but no observed median runner-queue
 improvement and no demonstrated reduction in total workflow invocations.
 
+### October 22 promotion critical-path sample
+
+Select the last three successful `repository_dispatch` promotions from the
+already captured later creation-window population. Read attempt one for each;
+every jobs page returns eleven jobs: ten allocated executions and one skipped
+failure-report job. This is a bounded successful-run sample, not a random
+sample, a failure census or before/after evidence.
+
+| Attempt-one run | First-job admission | Run to final job completion | After first-job creation | Job pickup median |
+|---|---:|---:|---:|---:|
+| `39852103270` | 216 seconds | 918 seconds | 702 seconds | 3 seconds |
+| `39857109817` | 1 second | 755 seconds | 754 seconds | 3 seconds |
+| `39859212307` | 0 seconds | 738 seconds | 738 seconds | 3 seconds |
+
+Compute admission from run creation to the first allocated job's creation;
+compute pickup separately from each job's creation to start. Parse both as
+UTC, not mixed local/UTC timestamps. The 216-second admission interval does
+not establish a runner-capacity problem or its specific cause. Summed pickup
+over ten jobs is 35/32/33 seconds; this sum includes parallel branches and is
+not time to subtract from the critical path.
+
+Artifact build and source units run in parallel. The actual source-unit logs
+bind Dev `258a4dd71b4f667bb24f6abb921ea276b633d32f`,
+`930e8e10648da2777f1fda2e905469725b9af8da` and
+`fc5ad89d65b05f9c091ce660b3dffa982fe8c5dd`, respectively. Each executes all
+877 currently admitted cases once, with coverage, in 9.527/18.269/17.601
+seconds. These are not the full historical unit census. The artifact-build
+jobs take 62/85/76 seconds and outlast the source-unit jobs' 26/36/36 seconds.
+
+The subsequent promote jobs take 179/201/180 seconds, including exact-candidate
+publication/readback steps of 92/103/97 seconds and pinned-signer verification
+steps of 45/52/49 seconds. The later source-publication jobs take 228/239/249
+seconds; their combined qualification, verification and publication command
+takes 177/183/194 seconds. Merge jobs then take 73/72/71 seconds. These separate
+trust boundaries are not interchangeable checks. Buffered helper output cannot
+attribute the combined command's cost to individual functions.
+
+The last sampled job explicitly selects reviewed helper
+`ce77da58017442f83bf3d82a5f80b111b63b9737`. That immutable helper's attestation
+loop is serial; it does not establish adoption of the bounded source changes
+in #7679/#7732. Existing release/control ownership retains pin selection,
+qualification and natural timing acceptance; this audit does not change a
+trusted pin or start another promotion.
+
+Across all allocated jobs, checkout steps sum to 124/133/127 seconds; again,
+parallel work makes this a work total, not a critical-path saving. One bounded
+source reduction uses a depth-one checkout of the gate-pinned Dev SHA in
+`source-units` only. Its version/library guards and admitted packet require
+current source bytes, not ancestry. Every history-dependent release checkout
+remains unchanged. The packet, coverage, identities and deadline remain intact.
+This removes unnecessary history transfer from that job, not an allocation,
+workflow invocation or demonstrated promotion critical-path delay. Source
+review and actual trusted-control adoption remain distinct gates.
+
 ### Enforcement snapshot
 
 At the October 18 capture, the Dev ruleset checks were `workflow-lockdown-guard` and
