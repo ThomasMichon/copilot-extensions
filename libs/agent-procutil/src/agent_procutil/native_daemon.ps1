@@ -69,12 +69,18 @@ function Start-NativeDaemon {
     )
     if ($env:OS -ne 'Windows_NT') { throw 'Native PowerShell daemon admission requires Windows.' }
     foreach ($path in @($Script, $WorkingDirectory, $script:NativeDaemonSource)) {
-        if (-not [IO.Path]::IsPathRooted($path) -or -not (Test-Path -LiteralPath $path)) {
-            throw 'Native daemon admission requires existing absolute paths.'
+        if (-not [IO.Path]::IsPathRooted($path) -or [IO.Path]::GetFullPath($path) -ne $path) {
+            throw 'Native daemon paths must be fully qualified and normalized.'
         }
-        if (-not [IO.Path]::IsPathRooted($LogPath) -or -not [IO.Directory]::Exists([IO.Path]::GetDirectoryName($LogPath))) {
-            throw 'Native daemon diagnostics require an absolute file in an existing directory.'
+        if (-not (Test-Path -LiteralPath $path)) {
+            throw 'Native daemon admission requires existing paths.'
         }
+    }
+    if (-not [IO.Path]::IsPathRooted($LogPath) -or [IO.Path]::GetFullPath($LogPath) -ne $LogPath) {
+        throw 'Native daemon diagnostic paths must be fully qualified and normalized.'
+    }
+    if (-not [IO.Directory]::Exists([IO.Path]::GetDirectoryName($LogPath))) {
+        throw 'Native daemon diagnostics require a file in an existing directory.'
     }
     $shell = Join-Path $PSHOME 'powershell.exe'
     if (-not [IO.File]::Exists($shell)) { $shell = Join-Path $PSHOME 'pwsh.exe' }
@@ -147,12 +153,12 @@ try {
             $start.WorkingDirectory = $WorkingDirectory
             $start.UseShellExecute = $false
             $start.CreateNoWindow = $true
-            $launcher = [Diagnostics.Process]::Start($start)
             $activated = $true
+            $launcher = [Diagnostics.Process]::Start($start)
         } else {
             $cimModule = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\Modules\CimCmdlets\CimCmdlets.psd1'
             Import-Module $cimModule -ErrorAction Stop
-            $startup = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{
+            $startup = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -ErrorAction Stop -Property @{
                 ShowWindow = [uint16]0
                 # WMI rejects CREATE_NO_WINDOW; conhost supplies a headless console.
                 CreateFlags = [uint32]0x00000008
@@ -162,13 +168,22 @@ try {
                 )
             }
             $conhost = Join-Path $env:SystemRoot 'System32\conhost.exe'
-            $result = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -OperationTimeoutSec 15 -Arguments @{
+            # A lost response can follow actual creation. Only a positive
+            # refusal, or observed child settlement, clears this uncertainty.
+            $activated = $true
+            $result = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -OperationTimeoutSec 15 -ErrorAction Stop -Arguments @{
                 CommandLine = "`"$conhost`" --headless `"$shell`" $commandArgs"
                 CurrentDirectory = $WorkingDirectory
                 ProcessStartupInformation = $startup
             }
-            if ($result.ReturnValue -ne 0) { throw "Native daemon broker refused launch ($($result.ReturnValue))." }
-            $activated = $true
+            if ($null -eq $result -or
+                ($result.ReturnValue -isnot [int] -and $result.ReturnValue -isnot [uint32])) {
+                throw 'Native daemon broker returned no valid activation outcome.'
+            }
+            if ($result.ReturnValue -ne 0) {
+                $activated = $false
+                throw "Native daemon broker refused launch ($($result.ReturnValue))."
+            }
             $launcher = [Diagnostics.Process]::GetProcessById([int]$result.ProcessId)
         }
         [void]$launcher.Handle

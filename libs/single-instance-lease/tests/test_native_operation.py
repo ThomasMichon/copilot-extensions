@@ -105,10 +105,14 @@ def test_native_local_handles_and_hardlinks_share_one_reservation(tmp_path):
         pass
 
 
-@pytest.mark.parametrize("kind", ["relative", "directory", "missing-parent"])
+@pytest.mark.parametrize("kind", [
+    "relative", "drive-relative", "current-drive-rooted", "directory", "missing-parent",
+])
 def test_native_rejects_unowned_paths(tmp_path, kind):
     path = {
         "relative": Path("operation.lock"),
+        "drive-relative": Path("C:operation.lock"),
+        "current-drive-rooted": Path("\\operation.lock"),
         "directory": tmp_path,
         "missing-parent": tmp_path / "absent" / "operation.lock",
     }[kind]

@@ -127,3 +127,28 @@ def test_native_owned_job_retires_writers_when_its_owner_dies(tmp_path):
                     writer.wait(timeout=5)
             finally:
                 writer.close()
+
+
+def test_native_owned_rejects_all_partially_qualified_paths_before_opening_log(tmp_path):
+    shell = Path(os.environ["SystemRoot"]) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+    log = tmp_path / "owned.log"
+    body = (
+        f"$ErrorActionPreference='Stop'; . {quoted(HELPER)}; $results=@(); "
+        "foreach ($field in @('FilePath','WorkingDirectory','LogPath')) { "
+        "foreach ($path in @('C:tool.exe','\\owned.log')) { "
+        f"$parameters=@{{FilePath={quoted(shell)}; Arguments=@('-NoProfile','-Command','exit 91'); "
+        f"WorkingDirectory={quoted(tmp_path)}; LogPath={quoted(log)} }}; "
+        "$parameters[$field]=$path; "
+        "try { [void](Invoke-NativeOwnedProcess @parameters); exit 91 } "
+        "catch { $results+=@{field=$field;path=$path;error=$_.Exception.Message} } } }; "
+        "ConvertTo-Json -InputObject $results -Compress"
+    )
+    result = subprocess.run(
+        [str(shell), "-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded(body)],
+        capture_output=True, text=True, timeout=30, **pu.no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stderr
+    outcomes = json.loads(result.stdout)
+    assert len(outcomes) == 6
+    assert all("fully qualified" in item["error"] for item in outcomes), outcomes
+    assert not log.exists()

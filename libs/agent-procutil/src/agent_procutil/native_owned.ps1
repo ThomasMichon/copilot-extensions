@@ -107,6 +107,11 @@ namespace CopilotExtensions {
         public static int Run(string executable, string arguments, string cwd, string log, int timeout) {
             if (timeout <= 0 || timeout > 7200000)
                 throw new ArgumentException("owned child requires a deadline of at most two hours");
+            foreach (string path in new string[] { executable, cwd, log }) {
+                if (String.IsNullOrEmpty(path) || !Path.IsPathRooted(path) ||
+                    !String.Equals(Path.GetFullPath(path), path, StringComparison.OrdinalIgnoreCase))
+                    throw new ArgumentException("native process paths must be fully qualified and normalized");
+            }
             IntPtr job = IntPtr.Zero, attributes = IntPtr.Zero, handles = IntPtr.Zero, jobs = IntPtr.Zero;
             bool initialized = false, assigned = false, settled = false;
             Exception primary = null;
@@ -211,9 +216,6 @@ function Invoke-NativeOwnedProcess {
         [int]$TimeoutMilliseconds = 180000
     )
     if ($env:OS -ne 'Windows_NT') { throw 'Native PowerShell process custody requires Windows.' }
-    foreach ($path in @($FilePath, $WorkingDirectory, $LogPath)) {
-        if (-not [IO.Path]::IsPathRooted($path)) { throw 'Native process custody requires absolute paths.' }
-    }
     $quoted = @($Arguments | ForEach-Object {
         if ($_ -and $_ -notmatch '[\s"]') { $_ }
         else { '"' + [regex]::Replace([regex]::Replace($_, '(\\*)"', '$1$1\"'), '(\\+)$', '$1$1') + '"' }

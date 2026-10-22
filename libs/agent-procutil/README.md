@@ -26,6 +26,8 @@ to these helpers merely because they are present.
 Dot-source `native_daemon.ps1` from the resolved, attributable payload and use
 `Start-NativeDaemon -Script <absolute-ps1> -Arguments <trusted-string-array>
 -WorkingDirectory <absolute-directory> -LogPath <absolute-diagnostic-file>`.
+Every path must be fully qualified and normalized; drive-relative and
+current-drive-rooted Windows paths refuse before activation or log opening.
 It uses the existing Windows WMI lifetime-broker mechanism. WMI rejects
 `CREATE_NO_WINDOW`, and a detached stock PowerShell can exit before evaluating
 its command; a headless `conhost` supplies the native console without opening
@@ -40,7 +42,9 @@ dispose it afterward. Spawn/admission is not application readiness or
 installation completion. `LogPath` records bootstrap failures; the entry point
 owns its continuing progress/result log. A
 `NativeDaemonSpawnException.CleanupConfirmed` value of false preserves
-uncertainty, including a lost return after acknowledgement; callers must
+uncertainty, including a lost CIM response after actual creation or a lost
+return after acknowledgement; only an explicit refusal or observed cleanup
+clears that uncertainty. Callers must
 consult their durable operation state rather than retrying installation.
 With `COPILOT_EXTENSIONS_TEST_CONTAINED=1`, the same handshake uses an ordinary
 windowless child and deliberately retains the caller's Job.

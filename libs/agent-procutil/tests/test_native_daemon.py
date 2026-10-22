@@ -112,7 +112,68 @@ def test_python_free_bootstrap_survives_only_authorized_caller_job_escape(tmp_pa
         assert observation.focus_changes == {}
 
 
-def test_native_broker_refusal_is_typed_and_never_runs_foreground(tmp_path):
+@pytest.mark.parametrize("mode", ["refusal", "lost-response"])
+def test_native_broker_outcome_never_invents_cleanup_or_runs_foreground(tmp_path, mode):
+    base = Path(__file__).resolve().parents[2]
+    helper = base / "agent-procutil" / "src" / "agent_procutil" / "native_daemon.ps1"
+    fixture = tmp_path / "entry.ps1"
+    shell = Path(os.environ["SystemRoot"]) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+
+    def quoted(path):
+        return "'" + str(path).replace("'", "''") + "'"
+
+    fixture.write_text(
+        f"[IO.File]::WriteAllText({quoted(tmp_path / 'started')}, 'unexpected entry point')",
+        encoding="utf-8",
+    )
+    activation = (
+        "$r = & $script:cim @PSBoundParameters; "
+        "if ($r.ReturnValue -ne 0) { throw 'fixture WMI activation refused' }; "
+        "$script:activation = [Diagnostics.Process]::GetProcessById([int]$r.ProcessId); "
+        "[void]$script:activation.Handle; throw 'fixture response lost after actual activation'; "
+        if mode == "lost-response" else "return [pscustomobject]@{ ReturnValue=8; ProcessId=0 }; "
+    )
+    script = (
+        f"$ErrorActionPreference='Stop'; . {quoted(helper)}; "
+        "$env:COPILOT_EXTENSIONS_TEST_CONTAINED=$null; "
+        "$script:activation=$null; "
+        "Import-Module (Join-Path $env:SystemRoot "
+        "'System32\\WindowsPowerShell\\v1.0\\Modules\\CimCmdlets\\CimCmdlets.psd1'); "
+        "$script:cim=Get-Command Invoke-CimMethod -CommandType Cmdlet; "
+        "function Invoke-CimMethod { [CmdletBinding()] param("
+        "[string]$ClassName,[string]$MethodName,[int]$OperationTimeoutSec,[hashtable]$Arguments); "
+        + activation + "}; "
+        "try { "
+        f"$p = Start-NativeDaemon -Script {quoted(fixture)} -Arguments @('worker') "
+        f"-WorkingDirectory {quoted(tmp_path)} -LogPath {quoted(tmp_path / 'worker.log')}; "
+        "$p.Dispose(); exit 91 "
+        "} catch { $e=$_.Exception; "
+        "while ($e.InnerException -and $e -isnot [CopilotExtensions.NativeDaemonSpawnException]) "
+        "{ $e=$e.InnerException }; "
+        "@{ settled=$e.CleanupConfirmed; type=$e.GetType().Name; error=$e.InnerException.Message } "
+        "| ConvertTo-Json -Compress } finally { "
+        "if ($script:activation) { try { "
+        "if (-not $script:activation.WaitForExit(20000)) { "
+        "$script:activation.Kill(); [void]$script:activation.WaitForExit(5000); "
+        "throw 'fixture activation did not retire after channel closure' } "
+        "} finally { $script:activation.Dispose() } } }"
+    )
+    encoded = base64.b64encode(script.encode("utf-16le")).decode("ascii")
+    result = subprocess.run(
+        [str(shell), "-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded],
+        capture_output=True, text=True, timeout=45, **pu.no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stderr
+    outcome = json.loads(result.stdout)
+    assert outcome["type"] == "NativeDaemonSpawnException"
+    assert outcome["settled"] is (mode == "refusal")
+    assert (
+        "refused launch (8)" if mode == "refusal" else "response lost after actual activation"
+    ) in outcome["error"]
+    assert not (tmp_path / "started").exists()
+
+
+def test_native_daemon_rejects_every_partially_qualified_path_before_activation(tmp_path):
     base = Path(__file__).resolve().parents[2]
     helper = base / "agent-procutil" / "src" / "agent_procutil" / "native_daemon.ps1"
     fixture = Path(__file__).with_name("fixture_native_daemon.ps1")
@@ -122,18 +183,16 @@ def test_native_broker_refusal_is_typed_and_never_runs_foreground(tmp_path):
         return "'" + str(path).replace("'", "''") + "'"
 
     script = (
-        f"$ErrorActionPreference='Stop'; . {quoted(helper)}; "
-        "$env:COPILOT_EXTENSIONS_TEST_CONTAINED=$null; "
-        "function Invoke-CimMethod { return [pscustomobject]@{ ReturnValue=8; ProcessId=0 } }; "
-        "try { "
-        f"$p = Start-NativeDaemon -Script {quoted(fixture)} -Arguments @('worker') "
-        f"-WorkingDirectory {quoted(tmp_path)} -LogPath {quoted(tmp_path / 'worker.log')}; "
-        "$p.Dispose(); exit 91 "
-        "} catch { $e=$_.Exception; "
-        "while ($e.InnerException -and $e -isnot [CopilotExtensions.NativeDaemonSpawnException]) "
-        "{ $e=$e.InnerException }; "
-        "@{ settled=$e.CleanupConfirmed; type=$e.GetType().Name; error=$e.InnerException.Message } "
-        "| ConvertTo-Json -Compress }"
+        f"$ErrorActionPreference='Stop'; . {quoted(helper)}; $results=@(); "
+        "foreach ($field in @('Script','WorkingDirectory','LogPath','helper')) { "
+        "foreach ($path in @('C:worker.ps1','\\worker.ps1')) { "
+        f"$script:NativeDaemonSource={quoted(helper)}; "
+        f"$parameters=@{{Script={quoted(fixture)}; Arguments=@('unused'); "
+        f"WorkingDirectory={quoted(tmp_path)}; LogPath={quoted(tmp_path / 'worker.log')} }}; "
+        "if ($field -eq 'helper') { $script:NativeDaemonSource=$path } else { $parameters[$field]=$path }; "
+        "try { $p=Start-NativeDaemon @parameters; $p.Dispose(); exit 91 } "
+        "catch { $results+=@{field=$field;path=$path;error=$_.Exception.Message} } } }; "
+        "ConvertTo-Json -InputObject $results -Compress"
     )
     encoded = base64.b64encode(script.encode("utf-16le")).decode("ascii")
     result = subprocess.run(
@@ -141,8 +200,7 @@ def test_native_broker_refusal_is_typed_and_never_runs_foreground(tmp_path):
         capture_output=True, text=True, timeout=30, **pu.no_window_kwargs(),
     )
     assert result.returncode == 0, result.stderr
-    outcome = json.loads(result.stdout)
-    assert outcome["type"] == "NativeDaemonSpawnException"
-    assert outcome["settled"] is True
-    assert "refused launch (8)" in outcome["error"]
-    assert not (tmp_path / "started").exists()
+    outcomes = json.loads(result.stdout)
+    assert len(outcomes) == 8
+    assert all("fully qualified" in item["error"] for item in outcomes), outcomes
+    assert not (tmp_path / "worker.log").exists()
