@@ -139,8 +139,11 @@ matrix below are _(agent-recommended)_ implementation details.
 - [x] Admit Containers' actual PowerShell `init.ps1` producer and preserve its
   optional Docker preflight diagnostics and failure status on both platforms
   (#7854).
-- [ ] Qualify MCP's actual PowerShell `init.ps1` producer and its remaining
-  visible native diagnostic boundaries without formatting MCP protocol output.
+- [x] Qualify MCP's actual PowerShell `init.ps1` producer and its remaining
+  visible native diagnostic boundaries without formatting MCP protocol output
+  (#7879).
+- [ ] Qualify Budget Guidance's actual self-staged PowerShell installer and
+  its construction-shell diagnostics before declaring captured UTF-8 output.
 - [ ] Prefix every human-readable install/update line with a wall-clock time;
   suffix it with honestly labeled monotonic elapsed time or completed-step
   duration. Do not represent arbitrary child-line arrival as execution cost.
@@ -257,8 +260,52 @@ bounded source delta inspection.
 
 ## Journal
 
+### 2026-10-22 - Budget staged output and native diagnostics qualified
+
+- Real PS5 and PowerShell 7 fixtures reproduced legacy-encoded construction
+  stderr and first-stamp output before enrollment. The construction probe
+  retained isolated Python flags, literal argv, successful warnings and
+  failure decisions; the actual marketplace-path stamp retained spaced,
+  quoted and non-ASCII runtime paths.
+- Only the construction-shell diagnostic boundary changed: its existing
+  dual-stream native helper now captures stderr explicitly and forwards it
+  through the producer text writer, including on native success. The helper
+  implementation, source checks, construction callback, staging/watchdog
+  authority and transaction policy are unchanged.
+- After native qualification, the actual `install.ps1` received the guarded
+  canonical initializer and source-bound output declaration. Release
+  materialization now covers twelve output producers without adopting
+  another shared installer engine.
+- The staged fixtures execute the original installer and its real self-stage
+  route, not an injected encoded-command wrapper. Its `Start-Process`
+  compatibility function can rewrite vector `-File` invocations, but the
+  current self-stage call supplies a quoted native command-line string.
+  Both hosts retained UTF-8 stdout without CLIXML, the original arguments,
+  the source snapshot and no runtime construction.
+- The full changed-module run passed 228 Windows cases with two skips and
+  188 same-source Linux cases with 39 platform skips. Six final native
+  fixtures also passed after tightening fixture asset requirements. Existing
+  Budget staging/stamp selectors passed on both platforms; no dependency
+  was installed. Optional-helper absence and requested-missing-helper
+  refusal remain covered through the original entrypoint.
+- Unit and simple end-to-end tiers include the real updater-to-staged-child
+  capture with an empty home, declared snapshot, time-framed lines and
+  retained completion status. This is first-touch stamping, not full clean-room
+  runtime construction; that unchanged contract was not repeated. No external
+  venue or host update is authorized for this candidate.
+- Documentation impact is confined to Budget's installer section and the
+  shared captured-output contract. Runtime JSON, output-free hooks, public
+  CLI arguments and configuration remain unchanged.
+- This is a qualified source candidate, not a merged, promoted or installed
+  release. Machines' remaining output boundary, equivalent no-op counts and
+  costs, serving-state proof and parent launch/trust obligations remain open.
+
 ### 2026-10-22 - MCP native diagnostics qualified before output enrollment
 
+- #7879 merged after current-head approval, empty review threads and green
+  required checks. The authorized extra CODEOWNER-vote exception did not
+  bypass CI. Both parent trackers remain open; promotion and installed
+  rollout are not inferred from this source merge.
 - Real `-File` fixtures reproduced legacy-encoded stderr bypassing the text
   writer at both the construction-shell and GC count subprocess boundaries.
   Both PS5 and PowerShell 7 controls failed before either boundary was
@@ -290,6 +337,12 @@ bounded source delta inspection.
   separately owned obligations.
 - This qualifies one more source boundary, not remaining Machines/Budget
   producers, equivalent no-op measurements or parent launch completion.
+- The next output boundary is Budget's actual standalone installer, including
+  its staged child invocation. Its compatibility launcher can rewrite a
+  `-File` vector as an encoded PowerShell command, so ordinary non-staged
+  first-stamp coverage alone does not establish the actual launch route or
+  redirected stream shape.
+  Qualify that native route before enrolling it; Machines remains unqualified.
 
 ### 2026-10-22 - Containers' declared producer retains native diagnostics
 

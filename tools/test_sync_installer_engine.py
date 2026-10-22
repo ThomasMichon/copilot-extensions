@@ -324,7 +324,7 @@ def test_whole_payload_human_contract(
         report = materialize_main.build(destination, source_root=source_root)
     assert not [line for line in report if line.startswith("SKIP")], report
     supports = _human_admission()
-    assert len(names) == 11
+    assert len(names) == 12
     for name in names:
         script = contract.human_output_entrypoint(destination / "plugins" / name)
         assert supports(script), name
@@ -335,7 +335,8 @@ def test_whole_payload_human_contract(
 
 @pytest.mark.parametrize(
     ("plugin", "entrypoint"),
-    [("agent-bridge", "install.ps1"), ("agent-containers", "init.ps1"), ("agent-mcp", "init.ps1")],
+    [("agent-bridge", "install.ps1"), ("agent-containers", "init.ps1"),
+     ("agent-mcp", "init.ps1"), ("budget-guidance", "install.ps1")],
 )
 @pytest.mark.parametrize("asset", ["entrypoint", "declaration", "initializer"])
 def test_same_root_invalid_human_source_fails_before_any_rewrite(

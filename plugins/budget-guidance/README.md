@@ -22,6 +22,13 @@ its contents. All mutating installer actions share the same bounded transaction
 lock (`COPILOT_PLUGIN_INSTALL_LOCK_TIMEOUT_SEC`, default 300 seconds); uninstall
 retains the lock and staging coordination while removing runtime/configuration.
 
+The PowerShell installer's declared, captured human output uses the packaged
+UTF-8 initializer only when requested by its admitting parent. Construction-shell
+diagnostics use its existing dual-stream native helper, retaining warnings and
+failure status without changing construction ownership. The staged installer
+keeps the original action, arguments and output contract. This does not format
+the runtime CLI's JSON or the output-free session hooks.
+
 Without `--config`, the command reads
 `$BUDGET_GUIDANCE_CONFIG` or `~/.budget-guidance/config.json`. A missing file is
 reported as unavailable; it is never interpreted as zero consumption or a full

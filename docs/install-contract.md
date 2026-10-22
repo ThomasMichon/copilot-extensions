@@ -2680,6 +2680,13 @@ text writer. The preceding GC command's explicit stderr suppression remains
 unchanged. Scalar count output retains its single-line shape. Construction
 ownership, failure decisions and the MCP stdio protocol are not changed.
 
+Budget Guidance's PowerShell construction-shell call uses the same existing
+dual-stream helper and producer-writer boundary, retaining diagnostics even
+when the native command succeeds. Its actual self-staged installer preserves
+requested UTF-8 output and literal forwarded arguments; the staging/watchdog
+authority and runtime CLI JSON are unchanged. POSIX has no corresponding
+PowerShell text-writer boundary.
+
 This declaration admits the existing Python updater's human-stream adapter;
 it does not replace signature/provenance checks or change `-File` arguments,
 script identity, exit handling, runtime construction or activation. Missing,

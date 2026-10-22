@@ -12,6 +12,13 @@ param(
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
+
+if ($env:COPILOT_EXTENSIONS_HUMAN_UTF8 -eq '1') {
+    if (-not [IO.File]::Exists((Join-Path $PSScriptRoot 'installer-human-output.ps1'))) {
+        throw 'Required installer human-output initializer is unavailable.'
+    }
+    . (Join-Path $PSScriptRoot 'installer-human-output.ps1')
+}
 . (Join-Path $PSScriptRoot 'versioned_runtime_native.ps1')
 
 if (-not $PSBoundParameters.ContainsKey('Action')) {
@@ -604,7 +611,11 @@ function Invoke-VersionedSlotClean {
     $py = Get-BootstrapPython
     if (-not $py) { throw 'Construction requires a bootstrap Python interpreter' }
     if (-not (Get-Command Start-RuntimeConstruction -ErrorAction SilentlyContinue)) {
-        $helpers = (& $py -I $vr --root $InstallDir construction-shell --shell ps1 | Out-String)
+        $nativeError = ''
+        $helpers = (Invoke-Hidden -FilePath $py `
+            -ArgList @('-I', $vr, '--root', $InstallDir, 'construction-shell', '--shell', 'ps1') `
+            -ErrorOutput ([ref]$nativeError) | Out-String)
+        if ($nativeError) { [Console]::Error.Write($nativeError) }
         if ($LASTEXITCODE -ne 0) { throw 'Canonical construction adapter is unavailable' }
         Invoke-Expression $helpers
     }

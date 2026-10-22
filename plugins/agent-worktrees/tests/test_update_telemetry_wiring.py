@@ -338,7 +338,7 @@ def test_legacy_native_bytes_and_file_arguments_pass_through(shell, tmp_path):
 
 
 @pytest.mark.parametrize("shell", ["powershell", "pwsh"])
-@pytest.mark.parametrize("plugin", ["agent-worktrees", "agent-containers", "agent-mcp"])
+@pytest.mark.parametrize("plugin", ["agent-worktrees", "agent-containers", "agent-mcp", "budget-guidance"])
 def test_real_unrequested_entrypoint_smoke_needs_no_output_helper(shell, plugin, tmp_path):
     from agent_worktrees.installer_capabilities import HUMAN_UTF8_ENV
 
@@ -351,7 +351,7 @@ def test_real_unrequested_entrypoint_smoke_needs_no_output_helper(shell, plugin,
     payload = tmp_path / "payload"
     scripts = payload / "scripts"
     scripts.mkdir(parents=True)
-    entrypoint = "install.ps1" if plugin == "agent-worktrees" else "init.ps1"
+    entrypoint = "install.ps1" if plugin in {"agent-worktrees", "budget-guidance"} else "init.ps1"
     assets = [entrypoint, "versioned_runtime_native.ps1"]
     if plugin == "agent-worktrees":
         assets.append("source-runtime.ps1")
@@ -394,7 +394,7 @@ def test_real_unrequested_entrypoint_smoke_needs_no_output_helper(shell, plugin,
 
 
 @pytest.mark.parametrize("shell", ["powershell", "pwsh"])
-@pytest.mark.parametrize("plugin", ["agent-containers", "agent-mcp"])
+@pytest.mark.parametrize("plugin", ["agent-containers", "agent-mcp", "budget-guidance"])
 @pytest.mark.real_installer_processes
 def test_real_standalone_first_stamp_uses_declared_human_adapter(shell, plugin, tmp_path, capsys):
     from agent_worktrees.installer_capabilities import powershell_human_utf8_supported
@@ -406,26 +406,39 @@ def test_real_standalone_first_stamp_uses_declared_human_adapter(shell, plugin, 
     if host is None:
         pytest.skip(f"{shell} is not installed")
     source = Path(__file__).resolve().parents[2] / plugin
-    payload = tmp_path / "payload"
+    home = tmp_path / "home"
+    home.mkdir()
+    payload = (
+        home / ".copilot" / "installed-plugins" / "fixture" / plugin
+        if plugin == "budget-guidance" else tmp_path / "payload"
+    )
     scripts = payload / "scripts"
     scripts.mkdir(parents=True)
+    entrypoint = "install.ps1" if plugin == "budget-guidance" else "init.ps1"
     assets = [
-        "init.ps1", "init.human-output.json", "installer-human-output.ps1",
+        entrypoint, Path(entrypoint).with_suffix(".human-output.json").name,
+        "installer-human-output.ps1",
         "versioned_runtime_native.ps1",
     ]
     if plugin == "agent-mcp":
         assets.append("source-runtime.ps1")
     for name in assets:
         shutil.copyfile(source / "scripts" / name, scripts / name)
+    if plugin == "budget-guidance":
+        shutil.copyfile(source / "plugin.json", payload / "plugin.json")
+        dependency = payload / "libs" / "agent-procutil"
+        dependency.mkdir(parents=True)
+        (dependency / "pyproject.toml").write_text(
+            '[project]\nname = "agent-procutil"\nversion = "1.0.0"\n', encoding="ascii",
+        )
     (payload / "pyproject.toml").write_text('version = "1.0.0"\n', encoding="ascii")
-    home = tmp_path / "home"
-    home.mkdir()
-    root = tmp_path / "runtime"
-    script = scripts / "init.ps1"
+    root = tmp_path / "runtime caf\u00e9"
+    script = scripts / entrypoint
     assert powershell_human_utf8_supported(script)
     environment = {
         key: value for key, value in os.environ.items()
-        if not key.startswith(("COPILOT_PLUGIN_", "AGENT_CONTAINERS_", "AGENT_MCP_"))
+        if not key.startswith(("COPILOT_PLUGIN_", "AGENT_CONTAINERS_", "AGENT_MCP_",
+                               "BUDGET_GUIDANCE_"))
         and key not in {"COPILOT_EXTENSIONS_CONTEXT", "COPILOT_EXTENSIONS_HUMAN_UTF8"}
     }
     environment.update(
@@ -440,7 +453,7 @@ def test_real_standalone_first_stamp_uses_declared_human_adapter(shell, plugin, 
         flow.complete("done" if result.returncode == 0 else "failed")
     assert result.returncode == 0
     assert (root / "stamped-version").read_text(encoding="utf-8") == "1.0.0"
-    assert powershell_human_utf8_supported(root / "snapshots" / "1.0.0" / "scripts" / "init.ps1")
+    assert powershell_human_utf8_supported(root / "snapshots" / "1.0.0" / "scripts" / entrypoint)
     assert not (root / "versions").exists()
     captured = capsys.readouterr()
     assert captured.out == ""
