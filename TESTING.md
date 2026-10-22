@@ -1700,10 +1700,11 @@ Standalone wheel/sdist tests bind every member to canonical bytes and wheel
 RECORD; a missing companion must fail rather than yield a partial artifact.
 
 `plugins/agent-index/tests/test_payload_hash_stability.py` copies a cold helper
-closure without bytecode caches. Its portable CLI check and native PowerShell
-5/7 construction/role-resolution checks compare every payload file before and
-after actual execution, and require a real completion marker. Run it directly
-with pytest; it needs neither an Index service nor package downloads.
+closure without bytecode caches. Its portable CLI, native Bash role probe and
+PowerShell 5/7 construction checks compare every payload file before and after
+actual execution, and require real completion evidence. Windows uses Git Bash,
+not WSL, for the Bash case. Run it directly with pytest; it needs neither an
+Index service nor package downloads.
 
 Dependency fixtures must also preserve source attribution. Stage matching
 publisher/project metadata and the declared local library graph at the real

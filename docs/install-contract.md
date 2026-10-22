@@ -1545,7 +1545,7 @@ reservation release remain independently binding.
 
 Read-only helper execution must not mutate the admitted payload. The runtime
 primitive loads its canonical sidecar source directly without creating or
-consuming bytecode caches; Windows Index role resolution similarly suppresses
+consuming bytecode caches; both native Index role probes similarly suppress
 bytecode writes. A cold first invocation must preserve the same full payload
 fingerprint through construction completion. Do not weaken the fingerprint
 by ignoring newly generated files to make an unstable constructor pass.
