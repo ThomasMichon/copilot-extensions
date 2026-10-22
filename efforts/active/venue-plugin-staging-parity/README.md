@@ -383,6 +383,13 @@ or a reason to create a daemon.
   Native cross-machine skill acceptance, the simultaneous target-user/staged
   union, privileged/container lifecycle and authorized running-version proof
   remain open. Review, required CI and merge still gate this source candidate.
+- Published #7920 through managed source reconciliation onto current `dev`.
+  The source candidate is open, not merged or deployed; current-head review and
+  every required check remain its completion gate. The all-ecosystem local
+  dependency audit could not read four unchanged npm declarations because
+  secure public-registry TLS failed on this host; the changed Python ecosystem
+  passes all 329 declarations. No certificate-verification bypass or global
+  package-manager configuration change was made.
 
 ### 2026-10-22 - Land privileged receiver source and continue the parent
 
