@@ -289,8 +289,14 @@ class FiniteReverseForward(SupervisedRelayForward):
                         )
                         self._notify_pid_change()
                         return
-                    if (evidence.state == "occupied" and not settled.ready
-                            and settled.remote_forward_failed):
+                    forward_failed = settled.remote_forward_failed
+                    if (evidence.state == "occupied" and not forward_failed
+                            and loop.time() < deadline):
+                        diagnostic = await self._read_stderr_available(
+                            proc, timeout=min(0.01, deadline - loop.time()),
+                        )
+                        forward_failed = self._remote_forward_failed(diagnostic)
+                    if evidence.state == "occupied" and forward_failed:
                         await self._retire_process()
                         continue
                     state = "refused" if evidence.state == "refused" else "unknown"

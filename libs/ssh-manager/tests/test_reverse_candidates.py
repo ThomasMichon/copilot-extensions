@@ -242,6 +242,27 @@ async def test_no_rotation_from_generic_ssh_exit_without_owner_collision_evidenc
     assert len(spawned) == 1 and retired == spawned
 
 
+async def test_late_confirmed_bind_failure_is_not_lost_after_initial_process_settle(monkeypatch):
+    relay, spawned, retired, _ = fixture_owner(monkeypatch, ["occupied", "ready"])
+    async def early_settle(self, proc):
+        proc.stderr = asyncio.StreamReader()
+        return _SettleResult(True, "")
+    async def observe(attempt):
+        proc = spawned[-1]
+        if attempt.endpoint.port == 41001:
+            proc.stderr.feed_data(b"Warning: remote port forwarding failed for listen port 41001\n")
+            proc.returncode = 255
+            return ReverseEvidence(attempt.attempt_id, "occupied")
+        return ReverseEvidence(attempt.attempt_id, "ready")
+    monkeypatch.setattr(FiniteReverseForward, "_wait_settled", early_settle)
+    relay._observe_candidate = observe
+    await relay.establish()
+    assert relay.reverse_status.state == "ready"
+    assert relay.reverse_status.attempt.endpoint.port == 41002
+    assert retired == [spawned[0]]
+    await relay.stop()
+
+
 async def test_target_port_is_stable_across_changed_reverse_endpoint_and_reconnect(monkeypatch):
     relay, spawned, _, attempts = fixture_owner(
         monkeypatch, ["occupied", "ready", "occupied", "ready"],
