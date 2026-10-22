@@ -87,6 +87,58 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Admitted fixture-semantic batches
 
+### N-SHELL ordinary host admission and current lifecycle publication
+
+Baseline: the actual #7783 merge. The native shell helper and complete
+collection module match preserved source, including an ordinary
+`admit_native_bash` entrypoint that retains the existing headless,
+five-second conformance probes and WSL-launcher rejection. The explicit
+resolver still requires the optional-tier opt-in. Collection stays
+process-free and the success regression exercises both admission paths.
+
+Only `test_installed_bin_layout_contains_all_lifecycle_helpers` changes
+in the hook IPC module. Current Dev already uses PowerShell `-Command`
+rather than stdin; that invocation is retained with the resolved executable.
+Bash receives POSIX path arguments and the canonical admission helper,
+without importing an unrelated installer test module.
+
+The first bounded run exposed stale assumptions in this same fixture:
+current installers call publication helpers and PowerShell resolves
+the native-source helper through `PluginDir`. The fixture now extracts
+and executes the real current publication functions and installer loops.
+A fresh miniature payload contains the four actual lifecycle helpers,
+preserving their canonical scripts/source layout. Publishing every
+unrelated installer helper exceeded the unchanged item watchdog; limiting
+fixture input to the four lifecycle helpers under test keeps the real
+publication boundary without dropping any test or assertion. Exact byte
+comparison now covers all four helpers, followed by the existing deployed
+client/native-source/lifecycle import assertions. Production installers
+are unchanged; no external installer-owner work is absorbed.
+
+Complete native Windows shell-collection and hook-IPC modules: 176 passed,
+zero skips, 28.10 seconds pytest / 31.88 preparation-cleanup inclusive.
+Exactly two work-stealing workers retain the original 30-second item
+watchdog, 240-second diagnostic group and every process/memory/native
+deadline and mark. Initial runs failed honestly on the stale fixture
+and then its overbroad publication input; neither receives passing credit.
+No new skip, exclusion, waiver, deadline increase or reduced selection.
+This is bounded functional evidence, not quiet-host, whole-suite,
+repeated same-head or final #5694/#5682 qualification.
+
+Documentation impact: this test-only, below-altitude extraction changes no
+operator-facing command or runtime behavior. This ledger is the relevant
+test-contract documentation. The actual Bash/PowerShell publication and
+deployed-helper imports provide the simple end-to-end check; fresh fixture
+publication exercises first touch, but does not qualify production
+provisioning. Production clean-room and external-venue lanes are inapplicable
+to this test-only change. Other N and production S/F/G/P/R/A residuals
+remain open; W4-BIND and its tests are unchanged.
+
+Prior-slice disposition: #7783 actually merged as
+`4bd41133e43596c4c3803bc34de399cef3875e8205`.
+Its worktree was finalized, parent claim settled, and the owning source
+effort reread and journaled before starting this independent slice.
+
 ### B-RECONCILE stage complete native fixture support without replacing overrides
 
 Baseline: the actual #7776 merge. Both installation-context fixture
