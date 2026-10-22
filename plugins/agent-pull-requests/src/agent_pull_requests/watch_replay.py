@@ -90,6 +90,7 @@ class WatchReplay:
             ):
                 raise ValueError
             expected: dict[tuple[str, str], set[str]] = {}
+            active_records: dict[tuple[str, str], list[tuple[ConsumerScope, dict]]] = {}
             identities = set()
             registration_ids = set()
             for record in state["records"]:
@@ -121,6 +122,7 @@ class WatchReplay:
                     expected.setdefault((scope.account, scope.repo), set()).add(
                         record["registration_id"],
                     )
+                    active_records.setdefault((scope.account, scope.repo), []).append((scope, record))
                     if record["completed_at"] is not None or record["event_id"] is not None:
                         raise ValueError
                 else:
@@ -160,10 +162,7 @@ class WatchReplay:
                     )
                 ):
                     raise ValueError
-                for record in state["records"]:
-                    scope = ConsumerScope(**record["scope"])
-                    if record["outcome"] != "active" or (scope.account, scope.repo) != key:
-                        continue
+                for scope, record in active_records[key]:
                     sub = registry.subscriber(
                         WatchKey(scope.repo, record["number"]), record["registration_id"],
                     )

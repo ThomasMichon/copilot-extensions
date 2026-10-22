@@ -291,7 +291,8 @@ def test_pull_events_never_enter_native_callback_scheduler():
     assert len(restored.pending_events(delivery_mode="pull")) == 1
 
 
-def test_capacity_refuses_new_acceptance_without_evicting_active_requests(owner):
+@pytest.mark.parametrize("spread", [False, True])
+def test_capacity_refuses_new_acceptance_without_evicting_active_requests(owner, monkeypatch, spread):
     core, _, now = owner
     register(core, now[0])
     original = core.snapshot()["records"][0]
@@ -299,20 +300,35 @@ def test_capacity_refuses_new_acceptance_without_evicting_active_requests(owner)
     state = core.snapshot()
     subscription = state["registries"][0]["subscriptions"][0]
     state["records"] = []
-    state["registries"][0]["subscriptions"] = []
+    state["registries"] = []
     for index in range(MAX_RECORDS):
         record = copy.deepcopy(original)
         record.update(request_id=f"request-{index}", registration_id=f"generation-{index}")
+        if spread:
+            record["scope"]["repo"] = f"example/project-{index}"
         state["records"].append(record)
         entry = copy.deepcopy(subscription)
         entry.update(subscriber_id=record["registration_id"],
-                     registration_id=record["registration_id"])
-        state["registries"][0]["subscriptions"].append(entry)
+                     registration_id=record["registration_id"], repo=record["scope"]["repo"])
+        if spread or not state["registries"]:
+            state["registries"].append({
+                "account": SCOPE.account, "repo": record["scope"]["repo"], "subscriptions": [],
+            })
+        state["registries"][-1]["subscriptions"].append(entry)
+    scope_calls = []
+    validate = ConsumerScope.__post_init__
+
+    def counted(scope):
+        scope_calls.append(1)
+        validate(scope)
+
+    monkeypatch.setattr(ConsumerScope, "__post_init__", counted)
     core = WatchReplay("fleet/service", state=state, commit=lambda _: None)
     assert register(core, now[0], request="overflow") == {
         "status": "unavailable", "reason": "replay_capacity",
     }
     assert len(core.snapshot()["records"]) == MAX_RECORDS
+    assert len(scope_calls) <= MAX_RECORDS * 3
 
 
 def test_oversized_observation_never_poison_commits_pending_state(owner):

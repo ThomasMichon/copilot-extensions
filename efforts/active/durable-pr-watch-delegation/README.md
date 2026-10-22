@@ -296,6 +296,10 @@ callback an implicit credential store.
   validated pull baseline, with deterministic before/at-deadline checks and
   all rich transitions exercised across staging and restart. Native callback
   baselines remain on their existing serialization contract.
+- The follow-up review identified quadratic scope reconstruction at the
+  supported 1,024-repository capacity. Indexed active records once per restore;
+  one-group and 1,024-group regressions bound scope-validation calls linearly
+  across restore and a subsequent staged mutation.
 - Documentation impact: updated the PR-plugin README and added the authoritative
   [internal replay contract](../../../plugins/agent-pull-requests/docs/watch-replay.md).
   This realizes part of the PR vision's durable delivery/scope behavior under
