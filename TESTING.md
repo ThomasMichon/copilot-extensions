@@ -239,6 +239,11 @@ symlink assertions execute on Linux without changing production or test bodies.
 This qualifies no command/descendant process settlement, native Windows,
 other activation test module or complete historical census.
 
+The activation package's remote-identity compatibility export imports the
+canonical pure-stdlib parser from `plugin_resolve.remote_identity`; both source
+files are hash-bound in that existing import closure. This adds no unit nodes,
+coverage targets, effects or budget, and does not enroll SSH dispatch tests.
+
 ## Tracking-write source guard
 
 The source tracking-write guard still parses every sibling-plugin Python file,
