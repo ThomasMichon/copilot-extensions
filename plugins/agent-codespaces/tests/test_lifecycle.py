@@ -76,7 +76,7 @@ class TestListCodespaces:
 
         monkeypatch.setattr("agent_codespaces.gh_account.mapped_accounts", lambda: ())
         monkeypatch.setattr(
-            "agent_codespaces.account_binding.bound_accounts", lambda: ("acct-x",),
+            "agent_codespaces.account_binding.bound_accounts_or_raise", lambda: ("acct-x",),
         )
         monkeypatch.setattr(lifecycle, "_list_codespaces_under", fake_under)
 

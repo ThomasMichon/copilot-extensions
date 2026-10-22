@@ -2,14 +2,15 @@
 from __future__ import annotations
 
 import os
-import re
 import subprocess
 from pathlib import Path
 
 from agent_procutil import no_window_flags
+import yaml
 
 from .config import RUNTIME_DIR
 from .auth_preflight import gh_account_failures, parse_gh_account_scopes
+from . import oauth_device
 
 
 def auth_root() -> Path:
@@ -41,6 +42,16 @@ def credential_env(login: str) -> dict[str, str] | None:
         (config_env(path) for account, path in authorized_configs().items()
          if account.casefold() == login.casefold()), None,
     )
+
+
+def credential_token(login: str) -> str | None:
+    from .credential_store import load
+
+    for account, path in authorized_configs().items():
+        if account.casefold() != login.casefold():
+            continue
+        return load(path, account)
+    return None
 
 
 def status(env: dict[str, str] | None = None) -> tuple[int, str]:
@@ -77,58 +88,39 @@ def classify(rc: int, text: str, login: str) -> dict[str, str]:
 
 def probe() -> dict[str, object]:
     """Derive relevant accounts without listing CodeSpaces or starting OAuth."""
-    from . import account_binding, gh_account
-    from .config import load_merged_config
+    from .account_candidates import candidates
 
     try:
-        accounts = list(account_binding.bound_accounts_or_raise())
-        ambient = False
-        for repo in load_merged_config(include_cwd=False).repos:
-            if login := gh_account.account_for_repo(repo):
-                accounts.append(login)
-            else:
-                ambient = True
         global_rc, global_text = status()
-        active = _active_login(global_text)
-        if active and (ambient or not accounts):
-            accounts.append(active)
-        configs = authorized_configs()
-        accounts.extend(configs)
-        accounts = list(dict.fromkeys(accounts))
-        if not accounts:
-            accounts = [""]
         results = []
-        for login in accounts:
-            env = credential_env(login) if login else None
-            rc, text = status(env) if env is not None else (global_rc, global_text)
-            results.append(classify(rc, text, login))
+        for account in candidates():
+            login = account or ""
+            try:
+                credential = credential_token(login) if login else None
+                if credential is None:
+                    results.append(classify(global_rc, global_text, login))
+                else:
+                    results.append(oauth_device.verify(credential, login))
+            except oauth_device.CredentialUnavailable as exc:
+                results.append({"status": "auth_required", "account": login, "message": str(exc)})
         blocked = next((row for row in results if row["status"] != "ready"), None)
         selected = blocked or results[0]
         return {**selected, "accounts": results}
-    except (OSError, subprocess.SubprocessError, RuntimeError, ValueError) as exc:
+    except (OSError, subprocess.SubprocessError, RuntimeError, ValueError, yaml.YAMLError) as exc:
         return {
             "status": "error", "account": "", "accounts": [],
             "message": f"GitHub authentication probe failed ({type(exc).__name__}); refresh to retry.",
         }
 
-
-def _active_login(text: str) -> str | None:
-    current = None
-    for line in text.splitlines():
-        if match := re.search(r"\baccount\s+([A-Za-z0-9][A-Za-z0-9-]*)", line):
-            current = match.group(1)
-        if "active account: true" in line.lower():
-            return current
-    accounts = parse_gh_account_scopes(text)
-    return next(iter(accounts)) if len(accounts) == 1 else None
-
-
 def summary(auth: dict[str, object]) -> dict[str, object]:
+    message = auth["message"]
+    if message and auth["account"]:
+        message = f"{auth['account']}: {message}"
     return {
         "auth": auth,
         "auth_status": auth["status"],
         "auth_account": auth["account"],
-        "banner_text": auth["message"],
+        "banner_text": message,
         "banner_level": "error" if auth["status"] == "error" else "warn",
     }
 

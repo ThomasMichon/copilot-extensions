@@ -15,7 +15,7 @@ def _clear_caches(monkeypatch):
     monkeypatch.setattr(
         "agent_codespaces.account_binding.bound_account", lambda name: None,
     )
-    monkeypatch.setattr("agent_codespaces.account_binding.bound_accounts", lambda: ())
+    monkeypatch.setattr("agent_codespaces.account_binding.bound_accounts_or_raise", lambda: ())
     monkeypatch.setattr(
         "agent_codespaces.account_binding.bind", lambda *args, **kwargs: None,
     )

@@ -65,8 +65,8 @@ headless widget/action with mocked authentication and land through review/CI.
 - [x] Publish structured `auth_required`, `scope_blocked`, `ready` or probe-error
       status, with selected account and actionable banner, in both one-shot and
       streaming pool results. Never equate probe failure with authenticated empty.
-- [x] Add a provider-owned explicit authorization command. Reuse vendor `gh`
-      OAuth/device authorization and account-selection primitives; isolate its
+- [x] Add a provider-owned explicit authorization command. Reuse the vendor
+      GitHub CLI OAuth registration/device protocol and account-selection primitives; isolate its
       configuration from global active-account selection, verify the resulting
       login before using it, retain credentials only on the consuming device,
       and expose only progress/device instructions, never tokens.
@@ -116,7 +116,7 @@ requirements, not optional implementation details.
   verification; existing per-process account pinning consumes verified results.
   No reusable authentication broker exists in the provider, so no optional
   sibling or adopter-private broker is imported.
-- Source validation: 247 provider/CLI/lifecycle tests and 225 Manager
+- Source validation: 256 provider/CLI/lifecycle tests and 225 Manager
   contract/production-widget/preview tests pass in isolated bounded runs.
   Tests drive actual clicks, visible device instructions, cancel/error/success,
   provider refresh, account mismatch and credential adoption with mocked vendor
@@ -130,3 +130,16 @@ requirements, not optional implementation details.
   empty initial snapshot without changing its row-arrival/reconnect budget.
   Non-progress view commands pass through the same confirmation gate as
   progress commands; a real headless click verifies Cancel-by-default.
+- Vendor-source inspection confirmed `GH_CONFIG_DIR` does not isolate the
+  shared OS keyring: `gh auth login` activates a shared unkeyed credential, and
+  file-storage mode still deletes that slot. The provider's on-demand owner
+  therefore uses GitHub's device endpoints with the vendor's public application
+  identifier, verifies identity/scope in memory, and publishes to a provider-owned,
+  installation-qualified keyring namespace (private-file fallback on POSIX).
+  It never calls the mutable vendor login command or touches GitHub CLI keyring
+  slots. Windows refuses storage failure rather than falling back to an
+  unprotected file. This is a storage-mechanism correction
+  within the reviewed provider-owned contract, not a new broker or daemon.
+- One shared candidate selector now serves authentication and inventory,
+  including mapped-only accounts. Pointer activation is constrained to the
+  actual button row; blank-row clicks are explicitly non-authorizing.

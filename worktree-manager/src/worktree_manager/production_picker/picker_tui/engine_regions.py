@@ -151,7 +151,7 @@ class _PickerButtons(_FocusRegion):
     def on_click(self, event) -> None:
         scr = self._screen
         reg = scr._reg_pivot()
-        if reg is not None and scr._pivot_view_actions():
+        if event.y == 0 and reg is not None and scr._pivot_view_actions():
             labels = (
                 ([f"+ {reg.create_action.label}"] if reg.create_action else [])
                 + [action.label for action in scr._pivot_view_actions()]

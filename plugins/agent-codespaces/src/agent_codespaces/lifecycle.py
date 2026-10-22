@@ -88,35 +88,15 @@ def list_codespaces() -> list[CodespaceInfo]:
     When no candidate accounts exist this collapses to a single ambient
     ``gh codespace list`` (today's behavior) -- additive and safe.
     """
-    from . import gh_account
-    from .picker_auth import authorized_configs
+    from .account_candidates import candidates
 
     validate_context()
-    try:
-        from . import account_binding
-
-        bound_accounts = account_binding.bound_accounts()
-    except Exception:
-        bound_accounts = ()
-    accounts_seen: list[str] = []
-    provider_accounts = authorized_configs()
-    for login in (*gh_account.mapped_accounts(), *bound_accounts, *provider_accounts):
-        if login and login not in accounts_seen:
-            accounts_seen.append(login)
-    accounts = tuple(accounts_seen)
-    if not accounts:
-        return _list_codespaces_under(None)
 
     merged: dict[str, CodespaceInfo] = {}
     errors: list[str] = []
     # Each candidate account, then the ambient active account (which may own
     # CodeSpaces under an owner that isn't in the map).
-    candidates = (*accounts, None)
-    if provider_accounts:
-        active = gh_account.active_account()
-        if not active or active.casefold() in {login.casefold() for login in accounts}:
-            candidates = accounts
-    for login in candidates:
+    for login in candidates():
         try:
             for cs in _list_codespaces_under(login):
                 merged.setdefault(cs.name, cs)

@@ -17,6 +17,7 @@ authors = [
 ]
 dependencies = [
     "pyyaml>=6.0.3",
+    "keyring>=25.6.0",
     "agent-ssh-manager",
     "agent-credential-relay",
     "agent-config-migrate",

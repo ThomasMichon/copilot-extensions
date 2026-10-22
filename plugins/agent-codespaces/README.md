@@ -480,25 +480,37 @@ explicit CLI below) starts authentication; listing and rendering never do.
 agent-codespaces authorize --account <login> --user-initiated
 ```
 
-Omit `--account` only when no login has been selected yet. The command runs
-`gh auth login --web --scopes codespace` on the consuming device with an isolated
-provider-owned `GH_CONFIG_DIR`. It does not switch the global `gh` account or
-write to the session environment. Vendor credentials remain in the local `gh`
-secure store (or its local configuration fallback); the provider adopts the
-configuration only after verifying the actual login and granted scope. A wrong
-login, denied scope, failed ceremony or cancellation is not success. The Manager
-refreshes the provider after success. Verified provider credentials participate
-in the existing account-pinned discovery/operation path; unrelated global
-credentials remain unchanged in selection.
+Omit `--account` only when no login has been selected yet. The command uses
+GitHub's device OAuth endpoints and the GitHub CLI's public OAuth application
+identifier. It never runs `gh auth login`: that command can modify the shared OS
+keyring even with an isolated `GH_CONFIG_DIR`, and even its file-storage option
+can delete the global active credential.
+
+Identity and granted scope are verified before storing a credential in the
+provider's own installation-qualified OS keyring namespace. No GitHub CLI keyring
+slot is written or deleted. On POSIX without an available keyring, the provider
+logs that it is using a private vendor-compatible `hosts.yml`: directories must
+be owner-only and files are published with mode `0600`. The modal discloses this
+fallback before authorization. Windows requires the OS keyring and reports an
+explicit storage failure rather than silently writing an unprotected token file.
+No token is exported into the session environment, and no global `gh` file or
+keyring slot is changed. A wrong login, denied scope, failed ceremony or
+cancellation is not success. Verified provider credentials take precedence over
+an older named keyring token for CodeSpace operations. The Manager refreshes the
+provider after success.
+
+Authentication and inventory use one shared set of mapped, bound, configured,
+provider-authorized and active account candidates. A mapped-only account
+missing scope therefore offers Authorize even when another account has rows.
 
 No private broker, persistent authentication daemon, PAT or repository opt-out
 is required. A remote terminal without an available browser can still use the
 displayed vendor verification URL/code in a browser. Native authorization and
 operating-system credential-store behavior require an operator-run ceremony;
 headless regression tests mock that boundary and never authorize an account.
-The provider suppresses automatic browser spawning; opening the displayed
+No browser or authentication child process is spawned; opening the displayed
 verification URL remains a deliberate user action, and cancelling cannot
-terminate an operator's browser.
+terminate an operator's browser or leave an authentication child behind.
 
 ## Credential relay: fail-fast & auth verification
 

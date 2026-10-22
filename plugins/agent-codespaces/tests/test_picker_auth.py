@@ -11,7 +11,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from agent_codespaces import authorize, gh_account, picker_auth, picker_pool, pool
+from agent_codespaces import authorize, credential_store, gh_account, oauth_device, picker_auth, picker_pool, pool
 
 
 def status_text(login="example-user", scope="repo"):
@@ -33,13 +33,14 @@ def test_classify(rc, text, expected):
     assert picker_auth.classify(rc, text, "example-user")["status"] == expected
 
 
-def test_relevant_accounts_ignore_unrelated_active_failure(monkeypatch):
+def test_relevant_accounts_ignore_unrelated_stored_failure(monkeypatch):
     from agent_codespaces import account_binding, config
 
     monkeypatch.setattr(account_binding, "bound_accounts_or_raise", lambda: ())
     monkeypatch.setattr(config, "load_merged_config", lambda **_: SimpleNamespace(repos={"example/repo": {}}))
     monkeypatch.setattr(gh_account, "account_for_repo", lambda _: "example-user")
-    monkeypatch.setattr(gh_account, "active_account", lambda: "other-user")
+    monkeypatch.setattr(gh_account, "active_account", lambda: "example-user")
+    monkeypatch.setattr(gh_account, "mapped_accounts", lambda: ())
     monkeypatch.setattr(picker_auth, "authorized_configs", lambda: {})
     monkeypatch.setattr(picker_auth, "status", lambda *_: (
         1, status_text(scope="codespace") + "Failed to log in to github.com account other-user",
@@ -54,6 +55,7 @@ def test_probe_failure_is_visible(monkeypatch):
     from agent_codespaces import account_binding
 
     monkeypatch.setattr(account_binding, "bound_accounts_or_raise", Mock(side_effect=RuntimeError("locked")))
+    monkeypatch.setattr(picker_auth, "status", lambda *_: (0, status_text(scope="codespace")))
     assert picker_auth.probe()["status"] == "error"
 
 
@@ -116,95 +118,60 @@ def test_authorize_requires_explicit_activation(monkeypatch, capsys):
 def test_vendor_result_verified_before_adoption(tmp_path, monkeypatch, actual, scope, expected):
     monkeypatch.setattr(picker_auth, "auth_root", lambda: tmp_path / "auth")
     before = dict(os.environ)
-    commands = []
-
-    def login(env, progress):
-        assert "GH_TOKEN" not in env and "GITHUB_TOKEN" not in env
-        directory = picker_auth.Path(env["GH_CONFIG_DIR"])
-        (directory / "hosts.yml").write_text("synthetic vendor config", encoding="utf-8")
-        progress("Open https://github.com/login/device and enter ABCD-EFGH")
-
-    monkeypatch.setattr(authorize, "_login", login)
-
-    def run(argv, **kw):
-        commands.append(argv)
-        assert kw["env"]["GH_CONFIG_DIR"] != os.environ.get("GH_CONFIG_DIR")
-        return subprocess.CompletedProcess(argv, 0, actual + "\n", "")
-
-    monkeypatch.setattr(authorize.subprocess, "run", run)
-    monkeypatch.setattr(picker_auth, "status", lambda *_: (0, status_text(actual, scope)))
+    # The vendor CLI's global active slot and named slots are deliberately
+    # different from the new credential. Neither login nor token retrieval
+    # may touch those slots when adopting/using provider credentials.
+    keyring = {("gh:github.com", ""): "account-a-original",
+               ("gh:github.com", "account-a"): "account-a-original",
+               ("gh:github.com", "example-user"): "account-b-old"}
+    original_keyring = dict(keyring)
+    monkeypatch.setattr(credential_store.keyring, "set_password",
+                        lambda service, user, value: keyring.__setitem__((service, user), value))
+    monkeypatch.setattr(credential_store.keyring, "get_password",
+                        lambda service, user: keyring.get((service, user)))
+    vendor_calls = Mock(side_effect=AssertionError("shared keyring must not be used"))
+    monkeypatch.setattr(authorize.subprocess, "run", vendor_calls)
+    monkeypatch.setattr(oauth_device, "acquire", lambda progress: "synthetic-new-credential")
+    monkeypatch.setattr(oauth_device, "_request", lambda *args, **kwargs: (
+        {"login": actual}, {"X-OAuth-Scopes": scope},
+    ))
     if expected == "success":
         assert authorize.authorize("example-user", lambda _: None) == "example-user"
         assert list(picker_auth.authorized_configs()) == ["example-user"]
         assert picker_auth.credential_env("example-user")["GH_CONFIG_DIR"].endswith("example-user")
+        gh_account.clear_caches()
+        monkeypatch.setattr(gh_account.shutil, "which", lambda _: "gh")
+        assert gh_account.token_for_account("example-user") == "synthetic-new-credential"
+        assert not (tmp_path / "auth/example-user/hosts.yml").exists()
     else:
         with pytest.raises(RuntimeError, match="not example-user|codespace scope"):
             authorize.authorize("example-user", lambda _: None)
         assert picker_auth.authorized_configs() == {}
     assert dict(os.environ) == before
-    assert all("switch" not in command for command in commands)
-    assert not list((tmp_path / "auth").glob(".pending-*"))
+    assert all(keyring[key] == value for key, value in original_keyring.items())
+    vendor_calls.assert_not_called()
 
 
 @pytest.mark.parametrize("error", [KeyboardInterrupt, RuntimeError("vendor unavailable")])
 def test_cancel_and_failure_do_not_adopt(tmp_path, monkeypatch, error):
     monkeypatch.setattr(picker_auth, "auth_root", lambda: tmp_path / "auth")
-    monkeypatch.setattr(authorize, "_login", Mock(side_effect=error))
+    monkeypatch.setattr(oauth_device, "acquire", Mock(side_effect=error))
     with pytest.raises(type(error) if isinstance(error, Exception) else KeyboardInterrupt):
         authorize.authorize("example-user", lambda _: None)
     assert picker_auth.authorized_configs() == {}
     assert not list((tmp_path / "auth").glob(".pending-*"))
 
 
-@pytest.mark.parametrize("cancel", [False, True])
-def test_vendor_login_process_boundary_and_cleanup(monkeypatch, cancel):
-    proc = Mock()
-    proc.stdout = io.StringIO(
-        "Copy this code: ABCD-EFGH\nOpen https://github.com/login/device\n"
-        "gho_syntheticsecret\n"
-    )
-    proc.returncode = 0
-    proc.poll.return_value = None if cancel else 0
-    if cancel:
-        proc.stdin.write.side_effect = KeyboardInterrupt
-    job = Mock()
-    spawn = Mock(return_value=(proc, job))
-    monkeypatch.setattr(authorize, "spawn_sync_in_kill_on_close_job", spawn)
-
-    class ImmediateThread:
-        def __init__(self, *, target, **_):
-            self.target = target
-
-        def start(self):
-            self.target()
-
-    monkeypatch.setattr(authorize.threading, "Thread", ImmediateThread)
-    messages = []
-    if cancel:
-        with pytest.raises(KeyboardInterrupt):
-            authorize._login({"GH_CONFIG_DIR": "synthetic"}, messages.append)
-        proc.terminate.assert_called_once()
-    else:
-        authorize._login({"GH_CONFIG_DIR": "synthetic"}, messages.append)
-        assert "ABCD-EFGH" in messages[-1]
-        assert "gho_syntheticsecret" not in messages[-1]
-    argv = spawn.call_args.args[0]
-    assert argv == ["gh", "auth", "login", "--hostname", "github.com",
-                    "--git-protocol", "https", "--web", "--scopes", "codespace"]
-    assert spawn.call_args.kwargs["require_job"] is True
-    assert spawn.call_args.kwargs["allow_breakaway"] is False
-    job.close.assert_called_once()
-
-
 @pytest.mark.parametrize("active", [None, "example-user"])
 def test_verified_provider_discovery_does_not_retry_unauthenticated_ambient(
     monkeypatch, active,
 ):
-    from agent_codespaces import account_binding, lifecycle
+    from agent_codespaces import account_binding, config, lifecycle
 
     monkeypatch.setattr(picker_auth, "authorized_configs", lambda: {"example-user": picker_auth.Path("vendor")})
     monkeypatch.setattr(gh_account, "mapped_accounts", lambda: ())
-    monkeypatch.setattr(account_binding, "bound_accounts", lambda: ())
+    monkeypatch.setattr(account_binding, "bound_accounts_or_raise", lambda: ())
+    monkeypatch.setattr(config, "load_merged_config", lambda **_: SimpleNamespace(repos={}))
     monkeypatch.setattr(gh_account, "active_account", lambda: active)
     listing = Mock(return_value=[])
     monkeypatch.setattr(lifecycle, "_list_codespaces_under", listing)
@@ -264,3 +231,48 @@ def test_inventory_timeout_publishes_error_then_recovers_empty_subscription(monk
     ]
     assert [summary["auth_status"] for summary in summaries] == ["error", "ready"]
     assert "TimeoutExpired" in summaries[0]["banner_text"]
+
+
+@pytest.mark.parametrize("active_rows", [[], [{"id": "active-space"}]])
+def test_mapped_only_account_scope_blocks_before_inventory(monkeypatch, active_rows):
+    from agent_codespaces import account_binding, config
+
+    monkeypatch.setattr(gh_account, "mapped_accounts", lambda: ("mapped-user",))
+    monkeypatch.setattr(gh_account, "active_account", lambda: "example-user")
+    monkeypatch.setattr(account_binding, "bound_accounts_or_raise", lambda: ())
+    monkeypatch.setattr(config, "load_merged_config", lambda **_: SimpleNamespace(repos={}))
+    monkeypatch.setattr(picker_auth, "authorized_configs", lambda: {})
+    monkeypatch.setattr(picker_auth, "status", lambda: (
+        0, status_text(scope="codespace") + status_text("mapped-user", "repo"),
+    ))
+    inventory = Mock(return_value=(active_rows, object()))
+    monkeypatch.setattr(pool, "build_pool", inventory)
+    payload = picker_pool.snapshot(SimpleNamespace(budget=None, stale_after=None))
+    assert payload["summary"]["auth_status"] == "scope_blocked"
+    assert payload["summary"]["auth_account"] == "mapped-user"
+    inventory.assert_not_called()
+
+
+def test_posix_keyring_failure_uses_private_file(tmp_path, monkeypatch):
+    if os.name == "nt":
+        pytest.skip("POSIX private-file fallback")
+    path = tmp_path / "account"
+    path.mkdir(mode=0o700)
+    monkeypatch.setattr(credential_store.keyring, "set_password", Mock(
+        side_effect=credential_store.keyring.errors.NoKeyringError("unavailable"),
+    ))
+    credential_store.save(path, "example-user", "synthetic-credential")
+    assert (path / "store-kind").read_text() == "file"
+    assert (path / "hosts.yml").stat().st_mode & 0o777 == 0o600
+    assert credential_store.load(path, "example-user") == "synthetic-credential"
+
+
+def test_missing_owned_keyring_credential_never_uses_global_keyring(tmp_path, monkeypatch):
+    path = tmp_path / "account"
+    path.mkdir()
+    (path / "store-kind").write_text("keyring", encoding="utf-8")
+    get = Mock(return_value=None)
+    monkeypatch.setattr(credential_store.keyring, "get_password", get)
+    with pytest.raises(oauth_device.CredentialUnavailable):
+        credential_store.load(path, "example-user")
+    assert get.call_args.args[0].startswith("agent-codespaces:")

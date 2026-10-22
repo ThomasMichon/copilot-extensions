@@ -97,6 +97,9 @@ def test_codespaces_view_action_actual_click_and_modal(monkeypatch, auth_state, 
             assert calls == []
             assert label in scr.query_one("#nf-buttons").render().plain
             await pilot.click("#nf-buttons", offset=(4, 1))
+            await pilot.pause()
+            assert calls == [] and not isinstance(app.screen, PivotProgressScreen)
+            await pilot.click("#nf-buttons", offset=(4, 0))
             for _ in range(40):
                 await pilot.pause()
                 if calls:
@@ -166,14 +169,14 @@ def test_nonprogress_view_command_honors_confirmation():
             scr._run_task_action = lambda *args: calls.append(args)
             scr.refresh()
             await pilot.pause()
-            await pilot.click("#nf-buttons", offset=(4, 1))
+            await pilot.click("#nf-buttons", offset=(4, 0))
             await pilot.pause()
             assert isinstance(app.screen, ActionConfirmScreen)
             assert calls == []
             await pilot.press("enter")
             await pilot.pause()
             assert calls == []
-            await pilot.click("#nf-buttons", offset=(4, 1))
+            await pilot.click("#nf-buttons", offset=(4, 0))
             await pilot.pause()
             await pilot.press("left", "enter")
             await pilot.pause()
