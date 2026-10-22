@@ -90,7 +90,7 @@ that pattern to this repository.
 | [Evidence-Calibrated Model Routing](active/evidence-calibrated-model-routing/README.md) | Active | #2014 |
 | [agent-bridge Contract Evolution](active/agent-bridge-contract-evolution/README.md) | Draft | #1460 |
 | [agent-bridge AHP Convergence](active/agent-bridge-ahp-convergence/README.md) | Draft | #1266, #1308 |
-| [agent-bridge Delegation Convergence](active/agent-bridge-delegation-convergence/README.md) | Active | #1448 |
+| [agent-bridge Delegation Convergence](active/agent-bridge-delegation-convergence/README.md) | Active | #1448 original; reviewed Plan/Validation/Journal with independent source claims and assigned #1266 preserved |
 | [agent-bridge Session Discovery](active/agent-bridge-session-discovery/README.md) | Draft | #2530 |
 | [agent-bridge CLI-Mode Sessions](active/agent-bridge-cli-mode-sessions/README.md) | Active | See effort |
 | [Proposed Alignment/Convergence of Observable agent-bridge CLI Sessions](active/agent-bridge-cli-session-alignment/README.md) | Active | See effort |

@@ -2,7 +2,7 @@
 
 - **Slug:** `agent-bridge-delegation-convergence`
 - **Repo:** copilot-extensions
-- **Branch(es):** issue-bound PR worktrees to `main`; parallel readers and
+- **Branch(es):** issue-bound PR worktrees to `dev`; parallel readers and
   serial shared-state writers
 - **Created:** 2026-08-31
 - **Status:** Active
@@ -13,8 +13,9 @@
   `single-stream-message-admission`, plus
   §Behaviors/`attention-requires-a-live-relationship` and
   `prompt-injection-requires-single-stream-proof`
-- **Umbrella issue:** [#1448](https://github.com/ThomasMichon/copilot-extensions/issues/1448)
-- **Sub-issues:**
+- **Original umbrella:** [#1448](https://github.com/ThomasMichon/copilot-extensions/issues/1448);
+  complete original/inherited acceptance is retained directly below
+- **Historical phase references:**
   [#1449](https://github.com/ThomasMichon/copilot-extensions/issues/1449)
   (delegated-agent lifecycle and attention contract) ·
   [#1450](https://github.com/ThomasMichon/copilot-extensions/issues/1450)
@@ -97,6 +98,15 @@ Durable fire-and-forget task ownership remains agent-dispatch's concern.
 - **Single-writer seams:** delegated lifecycle vocabulary, message admission,
   queue ordering, shared event identity, and bridge-owned durable schemas land
   serially even when result and attention readers proceed in parallel.
+- **Continuing tracking:** this reviewed Active Plan, Validation and Journal
+  retain the original umbrella and all adopted phase acceptance. Numbered phase
+  references above are historical requirements, not closed live claim tokens.
+  Preserve existing independently claimed source slices, assigned #1266 and all
+  resource/activation holds; future implementation uses an eligible OPEN
+  bounded-source claim and a Journal entry under the repository contribution
+  policy. Consolidation moves no claimant, source, resource or phase gate.
+  Actual reviewed merge and complete current readback precede supersession of
+  #1448; retain it if concrete custody still requires the live umbrella.
 
 ## Context
 
@@ -252,7 +262,190 @@ Tracked by #1449.
 - [ ] Retire an older semantic path only through #1460's live/durable reference
       census and rollback gate.
 
+### Direct delegation acceptance consolidated from #1448
+
+<!-- backlog-reconciliation:7556:transfer:1448:to:efforts/active/agent-bridge-delegation-convergence/README.md -->
+
+This direct Plan and Validation supplement retains complete unresolved acceptance within
+this existing Active effort. Preserve its complete current Plan, completed phases,
+Coordination and existing claimants. This is tracking consolidation of the semantic
+umbrella and all its already-adopted #1451/#1453/#1454/#1506/#1361/#2341/#2339 clauses,
+not implementation completion, a new controller, reassignment or rollout. Existing
+phase/record/provider owners and assigned #1266 remain unchanged. Reconcile the
+umbrella/intermediary pointers to these exact still-open subsections only after normal
+reviewed delivery and complete public readback; otherwise #1448 stays open.
+
+#### Plan: lifecycle, ordering and ordinary steering
+
+- [ ] Preserve one create/identify/read/steer/wait/interrupt/stop/resume/end-or-retire
+  vocabulary across CLI and authenticated API, one stable logical delegate and durable
+  caller position, bounded current/latest/incremental human/JSON output, explicit raw
+  expansion/truncation/unavailability and structured failures. Advanced operations
+  remain available; current consumers receive documented aliases or capability-gated
+  adoption.
+- [ ] Preserve completion/failure/input/permission/policy/unrecoverable-reachability
+  attention reasons, attached/subscribed/detached distinctions, cursor recovery and
+  compatible successor following. Detached work survives without promising an ended
+  caller a future wake channel; contract-incompatible succession settles explicitly with
+  successor identity.
+- [ ] Retain the frozen lifecycle baseline and completed result/wait slices. Ordinary
+  Phase2 steering precedes represented Phase3 admission serially; facade Phase4 composes
+  the consumed stable slices. Result/wait readers may proceed independently. AHP
+  projection remains a separate lane through assigned #1266 and does not gate AHP
+  ordering Phase3 or completion of the core delegation surface.
+- [ ] Keep autonomous task ownership/scheduling with Dispatch,
+  compatibility/pinning/reader-fencing with #1460, immutable event/reference semantics
+  with #1138, exact AHP with #1266, and existing handoff/claim/lease/provider primitives
+  with their owners. Do not create a second lifecycle/controller/ownership ledger or
+  reopen their completed finite slices.
+- [ ] Ordinary steering non-destructively wakes idle/resumable delegates and durably
+  queues behind running/busy work. Retain the actual busy-before-queue CLI end-to-end
+  regression so queue intent reaches admission, without cancelling the active turn or
+  silently changing legacy consumer semantics.
+- [ ] Durable acknowledgements distinguish immediate versus queued admission and
+  correlate logical message, queue identity and sender attribution. Apply contract-key
+  dedup before admission, including ambiguous-acknowledgement retry; preserve
+  FIFO/exactly-once dequeue through caller reconnect and daemon restart.
+- [ ] Route through the logical delegate and retain queued steering across deliberate
+  successor handoff. Keep an explicit succession fixture gated only while its
+  prerequisite is genuinely unavailable; existing handoff primitives alone are not
+  queue-transfer proof. Explicit interrupt/replacement remains a separate intentional
+  operation.
+
+#### Plan: represented admission and compact launch facade
+
+- [ ] Bind represented submissions server-side to canonical owning session and the
+  frozen logical-message idempotency scope. Fence the authoritative controller's
+  generation/lease across overlap, resume/reconnect, stale subscribers and taken-over
+  registrations; one logical message creates at most one turn on one stream.
+- [ ] Distinguish passive notification/attachment, current-turn steering, future enqueue
+  and fresh-turn start. Unsupported adapters retain truthful
+  presence/observation/attributed notification and explicitly refuse unsafe injection
+  rather than adding a hidden controller.
+- [ ] Correlate submission, queue, turn/model-call, user-message and response identities
+  so duplicate rendering/history is distinguishable from duplicate inference. Exercise
+  duplicate extension delivery, ambiguous acknowledgements, overlapping resumes,
+  stale/taken-over controllers and subsequent user messages after reconnect.
+- [ ] Consume current reservation/taken-over and lease/liveness primitives. Keep
+  ordinary-startup deterministic-peer/source lanes separately owned; newly merged keyed
+  native startup/receipt source is positive bounded credit, not represented-session or
+  qualified native-product completion.
+- [ ] Keep facade handles/positions stable through stop/resume/succession; compose
+  attention/results/admission without another authority. Preserve advanced verbs,
+  existing CLI/REST consumers, semantic compatibility aliases and
+  reader/writer/default/retirement gates.
+- [ ] Carry the already-accepted structured per-session arguments and/or MCP toolsets
+  from supervisor/caller through compact CLI parsing, client serialization, request
+  validation, session construction and actual child/ACP execution. Preserve venue versus
+  charter; never replace typed data with shell interpolation or mutate global agent
+  settings.
+- [ ] Preserve provider launch/remote-ACP/ownership/protocol restrictions, supported
+  resume/reattach tool configuration and worker isolation. Validate
+  malformed/quoted/special inputs, unsupported options, exact forwarding and actual
+  required-tool availability; a parser flag or mocked serializer is not the whole worker
+  capability.
+
+#### Plan: AHP and venue/migration lanes
+
+- [ ] Map logical identity/succession, attention and bounded results/expansion
+  references through the selected released AHP version's actual standard
+  resources/state/actions/capabilities or negotiated extensions. Do not embed private
+  REST/SSE assumptions, invent another lifecycle/controller/replay authority or turn
+  Bridge federation into mandatory AHP core.
+- [ ] Reconnect, multiple AHP clients and handoff preserve one admission authority and
+  ordered stream. Equivalent delegated scenarios through Bridge controls and the AHP
+  face retain lifecycle/attention/results. Distinguish upstream AHP hosting from
+  downstream ACP; unsupported capabilities degrade explicitly without dropping state or
+  advertising unsupported control.
+- [ ] Feature-detect compatible actual released native hosts. Protocol fixtures,
+  mock/model-free witnesses and remote ACP connectivity remain their actual evidence
+  tiers, not native-product adoption. Preserve assigned #1266 codecs/conformance
+  custody; AHP projection does not delay independent AHP ordering work.
+- [ ] Preserve equivalent supported local, peer, trusted-container and CodeSpace
+  lifecycle/attention behavior and honest restricted/reduced fidelity. Exercise the
+  complete compact vocabulary on at least one remote venue. Preserve existing sessions'
+  negotiated semantics through frontend/provider/default changes; measure legacy use,
+  stop old writers before retiring readers/adapters, and consume existing
+  reference-census/rollback gates.
+
+#### Plan: represented-inbox provenance, target binding and durable audit
+
+- [ ] Every actual inbox delivery path visibly distinguishes admitted sender, real
+  channel, exact intended/live session target, stable message identity and canonical
+  reply route from operator input. Labels, quoted envelopes and payload assertions are
+  not authentication or enlarged permission.
+- [ ] Prime receivable sessions before interpretation through their existing owned
+  startup/continuity guidance. Use admitted host/transport relationship and operator
+  binding for authority; retain legitimate delegated in-scope peer coordination without
+  blanket rejection, operator impersonation or a competing trust authority.
+- [ ] Validate exact authorized session/worktree/project/controller incarnation across
+  aliases, stale/reused handles, reconnect and handoff. Test/experiment contexts cannot
+  silently reach unrelated production conversations without configured
+  ingress/delegation authority; a syntactically routable handle or copied tool/nudge
+  label is insufficient.
+- [ ] If an actual path uses a mux, retain its owning mux-session plus pane identity and
+  revalidate intended session before injection or retirement. Do not invent pane
+  transport for direct SDK delivery or conflate the separately corrected pane primitive
+  with inbox routing.
+- [ ] Maintain a bounded authorized durable sender -> intended target -> logical
+  message/payload identity -> admission/delivery/consumption audit across
+  restart/cutover, with explicit privacy, access, retention and redaction. Report
+  unavailable evidence honestly; neither transient rows nor method/path/status logs
+  alone suffice. Every delivery path and cleanup/rotation must retain sufficient
+  controlled incident evidence without logging secrets or retaining all bodies
+  indefinitely.
+- [ ] Keep admission, SDK acceptance, user-message consumption and semantic application
+  distinct. Delivery/receipt is not operator approval, successor ownership or retirement
+  permission.
+- [ ] Retain the corrected causal boundary: the withdrawn status-monitor/postToolUse
+  attribution and separate pane-collision primitive are not this inbox incident's cause
+  or proof of completion. No private incident identifier or imperative payload is needed
+  in public tracking.
+
+#### Validation: direct acceptance, not title/link equivalence
+
+- [ ] Verify lifecycle/attention reasons, stable handles/positions, bounded output and
+  explicit raw detail across supported surfaces; detachment never fabricates a retained
+  wake relationship. Keep the already-completed finite result/wait evidence credited
+  rather than resetting it.
+- [ ] Verify running/idle/stopped-resumable/busy steering, the busy-before-queue CLI
+  path, attributed durable acknowledgements, logical-key ambiguous retries, FIFO
+  exactly-once drain through reconnect/restart, and deliberate succession with only
+  genuinely unavailable prerequisites explicitly gated.
+- [ ] Verify single-controller represented admission under two concurrent callers,
+  duplicate extension deliveries, stale/taken-over generations, overlapping resumes and
+  subsequent user turns after reconnect; correlate actual
+  logical-message/admission/turn/model-call/user-message/response outcomes, not only
+  rendered text.
+- [ ] Verify exact launch arguments/toolsets across the entire caller-to-worker path,
+  supported resume/reattach, malformed/quoted/unsupported cases, provider restrictions,
+  isolated workers and actual required-tool availability without global changes.
+- [ ] Verify actual receiving-model source distinction and startup grounding,
+  intended-target/canonical-reply success, wrong/stale/foreign/reused-target refusal
+  across unrelated sessions, duplicate/restart/retry and durable audit retention. Do not
+  inject into an unconsenting live conversation; unavailable native lanes remain
+  explicit rather than credited from envelope-only units.
+- [ ] Verify equivalent supported local/peer/container/CodeSpace outcomes, the full
+  vocabulary in at least one remote venue, exact supported old/new negotiation before
+  effects, existing-session semantic pinning, restricted-authority denial and the
+  separately owned focused AHP mapping/native acceptance where originally required.
+- [ ] Preserve source/release/installed/native evidence distinctions and every current
+  claimant/hold, serial writer boundary and accepted alternative. No new ACK ceremony,
+  all-host/future-program completion gate or resource release is created by
+  consolidation. Ordinary accepted source contributions retain their earned credit.
+
+Public sources: https://github.com/ThomasMichon/copilot-extensions/issues/1448 ;
+https://github.com/ThomasMichon/copilot-extensions/pull/1509 ;
+https://github.com/ThomasMichon/copilot-extensions/pull/1566 ;
+https://github.com/ThomasMichon/copilot-extensions/pull/1588 ;
+https://github.com/ThomasMichon/copilot-extensions/pull/1899 ;
+https://github.com/ThomasMichon/copilot-extensions/pull/7593 .
+
 ## Validation Plan
+
+- [ ] Complete every directly retained #1448 Plan/Validation row above at its
+  original evidence tier and bounds, preserving existing owners and holds.
+  Tracker consolidation is not implementation or native acceptance.
 
 - [ ] A caller can create, read, steer, wait, interrupt, and end one delegated
       target without learning its venue or transport.
@@ -304,6 +497,13 @@ ownership.
 
 ## Journal
 
+### 2026-10-22 - Complete retained acceptance from #1448
+
+- Materialized the complete #1448 residual directly in the Plan and
+  Validation, preserving existing source/resource custody and partial delivery.
+  Normal reviewed merge and current full readback precede administrative
+  source supersession; no behavior, native run or rollout is declared complete.
+
 ### 2026-08-31 — Kickoff and sibling-effort reconciliation
 
 - Promoted #1448 from a vision follow-up into the explicit sibling effort for
@@ -332,7 +532,7 @@ ownership.
 ### 2026-08-31 — Phase 0 contract baseline
 
 - Carved #1449 into the focused
-  [`agent-bridge-delegation-contract`](../agent-bridge-delegation-contract/README.md)
+  [`agent-bridge-delegation-contract`](../../2026/09/26%20agent-bridge-delegation-contract/README.md)
   stretch.
 - Defined the current-to-target lifecycle, authoritative lineage-derived
   delegate identity, caller relationships, attention reasons, and
@@ -363,7 +563,7 @@ ownership.
 ### 2026-09-01 — Phase 1B attention-wait proposal
 
 - Claimed #1450 and carved the focused
-  [`agent-bridge-attention-waits`](../agent-bridge-attention-waits/README.md)
+  [`agent-bridge-attention-waits`](../../2026/09/03%20agent-bridge-attention-waits/README.md)
   stretch.
 - Selected a deterministic earliest-boundary attention projection over the
   existing event, succession, and bounded-result authorities, retaining the

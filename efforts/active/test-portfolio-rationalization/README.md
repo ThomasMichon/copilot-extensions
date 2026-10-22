@@ -92,7 +92,7 @@ contract map, effect declarations, containment, effectiveness evidence,
 runtime/reliability budgets, and a repeatable rule for keeping, consolidating,
 rewriting, moving, or deleting a test family.
 
-The active [`plugin-process-hygiene`](../plugin-process-hygiene/README.md)
+The archived [`plugin-process-hygiene`](../../2026/09/13%20plugin-process-hygiene/README.md)
 effort governs installed runtime processes. This effort is complementary and
 owns processes and effects created by tests and their runners. Its containment
 work reuses or extends the existing shared process primitives
@@ -242,7 +242,47 @@ _Correlated via a facility-driven sweep of open `bug`-labeled issues against act
 - [ ] **#1052** agent-worktrees: full plugin suite can hang indefinitely without progress output
   - A suite hang without progress output is a test-reliability/portfolio issue.
 
+### Windows SessionHost active-child streaming-hold fixture from #1349
+
+<!-- backlog-reconciliation:7556:transfer:1349:to:efforts/active/test-portfolio-rationalization/README.md -->
+
+Place this exact still-open family in the Phase4 agent-bridge wave and Validation Plan,
+not a generic journal link or a test deletion. Retain SessionHost test/production owners
+and actual overlapping source claims; no competing reaper/process authority or resource
+custody is created.
+
+- [ ] Synchronize the fixture producer, reader and ACTIVE-HOLD lifecycle so the fake
+  stream cannot reach EOF before the intended ten progress frames. Replace the
+  fixed-cadence assumption with deterministic lifecycle evidence; do not mask
+  feed-after-EOF or merely retry for a faster Windows sample.
+- [ ] Preserve all original behavior assertions: active streaming across several hold
+  windows is NOT reaped, ten frames are actually relayed/buffered, and only a genuine
+  full quiet window with no reattach permits reaping. Production reaping behavior/hold
+  semantics remain unchanged.
+- [ ] Retain the original failed combined SessionHost/GC observation and separate
+  isolated1.79s passing retry as different evidence. Concurrent Windows transport abort
+  is not by itself a proved common cause or accepted-flake waiver.
+- [ ] Record bounded repeated native WINDOWS and adjacent-family qualification after
+  synchronization, including reader/producer shutdown and owned cleanup. Preserve
+  item/group/plugin/resource limits and original assertions; no timeout enlargement,
+  hidden skip/xfail, text-only replacement or new model/cloud requirement.
+- [ ] Keep the native/integration family at its proper current periodic/contained tier.
+  Routing it out of required-unit CI is not a passing result, but this finite regression
+  repair does not wait for the whole portfolio, release cadence, mutation tournament or
+  a new ACK ceremony.
+
+No production/runtime/service/native probe was performed by this intake. Close
+duplicate1349 only AFTER this COMPLETE named family plus validation is merged/read back
+in this existing reviewed Active effort and every requirement/owner/gate survives. If
+the receiver is no longer Active, delivery is only a link, or custody/scope cannot be
+preserved, retain1349. Preserve immutable first-pass history and do not claim the
+fixture repaired merely by moving its tracker.
+
 ## Validation Plan
+
+- [ ] Complete every directly retained #1349 Plan/Validation row above at its
+  original evidence tier and bounds, preserving existing owners and holds.
+  Tracker consolidation is not implementation or native acceptance.
 
 - [ ] The containment harness kills and reaps all descendants after success,
   failure, timeout, and interruption on Windows and POSIX.
@@ -272,6 +312,13 @@ with another unbounded full-suite run. Portfolio reductions follow only after
 the inventory and evidence gates are available.
 
 ## Journal
+
+### 2026-10-22 - Complete retained acceptance from #1349
+
+- Materialized the complete #1349 residual directly in the Plan and
+  Validation, preserving existing source/resource custody and partial delivery.
+  Normal reviewed merge and current full readback precede administrative
+  source supersession; no behavior, native run or rollout is declared complete.
 
 ### 2026-10-19 - Accept periodic-container residual ownership
 

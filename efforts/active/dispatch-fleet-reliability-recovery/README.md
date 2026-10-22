@@ -225,7 +225,57 @@ This is a proposal, not an implementation or rollout authorization.
 - [ ] Keep normal publication, containing release and authorized rollout separate;
   plan approval alone does not authorize deployment or clear acceptance.
 
+### Spawn-attempt exhaustion reporting and single-task recovery from #1145
+
+<!-- backlog-reconciliation:7556:transfer:1145:to:efforts/active/dispatch-fleet-reliability-recovery/README.md -->
+
+Place this direct unchecked acceptance under Phase3 supervision/recovery and its
+Validation Plan. It is still-open work, not a completed feature or a new authority.
+Preserve existing coordinator/supervisor, startup/ground-owner, scalar-repair and
+held-cleanup source owners, claims and effect gates; no reservation, resource or
+implementation custody is transferred.
+
+- [ ] Reconcile handleless/stale RESERVING through a bounded race-safe original-startup
+  check. A missing handle, expired timestamp, failed probe or UNKNOWN verdict is not
+  absence; require the existing exact owner/operation evidence and prevent a late launch
+  before freeing capacity. Preserve live/unknown/unreachable and captured-history
+  blockers.
+- [ ] Do not consume the hard failed-attempt budget for EXPLICITLY retryable
+  dependency/capacity unavailability. Distinguish safe pre-admission refusal from
+  uncertain accepted work; never use this classification as permission for duplicate
+  effect replay or clearing held startup authority.
+- [ ] Make generic task/list/health/status report the SAME exhausted-spawn blockage,
+  count and supported recovery, rather than only a loop log while presenting an ordinary
+  runnable queue. Preserve retired task-status DEAD_LETTER compatibility/migration
+  separately; do not restore that status or confuse queued spawn diagnostics with
+  terminal task retirement.
+- [ ] Provide one-task explicit permissioned/audited retry/reset without globally
+  raising attempt limits. Keep current
+  owner/generation/native-history/startup/cleanup/exclusivity fences; coherent
+  configured attempt bounds must not strand a task below an unrelated recovery minimum.
+- [ ] Preserve append-only diagnosis and all original reservation keys, outcomes, errors
+  and lifecycle events. Audited current-state transitions must not erase historical
+  failure or synthesize missing launch/completion evidence.
+- [ ] Qualify daemon restart, transient dependency outage, stale/handleless reserving,
+  exhausted budget, queued-versus-blocked views and manual single-task recovery,
+  including probe/write/late-start races. Preserve ordinary queued behavior and UNKNOWN
+  conservatism; no all-host/model or whole-effort completion is added to this finite
+  repair.
+
+Delivered atomic rearm and positive-absence recovery are baseline, not all1145
+acceptance. Keep assigned terminal-startup capacity and other active source scopes with
+their existing owners; this block neither closes them nor sweeps held rows. Normal
+source review/current test-portfolio routing applies, not a new ACK rendezvous. Close
+duplicate1145 ONLY after this COMPLETE named Plan/Validation block is merged/read back
+in this existing reviewed Active effort; link-only journal text or a closed/Draft
+receiver is insufficient. Preserve first-pass history and retain1145 if delivery or
+custody conditions fail.
+
 ## Validation Plan
+
+- [ ] Complete every directly retained #1145 Plan/Validation row above at its
+  original evidence tier and bounds, preserving existing owners and holds.
+  Tracker consolidation is not implementation or native acceptance.
 
 - [ ] Request read-back preserves category-only scope, no pruning, audit retention,
   registry authority and existing schema-fix ownership.
@@ -281,6 +331,13 @@ named-resource resolution so an older peer cannot silently accept but ignore a
 requested contract.
 
 ## Journal
+
+### 2026-10-22 - Complete retained acceptance from #1145
+
+- Materialized the complete #1145 residual directly in the Plan and
+  Validation, preserving existing source/resource custody and partial delivery.
+  Normal reviewed merge and current full readback precede administrative
+  source supersession; no behavior, native run or rollout is declared complete.
 
 ### 2026-10-21 - Phase 7 local review corrections
 
