@@ -328,6 +328,10 @@ or a reason to create a daemon.
 
 ### 2026-10-22 - Integrate the actual privileged receiver in source
 
+- Published source candidate #7899 for review. Its managed rebase includes no
+  intervening Bridge or shared-library changes; the qualified implementation
+  is unchanged. Required CI, review, merge and subsequent publication remain
+  distinct from authorized installed and native privileged acceptance.
 - Completed the existing owner trace: `LocalSpawner` always starts a fresh
   Session Host under the receiver's inherited token and resolved environment.
   Preparation belongs after its own allocation/profile merge, not inside a
