@@ -2723,6 +2723,7 @@ class TestCreatePRAutoOpen:
         assert res["success"] is True
         assert res["pr_opened"] is True
         assert attribution.parse_marker(fake.captured["scope"].body) is None
+        assert fake.captured["scope"].body == ""
 
     def test_no_attribution_overrides_repo_opt_in(self, pr_repo, monkeypatch):
         from agent_worktrees import providers
@@ -2733,11 +2734,12 @@ class TestCreatePRAutoOpen:
         monkeypatch.setattr(providers, "get_provider", lambda name: fake)
 
         res = pr_ops.create_pr(
-            wid, config, title="Add feature", attribution=False,
+            wid, config, title="Add feature", attribution=False, body="Hello",
         )
 
         assert res["success"] is True
         assert attribution.parse_marker(fake.captured["scope"].body) is None
+        assert fake.captured["scope"].body == "Hello"
 
     def test_codename_mode_embeds_codename_and_encrypted_identity(
         self, provider_record_repo, monkeypatch, keyed_identity_payload,
@@ -2927,6 +2929,9 @@ class TestCreatePRAutoOpen:
         assert res["success"] is True
         assert attribution.parse_marker(fake.captured["scope"].body) is None
         assert "stale-worktree-id" not in fake.captured["scope"].body
+        assert "agent-worktrees:source" not in fake.captured["scope"].body
+        rec_after = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        assert rec_after.active_pr().attribution_head == ""
 
     def test_attribution_disabled_strips_a_stale_marker_from_the_body(
         self, provider_record_repo, monkeypatch,

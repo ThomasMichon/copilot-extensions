@@ -87,7 +87,46 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Admitted fixture-semantic batches
 
+### B-PROVIDER-ASSERT body and malformed-marker controls
+
+Baseline: the actual #7691 merge. The default-disabled publication
+case now requires an exact empty body. The explicit disabled-attribution
+override supplies `"Hello"` through real `create_pr` and requires those
+exact bytes. The malformed-codename/stale-marker record case additionally
+requires no marker text and no persisted `attribution_head`.
+
+All 246 existing test identities, fixture dependencies, decorators and
+old assertions remain. In particular, the three historical duplicate
+removal candidates are not applied: the actual publication tests
+`test_codename_mode_skips_marker_for_a_malformed_codename`,
+`test_codename_mode_skip_does_not_record_attribution_head` and
+`test_no_attribution_omits_marker` still execute unchanged. The stronger
+record-boundary assertions supplement rather than replace those end-to-end
+cases. Their removal deltas are proposed for retirement from future
+extraction, not their tests or contracts; preserving them maintains complete original
+selection under the reviewed wave plan.
+
+Complete native Windows provider module: 246 passed, zero skips,
+122.11 seconds pytest / 136.88 preparation-cleanup inclusive. Exactly
+two work-stealing workers retain the original 30-second item watchdog,
+all marks/resource ceilings and the 240-second diagnostic group.
+This is functional integration, not quiet-host, whole-suite or
+repeated same-head qualification.
+
+This below-altitude assertion-only change affects no production,
+command, configuration, installation or architecture contract.
+Documentation impact is this ledger. Clean-room provisioning and
+external-venue lanes are inapplicable; other B/N and S/F/G/P/R/A
+contracts remain separate.
+
 ### B-PROVIDER-RECORD persisted provider inputs
+
+Actual disposition: #7691 merged as
+`5106ca4d00f69dfbc74b7486da85ae9d55636d2b`; full Copilot review
+`5607632841` approved exact head
+`7bcecd5dc854a5ad8999c2dc4f9e8e2debdd4b96`.
+All findings and threads are resolved, required CI was green, and
+the child worktree is finalized.
 
 Baseline: the actual #7684 merge. `provider_record_repo` constructs fresh
 configuration and a real tracking record per case, without Git setup.

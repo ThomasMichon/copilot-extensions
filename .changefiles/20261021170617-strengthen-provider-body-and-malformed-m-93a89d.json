@@ -1,0 +1,9 @@
+{
+  "comment": "Strengthen provider body and malformed marker assertions without reducing test selection",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
