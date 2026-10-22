@@ -27,6 +27,7 @@ isolated regression proof, not production SSH recovery or live adoption.
 | Participant | Role in this effort | Reached via |
 |-------------|---------------------|-------------|
 | Source contributor | Proposal, new bounded coordination source, focused regression and publication | #7719; `soldered-sprocket`, source root `jittery-wrench` |
+| Existing finite-forward contributor | Retain finite candidate selection, actual SSH bind/process ownership and candidate-specific readiness | #7720; source `greased-kiln` |
 | Existing transport/profile owners | Retain actual SSH execution, profile derivation and supported platform adapters | #63, #7206 and #5973 |
 | Existing permission/enrollment owners | Retain authenticated participant policy, both forwarding directions and grant projection | #5789 and #6804 |
 | Existing lifecycle/adoption owners | Retain supervision, restart custody, distribution and live activation | #6240, #6424, #6030 and #6681 |
@@ -46,6 +47,10 @@ isolated regression proof, not production SSH recovery or live adoption.
 - **Retained ownership:** the archived Gateway campaign under #7257 and the
   existing policy/profile/lifecycle sources are not taken over. Shared
   integration changes require their own explicit source acceptance.
+- **Finite-forward dependency:** #7720 owns the additive `ssh-manager`
+  candidate/readiness leaf. This campaign coordinates admission, publication
+  and uncertainty above that owner; it must not implement another candidate
+  selector, retry loop or SSH process owner.
 
 ## Context
 
@@ -60,6 +65,9 @@ reservation API. The existing `fleet-manager.gateway_ssh_policy` and
 `gateway_ssh_runtime` leaves provide policy decisions and named-profile
 reconciliation; neither supplies reverse-listener allocation. The service-role
 Gateway's HTTP/response-stream profile explicitly refuses generic TCP.
+The newly accepted #7720 contribution owns the missing finite-forward leaf;
+its accepted source contract is an integration dependency, not an API inferred
+from an issue or a reason to patch its source here.
 
 The [design](design.md) reconciles those boundaries, the actual OpenSSH
 permission constraint and the available qualification tiers. Existing local
@@ -106,6 +114,9 @@ All steps in this phase are agent-recommended.
 - [ ] Implement the strictly bounded new coordination module described in
   [design.md](design.md), with explicit typed conflict, refusal, unavailable
   and unknown outcomes.
+- [ ] Compose the accepted #7720 finite-forward contract without duplicating
+  candidate selection or process/reconnect ownership. Keep an unavailable
+  production adapter explicit.
 - [ ] Retain the actual successful candidate resource; publish only after
   owner-verified target readiness and generation-checked admission.
 - [ ] Keep ambiguous bind/publication outcomes under their original
@@ -189,5 +200,9 @@ No production API or runtime readiness is claimed by this proposal.
 - Located no existing real `sshd` harness or reusable SSH credential fixture
   in the tracked forwarding/native test inventory. This limits the proposed
   qualification lane; it is not permission to provision credentials.
+- Reconciled the separately accepted #7720 finite-forward source reservation:
+  retain that contributor's candidate selection, readiness and actual SSH
+  process ownership; narrow this proposal to its distinct supplied-owner
+  admission/publication/uncertainty layer.
 - Reconciled existing vision intent and prepared the proposal. No engine,
   retained policy/profile/lifecycle source or live resource was changed.

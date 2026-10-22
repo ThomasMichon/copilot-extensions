@@ -17,6 +17,7 @@ Existing source provides useful, distinct responsibilities:
 | Source | Existing responsibility | Not supplied |
 |---|---|---|
 | `libs/ssh-manager/.../forward.py` and relay owners | Actual SSH argv, owned process/proxy lifetime, platform-aware forwarding | Participant-scoped remote listener allocation/publication authority |
+| Accepted #7720 finite-forward contribution | Additive finite candidate selection, retained actual bind, candidate readiness and bounded existing-channel recovery | Fleet admission, grant projection or authoritative generation publication |
 | `fleet-manager/.../gateway_ssh_policy.py` | Explicit machine/environment/direction/host-mediation decisions | Execution authorization or actual socket readiness |
 | `fleet-manager/.../gateway_ssh_runtime.py` | Fixed trusted profile-owner/authority protocols, exact observation and plan fencing | Reverse bind resources or a listener lease registry |
 | `libs/endpoint-rendezvous` | Local atomic advertisement and serialized owner-checked cleanup | Authenticated remote reservation or peer forwarding permission |
@@ -68,6 +69,10 @@ The module will be a finite callable coordinator under a supplied existing
 owner, not another background loop, CLI daemon, endpoint registry or persistent
 lease store. Its public documentation must state which real adapter exists;
 an interface and its synthetic implementation do not qualify deployment.
+In particular, #7720 is the sole finite-forward source owner. Do not duplicate
+its candidate iteration, classify arbitrary SSH failures as conflicts, or
+create another reconnect/process owner in this module. The exact accepted
+provider API must be consumed rather than guessed from the issue.
 
 ## Supplied-owner contract
 
@@ -83,11 +88,14 @@ The proposal separates four operations:
    authenticated participant/session and policy observation. Refuse stale,
    withdrawn, unsupported, conflicting or unresolved previous operations
    before requesting another effect.
-2. **Bind and retain.** Attempt an actual permitted tuple within one finite
-   budget. Only a positively classified address conflict permits trying the
-   next already authorized candidate. Authentication, permission, transport
-   and ambiguous failures are not port conflicts. Retain the successful
-   owner resource, rather than closing a probe and rebinding.
+2. **Bind and retain through the existing leaf.** Invoke the accepted #7720
+   owner contract once under the admitted correlation and finite operation
+   budget. That owner alone selects among already authorized candidates and
+   retains the actual successful process/listener. Only its positively
+   classified bind conflict permits another candidate; authentication,
+   permission, transport and ambiguous failures are not port conflicts.
+   This coordinator must not retry the leaf after an unknown result or
+   create a probe-close/rebind fallback.
 3. **Verify and publish.** The owner proves expected target readiness on that
    resource and rechecks current policy/generation. Its existing authoritative
    journal atomically compares the expected predecessor and publishes the
@@ -104,6 +112,14 @@ bounded implementation against these obligations. Explicitly distinguish
 no-effect refusal, confirmed conflict/exhaustion, applied publication and
 unknown effect. Unexpected programming errors propagate; no success-shaped
 fallback or raw stderr/transcript logging is proposed.
+
+The minimum integration evidence from the finite-forward owner is a selected
+tuple within the admitted finite set, the retained resource/connection custody,
+candidate-specific readiness, and the original operation correlation.
+Confirmed no-effect refusal/exhaustion must be distinguishable from an
+unresolved effect. A healthy process, a selected integer or a callback name is
+not that contract. These are requirements to reconcile with #7720, not a
+declaration that its future method or wire shape already exists.
 
 ## Concurrency, failure and connection isolation
 
