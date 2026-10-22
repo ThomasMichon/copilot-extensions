@@ -2666,6 +2666,16 @@ deadline and deployed-version receipt judgment. Streaming output does not turn
 a zero exit with a missing target receipt, an expired deadline or a failed
 cutover into a successful operation.
 
+Bridge, Dispatch, Vault, Pull Requests, SSH and Budget Guidance emit ordinary
+progress-helper lines for install/update action identity instead of decorative
+blank/banner blocks. Existing start/completion locations and useful action
+names remain; Dispatch's superseded-install line retains its qualification as
+skipped progress. Captured parents normalize these helpers to running, done or
+skipped diagnostics with elapsed time. Only the parent's actual completion
+records an operation duration and result. This is emitter-side cleanup, not
+generic banner recognition or suppression of arbitrary empty child lines.
+Uninstall presentation is unchanged.
+
 ### External dependency seasoning
 
 External build, runtime, development and selected optional dependencies must

@@ -1103,9 +1103,7 @@ if [[ "$ACTION" == "uninstall" ]]; then
     exit 0
 fi
 
-echo ''
-echo '=== agent-ssh install ==='
-echo ''
+_step 'agent-ssh install'
 
 if [[ ! -d "$PKG_SRC_DIR" ]]; then
     _fail "Package source not found at $PKG_SRC_DIR"
@@ -1230,7 +1228,6 @@ case ":$PATH:" in
     *) _step "Add $LOCAL_BIN to your PATH (e.g. in ~/.bashrc): export PATH=\"\$HOME/.local/bin:\$PATH\"" ;;
 esac
 
-echo ''
-echo '=== agent-ssh install complete ==='
+_ok 'agent-ssh install'
 echo '  Try: agent-ssh version'
 exit 0

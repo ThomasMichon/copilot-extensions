@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import importlib.util
+import io
 import json
 import os
+import re
 import shutil
 import stat
 import subprocess
@@ -60,6 +62,93 @@ def test_human_output_declarations_bind_real_packaged_entrypoints():
         assert supports(script), name
         declaration = json.loads(script.with_suffix(".human-output.json").read_text("utf-8"))
         assert declaration == contract.human_output_declaration(script)
+
+
+@pytest.mark.parametrize("shell", ["bash", "pwsh", "powershell"])
+def test_installer_action_identity_uses_existing_progress_helpers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, shell: str,
+) -> None:
+    if shell == "bash" and os.name == "nt":
+        pytest.skip("exercise POSIX installers on a POSIX host")
+    executable = shutil.which(shell)
+    if not executable:
+        pytest.skip(f"{shell} unavailable")
+    powershell = shell != "bash"
+    suffix = ".ps1" if powershell else ".sh"
+    markers = {"running": "...   ", "done": "[OK]  ", "skipped": "[SKIP]"}
+    helpers = (
+        {"running": "Write-Step", "done": "Write-Ok", "skipped": "Write-Skip"}
+        if powershell else {"running": "_step", "done": "_ok", "skipped": "_skip"}
+    )
+    fragments = []
+    expected = []
+    states = []
+    for plugin in (
+        "agent-dispatch", "agent-vault", "agent-pull-requests", "agent-ssh", "budget-guidance",
+    ):
+        source = (REPO / "plugins" / plugin / "scripts" / ("install" + suffix)).read_text(
+            encoding="utf-8",
+        )
+        source_lines = source.splitlines()
+        actions = ["install", "update"] if plugin in {"agent-dispatch", "agent-vault"} \
+            else ["install"]
+        cases = [(state, f"{plugin} {action}") for action in actions
+                 for state in ("running", "done")]
+        if plugin == "agent-dispatch":
+            cases.append(("skipped", "agent-dispatch install (superseded by a newer concurrent build)"))
+        for state, message in cases:
+            helper = helpers[state]
+            declaration = f"function {helper} " if powershell else helper + "()"
+            fragments.append(next(
+                line for line in source_lines if line.startswith(declaration)
+            ))
+            invocation = re.search(
+                rf"^[ \t]*{re.escape(helper)}[ \t]+(['\"]){re.escape(message)}\1[ \t]*$",
+                source, re.M,
+            )
+            assert invocation is not None, (plugin, state, message)
+            index = source_lines.index(invocation[0])
+            for neighbor in source_lines[max(0, index - 1):index] + source_lines[index + 1:index + 2]:
+                assert neighbor.strip() not in {"Write-Host ''", 'Write-Host ""', "echo ''", 'echo ""'}
+            fragments.append(invocation[0])
+            expected.append(f"  {markers[state]} {message}")
+            states.append(f"{state} {message}")
+    harness = tmp_path / ("identities" + suffix)
+    harness.write_text(
+        ("$ErrorActionPreference = 'Stop'\n" if powershell else "set -euo pipefail\n")
+        + "\n".join(fragments) + "\n", encoding="utf-8",
+    )
+    argv = (
+        [executable, "-NoProfile", "-NonInteractive", "-File", str(harness)]
+        if powershell else [executable, str(harness)]
+    )
+    options = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+    standalone = subprocess.run(
+        argv, capture_output=True, text=True, timeout=10, check=False, **options,
+    )
+    assert standalone.returncode == 0, standalone.stderr
+    assert standalone.stderr == ""
+    assert standalone.stdout.splitlines() == expected
+
+    monkeypatch.syspath_prepend(str(REPO / "libs" / "update-telemetry" / "src"))
+    from update_telemetry.human import HumanOperation, native_output
+
+    output = io.StringIO()
+    with HumanOperation("installers", stream=output) as operation:
+        with native_output() as sink:
+            result = subprocess.run(
+                argv, stdout=sink, stderr=sink, timeout=10, check=False, **options,
+            )
+        operation.complete("done" if result.returncode == 0 else "failed", f"exit {result.returncode}")
+    assert result.returncode == 0
+    lines = output.getvalue().splitlines()
+    assert len(lines) == len(states) + 2, lines
+    for line, message in zip(lines[1:-1], states, strict=True):
+        assert re.fullmatch(
+            rf"\[\d{{2}}:\d{{2}}:\d{{2}}\.\d{{3}}Z\] installers "
+            rf"{re.escape(message)} \[elapsed \d+\.\d+s\]", line,
+        )
+    assert "installers done exit 0 [duration " in lines[-1]
 
 
 def _copy_real_installer_engine(root: Path) -> None:

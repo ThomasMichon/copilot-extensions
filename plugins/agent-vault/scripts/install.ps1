@@ -1167,14 +1167,14 @@ function Stop-VaultDaemonGraceful {
 }
 
 function Invoke-Install {
-    Write-Host ''; Write-Host '=== agent-vault install ===' -ForegroundColor Cyan; Write-Host ''
+    Write-Step 'agent-vault install'
     Install-Runtime
     Register-AgentVaultTask
-    Write-Host ''; Write-Host '=== agent-vault install complete ===' -ForegroundColor Cyan
+    Write-Ok 'agent-vault install'
 }
 
 function Invoke-Update {
-    Write-Host ''; Write-Host '=== agent-vault update ===' -ForegroundColor Cyan; Write-Host ''
+    Write-Step 'agent-vault update'
     Invoke-DowngradeGuard
     Install-Runtime
     # Thread B (lightest tier; docs/patterns/graceful-daemon-cutover.md): a version
@@ -1187,7 +1187,7 @@ function Invoke-Update {
     # starts the new daemon on the now-free endpoint.
     if (-not $NoService) { [void](Stop-VaultDaemonGraceful) }
     Register-AgentVaultTask
-    Write-Host ''; Write-Host '=== agent-vault update complete ===' -ForegroundColor Cyan
+    Write-Ok 'agent-vault update'
 }
 
 function Invoke-Start {

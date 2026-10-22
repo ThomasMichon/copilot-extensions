@@ -3929,7 +3929,7 @@ function Invoke-Stamp {
 
 
 function Invoke-Install {
-    Write-Host ''; Write-Host '=== agent-dispatch install ===' -ForegroundColor Cyan; Write-Host ''
+    Write-Step 'agent-dispatch install'
     Install-Runtime
     if (Test-ActivationSupersededNow) {
         # A concurrent, newer install already activated -- either caught at
@@ -3943,7 +3943,7 @@ function Invoke-Install {
         # own (older, losing) $VenvPython build -- proceeding would
         # misreport a perfectly healthy, already-newer coordinator as
         # serving a stale build. Nothing else to do for this invocation.
-        Write-Host ''; Write-Host '=== agent-dispatch install complete (superseded by a newer concurrent build) ===' -ForegroundColor Cyan
+        Write-Skip 'agent-dispatch install (superseded by a newer concurrent build)'
         return
     }
     Install-CoordinatorTask
@@ -3951,7 +3951,7 @@ function Invoke-Install {
     Install-SupervisorTask
     if (-not $NoService) { Confirm-CoordinatorRunning }
     Invoke-SupervisorAudit -Event installer-reconcile -Reason invocation-returned -Outcome ok
-    Write-Host ''; Write-Host '=== agent-dispatch install complete ===' -ForegroundColor Cyan
+    Write-Ok 'agent-dispatch install'
 }
 
 function Test-CoordinatorRouted {
@@ -4002,7 +4002,7 @@ function Invoke-CoordinatorCutover {
 }
 
 function Invoke-Update {
-    Write-Host ''; Write-Host '=== agent-dispatch update ===' -ForegroundColor Cyan; Write-Host ''
+    Write-Step 'agent-dispatch update'
     # Mark the live-service update lifecycle as in-progress (ce#5066) so a
     # local liveness watchdog never force-restarts a daemon that is
     # legitimately, briefly mid-cutover. try/finally (not a trap, which
@@ -4097,7 +4097,7 @@ function Invoke-Update {
         Install-SupervisorTask
     }
     Invoke-SupervisorAudit -Event installer-reconcile -Reason invocation-returned -Outcome ok
-    Write-Host ''; Write-Host '=== agent-dispatch update complete ===' -ForegroundColor Cyan
+    Write-Ok 'agent-dispatch update'
     } finally {
         Clear-UpdateMarker
     }

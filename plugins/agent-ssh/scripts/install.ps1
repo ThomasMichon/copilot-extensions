@@ -1086,9 +1086,7 @@ if ($Action -eq 'uninstall') {
     exit 0
 }
 
-Write-Host ''
-Write-Host '=== agent-ssh install ===' -ForegroundColor Cyan
-Write-Host ''
+Write-Step 'agent-ssh install'
 
 if (-not (Test-Path $PkgSrcDir)) {
     Write-Fail "Package source not found at $PkgSrcDir"
@@ -1290,8 +1288,7 @@ if ($pathDirs -contains $LocalBin) {
     }
 }
 
-Write-Host ''
-Write-Host '=== agent-ssh install complete ===' -ForegroundColor Cyan
+Write-Ok 'agent-ssh install'
 Write-Host '  Try: agent-ssh version' -ForegroundColor DarkGray
 exit 0
 } finally {

@@ -2324,7 +2324,7 @@ do_stamp() {
 }
 
 do_install() {
-    echo ''; echo '=== agent-dispatch install ==='; echo ''
+    _step 'agent-dispatch install'
     _ensure_runtime || return 1
     if _activation_superseded_now; then
         # A concurrent, newer install already activated -- either caught at
@@ -2335,19 +2335,19 @@ do_install() {
         # themselves version-agnostic (they write generic, marker-resolving
         # systemd units), but running them from this invocation's own
         # (older, losing) build is still unnecessary -- nothing left to do.
-        echo ''; echo '=== agent-dispatch install complete (superseded by a newer concurrent build) ==='
+        _skip 'agent-dispatch install (superseded by a newer concurrent build)'
         return 0
     fi
     _install_service
     _install_supervisor_service
     _supervisor_audit installer-reconcile invocation-returned "" "" ok
-    echo ''; echo '=== agent-dispatch install complete ==='
+    _ok 'agent-dispatch install'
     echo '  Coordinator: systemctl --user status agent-dispatch'
     echo '  Supervisor:  systemctl --user status agent-dispatch-supervisor'
 }
 
 do_update() {
-    echo ''; echo '=== agent-dispatch update ==='; echo ''
+    _step 'agent-dispatch update'
     # Mark the live-service update lifecycle as in-progress (ce#5066) so a
     # local liveness watchdog never force-restarts a daemon that is
     # legitimately, briefly mid-cutover. The EXIT trap covers every path
@@ -2477,7 +2477,7 @@ do_update() {
     _install_supervisor_service
     _unlock_cutover
     _supervisor_audit installer-reconcile invocation-returned "" "" ok
-    echo ''; echo '=== agent-dispatch update complete ==='
+    _ok 'agent-dispatch update'
 }
 
 do_start() {

@@ -743,9 +743,7 @@ try {
         exit 0
     }
 
-    Write-Host ''
-    Write-Host '=== agent-pull-requests install ===' -ForegroundColor Cyan
-    Write-Host ''
+    Write-Step 'agent-pull-requests install'
 
     if (-not (Test-Path $PkgSrcDir)) {
         Write-Fail "Package source not found at $PkgSrcDir"
@@ -874,8 +872,7 @@ try {
         Write-Ok "PATH: $LocalBin is on PATH"
     }
 
-    Write-Host ''
-    Write-Host '=== agent-pull-requests install complete ===' -ForegroundColor Cyan
+    Write-Ok 'agent-pull-requests install'
     Write-Host '  Try: agent-pull-requests --version' -ForegroundColor DarkGray
     exit 0
 } finally {

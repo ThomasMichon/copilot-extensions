@@ -670,9 +670,7 @@ if [[ "$ACTION" == "uninstall" ]]; then
     exit 0
 fi
 
-echo ""
-echo "=== agent-pull-requests install ==="
-echo ""
+_step 'agent-pull-requests install'
 
 if [[ ! -d "$PKG_SRC_DIR" ]]; then
     _fail "Package source not found at $PKG_SRC_DIR"
@@ -761,7 +759,6 @@ case ":$PATH:" in
     *) _step "Add $LOCAL_BIN to your PATH (e.g. in ~/.bashrc): export PATH=\"\$HOME/.local/bin:\$PATH\"" ;;
 esac
 
-echo ""
-echo '=== agent-pull-requests install complete ==='
+_ok 'agent-pull-requests install'
 echo '  Try: agent-pull-requests --version'
 exit 0

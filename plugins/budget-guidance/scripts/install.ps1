@@ -932,9 +932,7 @@ if ($Action -eq 'uninstall') {
     exit 0
 }
 
-Write-Host ''
-Write-Host '=== budget-guidance install ===' -ForegroundColor Cyan
-Write-Host ''
+Write-Step 'budget-guidance install'
 
 if (-not (Test-Path $PkgSrcDir)) {
     Write-Fail "Package source not found at $PkgSrcDir"
@@ -1145,8 +1143,7 @@ if ($pathDirs -contains $LocalBin) {
     }
 }
 
-Write-Host ''
-Write-Host '=== budget-guidance install complete ===' -ForegroundColor Cyan
+Write-Ok 'budget-guidance install'
 } finally {
     Stop-RuntimeConstruction
 }
