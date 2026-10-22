@@ -283,9 +283,12 @@ authorizes critical main-path acceptance or a bounded administrative change.
   preserving all sibling files, failure handling, alias fixed points and
   diagnostic ordering. Keep local paired timing separate from hosted timing
   and the broader whole-flow acceptance gates.
-- [ ] Land and observe bounded headless-guard analysis reuse, preserving all
-  production roots, six enforcement rules, allowlists and failure handling.
+- [x] Land and observe bounded headless-guard analysis reuse (#7700), preserving
+  all production roots, six enforcement rules, allowlists and failure handling.
   Keep local paired timing distinct from natural hosted observations.
+- [ ] Land and observe conservative narrative-only PR omission of the three
+  source AST scans, retaining full non-narrative and non-PR execution, pinned
+  input/error handling, every other guard and all required unit evidence.
 - [ ] Remove redundant release-shaped PR and main-push validation only where
   existing trusted gates and exact-SHA release evidence cover the removed work;
   first prove no generated-output coverage or required context is lost.

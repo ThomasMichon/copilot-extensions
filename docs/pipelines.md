@@ -29,6 +29,14 @@ not again on each PR update. Admitted Dev-push executions retain that diagnostic
 strict source guards and required validation remain in PR CI. A cancelled or
 superseded execution is not diagnostic or test evidence.
 
+The checks job independently reuses the same pinned-diff narrative classifier
+for its tracking-write, headless-launch and asyncio-timeout AST scans. Only
+known Markdown-only PRs omit these three scans, whose inputs exclude those
+files. Non-narrative/unknown PR inputs retain complete scans; push, manual and
+other events always run them. Invalid or unavailable diff evidence fails the
+job, not a success-shaped skip. All other guards remain unchanged, and the
+ungated trusted-CI guard binds the selector and exact scan commands.
+
 Push CI performs source-policy admission without repeating promotion's unit
 execution. Manual CI runs the same admitted packet, not the old full portfolio.
 The retired self-hosted PR workflow is a manual routing pointer; payload-CWD

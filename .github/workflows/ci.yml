@@ -82,7 +82,32 @@ jobs:
       run: python tools/check-large-files.py --all
     - name: No agent-machines consuming-side packages in this repo
       run: python tools/check-no-agent-machines-packages.py
+    - id: source-ast-impact
+      name: Resolve source AST guard inputs
+      timeout-minutes: 2
+      env:
+        EVENT: ${{ github.event_name }}
+        BASE: ${{ github.event.pull_request.base.sha }}
+        HEAD: ${{ github.event.pull_request.head.sha }}
+      run: |
+        python - <<'PY'
+        import json
+        import os
+        import subprocess
+        from pathlib import Path
+        import sys
+        sys.path.insert(0, str(Path("tools").resolve()))
+        from promotion_unit_contract import ci_requires_units
+        needed = os.environ["EVENT"] != "pull_request" or ci_requires_units(
+            os.environ["EVENT"], os.environ["BASE"], os.environ["HEAD"],
+            subprocess.check_output,
+        )
+        with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+            output.write("run=" + str(needed).lower() + "\n")
+        print(json.dumps({"run_source_ast_guards": needed}))
+        PY
     - name: No sibling plugin writes tracking YAML directly
+      if: steps.source-ast-impact.outputs.run == 'true'
       run: python tools/check-no-sibling-tracking-writes.py
     - name: Install contract
       run: python tools/check-install-contract.py
@@ -107,6 +132,7 @@ jobs:
     - name: Vendored library synchronization
       run: python tools/check-vendored-libs-sync.py
     - name: Windows headless launch invariants
+      if: steps.source-ast-impact.outputs.run == 'true'
       run: python tools/check-headless-launch.py
     - name: Picker inbox discipline
       run: python tools/check-picker-inbox-discipline.py
@@ -130,6 +156,7 @@ jobs:
     - name: Feed neutrality (no hardcoded public package-feed pins)
       run: python tools/check-feed-neutrality.py
     - name: Asyncio timeout handlers (Python 3.10 daemon)
+      if: steps.source-ast-impact.outputs.run == 'true'
       run: python tools/check-asyncio-timeout-handlers.py
     - name: Ruff (F, E9)
       run: ruff check --select F,E9 --output-format=github .

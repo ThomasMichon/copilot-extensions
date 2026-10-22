@@ -67,6 +67,16 @@ def declarations():
             },
         },
     }
+    ci["jobs"]["checks"]["steps"].extend([{
+        "id": "source-ast-impact",
+        "timeout-minutes": 2,
+        "env": {
+            "EVENT": "${{ github.event_name }}",
+            "BASE": "${{ github.event.pull_request.base.sha }}",
+            "HEAD": "${{ github.event.pull_request.head.sha }}",
+        },
+        "run": GUARD.SOURCE_AST_SCRIPT,
+    }, *({"run": command, "if": GUARD.SOURCE_AST_CONDITION} for command in GUARD.SOURCE_AST_COMMANDS)])
     return routing, ci
 
 
@@ -80,6 +90,99 @@ def validate(tmp_path, routing, ci):
 def test_positive_compact_profile_has_no_self_hosted_pr_test_route(tmp_path):
     routing, ci = declarations()
     assert validate(tmp_path, routing, ci) == []
+
+
+@pytest.mark.parametrize("change", [
+    {"if": "false"}, {"continue-on-error": True}, {"timeout-minutes": 30},
+    {"env": {}}, {"run": "echo run=false"},
+])
+def test_source_ast_admission_cannot_skip_failures_or_lose_pinned_inputs(tmp_path, change):
+    routing, ci = declarations()
+    ci["jobs"]["checks"]["steps"][2].update(change)
+    assert "source AST guards require conservative pinned-input admission" in validate(tmp_path, routing, ci)
+
+
+@pytest.mark.parametrize("change", [
+    {"if": "false"}, {"continue-on-error": True}, {"run": "echo passed"},
+])
+@pytest.mark.parametrize("index", [3, 4, 5])
+def test_source_ast_scan_commands_and_outcomes_cannot_be_weakened(tmp_path, change, index):
+    routing, ci = declarations()
+    ci["jobs"]["checks"]["steps"][index].update(change)
+    assert "source AST guards must follow validated admission without weakening scans" in validate(tmp_path, routing, ci)
+
+
+def test_source_ast_scans_cannot_precede_or_duplicate_admission(tmp_path):
+    routing, ci = declarations()
+    steps = ci["jobs"]["checks"]["steps"]
+    steps[2], steps[3] = steps[3], steps[2]
+    assert "source AST guards must follow validated admission without weakening scans" in validate(tmp_path, routing, ci)
+    steps[2], steps[3] = steps[3], steps[2]
+    steps.append(dict(steps[2]))
+    assert "source AST guards require conservative pinned-input admission" in validate(tmp_path, routing, ci)
+
+
+def execute_source_ast_selector(output, event, read_diff):
+    routing, ci = declarations()
+    assert validate(output.parent, routing, ci) == []
+    modules = {
+        "os": SimpleNamespace(environ={
+            "EVENT": event, "BASE": "a" * 40, "HEAD": "b" * 40,
+            "GITHUB_OUTPUT": str(output),
+        }),
+        "subprocess": SimpleNamespace(check_output=read_diff),
+        "sys": SimpleNamespace(path=SimpleNamespace(insert=lambda *args: None)),
+    }
+
+    def imports(name, *args, **kwargs):
+        return modules[name] if name in modules else builtins.__import__(name, *args, **kwargs)
+
+    body = "\n".join(GUARD.SOURCE_AST_SCRIPT.splitlines()[1:-1])
+    exec(compile(body, "<source-ast-impact>", "exec"), {
+        "__builtins__": {**vars(builtins), "__import__": imports},
+    })
+
+
+@pytest.mark.parametrize("event,paths,expected", [
+    ("pull_request", ["docs/example.md"], False),
+    ("pull_request", ["TESTING.md", "efforts/active/example/README.md"], False),
+    ("pull_request", ["docs/example.py"], True),
+    ("pull_request", ["plugins/example/src/mod.py", "docs/moved.md"], True),
+    ("pull_request", [".github/workflows/ci.yml"], True),
+    ("pull_request", [], True),
+    ("push", ["docs/example.md"], True),
+    ("workflow_dispatch", [], True),
+    ("future-event", [], True),
+])
+def test_actual_source_ast_selector_preserves_non_narrative_and_non_pr_execution(
+    tmp_path, event, paths, expected,
+):
+    output = tmp_path / "outputs"
+    calls = []
+
+    def read_diff(argv):
+        calls.append(argv)
+        return ("\0".join(paths) + "\0").encode()
+
+    execute_source_ast_selector(output, event, read_diff)
+    assert output.read_text() == "run=" + str(expected).lower() + "\n"
+    assert calls == ([
+        ["git", "diff", "--no-renames", "--name-only", "-z", "a" * 40, "b" * 40],
+    ] if event == "pull_request" else [])
+
+
+@pytest.mark.parametrize("failure", ["unavailable", "encoding", "path"])
+def test_source_ast_selector_errors_never_emit_skipped_success(tmp_path, failure):
+    output = tmp_path / "outputs"
+
+    def read_diff(argv):
+        if failure == "unavailable":
+            raise RuntimeError("pinned diff unavailable")
+        return b"\xff\0" if failure == "encoding" else b"../outside\0"
+
+    with pytest.raises((RuntimeError, UnicodeDecodeError, ValueError)):
+        execute_source_ast_selector(output, "pull_request", read_diff)
+    assert not output.exists()
 
 
 def test_legacy_pr_integration_cannot_return_through_the_retired_workflow(tmp_path):

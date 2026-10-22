@@ -19,6 +19,28 @@ TRUSTED_JOB_CONDITION = (
     "vars.TRUSTED_SELF_HOSTED_CI == 'enabled'"
 )
 UNIT_CONDITION = "steps.impact.outputs.run == 'true'"
+SOURCE_AST_CONDITION = "steps.source-ast-impact.outputs.run == 'true'"
+SOURCE_AST_COMMANDS = (
+    "python tools/check-no-sibling-tracking-writes.py",
+    "python tools/check-headless-launch.py",
+    "python tools/check-asyncio-timeout-handlers.py",
+)
+SOURCE_AST_SCRIPT = """python - <<'PY'
+import json
+import os
+import subprocess
+from pathlib import Path
+import sys
+sys.path.insert(0, str(Path("tools").resolve()))
+from promotion_unit_contract import ci_requires_units
+needed = os.environ["EVENT"] != "pull_request" or ci_requires_units(
+    os.environ["EVENT"], os.environ["BASE"], os.environ["HEAD"],
+    subprocess.check_output,
+)
+with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+    output.write("run=" + str(needed).lower() + "\\n")
+print(json.dumps({"run_source_ast_guards": needed}))
+PY"""
 UNIT_GATE_SCRIPT = """python - <<'PY'
 import json
 import os
@@ -406,6 +428,33 @@ def _validate_ci(path: Path) -> list[str]:
         if unit_profile and ci_jobs is not None:
             if set(ci_jobs) != {"checks", "unit-tests", "pr-gate"}:
                 errors.append("unit-only CI must contain only guards, combined units and aggregate")
+            check_steps = (_mapping(ci_jobs.get("checks")) or {}).get("steps", [])
+            ast_impact = [
+                step for step in check_steps if isinstance(step, dict)
+                and step.get("id") == "source-ast-impact"
+            ]
+            if len(ast_impact) != 1 or (
+                str(ast_impact[0].get("run", "")).strip() != SOURCE_AST_SCRIPT
+                or ast_impact[0].get("timeout-minutes") != "2"
+                or ast_impact[0].get("env") != {
+                    "EVENT": "${{ github.event_name }}",
+                    "BASE": "${{ github.event.pull_request.base.sha }}",
+                    "HEAD": "${{ github.event.pull_request.head.sha }}",
+                }
+                or any(key in ast_impact[0] for key in ("if", "continue-on-error"))
+            ):
+                errors.append("source AST guards require conservative pinned-input admission")
+            for command in SOURCE_AST_COMMANDS:
+                scans = [
+                    step for step in check_steps if isinstance(step, dict)
+                    and step.get("run") == command
+                ]
+                if len(scans) != 1 or len(ast_impact) != 1 or (
+                    scans[0].get("if") != SOURCE_AST_CONDITION
+                    or "continue-on-error" in scans[0]
+                    or check_steps.index(ast_impact[0]) >= check_steps.index(scans[0])
+                ):
+                    errors.append("source AST guards must follow validated admission without weakening scans")
             inventory = [
                 step for step in (_mapping(ci_jobs.get("checks")) or {}).get("steps", [])
                 if isinstance(step, dict)
