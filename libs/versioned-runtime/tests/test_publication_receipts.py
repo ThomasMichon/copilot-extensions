@@ -127,6 +127,54 @@ def test_invalid_required_proof_refuses_whole_set(tmp_path: Path, fault: str) ->
     with pytest.raises((proof.PublicationProofError, OSError)):
         proof.recover_owned(context, [receipt], list(before), context.parent / "recovery.jsonl", expected(root, payload))
     assert {path: path.read_bytes() for path in before} == before
+    if fault != "truncated":
+        with pytest.raises((proof.PublicationProofError, OSError)):
+            proof.read_receipt(receipt, root, set(before), recovery_only=True)
+
+
+@pytest.mark.parametrize("tail", [b"", b'{"kind": "finish",', b"\xff\xfe"])
+def test_recovery_only_accepts_durable_created_prefix_without_certifying_success(tmp_path: Path, tail: bytes) -> None:
+    root, context, payload, _bindings = case(tmp_path, ("payload-dir", "stamped-version"))
+    receipt = context.parent / "producer.jsonl"
+    publish(root, payload, receipt)
+    rows = receipt.read_bytes().splitlines(keepends=True)
+    receipt.write_bytes(b"".join(rows[:-1]) + tail)
+    before = proof.state_path(receipt, private=True)
+    with pytest.raises(proof.PublicationProofError):
+        proof.read_receipt(receipt, root, {root / "payload-dir", root / "stamped-version"})
+    entries = proof.read_context(context)[1]
+    recovered = proof._proofs([receipt], root, entries, expected(root, payload), recovery_only=True)
+    assert all(proof.state_path(path) in recovered[path] for path in entries)
+    assert proof.state_path(receipt, private=True) == before
+    with pytest.raises(proof.PublicationProofError, match="not declared"):
+        proof._proofs([receipt], root, entries, [[str(root / "payload-dir"), "0" * 64]], recovery_only=True)
+
+
+@pytest.mark.parametrize("fault", ["empty", "header", "sequence", "record", "finish", "oversized"])
+def test_recovery_prefix_never_repairs_missing_or_invalid_complete_records(tmp_path: Path, fault: str) -> None:
+    root, context, payload, _bindings = case(tmp_path, ("payload-dir", "stamped-version"))
+    receipt = context.parent / "producer.jsonl"
+    publish(root, payload, receipt)
+    rows = [json.loads(line) for line in receipt.read_bytes().splitlines()]
+    if fault == "empty":
+        data = b""
+    elif fault == "header":
+        data = json.dumps(rows[0]).encode()[:20]
+    elif fault == "oversized":
+        data = receipt.read_bytes() + b"x" * proof.MAX_BYTES
+    else:
+        if fault == "sequence":
+            rows[1]["sequence"] = 2
+        elif fault == "record":
+            rows[1]["unexpected"] = True
+        else:
+            rows[-1]["sequence"] += 1
+        data = "".join(json.dumps(row) + "\n" for row in rows).encode()
+    receipt.write_bytes(data)
+    before = receipt.read_bytes()
+    with pytest.raises(proof.PublicationProofError):
+        proof.read_receipt(receipt, root, {root / "payload-dir", root / "stamped-version"}, recovery_only=True)
+    assert receipt.read_bytes() == before
 
 
 def test_failed_producer_records_owned_recovery_stages(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

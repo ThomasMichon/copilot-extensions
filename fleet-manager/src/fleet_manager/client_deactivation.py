@@ -40,7 +40,10 @@ def _proofs(namespace, identity, saved, publication):
     proofs = {}
     for value in values:
         activation._state(value, identity)
-        directory, _entries, states, _attempts = activation._proofs(namespace, value, publication)
+        directory, _entries, states, _attempts = activation._proofs(
+            namespace, value, publication,
+            recovery_only=value == saved["pending"] and value != saved["active"],
+        )
         intent = construction._read(directory / "intent.json")
         record(intent, "fleet-manager.client-selector-intent", {"active", "previous", "before"})
         if intent["active"] != value or not isinstance(intent["before"], dict) or (
@@ -171,6 +174,7 @@ def deactivate_client_runtime(root, identity):
                     "schema": "fleet-manager.client-runtime-deactivation", "version": 1,
                     "identity": identity, "admitted": admitted,
                     "active": False, "selectors_absent": True, "frontdoor_registered": False,
+                    "pending_activation_withdrawn": saved["pending"] is not None,
                     "mutations_performed": marker is not None, "reused": marker is None,
                     "runtime_removed": False, "installation_retired": False,
                     "path_modified": False, "live_readiness_verified": False,

@@ -48,6 +48,7 @@ def _proofs(namespace, identity, directory, saved, publication):
         receipts.extend(recovery)
         for command, states in publication._proofs(
             receipts, root, entries, frontdoor._expected(family),
+            recovery_only=name == "pending",
         ).items():
             proofs.setdefault(command, []).extend(states)
     return commands, proofs
@@ -180,6 +181,7 @@ def unregister_client_frontdoor(root, identity, *, command_directory):
                         "identity": identity, "admitted": admitted,
                         "command_directory": str(directory), "commands": [str(command) for command in commands],
                         "frontdoor_registered": False, "commands_absent": True,
+                        "pending_registration_withdrawn": saved["pending"] is not None,
                         "mutations_performed": marker is not None, "reused": marker is None,
                         "runtime_selectors_modified": False, "runtime_removed": False,
                         "installation_retired": False, "path_modified": False,

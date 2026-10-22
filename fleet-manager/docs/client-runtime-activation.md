@@ -116,11 +116,19 @@ Any registered, pending or unsettled-removal command record blocks deactivation.
 Use [owned command withdrawal](client-frontdoor.md#owned-withdrawal-and-retry)
 first. Deactivation acquires installation ownership, a SQLite transaction and
 the canonical selector target-writer lease **once**; both selectors share this
-non-reentrant lease. Every present selector must match complete canonical
-producer-created physical proof, including original and new generations in a
-pending upgrade. Same-byte foreign replacements, unattributed selectors,
-foreign `current` links, corrupt ownership and torn producer receipts refuse
-before removal. Missing already-withdrawn selectors are allowed.
+non-reentrant lease. Every present selector must match canonical producer-created
+physical proof, including original and new generations in a pending upgrade.
+Acknowledged active publications still require complete receipts, even when the
+same reference also appears as pending. Only a distinct pending publication may
+use its complete newline-framed created-object prefix before a missing finish or
+incomplete final record. Those physical records are synced before their selector
+renames. They authorize withdrawal of matching objects, not successful activation
+or forward retry. The original receipt and unfinished tail remain unchanged.
+Same-byte foreign replacements, unattributed selectors, foreign `current` links,
+corrupt ownership, invalid complete records or present receipts with invalid
+headers refuse before removal. The prepared context is always required. A pending
+attempt before its first producer receipt contributes no new physical proof.
+Missing already-withdrawn selectors are allowed.
 
 Before the first selector effect, `client-activation-removing.json` durably
 snapshots both active and pending activation references. Its
@@ -135,12 +143,17 @@ retained proofs, tolerates already-absent objects and partially cleared
 acknowledgements, and preserves any foreign replacement. Only after both
 selectors are absent and directory metadata is synced are active/pending
 references and the removal marker cleared. A repeated completed deactivation
-checks absence and reports a no-op. Torn or corrupt producer evidence remains
-a refusal, not a heuristic repair.
+checks absence and reports a no-op. No missing ownership is manufactured; a header
+alone authorizes no deletion. A present selector still needs a complete earlier
+active proof or another valid created record; otherwise only absence can settle.
+Activation's execution/reuse and forward-retry paths continue to reject incomplete
+producer receipts and do not use this withdrawal-only exception.
 
 The `fleet-manager.client-runtime-deactivation`, version `1`, report includes
 `active: false`, `selectors_absent: true`, the unchanged admitted receipt,
-`reused` and `mutations_performed`. `runtime_removed`, `installation_retired`,
+`reused` and `mutations_performed`. `pending_activation_withdrawn` explicitly
+identifies withdrawal of an unsettled attempt, not its successful activation.
+`runtime_removed`, `installation_retired`,
 `frontdoor_registered`, `path_modified` and `live_readiness_verified` remain
 `false`. All completed/failed runtimes, retained-good bytes, configuration,
 user data, admission state and historical proofs remain intact. This does not

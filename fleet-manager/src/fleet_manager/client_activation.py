@@ -74,7 +74,7 @@ def _not_removing(namespace):
         raise PlanError("client selector removal is unsettled; owned deactivate retry is required")
 
 
-def _proofs(namespace, active, publication):
+def _proofs(namespace, active, publication, *, recovery_only=False):
     directory = namespace / HISTORY / active["publication"]
     artifact_staging._directory(directory)
     context = directory / "context.json"
@@ -92,6 +92,7 @@ def _proofs(namespace, active, publication):
     proofs = publication._proofs(
         receipts, root, entries,
         _expected(namespace, active["candidate"]),
+        recovery_only=recovery_only,
     ) if receipts else {}
     return directory, entries, proofs, len(receipts)
 

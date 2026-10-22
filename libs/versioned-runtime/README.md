@@ -304,6 +304,19 @@ live runtime. This Python API adds no bulk-copy CLI. It provides serialized
 caught-failure recovery, not simultaneous multi-file visibility, process-crash
 journaling or service-state rollback.
 
+`read_receipt(path, root, allowed, recovery_only=True)` is an explicit read-only
+exception for a lifecycle owner's withdrawal of an unsettled publication.
+It validates the original physical producer file and every complete
+newline-framed record, allowing a missing finish record or an incomplete final
+tail. It returns only created-object states from valid complete records, does
+not rewrite or complete the journal, and does not certify publication success.
+The caller retains installation and target-writer custody and must refuse every
+present target without a matching physical proof. Missing/invalid headers,
+contexts or complete records remain refusals; a header alone proves no target.
+Ordinary readers, registration reuse, `check_owned` and `recover_owned` retain
+their complete-receipt requirement. This is not restoration authority for an
+older runtime or a generic repair of missing evidence.
+
 ## Claim-owned development generations
 
 An explicit development refresh uses a new `dev-<32 lowercase hex digits>`

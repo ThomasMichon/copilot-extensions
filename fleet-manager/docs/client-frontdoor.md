@@ -84,7 +84,9 @@ Any interrupted publication/acknowledgement reports an **unknown outcome** and
 retains pending state and evidence. Further registration refuses until an
 owned withdrawal reconciles it as described below. Registration does not infer
 success from matching text or silently restore an older release.
-Corrupt, truncated or foreign proof refuses.
+Corrupt or foreign proof refuses. A pending attempt's durable created-object
+prefix can authorize only the explicit withdrawal below, never registration
+reuse or forward completion.
 The accepted admission floor, user configuration and runtime selectors are never
 cleared by registration. A private root does not isolate state from a hostile
 process running as the same OS principal.
@@ -113,10 +115,19 @@ authority cannot grant new execution through withdrawal; it also need not
 prevent withdrawing already-owned commands.
 
 The owner validates the durable admission database and runtime-namespace owner,
-then the registered and pending intents and their canonical copy contexts and
-complete created-descriptor receipts. It includes caught-failure recovery
-receipts, so a pending update whose failed health restored physically proved
-old commands can also be withdrawn. Every present command must match one of
+then the registered and pending intents and their canonical copy contexts.
+Registered publications still require complete created-descriptor receipts.
+For a pending attempt only, withdrawal can read an unfinished receipt's complete
+newline-framed prefix, including caught-failure recovery receipts. Each original
+producer appends and syncs its physical created-descriptor record before the
+corresponding command rename. A missing finish record or incomplete final record
+therefore does not erase the authority in earlier complete records, but supplies
+no proof for the interrupted record itself. Every complete record, producer file
+identity, root, target family, sequence and declared content digest must still
+validate. Original receipt bytes and unfinished tails remain unchanged.
+
+A pending update whose failed health restored physically proved old commands
+can also be withdrawn. Every present command must match one of
 those physical proofs; matching text, a saved pathname, an unrelated command
 or a same-byte peer replacement supplies no deletion authority. The whole
 command family is checked before the first removal.
@@ -137,14 +148,23 @@ rereads retained intent and proofs, tolerates already-absent commands, and
 preserves any new foreign replacement. Only after the complete command family
 is absent and directory metadata is synced are the registered/pending references
 and the removal marker cleared. An exact repeated withdrawal checks absence
-again and performs no new removal. Missing/corrupt/incomplete producer receipts
-are still a refusal, not a manufactured ownership proof or automatic repair of
-a torn registration journal. This command recovers by **withdrawal**, not
-forward completion of an interrupted registration.
+again and performs no new removal. A pending intent with neither copy context
+nor forward receipt contributes no new ownership proof, as before its first
+native copy effect. Once either file exists, missing required peers, an empty
+or incomplete producer header, invalid complete records and unproved present
+commands refuse before deletion. There is no inferred or manufactured ownership
+proof. A header alone authorizes no deletion: a present command still
+needs an earlier complete registered proof or another valid created record.
+Without such a proof, only already-absent targets can settle.
+This command recovers by **withdrawal**, not
+forward completion of an interrupted registration; it never marks an unfinished
+publication successful.
 
 The `fleet-manager.client-command-unregistration`, version `1`, report includes
 the installation identity, unchanged admitted receipt, exact command paths,
 `commands_absent`, `frontdoor_registered`, `reused` and `mutations_performed`.
+`pending_registration_withdrawn` explicitly identifies settlement of a pending
+attempt rather than successful completion of that registration.
 Runtime selectors, completed/failed candidates, configuration, user data,
 backups and the accepted sequence floor remain untouched. This does not stop
 an already-running client or release its runtime retention lease. No PATH or
@@ -153,7 +173,9 @@ not retired.
 
 After command withdrawal, [owned selector withdrawal](client-runtime-activation.md#owned-selector-withdrawal)
 is a separate explicit transition that still preserves all runtime bytes.
-Runtime deletion, retained-good rollback, torn-producer-journal recovery,
+Exact [runtime deletion](client-runtime-activation.md#completed-candidate-removal)
+requires settled command and selector withdrawal and preserves other candidates.
+Retained-good rollback, recovery without an attributable producer/context prefix,
 identity retirement and reinstall fencing, complete lifecycle orchestration and
 controller/node assembly remain separate obligations. Do not erase admission
 or retained evidence while candidates or commands can still be replayed.

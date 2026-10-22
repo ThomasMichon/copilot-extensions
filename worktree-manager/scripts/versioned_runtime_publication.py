@@ -224,7 +224,7 @@ class Receipt:
                       "target": str(target), "state": asdict(state)})
 
 
-def _read_json(path: Path, *, lines: bool = False) -> Any:
+def _read_json(path: Path, *, lines: bool = False, recovery_only: bool = False) -> Any:
     before = state_path(path, private=True)
     if before is None or before.size > MAX_BYTES:
         raise PublicationProofError(f"Required proof is missing or oversized: {path}")
@@ -242,8 +242,12 @@ def _read_json(path: Path, *, lines: bool = False) -> Any:
             raise PublicationProofError(f"Proof changed while read: {path}")
     finally:
         os.close(fd)
-    if state_path(path, private=True) != before or not data.endswith(b"\n"):
-        raise PublicationProofError(f"Proof changed or is incomplete: {path}")
+    if state_path(path, private=True) != before:
+        raise PublicationProofError(f"Proof changed while read: {path}")
+    if not data.endswith(b"\n"):
+        if not (lines and recovery_only):
+            raise PublicationProofError(f"Proof is incomplete: {path}")
+        data = data[:data.rfind(b"\n") + 1]
     try:
         if lines:
             return [json.loads(line, object_pairs_hook=_pairs) for line in data.splitlines()]
@@ -252,9 +256,12 @@ def _read_json(path: Path, *, lines: bool = False) -> Any:
         raise PublicationProofError(f"Invalid proof data: {path}") from error
 
 
-def read_receipt(path: Path, root: Path, allowed: set[Path]) -> dict[Path, list[PhysicalState]]:
-    records = _read_json(path, lines=True)
-    if len(records) < 2 or len(records) > 1024:
+def read_receipt(
+    path: Path, root: Path, allowed: set[Path], *, recovery_only: bool = False,
+) -> dict[Path, list[PhysicalState]]:
+    """Read created-object proofs; a recovery-only prefix never certifies publication."""
+    records = _read_json(path, lines=True, recovery_only=recovery_only)
+    if not records or len(records) > 1024 or (not recovery_only and len(records) < 2):
         raise PublicationProofError("Required proof has no complete producer outcome")
     header = records[0]
     if not isinstance(header, dict) or set(header) != {
@@ -276,8 +283,11 @@ def read_receipt(path: Path, root: Path, allowed: set[Path]) -> dict[Path, list[
             or len(targets) != len(set(targets))
             or any(Path(value) not in allowed or str(absolute(Path(value))) != value for value in targets)):
         raise PublicationProofError("Proof target binding does not match")
+    finish = records[-1] if isinstance(records[-1], dict) and records[-1].get("kind") == "finish" else None
+    if finish is None and not recovery_only:
+        raise PublicationProofError("Required proof is incomplete")
     result = {Path(value): [] for value in targets}
-    for sequence, record in enumerate(records[1:-1], 1):
+    for sequence, record in enumerate(records[1:-1] if finish is not None else records[1:], 1):
         if isinstance(record, dict) and record.get("kind") == "noop":
             if header["producer"] != "files" or set(record) != {"kind", "sequence", "target", "state"} or (
                 type(record["sequence"]) is not int or record["sequence"] != sequence
@@ -293,11 +303,10 @@ def read_receipt(path: Path, root: Path, allowed: set[Path]) -> dict[Path, list[
         ):
             raise PublicationProofError("Invalid created-stage proof record")
         result[Path(record["target"])].append(PhysicalState.parse(record["state"]))
-    finish = records[-1]
-    if not isinstance(finish, dict) or set(finish) != {"kind", "sequence", "outcome"} or (
+    if finish is not None and (set(finish) != {"kind", "sequence", "outcome"} or (
         finish["kind"] != "finish" or type(finish["sequence"]) is not int
         or finish["sequence"] != len(records) - 2 or finish["outcome"] not in ("success", "error")
-    ):
+    )):
         raise PublicationProofError("Required proof is incomplete")
     return result
 
@@ -357,7 +366,10 @@ def read_context(path: Path) -> tuple[Path, dict[Path, tuple[Path | None, Physic
     return root, result
 
 
-def _proofs(receipts: list[Path], root: Path, entries: dict, expected: list[list[str]]) -> dict[Path, list[PhysicalState]]:
+def _proofs(
+    receipts: list[Path], root: Path, entries: dict, expected: list[list[str]], *,
+    recovery_only: bool = False,
+) -> dict[Path, list[PhysicalState]]:
     result: dict[Path, list[PhysicalState]] = {}
     digests = {target: ({before.digest} if before else set()) for target, (_backup, before) in entries.items()}
     for target, digest in expected:
@@ -368,7 +380,7 @@ def _proofs(receipts: list[Path], root: Path, entries: dict, expected: list[list
     if not receipts or len(receipts) != len(set(receipts)):
         raise PublicationProofError("Required producer receipts are missing or duplicated")
     for path in receipts:
-        for target, values in read_receipt(path, root, set(entries)).items():
+        for target, values in read_receipt(path, root, set(entries), recovery_only=recovery_only).items():
             if any(value.digest not in digests[target] for value in values):
                 raise PublicationProofError(f"Producer bytes were not declared by its caller: {target}")
             result.setdefault(target, []).extend(values)
