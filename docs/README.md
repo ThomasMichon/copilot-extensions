@@ -35,6 +35,9 @@ venue or another platform works.
   claim ownership, and maintenance checks.
 - [Visions](../visions/README.md): standing intent, not capability evidence.
 - [Efforts](../efforts/README.md): ongoing and completed campaigns.
+- [Gateway and SSH mesh prototypes](../examples/gateway-fleet/README.md):
+  experimental reference source and synthetic tests, not supported installation
+  or production-readiness claims.
 
 `docs/plans/` holds planning material; a plan, milestone, or screenshot is not
 proof that its subject is shipped. Confirm present-tense support in the owning
