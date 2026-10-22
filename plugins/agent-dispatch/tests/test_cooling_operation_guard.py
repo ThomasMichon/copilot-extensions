@@ -229,7 +229,8 @@ def test_ambiguous_stop_retains_guard_across_coordinator_reopen(tmp_path, outcom
     assert reopened.get(task.id).status == "suspended"
 
 
-def test_queued_legacy_cold_never_probes_stops_or_defers(tmp_path):
+@pytest.mark.parametrize("cached", [False, True])
+def test_queued_legacy_cold_never_recovers_or_frees_capacity(tmp_path, cached):
     queue, task, reservation = _body(tmp_path, suspended=False)
     with queue._connect() as conn:
         conn.execute(
@@ -237,20 +238,32 @@ def test_queued_legacy_cold_never_probes_stops_or_defers(tmp_path):
             (SpawnState.COLD, reservation.key),
         )
     before = asdict(queue.get_reservation(reservation.key))
+    probes = []
     supervisor = Supervisor(
         QueueBackedClient(queue), spawn_fn=lambda _: pytest.fail("no replacement"),
         repo=TEST_REPO,
-        local_body_verdict_fn=lambda _: pytest.fail("legacy startup cannot be probed"),
+        local_body_verdict_fn=lambda sid: probes.append(sid) or tracking.GONE,
         local_cold_fn=lambda _: pytest.fail("legacy startup cannot be stopped"),
     )
+    if cached:
+        supervisor._cooled_reservations.add(reservation.key)
     assert supervisor.recover_stranded_cold_reservations() == 0
     assert len(supervisor._active_reservations()) == 1
+    assert probes == []
     with pytest.raises(TaskError, match="previous startup remains incomplete"):
         queue.defer_spawn(
             reservation.key, startup_revision=reservation.startup_revision,
             expected_generation=task.generation,
         )
     assert asdict(queue.get_reservation(reservation.key)) == before
+    other = queue.create("Another eligible review", labels=["review"])
+    supervisor.max_concurrent = 1
+    assert supervisor.poll_once() == []
+    assert asdict(queue.get_reservation(reservation.key)) == before
+    assert queue.latest_reservation(task.id).attempt == reservation.attempt
+    assert queue.latest_reservation(other.id) is None
+    assert queue.get(task.id).status == "queued"
+    assert queue.get(task.id).owner is None
 
 
 def test_guarded_cold_deferral_checks_revision_token_and_task_atomically(tmp_path):

@@ -48,6 +48,11 @@
 .PARAMETER Force
     On update: bypass the downgrade guard (deliberate rollback). Env:
     AGENT_DISPATCH_ALLOW_DOWNGRADE=1.
+
+.PARAMETER RequireGracefulCutover
+    On update: fail without restart or supervisor reconciliation unless a
+    routed coordinator cuts over successfully. Runtime selection may already
+    have changed when a cutover fails.
 #>
 [CmdletBinding()]
 param(
@@ -59,6 +64,7 @@ param(
     [switch]$Interactive,
     [switch]$Purge,
     [switch]$Force,
+    [switch]$RequireGracefulCutover,
 
     # DEPRECATED / no-op (Thread B): the graceful zdd cutover
     # (Invoke-CoordinatorCutover) is already the DEFAULT on `update` whenever a
@@ -82,6 +88,10 @@ if ($env:COPILOT_EXTENSIONS_HUMAN_UTF8 -eq '1') {
         throw 'Required installer human-output initializer is unavailable.'
     }
     . (Join-Path $PSScriptRoot 'installer-human-output.ps1')
+}
+
+if ($RequireGracefulCutover -and ($Action -ne 'update' -or $NoService)) {
+    throw '-RequireGracefulCutover requires update without -NoService'
 }
 
 # Raise the shared self-stage watchdog's deadline for THIS plugin specifically,
@@ -3983,21 +3993,34 @@ function Invoke-CoordinatorCutover {
     Write-Step 'Graceful cutover: standing the new coordinator up beside the old, then flipping routing...'
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
-    $out = & $py -m agent_dispatch _cutover --json 2>&1 | Out-String
+    $out = if ($RequireGracefulCutover) {
+        & $py -m agent_dispatch _cutover --json | Out-String
+    } else {
+        & $py -m agent_dispatch _cutover --json 2>&1 | Out-String
+    }
     $rc = $LASTEXITCODE
     $ErrorActionPreference = $prevEAP
     $ok = $false
     try {
-        # The JSON result is the last brace-balanced object on stdout; steps go to stderr.
-        $jsonLine = ($out -split "`n" | Where-Object { $_.Trim().StartsWith('{') } | Select-Object -Last 1)
-        if ($jsonLine) { $ok = [bool]((ConvertFrom-Json $jsonLine).ok) }
+        $jsonLine = if ($RequireGracefulCutover) { $out } else {
+            ($out -split "`n" | Where-Object { $_.Trim().StartsWith('{') } | Select-Object -Last 1)
+        }
+        if ($jsonLine) {
+            $value = (ConvertFrom-Json $jsonLine).ok
+            $ok = if ($RequireGracefulCutover) { $value -is [bool] -and $value } else { [bool]$value }
+        }
     } catch { $ok = $false }
-    if ($ok -or $rc -eq 0) {
+    if (($RequireGracefulCutover -and $ok -and $rc -eq 0) -or
+        (-not $RequireGracefulCutover -and ($ok -or $rc -eq 0))) {
         Invoke-SupervisorAudit -Event coordinator-cutover -Reason coordinator-cutover-returned -Outcome ok
         Write-Ok 'Coordinator cut over to the new build (no in-flight work killed; supervisor/workers re-adopt via the queue DB + routing table)'
         return $true
     }
-    Write-Warn 'Graceful cutover did not complete -- falling back to a normal restart'
+    if ($RequireGracefulCutover) {
+        Write-Warn 'Required graceful cutover was not confirmed'
+    } else {
+        Write-Warn 'Graceful cutover did not complete -- falling back to a normal restart'
+    }
     if ($out.Trim()) { Write-Step ($out.Trim()) }
     return $false
 }
@@ -4074,6 +4097,9 @@ function Invoke-Update {
                     # A Thread-B coordinator (routed, /drain seam) -> graceful cutover.
                     $didCutover = Invoke-CoordinatorCutover
                 } else {
+                    if ($RequireGracefulCutover) {
+                        throw 'Required graceful cutover needs a routed coordinator; no process stop attempted. Runtime selection may already have changed.'
+                    }
                     # Pre-Thread-B coordinator (unrouted, no /drain): one-time
                     # stop-and-swap (invariant #2 fallback). Every future update from a
                     # Thread-B build is graceful. The supervisor is left running.
@@ -4082,6 +4108,9 @@ function Invoke-Update {
                         Write-Step "Stopped $stopped pre-cutover coordinator process(es) -- one-time transition to graceful cutover"
                     }
                 }
+            }
+            if ($RequireGracefulCutover -and -not $didCutover) {
+                throw 'Required graceful cutover was not confirmed; runtime selection may already have changed. No restart or supervisor reconciliation attempted.'
             }
             Remove-CoordinatorFirewallRule
             # Refresh the boot task definition either way; -NoStart avoids launching a

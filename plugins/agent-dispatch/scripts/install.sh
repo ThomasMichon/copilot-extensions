@@ -40,6 +40,9 @@
 #   --purge            On uninstall: also delete config, DB, and env file.
 #   --force            On update: bypass the downgrade guard (deliberate
 #                      rollback). Env: AGENT_DISPATCH_ALLOW_DOWNGRADE=1.
+#   --require-graceful-cutover
+#                      On update: fail without restart/supervisor reconciliation
+#                      unless a routed coordinator cuts over successfully.
 #   --install-dir DIR  Override the runtime root (default ~/.agent-dispatch).
 # =============================================================================
 
@@ -353,6 +356,7 @@ NO_SERVICE=0
 NO_SUPERVISOR=0
 PURGE=0
 DRY_RUN=0
+REQUIRE_GRACEFUL_CUTOVER=0
 INSTALL_DIR=""
 FORCE="${AGENT_DISPATCH_ALLOW_DOWNGRADE:-0}"
 [[ "$FORCE" == "1" ]] && FORCE=1 || FORCE=0
@@ -362,11 +366,18 @@ while [[ $# -gt 0 ]]; do
         --no-supervisor) NO_SUPERVISOR=1; shift ;;
         --purge) PURGE=1; shift ;;
         --force) FORCE=1; shift ;;
+        --require-graceful-cutover) REQUIRE_GRACEFUL_CUTOVER=1; shift ;;
         --dry-run) DRY_RUN=1; shift ;;
         --install-dir) INSTALL_DIR="$2"; shift 2 ;;
         *) shift ;;
     esac
 done
+
+if [[ "$REQUIRE_GRACEFUL_CUTOVER" -eq 1 ]] &&
+   { [[ "$ACTION" != update ]] || [[ "$NO_SERVICE" -eq 1 ]]; }; then
+    _fail '--require-graceful-cutover requires update without --no-service'
+    exit 1
+fi
 
 INSTALL_DIR="${INSTALL_DIR:-$HOME/.agent-dispatch}"
 if [[ "$INSTALL_DIR" != /* ]]; then
@@ -1630,11 +1641,24 @@ _coordinator_cutover() {
     # /drain-capable). read_active_endpoint verifies a live listener too.
     "$py" -c 'import sys; from zdd.routing import read_active_endpoint; from agent_dispatch.config import routing_dir; sys.exit(0 if read_active_endpoint(routing_dir()) else 1)' 2>/dev/null || return 1
     _step 'Graceful cutover: standing the new coordinator up beside the old, then flipping routing...'
-    if "$py" -m agent_dispatch _cutover >/dev/null 2>&1; then
+    local cutover_ok=0 output
+    if [[ "${REQUIRE_GRACEFUL_CUTOVER:-0}" -eq 1 ]]; then
+        if output="$("$py" -m agent_dispatch _cutover --json)"; then
+            if printf '%s' "$output" | "$py" -c 'import json, sys; result = json.load(sys.stdin); sys.exit(0 if isinstance(result, dict) and result.get("ok") is True else 1)'; then
+                cutover_ok=1
+            fi
+        fi
+        [[ "$cutover_ok" -eq 1 ]] || _warn "Graceful cutover was not confirmed: $output"
+    elif "$py" -m agent_dispatch _cutover >/dev/null 2>&1; then
+        cutover_ok=1
+    fi
+    if [[ "$cutover_ok" -eq 1 ]]; then
         _ok 'Coordinator cut over to the new build (no in-flight claim dropped; supervisor/workers re-adopt via the queue DB + routing table)'
         return 0
     fi
-    _warn 'Graceful cutover did not complete -- falling back to a SIGTERM-graceful systemctl restart'
+    if [[ "${REQUIRE_GRACEFUL_CUTOVER:-0}" -ne 1 ]]; then
+        _warn 'Graceful cutover did not complete -- falling back to a SIGTERM-graceful systemctl restart'
+    fi
     return 1
 }
 
@@ -2472,6 +2496,11 @@ do_update() {
         _supervisor_audit coordinator-cutover coordinator-cutover-returned "$SUPERVISOR_UNIT" "$SUPERVISOR_ENV_FILE" ok
         _install_service --no-restart
     else
+        if [[ "${REQUIRE_GRACEFUL_CUTOVER:-0}" -eq 1 ]]; then
+            _fail 'Required graceful cutover was not confirmed; runtime selection may already have changed. No restart or supervisor reconciliation attempted.'
+            _unlock_cutover
+            return 1
+        fi
         _install_service
     fi
     _install_supervisor_service

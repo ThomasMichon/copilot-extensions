@@ -254,6 +254,19 @@ coordinator, matching agent-bridge).
 `update` is downgrade-guarded (a stale checkout won't silently roll back a newer
 deployed runtime; override with `--force`).
 
+For controlled updates that must never fall back to a restart, use
+`update --require-graceful-cutover` on POSIX or
+`update -RequireGracefulCutover` on PowerShell. The option requires a live,
+routed coordinator and a successful cutover with an explicit JSON `ok: true`
+and zero exit status. Missing routing, failed execution or ambiguous output
+fails the update before coordinator restart/legacy process retirement and
+supervisor reconciliation. The default update behavior is unchanged. This is
+not a build-only or transactional rollback option: the candidate runtime,
+launchers and manifest may already be selected/published when it fails.
+Inspect routing, resident processes and runtime selection before recovery;
+do not blindly retry or revert database files. The option is valid only for
+`update` without `--no-service` / `-NoService`.
+
 Both installers source the canonical installer engine during development;
 release tooling materializes byte-identical payload-local copies. The engine
 owns pinned, checksum-verified uv acquisition, transient venv/package retries
