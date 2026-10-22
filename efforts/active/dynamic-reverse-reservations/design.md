@@ -57,11 +57,16 @@ on both ends. Selecting a positive tuple from an authorized finite set is a
 departure, even when an actual retained bind prevents duplicate ownership.
 The permission constraint alone does not authorize that departure.
 
-Phase 1 therefore includes a reviewed, narrow
+Phase 1 therefore includes a reviewed
+[service-vision reconciliation](../../../visions/plugin-services/README.md#minimal-network-exposure),
+plus a narrow
 [transport-pattern amendment](../../../docs/patterns/service-transport.md#constrained-reverse-ssh-listener-grants)
 and its [pattern-index qualification](../../../docs/patterns/README.md).
-**Do not implement the finite-positive strategy until that amendment is
-reviewed and merged, or a conforming alternative is selected.**
+**Do not implement the finite-positive strategy until the governing vision and
+pattern amendments are both reviewed and merged, or a conforming alternative
+is selected.** The vision states the constrained, temporary, exclusively owned
+and permission-preserving outcome; the pattern supplies the finite-tuple
+mechanism rather than copying its API or permission syntax into the vision.
 The amendment retains OS-assigned local/ordinary-forward defaults, applies only
 where reverse-SSH allocation cannot be narrowly authorized otherwise, requires
 existing finite permissions on both directions and actual retained bind/

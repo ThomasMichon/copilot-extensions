@@ -17,10 +17,11 @@ without killing an unknown holder, broadening forwarding permissions or
 publishing an endpoint that has not actually become ready. Preserve the
 existing owners of identity, transport, discovery, supervision and lifecycle.
 
-This campaign closes a realization gap in existing standing intent. It does
+This campaign closes a realization gap and proposes a narrow revision of
+existing endpoint intent for policy-constrained boundary transports. It does
 not introduce a second machine registry, lease service, supervisor or Gateway.
-The proposal includes a narrowly scoped transport-pattern amendment; that
-mechanism is not admitted for implementation until the amendment clears review.
+The proposal includes coordinated vision and transport-pattern amendments;
+that mechanism is not admitted for implementation until both clear review.
 The first contribution is a finite, supplied-owner coordination primitive and
 isolated regression proof, not production SSH recovery or live adoption.
 
@@ -106,6 +107,10 @@ or an already supplied runtime contract.
   Gateway/SSH policy, profile, forwarding and discovery seams.
 - [x] Separate actual OpenSSH permission constraints from local rendezvous
   prior art and explicitly identify missing integration authority.
+- [ ] Review and land the corresponding
+  [endpoint vision reconciliation](../../../visions/plugin-services/README.md#minimal-network-exposure),
+  preserving ordinary OS-assigned ephemeral defaults and scoped, exclusive,
+  temporary ownership for constrained boundary transports.
 - [ ] Review and land the explicit
   [constrained reverse-SSH pattern amendment](../../../docs/patterns/service-transport.md#constrained-reverse-ssh-listener-grants),
   or select a conforming approach, before any finite-positive-port engine
@@ -116,8 +121,8 @@ or an already supplied runtime contract.
 ### Phase 2 - Finite supplied-owner source
 
 All steps in this phase are agent-recommended.
-This phase is blocked until both the proposal and its governing pattern
-amendment in Phase 1 have actually cleared review and merged.
+This phase is blocked until the proposal and its governing vision and pattern
+amendments in Phase 1 have actually cleared review and merged.
 
 - [ ] Implement the strictly bounded new coordination module described in
   [design.md](design.md), with explicit typed conflict, refusal, unavailable
@@ -218,3 +223,7 @@ No production API or runtime readiness is claimed by this proposal.
   unconditional OS-assigned forwarded-port pattern. Added the explicit
   pre-implementation gate and a narrow reviewed-pattern amendment rather than
   treating the permission constraint as an implicit exception.
+- Further review identified the same unconditional requirement in the
+  governing service vision. Reconciled its endpoint intent in place and gated
+  implementation on the reviewed vision as well as the pattern, retaining
+  ordinary defaults and forbidding widened permissions or unowned reclamation.
