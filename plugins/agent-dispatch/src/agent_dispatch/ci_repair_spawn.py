@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 import subprocess
 import uuid
 from contextlib import nullcontext
 from typing import TYPE_CHECKING
 
 from .producers.ci_repair import AdmissionRefused, _invoke, execution, failure
+from .queue_records import TaskError
 
 if TYPE_CHECKING:
     from .coordinator_execution_sender import CoordinatorExecutionSender
@@ -179,28 +181,35 @@ def make_ci_repair_spawn(
             if execution_sender is not None
             else nullcontext(None)
         )
-        with custody as attempt:
-            try:
-                result = bridge.spawn_worker(
-                    task["id"],
-                    agent=selected["venue"],
-                    charter=selected["charter"],
-                    target_dir=selected["workspace"],
-                    worker_id=worker_id,
-                    prompt="Remain idle. Do not claim or execute any task until the coordinator sends an admitted task turn.",
-                    wait=False,
-                    json_output=True,
-                    timeout=30,
-                )
-            except (bridge.BridgeUnavailable, OSError, subprocess.TimeoutExpired) as exc:
-                return False, {"error": str(exc)}
-            if result.returncode != 0:
-                return False, {"error": result.stderr.strip() or "CI repair spawn failed"}
-            sid = embody.parse_fleet_body_session(result)
-            if not sid:
-                return False, {"error": "CI repair spawn omitted session identity"}
-            if attempt is not None:
-                attempt.sent()
+        sid: str | None = None
+        try:
+            with custody as attempt:
+                try:
+                    result = bridge.spawn_worker(
+                        task["id"],
+                        agent=selected["venue"],
+                        charter=selected["charter"],
+                        target_dir=selected["workspace"],
+                        worker_id=worker_id,
+                        prompt="Remain idle. Do not claim or execute any task until the coordinator sends an admitted task turn.",
+                        wait=False,
+                        json_output=True,
+                        timeout=30,
+                    )
+                except (bridge.BridgeUnavailable, OSError, subprocess.TimeoutExpired) as exc:
+                    return False, {"error": str(exc)}
+                if result.returncode != 0:
+                    return False, {"error": result.stderr.strip() or "CI repair spawn failed"}
+                sid = embody.parse_fleet_body_session(result)
+                if not sid:
+                    return False, {"error": "CI repair spawn omitted session identity"}
+                if attempt is not None:
+                    attempt.sent()
+        except (TaskError, OSError, sqlite3.Error) as exc:
+            return False, {
+                "error": str(exc),
+                **({"session": f"local-body:{sid}", "worktree": None} if sid else {}),
+            }
         return True, {"session": f"local-body:{sid}", "worktree": None, "task_seed": seed}
 
     spawn.requires_reusable_worktree = False

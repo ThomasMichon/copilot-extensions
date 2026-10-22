@@ -241,6 +241,9 @@ Timeouts, transport errors, nonzero launch results, missing session identities
 and refused delivery replies remain `unknown`, not `not_sent`. If settlement
 itself fails, the persisted `pending` record remains a retry fence. Neither
 outcome establishes task completion or process exit.
+If launch returned a usable session before settlement failed, the factory
+preserves that handle and the route requests release without delivering the task
+turn or clearing pending custody.
 
 Scope closure and custody admission retain their queue-transaction ordering:
 closure first prevents transport; custody first retains an in-flight participant

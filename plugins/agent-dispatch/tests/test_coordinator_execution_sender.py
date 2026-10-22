@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 import subprocess
 from dataclasses import asdict, replace
 from pathlib import Path
@@ -330,6 +331,48 @@ def test_failed_settlement_leaves_pending_custody_and_no_new_transport(cohort, m
     with pytest.raises(TaskError, match="already has custody"):
         with owner.attempt("launch"):
             pytest.fail("pending custody cannot authorize another transport")
+
+
+@pytest.mark.parametrize("error_type", [TaskError, OSError, sqlite3.OperationalError])
+def test_launch_settlement_failure_retains_known_session_and_cleanup(
+    cohort, monkeypatch, error_type
+) -> None:
+    queue, task, _, _ = cohort
+
+    def unavailable(*args, **kwargs):
+        raise error_type("settlement unavailable")
+
+    monkeypatch.setattr(queue, "settle_execution_send", unavailable)
+    monkeypatch.setattr(bridge, "resume_worker", lambda *a, **k: pytest.fail("no task turn"))
+    result = _post(cohort)
+    assert result["coordinator_launch"]["ok"] is False
+    assert result["coordinator_launch"]["session"] == "local-body:body"
+    assert result["coordinator_launch"]["error"] == "settlement unavailable"
+    reservation = queue.latest_reservation(task.id)
+    assert reservation.session_handle == "local-body:body"
+    assert reservation.release_requested is True
+    assert _sends(queue)[0]["state"] == "pending"
+
+
+@pytest.mark.parametrize("error_type", [TaskError, OSError, sqlite3.OperationalError])
+def test_delivery_settlement_failure_retains_existing_session_and_pending_custody(
+    cohort, monkeypatch, error_type
+) -> None:
+    queue, task, _, _ = cohort
+    original = queue.settle_execution_send
+
+    def settle(identity, **kwargs):
+        if identity.kind == "deliver":
+            raise error_type("settlement unavailable")
+        return original(identity, **kwargs)
+
+    monkeypatch.setattr(queue, "settle_execution_send", settle)
+    assert _post(cohort)["coordinator_launch"]["ok"] is False
+    reservation = queue.latest_reservation(task.id)
+    assert reservation.session_handle == "local-body:body" and reservation.release_requested
+    assert [(row["kind"], row["state"]) for row in _sends(queue)] == [
+        ("launch", "sent"), ("deliver", "pending")
+    ]
 
 
 def test_direct_factory_without_sender_preserves_unqualified_behavior(cohort) -> None:

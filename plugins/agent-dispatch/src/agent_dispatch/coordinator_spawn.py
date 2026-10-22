@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import asdict
 import logging
+import sqlite3
 import subprocess
 
 from fastapi import Depends, FastAPI, HTTPException, Request
@@ -268,7 +269,7 @@ def register_spawn_routes(
                         delivered = bridge.resume_worker(handle["session"].removeprefix("local-body:"), handle["task_seed"], timeout=30)
                         if delivered:
                             attempt.sent()
-                except (TaskError, OSError, subprocess.TimeoutExpired) as exc:
+                except (TaskError, OSError, sqlite3.Error, subprocess.TimeoutExpired) as exc:
                     delivered = False
                     delivery_error = str(exc)
                 if not delivered:
@@ -276,7 +277,14 @@ def register_spawn_routes(
                     return {"reserved": False, "reservation": _reservation_dict(queue.get_reservation(reservation.key)),
                             "coordinator_launch": {"ok": False, "error": delivery_error}}
             else:
-                queue.fail_spawn(reservation.key, detail=handle.get("error"))
+                if handle.get("session"):
+                    queue.request_spawn_release(
+                        reservation.key,
+                        session_handle=handle["session"],
+                        detail=handle.get("error"),
+                    )
+                else:
+                    queue.fail_spawn(reservation.key, detail=handle.get("error"))
             return {"reserved": False, "reservation": _reservation_dict(queue.get_reservation(reservation.key)),
                     "coordinator_launch": {"ok": ok, **handle}}
         if reserved:
