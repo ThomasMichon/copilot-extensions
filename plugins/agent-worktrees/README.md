@@ -541,6 +541,15 @@ standalone-behavior changes.
 | `sessionStart` | Every session | Emits worktree/account/machine context, reload guidance, runtime bootstrap hints, repo-plugin provisioning, project hooks, session registration, anchor hygiene, and provision checks. When cwd/env identity is absent, registration recovers the exact binding from the session lock PID -> process ancestry -> owning `wt-<id>` mux pane/session |
 | `sessionEnd` | Session end | Uses original source evidence to close the matching activation, not a replacement; legacy unqualified records retain their prior behavior. Ending an interval does not conclude the resumable session |
 
+Session registration defaults to the hook's 1.5-second request budget with
+zero daemon boot-wait. Explicit `bind-session` selects the existing normal
+tracking-write request budget of 8 seconds instead; deregistration is unchanged.
+This selects the caller's acknowledgement budget, not new execution authority
+or a retry policy. A sent request may still commit after the client times out:
+post-send uncertainty remains ambiguous and must not trigger a direct retry.
+Receiving-side authorization, version-3 registration and lifecycle-source
+qualification remain required.
+
 Native Linux/WSL lifecycle hooks capture bounded original ancestor PID/birth and
 boot/environment metadata before contacting the resident monitor. Registration
 qualifies an opaque activation source only when that original process actually

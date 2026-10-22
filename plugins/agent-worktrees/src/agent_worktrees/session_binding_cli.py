@@ -654,7 +654,7 @@ def cmd_bind_session(args: argparse.Namespace) -> int:
             candidate_before_ack = None
 
     try:
-        from . import native_lifecycle_source
+        from . import native_lifecycle_source, tracking_write
 
         linked_handoff = tracking.register_session(
             wt_id,
@@ -663,6 +663,7 @@ def cmd_bind_session(args: argparse.Namespace) -> int:
             pane_id=pane_id,
             source="bind",
             handoff_token=handoff_token,
+            request_deadline_s=tracking_write.REQUEST_DEADLINE_S,
             source_identity=native_lifecycle_source.start_identity(
                 session_id, native_lifecycle_source.witness(None, resident=False),
             ),

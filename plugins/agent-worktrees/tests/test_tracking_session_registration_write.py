@@ -56,7 +56,8 @@ def record_path(tmp_tracking_dir: Path, monkeypatch) -> Path:
     monkeypatch.setattr(cfg, "load_project_config", lambda name, **_kwargs: config)
     path = tmp_tracking_dir / "wt-reg.yaml"
     rec = WorktreeRecord(
-        worktree_id="wt-reg", branch="worktree/wt-reg", worktree_path="/tmp/wt-reg",
+        worktree_id="wt-reg", branch="worktree/wt-reg",
+        worktree_path=str(tmp_tracking_dir / "trees" / "wt-reg"),
         repo="test-repo", machine="test", platform="wsl",
         started_at="2026-06-01T10:00:00", last_resumed_at="2026-06-01T10:00:00",
         resume_count=0, title=None, status="active", completed_at=None, sessions=[],

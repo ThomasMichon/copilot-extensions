@@ -194,6 +194,7 @@ def register_session(
     candidate_token: str | None = None,
     initial_projection: bool = False,
     source_identity: str | None = None,
+    request_deadline_s: float = _SESSION_REGISTER_REQUEST_DEADLINE_S,
 ) -> tracking.SessionHandoff | None:
     """Register (or reactivate) a Copilot session against a worktree.
 
@@ -201,8 +202,10 @@ def register_session(
     (daemon write path when reachable, else the identical logged in-process
     fallback -- ``agent-worktrees-authoritative-daemon`` effort, Phase 3;
     see ``tracking_session_registration_write.py``'s own module docstring
-    for the full design rationale). Called from the sessionStart hook, so
-    this bounds latency two ways rather than one (2026-09-27 PR review
+    for the full design rationale). The default protects the sessionStart
+    hook; explicit CLI callers can select the existing normal tracking-write
+    request budget through ``request_deadline_s``. The hook default bounds
+    latency two ways rather than one (2026-09-27 PR review
     finding): ``boot_wait_s=0`` never spin-waits for a cold daemon boot (an
     already-warm daemon is dialed immediately; a cold/unreachable one falls
     straight through to the same code with no added wait, matching this
@@ -250,7 +253,7 @@ def register_session(
             _smr._ensure_status_monitor if _smr._status_monitor_enabled() else None
         ),
         boot_wait_s=0.0,
-        request_deadline_s=_SESSION_REGISTER_REQUEST_DEADLINE_S,
+        request_deadline_s=request_deadline_s,
         min_version=3,
     )
     if result.get("error") in ("lifecycle", "execution_space"):

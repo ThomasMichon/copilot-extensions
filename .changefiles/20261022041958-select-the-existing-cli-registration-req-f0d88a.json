@@ -1,0 +1,9 @@
+{
+  "comment": "Select the existing CLI registration request budget for explicit bind-session while preserving hook deadlines and ambiguous-write behavior.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
