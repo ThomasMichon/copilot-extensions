@@ -169,6 +169,16 @@ or changing the observer, collection root or packet budget. Each case must
 contribute real production call coverage. This is one bounded library mapping,
 not complete historical-census or native-platform qualification.
 
+`tools/promotion_unit_tests/test_dropin_registry.py` re-exports all nineteen
+original functions from `libs/dropin-registry/tests/test_dropin_registry.py`.
+Replacing only the original file prefix maps their identities to release nodes.
+The original test and all four canonical package modules remain hash-bound;
+every case must contribute actual production call coverage under the unchanged
+observer, root and budget. Temporary-file, link and FIFO assertions execute on
+the Linux release host without skips. The original platform availability rules
+remain intact: a missing capability cannot become positive packet evidence.
+This bounded mapping does not qualify the complete historical or Windows census.
+
 ## Tracking-write source guard
 
 The source tracking-write guard still parses every sibling-plugin Python file,

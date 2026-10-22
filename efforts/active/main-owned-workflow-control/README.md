@@ -309,10 +309,11 @@ authorizes critical main-path acceptance or a bounded administrative change.
 - [ ] Remove redundant release-shaped PR and main-push validation only where
   existing trusted gates and exact-SHA release evidence cover the removed work;
   first prove no generated-output coverage or required context is lost.
-- [ ] Land and observe bounded asyncio ancestry-map reduction, preserving
+- [x] Land and observe bounded asyncio ancestry-map reduction, preserving
   every file read/parse, path validation, handler classification and ordered
-  diagnostic/list output. Local paired comparisons alone do not close
-  hosted or whole-flow acceptance.
+  diagnostic/list output (#7865). Actual required source CI runs all three
+  scanners in 22 seconds. Local paired comparisons and this natural sample
+  do not close comparable whole-flow acceptance.
 - [x] Consolidate main-PR admission into its existing trusted reminder
   invocation: release and prove admission and generated-content identifier
   scanning first, then remove legacy CI allocation while retaining full
@@ -412,6 +413,10 @@ authorizes critical main-path acceptance or a bounded administrative change.
   Full-census and every-release acceptance remain separate.
 - [x] Land the dev implementation of reviewed, widen-only module-size baseline
   maintenance and remove its obsolete main exception from source (#6438).
+- [ ] Map the nineteen original drop-in registry cases through exact original
+  function objects, retaining actual temporary-file/link/FIFO assertions,
+  source closure, production-call coverage and the existing packet budget.
+  Complete native Linux mapping is not full-census or Windows qualification.
 - [x] Verify a covering promotion activates the dev-owned baseline producer on
   default main; record authorized runtime adoption separately.
   #6631 and hosted job `115706505844` prove activation of #6438; this
