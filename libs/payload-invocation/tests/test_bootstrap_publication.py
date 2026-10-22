@@ -366,6 +366,66 @@ def test_budget_bootstrap_retains_pythonless_admission(
             assert _snapshot(binding_fixture["home"]) == before
 
 
+@pytest.mark.skipif(os.name == "nt", reason="stock macOS Bash is a POSIX interpreter")
+@pytest.mark.parametrize("plugin", PLUGINS)
+@pytest.mark.parametrize("phase", ["cold", "drift"])
+@pytest.mark.parametrize("state", ["missing", "standalone", "managed", "invalid", "foreign", "future"])
+def test_bootstrap_publication_with_stock_bash(
+    binding_fixture: dict, plugin: str, phase: str, state: str, bootstrap_payloads,
+) -> None:
+    requested = os.environ.get("INSTALLATION_CONTEXT_BASH32")
+    interpreter = Path(requested or "/bin/bash")
+    if not interpreter.is_file():
+        if requested:
+            pytest.fail("INSTALLATION_CONTEXT_BASH32 does not name an interpreter")
+        pytest.skip("Bash 3.2 is unavailable")
+    environment = _bootstrap_fixture(binding_fixture, "bash", plugin, bootstrap_payloads)
+    version = _run(
+        binding_fixture, environment, [str(interpreter), "-c", 'printf "%s" "$BASH_VERSION"'],
+    )
+    if not version.stdout.startswith("3.2."):
+        if requested:
+            pytest.fail("INSTALLATION_CONTEXT_BASH32 must select an actual Bash 3.2 interpreter")
+        pytest.skip("Bash 3.2 is unavailable")
+    if phase == "drift":
+        _installed(binding_fixture, healthy=False)
+        command = _recording_processes(binding_fixture, "bash", environment)
+    else:
+        command = _command(binding_fixture, "bash", "bootstrap-check")
+    _policy(binding_fixture, binding_fixture["legacy"], binding_fixture["arguments"], state)
+    if plugin == "budget-guidance":
+        _without_python(binding_fixture, environment)
+        native_bash = Path(environment["PATH"]) / "bash"
+        native_bash.unlink()
+        native_bash.symlink_to(interpreter)
+        assert shutil.which("python", path=environment["PATH"]) is None
+        assert shutil.which("python3", path=environment["PATH"]) is None
+    else:
+        tools = binding_fixture["home"] / "stock-shell"
+        tools.mkdir()
+        (tools / "bash").symlink_to(interpreter)
+        environment["PATH"] = str(tools) + os.pathsep + environment["PATH"]
+    command[0] = str(interpreter)
+    before = _snapshot(binding_fixture["home"])
+
+    result = _run(binding_fixture, environment, command)
+
+    assert json.loads(result.stdout) == {}, result.stdout + result.stderr
+    if state in {"missing", "standalone"}:
+        assert result.returncode == 0, result.stdout + result.stderr
+        witness = binding_fixture["legacy"] / (
+            "installer-dispatched" if phase == "cold" else "process-dispatched"
+        )
+        deadline = time.monotonic() + 2
+        while not witness.exists() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert witness.read_text().strip() == ("stamp" if phase == "cold" else "spawn")
+    else:
+        assert result.returncode == 3, result.stdout + result.stderr
+        assert "Runtime publication refused" in result.stderr
+        assert _snapshot(binding_fixture["home"]) == before
+
+
 @pytest.mark.parametrize("shell", SHELLS)
 @pytest.mark.parametrize("phase", ["cold", "drift", "healthy"])
 @pytest.mark.parametrize("state", ["managed", "invalid", "foreign", "future", "standalone"])

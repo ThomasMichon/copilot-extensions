@@ -3,8 +3,13 @@
 set -euo pipefail
 
 if ((BASH_VERSINFO[0] < 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 4))); then
-    printf 'installation-context: Bash 4.4 or newer is required.\n' >&2
-    exit 1
+    case "${1:-}" in
+        status|deployment-status|probe-plugin-publication|probe-legacy) ;;
+        *)
+            printf 'installation-context: Bash 4.4 or newer is required for installation management.\n' >&2
+            exit 1
+            ;;
+    esac
 fi
 
 SCRIPT_DIR="$(cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -23,11 +28,41 @@ CANONICAL_PATH_MAX_LINK_DEPTH=40
 CANONICAL_PATH_PARTS=()
 MAX_SNAPSHOT_PATH_BYTES=4096
 MAX_SNAPSHOT_CONTENT_BYTES=4294967296
-MAIN_BASHPID="$BASHPID"
+shell_pid_into() {
+    if ((BASH_VERSINFO[0] >= 4)); then
+        printf -v "$1" '%s' "$BASHPID"
+    else
+        # exec preserves the process-substitution child's parent: the caller,
+        # including when the caller is itself a command-substitution subshell.
+        read -r "$1" < <(exec sh -c 'printf "%s\n" "$PPID"')
+    fi
+}
+shell_pid_into MAIN_BASHPID
 KERNEL_NAME=""
-declare -A VALIDATED_FILE_SHA256=()
-declare -A VALIDATED_FILE_IDENTITY=()
-declare -A VALIDATED_FILE_METADATA=()
+if ((BASH_VERSINFO[0] >= 4)); then
+    declare -A VALIDATED_FILE_SHA256=()
+    declare -A VALIDATED_FILE_IDENTITY=()
+    declare -A VALIDATED_FILE_METADATA=()
+else
+    VALIDATED_FILE_PATHS=()
+    VALIDATED_FILE_SHA256=()
+    VALIDATED_FILE_IDENTITY=()
+    VALIDATED_FILE_METADATA=()
+fi
+validated_file_key() {
+    VALIDATED_FILE_KEY="$1"
+    if ((BASH_VERSINFO[0] < 4)); then
+        local index
+        for ((index = 0; index < ${#VALIDATED_FILE_PATHS[@]}; index++)); do
+            if [[ "${VALIDATED_FILE_PATHS[index]}" == "$1" ]]; then
+                VALIDATED_FILE_KEY="$index"
+                return
+            fi
+        done
+        VALIDATED_FILE_KEY="${#VALIDATED_FILE_PATHS[@]}"
+        VALIDATED_FILE_PATHS+=("$1")
+    fi
+}
 SAFE_FILE_FD=""
 SAFE_FILE_IDENTITY=""
 SAFE_FILE_METADATA=""
@@ -35,9 +70,10 @@ CAPTURED_FILE_IDENTITY=""
 CAPTURED_FILE_METADATA=""
 
 cleanup() {
-    local index path token
-    [[ "$BASHPID" == "$MAIN_BASHPID" ]] || return 0
-    for path in "${TEMP_FILES[@]}"; do
+    local index path token current_pid
+    shell_pid_into current_pid
+    [[ "$current_pid" == "$MAIN_BASHPID" ]] || return 0
+    for path in ${TEMP_FILES[@]+"${TEMP_FILES[@]}"}; do
         rm -f -- "$path" 2>/dev/null || true
     done
     for ((index = ${#TEMP_DIRS[@]} - 1; index >= 0; index--)); do
@@ -62,6 +98,26 @@ trap 'cleanup 2>/dev/null' EXIT
 fail() {
     printf 'installation-context: %s\n' "$*" >&2
     exit 1
+}
+
+lowercase() {
+    if ((BASH_VERSINFO[0] >= 4)); then
+        printf '%s' "${1,,}"
+    else
+        printf '%s' "$1" | LC_ALL=C tr '[:upper:]' '[:lower:]'
+    fi
+}
+
+uppercase() {
+    if ((BASH_VERSINFO[0] >= 4)); then
+        printf '%s' "${1^^}"
+    else
+        printf '%s' "$1" | LC_ALL=C tr '[:lower:]' '[:upper:]'
+    fi
+}
+
+matches() {
+    [[ "$1" =~ $2 ]]
 }
 
 need_value() {
@@ -351,7 +407,7 @@ acquire_lock() {
     local owner_kind owner_marketplace owner_plugin owner_token
     host="$(hostname)"
     host="${host%%.*}"
-    host="${host,,}"
+    host="$(lowercase "$host")"
     token="$(random_token)"
     mkdir -p -- "$(dirname -- "$path")"
     deadline=$((SECONDS + timeout_seconds))
@@ -440,8 +496,8 @@ release_lock() {
         fail "Cannot release installation lock '$path'."
     unset 'HELD_LOCK_DIRS[index]'
     unset 'HELD_LOCK_TOKENS[index]'
-    HELD_LOCK_DIRS=("${HELD_LOCK_DIRS[@]}")
-    HELD_LOCK_TOKENS=("${HELD_LOCK_TOKENS[@]}")
+    HELD_LOCK_DIRS=(${HELD_LOCK_DIRS[@]+"${HELD_LOCK_DIRS[@]}"})
+    HELD_LOCK_TOKENS=(${HELD_LOCK_TOKENS[@]+"${HELD_LOCK_TOKENS[@]}"})
 }
 
 is_absolute() {
@@ -483,7 +539,7 @@ canonical_missing_path() {
     [[ "$value" == /* ]] || value="$PWD/$value"
     CANONICAL_PATH_PARTS=()
     canonical_split_path "$value"
-    pending=("${CANONICAL_PATH_PARTS[@]}")
+    pending=(${CANONICAL_PATH_PARTS[@]+"${CANONICAL_PATH_PARTS[@]}"})
     while ((index < ${#pending[@]})); do
         part="${pending[index]}"
         index=$((index + 1))
@@ -533,7 +589,7 @@ canonical_missing_path() {
                 out=""
             fi
             pending=(
-                "${CANONICAL_PATH_PARTS[@]}"
+                ${CANONICAL_PATH_PARTS[@]+"${CANONICAL_PATH_PARTS[@]}"}
                 "${pending[@]:index}"
             )
             index=0
@@ -597,7 +653,7 @@ digest_record() {
         fail "No SHA-256 implementation is available (sha256sum, shasum, or openssl)."
     fi
     [[ "$digest" =~ ^[0-9a-fA-F]{64}$ ]] || fail "SHA-256 implementation returned an invalid digest."
-    printf '%s' "${digest,,}"
+    lowercase "$digest"
 }
 
 ensure_kernel_name() {
@@ -622,9 +678,9 @@ stat_file_metadata() {
     fi
     local arguments=(-c '%F|%d|%i|%s|%y|%z')
     if [[ "$follow" == true ]]; then
-        arguments=(-L "${arguments[@]}")
+        arguments=(-L ${arguments[@]+"${arguments[@]}"})
     fi
-    stat "${arguments[@]}" -- "$path" 2>/dev/null
+    stat ${arguments[@]+"${arguments[@]}"} -- "$path" 2>/dev/null
 }
 
 utf8_is_well_formed() {
@@ -727,11 +783,31 @@ metadata_identity() {
     printf '%s:%s' "$device" "$inode"
 }
 
+open_input_fd() {
+    if ((BASH_VERSINFO[0] > 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 1))); then
+        exec {SAFE_OPEN_FD}<"$1"
+    else
+        # The helper owns one input descriptor at a time. Reserve a descriptor
+        # supported by stock macOS Bash rather than requiring dynamic FDs.
+        exec 9<"$1" || return
+        SAFE_OPEN_FD=9
+    fi
+}
+
+close_input_fd() {
+    local fd="$1"
+    if ((BASH_VERSINFO[0] > 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 1))); then
+        exec {fd}<&-
+    else
+        exec 9<&-
+    fi
+}
+
 open_regular_file_once() {
     local path="$1" label="$2" require_same_identity="${3:-false}"
     local guard_blocking_open="${4:-true}"
     local current current_identity opened opened_identity descriptor_path fd attempt
-    local open_watchdog="" open_parent_pid=""
+    local open_watchdog="" open_parent_pid="" open_status=0
 
     [[ -e "$path" ]] || fail "$label must exist."
     for ((attempt = 0; attempt < 64; attempt++)); do
@@ -740,50 +816,54 @@ open_regular_file_once() {
             fail "$label may not be a symbolic link or reparse point."
         if [[ "$guard_blocking_open" == true ]]; then
             trap 'trap - USR1; return 97' USR1
-            open_parent_pid="$BASHPID"
+            shell_pid_into open_parent_pid
             (
                 sleep 2
                 kill -USR1 "$open_parent_pid" 2>/dev/null || true
             ) &
             open_watchdog=$!
         fi
-        if ! exec {fd}<"$path"; then
+        open_input_fd "$path" && open_status=0 || open_status=$?
+        if ((open_status != 0)); then
             if [[ -n "$open_watchdog" ]]; then
                 kill "$open_watchdog" 2>/dev/null || true
                 wait "$open_watchdog" 2>/dev/null || true
                 trap - USR1
                 open_watchdog=""
             fi
+            ((open_status != 97)) || return 97
             continue
         fi
+        fd="$SAFE_OPEN_FD"
         if [[ -n "$open_watchdog" ]]; then
             kill "$open_watchdog" 2>/dev/null || true
             wait "$open_watchdog" 2>/dev/null || true
             trap - USR1
             open_watchdog=""
         fi
-        descriptor_path="/proc/$BASHPID/fd/$fd"
+        shell_pid_into open_parent_pid
+        descriptor_path="/proc/$open_parent_pid/fd/$fd"
         if [[ ! -e "$descriptor_path" ]]; then
             descriptor_path="/dev/fd/$fd"
         fi
         opened="$(stat_file_metadata "$descriptor_path" true)" || {
-            exec {fd}<&-
-            fail "Cannot inspect opened ${label,,} '$path'."
+            close_input_fd "$fd"
+            fail "Cannot inspect opened $(lowercase "$label") '$path'."
         }
         if ! metadata_is_regular "$opened"; then
-            exec {fd}<&-
+            close_input_fd "$fd"
             fail "$label must be an ordinary file."
         fi
         [[ ! -L "$path" ]] || {
-            exec {fd}<&-
+            close_input_fd "$fd"
             fail "$label may not be a symbolic link or reparse point."
         }
         current="$(stat_file_metadata "$path")" || {
-            exec {fd}<&-
+            close_input_fd "$fd"
             continue
         }
         metadata_is_regular "$current" || {
-            exec {fd}<&-
+            close_input_fd "$fd"
             fail "$label must be an ordinary file."
         }
         current_identity="$(metadata_identity "$current")"
@@ -800,28 +880,29 @@ open_regular_file_once() {
             SAFE_FILE_METADATA="$opened"
             return
         fi
-        exec {fd}<&-
+        close_input_fd "$fd"
     done
     fail "$label changed while it was being opened."
 }
 
 finish_regular_file_once() {
     local path="$1" label="$2" require_same_identity="${3:-false}"
-    local descriptor_path opened_after current
+    local descriptor_path opened_after current current_pid
 
-    descriptor_path="/proc/$BASHPID/fd/$SAFE_FILE_FD"
+    shell_pid_into current_pid
+    descriptor_path="/proc/$current_pid/fd/$SAFE_FILE_FD"
     if [[ ! -e "$descriptor_path" ]]; then
         descriptor_path="/dev/fd/$SAFE_FILE_FD"
     fi
     opened_after="$(stat_file_metadata "$descriptor_path" true)" || {
-        exec {SAFE_FILE_FD}<&-
-        fail "Cannot inspect opened ${label,,} '$path'."
+        close_input_fd "$SAFE_FILE_FD"
+        fail "Cannot inspect opened $(lowercase "$label") '$path'."
     }
-    exec {SAFE_FILE_FD}<&-
+    close_input_fd "$SAFE_FILE_FD"
     [[ ! -L "$path" ]] ||
         fail "$label may not be a symbolic link or reparse point."
     current="$(stat_file_metadata "$path")" ||
-        fail "Cannot inspect ${label,,} '$path'."
+        fail "Cannot inspect $(lowercase "$label") '$path'."
     metadata_is_regular "$current" || fail "$label must be an ordinary file."
     if [[ "$require_same_identity" == true ]]; then
         [[ "$(metadata_identity "$opened_after")" == "$SAFE_FILE_IDENTITY" &&
@@ -844,26 +925,28 @@ capture_regular_file() {
     CAPTURED_FILE_IDENTITY="$SAFE_FILE_IDENTITY"
     CAPTURED_FILE_METADATA="$SAFE_FILE_METADATA"
     cat <&"$SAFE_FILE_FD" >"$destination" ||
-        fail "Cannot capture ${label,,} '$path'."
+        fail "Cannot capture $(lowercase "$label") '$path'."
     finish_regular_file_once "$path" "$label" "$require_same_identity"
 }
 
 capture_json_for_validation() {
-    local target="$1" path="$2" label="$3" capture digest
+    local target="$1" path="$2" label="$3" capture digest cache_key
     capture="$(mktemp "${TMPDIR:-/tmp}/installation-context-read.XXXXXX")" ||
-        fail "Cannot capture ${label,,}."
+        fail "Cannot capture $(lowercase "$label")."
     TEMP_FILES+=("$capture")
     capture_regular_file "$path" "$label" "$capture" true
     digest="$(digest_file "$capture")"
-    if [[ -n "${VALIDATED_FILE_SHA256[$path]-}" &&
-          ("${VALIDATED_FILE_SHA256[$path]}" != "$digest" ||
-           "${VALIDATED_FILE_IDENTITY[$path]}" != "$CAPTURED_FILE_IDENTITY" ||
-           "${VALIDATED_FILE_METADATA[$path]}" != "$CAPTURED_FILE_METADATA") ]]; then
+    validated_file_key "$path"
+    cache_key="$VALIDATED_FILE_KEY"
+    if [[ -n "${VALIDATED_FILE_SHA256[$cache_key]-}" &&
+          ("${VALIDATED_FILE_SHA256[$cache_key]}" != "$digest" ||
+           "${VALIDATED_FILE_IDENTITY[$cache_key]}" != "$CAPTURED_FILE_IDENTITY" ||
+           "${VALIDATED_FILE_METADATA[$cache_key]}" != "$CAPTURED_FILE_METADATA") ]]; then
         fail "File '$path' changed after it was validated."
     fi
-    VALIDATED_FILE_SHA256["$path"]="$digest"
-    VALIDATED_FILE_IDENTITY["$path"]="$CAPTURED_FILE_IDENTITY"
-    VALIDATED_FILE_METADATA["$path"]="$CAPTURED_FILE_METADATA"
+    VALIDATED_FILE_SHA256["$cache_key"]="$digest"
+    VALIDATED_FILE_IDENTITY["$cache_key"]="$CAPTURED_FILE_IDENTITY"
+    VALIDATED_FILE_METADATA["$cache_key"]="$CAPTURED_FILE_METADATA"
     printf -v "$target" '%s' "$capture"
 }
 
@@ -883,21 +966,23 @@ digest_safe_file_fd_into() {
     fi
     [[ "$value" =~ ^[0-9a-fA-F]{64}$ ]] ||
         fail "SHA-256 output is invalid."
-    printf -v "$target" '%s' "${value,,}"
+    printf -v "$target" '%s' "$(lowercase "$value")"
 }
 
 digest_file() {
     local path="$1" digest current_identity opened_identity opened_metadata
-    local verification_digest verification_identity verification_metadata
-    if [[ -n "${VALIDATED_FILE_SHA256[$path]-}" ]]; then
+    local verification_digest verification_identity verification_metadata cache_key
+    validated_file_key "$path"
+    cache_key="$VALIDATED_FILE_KEY"
+    if [[ -n "${VALIDATED_FILE_SHA256[$cache_key]-}" ]]; then
         open_regular_file_once "$path" "File '$path'" true
         current_identity="$SAFE_FILE_IDENTITY"
         opened_metadata="$SAFE_FILE_METADATA"
         digest_safe_file_fd_into digest
         finish_regular_file_once "$path" "File '$path'" true
-        [[ "$current_identity" == "${VALIDATED_FILE_IDENTITY[$path]}" &&
-           "$opened_metadata" == "${VALIDATED_FILE_METADATA[$path]}" &&
-           "$digest" == "${VALIDATED_FILE_SHA256[$path]}" ]] ||
+        [[ "$current_identity" == "${VALIDATED_FILE_IDENTITY[$cache_key]}" &&
+           "$opened_metadata" == "${VALIDATED_FILE_METADATA[$cache_key]}" &&
+           "$digest" == "${VALIDATED_FILE_SHA256[$cache_key]}" ]] ||
             fail "File '$path' changed after it was validated."
         printf '%s' "$digest"
         return
@@ -919,9 +1004,9 @@ digest_file() {
            "$verification_digest" == "$digest" ]] ||
             fail "File '$path' changed while it was being hashed."
     fi
-    VALIDATED_FILE_SHA256["$path"]="$digest"
-    VALIDATED_FILE_IDENTITY["$path"]="$opened_identity"
-    VALIDATED_FILE_METADATA["$path"]="$opened_metadata"
+    VALIDATED_FILE_SHA256["$cache_key"]="$digest"
+    VALIDATED_FILE_IDENTITY["$cache_key"]="$opened_identity"
+    VALIDATED_FILE_METADATA["$cache_key"]="$opened_metadata"
     printf '%s' "$digest"
 }
 
@@ -1046,7 +1131,7 @@ digest_snapshot_contents() {
     digest="$(digest_file "$records")"
     [[ "$digest" =~ ^[0-9a-fA-F]{64}$ ]] ||
         fail "SHA-256 output is invalid."
-    printf '%s' "${digest,,}"
+    lowercase "$digest"
 }
 
 slugify() {
@@ -1058,7 +1143,7 @@ slugify() {
 
 percent_decode_unreserved() {
     local value="$1" prefix hex code character
-    while [[ "$value" =~ ^([^%]*)%([0-9A-Fa-f]{2})(.*)$ ]]; do
+    while matches "$value" '^([^%]*)%([0-9A-Fa-f]{2})(.*)$'; do
         prefix="${BASH_REMATCH[1]}"
         hex="${BASH_REMATCH[2]}"
         value="${BASH_REMATCH[3]}"
@@ -1070,7 +1155,7 @@ percent_decode_unreserved() {
             [[ "$character" == [-._~] ]]; then
             printf '%s%s' "$prefix" "$character"
         else
-            printf '%s%%%s' "$prefix" "${hex^^}"
+            printf '%s%%%s' "$prefix" "$(uppercase "$hex")"
         fi
     done
     printf '%s' "$value"
@@ -1105,7 +1190,7 @@ normalize_url_path() {
     path="$(percent_encode_path "$path")"
     path="$(percent_decode_unreserved "$path")"
     IFS=/ read -r -a parts <<<"$path"
-    for part in "${parts[@]}"; do
+    for part in ${parts[@]+"${parts[@]}"}; do
         case "$part" in
             "")
                 ((${#stack[@]} > 0)) && stack+=("")
@@ -1117,10 +1202,10 @@ normalize_url_path() {
             *) stack+=("$part") ;;
         esac
     done
-    while ((${#stack[@]} > 0)) && [[ -z "${stack[-1]}" ]]; do
+    while ((${#stack[@]} > 0)) && [[ -z "${stack[${#stack[@]}-1]}" ]]; do
         unset "stack[$((${#stack[@]} - 1))]"
     done
-    for part in "${stack[@]}"; do
+    for part in ${stack[@]+"${stack[@]}"}; do
         result+="$separator$part"
         separator=/
     done
@@ -1137,18 +1222,18 @@ valid_ipv6() {
         right="${address#*::}"
         [[ "$right" != *::* ]] || return 1
         IFS=: read -r -a groups <<<"$left"
-        for group in "${groups[@]}"; do
+        for group in ${groups[@]+"${groups[@]}"}; do
             [[ -z "$group" || "$group" =~ ^[0-9A-Fa-f]{1,4}$ ]] || return 1
             [[ -z "$group" ]] || count=$((count + 1))
         done
         IFS=: read -r -a groups <<<"$right"
-        for group in "${groups[@]}"; do
+        for group in ${groups[@]+"${groups[@]}"}; do
             [[ -z "$group" || "$group" =~ ^[0-9A-Fa-f]{1,4}$ ]] || return 1
             [[ -z "$group" ]] || count=$((count + 1))
         done
     else
         IFS=: read -r -a groups <<<"$address"
-        for group in "${groups[@]}"; do
+        for group in ${groups[@]+"${groups[@]}"}; do
             [[ "$group" =~ ^[0-9A-Fa-f]{1,4}$ ]] || return 1
             count=$((count + 1))
         done
@@ -1174,23 +1259,23 @@ normalize_git_url() {
             fail "Git URL has a malformed percent-escape."
         percent_tail="${percent_tail:2}"
     done
-    if [[ "$candidate" =~ ^[^/@:]+@([^/:]+):(.+)$ ]]; then
+    if matches "$candidate" '^[^/@:]+@([^/:]+):(.+)$'; then
         candidate="ssh://${BASH_REMATCH[1]}/${BASH_REMATCH[2]}"
     fi
     candidate="${candidate%%\#*}"
     candidate="${candidate%%\?*}"
-    [[ "$candidate" =~ ^([A-Za-z][A-Za-z0-9+.-]*)://([^/?#]+)(/.*)?$ ]] ||
+    matches "$candidate" '^([A-Za-z][A-Za-z0-9+.-]*)://([^/?#]+)(/.*)?$' ||
         fail "Git URL must be absolute and include a host: $1"
-    scheme="${BASH_REMATCH[1],,}"
+    scheme="$(lowercase "${BASH_REMATCH[1]}")"
     authority="${BASH_REMATCH[2]}"
     path="${BASH_REMATCH[3]:-/}"
     authority="${authority##*@}"
-    if [[ "$authority" =~ ^(\[[^]]+\])(:([0-9]*))?$ ]]; then
-        host="${BASH_REMATCH[1],,}"
+    if matches "$authority" '^(\[[^]]+\])(:([0-9]*))?$'; then
+        host="$(lowercase "${BASH_REMATCH[1]}")"
         port_marker="${BASH_REMATCH[2]:-}"
         raw_port="${BASH_REMATCH[3]:-}"
-    elif [[ "$authority" =~ ^([^:]+)(:([0-9]*))?$ ]]; then
-        host="${BASH_REMATCH[1],,}"
+    elif matches "$authority" '^([^:]+)(:([0-9]*))?$'; then
+        host="$(lowercase "${BASH_REMATCH[1]}")"
         port_marker="${BASH_REMATCH[2]:-}"
         raw_port="${BASH_REMATCH[3]:-}"
     else
@@ -1224,7 +1309,7 @@ normalize_git_url() {
     while [[ "$path" != / && "$path" == */ ]]; do
         path="${path%/}"
     done
-    [[ "${path,,}" == *.git ]] && path="${path:0:${#path}-4}"
+    [[ "$(lowercase "$path")" == *.git ]] && path="${path:0:${#path}-4}"
     [[ "$path" == /* ]] || path="/$path"
     printf '%s://%s%s%s' "$scheme" "$host" "$port" "$path"
 }
@@ -1240,7 +1325,7 @@ normalize_source() {
     if [[ -z "$kind" ]]; then
         json_optional_string_into kind "$file" "$(path_join "$prefix" source)"
     fi
-    kind="${kind,,}"
+    kind="$(lowercase "$kind")"
     kind="${kind#"${kind%%[![:space:]]*}"}"
     kind="${kind%"${kind##*[![:space:]]}"}"
     [[ "$kind" == local ]] && kind=directory
@@ -1266,20 +1351,20 @@ normalize_source() {
             repository="${repository#"${repository%%[![:space:]]*}"}"
             repository="${repository%"${repository##*[![:space:]]}"}"
             shopt -s nocasematch
-            if [[ "$repository" =~ ^https?://github\.com/(.*)$ ]]; then
+            if matches "$repository" '^https?://github\.com/(.*)$'; then
                 repository="${BASH_REMATCH[1]}"
-            elif [[ "$repository" =~ ^ssh://git@github\.com/(.*)$ ]]; then
+            elif matches "$repository" '^ssh://git@github\.com/(.*)$'; then
                 repository="${BASH_REMATCH[1]}"
-            elif [[ "$repository" =~ ^git@github\.com:(.*)$ ]]; then
+            elif matches "$repository" '^git@github\.com:(.*)$'; then
                 repository="${BASH_REMATCH[1]}"
             fi
             shopt -u nocasematch
             repository="${repository#/}"
             repository="${repository%/}"
-            [[ "${repository,,}" == *.git ]] && repository="${repository:0:${#repository}-4}"
+            [[ "$(lowercase "$repository")" == *.git ]] && repository="${repository:0:${#repository}-4}"
             [[ "$repository" =~ ^[^/]+/[^/]+$ ]] ||
                 fail "GitHub source requires owner/repository, got '$repository'."
-            SOURCE_CANONICAL="github:${repository,,}"
+            SOURCE_CANONICAL="github:$(lowercase "$repository")"
             ;;
         git)
             if [[ -n "$canonical_input" ]]; then
@@ -1364,9 +1449,10 @@ derive_identity() {
 
 assert_plugin_id() {
     local basename="${1%%.*}"
-    [[ "$1" =~ ^[A-Za-z0-9]([A-Za-z0-9._-]*[A-Za-z0-9])?$ && "$1" != "." && "$1" != ".." ]] ||
+    matches "$1" '^[A-Za-z0-9]([A-Za-z0-9._-]*[A-Za-z0-9])?$' &&
+        [[ "$1" != "." && "$1" != ".." ]] ||
         fail "Invalid filesystem-safe plugin id '$1'."
-    case "${basename^^}" in
+    case "$(uppercase "$basename")" in
         CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])
             fail "Invalid filesystem-safe plugin id '$1'."
             ;;
@@ -1374,7 +1460,7 @@ assert_plugin_id() {
 }
 
 assert_marketplace_id() {
-    [[ "$1" =~ ^[a-z0-9]+(-[a-z0-9]+)*--[0-9a-f]{16}$ ]] ||
+    matches "$1" '^[a-z0-9]+(-[a-z0-9]+)*--[0-9a-f]{16}$' ||
         fail "Invalid source-derived marketplace id '$1'."
 }
 
@@ -1565,7 +1651,7 @@ resolve_directory_evidence() {
     [[ "$EVIDENCE_FOUND" == false ]] || return 0
     cursor="$payload"
     while :; do
-        for relative in "${manifests[@]}"; do
+        for relative in ${manifests[@]+"${manifests[@]}"}; do
             manifest="$cursor/$relative"
             [[ -f "$manifest" ]] || continue
             json_optional_string_into plugin_root "$manifest" "$(path_join metadata pluginRoot)"
@@ -1657,7 +1743,7 @@ validate_namespace_receipt() {
     json_optional_string_into receipt_marketplace_id "$document" marketplaceId
     [[ "$receipt_marketplace_id" == "$receipt_id" ]] ||
         fail "Namespace receipt '$actual' does not match its cell directory."
-    [[ "$receipt_id" =~ ^(.+)--[0-9a-f]{16}$ ]] ||
+    matches "$receipt_id" '^(.+)--[0-9a-f]{16}$' ||
         fail "Invalid source-derived marketplace id '$receipt_id'."
     slug="${BASH_REMATCH[1]}"
     generation="$(json_optional_path "$document" generation)"
@@ -1736,7 +1822,7 @@ validate_context_receipt() {
     json_optional_string_into marketplace_id "$document" marketplaceId
     json_optional_string_into plugin_id "$document" pluginId
     [[ -n "$marketplace_id" && -n "$plugin_id" ]] || fail "install.json identity is incomplete."
-    [[ "$marketplace_id" =~ ^[a-z0-9]+(-[a-z0-9]+)*--[0-9a-f]{16}$ ]] ||
+    matches "$marketplace_id" '^[a-z0-9]+(-[a-z0-9]+)*--[0-9a-f]{16}$' ||
         fail "Invalid source-derived marketplace id '$marketplace_id'."
     assert_plugin_id "$plugin_id"
     lexical_marketplaces="$durable_home/marketplaces"
@@ -2160,10 +2246,11 @@ stamp_context() {
 
 assert_snapshot_id() {
     local value="$1" basename
-    [[ "$value" =~ ^[A-Za-z0-9]([A-Za-z0-9._+-]*[A-Za-z0-9])?$ && "$value" != . && "$value" != .. ]] ||
+    matches "$value" '^[A-Za-z0-9]([A-Za-z0-9._+-]*[A-Za-z0-9])?$' &&
+        [[ "$value" != . && "$value" != .. ]] ||
         fail "Invalid filesystem-safe snapshot id '$value'."
     basename="${value%%.*}"
-    basename="${basename^^}"
+    basename="$(uppercase "$basename")"
     case "$basename" in
         CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])
             fail "Invalid filesystem-safe snapshot id '$value'." ;;
@@ -2174,10 +2261,11 @@ assert_runtime_version() {
     local value="$1" basename
     (( $(utf8_length "$value") <= 128 )) ||
         fail "Runtime version exceeds the portable 128-character limit."
-    [[ "$value" =~ ^[A-Za-z0-9]([A-Za-z0-9._+-]*[A-Za-z0-9])?$ && "$value" != . && "$value" != .. ]] ||
+    matches "$value" '^[A-Za-z0-9]([A-Za-z0-9._+-]*[A-Za-z0-9])?$' &&
+        [[ "$value" != . && "$value" != .. ]] ||
         fail "Invalid filesystem-safe runtime version '$value'."
     basename="${value%%.*}"
-    basename="${basename^^}"
+    basename="$(uppercase "$basename")"
     case "$basename" in
         CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])
             fail "Invalid filesystem-safe runtime version '$value'." ;;
@@ -2248,7 +2336,7 @@ resolve_snapshot_paths() {
     shopt -s nullglob dotglob
     entries=("$SNAPSHOT_ROOT"/*)
     shopt -u nullglob dotglob
-    for entry in "${entries[@]}"; do
+    for entry in ${entries[@]+"${entries[@]}"}; do
         if [[ "$(basename -- "$entry")" != snapshot-provenance.json ]]; then
             materialized=true
             break
@@ -2563,7 +2651,7 @@ resolve_runtime_slot_paths() {
     RUNTIME_VERSIONS_RELATIVE="$relative"
     cursor="$CTX_PLUGIN_ROOT"
     IFS='/' read -r -a parts <<<"$relative"
-    for part in "${parts[@]}"; do
+    for part in ${parts[@]+"${parts[@]}"}; do
         [[ -n "$part" ]] || continue
         cursor="$cursor/$part"
         [[ ! -L "$cursor" ]] ||
@@ -2612,7 +2700,7 @@ ensure_versions_root_chain() {
     local cursor="$CTX_PLUGIN_ROOT" part
     local parts=()
     IFS='/' read -r -a parts <<<"$RUNTIME_VERSIONS_RELATIVE"
-    for part in "${parts[@]}"; do
+    for part in ${parts[@]+"${parts[@]}"}; do
         [[ -n "$part" ]] || continue
         cursor="$cursor/$part"
         [[ ! -L "$cursor" ]] ||
@@ -2710,7 +2798,7 @@ validate_runtime_slot_ownership() {
         local generation
         assert_json_type "$ownership_document" generation number "reservation generation"
         generation="$(json_optional_path "$ownership_document" generation)"
-        [[ "$generation" =~ ^(0|[1-9][0-9]*)$ ]] || fail "Invalid reservation generation."
+        matches "$generation" '^(0|[1-9][0-9]*)$' || fail "Invalid reservation generation."
         normalize_expected_generation_into generation "$generation" reservation
         [[ "$generation" == "$reservation_generation" ]] || fail "Reservation generation changed."
     fi
@@ -2769,7 +2857,7 @@ validate_runtime_slot_ownership() {
     shopt -s nullglob dotglob
     entries=("$RUNTIME_SLOT_ROOT"/*)
     shopt -u nullglob dotglob
-    for entry in "${entries[@]}"; do
+    for entry in ${entries[@]+"${entries[@]}"}; do
         if [[ "$(basename -- "$entry")" != .runtime-slot-ownership.json ]]; then
             slot_empty=false
             break
@@ -2944,8 +3032,8 @@ validate_build_completion() {
         fail "Build completion evidence version must match the runtime version."
     parse_utc_epoch "$completed_at" >/dev/null ||
         fail "build completion completed_at must be RFC3339 UTC."
-    [[ "$(json_type_path "$capture" pid)" == number &&
-       "$pid" =~ ^(0|[1-9][0-9]*)$ ]] ||
+    [[ "$(json_type_path "$capture" pid)" == number ]] &&
+        matches "$pid" '^(0|[1-9][0-9]*)$' ||
         fail "Build completion evidence pid must be an integer from 0 through 9223372036854775807."
     pid_length="${#pid}"
     if ((pid_length > 19)); then
@@ -3106,7 +3194,7 @@ validate_runtime_slot_completion() {
        "$build_receipt_sha" =~ ^[0-9a-f]{64}$ &&
        "$payload_sha" =~ ^[0-9a-f]{64}$ ]] ||
         fail "Runtime slot completion digests must be lowercase 64-hex."
-    [[ "$build_pid" =~ ^(0|[1-9][0-9]*)$ ]] ||
+    matches "$build_pid" '^(0|[1-9][0-9]*)$' ||
         fail "Runtime slot completion build.pid must be an integer from 0 through 9223372036854775807."
     pid_length="${#build_pid}"
     if ((pid_length > 19)); then
@@ -3289,7 +3377,7 @@ resolve_reservation_target() {
         fail "Reservation root must be absolute and may not be linked."
     if ! paths_equal "$RESERVATION_ROOT" "$RUNTIME_SLOT_ROOT"; then
         paths_equal "$(dirname -- "$RESERVATION_ROOT")" "$parent" &&
-            [[ "$name" =~ ^\.runtime-slot-$digest-([0-9a-f]{16}|[0-9a-f]{32})$ ]] ||
+            matches "$name" "^\\.runtime-slot-$digest-([0-9a-f]{16}|[0-9a-f]{32})$" ||
             fail "Reservation root must be the exact slot or its attributable hidden sibling."
     fi
     [[ "$(canonical_path "$RESERVATION_ROOT")" == "$RESERVATION_ROOT" ]] ||
@@ -3331,7 +3419,7 @@ release_runtime_slot() {
             [[ -d "$RESERVATION_ROOT" && ! -L "$RESERVATION_ROOT" ]] || fail "Reservation must be an ordinary directory."
             receipt="$RESERVATION_ROOT/.runtime-slot-reservation.json"
             evidence_paths=("$CTX_NAMESPACE_RECEIPT" "$CTX_INSTALL_RECEIPT" "$current_path" "$lkg_path" "$RESERVATION_ROOT" "$receipt")
-            for entry in "${evidence_paths[@]}"; do evidence+=("$(lifecycle_path_evidence "$entry")"); done
+            for entry in ${evidence_paths[@]+"${evidence_paths[@]}"}; do evidence+=("$(lifecycle_path_evidence "$entry")"); done
             directory_identity="$(stat_file_metadata "$RESERVATION_ROOT" | cut -d '|' -f 2,3)"
             [[ -f "$receipt" && ! -L "$receipt" && "$(digest_file "$receipt")" == "$EXPECTED_RESERVATION_SHA256" ]] ||
                 fail "Runtime slot reservation receipt changed."
@@ -3386,7 +3474,7 @@ read_runtime_marker_into() {
     [[ "$byte_count" =~ ^[0-9]+$ && "$byte_count" -le 130 ]] ||
         fail "$label exceeds the portable 128-character runtime version limit."
     raw="$(cat -- "$actual"; printf '\034')" ||
-        fail "Cannot read ${label,,} '$actual'."
+        fail "Cannot read $(lowercase "$label") '$actual'."
     raw="${raw%$'\034'}"
     value="$raw"
     expected_size="${#value}"
@@ -3621,7 +3709,7 @@ emit_locator() {
     if [[ "$LOCATOR_KIND" == installed ]]; then
         printf '{"kind":"installed","copilotHome":%s,"marketplaceKey":%s,"declaredIn":[' \
             "$(json_quote "$LOCATOR_COPILOT_HOME")" "$(json_quote "$LOCATOR_MARKETPLACE_KEY")"
-        for value in "${LOCATOR_DECLARED_IN[@]}"; do
+        for value in ${LOCATOR_DECLARED_IN[@]+"${LOCATOR_DECLARED_IN[@]}"}; do
             printf '%s%s' "$delimiter" "$(json_quote "$value")"
             delimiter=,
         done
@@ -3695,7 +3783,7 @@ snapshot_hex() {
 snapshot_hex_into() {
     local target="$1" snapshot="$2" key="$3" encoded escapes="" decoded=""
     encoded="$(snapshot_value "$snapshot" "${key}Hex")" || return 1
-    [[ "$encoded" =~ ^([0-9a-f]{2})*$ ]] ||
+    matches "$encoded" '^([0-9a-f]{2})*$' ||
         fail "Invalid encoded snapshot value for '$key'."
     while [[ -n "$encoded" ]]; do
         escapes+="\\x${encoded:0:2}"
@@ -3709,7 +3797,7 @@ normalized_short_host() {
     local host
     host="$(hostname 2>/dev/null || uname -n 2>/dev/null || printf '')"
     host="${host%%.*}"
-    printf '%s' "${host,,}"
+    lowercase "$host"
 }
 
 pid_is_live() {
@@ -3827,7 +3915,7 @@ read_environment_tuple() {
     [[ -n "$READ_ENV_HOME_REAL_PATH" ]] ||
         fail "$label.homeRealPath must be a non-empty string."
     if [[ "$READ_ENV_PLATFORM" == windows ]]; then
-        [[ "$READ_ENV_HOME_REAL_PATH" =~ ^[A-Za-z]:[\\/]|^\\\\[^\\/]+[\\/][^\\/]+([\\/]|$) ]] ||
+        matches "$READ_ENV_HOME_REAL_PATH" '^[A-Za-z]:[\\/]|^\\\\[^\\/]+[\\/][^\\/]+([\\/]|$)' ||
             fail "$label.homeRealPath must be absolute."
     else
         is_absolute "$READ_ENV_HOME_REAL_PATH" ||
@@ -3931,7 +4019,7 @@ policy_snapshot() {
             keys="$(json_object_keys "$file" "$(path_join installationMode marketplaces)")"
             while IFS= read -r marketplace_key; do
                 [[ -n "$marketplace_key" ]] || continue
-                [[ "$marketplace_key" =~ ^[a-z0-9]+(-[a-z0-9]+)*--[0-9a-f]{16}$ ]] ||
+                matches "$marketplace_key" '^[a-z0-9]+(-[a-z0-9]+)*--[0-9a-f]{16}$' ||
                     fail "Policy marketplace ids must be exact source-derived ids."
                 marketplace_path="$(path_join "$(path_join installationMode marketplaces)" "$marketplace_key")"
                 [[ "$(json_type_path "$file" "$marketplace_path")" == object ]] ||
@@ -4016,7 +4104,7 @@ maintenance_sidecar_snapshot() {
     [[ -n "$owner" && -n "$host" && -n "$reason" ]] ||
         fail "Maintenance sidecar fields must be non-empty."
     host="${host%%.*}"
-    host="${host,,}"
+    host="$(lowercase "$host")"
     [[ "$pid" =~ ^[1-9][0-9]*$ ]] ||
         fail "Maintenance pid must be a positive integer."
     entered_epoch="$(parse_utc_epoch "$entered_at")" ||
@@ -4308,7 +4396,7 @@ tombstone_snapshot() {
         fail "Tombstone pluginId must be a string."
     json_optional_string_into owner_marketplace_id "$file" marketplaceId
     json_optional_string_into owner_plugin_id "$file" pluginId
-    [[ "$owner_marketplace_id" =~ ^[a-z0-9]+(-[a-z0-9]+)*--[0-9a-f]{16}$ ]] ||
+    matches "$owner_marketplace_id" '^[a-z0-9]+(-[a-z0-9]+)*--[0-9a-f]{16}$' ||
         fail "Tombstone marketplaceId must be an exact source-derived id."
     assert_plugin_id "$owner_plugin_id"
     if [[ -n "$current_plugin_id" && "$owner_plugin_id" != "$current_plugin_id" ]]; then
@@ -4738,7 +4826,7 @@ deployment_policy_snapshot() {
     finish_regular_file_once "$path" "Runtime deployment policy" true
     # Bash strings cannot retain NUL. Reject it before decoding so corrupt JSON
     # cannot become an apparently valid policy through command substitution.
-    [[ ! "$encoded" =~ ^([[:xdigit:]]{2})*00 ]] ||
+    ! matches "$encoded" '^([[:xdigit:]]{2})*00' ||
         fail "Runtime deployment policy contains a NUL byte."
     decode_hex_into document "$encoded"
     utf8_is_well_formed "$document" ||

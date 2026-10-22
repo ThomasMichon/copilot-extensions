@@ -157,8 +157,7 @@ def test_native_guest_writers_and_readers_preserve_identity_and_refusals(
         for runner in ("python", "bash", "powershell"):
             refused = run(runner, "guest-status", None)
             assert refused.returncode == 1, refused.stdout + refused.stderr + "".join(host.errors)
-            if runner != "powershell":
-                assert "guest-identity-unregistered" in refused.stderr
+            assert "guest-identity-unregistered" in refused.stderr
             assert _snapshot(profile) == unregistered
         created = run(writer, "guest-register", distribution)
         assert created.returncode == 0, created.stdout + created.stderr + "".join(host.errors)
@@ -179,8 +178,7 @@ def test_native_guest_writers_and_readers_preserve_identity_and_refusals(
                     assert _snapshot(profile) == before
             refused = run(runner, "guest-status", "Other Distro")
             assert refused.returncode == 1
-            if runner != "powershell":
-                assert "guest-identity-conflict" in refused.stderr
+            assert "guest-identity-conflict" in refused.stderr
             assert _snapshot(profile) == before
 
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -199,11 +197,9 @@ def test_native_guest_writers_and_readers_preserve_identity_and_refusals(
         for runner in ("python", "bash", "powershell"):
             refused = run(runner, "guest-status", None)
             assert refused.returncode == 1
-            if runner != "powershell":
-                assert "guest-identity-foreign" in refused.stderr
+            assert "guest-identity-foreign" in refused.stderr
             assert _snapshot(profile) == foreign
     finally:
         host.close()
-    assert "guest-identity-conflict" in "".join(host.errors)
-    assert "guest-identity-foreign" in "".join(host.errors)
+    assert not host.errors
     assert _snapshot(profile) == foreign

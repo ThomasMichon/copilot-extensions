@@ -8,9 +8,12 @@ cells. Mutation remains explicit and non-automatic:
   the canonical Python implementation componentized while the sync tool vendors
   the same self-contained file set into every consuming plugin.
 - `installation-context.sh` plus `json-query.awk` provides a Bash bootstrap that
-  does not require Python or `jq`. The Linux/WSL bootstrap requires Bash 4.4+
-  plus `awk`, a SHA-256 command (`sha256sum`, `shasum`, or `openssl`), and a
-  physical-path command (`realpath -m` or `readlink -f`).
+  does not require Python or `jq`. Read-only `status`, `deployment-status`,
+  `probe-plugin-publication` and `probe-legacy` support stock macOS Bash 3.2;
+  installation-management actions still require Bash 4.4+. Native dependencies
+  include `awk`, `sh` and a SHA-256 command (`sha256sum`, `shasum`, or `openssl`).
+  Physical-path resolution uses `realpath -m`, `readlink -f` or the canonical
+  shell fallback.
 - `installation-context.ps1` provides the PowerShell 5.1+/pwsh bootstrap.
   Missing native types compile in one batch to bound cold diagnostic startup;
   re-entry retains already-loaded types rather than recompiling them.
@@ -40,6 +43,13 @@ cells. Mutation remains explicit and non-automatic:
   managed dispatch without granting cold publication. Vault's payload dispatcher
   instead probes publication against its independently validated selected cell
   or canonical legacy root; a legacy-only adapter never admits a namespaced cell.
+
+On-demand stock-shell regressions use an actual Bash 3.2 interpreter selected by
+`INSTALLATION_CONTEXT_BASH32` (or stock `/bin/bash` for bootstrap cases). They
+cover cold and drift admission across bootstrap adopters, including Budget
+Guidance without Python. Canonical deployment-adapter cases also exercise that
+interpreter when explicitly selected. This is interpreter compatibility
+coverage, not a substitute for native macOS platform qualification.
 
 All three normalize marketplace source descriptors, derive source fingerprints
 and marketplace ids, resolve payload provenance, compute the approved durable

@@ -254,7 +254,7 @@ def _without_python(fixture: dict, environment: dict[str, str]) -> None:
         "awk", "bash", "basename", "cat", "chmod", "cp", "cut", "date", "dirname",
         "find", "flock", "getent", "grep", "head", "id", "ln", "mkdir", "mktemp", "mv", "od", "pwd",
         "readlink", "realpath", "rm", "sed", "sha256sum", "shasum", "sleep", "sort",
-        "stat", "tail", "tr", "uname", "wc",
+        "sh", "stat", "tail", "tr", "uname", "wc",
     ):
         executable = shutil.which(name, path=environment["PATH"])
         if executable is not None:

@@ -21,19 +21,44 @@ from test_installation_mode_governance import (
     _write_json,
 )
 
+ADMISSION_RUNNERS = (
+    *ALL_RUNNERS,
+    *(("posix32",) if os.name != "nt" and os.environ.get("INSTALLATION_CONTEXT_BASH32") else ()),
+)
+
 
 def _run_adapter(runner: str, arguments: list[str]) -> subprocess.CompletedProcess[str]:
     environment = os.environ.copy()
     environment.pop("COPILOT_EXTENSIONS_CONTEXT", None)
     environment.pop("COPILOT_PLUGIN_ROOT", None)
+    command = (
+        [
+            os.environ["INSTALLATION_CONTEXT_BASH32"],
+            str(Path(__file__).resolve().parents[1] / "installation-context.sh"),
+            *arguments,
+        ]
+        if runner == "posix32" else _runner_command(runner, arguments)
+    )
     return subprocess.run(
-        _runner_command(runner, arguments), capture_output=True, text=True,
+        command, capture_output=True, text=True,
         encoding="utf-8", env=environment, check=False, timeout=30,
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
 
 
-@pytest.mark.parametrize("runner", ALL_RUNNERS)
+@pytest.mark.skipif(
+    os.name == "nt" or not os.environ.get("INSTALLATION_CONTEXT_BASH32"),
+    reason="an actual POSIX Bash 3.2 interpreter must be selected",
+)
+def test_stock_bash_management_retains_modern_shell_floor(tmp_path: Path) -> None:
+    result = _run_adapter("posix32", ["stamp", "--durable-home", str(tmp_path)])
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert not result.stdout
+    assert "Bash 4.4 or newer is required for installation management" in result.stderr
+    assert not any(tmp_path.iterdir())
+
+
+@pytest.mark.parametrize("runner", ADMISSION_RUNNERS)
 @pytest.mark.parametrize("case", [
     "missing", "managed", "standalone", "unsupported", "invalid-json", "duplicate",
     "wrong-case", "string-boolean", "array-boolean", "array-version", "array-owner-field",
@@ -124,7 +149,7 @@ def test_native_policy_decision_matches_reference(
         assert not legacy.exists()
 
 
-@pytest.mark.parametrize("runner", ALL_RUNNERS)
+@pytest.mark.parametrize("runner", ADMISSION_RUNNERS)
 def test_namespaced_adapter_policy_uses_governed_actual_root(tmp_path: Path, runner: str) -> None:
     module = _load_module()
     layout = _cell_layout(tmp_path)
@@ -159,7 +184,7 @@ def test_namespaced_adapter_policy_uses_governed_actual_root(tmp_path: Path, run
 
 
 @pytest.mark.skipif(os.name != "posix", reason="Requires POSIX permission semantics")
-@pytest.mark.parametrize("runner", ALL_RUNNERS)
+@pytest.mark.parametrize("runner", ADMISSION_RUNNERS)
 @pytest.mark.parametrize("blocked", ["policy", "root"])
 def test_inaccessible_policy_cannot_become_missing(
     tmp_path: Path, runner: str, blocked: str,
