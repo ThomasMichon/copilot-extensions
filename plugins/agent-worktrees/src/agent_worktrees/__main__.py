@@ -6446,9 +6446,15 @@ def main(argv: list[str] | None = None) -> int:
             print("\nCancelled.")
             return 130
 
-    # Manual-dispatch verbs + the COMMAND_MAP fallback may reach the
-    # cross-referencing CLI-submodule cluster -- resolve it once.
-    _ensure_cluster_loaded()
+    # Metadata readers use their modules' own helpers. Other manual verbs
+    # and the COMMAND_MAP fallback still need the cross-referencing cluster.
+    if (
+        args_list[0] not in {
+            "state-root", "coordination-readiness", "config-root", "knowledge",
+        }
+        and args_list[:2] != ["repos", "list"]
+    ):
+        _ensure_cluster_loaded()
 
     # Services uses manual dispatch for passthrough support --
     # argparse can't handle "unknown subcommand = service name".
@@ -6527,7 +6533,6 @@ def main(argv: list[str] | None = None) -> int:
     # state-root (resolve where efforts/visions/logs are written) -- manual
     # dispatch (needs project context; see cmd_state_root_dispatch).
     if args_list[0] == "state-root":
-        _ensure_cluster_loaded()
         from . import context_cli
 
         try:
@@ -6538,7 +6543,6 @@ def main(argv: list[str] | None = None) -> int:
 
     # coordination-readiness -- JSON preflight for claim-producing peers.
     if args_list[0] == "coordination-readiness":
-        _ensure_cluster_loaded()
         from . import context_cli
 
         try:
@@ -6549,7 +6553,6 @@ def main(argv: list[str] | None = None) -> int:
 
     # config-root (guarded machine-local setup destination) -- manual dispatch.
     if args_list[0] == "config-root":
-        _ensure_cluster_loaded()
         from . import context_cli
 
         try:
@@ -6560,7 +6563,6 @@ def main(argv: list[str] | None = None) -> int:
 
     # knowledge (paired private-repo management) -- manual dispatch.
     if args_list[0] == "knowledge":
-        _ensure_cluster_loaded()
         from . import context_cli
 
         try:

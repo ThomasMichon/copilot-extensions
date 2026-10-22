@@ -50,7 +50,7 @@ _ADD_PARSERS_MODULES = [
     "pane_lifecycle", "handoff_cli", "handoff_successor_repair_cli", "handoff_cancel_cli", "list_cli", "claims_cli", "follow_ups_cli",
     "session_metadata_cli", "cleanup_gc_cli", "reap_cli", "reclaim_cli", "resource_producer_cli",
     "worktree_ops_cli", "picker_profiles_cli", "maintenance_cli",
-    "installation_cli", "update_cli", "context_cli", "services_cli",
+    "installation_cli", "update_cli", "update_launch_cli", "context_cli", "services_cli",
     "repos_cli", "related_cli", "git_cli", "pr_cli", "session_binding_cli",
     "session_inspection_cli", "session_tracking_cli", "record_cli", "worktree_status_audit",
     "picker_reconcile_cli", "launch_registry",
@@ -243,6 +243,87 @@ def _deferred_only_global_names() -> frozenset[str]:
             func_start, func_end = node.lineno, node.end_lineno
     _cheap, heavy_owned, heavy_native = _core_cluster_scan.classify_main_names(main_tree, func_start, func_end)
     return frozenset(heavy_owned.keys()) | frozenset(heavy_native)
+
+
+@pytest.mark.parametrize(
+    "argv, expected",
+    [
+        (["repos", "list", "--json"], 0),
+        (["state-root", "--json"], 0),
+        (["state-root", "--pair", "--json"], 3),
+        (["coordination-readiness"], 0),
+        (["config-root", "--json"], 0),
+        (["knowledge", "control-plane"], 0),
+        (["--project", "demo", "knowledge", "compose-plugins", "--json"], 0),
+    ],
+)
+def test_metadata_handlers_run_without_full_cluster(
+    argv, expected, tmp_path, monkeypatch, capfd,
+):
+    import json
+
+    from agent_worktrees import config as cfg
+
+    anchor = tmp_path / "anchor"
+    anchor.mkdir()
+    config = cfg.Config(
+        srcroot=str(tmp_path), machine="test", platform="windows", repo_name="demo",
+        repos={"demo": cfg.RepoConfig(
+            anchor=str(anchor), worktree_root=str(tmp_path / "worktrees"),
+        )},
+    )
+    topology = tmp_path / "machines.yaml"
+    topology.write_text(
+        "control_plane:\n  harness: example-harness\n  knowledge: example-knowledge\n",
+        encoding="utf-8",
+    )
+    if argv[:2] == ["knowledge", "control-plane"]:
+        argv = [*argv, "--path", str(topology), "--json"]
+    monkeypatch.chdir(anchor)
+    monkeypatch.setattr(m, "_resolve_active_project", lambda _: ("demo", anchor))
+    monkeypatch.setattr(m, "_cwd_is_inside_project", lambda _: True)
+    monkeypatch.setattr(cfg, "load_config", lambda *a, **k: config)
+    for name in _deferred_only_global_names():
+        monkeypatch.delitem(m.__dict__, name, raising=False)
+    monkeypatch.setattr(m, "_FULL_SURFACE_LOADED", False)
+    monkeypatch.setattr(m, "_CLUSTER_LOADED", False)
+    monkeypatch.setattr(
+        m, "_load_full_command_surface",
+        lambda: pytest.fail("metadata handler loaded the full CLI cluster"),
+    )
+
+    assert m.main(argv) == expected
+    payload = json.loads(capfd.readouterr().out)
+    assert isinstance(payload, dict)
+    assert not m._FULL_SURFACE_LOADED
+    assert not m._CLUSTER_LOADED
+
+
+def test_launch_update_bootstrap_handler_runs_without_full_cluster(monkeypatch, capsys):
+    from agent_worktrees import update_cli, update_driver_json_cli
+
+    for name in _deferred_only_global_names():
+        monkeypatch.delitem(m.__dict__, name, raising=False)
+    monkeypatch.setattr(m, "_FULL_SURFACE_LOADED", False)
+    monkeypatch.setattr(m, "_CLUSTER_LOADED", False)
+    monkeypatch.setattr(
+        m, "_load_full_command_surface",
+        lambda: pytest.fail("launch-update handler loaded the full CLI cluster"),
+    )
+    monkeypatch.setattr(update_cli, "plan_pre_launch", lambda: {"action": "none"})
+    requests = []
+
+    def submit(kind, flags, args, execute):
+        requests.append((kind, flags))
+        return execute(args)
+
+    monkeypatch.setattr(update_driver_json_cli, "_run_request", submit)
+
+    assert m._dispatch_lazy("launch-update", ["launch-update", "bootstrap"]) == 0
+    assert requests == [("launch-update", ["bootstrap"])]
+    assert '"executed": []' in capsys.readouterr().out
+    assert not m._FULL_SURFACE_LOADED
+    assert not m._CLUSTER_LOADED
 
 
 @pytest.mark.parametrize(

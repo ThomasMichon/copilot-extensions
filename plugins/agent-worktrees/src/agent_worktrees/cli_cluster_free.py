@@ -37,6 +37,7 @@ CLUSTER_FREE_MODULES: frozenset[str] = frozenset({
     "status_monitor_runtime",
     "status_updater_cli",
     "update_cli",
+    "update_launch_cli",
     "worktree_ops_cli",
     "worktree_status_audit",
 })

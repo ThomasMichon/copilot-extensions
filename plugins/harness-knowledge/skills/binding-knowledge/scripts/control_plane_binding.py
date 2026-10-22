@@ -161,7 +161,8 @@ def resolve_binding(
         raise RuntimeError("effective harness knowledge binding is invalid or conflicts with the pair")
     for role, name in (("harness", harness), ("knowledge", knowledge)):
         readiness = owner.inspect_registration(
-            name, resolved[f"{role}_path"], command, platform_key=platform
+            name, resolved[f"{role}_path"], command,
+            platform_key=platform, registry=registry,
         )
         if readiness["status"] != "ready":
             raise RuntimeError(f"{role} registration is not ready: {readiness['reason']}")

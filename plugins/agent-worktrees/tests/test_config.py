@@ -1703,6 +1703,75 @@ class TestInRepoConfigCommittedRefResolution:
         self._git("update-ref", "refs/remotes/origin/main", "HEAD", cwd=tmp_path)
         assert self._resolve(tmp_path) == {"marker": "newly-committed"}
 
+    def test_snapshot_reuse_is_opt_in_and_ends_before_the_next_resolution(
+        self, tmp_path, monkeypatch,
+    ):
+        from types import SimpleNamespace
+
+        from agent_worktrees import git_ops, inrepo_config_source as src
+
+        marker, reads = ["first"], []
+
+        def observed(*args, **kwargs):
+            reads.append(args)
+            if args[0] == "symbolic-ref":
+                text = "refs/remotes/origin/main\n"
+            elif "ls-tree" in args:
+                text = f"100644 blob {'0' * 40}\t{args[args.index('--') + 1]}\0"
+            else:
+                text = f"marker: {marker[0]}\nnested: {{value: original}}\n"
+            return SimpleNamespace(returncode=0, stdout=text)
+
+        monkeypatch.setattr(git_ops, "git", observed)
+        with src.resolution_budget(reuse_snapshots=True):
+            first = self._resolve(tmp_path)
+            first["nested"]["value"] = "caller mutation"
+            marker[0] = "changed"
+            assert self._resolve(tmp_path) == {
+                "marker": "first", "nested": {"value": "original"},
+            }
+            assert len(reads) == 3
+        assert self._resolve(tmp_path)["marker"] == "changed"
+        assert len(reads) == 6
+        with src.resolution_budget():
+            assert self._resolve(tmp_path)["marker"] == "changed"
+            marker[0] = "latest"
+            assert self._resolve(tmp_path)["marker"] == "latest"
+        assert len(reads) == 12
+
+    @pytest.mark.parametrize("difference", ["anchor", "candidates", "remote", "parser"])
+    def test_resolution_snapshot_does_not_mix_sources_or_custom_parsers(
+        self, tmp_path, monkeypatch, difference,
+    ):
+        from types import SimpleNamespace
+
+        from agent_worktrees import git_ops, inrepo_config_source as src
+
+        reads = []
+
+        def observed(*args, **kwargs):
+            reads.append(args)
+            if args[0] == "symbolic-ref":
+                text = args[-1].removesuffix("HEAD") + "main\n"
+            elif "ls-tree" in args:
+                text = f"100644 blob {'0' * 40}\t{args[args.index('--') + 1]}\0"
+            else:
+                text = "marker: source\n"
+            return SimpleNamespace(returncode=0, stdout=text)
+
+        monkeypatch.setattr(git_ops, "git", observed)
+        candidates = (Path("config.yaml"),)
+        with src.resolution_budget(reuse_snapshots=True):
+            src.load_inrepo_config_from_committed_ref(tmp_path, candidates)
+            anchor = tmp_path / "other" if difference == "anchor" else tmp_path
+            paths = (Path("other.yaml"),) if difference == "candidates" else candidates
+            remote = "upstream" if difference == "remote" else "origin"
+            parser = (lambda _: {"custom": True}) if difference == "parser" else src.parse_yaml_text_safe
+            src.load_inrepo_config_from_committed_ref(
+                anchor, paths, remote, parser=parser,
+            )
+        assert len(reads) == 6
+
     @pytest.mark.parametrize("text,expected", [
         ("", {}),
         ("[malformed", {}),
@@ -1733,7 +1802,10 @@ class TestInRepoConfigCommittedRefResolution:
         assert self._resolve(tmp_path) == expected
         assert reads == [f"origin/main:{first.relative_to(tmp_path).as_posix()}"]
 
-    @pytest.mark.parametrize("failure", ["exit", "timeout", "non-text", "os-error", "git-error"])
+    @pytest.mark.parametrize(
+        "failure",
+        ["exit", "timeout", "non-text", "os-error", "git-error", "unterminated", "malformed"],
+    )
     def test_presence_probe_unavailability_retains_bounded_blob_reads_and_warns(
         self, tmp_path, monkeypatch, caplog, failure,
     ):
@@ -1760,6 +1832,9 @@ class TestInRepoConfigCommittedRefResolution:
                     raise OSError("probe unavailable")
                 if failure == "git-error":
                     raise git_ops.GitError(["git", *args], 128, "probe unavailable")
+                if failure in {"unterminated", "malformed"}:
+                    text = "incomplete" if failure == "unterminated" else "invalid\0"
+                    return types.SimpleNamespace(returncode=0, stdout=text)
                 return types.SimpleNamespace(returncode=128 if failure == "exit" else 0, stdout=None)
             if args[0] == "show":
                 reads.append(args[1])
@@ -1769,6 +1844,27 @@ class TestInRepoConfigCommittedRefResolution:
         assert self._resolve(tmp_path) == {"marker": "actual-blob"}
         assert reads == [f"origin/main:{path.relative_to(tmp_path).as_posix()}"]
         assert "presence probe" in caplog.text and "bounded ordered reads" in caplog.text
+
+    def test_presence_probe_skips_absent_higher_priority_candidates(self, tmp_path, monkeypatch):
+        from agent_worktrees import git_ops
+
+        self._empty_committed_anchor(tmp_path)
+        path = cfg.legacy_inrepo_config_path(tmp_path)
+        path.parent.mkdir(parents=True)
+        path.write_text("marker: legacy\n", encoding="utf-8")
+        self._git("add", "-A", cwd=tmp_path)
+        self._git("commit", "-m", "legacy config", cwd=tmp_path)
+        self._git("update-ref", "refs/remotes/origin/main", "HEAD", cwd=tmp_path)
+        original, calls = git_ops.git, []
+
+        def observed(*args, **kwargs):
+            calls.append(args)
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(git_ops, "git", observed)
+        assert self._resolve(tmp_path) == {"marker": "legacy"}
+        assert len(calls) == 3
+        assert calls[-1] == ("show", f"origin/main:{path.relative_to(tmp_path).as_posix()}")
 
     def test_absence_probe_uses_literal_candidate_paths(self, tmp_path, monkeypatch):
         from agent_worktrees import git_ops, inrepo_config_source

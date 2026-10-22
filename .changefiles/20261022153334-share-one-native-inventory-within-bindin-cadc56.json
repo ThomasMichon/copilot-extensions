@@ -1,0 +1,9 @@
+{
+  "comment": "Share one native inventory within binding preflight while re-reading registration before the binding writer.",
+  "changes": [
+    {
+      "plugin": "harness-knowledge",
+      "type": "patch"
+    }
+  ]
+}

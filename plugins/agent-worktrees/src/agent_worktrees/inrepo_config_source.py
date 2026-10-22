@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import contextlib
 import contextvars
+import copy
 import logging
 import subprocess
 import time
@@ -42,19 +43,28 @@ _RESOLUTION_BUDGET = 30.0
 _shared_deadline: contextvars.ContextVar[float | None] = contextvars.ContextVar(
     "_agent_worktrees_inrepo_resolution_deadline", default=None
 )
+_shared_snapshots: contextvars.ContextVar[
+    dict[tuple[Path, tuple[Path, ...], str], dict[str, Any]] | None
+] = contextvars.ContextVar("_agent_worktrees_inrepo_config_snapshots", default=None)
 
 
 @contextlib.contextmanager
-def resolution_budget(seconds: float | None = None):
+def resolution_budget(seconds: float | None = None, *, reuse_snapshots: bool = False):
     """Share one probe budget across every committed-config resolution in this
-    block. Nested blocks keep the outermost deadline."""
+    block. Nested blocks keep the outermost deadline.
+
+    One config load may reuse committed answers across its own overlay/base
+    reads. The scope ends before a later policy revalidation or source fetch.
+    """
     if _shared_deadline.get() is not None:
         yield
         return
     token = _shared_deadline.set(time.monotonic() + (_RESOLUTION_BUDGET if seconds is None else seconds))
+    snapshots = _shared_snapshots.set({} if reuse_snapshots else None)
     try:
         yield
     finally:
+        _shared_snapshots.reset(snapshots)
         _shared_deadline.reset(token)
 
 
@@ -137,12 +147,12 @@ def _read_committed_blob(
     return proc.stdout if proc.returncode == 0 else None
 
 
-def _has_committed_candidates(
+def _committed_candidates(
     anchor: Path, remote: str, branch: str, candidates: tuple[Path, ...], deadline: float,
-) -> bool | None:
-    """Prove all candidates absent in one fresh probe; otherwise retain ordered reads."""
+) -> frozenset[str] | None:
+    """Find exact candidate paths in one fresh probe; unknown results retain all reads."""
     if not candidates:
-        return False
+        return frozenset()
     timeout = _probe_timeout(deadline)
     if timeout is None:
         return None
@@ -169,7 +179,23 @@ def _has_committed_candidates(
             "Committed-config presence probe returned non-text output; retaining bounded ordered reads.",
         )
         return None
-    return bool(proc.stdout)
+    expected = {candidate.as_posix() for candidate in candidates}
+    found: set[str] = set()
+    records = proc.stdout.split("\0")
+    if records.pop() != "":
+        logging.getLogger("agent-worktrees").warning(
+            "Committed-config presence probe returned malformed output; retaining bounded ordered reads.",
+        )
+        return None
+    for record in records:
+        metadata, separator, path = record.partition("\t")
+        if not separator or len(metadata.split()) != 3 or path not in expected:
+            logging.getLogger("agent-worktrees").warning(
+                "Committed-config presence probe returned malformed output; retaining bounded ordered reads.",
+            )
+            return None
+        found.add(path)
+    return frozenset(found)
 
 
 def load_inrepo_config_from_committed_ref(
@@ -196,15 +222,33 @@ def load_inrepo_config_from_committed_ref(
     fetched tracking refs, or the anchor isn't a git repo at all); callers
     fall back to the working-tree read in that case.
     """
+    snapshots = _shared_snapshots.get()
+    if snapshots is not None and parser is parse_yaml_text_safe:
+        key = (anchor, rel_path_candidates, remote)
+        if key not in snapshots:
+            snapshots[key] = _resolve_committed_config(
+                anchor, rel_path_candidates, remote, parser,
+            )
+        return copy.deepcopy(snapshots[key])
+    return _resolve_committed_config(anchor, rel_path_candidates, remote, parser)
+
+
+def _resolve_committed_config(
+    anchor: Path, rel_path_candidates: tuple[Path, ...], remote: str,
+    parser: Callable[[str], dict[str, Any]],
+) -> dict[str, Any]:
     deadline = _shared_deadline.get() or time.monotonic() + _RESOLUTION_BUDGET
     head_branch = _offline_remote_head_branch(anchor, remote, deadline)
     if head_branch is None:
         return {}
 
     def _read_config_on(branch: str) -> dict[str, Any] | None:
-        if _has_committed_candidates(anchor, remote, branch, rel_path_candidates, deadline) is False:
+        present = _committed_candidates(anchor, remote, branch, rel_path_candidates, deadline)
+        if present == frozenset():
             return None
         for rel_path in rel_path_candidates:
+            if present is not None and rel_path.as_posix() not in present:
+                continue
             text = _read_committed_blob(anchor, remote, branch, rel_path, deadline)
             if text is not None:
                 return parser(text)

@@ -774,6 +774,10 @@ profile_assignment:
   on top.
 - A missing or malformed file safely degrades to "no in-repo settings" — the
   machine-local + global tiers still resolve the repo.
+- Committed-config probes preserve candidate priority and skip paths a fresh
+  tree listing proves absent. Overlay and base reads within one config load
+  share copied snapshots; a later config load, including a mutation-boundary
+  policy revalidation, probes again rather than reusing that earlier answer.
 
 ---
 

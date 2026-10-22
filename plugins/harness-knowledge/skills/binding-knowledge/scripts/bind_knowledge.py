@@ -258,9 +258,13 @@ def inspect_registration(
     knowledge_path: str,
     agent_worktrees_path: str,
     account_override: str = "",
-    *, platform_key: str = "",
+    *, platform_key: str = "", registry: dict | None = None,
 ) -> dict[str, object]:
-    """Inspect canonical registration without mistaking fallback discovery for it."""
+    """Inspect canonical registration, optionally sharing a read-only preflight inventory.
+
+    The binding writer does not supply an inventory: it must re-read registration
+    immediately before writing, even when preflight inspected it already.
+    """
     remote = knowledge_origin(knowledge_path)
     default_branch = knowledge_default_branch(knowledge_path)
     account = ""
@@ -280,21 +284,26 @@ def inspect_registration(
         "registration_argv": [],
         "registration_command": "",
     }
-    listed = _run_agent_worktrees(
-        agent_worktrees_path,
-        ["repos", "list", "--json"],
-    )
-    if listed is None:
-        return base
-    if listed.returncode != 0:
-        base["reason"] = listed.stderr.strip() or "agent-worktrees repos list failed"
-        return base
-    try:
-        payload = json.loads(listed.stdout)
-        entries = payload.get("repos", [])
-    except (json.JSONDecodeError, AttributeError):
+    if registry is None:
+        listed = _run_agent_worktrees(
+            agent_worktrees_path,
+            ["repos", "list", "--json"],
+        )
+        if listed is None:
+            return base
+        if listed.returncode != 0:
+            base["reason"] = listed.stderr.strip() or "agent-worktrees repos list failed"
+            return base
+        try:
+            registry = json.loads(listed.stdout)
+        except json.JSONDecodeError:
+            base["reason"] = "agent-worktrees repos list returned invalid JSON"
+            return base
+    if not isinstance(registry, dict):
         base["reason"] = "agent-worktrees repos list returned invalid JSON"
         return base
+    payload = registry
+    entries = payload.get("repos", [])
 
     if "platform" in payload:
         native_platform = payload["platform"]

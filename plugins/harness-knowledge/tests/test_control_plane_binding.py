@@ -141,6 +141,20 @@ def test_fresh_pair_uses_normal_writer_without_prior_local_config(pair):
     assert list(knowledge.iterdir()) == [topology]
 
 
+def test_preflight_shares_one_inventory_but_writer_reads_registration_again(pair):
+    home, harness, knowledge, _topology, _roles, _registry, calls = pair
+    selected = _resolve(pair)
+    assert sum(args == ["repos", "list", "--json"] for args, _ in calls) == 1
+
+    bk.bind(
+        selected["harness"], selected["knowledge"], str(knowledge),
+        home=home, harness_path=str(harness), agent_worktrees_path="native-owner",
+        assemble_plugins=False, preserve_binding=True,
+    )
+
+    assert sum(args == ["repos", "list", "--json"] for args, _ in calls) == 2
+
+
 @pytest.mark.parametrize("change", ["removed", "repointed"])
 @pytest.mark.parametrize("existing", [False, True])
 def test_changed_registration_after_preflight_never_writes_binding(pair, change, existing):
