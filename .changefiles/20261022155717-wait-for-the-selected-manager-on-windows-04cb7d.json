@@ -1,0 +1,9 @@
+{
+  "comment": "Wait for the selected Manager on Windows and preserve its exit status after standalone bootstrap activation",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

@@ -63,11 +63,11 @@ def constructed_update(tmp_path, monkeypatch):
         sys.modules, "update_entry", SimpleNamespace(validate_manager_ownership=lambda *args: None),
     )
 
-    def dispatch(executable, arguments):
-        state.dispatch.append((executable, arguments))
+    def dispatch(arguments):
+        state.dispatch.append((arguments[0], arguments))
         raise CommandDispatched
 
-    monkeypatch.setattr(installer.os, "execv", dispatch)
+    monkeypatch.setattr(installer, "_dispatch_manager", dispatch)
     return state
 
 
