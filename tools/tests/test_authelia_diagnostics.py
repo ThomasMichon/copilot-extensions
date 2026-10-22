@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 import pytest
 
-from test_authelia_profile_qualification import CID, MODULES, PREP, RUN
+from test_authelia_profile_qualification import CID, MODULES, NETWORK, PREP, ROOT, RUN
 
 DIAG = MODULES["diagnostics"]
 
@@ -89,6 +89,41 @@ def test_structured_vendor_stack_and_provider_names_survive_capture(tmp_path: Pa
     assert json.loads(result["providers"]) == record["providers"]
 
 
+def test_text_configuration_error_preserves_cause_and_escaped_values(tmp_path: Path) -> None:
+    message = 'Configuration: invalid value "quoted" at C:\\fixture\\config\nsecond line'
+    error = 'client_secret="unknown-fixture-secret"'
+    data = (
+        'time="2026-10-22T00:00:00Z" level=error msg=' + json.dumps(message)
+        + " error=" + json.dumps(error) + " provider=configuration"
+    ).encode()
+    value = DIAG.diagnostic_records(data, tmp_path)["diagnostics"][0]
+    assert value["msg"] == message and value["provider"] == "configuration"
+    assert "unknown-fixture-secret" not in value["error"]
+    assert "[redacted]" in value["error"]
+
+
+def test_text_fatal_configuration_error_redacts_actual_fixture_secret(tmp_path: Path) -> None:
+    provider = tmp_path / "provider"
+    provider.mkdir()
+    secret = "unique-throwaway-client-secret"
+    (provider / "configuration.yml").write_text(json.dumps({"client_secret": secret}))
+    data = ("time=fixture level=fatal msg=" + json.dumps(
+        "Configuration: rejected value " + secret)).encode()
+    result = DIAG.diagnostic_records(data, tmp_path)
+    assert result["diagnostics"][0]["msg"] == "Configuration: rejected value [redacted]"
+    assert secret not in json.dumps(result)
+
+
+@pytest.mark.parametrize("line", [
+    b"unrestricted unstructured output",
+    b'level=error msg="unterminated',
+    b"level=error level=fatal msg=ambiguous",
+    b"prefix level=error msg=foreign",
+])
+def test_text_parser_has_no_arbitrary_output_fallback(tmp_path: Path, line: bytes) -> None:
+    assert DIAG.diagnostic_records(line, tmp_path)["diagnostics"] == []
+
+
 def test_unreadable_redaction_input_withholds_text_and_surfaces_failure(tmp_path: Path) -> None:
     provider = tmp_path / "fixtures/provider"
     provider.mkdir(parents=True, mode=0o700)
@@ -141,3 +176,37 @@ def test_state_and_redacted_cause_are_persisted_before_exact_cleanup(tmp_path: P
     assert "permission denied" in json.loads(log.read_bytes())["diagnostics"][0]["error"]
     state = engine.receipt["states_before_cleanup"][0]
     assert state["exit_code"] == 1 and state["oom_killed"] is False
+
+
+def test_journal_failure_still_stops_removes_and_removes_network(tmp_path: Path) -> None:
+    engine = RUN.QualifierEngine(tmp_path, {})
+    engine.containers = [CID]
+    engine.network = NETWORK
+    calls = []
+
+    def call(*args: str, **kwargs: object) -> str:
+        calls.append(args)
+        if args[0] == "inspect":
+            return json.dumps({
+                "Status": "running", "ExitCode": 0, "OOMKilled": False, "Error": "",
+            })
+        return ""
+
+    with (patch.object(engine, "call", call),
+          patch.object(engine, "journal", side_effect=OSError("synthetic write failure"))):
+        errors = engine.cleanup()
+    assert ("stop", "--time", "5", CID) in calls
+    assert ("rm", CID) in calls
+    assert ("network", "rm", NETWORK) in calls
+    assert errors == ["pre-cleanup-receipt-write-failed", "cleanup-receipt-write-failed"]
+
+
+def test_final_receipt_failure_returns_explicit_failure_and_restores_signals(tmp_path: Path) -> None:
+    previous = {number: RUN.signal.getsignal(number) for number in RUN.SIGNALS}
+    with (patch.object(RUN, "materialize_probe", side_effect=RUN.ProofError("synthetic-stop")),
+          patch.object(RUN, "save", side_effect=OSError("synthetic write failure"))):
+        result = RUN.run(ROOT, "a" * 40, tmp_path, 900)
+    assert result["result"] == "fail" and result["error"] == "final-receipt-write-failed"
+    assert result["receipt_persistence"] == "failed"
+    assert result["cleanup"] == "complete"
+    assert {number: RUN.signal.getsignal(number) for number in RUN.SIGNALS} == previous

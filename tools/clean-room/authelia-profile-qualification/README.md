@@ -93,12 +93,21 @@ fixture secrets, private keys, tokens, password hashes and authorization
 values. Redaction happens before truncation and before persistence. Records
 and text lengths are bounded; omitted records are counted explicitly. Other
 JSON fields and unrecognized output are not copied into the evidence.
+Configuration-validation errors use the pinned provider's text format before
+it switches to JSON. The runner parses only structured key/value records from
+that format, including quoted and escaped messages, through the same approved
+field/redaction path. There is no arbitrary text-output fallback.
 
 If fixture redaction inputs cannot be read safely, diagnostic text is
 withheld and `diagnostic_capture_error` is recorded; there is no raw-output
 fallback. Exact-ID cleanup still runs. The private evidence files survive
 container/network teardown, so a failed provider's useful cause is not
 destroyed with the container.
+Receipt or diagnostic-persistence failure cannot prevent owned teardown.
+Such failures remain explicit in cleanup errors; if even the final receipt
+cannot be written, the command returns failure and reports
+`final-receipt-write-failed` and failed persistence on stdout. Signal handlers
+are restored regardless of that final write.
 
 Exit **0** means this narrow token/proof flow was verified over actual TLS.
 Exit **2** means a valid acquisition produced an incompatible wire/profile

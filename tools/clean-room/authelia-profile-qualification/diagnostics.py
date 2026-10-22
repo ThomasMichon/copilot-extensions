@@ -28,6 +28,7 @@ PASSWORD_HASH = re.compile(r"\$(?:argon2(?:id|i|d)|pbkdf2[-a-z0-9]*)\$[^\s\"'\\]
 AUTH_VALUE = re.compile(
     r"(?i)\b(?:" + "Bear" + "er|DP" + "oP|Ba" + "sic" + r")\s+[A-Za-z0-9+/_.=-]+",
 )
+LOGFMT_FIELD = re.compile(r'([A-Za-z_][A-Za-z0-9_.-]*)=("(?:\\.|[^"\\])*"|[^\s"]+)')
 ASSIGNED_SECRET = re.compile(
     r"""(?ix)\b(access_token|refresh_token|id_token|client_secret|password|"""
     r"""hmac_secret|encryption_key|jwt_secret)\b(["']?\s*[:=]\s*)"""
@@ -37,6 +38,30 @@ ASSIGNED_SECRET = re.compile(
 
 class CaptureError(ValueError):
     """Fixture redaction inputs unavailable; no raw diagnostic may be retained."""
+
+
+def text_record(line: bytes) -> dict | None:
+    """Pinned Authelia validates configuration before selecting JSON log format."""
+    try:
+        text = line.decode("utf-8")
+    except UnicodeError:
+        return None
+    values: dict[str, str] = {}
+    end = 0
+    for field in LOGFMT_FIELD.finditer(text):
+        if text[end:field.start()].strip():
+            return None
+        name, value = field.groups()
+        if name in values:
+            return None
+        if value.startswith('"'):
+            try:
+                value = json.loads(value)
+            except ValueError:
+                return None
+        values[name] = value
+        end = field.end()
+    return values if values and not text[end:].strip() else None
 
 
 def sensitive_values(value: object) -> set[str]:
@@ -113,7 +138,7 @@ def diagnostic_records(data: bytes, fixtures: Path) -> dict:
             if line.startswith(b"Error response from daemon:"):
                 value = {"level": "error", "msg": line.decode("utf-8", errors="replace")}
             else:
-                continue
+                value = text_record(line)
         if not isinstance(value, dict) or value.get("level") not in ("error", "fatal", "warning"):
             continue
         if len(records) == MAX_RECORDS:

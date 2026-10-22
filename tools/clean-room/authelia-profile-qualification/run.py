@@ -151,8 +151,19 @@ class QualifierEngine(Engine):
             except (ProofError, CaptureError, OSError, ValueError, KeyError, TypeError):
                 states.append({"container_id": cid, "inspection": "unavailable"})
         self.receipt["states_before_cleanup"] = states
-        self.journal()
-        return super().cleanup()
+        errors = []
+        try:
+            self.journal()
+        except (OSError, ProofError):
+            errors.append("pre-cleanup-receipt-write-failed")
+        finally:
+            try:
+                errors.extend(super().cleanup())
+            except (OSError, ProofError):
+                errors.extend(self.receipt.get("cleanup_errors", []))
+                errors.append("cleanup-receipt-write-failed")
+        self.receipt["cleanup_errors"] = errors
+        return errors
 
     def create_fixture(self, image: str, kind: str) -> str:
         if not IMAGE_ID.fullmatch(image) or kind not in ("prepare", "provider", "probe"):
@@ -296,14 +307,20 @@ def run(repository: Path, ref: str, root: Path, build_timeout: int) -> dict:
     finally:
         for number in SIGNALS:
             signal.signal(number, signal.SIG_IGN)
-        errors = engine.cleanup() if engine else []
-        receipt["cleanup"] = "failed" if errors else "complete"
-        if errors:
-            receipt["result"] = "fail"
-        receipt["finished_at"] = int(time.time())
-        save(root / "receipt.json", receipt)
-        for number, handler in previous.items():
-            signal.signal(number, handler)
+        try:
+            errors = engine.cleanup() if engine else []
+            receipt["cleanup"] = "failed" if errors else "complete"
+            if errors:
+                receipt["result"] = "fail"
+            receipt["finished_at"] = int(time.time())
+            try:
+                save(root / "receipt.json", receipt)
+            except OSError:
+                receipt.update(result="fail", error="final-receipt-write-failed",
+                               receipt_persistence="failed")
+        finally:
+            for number, handler in previous.items():
+                signal.signal(number, handler)
     return receipt
 
 
@@ -327,7 +344,8 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("private results root unavailable")
     receipt = run(args.repository, args.source_commit, results, args.build_timeout)
     print(json.dumps({"results": str(results), "result": receipt["result"],
-                      "cleanup": receipt["cleanup"]}))
+                      "cleanup": receipt["cleanup"], "error": receipt.get("error"),
+                      "receipt_persistence": receipt.get("receipt_persistence", "complete")}))
     return {"verified": 0, "incompatible": 2}.get(receipt["result"], 1)
 
 
