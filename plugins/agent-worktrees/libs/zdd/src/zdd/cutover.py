@@ -148,6 +148,7 @@ class CutoverOrchestrator:
         drain_before_publish: bool = False,
         expected_old: Endpoint | None = None,
         on_published: Callable[[Endpoint], None] | None = None,
+        predecessor_health_check: Callable[[str, int], bool] | None = None,
     ) -> None:
         if expected_old is not None and refuse_old is None:
             raise ValueError("an expected predecessor also requires a publication refusal guard")
@@ -158,6 +159,7 @@ class CutoverOrchestrator:
         self.version = version
         self.spawn_passive = spawn_passive
         self.health_check = health_check
+        self.predecessor_health_check = predecessor_health_check
         self.make_client = make_client
         self.pick_free_port = pick_free_port
         self.refuse_old = refuse_old

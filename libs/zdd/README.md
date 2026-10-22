@@ -207,6 +207,13 @@ or resumption.
 
 ### `zdd.cutover` -- the cutover orchestrator
 
+`CutoverOrchestrator` accepts an optional `predecessor_health_check(host, port)`
+for rollback eligibility, defaulting to `health_check` for existing consumers.
+A resident that temporarily fences its writer after losing election can remain
+eligible for route restoration and undrain without satisfying the successor's
+strict serving-readiness check. This predicate is used only for restoring the
+old endpoint; successor readiness and commit-forward still use `health_check`.
+
 `CutoverOrchestrator` drives one active/passive cutover: spawn the new daemon on
 a fresh port, health-gate it, flip the routing table, drain the old daemon, then
 retire it. The sequence is reversible up to an explicit commit point, with

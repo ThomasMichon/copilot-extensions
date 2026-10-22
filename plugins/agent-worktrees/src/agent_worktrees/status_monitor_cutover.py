@@ -460,6 +460,18 @@ def _make_client(base_url: str) -> ControlClient:
     return ControlClient(base_url, config_dir=routing_dir(), timeout=65.0)
 
 
+def _predecessor_health_check(host: str, port: int) -> bool:
+    """A fenced resident can recover only after rollback restores its election."""
+    try:
+        status = ControlClient(f"http://{host}:{port}").health()
+        roster = status.get("worktrees")
+        return status.get("status") in {"ready", "draining", "unavailable"} and (
+            not isinstance(roster, dict) or roster.get("status") not in {"shutdown", "closed"}
+        )
+    except Exception:
+        return False
+
+
 def _is_status_monitor_cmdline(cmdline: str) -> bool:
     tokens = cmdline.split()
     for index in range(len(tokens) - 2):
@@ -631,6 +643,7 @@ def activate_after_update(
             version=None,
             spawn_passive=spawn,
             health_check=_health_check,
+            predecessor_health_check=_predecessor_health_check,
             make_client=make_client,
             pick_free_port=pick_free_port,
         )

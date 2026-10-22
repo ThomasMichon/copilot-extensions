@@ -58,6 +58,43 @@ def test_elected_recovery_does_not_reopen_shutdown_runtime(tmp_path):
         owner.activate()
 
 
+def test_retiring_feed_notice_keeps_its_committed_generation_after_recovery(tmp_path):
+    from agent_worktrees.worktrees_feed_client import FeedReceiver
+
+    elected = [0]
+    path = tmp_path / "current.sqlite3"
+    old = WorktreesRuntime(path, elected=lambda: elected[0] == 0)
+    new = WorktreesRuntime(path, elected=lambda: elected[0] == 1)
+    old.activate()
+    old.publish("project", [{"id": "before"}], observed_at=1)
+    receiver = FeedReceiver(_request())
+    stream = old.feed.stream(_request(), lambda: False)
+    try:
+        for frame in stream:
+            committed = receiver.receive(frame)
+            if committed:
+                break
+        generation = old.store.generation
+        elected[0] = 1
+        new.activate()
+        new.publish("project", [{"id": "replacement"}], observed_at=2)
+        old.close_admission("superseded")
+        elected[0] = 0
+        old.activate()
+        old.publish("project", [{"id": "recovered"}], observed_at=3)
+        notice = next(stream)
+        assert old.store.generation != generation
+        assert notice == {
+            "type": "going-away", "reason": "superseded",
+            "generation": generation, "cursor": receiver.current["projection"]["revision"],
+        }
+        assert receiver.receive(notice) == [notice]
+    finally:
+        stream.close()
+        old.shutdown()
+        new.shutdown()
+
+
 def test_relay_flushes_once_per_committed_transaction(tmp_path, monkeypatch):
     from agent_worktrees import worktrees_feed as feed
     from agent_worktrees import worktrees_feed_client as client
@@ -185,3 +222,113 @@ def test_cutover_health_checks_roster_serviceability(published, roster_status, h
             assert control._health_check("127.0.0.1", server.port) is healthy
     finally:
         server.close()
+
+
+@pytest.mark.parametrize("guarded", [False, True])
+def test_orchestrator_restores_fenced_predecessor_after_promotion_failure(
+    tmp_path, monkeypatch, guarded,
+):
+    from zdd import routing
+    from zdd.cutover import CutoverOrchestrator
+
+    servers = []
+    path = tmp_path / "current.sqlite3"
+
+    def elected(index):
+        active = routing.read_active_endpoint(tmp_path, verify_listener=False)
+        return active is not None and active.port == servers[index].port
+
+    owners = [
+        WorktreesRuntime(path, elected=lambda index=i: elected(index)) for i in range(2)
+    ]
+    fenced_health = []
+
+    def handle(index, action, payload):
+        owner = owners[index]
+        if action == "health":
+            if index == 1 and elected(index) and not fenced_health:
+                owner.activate()
+                owner.publish("project", [{"id": "replacement"}], observed_at=2)
+                owners[0].handle(_request())
+                fenced_health.append(owners[0].health()["worktrees"]["status"])
+                owner.close_admission("unavailable")
+            health = owner.health()
+            status = health["worktrees"]["status"]
+            return {
+                "status": "ready" if status in {"ready", "unready"} else "unavailable",
+                "published": status != "unready", **health,
+            }
+        if action == "drain":
+            owner.close_admission("draining")
+            return {"drained": True, "clean": True, "forced": False}
+        if action == "undrain":
+            owner.activate()
+            owner.publish("project", [{"id": "recovered"}], observed_at=3)
+            return {"draining": False}
+        return owner.handle(payload)
+
+    servers.extend([
+        control.ControlServer(
+            lambda action, payload, index=i: handle(index, action, payload),
+            token="fixture-token",
+        ) for i in range(2)
+    ])
+    client_class = control.ControlClient
+
+    class Client(client_class):
+        def __init__(self, url):
+            super().__init__(url, token="fixture-token")
+
+    monkeypatch.setattr(control, "ControlClient", Client)
+
+    class Handle:
+        pid = 202
+        stopped = False
+
+        def terminate(self):
+            self.stopped = True
+
+        def poll(self):
+            return 0 if self.stopped else None
+
+    try:
+        for server in servers:
+            server.start()
+        routing.publish_active(
+            tmp_path, bind="127.0.0.1", port=servers[0].port, pid=101, version="old",
+        )
+        owners[0].activate()
+        owners[0].publish("project", [{"id": "before"}], observed_at=1)
+        result = CutoverOrchestrator(
+            tmp_path, bind="127.0.0.1", version="new",
+            spawn_passive=lambda port: Handle(),
+            health_check=control._health_check,
+            predecessor_health_check=control._predecessor_health_check,
+            make_client=Client, pick_free_port=lambda: servers[1].port,
+            drain_before_publish=guarded,
+        ).run(health_timeout=1, drain_timeout=1, poll=0.01)
+        assert result.ok is False and result.rolled_back is True
+        assert fenced_health == ["superseded"]
+        assert routing.read_active_endpoint(tmp_path).port == servers[0].port
+        assert owners[0].health()["worktrees"]["status"] == "ready"
+        assert owners[0].handle(_request())["worktrees"] == [{"id": "recovered"}]
+        with pytest.raises(projection.ProjectionUnavailable):
+            owners[1].publish("project", [{"id": "obsolete"}], observed_at=4)
+    finally:
+        for server in servers:
+            server.close()
+        for owner in owners:
+            owner.shutdown()
+
+
+@pytest.mark.parametrize("reason", ["shutdown", "closed"])
+def test_shutdown_predecessor_is_not_eligible_for_rollback(monkeypatch, reason):
+    class Client:
+        def __init__(self, url):
+            pass
+
+        def health(self):
+            return {"status": "draining", "worktrees": {"status": reason}}
+
+    monkeypatch.setattr(control, "ControlClient", Client)
+    assert control._predecessor_health_check("127.0.0.1", 12345) is False

@@ -55,10 +55,12 @@ def _rollback(
     guarded = self.drain_before_publish or self.expected_old is not None
     successor_stopped = False
     old_live: bool | None = None
+    predecessor_health_check = self.predecessor_health_check or self.health_check
     if guarded:
         try:
             old_live = bool(
-                (flipped or drain_started) and old and self.health_check(old.client_host, old.port)
+                (flipped or drain_started) and old
+                and predecessor_health_check(old.client_host, old.port)
             )
         except Exception:
             old_live = False
@@ -87,7 +89,7 @@ def _rollback(
         and (not guarded or successor_stopped)
     ):
         try:
-            predecessor_live = self.health_check(old.client_host, old.port)
+            predecessor_live = predecessor_health_check(old.client_host, old.port)
             if predecessor_live:
                 if guarded:
                     table = self.routing.read_table(self.config_dir) or {}

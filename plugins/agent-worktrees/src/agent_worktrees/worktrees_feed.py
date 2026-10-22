@@ -91,7 +91,10 @@ class WorktreesFeed:
         return {
             "type": "going-away",
             "reason": reason,
-            "generation": self._owner.store.generation,
+            "generation": (
+                self._owner.store.generation if previous is None
+                else previous["projection"]["generation"]
+            ),
             "cursor": None if previous is None else previous["projection"]["revision"],
         }
 
@@ -157,7 +160,7 @@ class WorktreesFeed:
                         break
                     yield {
                         "type": "heartbeat",
-                        "generation": self._owner.store.generation,
+                        "generation": previous["projection"]["generation"],
                         "cursor": previous["projection"]["revision"],
                     }
         finally:

@@ -453,7 +453,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
 
     def _start_request_surfaces() -> bool:
         nonlocal hook_server, classify_server, tracking_write_server
-        if admission_closed or not published_lock:
+        if admission_closed or not published_lock or shutdown_requested.is_set():
             return False
         try:
             worktrees_runtime.activate()
@@ -681,6 +681,8 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             )
             with trace.stage("state-lock"):
                 with state_lock:
+                    if shutdown_requested.is_set():
+                        return {"adopted": False, "error": "monitor is shutting down"}
                     with trace.stage("retired-cleanup"):
                         _cleanup_retired_request_surfaces()
                     published_lock = True
@@ -696,8 +698,10 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             wake_event.set()
             return {"adopted": True}
         if action == "shutdown":
-            worktrees_runtime.close_admission("shutdown")
-            shutdown_requested.set()
+            with state_lock:
+                shutdown_requested.set()
+                _enter_drain_only_state()
+                worktrees_runtime.close_admission("shutdown")
             wake_event.set()
             return {"shutdown": True}
         if action == "undrain":
@@ -707,6 +711,8 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             )
             with trace.stage("state-lock"):
                 with state_lock:
+                    if shutdown_requested.is_set():
+                        return {"draining": True, "error": "monitor is shutting down"}
                     admission_closed = False
                     with trace.stage("retired-cleanup"):
                         _cleanup_retired_request_surfaces()
@@ -748,7 +754,10 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             roster_ready = worktrees_runtime.health()["worktrees"]["status"] == "ready"
             if active_generation is not None and (not published_lock or not roster_ready):
                 with state_lock:
-                    if not admission_closed and (not published_lock or not roster_ready):
+                    if (
+                        not admission_closed and not shutdown_requested.is_set()
+                        and (not published_lock or not roster_ready)
+                    ):
                         published_lock = True
                         published_lock = _start_request_surfaces()
                         if published_lock:

@@ -4235,6 +4235,74 @@ def test_status_monitor_does_not_acknowledge_failed_authority_and_retries_before
     assert swept == [True]
 
 
+def test_status_monitor_shutdown_cannot_recover_or_promote_admission(tmp_path, monkeypatch):
+    from agent_worktrees import self_retire, status_monitor_cutover as smc
+    from agent_worktrees.worktrees_runtime import WorktreesRuntime
+
+    monkeypatch.setattr(m, "_monitor_lock_path", lambda: tmp_path / "status-monitor.lock")
+    monkeypatch.setattr(m, "_aw_runtime_home", lambda: tmp_path)
+    monkeypatch.setattr(m, "_load_hook_client_module", lambda: None)
+    monkeypatch.setattr(m.locks, "write_lock", lambda _path, extra=None: True)
+    monkeypatch.setattr(smc, "active_generation_for_pid", lambda pid: 42)
+    monkeypatch.setattr(smc, "clear_route_if_owner", lambda pid: False)
+    monkeypatch.setattr(self_retire, "is_superseded", lambda *args: False)
+    monkeypatch.setattr(m.status_monitor_cli, "sweep_mux_pane_args", lambda: None)
+    monkeypatch.setattr(
+        m.loop_governance_mod, "LoopGovernance",
+        lambda: type("Governance", (), {"recheck": lambda self, checkpoint: {"status": "ready"}})(),
+    )
+    handles = []
+    activations = []
+    activate = WorktreesRuntime.activate
+
+    def record_activate(owner):
+        activations.append(True)
+        return activate(owner)
+
+    monkeypatch.setattr(WorktreesRuntime, "activate", record_activate)
+
+    class Control:
+        port = 12345
+
+        def __init__(self, handle, **kwargs):
+            handles.append(handle)
+
+        def start(self):
+            assert handles[0]("promote", {})["adopted"]
+
+        def current_read_count(self):
+            return int(len(waits) < 2)
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(smc, "ControlServer", Control)
+    sweeps = []
+
+    def sweep(*args, **kwargs):
+        sweeps.append(True)
+        assert handles[0]("shutdown", {}) == {"shutdown": True}
+        assert handles[0]("health", {})["worktrees"]["status"] == "shutdown"
+        assert handles[0]("promote", {})["adopted"] is False
+        assert handles[0]("undrain", {})["draining"] is True
+        return 1
+
+    monkeypatch.setattr(m, "_monitor_sweep", sweep)
+    waits = []
+
+    def wait(*args, **kwargs):
+        waits.append(True)
+        assert handles[0]("health", {})["published"] is False
+        assert len(activations) == 2
+        assert len(sweeps) == 1
+        assert len(waits) <= 2
+
+    monkeypatch.setattr(m.status_monitor_cli, "_wake_interruptible_wait", wait)
+    assert m.cmd_status_monitor(argparse.Namespace(interval=2, passive=True)) == 0
+    assert len(waits) == 2
+    assert len(activations) == 2
+
+
 def test_status_monitor_expires_orphaned_pane_args_before_eligible_sweep(
     tmp_path, monkeypatch
 ):
