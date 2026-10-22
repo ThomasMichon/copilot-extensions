@@ -81,10 +81,10 @@ Foreign replacements are preserved; failed recovery is not success. An
 acknowledgement failure can leave the new commands in place.
 
 Any interrupted publication/acknowledgement reports an **unknown outcome** and
-retains pending state and evidence. Further registration refuses until a
-separately owned recovery flow reconciles it; this slice does not provide a
-crash-recovery command, infer success from matching text, delete pending evidence
-or silently restore an older release. Corrupt, truncated or foreign proof refuses.
+retains pending state and evidence. Further registration refuses until an
+owned withdrawal reconciles it as described below. Registration does not infer
+success from matching text or silently restore an older release.
+Corrupt, truncated or foreign proof refuses.
 The accepted admission floor, user configuration and runtime selectors are never
 cleared by registration. A private root does not isolate state from a hostile
 process running as the same OS principal.
@@ -95,8 +95,64 @@ the identity, admitted selection, candidate, exact command paths, local health,
 `path_modified` and `live_readiness_verified` remain `false`. A success report is
 not a retained lease, remote grant or fleet-readiness claim.
 
-Owned unregister/runtime removal, retained-good rollback, identity retirement and
-reinstall fencing, complete lifecycle orchestration and controller/node assembly
-remain separate obligations. Do not erase admission, registration or rollback
-evidence while retained candidates or commands can still be replayed. Release
-promotion and an authorized rollout are also separate from merging source.
+## Owned withdrawal and retry
+
+Use an independently installed owner command, not the command being removed:
+
+```text
+fleet-manager client-state unregister-commands --root <private-installation> --identity identity.json --command-directory <separate-private-commands>
+```
+
+The Python entry point is
+`fleet_manager.client_command_removal.unregister_client_frontdoor(...)`.
+Withdrawal needs the existing initialized installation identity and the same
+explicit private command directory. It does not authenticate or execute a
+candidate, and therefore does not require a selected-release record, artifact
+source, current signing policy or target configuration. Expired/revoked release
+authority cannot grant new execution through withdrawal; it also need not
+prevent withdrawing already-owned commands.
+
+The owner validates the durable admission database and runtime-namespace owner,
+then the registered and pending intents and their canonical copy contexts and
+complete created-descriptor receipts. It includes caught-failure recovery
+receipts, so a pending update whose failed health restored physically proved
+old commands can also be withdrawn. Every present command must match one of
+those physical proofs; matching text, a saved pathname, an unrelated command
+or a same-byte peer replacement supplies no deletion authority. The whole
+command family is checked before the first removal.
+
+Under installation, SQLite, selector-publication and target-writer ownership,
+`client-frontdoor-removing.json` durably snapshots both registration references
+before any command is removed. The canonical native recovery primitive uses a
+separate **empty-backup removal context**, never the original copy backups:
+withdrawal deletes the proved commands rather than restoring an older executable.
+All intents, copy sources, backups, physical proofs and removal outcomes remain
+under `client-runtime/client-frontdoors/` and `client-command-removals/`.
+Acknowledgement staging is attempt-local, so a failed registration acknowledgement
+does not leave a shared temporary filename blocking the next explicit registration.
+
+Registration refuses while withdrawal is unsettled. If the owner dies or
+settlement fails, repeat the same `unregister-commands` operation. A fresh owner
+rereads retained intent and proofs, tolerates already-absent commands, and
+preserves any new foreign replacement. Only after the complete command family
+is absent and directory metadata is synced are the registered/pending references
+and the removal marker cleared. An exact repeated withdrawal checks absence
+again and performs no new removal. Missing/corrupt/incomplete producer receipts
+are still a refusal, not a manufactured ownership proof or automatic repair of
+a torn registration journal. This command recovers by **withdrawal**, not
+forward completion of an interrupted registration.
+
+The `fleet-manager.client-command-unregistration`, version `1`, report includes
+the installation identity, unchanged admitted receipt, exact command paths,
+`commands_absent`, `frontdoor_registered`, `reused` and `mutations_performed`.
+Runtime selectors, completed/failed candidates, configuration, user data,
+backups and the accepted sequence floor remain untouched. This does not stop
+an already-running client or release its runtime retention lease. No PATH or
+profile is changed, no service is contacted and the installation identity is
+not retired.
+
+Runtime removal, retained-good rollback, torn-producer-journal recovery,
+identity retirement and reinstall fencing, complete lifecycle orchestration and
+controller/node assembly remain separate obligations. Do not erase admission
+or retained evidence while candidates or commands can still be replayed.
+Release promotion and an authorized rollout are also separate from merging source.

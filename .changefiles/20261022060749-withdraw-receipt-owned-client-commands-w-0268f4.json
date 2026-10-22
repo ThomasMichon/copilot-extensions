@@ -1,0 +1,9 @@
+{
+  "comment": "Withdraw receipt-owned client commands with retained pending evidence and durable interruption retry",
+  "changes": [
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    }
+  ]
+}

@@ -169,9 +169,10 @@ Implementation sequencing below is **agent-recommended**:
   serial durable-admission, construction and owned-activation/removal gates;
   durable admission is merged in #7459; construction and compatibility/local
   health are merged in #7804; physically attributed local runtime-selector
-  activation and bounded forward retry are merged in #7847. Frontdoor
-  registration, removal, retained-good recovery and a managed installer remain
-  open. None of these local prerequisites authorizes a live rollout.
+  activation and bounded forward retry are merged in #7847; explicit physically
+  attributed client command registration is merged in #7866. Pending-command
+  recovery, owned removal, retained-good recovery and a managed installer
+  remain open. None of these local prerequisites authorizes a live rollout.
   [Installation repair conductor](installation-repair-conductor.md) is the
   agent-recommended #6464 setup prerequisite proposal. Its ordinary-owner
   source implementation is merged in #6944; fresh-environment/native acceptance
@@ -917,3 +918,66 @@ These bounded Windows selections are not a new full Windows-suite claim.
   reuse. All 19 native frontdoor cases passed within the existing 120-second
   portfolio budget; all 19 Linux cases passed too. No policy or timeout
   waiver, live activation or completed-campaign claim follows.
+
+### 2026-10-22 - Owned client command registration merged
+- #7866 merged into `dev` at `2026-10-22T12:31:28Z`, commit
+  `e7109dca14223df0bb49b2f4622ba16c47606cd7`. Current-head Copilot review
+  `5614097873` approved `a93a3aa0c86ba2e69e6779a3e77f13a3efc2468c`
+  with no open issues. Both Windows findings were fixed and their threads
+  resolved; required CI, source attribution and authorized completion passed.
+- This delivers the explicit client command-registration transition and the
+  native read-custody correction described above, not a complete installer.
+  No PATH/profile/service or live fleet role was changed. Promotion and
+  authorized installed adoption are unobserved; merging source did not invoke
+  an updater, enroll a host or authorize activation.
+- The next serial client work is owned pending-command recovery and removal,
+  using the existing installation and physical publication receipts. Preserve
+  the accepted floor, user configuration, foreign artifacts, backups and retained
+  runtimes. Restoring an older executable is not ordinary removal and still
+  requires the separately scoped retained-good compatibility/rollback policy.
+- The campaign remains Active. Every broader Phase 2, useful-service,
+  persistence, continuity and Validation Plan obligation remains open; this
+  worktree continues the owning effort rather than finalizing after one slice.
+
+### 2026-10-22 - Owned command withdrawal qualified for review
+- The next serial source slice adds explicit `unregister-commands` against an
+  existing installation identity and the same private command directory.
+  It verifies registered/pending intents and canonical physical producer
+  receipts, then uses the shared native recovery primitive with a separate
+  empty-backup removal context. It does not restore the copy backups or an
+  older executable. A durable removal marker blocks registration and lets a
+  fresh owner retry after process death or partial metadata settlement.
+- Present foreign replacements, corrupt/truncated producer proofs and changed
+  installation scope refuse. Complete caught-failure recovery receipts permit
+  withdrawal of an interrupted update whether it left new commands or restored
+  physically proved old commands. Torn/incomplete producer-journal repair and
+  forward completion of a pending registration are not supplied by this slice.
+- Native Windows and isolated Linux ownership/fault suites pass, including an
+  abrupt exit after the first unlink followed by a distinct installed owner.
+  Actual installed CLI registration/withdrawal/no-op flows pass on both
+  platforms with non-ASCII paths. A separately installed owner with no optional
+  dependencies withdraws commands without executing a candidate. Native
+  wheel/RECORD and repository-removed sdist rebuild controls pass.
+- The first withdrawal test exposed a failed registration acknowledgement's
+  shared `.tmp` filename blocking later registration. Acknowledgement and
+  removal-marker staging are now attempt-local; old staging/evidence is retained
+  rather than guessed away. Rerun, pending-update and foreign-replacement
+  controls pass after that correction.
+- Validation tiers: unit/fault and simple installed end-to-end contracts pass.
+  The Linux lane creates an isolated fresh source/SDK and new private client
+  state, not a fresh-OS clean-room or live fleet receipt. No live deployment
+  lane is authorized for this local withdrawal prerequisite; controller/node
+  provisioning, credentials, service migration and shared updaters remain
+  outside its scope. Required source guards and current-head review/CI remain
+  publication/merge gates, not claimed by these local results.
+- Documentation-impact review updated the existing client-command reference,
+  its README entry and this lifecycle plan; no top-level hub, adoption/runtime
+  policy, independent installer or new pattern is introduced. This closes
+  another part of machine-fleet `unified-coordination-product` using the
+  reviewed standalone-system lifecycle and existing versioned-runtime
+  ownership/publication patterns.
+- The accepted floor, runtime selectors, retained candidates, user settings,
+  backups and foreign artifacts remain intact. Runtime removal, retained-good
+  rollback, identity retirement/reinstall fencing, the full managed installer
+  and broader fleet Plan/Validation obligations remain open. Source qualification
+  and a future merge do not authorize promotion, rollout or live activation.

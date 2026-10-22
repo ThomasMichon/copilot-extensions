@@ -17,7 +17,13 @@ from .planning import PlanError, decode, digest, record
 REGISTERED = "client-frontdoor.json"
 PENDING = "client-frontdoor-pending.json"
 HISTORY = "client-frontdoors"
+REMOVING = "client-frontdoor-removing.json"
 FIELDS = {"active", "directory", "publication", "target_digest"}
+
+
+def _command_paths(directory):
+    names = ("fleet-manager.ps1", "fleet-manager.cmd") if os.name == "nt" else ("fleet-manager",)
+    return [directory / name for name in names]
 
 
 def _commands(directory, slot):
@@ -29,7 +35,7 @@ def _commands(directory, slot):
         command = " ".join(shlex.quote(value) for value in (
             python, "-I", "-S", "-B", bootstrap, "-m", "fleet_manager",
         ))
-        return {directory / "fleet-manager": f'#!/bin/sh\nexec {command} "$@"\n'.encode()}
+        return dict(zip(_command_paths(directory), [f'#!/bin/sh\nexec {command} "$@"\n'.encode()], strict=True))
     quote = lambda value: "'" + value.replace("'", "''") + "'"
     ps1 = (
         "$ErrorActionPreference = 'Stop'\n"
@@ -42,23 +48,14 @@ def _commands(directory, slot):
         '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "%~dp0fleet-manager.ps1" %*\r\n'
         "exit /b %ERRORLEVEL%\r\n"
     )
-    return {
-        directory / "fleet-manager.ps1": ps1.encode("utf-8-sig"),
-        directory / "fleet-manager.cmd": cmd.encode("ascii"),
-    }
+    return dict(zip(_command_paths(directory), [ps1.encode("utf-8-sig"), cmd.encode("ascii")], strict=True))
 
 
 def _expected(commands):
     return [[str(path), hashlib.sha256(data).hexdigest()] for path, data in commands.items()]
 
 
-def _receipt(namespace, identity, directory, publication):
-    if os.path.lexists(namespace / PENDING):
-        raise PlanError("client frontdoor outcome is unknown; owned registration recovery is required")
-    receipt = namespace / REGISTERED
-    if not os.path.lexists(receipt):
-        return None
-    value = construction._read(receipt)
+def _binding(namespace, identity, directory, value):
     record(value, "fleet-manager.client-frontdoor", FIELDS)
     if set(value) != {"schema", "version", *FIELDS}:
         raise PlanError("client frontdoor receipt has unsupported fields")
@@ -77,8 +74,21 @@ def _receipt(namespace, identity, directory, publication):
     artifact_staging._directory(workspace)
     if construction._read(workspace / "intent.json") != value:
         raise PlanError("client frontdoor receipt differs from its registration intent")
-    root, entries = publication.read_context(workspace / "copy-context.json")
     commands = _commands(directory, namespace / "versions" / value["active"]["candidate"])
+    return workspace, commands
+
+
+def _receipt(namespace, identity, directory, publication):
+    if os.path.lexists(namespace / REMOVING):
+        raise PlanError("client frontdoor removal is unsettled; owned unregister retry is required")
+    if os.path.lexists(namespace / PENDING):
+        raise PlanError("client frontdoor outcome is unknown; owned registration recovery is required")
+    receipt = namespace / REGISTERED
+    if not os.path.lexists(receipt):
+        return None
+    value = construction._read(receipt)
+    workspace, commands = _binding(namespace, identity, directory, value)
+    root, entries = publication.read_context(workspace / "copy-context.json")
     if root != namespace or set(entries) != set(commands):
         raise PlanError("client frontdoor proof has a different root or command family")
     proofs = publication._proofs(
@@ -244,7 +254,10 @@ def register_client_frontdoor(root, identity, selection, staged, *, command_dire
                             copy.verify()
                             checkpoint()
                             acknowledging = True
-                            construction._write(namespace / REGISTERED, value)
+                            acknowledgement = workspace / "acknowledgement.json"
+                            construction._write(acknowledgement, value)
+                            os.replace(acknowledgement, namespace / REGISTERED)
+                            client_admission._sync_directory(namespace)
                             (namespace / PENDING).unlink()
                             client_admission._sync_directory(namespace)
                             publishing = False

@@ -12,11 +12,12 @@ contract is documented in [client construction](../../../fleet-manager/docs/clie
 Owned runtime-selector activation with fresh local health and physically proved,
 bounded forward retry merged in #7847. Its actual
 contract is documented in [runtime activation](../../../fleet-manager/docs/client-runtime-activation.md).
-The next owned client slice implements explicit
-[frontdoor registration](../../../fleet-manager/docs/client-frontdoor.md) using
-the shared publication and retained-execution primitives. Its qualification and
-review remain pending; removal and the complete managed lifecycle remain serial
-obligations, not delivered behavior or permission for live activation.
+Explicit [frontdoor registration](../../../fleet-manager/docs/client-frontdoor.md)
+merged in #7866 using the shared publication and retained-execution primitives.
+The next source slice withdraws physically proved registered/pending commands,
+with durable owned retry and no runtime rollback. Torn-producer-journal recovery,
+runtime removal and the complete managed lifecycle remain serial obligations,
+not delivered behavior or permission for live activation.
 
 ## Scope and ownership
 

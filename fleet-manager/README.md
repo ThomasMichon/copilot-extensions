@@ -123,7 +123,10 @@ attributed local selectors. It supports bounded, proven forward retries, not
 frontdoor registration, rollback, removal or a live fleet rollout.
 The separate [owned client command registration](docs/client-frontdoor.md)
 transition publishes physically attributed, version-pinned commands into an
-explicit private directory. It does not edit PATH/profiles or perform removal.
+explicit private directory. Its separate `unregister-commands` transition
+withdraws physically proved registered/pending commands with owned interruption
+retry; it does not restore an older executable or remove runtimes. Neither
+operation edits PATH/profiles or retires an installation.
 
 The [current-observation storage API](docs/current-observations.md) provides
 separate explicit SQLite current slots, origin-generation comparison, atomic
@@ -237,14 +240,14 @@ boundary. It reuses immutable-runtime primitives without activating one.
 
 `fleet-manager client-state` supplies separate explicit initialization,
 read-only inspection, freshly authenticated admission, construction and owned
-runtime-selector activation and explicit command-registration operations. None implicitly performs another
-transition, selects a release, edits PATH, installs a hosting role or
+runtime-selector activation, command registration and owned command withdrawal.
+None implicitly selects a release, edits PATH, installs a hosting role or
 authorizes rollout. See [Client release admission](docs/client-admission.md) for
 trusted inputs and monotonic state, [construction](docs/client-construction.md)
 for candidate health, and [runtime activation](docs/client-runtime-activation.md)
 for physical selector ownership, retries and uncertainty. See
 [client commands](docs/client-frontdoor.md) for explicit registration, retained
-execution and unknown-outcome refusal.
+execution, owned withdrawal/retry and unknown-outcome refusal.
 
 ```text
 fleet-manager inspect --release release.json --observation observation.json --role client --authority example --installation local-example

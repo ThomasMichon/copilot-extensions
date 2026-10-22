@@ -46,7 +46,10 @@ def main(argv=None):
         "client-state", help="Explicit client admission, construction, runtime selectors and commands",
     )
     state_commands = admission.add_subparsers(dest="state_command", required=True)
-    for operation in ("initialize", "inspect", "admit", "construct", "activate-runtime", "register-commands"):
+    for operation in (
+        "initialize", "inspect", "admit", "construct", "activate-runtime",
+        "register-commands", "unregister-commands",
+    ):
         state = state_commands.add_parser(operation)
         state.add_argument("--root", type=Path, required=True)
         state.add_argument("--identity", type=Path, required=True)
@@ -59,7 +62,7 @@ def main(argv=None):
             state.add_argument("--staging-parent", type=Path, required=True)
         if operation in ("construct", "activate-runtime", "register-commands"):
             state.add_argument("--target", type=Path, required=True)
-        if operation == "register-commands":
+        if operation in ("register-commands", "unregister-commands"):
             state.add_argument("--command-directory", type=Path, required=True)
     try:
         args = parser.parse_args(argv)
@@ -101,6 +104,12 @@ def main(argv=None):
                 result = initialize_client_admission(args.root, identity)
             elif args.state_command == "inspect":
                 result = inspect_client_admission(args.root, identity)
+            elif args.state_command == "unregister-commands":
+                from .client_command_removal import unregister_client_frontdoor
+
+                result = unregister_client_frontdoor(
+                    args.root, identity, command_directory=args.command_directory,
+                )
             else:
                 recover_client_admission(args.root, identity)
                 if (
