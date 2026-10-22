@@ -251,7 +251,7 @@ def _communicate_windows_bounded(
                 return
             retiring.set()
             try:
-                job.terminate_and_wait(2.0)
+                process.retire_job(job, 2.0)
             except BaseException as error:
                 retirement_error.append(error)
                 raise
@@ -439,7 +439,7 @@ def _run_owned(
         try:
             if bounded_windows and not retained and job.handle:
                 try:
-                    job.terminate_and_wait(2.0)
+                    process.retire_job(job, 2.0)
                     process.wait(timeout=2.0)
                 except BaseException as error:
                     retained = True

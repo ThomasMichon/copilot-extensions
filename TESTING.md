@@ -30,6 +30,28 @@ plugin preferences. The controls prove actual SSH streaming and cancellation
 quiescence, not cross-machine native plugin discovery. Leave this opt-in unset
 for ordinary contained test runs.
 
+## Explicit Windows broker experiment
+
+`installation-context-acceptance.yml` has a manual `windows_broker_probe` input.
+It selects only the credential-free probe on a disposable hosted Windows
+runner, with no package installation, persistent trigger, elevated principal
+or shared-host change. The PowerShell entrypoint refuses without explicit
+ephemeral-CI consent. Its newly created S4U task has a one-minute execution
+limit, a unique owned name and no saved password; cleanup stops only its own
+instances and deletes only that registration.
+
+Two activations compare the scheduler instance's engine PID with the native
+named-pipe creator and birth-pinned broker process. Each attempts suspended
+child breakaway, refuses any remaining Job membership and checks actual child
+execution/control after finite broker exit. `result.json` records unsupported
+outcomes and positive cleanup separately; a skipped or unavailable mechanism
+is not a pass.
+
+This is an API/capability experiment, not a production broker, authenticated
+IPC, nested caller-Job survival, interactive-desktop visibility or installed
+lifecycle qualification. The private synthetic pipe carries no credentials.
+The reviewed broker contract still owns those separate acceptance gates.
+
 ## Native file-link prerequisites
 
 `tools/test_dependency_uv_executable_native.py` qualifies both absolute and

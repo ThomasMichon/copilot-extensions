@@ -157,6 +157,17 @@ cannot leave an unassigned suspended target.
 Input writing and bounded output draining remain deadline-supervised together;
 the Job must report zero active processes and pipe workers must settle before
 completion or an output-limit error.
+Zero active accounting alone is not a member-handle exit witness. Retirement
+pins current members before termination and waits for their native exit within
+the same cleanup budget. Birth counters fence the census; an unstable census,
+late unpinned birth, failed query or unconfirmed member exit remains a cleanup
+error, never a successful partial completion.
+Unconfirmed retirement retains its query Job and pinned member handles on the
+cleanup error's Job owner. The retained Windows process's
+`retire_job(error.job, timeout)` retries those same native exit witnesses;
+it does not substitute a fresh census after the original Job handle closed.
+An incomplete census or an unpinned birth remains a failure, not a retry that
+silently discards unknown descendants.
 Worker setup and startup stay inside that boundary, including interruption
 before a launched thread has assigned its identity.
 Normal early stdin closure preserves the target's result; unexpected input
@@ -275,6 +286,11 @@ It composes the helpers above, so its flags never drift from them:
   line or into temporary files. The actual daemon is staged suspended, its
   native process handle is adopted and its independent lifetime checked, then
   it is resumed. Failed uncommitted launches are reaped before a retry.
+  Windows can also place those processes in ambient OS Jobs unrelated to the
+  caller. Membership in any Job is not evidence of caller ownership. The broker
+  queries the invoking process's current Job and checks its complete PID list
+  against each pinned bootstrap/resident identity. Partial, invalid, over-budget
+  or unavailable membership refuses adoption; it is never treated as escape.
   Cleanup branches run independently and preserve `DaemonSpawnError`;
   `cleanup_confirmed=False` reports uncertain process exit and prohibits even
   an explicitly requested contained retry.
@@ -463,6 +479,8 @@ if the native operation fails after its caller was cancelled.
 The caller can boundedly await `asyncio.wrap_future(holder)` at shutdown without
 claiming native completion from a cancelled coroutine. The sampling thread is
 daemon-scoped to its owning process and cannot outlive that process.
+Late sample failure preserves the native exception and accounting without
+installing a second cancelled-waiter exception logger.
 psutil may inspect system process tables internally; the identity cap alone
 does not prove host-independent constant sampling cost.
 

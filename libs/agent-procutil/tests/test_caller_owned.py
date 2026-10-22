@@ -131,6 +131,7 @@ def test_windows_input_errors_distinguish_early_closure_from_failure(number, bou
     process = SimpleNamespace(
         stdin=Input(), stdout=io.BytesIO(b"closed"), stderr=io.BytesIO(),
         poll=lambda: 7, wait=lambda **kwargs: 7,
+        retire_job=lambda job, timeout: job.terminate_and_wait(timeout),
     )
     job = SimpleNamespace(terminate_and_wait=lambda timeout: None)
 
@@ -298,6 +299,9 @@ def test_windows_cleanup_failure_is_explicit_and_not_retried():
 
         def wait(self, timeout):
             return 0
+
+        def retire_job(self, job, timeout):
+            job.terminate_and_wait(timeout)
 
     class Job:
         attempts = 0
