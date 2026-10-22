@@ -102,7 +102,7 @@ rather than stdin; that invocation is retained with the resolved executable.
 Bash receives POSIX path arguments and the canonical admission helper,
 without importing an unrelated installer test module.
 The availability precheck preserves the supported canonical Windows Bash
-location even when Bash is absent from PATH. A review-driven regression
+location even when Bash is absent from PATH. A regression
 executes this lifecycle fixture with that configuration and proves both
 nonconformant and timed-out admission probes fail rather than skip.
 
@@ -119,8 +119,9 @@ comparison now covers all four helpers, followed by the existing deployed
 client/native-source/lifecycle import assertions. Production installers
 are unchanged; no external installer-owner work is absorbed.
 
-Complete native Windows shell-collection and hook-IPC modules after that
-review fix: 178 passed, zero skips, 31.56 seconds pytest / 37.33
+Complete native Windows shell-collection and hook-IPC modules, including
+the canonical-Bash failure regressions: 178 passed, zero skips,
+31.56 seconds pytest / 37.33
 preparation-cleanup inclusive. The initial passing implementation had 176
 passes; it is not substituted for the final regression run.
 Exactly two work-stealing workers retain the original 30-second item
