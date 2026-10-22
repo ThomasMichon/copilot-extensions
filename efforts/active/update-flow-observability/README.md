@@ -160,6 +160,9 @@ matrix below are _(agent-recommended)_ implementation details.
 - [ ] Consolidate banners, status names, nesting and error presentation;
   preserve useful detail without duplicate timestamps, repeated status
   prefixes or contradictory aggregate success.
+- [x] Replace remaining installer-owned stamp, initialization and provisioning
+  decoration through the existing emitters, retaining deferral policy and
+  admitting-parent outcomes (#7908).
 - [ ] Preserve JSON/quiet/protocol output, redaction and Windows/POSIX parity.
 
 ### Phase 3 - Remove proven unnecessary work
@@ -262,6 +265,70 @@ Bridge serving-version gap and supervisor framing defect survived that
 bounded source delta inspection.
 
 ## Journal
+
+### 2026-10-22 - Portable selected-context consumer qualified
+
+- The selected-context path now prefers the portable resolver in the same
+  admitted payload, just as the installation-mode probe already does.
+  Platform-native helper admission and native-only compatibility remain.
+  Both routes retain fresh validation, exact context/plugin/durable-root
+  arguments, same-plugin payload binding, cross-plugin expected-cell-root
+  binding, the fifteen-second deadline and explicit refusals.
+- The selected-context transport moved into the existing probe module,
+  shrinking the grandfathered reconciler rather than widening its baseline.
+  Its caller-owned subprocess is windowless. Both actual resolver producers
+  declare UTF-8; explicit decoding also corrects the native fallback's
+  locale-dependent non-ASCII root interpretation.
+- Real own-plugin, cross-plugin, Unicode and tampered-namespace controls pass
+  through Python and both Windows PowerShell hosts. The fixture explicitly
+  decodes its UTF-8 stamp output and relocates its actual payload with the
+  Unicode home. It protects every installation-state file; only Desktop
+  PowerShell's exact CLR startup-profile cache is excluded as host-owned,
+  not mistaken for an SDK write. Missing native assets, native-only fallback,
+  malformed output, nonzero exits, unavailable commands and timeouts have
+  explicit controls.
+- The complete four-module consumer cohort passes 300 cases on Windows
+  (one platform skip) and 284 on Linux (17 Windows-specific skips).
+  The aggregate Linux selection and then its publication-policy module alone
+  exceeded the unchanged 300-second group bound. All policy cases subsequently
+  passed in three logical cohorts: publication/discovery, custom-bootstrap
+  preflight and payload-stage policy. No test was omitted and no item, child,
+  process, memory or group limit was raised.
+- The [paired audit](audit.md#remaining-read-only-plan-cost-and-selected-context-validation)
+  compares the actual original/current consumer against the same immutable
+  inputs: medians 2.471 versus 0.403 seconds, with one fresh validation in both
+  and the parent-owned PowerShell resolver call removed. These two-sample
+  fixture measurements do not establish a whole-update or installed-state
+  speedup.
+- Unit and simple end-to-end tiers exercise actual resolver processes and
+  stamped context records. Full clean-room runtime construction is unchanged
+  and was not repeated; live host/external-venue rollout remains unauthorized.
+  No dependencies were installed. The parent effort, installed-state proof
+  and complete-update cost comparison remain open.
+
+### 2026-10-22 - Presentation merged; remaining planning cost isolated
+
+- #7908 merged after a current-head approval, no open findings and all required
+  checks passing. Its source worktree remains responsible for this active
+  effort, rather than finalizing after a presentation milestone. Installed
+  serving state and equivalent complete-update cost remain unproven.
+- A paired experiment through the real read-only plan builder retained
+  identical results, helper-action counts and fixture bytes/mtimes across
+  missing, standalone, managed, invalid, unsupported and foreign publication
+  records, plus a managed healthy runtime. It changed only the previously
+  reviewed Python site-initialization flag, not policy or helper contents.
+  The healthy plan used one fresh probe and measured medians of 0.617 seconds
+  with site initialization and 0.543 without. Other cases were noisy and
+  sometimes reversed; this does not explain or resolve a minute-long live
+  reconciliation.
+- The explicit cross-plugin context route still starts PowerShell to invoke
+  the same payload-owned resolver. In a real existing governed-plan fixture,
+  that native call took 2.348 seconds versus 0.524 for the same payload's
+  isolated portable resolver, with identical complete JSON, stderr and exit
+  status and unchanged fixture bytes/mtimes. This is one isolated route, not a
+  deployed-flow extrapolation. The next bounded slice must retain a fresh
+  validation, native compatibility fallback, admission checks and refusals
+  while avoiding the measured extra shell startup.
 
 ### 2026-10-22 - Remaining stamp and initialization decoration qualified
 

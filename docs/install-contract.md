@@ -1393,11 +1393,16 @@ paths, and any foreign plugin context are removed. A missing or invalid receipt
 blocks that plugin's mutation with an explicit diagnostic rather than falling
 through to an unattributed legacy root.
 
-Read-only launch preflight invokes the owning payload's portable
+Installation-mode probes and explicit-context validation in read-only launch
+preflight invoke the owning payload's portable
 `installation_context.py` with the running runtime's Python in isolated UTF-8
 mode, with explicit UTF-8 output decoding, including on Windows. Windows still
 requires its native helper to be present and uses it for older payloads without
-the portable helper. Probe failures
+the portable helper. Selected-context validation retains the existing
+same-plugin payload-root and cross-plugin expected-cell-root constraints,
+fresh receipt checks and fifteen-second deadline. Both helpers explicitly
+produce UTF-8 JSON, so context validation must not decode a non-ASCII root
+using the caller's locale. Probe failures
 remain explicit failures, never reasons to fall back to another authority.
 Pre-launch configuration omits foreign control-plane PR overlays, which do
 not participate in bootstrap-service selection; ordinary PR operations retain

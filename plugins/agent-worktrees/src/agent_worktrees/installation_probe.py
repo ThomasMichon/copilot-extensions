@@ -22,6 +22,35 @@ def strict_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     return result
 
 
+def run_context_resolution(
+    command: list[str], environment: dict[str, str],
+) -> dict[str, Any]:
+    try:
+        process = subprocess.run(
+            command, capture_output=True, text=True,
+            encoding="utf-8",
+            check=False, env=environment, timeout=15, **no_window_kwargs(),
+        )
+    except subprocess.TimeoutExpired as error:
+        raise ValueError("installation-context validation timed out") from error
+    except (OSError, UnicodeError) as error:
+        raise ValueError(
+            f"installation-context validator could not run: {error}"
+        ) from error
+    if process.returncode:
+        detail = process.stderr.strip() or process.stdout.strip() or "validation failed"
+        raise ValueError(detail)
+    try:
+        result = json.loads(process.stdout)
+    except (json.JSONDecodeError, TypeError) as error:
+        raise ValueError(
+            "installation-context validator returned invalid output"
+        ) from error
+    if not isinstance(result, dict):
+        raise ValueError("installation-context validator returned invalid output")
+    return result
+
+
 def run_installation_probe(
     command: list[str], environment: dict[str, str], plugin: str, *, action: str,
 ) -> dict[str, Any]:

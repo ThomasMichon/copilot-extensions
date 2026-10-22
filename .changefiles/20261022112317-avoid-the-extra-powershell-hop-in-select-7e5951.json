@@ -1,0 +1,9 @@
+{
+  "comment": "Avoid the extra PowerShell hop in selected-context validation while retaining fresh payload-owned checks, native compatibility and UTF-8 root decoding.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

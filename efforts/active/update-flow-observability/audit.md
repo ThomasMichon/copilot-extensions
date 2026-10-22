@@ -478,3 +478,55 @@ including all five existing construction retry/fallback modes. Native Linux
 parity passed 10 cases (11 unavailable-shell skips). No deadlines were raised.
 These establish work avoided and failure ordering, not a measured end-to-end
 time improvement or promoted installed proof.
+
+### Remaining read-only plan cost and selected-context validation
+
+A paired Windows experiment exercised the real `build_plan` consumer in the
+existing isolated deployment-policy fixtures. Each scenario used the same
+payload/helper, interpreter, policy, initial cache and fixture files for four
+calls, alternating the earlier site-initialized Python invocation and the
+reviewed `-I -S` invocation. Fixture setup and byte/mtime snapshots were outside
+the measured plan interval. Complete plan results, probe-action counts and
+fixture bytes/mtimes matched in every pair.
+
+| Publication scenario | Fresh helper calls | Median with site (s) | Median without site (s) |
+|---|---:|---:|---:|
+| Missing policy | 1 | 0.928 | 0.815 |
+| Standalone | 2 | 1.235 | 1.215 |
+| Managed | 2 | 1.247 | 1.279 |
+| Invalid | 2 | 1.093 | 1.193 |
+| Unsupported | 2 | 1.403 | 1.283 |
+| Foreign owner | 2 | 1.024 | 1.044 |
+| Managed, healthy runtime | 1 | 0.617 | 0.543 |
+
+These are two samples per variant and scenario, not a statistically established
+whole-update speedup. Several differences reversed. In particular, omitting site
+initialization does not by itself explain a minute-long deployed reconciliation.
+
+The explicit cross-plugin context route had another, independently reached
+boundary: `_selected_runtime_root` still launched PowerShell to run the
+payload-owned `resolve` operation. The original function from
+`188915d95e52deaeb1bec3466d0d1e88440614a5` and the changed function were
+executed in the same governed-plan fixture in original/current/current/original
+order, against identical current payload and receipt bytes. Every invocation
+performed a fresh validation; fixture snapshots and root-routing tuples matched.
+
+| Selected-context consumer | Original | Portable preference |
+|---|---:|---:|
+| Parent-invoked PowerShell resolver commands | 1 | 0 |
+| Parent-invoked portable Python resolver commands | 0 | 1 |
+| Fresh validator invocations | 1 | 1 |
+| Samples (s) | 2.445, 2.497 | 0.408, 0.398 |
+| Median (s) | 2.471 | 0.403 |
+
+This removes a measured shell hop, not a policy check. A separate real
+same-fixture native/portable resolver comparison retained identical complete
+JSON, stderr and exit status. Native-only compatibility, platform-helper
+admission, exact-context routing, expected-root constraints and refusal remain
+required. Both resolver producers declare UTF-8, so a locale-dependent decoder
+must not corrupt a non-ASCII runtime root.
+
+The measurements cover one synthetic, read-only selected-context consumer.
+They neither time runtime construction nor establish the deployed planner's
+plugin count, repeated-context count or total reconciliation duration. Those
+remain separate evidence gates; no authorized host update or repair was run.
