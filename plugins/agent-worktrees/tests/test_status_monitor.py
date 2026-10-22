@@ -4249,7 +4249,10 @@ def test_status_monitor_does_not_acknowledge_failed_authority_and_retries_before
     assert swept == [True]
 
 
-def test_status_monitor_shutdown_cannot_recover_or_promote_admission(tmp_path, monkeypatch):
+@pytest.mark.parametrize("shutdown_mode", ["requested", "interrupted"])
+def test_status_monitor_shutdown_cannot_recover_or_promote_admission(
+    tmp_path, monkeypatch, shutdown_mode,
+):
     from agent_worktrees import self_retire, status_monitor_cutover as smc
     from agent_worktrees.worktrees_runtime import WorktreesRuntime
 
@@ -4289,7 +4292,12 @@ def test_status_monitor_shutdown_cannot_recover_or_promote_admission(tmp_path, m
             return int(len(waits) < 2)
 
         def close(self):
-            pass
+            elected[0] = None
+            assert handles[0](
+                "worktrees-read", {"contract_version": 1, "project": "test"},
+            )["ok"] is False
+            assert handles[0]("health", {})["worktrees"]["status"] == "shutdown"
+            assert smc._predecessor_health_check("127.0.0.1", 12345) is False
 
     monkeypatch.setattr(smc, "ControlServer", Control)
 
@@ -4305,6 +4313,8 @@ def test_status_monitor_shutdown_cannot_recover_or_promote_admission(tmp_path, m
 
     def sweep(*args, **kwargs):
         sweeps.append(True)
+        if shutdown_mode == "interrupted":
+            return 1
         assert handles[0]("shutdown", {}) == {"shutdown": True}
         elected[0] = None
         assert handles[0]("worktrees-read", {"contract_version": 1, "project": "test"})["ok"] is False
@@ -4319,12 +4329,18 @@ def test_status_monitor_shutdown_cannot_recover_or_promote_admission(tmp_path, m
 
     def wait(*args, **kwargs):
         waits.append(True)
+        if shutdown_mode == "interrupted":
+            raise KeyboardInterrupt
         assert handles[0]("health", {})["published"] is False
         assert len(activations) == 2
         assert len(sweeps) == 1
         assert len(waits) <= 2
 
     monkeypatch.setattr(m.status_monitor_cli, "_wake_interruptible_wait", wait)
+    if shutdown_mode == "interrupted":
+        with pytest.raises(KeyboardInterrupt):
+            m.cmd_status_monitor(argparse.Namespace(interval=2, passive=True))
+        return
     assert m.cmd_status_monitor(argparse.Namespace(interval=2, passive=True)) == 0
     assert len(waits) == 2
     assert len(activations) == 2

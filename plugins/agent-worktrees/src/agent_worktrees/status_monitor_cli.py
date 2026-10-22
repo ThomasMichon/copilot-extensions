@@ -912,7 +912,10 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                 empty_strikes = 0
             _wake_interruptible_wait(wake_event, interval)
     finally:
-        worktrees_runtime.close_admission("shutdown")
+        with state_lock:
+            shutdown_requested.set()
+            _enter_drain_only_state()
+            worktrees_runtime.close_admission("shutdown")
         worktrees_runtime.feed.wait_closed(status_monitor_cutover._READ_TIMEOUT_S)
         _close_request_surfaces()
         control_server.close()
