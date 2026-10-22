@@ -7,6 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import datetime
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -40,6 +41,9 @@ def _stub_create_worktree_core_internals(monkeypatch, tmp_path, config):
 def admission_config(tmp_path, monkeypatch):
     monkeypatch.setattr(request.cfg, "tracking_dir", lambda: tmp_path)
     monkeypatch.setattr(request.cfg, "detect_platform", lambda: "windows")
+    registry = tmp_path / ".agent-worktrees" / "machines.yaml"
+    registry.parent.mkdir()
+    registry.write_text("machines: {}\n", encoding="utf-8")
     for project in ("demo", "demo-repo"):
         directory = request.cfg.project_dir(project)
         directory.mkdir(parents=True, exist_ok=True)
@@ -718,13 +722,17 @@ def test_real_powershell_transport_preserves_encoded_intent(tmp_path):
     # cannot represent the intent's non-ASCII text.
     script = (
         "import base64,json,sys;"
+        "assert sys.flags.utf8_mode == 1;"
         "sys.stdout.reconfigure(encoding='utf-8');"
         "print(json.dumps(json.loads(base64.b64decode(sys.argv[1])),ensure_ascii=False))"
     )
-    command = remote_seed_launch.shell_command("pwsh", [sys.executable, "-c", script, encoded])
+    command = remote_seed_launch.shell_command(
+        "pwsh", [sys.executable, "-X", "utf8", "-c", script, encoded],
+    )
     result = subprocess.run(
         [pwsh, "-NoProfile", "-EncodedCommand", command.split()[-1]],
         capture_output=True, text=True, encoding="utf-8", timeout=20,
+        env={**os.environ, "PYTHONUTF8": "0"},
         **({"creationflags": subprocess.CREATE_NO_WINDOW} if sys.platform == "win32" else {}),
     )
     assert result.returncode == 0, result.stderr

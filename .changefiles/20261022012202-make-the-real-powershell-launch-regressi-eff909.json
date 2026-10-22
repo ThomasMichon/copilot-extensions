@@ -1,0 +1,9 @@
+{
+  "comment": "Make the real PowerShell launch regression explicitly UTF-8 and provision its isolated machine registry.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
