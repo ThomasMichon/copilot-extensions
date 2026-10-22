@@ -256,14 +256,14 @@ def test_backed_sync_publishes_legacy_pr_without_replay_journals(
 
 def test_sync_aborts_before_rebase_when_backup_cannot_be_written(pr_repo, monkeypatch):
     config, wid, path, _, _, old = _prepare(pr_repo)
-    original = git_ops.git
+    original = pr_rebase._git_bytes
 
     def fail_backup(*args, **kwargs):
         if args[:1] == ("update-ref",):
             raise git_ops.GitError(["git", *args], 1, "backup storage unavailable")
         return original(*args, **kwargs)
 
-    monkeypatch.setattr(git_ops, "git", fail_backup)
+    monkeypatch.setattr(pr_rebase, "_git_bytes", fail_backup)
     assert not git_collab.sync_forward(wid, config)
     assert _git("rev-parse", "HEAD", cwd=path) == old
     assert not pr_recovery._path(str(path)).exists()

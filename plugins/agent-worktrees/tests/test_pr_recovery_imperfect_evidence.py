@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from agent_worktrees import finalize, git_ops, pr_recovery
+from agent_worktrees import finalize, git_ops, pr_rebase, pr_recovery
 from test_pr_recovery_advanced_head import REASON, PrRepo, backed_publication, git, metadata, preview, record
 
 pytestmark = [pytest.mark.timeout(120)]
@@ -27,6 +27,7 @@ def test_unusable_checkpoint_produces_bound_rewrite_preview_and_confirmed_rewrit
     original = checkpoint.read_bytes()
     collection = json.loads(original)
     point = collection["checkpoints"][collection["latest"]]
+    encoding_probes = []
     if defect == "json":
         checkpoint.write_text("{unfinished checkpoint")
     elif defect == "schema":
@@ -40,18 +41,30 @@ def test_unusable_checkpoint_produces_bound_rewrite_preview_and_confirmed_rewrit
     elif defect in {"null-ref", "surrogate-ref"}:
         point["local_ref"] = "\0" if defect == "null-ref" else "\ud800"
         checkpoint.write_text(json.dumps(collection))
-    elif defect in {"spawn", "synced-encoding"}:
+    elif defect == "spawn":
         real_git = git_ops.git
 
         def probe(*args: str, **kwargs: object) -> object:
             if "--end-of-options" in args and args[-1].startswith(point["local_ref"]):
-                if defect == "spawn":
-                    raise OSError(22, "evidence probe could not start")
-                if args[-1] == point["local_ref"] + "^{commit}":
-                    raise UnicodeEncodeError("utf-8", "\ud800", 0, 1, "unencodable evidence")
+                raise OSError(22, "evidence probe could not start")
             return real_git(*args, **kwargs)
 
         monkeypatch.setattr(git_ops, "git", probe)
+    elif defect == "synced-encoding":
+        real_git_bytes = pr_rebase._git_bytes
+        requested = (point["local_ref"] + "^{commit}").encode()
+
+        def batch_probe(*args: str, **kwargs: object) -> bytes:
+            data = kwargs.get("stdin")
+            if (
+                args == ("cat-file", "--batch-check=%(objectname) %(objecttype)", "-z")
+                and isinstance(data, bytes) and requested in data.split(b"\0")[:-1]
+            ):
+                encoding_probes.append(args)
+                raise UnicodeEncodeError("utf-8", "\ud800", 0, 1, "unencodable evidence")
+            return real_git_bytes(*args, **kwargs)
+
+        monkeypatch.setattr(pr_rebase, "_git_bytes", batch_probe)
     else:
         real_text, real_bytes = Path.read_text, Path.read_bytes
 
@@ -70,6 +83,8 @@ def test_unusable_checkpoint_produces_bound_rewrite_preview_and_confirmed_rewrit
     evidence_bytes = read_original_bytes(checkpoint)
     capfd.readouterr()
     first = preview(wid, config)
+    if defect == "synced-encoding":
+        assert len(encoding_probes) == 1
     operation = first["operation"]
     assert operation["action"] == "rewrite"
     assert operation["evidence_status"] == "unusable"

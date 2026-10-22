@@ -255,6 +255,12 @@ read the corresponding raw commit trees in one ordered probe. Tree evidence
 does not replace parent reconstruction, raw author/message comparison, explicit
 conflict-continuation proof or the existing upstream-empty-commit checks.
 
+Recovery snapshots resolve their commit refs in one fresh NUL-input probe and
+retain local, published and lineage refs in one create-only Git transaction.
+A collision or invalid ref leaves the entire transaction unapplied. Subsequent
+settlement re-reads the retained refs; retention never grants replay or remote
+publication authority.
+
 ## Captured child ownership
 
 Bounded Git publication and static-guidance Git preflights use a headless

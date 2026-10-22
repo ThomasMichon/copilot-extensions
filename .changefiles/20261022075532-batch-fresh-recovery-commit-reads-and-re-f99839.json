@@ -1,0 +1,9 @@
+{
+  "comment": "Batch fresh recovery commit reads and retain recovery refs atomically.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
