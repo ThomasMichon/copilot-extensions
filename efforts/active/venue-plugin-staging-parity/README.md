@@ -395,6 +395,9 @@ or a reason to create a daemon.
   the extracted supervisor is only invoked by Bridge and SSH. Extended the
   same changefile to those consumers instead of bypassing the gate or
   hand-editing versions; their runtime behavior remains unchanged.
+  Synchronized the sole remaining checked-in `plugin-resolve` consumer copy
+  from the verified canonical extraction; the library-copy, headless and
+  publication-closure guards now pass locally.
 
 ### 2026-10-22 - Land privileged receiver source and continue the parent
 
