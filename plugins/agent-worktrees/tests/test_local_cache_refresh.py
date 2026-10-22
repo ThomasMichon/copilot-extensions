@@ -283,10 +283,12 @@ def test_nonregular_input_is_rejected_before_open(copy_workspace, monkeypatch, k
     def file_stat(path, *args, **kwargs):
         value = original_stat(path, *args, **kwargs)
         if path == target:
-            return os.stat_result(
-                (stat.S_IFIFO | 0o600, *value[1:]),
-                {"st_file_attributes": getattr(value, "st_file_attributes", 0)},
-            )
+            fields = {
+                name: getattr(value, name) for name in dir(value)
+                if name.startswith("st_")
+            }
+            fields["st_mode"] = stat.S_IFIFO | 0o600
+            return SimpleNamespace(**fields)
         return value
 
     def read_bytes(path):
@@ -303,6 +305,12 @@ def test_nonregular_input_is_rejected_before_open(copy_workspace, monkeypatch, k
     monkeypatch.setattr(Path, "stat", file_stat)
     monkeypatch.setattr(Path, "read_bytes", read_bytes)
     monkeypatch.setattr(static, "_git", git)
+    native = original_stat(target, follow_symlinks=False)
+    simulated = target.lstat()
+    assert stat.S_ISFIFO(simulated.st_mode)
+    for field in dir(native):
+        if field.startswith("st_") and field != "st_mode":
+            assert getattr(simulated, field) == getattr(native, field)
     result = lcr.refresh_local_cache(root)
     assert result.status == "failed"
     assert "not a regular file" in result.detail

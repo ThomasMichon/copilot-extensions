@@ -87,7 +87,45 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Admitted fixture-semantic batches
 
+### N-STAT native stat fields in nonregular-input simulation
+
+Baseline: the actual #7710 merge. The simulated FIFO now copies every
+actual `st_*` attribute from the native stat result into a
+`SimpleNamespace`, changing only `st_mode`. Reconstructing
+`os.stat_result` from its sequence fields and one optional Windows field
+discarded other native fields, including `st_reparse_tag`.
+The `file_stat` helper matches pinned preserved source. The test checks
+FIFO mode and equality of every other native `st_*` field before invoking
+the real refresh; this strengthens the source's two-field parity check.
+
+All original assertions, fixture dependencies, decorators and cases
+remain. The five settings/declaration/template/exclude/output cases still
+require rejection before reads; the exclude case still refuses Git
+ignore-rule consultation before rejection. No production reader changes,
+mocked refresh result, new skip, reduced selection or fixture-seed changes.
+
+Complete native Windows local-cache-refresh module: 94 passed and the
+same four existing POSIX-FIFO-unavailable skips, 46.43 seconds pytest /
+62.94 preparation-cleanup inclusive. Exactly two work-stealing workers
+retain the original 30-second item watchdog, all marks/resource ceilings
+and the 240-second diagnostic group. Functional integration only, not
+quiet-host, whole-suite or repeated same-head qualification.
+
+This below-altitude test-double correction changes no production,
+command, configuration, installation or architecture contract.
+Documentation impact is this ledger; no adopter guide changes.
+Clean-room provisioning and external-venue lanes are inapplicable
+to this native stat-result simulation. Other B/N and production
+S/F/G/P/R/A contracts and parent qualification remain open.
+
 ### B-PROVIDER-RECORD non-string guard fixture signature
+
+Actual disposition: #7710 merged as
+`d96da43cc8f905d74e86cc144ba00ed73c424ab8`; full Copilot review
+`5608251961` approved exact head
+`1056298c9965fa8dd4cd4eb992f860ff048c9da6`.
+Overview, inline/general channels and threads had no findings;
+required CI was green and the child worktree is finalized.
 
 Baseline: the actual #7704 merge. The non-string-codename guard case
 directly exercises `is_valid_handle` and its short-circuit guard; it
