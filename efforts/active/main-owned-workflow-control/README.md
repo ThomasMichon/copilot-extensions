@@ -296,10 +296,11 @@ authorizes critical main-path acceptance or a bounded administrative change.
   identities, consumer authority, deadlines and joined failures. Existing
   control selection and comparable live publication timing remain open;
   this source reduction does not update the trusted helper pin.
-- [ ] Land and observe fixed three-worker execution of the unchanged full
+- [x] Land and observe fixed three-worker execution of the unchanged full
   source AST scanners, preserving pinned narrative admission, joined failure
-  diagnostics and bounded step/child execution. Local paired timing qualifies
-  the candidate, not hosted whole-flow acceptance or a CPU-work reduction.
+  diagnostics and bounded step/child execution (#7768). Actual source CI
+  retains every scanner and completes the group in 25 seconds. Local paired
+  timing is not controlled hosted whole-flow acceptance or a CPU-work reduction.
 - [ ] Remove redundant release-shaped PR and main-push validation only where
   existing trusted gates and exact-SHA release evidence cover the removed work;
   first prove no generated-output coverage or required context is lost.
@@ -378,6 +379,10 @@ authorizes critical main-path acceptance or a bounded administrative change.
   previous identities remain, yielding 422 source-qualified nodes with
   actual call coverage. This bounded mapping does not close the complete
   historical census or establish a subsequent Main release's execution.
+- [ ] Map the 201 original fleet-contracts cases through exact function objects
+  and unchanged parameterization, preserving all current packet identities,
+  closed source hashes and production-call evidence. Local cohort qualification
+  does not close the whole census or every-release acceptance.
 - [x] Land the dev implementation of reviewed, widen-only module-size baseline
   maintenance and remove its obsolete main exception from source (#6438).
 - [x] Verify a covering promotion activates the dev-owned baseline producer on

@@ -119,6 +119,17 @@ All three files are hash-bound in the same manifest and every aliased case must
 contribute actual library call coverage under the unchanged effect observer.
 This bounded mapping does not establish the unfinished full-library census.
 
+`tools/promotion_unit_tests/test_fleet_contracts.py` re-exports the exact
+functions and parameterization from both original `libs/fleet-contracts/tests/`
+modules. Replacing either original module's file prefix with the adapter path
+maps each case to its release identity; their disjoint function names make the
+mapping injective, and a duplicate name fails collection. The original tests,
+canonical package initializer and both production modules remain hash-bound.
+The path-only conftest is not executed and no assertion body, import, effect
+rule or collection-root restriction is rewritten. Every admitted case must
+contribute actual library call coverage under the same observer and budget.
+This qualifies that bounded library cohort, not the whole historical census.
+
 ## Tracking-write source guard
 
 The source tracking-write guard still parses every sibling-plugin Python file,

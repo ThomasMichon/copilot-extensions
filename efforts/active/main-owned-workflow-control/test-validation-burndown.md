@@ -214,6 +214,48 @@ The complete historical-unit bijection, other library families, Windows
 first-touch and periodic/native acceptance remain open with their existing
 owners; fourteen mapped cases do not complete that broader census.
 
+### Bounded fleet-contracts cohort
+
+Both original `libs/fleet-contracts/tests/test_records.py` and
+`test_responses.py` are reviewed together with their complete import and fixture
+closure. The conftest only inserts the canonical library source path. The tests
+use fifty original functions with unchanged parameterization, covering 201
+cases; there is no process, network, native-loader, thread or sleep operation.
+The positive eligibility result comes from actual execution under the unchanged
+observer, not this source inspection alone.
+
+A separate contained process collects the original identities so no production
+module is preloaded into the observer process. With observation active before
+collection, all 201 cases/603 phases pass with zero effects in 2.151 seconds.
+Each case contributes real `records.py` call coverage; all thirty-nine response
+cases also reach `responses.py`. Opened/imported local closure is precisely
+the two original tests, three canonical production modules and the existing
+contract/effect observer.
+
+The packet adapter re-exports those original function objects without copying,
+moving or rewriting bodies. Replacing either original node's file prefix with
+`tools/promotion_unit_tests/test_fleet_contracts.py` gives its exact release
+identity. Original function names are disjoint, making that mapping injective;
+a duplicate name fails collection rather than overwriting another case.
+The original test modules and all three production files join the hash-bound
+closure, with both implementation files added as coverage targets. No conftest,
+packet root, observer, production import or deadline changes.
+
+The source candidate executes 646 nodes/1,938 phases with zero effects in
+16.467 seconds and independently verifies its actual three-file packet.
+All 445 current-base identities remain in order; forty-eight sources,
+twenty-eight targets and the same 300-second budget cover the combined pass.
+Full collection matches the manifest, and all fifty exported functions retain
+their exact original objects and code-file origins. Removing either original
+test from source admission, altering either implementation's bytes, or
+introducing a duplicate original function name fails without a passing proof.
+Native Windows executes the same 201 aliases successfully in 0.52 seconds;
+that is not a Windows effect-observed whole-packet result.
+
+This qualifies only the bounded library source mapping. Hosted source CI,
+qualified release, the remaining library/plugin census and accountable
+periodic/native repair remain separate parent gates.
+
 ### Scheduled execution is real; repair initiation is not yet established
 
 The current Dev and Main snapshots carry byte-identical periodic workflow and
