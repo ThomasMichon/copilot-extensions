@@ -19,16 +19,18 @@ from ssh_manager.reverse_candidates import (
 
 
 CHILD = """
-import os, socket, sys
+import errno, os, socket, sys
 s = socket.socket()
 if os.name != 'nt':
     s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 try:
     s.bind(('127.0.0.1', int(sys.argv[1])))
-except OSError:
+    s.listen()
+except OSError as error:
+    if error.errno != errno.EADDRINUSE:
+        raise
     print('fixture-bind-refused', file=sys.stderr, flush=True)
     raise SystemExit(255)
-s.listen()
 print('fixture-bound', flush=True)
 while True:
     connection, _ = s.accept()
