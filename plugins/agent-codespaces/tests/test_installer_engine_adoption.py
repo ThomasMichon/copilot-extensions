@@ -1306,6 +1306,15 @@ def codespaces_stamped_snapshot(tmp_path_factory, request):
     stage = tmp_path / "source"
     payload = stage / "plugins" / PLUGIN.name
     shutil.copytree(PLUGIN, payload, ignore=shutil.ignore_patterns("tests", "__pycache__"))
+    roster = stage / ".github" / "plugin" / "marketplace.json"
+    roster.parent.mkdir(parents=True)
+    roster.write_text(
+        json.dumps({
+            "name": "codespaces-snapshot-fixture",
+            "plugins": [{"name": PLUGIN.name, "source": f"plugins/{PLUGIN.name}"}],
+        }),
+        encoding="utf-8",
+    )
     if materialized:
         logs = mm.materialize_uv_editable_refs(stage, canonical_root=REPO)
         logs += mm.materialize_installer_engine_refs(stage, canonical_root=REPO)
@@ -1373,6 +1382,9 @@ def codespaces_stamped_snapshot(tmp_path_factory, request):
     )
     assert stamp.returncode == 0, stamp.stdout + stamp.stderr
     snapshot = Path((root / "payload-dir").read_text().strip())
+    provenance = json.loads((snapshot / "snapshot-provenance.json").read_text(encoding="utf-8"))
+    assert provenance["schema"] == "copilot-extensions.legacy-snapshot-source"
+    assert provenance["resolution"]["pluginId"] == PLUGIN.name
     assert snapshot_tree_manifest(snapshot / "snapshot-copy-probe") == probe_before
     for name, (source, before, expected) in library_inputs.items():
         assert snapshot_tree_manifest(source) == before
