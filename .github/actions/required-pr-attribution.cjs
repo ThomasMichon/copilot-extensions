@@ -175,15 +175,26 @@ async function currentPR(github, context, number, budget) {
 async function headPolicy(github, context, number, expectedHead, budget) {
   let pr = expectedHead ? null : await currentPR(github, context, number, budget);
   const head = expectedHead || pr.head.sha;
-  let listed = await paginate(budget, github, github.rest.repos.listPullRequestsAssociatedWithCommit, {
-    ...context.repo, commit_sha: head, per_page: 100,
-  });
+  let listed;
+  let census = false;
+  try {
+    listed = await paginate(budget, github, github.rest.repos.listPullRequestsAssociatedWithCommit, {
+      ...context.repo, commit_sha: head, per_page: 100,
+    });
+  } catch (error) {
+    if (![500, 502, 503, 504].includes(error?.status)) throw error;
+    console.warn("Commit association service failed; verifying the complete open-dev pull request census.");
+    listed = await paginate(budget, github, github.rest.pulls.list, {
+      ...context.repo, state: "open", base: "dev", per_page: 100,
+    });
+    census = true;
+  }
   const associated = listed.find((item) => item.number === number &&
     item.state === "open" && item.base.ref === "dev" && item.head.sha === head);
   if (associated) pr = associated;
   else {
     // Commits already on the default branch can omit open PRs from the association API.
-    listed = await paginate(budget, github, github.rest.pulls.list, {
+    if (!census) listed = await paginate(budget, github, github.rest.pulls.list, {
       ...context.repo, state: "open", base: "dev", per_page: 100,
     });
     pr = listed.find((item) => item.number === number) || await currentPR(github, context, number, budget);

@@ -747,6 +747,12 @@ Freshness rereads normally query only PRs associated with that head commit,
 not the entire repository's open-PR list. If this endpoint omits the current
 PR (as it can for a commit already on the default branch), a full current
 listing is required rather than assuming a unique head.
+The same fully paginated census is authoritative when commit association fails
+with HTTP 500, 502, 503 or 504; the script reports that fallback explicitly.
+Authorization, rate-limit and unclassified errors still fail closed, as do
+failed/incomplete censuses, missing membership, duplicate heads and moving
+metadata. Fallback pages consume the existing refresh request budget and keep
+the same final stable-snapshot and failure-fencing requirements.
 The association response supplies current PR metadata too; normal refreshes
 do not add a separate per-PR GET to each freshness read. New checks remain
 pending during pacing and are completed only after a fresh matching snapshot.

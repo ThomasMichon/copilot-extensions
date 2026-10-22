@@ -566,6 +566,98 @@ test("association omissions use a fresh full listing without hiding same-head pe
   }
 });
 
+function failAssociations(github, status = 500) {
+  const paginate = github.paginate;
+  const failure = Object.assign(new Error("association unavailable"), { status });
+  github.paginate = paged(async (method, options) => {
+    if (method === github.rest.repos.listPullRequestsAssociatedWithCommit) throw failure;
+    return paginate(method, options);
+  });
+  return failure;
+}
+
+test("association service failures use the complete census and report the fallback", async (t) => {
+  const warnings = [];
+  t.mock.method(console, "warn", (message) => warnings.push(message));
+  for (const status of [500, 502, 503, 504]) {
+    for (const peer of [false, true]) {
+      const values = Array.from({ length: 150 }, (_, index) => ({
+        ...pr(marker), number: index + 1, head: { sha: index ? `other-${index}` : "head" },
+      }));
+      if (peer) values.push({ ...pr(marker), number: 151 });
+      const { github } = headFixture(values);
+      failAssociations(github, status);
+      const output = core();
+      await gate.enforce({ github, context, core: output });
+      if (peer) assert.match(output.messages.join("\n"), /Multiple open dev pull requests/);
+      else assert.deepEqual(output.messages, []);
+    }
+  }
+  assert.equal(warnings.length, 16);
+  assert.ok(warnings.every((message) => message.includes("complete open-dev pull request census")));
+});
+
+test("association authorization, rate-limit and unclassified errors never use a fallback", async () => {
+  for (const status of [401, 403, 404, 429, 501, "500", null]) {
+    const { github } = headFixture([{ ...pr(marker), number: 1 }]);
+    const paginate = github.paginate;
+    let fullLists = 0;
+    github.paginate = paged(async (method, options) => {
+      if (method === github.rest.pulls.list) fullLists++;
+      return paginate(method, options);
+    });
+    const failure = failAssociations(github, status);
+    await assert.rejects(gate.enforce({ github, context, core: core() }), (error) => error === failure);
+    assert.equal(fullLists, 0);
+  }
+});
+
+test("a failed or incomplete fallback census cannot authorize membership", async (t) => {
+  t.mock.method(console, "warn", () => {});
+  for (const unavailable of [false, true]) {
+    const { github } = headFixture([{ ...pr(marker), number: 1 }]);
+    const failure = new Error("census unavailable");
+    github.paginate = paged(async (method) => {
+      if (method === github.rest.repos.listPullRequestsAssociatedWithCommit) {
+        throw Object.assign(new Error("association unavailable"), { status: 500 });
+      }
+      if (unavailable) throw failure;
+      return [];
+    });
+    await assert.rejects(gate.enforce({ github, context, core: core() }),
+      unavailable ? (error) => error === failure : /membership could not be verified/);
+  }
+});
+
+test("fallback census retains the stable metadata recheck", async (t) => {
+  t.mock.method(console, "warn", () => {});
+  const values = [{ ...pr(marker), number: 1 }];
+  const { github } = headFixture(values);
+  const paginate = github.paginate;
+  let censuses = 0;
+  github.paginate = paged(async (method, options) => {
+    if (method === github.rest.pulls.list && ++censuses === 2) values[0].body = "";
+    return paginate(method, options);
+  });
+  failAssociations(github);
+  const output = core();
+  await gate.enforce({ github, context, core: output });
+  assert.match(output.messages.join("\n"), /metadata changed or could not be verified/);
+});
+
+test("fallback census requests remain inside the refresh budget and failure fencing", async (t) => {
+  t.mock.method(console, "warn", () => {});
+  const { github, created } = headFixture([{ ...pr(marker), number: 1 }]);
+  const requests = countRequests(github);
+  failAssociations(github);
+  await assert.rejects(gate.backfill({
+    github, context, core: core(), requestLimit: 8, pause: async () => {},
+  }), /request budget/);
+  assert.ok(requests() <= 8);
+  assert.ok(created.length > 0);
+  assert.ok(created.every((check) => check.status === "completed" && check.conclusion === "failure"));
+});
+
 test("associated ancestor commits, non-dev and closed PRs do not create head collisions", async () => {
   const values = [
     { ...pr(marker), number: 1 },
