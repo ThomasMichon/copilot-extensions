@@ -29,6 +29,56 @@ def _isolate_config_layers(tmp_path_factory, monkeypatch):
         repos_mod, "read_registry", lambda: repos_mod.ReposRegistry()
     )
 
+@pytest.mark.parametrize(
+    "loader", [cfg.yaml.SafeLoader, getattr(cfg.yaml, "CSafeLoader", cfg.yaml.SafeLoader)],
+    ids=["python", "accelerated"],
+)
+def test_safe_config_loader_revalidates_files_and_preserves_yaml(tmp_path, monkeypatch, loader):
+    calls = []
+
+    class ObservedLoader(loader):
+        def __init__(self, stream):
+            calls.append(stream.name)
+            super().__init__(stream)
+
+    monkeypatch.setattr(cfg, "_YamlSafeLoader", ObservedLoader)
+    path = tmp_path / "config.yaml"
+    path.write_text(
+        'defaults: &defaults {name: "Caf\u00e9", enabled: true}\n'
+        'project: {<<: *defaults, "quoted:key": "value"}\n',
+        encoding="utf-8",
+    )
+    assert cfg._load_yaml_safe(path) == {
+        "defaults": {"name": "Caf\u00e9", "enabled": True},
+        "project": {"name": "Caf\u00e9", "enabled": True, "quoted:key": "value"},
+    }
+    path.write_text("project: {name: changed}\n", encoding="utf-8")
+    assert cfg._load_yaml_safe(path) == {"project": {"name": "changed"}}
+    for text in (
+        "defaults: [\n",
+        "!!python/object/apply:builtins.dict\n- [[accepted, unsafe]]\n",
+        "- ignored\n",
+        "42\n",
+        "plain text\n",
+        "",
+    ):
+        path.write_text(text, encoding="utf-8")
+        assert cfg._load_yaml_safe(path) == {}
+    real_open = open
+
+    def unreadable(file, *args, **kwargs):
+        if Path(file) == path:
+            raise PermissionError("config read denied")
+        return real_open(file, *args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr("builtins.open", unreadable)
+        assert cfg._load_yaml_safe(path) == {}
+    path.unlink()
+    assert cfg._load_yaml_safe(path) == {}
+    assert calls == [str(path)] * 8
+
+
 # ---------------------------------------------------------------------------
 # detect_platform
 # ---------------------------------------------------------------------------

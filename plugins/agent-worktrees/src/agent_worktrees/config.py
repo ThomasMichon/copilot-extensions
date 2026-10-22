@@ -44,6 +44,7 @@ from .config_cache import (  # noqa: F401 (re-exported)
 _ENV_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _PROJECT_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$")
 _ASSIGNMENT_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+_YamlSafeLoader = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
 
 # In-repo, committed config carrying *repo-level policy/settings* (shared
 # across every machine that checks out the repo), as opposed to the
@@ -1233,7 +1234,7 @@ def _load_yaml_safe(path: Path) -> dict[str, Any]:
         if not path.exists():
             return {}
         with open(path, encoding="utf-8") as f:
-            raw = yaml.safe_load(f)
+            raw = yaml.load(f, Loader=_YamlSafeLoader)
         return raw if isinstance(raw, dict) else {}
     except Exception:
         return {}

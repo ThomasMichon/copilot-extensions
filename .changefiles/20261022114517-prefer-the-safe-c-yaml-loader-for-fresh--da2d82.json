@@ -1,0 +1,9 @@
+{
+  "comment": "Prefer the safe C YAML loader for fresh file configuration reads with a safe Python fallback",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

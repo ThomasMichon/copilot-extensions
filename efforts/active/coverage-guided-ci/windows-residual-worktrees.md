@@ -87,6 +87,40 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Admitted narrow batches
 
+### Y fresh file configuration through an explicitly safe YAML backend
+
+`config._load_yaml_safe` selects PyYAML's `CSafeLoader` when available,
+otherwise `SafeLoader`, and passes that safe class explicitly to `yaml.load`.
+It still opens and parses the file on each call; no authority or result is
+cached. The existing missing/empty/nonmapping/malformed/read-error behavior
+is unchanged. This batch owns only the two Y production hunks and its
+configuration regression, not C's committed-ref absence probe or H's
+single-decision protection read.
+
+Both safe backends exercise UTF-8 aliases/merge keys, quoted mappings,
+replacement between reads, unsafe object tags, malformed input, lists,
+scalars, empty files, denied reads and deletion. The complete unpartitioned
+configuration module passes all 125 tests without skips in 32.56 seconds
+including preparation and cleanup, with exactly two workers and unchanged
+item/group/native/process/memory bounds.
+
+A fresh contained interpreter separately loads an actual first-touch file
+through `cfg.load_config`, then observes its replacement. Both the installed
+C backend and import-time fallback with `CSafeLoader` deliberately absent
+pass, in 3.83 seconds total including preparation/cleanup. An initial
+one-off check script had malformed string quoting and did not execute the
+consumer; only its corrected successful run receives credit. No package,
+service or runtime was installed or updated.
+
+Ruff F/E9, thirteen install contracts and diff checks pass. Documentation
+impact is this census and the owning effort journal; no command,
+configuration schema, file precedence or public behavior changes. The
+lightweight first-touch process check covers fresh parser selection, not
+installer provisioning. No external-venue or non-Windows result is claimed.
+This is a below-altitude backend substitution, not permission to skip fresh
+reads. H, C, other residuals and actual repeated complete same-head native
+Windows #5694/#5682 qualification remain open.
+
 ### B-BACKED private copies preserve prior-publication evidence
 
 Two session seeds prepare the existing backed publication, with and without
