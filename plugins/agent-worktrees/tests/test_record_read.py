@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -58,7 +59,7 @@ def invoke(*args):
 
 @pytest.mark.parametrize("case", [
     "tracked", "untracked", "colliding-id", "foreign-project", "anchor",
-    "nested-untracked", "record-race",
+    "nested-untracked", "record-race", "symlink-root", "ambiguous-root",
 ])
 def test_workspace_record_is_project_scoped_non_enrolling_and_non_activating(
     record_fixture, monkeypatch, case,
@@ -106,14 +107,31 @@ def test_workspace_record_is_project_scoped_non_enrolling_and_non_activating(
     elif case == "nested-untracked":
         (cwd / ".git").mkdir()
     elif case == "record-race":
-        find = tracking.find_worktree_id_by_cwd
+        find = tracking.list_records
 
         def changed(*args, **kwargs):
             result = find(*args, **kwargs)
             path.unlink()
             return result
 
-        monkeypatch.setattr(tracking, "find_worktree_id_by_cwd", changed)
+        monkeypatch.setattr(tracking, "list_records", changed)
+    elif case == "symlink-root":
+        link = Path(cfg._home()) / "linked-workspaces"
+        if os.name == "nt":
+            from agent_procutil import no_window_kwargs
+
+            subprocess.run(
+                [os.environ["COMSPEC"], "/c", "mklink", "/J", str(link), str(root.parent)],
+                check=True, capture_output=True, timeout=10, **no_window_kwargs(),
+            )
+        else:
+            link.symlink_to(root.parent, target_is_directory=True)
+        data["worktree_path"] = str(link / root.name)
+        path.write_text(yaml.safe_dump(data), encoding="utf-8")
+    elif case == "ambiguous-root":
+        (path.parent / "ambiguous.yaml").write_text(
+            yaml.safe_dump({**data, "worktree_id": "ambiguous"}), encoding="utf-8",
+        )
     before = {item: item.read_bytes() for item in Path(cfg._home()).rglob("*") if item.is_file()}
 
     def forbidden(*args, **kwargs):
@@ -130,7 +148,7 @@ def test_workspace_record_is_project_scoped_non_enrolling_and_non_activating(
     with output.capture_json_output() as captured:
         rc = main.main(["--project", "example-project", "record", "--cwd", str(cwd), "--json"])
     result = json.loads(captured.getvalue())
-    if case in {"tracked", "colliding-id"}:
+    if case in {"tracked", "colliding-id", "symlink-root"}:
         assert rc == 0 and result["ok"] is True
         context = result["context"]
         assert context["project"] == "example-project" and context["root"] == str(root)
@@ -147,7 +165,8 @@ def test_workspace_record_is_project_scoped_non_enrolling_and_non_activating(
     else:
         assert rc == 1 and result["ok"] is False
         assert result["error"]["code"] in {
-            "workspace-untracked", "repository-mismatch", "workspace-mismatch", "record-missing",
+            "workspace-untracked", "workspace-ambiguous", "repository-mismatch",
+            "workspace-mismatch", "record-missing",
         }
     after = {item: item.read_bytes() for item in Path(cfg._home()).rglob("*") if item.is_file()}
     if case == "record-race":

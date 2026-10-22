@@ -131,6 +131,9 @@ an existing checkout in the selected project without enrolling it, contacting
 the resident, starting a service or changing its head. It checks the actual Git
 marker's registered project, finds an existing project-scoped tracking record,
 then strictly re-reads that exact record and verifies its repository and root.
+Recorded roots are matched canonically, so symlinked/junction worktree-root
+spellings retain the same identity. Multiple records for the same canonical
+checkout refuse as ambiguous rather than choosing by filename order.
 An untracked linked checkout, a foreign project, a disappeared record or a
 nested untracked checkout refuses; there is no cross-project or anchor fallback.
 

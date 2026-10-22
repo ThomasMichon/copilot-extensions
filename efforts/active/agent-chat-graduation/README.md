@@ -355,6 +355,18 @@ shared-multiplex contracts above.
 
 ## Journal
 
+### 2026-10-22 - Preserve canonical worktree-root aliases
+
+- A later review correctly found that lexical CWD lookup could reject a
+  tracked checkout stored under a symlinked/junction root spelling. The new
+  symlink-root regression failed before correction; a second regression also
+  proved the old lookup chose one of multiple records for the same checkout.
+- The metadata reader now matches canonical record paths only inside its
+  selected project, refuses ambiguous matches and retains the strict exact
+  record re-read/root check. Both negative controls failed as expected; the
+  corrected owner compatibility selection passed186 cases. The ordinary
+  inference/adoption helper and existing client wire contract are unchanged.
+
 ### 2026-10-22 - Corrected owner/client boundary qualified on Windows
 
 - Candidate `71862f3961c36e2602e6d980ff2c65afb425be16` passed the unchanged

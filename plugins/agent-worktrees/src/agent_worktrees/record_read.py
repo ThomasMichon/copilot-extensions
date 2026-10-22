@@ -284,10 +284,18 @@ def read_workspace_record(cwd: str) -> dict[str, object]:
 
             context["identity"] = read_execution_identity()
             return context
-        worktree_id = tracking.find_worktree_id_by_cwd(str(root), project=project)
-        if not worktree_id:
+        matches = [
+            record.worktree_id
+            for record in tracking.list_records(
+                cfg.tracking_dir(project), repo_filter=project, copy_records=False,
+            )
+            if record.worktree_path and Path(record.worktree_path).resolve() == root
+        ]
+        if not matches:
             raise RecordReadError("workspace-untracked", "Checkout has no record in this project")
-        worktree = read_exact_record(worktree_id, include_workspace=True)
+        if len(matches) != 1:
+            raise RecordReadError("workspace-ambiguous", "Checkout has multiple records in this project")
+        worktree = read_exact_record(matches[0], include_workspace=True)
         if worktree["repo"] != project or Path(worktree["path"]).resolve(strict=True) != root:
             raise RecordReadError("workspace-mismatch", "Recorded checkout does not match initialization")
         context["worktree"] = worktree
