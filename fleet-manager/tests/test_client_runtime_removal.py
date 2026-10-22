@@ -237,6 +237,32 @@ def test_absent_without_a_completed_outcome_is_not_success(owned):
         remove(owned, candidate="client-100-" + "a" * 64)
 
 
+def test_reconstruction_invalidates_only_current_outcome_before_new_slot_creation(
+    owned, primitive, tmp_path, monkeypatch,
+):
+    root, fixture, staged, trusted, namespace, slot = owned
+    remove(owned)
+    pointer = namespace / removal.OUTCOMES / (slot.name + ".json")
+    history = states(path for path in (namespace / removal.HISTORY).rglob("*") if path.is_file())
+    assert pointer.is_file()
+    original = primitive.slot
+    checked = []
+
+    def new_generation(*args, **kwargs):
+        assert not pointer.exists()
+        checked.append(True)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(primitive, "slot", new_generation)
+    rebuilt = construct(root, fixture, staged, trusted)
+    assert checked and not rebuilt["reused"] and not pointer.exists()
+    assert states(history) == history
+    slot.rename(tmp_path / "unexplained-disappearance")
+    with pytest.raises(PlanError):
+        remove(owned)
+    assert states(history) == history and not pointer.exists()
+
+
 def test_canonical_removal_has_no_unowned_or_incomplete_delete_fallback(owned, primitive):
     _root, _fixture, _staged, _trusted, namespace, slot = owned
     with pytest.raises(ValueError, match="installation owner"):

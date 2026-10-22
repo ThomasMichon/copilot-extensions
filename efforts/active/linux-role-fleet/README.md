@@ -1134,3 +1134,11 @@ These bounded Windows selections are not a new full Windows-suite claim.
   contracts remain unchanged and pass. The prior original failed-construction
   extraction matrix remains qualified; no shared cleanup semantics changed
   while fixing consumer claim/publication recovery.
+- Follow-up review found that a prior outcome could incorrectly certify
+  unexplained absence after reconstruction of the same selection. Construction
+  now validates and durably invalidates only the current per-candidate outcome
+  pointer before cleaning/creating a new generation under custody. Historical
+  receipts remain. The ordered regression and real installed console on both
+  platforms prove refusal after a reconstructed root disappears outside owned
+  removal. Final removal suites pass 47 Linux and 43 Windows cases (four
+  POSIX-only skips); the actual native lifecycle passes on both platforms.

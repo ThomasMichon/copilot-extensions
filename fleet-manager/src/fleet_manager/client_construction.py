@@ -310,6 +310,20 @@ def _completed_intent(namespace, version, binding):
     return intent
 
 
+def _invalidate_removed_outcome(namespace, version, identity):
+    directory = namespace / "client-runtime-removed"
+    if not os.path.lexists(directory):
+        return
+    artifact_staging._directory(directory)
+    path = directory / (version + ".json")
+    if os.path.lexists(path):
+        from .client_runtime_removal import _outcome
+
+        _outcome(_read(path), identity, version)
+        path.unlink()
+        client_admission._sync_directory(directory)
+
+
 def _discard(primitive, namespace, version, intent, binding):
     primitive.discard_failed_candidate(
         namespace, version, validate=lambda candidate: _unfinished(candidate, intent, binding),
@@ -433,6 +447,7 @@ def construct_client_release(root, identity, selection, staged, *,
                         ) != primitive.ADMIT_CONSTRUCT:
                             raise PlanError("client candidate construction admission refused")
                         intent = _construction_intent(namespace, version, slot, binding)
+                        _invalidate_removed_outcome(namespace, version, identity)
                         if os.path.lexists(slot):
                             _unfinished(slot, intent, binding)
                             _discard(primitive, namespace, version, intent, binding)

@@ -214,5 +214,9 @@ identity/candidate, `runtime_removed: true`, `reused` and
 rollback slots, configuration/data, admission floors, construction inputs and
 publication/removal history are preserved. After settlement, explicit
 construction can rebuild the same selection only through its ordinary current
-policy, compatibility, byte and local-health checks; a later removal captures
-that new physical generation rather than reusing old deletion authority.
+policy, compatibility, byte and local-health checks. Under construction custody,
+it validates and durably invalidates the prior per-candidate outcome pointer
+before creating or cleaning a new slot; historical outcomes remain. Unexplained
+absence after reconstruction is therefore a refusal, not an old removal's
+no-op. A later removal captures that new physical generation rather than reusing
+old deletion authority.

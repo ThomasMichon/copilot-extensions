@@ -276,6 +276,18 @@ def test_actual_installed_console_client_state_transitions(
                         rebuilt = json.loads(result.stdout)
                         assert not rebuilt["reused"] and rebuilt["candidate"] == reports[2]["candidate"]
                         assert runtime.is_dir() and database_bytes(root) == floor
+                        assert not (namespace / "client-runtime-removed" / (runtime.name + ".json")).exists()
+                        missing = tmp_path / "unexplained-runtime-disappearance"
+                        runtime.rename(missing)
+                        try:
+                            result = subprocess.run(
+                                [str(console), "client-state", "remove-runtime", *base,
+                                 "--candidate", reports[2]["candidate"]],
+                                cwd=tmp_path, capture_output=True, text=True, timeout=30, **FLAGS,
+                            )
+                            assert result.returncode == 1, result.stderr
+                        finally:
+                            missing.rename(runtime)
                         result = subprocess.run(
                             [str(console), "client-state", "remove-runtime", *base,
                              "--candidate", reports[2]["candidate"]],
