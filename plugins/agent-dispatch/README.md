@@ -285,6 +285,12 @@ such as `--pool host-a,host-b --origin origin --headless` in
 `AGENT_DISPATCH_SUPERVISE_EXTRA_ARGS`. See
 [`docs/spawn-supervisor.md`](docs/spawn-supervisor.md#running-as-a-persistent-service-the-always-on-last-mile)
 for the full supervisor/profile contract.
+On Windows, an already-registered interactive-logon launcher is also eligible
+for the installer `start` action when its env selects
+`AGENT_DISPATCH_SUPERVISE_MODE=serve`, even without legacy embody labels.
+Unlabeled legacy launchers remain inert, absent registrations are not enrolled,
+and an explicitly disabled Scheduled Task is not bypassed through a logon
+registration.
 
 ### Same-cell sibling invocation
 

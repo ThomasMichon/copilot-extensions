@@ -3682,6 +3682,11 @@ function Invoke-SupervisorStart {
         [Parameter(Mandatory)][string]$Label
     )
     $task = Get-ScheduledTask -TaskName $Name -ErrorAction SilentlyContinue
+    if ($task -and $task.State -eq 'Disabled') {
+        Invoke-SupervisorAudit -Event selection -Reason prior-native-disabled -Name $Name -EnvFile $EnvFile -Outcome skipped
+        Write-Skip "$Label remains disabled; explicit native enablement is required"
+        return
+    }
     if ($task -and $task.State -ne 'Disabled') {
         Invoke-SupervisorTaskAction -Operation start -Name $Name -Reason lifecycle-start
         if ($script:SupervisorActionSucceeded) { Write-Ok "$Label started" }
@@ -3690,7 +3695,8 @@ function Invoke-SupervisorStart {
     $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
     $auto = Get-ItemProperty -Path $runKey -Name $Name -ErrorAction SilentlyContinue
     $launcher = Join-Path $InstallDir 'supervise-service.ps1'
-    if ($auto -and (Test-Path $launcher) -and (Test-SupervisorLabelsConfigured -EnvFile $EnvFile)) {
+    $mode = Get-SupervisorMode -EnvFile $EnvFile
+    if ($auto -and (Test-Path $launcher) -and ($mode -eq 'serve' -or (Test-SupervisorLabelsConfigured -EnvFile $EnvFile))) {
         Install-SupervisorLogonAutostart -Name $Name -Launcher $launcher -EnvFile $EnvFile
     }
 }
