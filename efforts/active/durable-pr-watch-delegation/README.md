@@ -292,6 +292,13 @@ callback an implicit credential store.
   strict profile/context parsing, bounded replies and value-free handler
   failures. The existing Gateway service portfolio also passes on the
   supported dependency floor.
+- #7810 review found that context expiry during transit could escape the
+  per-request task and terminate the shared channel. Expiry now refuses
+  inside that task before invoking the handler; malformed/wrong-owner
+  context remains channel-fatal. Real concurrent GET/POST regressions retain
+  another caller's valid in-flight response and subsequent channel use.
+  The current-source Gateway service portfolio passes all 258 cases;
+  mutations retain their existing conservative `outcome-unknown` semantics.
 - Fresh test provisioning exposed the existing unseasoned `aiohttp>=3.14.5`
   floor. The Gateway's disabled-compression path supports the seasoned 3.14.4
   release; both declared extras now admit it without bypassing the seven-day

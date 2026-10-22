@@ -181,6 +181,10 @@ connector checks exact fields, its deployment-selected fleet/Gateway/slot and
 expiry before invoking the handler. Client headers, body and query remain
 untrusted application input, never identity. No caller token, proof, cookie,
 key reference or credential is forwarded.
+Malformed or wrong-owner context refuses the channel. A structurally valid
+context that expires in transit instead fails only that request with
+`caller-context-expired`; unrelated active handlers and the channel remain live.
+Lost or failed mutations still report `outcome-unknown`, not permission to retry.
 
 Constructing a context object does not authenticate it or create an offline
 permit. There is no public HTTP handler endpoint to trust a serialized copy.

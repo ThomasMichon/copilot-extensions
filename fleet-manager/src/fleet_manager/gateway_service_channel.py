@@ -295,7 +295,8 @@ class Channel:
         elif kind == "error":
             shape(value, {"type", "id", "code"})
             check(value["code"] in ("backend-unavailable", "backend-timeout",
-                                     "response-limit", "invalid-backend-response"))
+                                     "response-limit", "invalid-backend-response",
+                                     "caller-context-expired"))
             pending.fail("outcome-unknown" if pending.method not in
                          ("GET", "HEAD", "OPTIONS") else value["code"],
                          504 if value["code"] == "backend-timeout" else 502)

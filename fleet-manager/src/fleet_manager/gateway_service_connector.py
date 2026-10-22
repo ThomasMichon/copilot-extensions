@@ -177,7 +177,8 @@ class ServiceConnector:
         except (aiohttp.ClientError, OSError):
             await send(ws, {"type": "error", "id": exchange.id, "code": "backend-unavailable"})
         except TransportError as exc:
-            code = "response-limit" if exc.code == "response-limit" else "invalid-backend-response"
+            code = (exc.code if exc.code in {"response-limit", "caller-context-expired"}
+                    else "invalid-backend-response")
             await send(ws, {"type": "error", "id": exchange.id, "code": code})
     async def _response(
         self, ws: aiohttp.ClientWebSocketResponse, session: aiohttp.ClientSession,

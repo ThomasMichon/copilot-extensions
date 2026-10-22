@@ -97,7 +97,6 @@ class HandlerBinding:
         context = CallerContext.parse(value)
         check((context.fleet, context.gateway, context.slot)
               == (self.fleet, self.gateway, slot), "caller-context-owner-mismatch")
-        check(context.expires_at > time.time(), "caller-context-expired")
         return context
 
 
@@ -106,6 +105,7 @@ async def respond(
     binding: HandlerBinding, request: ServiceRequest,
 ) -> None:
     """One bounded response, using the same channel ACK/backpressure contract."""
+    check(request.context.expires_at > time.time(), "caller-context-expired")
     try:
         response = await binding.handle(request)
     except (TransportError, OSError, asyncio.TimeoutError):

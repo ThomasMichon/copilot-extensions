@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import FrozenInstanceError
+from types import SimpleNamespace
 
 import pytest
 
@@ -14,7 +15,7 @@ from fleet_manager.gateway_service_handler import (
 )
 from gateway_service_transport_fixtures import eventually, running
 from test_gateway_service_policy import Harness
-from test_runtime_identity import NOW
+from test_runtime_identity import NOW, pair
 
 
 async def connect_handler(rig, handle, *, fleet="fleet-a", gateway="gateway-a"):
@@ -247,13 +248,82 @@ def test_context_schema_and_binding_refuse_before_handler(change):
         binding.context(dict(context, **change), "service-a")
 
 
-def test_expired_context_refuses_before_handler():
+def test_structural_context_parse_does_not_expire_the_shared_channel():
     async def unused(request):
         raise AssertionError("not invoked")
     binding = HandlerBinding("fleet-a", "gateway-a", unused)
-    with pytest.raises(TransportError, match="caller-context-expired"):
-        binding.context({"fleet": "fleet-a", "gateway": "gateway-a", "slot": "service-a",
-                         "principal": "caller-a", "expires_at": 1}, "service-a")
+    context = binding.context({
+        "fleet": "fleet-a", "gateway": "gateway-a", "slot": "service-a",
+        "principal": "caller-a", "expires_at": 1}, "service-a")
+    assert context.expires_at == 1
+
+
+@pytest.mark.parametrize("method", ["GET", "POST"])
+def test_expiry_in_transit_refuses_one_request_not_other_active_handlers(
+    tmp_path, monkeypatch, method,
+):
+    async def scenario():
+        async with running(tmp_path) as rig:
+            rig.h.document["callers"].append({
+                "principal": "caller-b", "key_source": "caller-a",
+                "slots": ["service-a"], "methods": ["GET", "POST"],
+            })
+            await rig.update()
+            clock = [rig.h.clock.value]
+            monkeypatch.setattr("fleet_manager.gateway_service_handler.time",
+                                SimpleNamespace(time=lambda: clock[0]))
+            access = rig.access
+
+            def selected_access(subject, key):
+                if subject != "caller-b":
+                    return access(subject, key)
+                return pair(
+                    (rig.h.keys[0], rig.h.keys[key]), SimpleNamespace(nonce="unused"),
+                    now=rig.h.clock.value,
+                    access={"sub": subject, "exp": rig.h.clock.value + 5})[0]
+
+            rig.access = selected_access
+            started, release, stopped = asyncio.Event(), asyncio.Event(), asyncio.Event()
+            received = []
+
+            async def handle(request):
+                received.append(request.context.principal)
+                started.set()
+                try:
+                    await release.wait()
+                    return ServiceResponse(200, body=b"still-valid")
+                finally:
+                    stopped.set()
+
+            connector = await connect_handler(rig, handle)
+            valid = asyncio.create_task(rig.request("/api/hold"))
+            try:
+                await asyncio.wait_for(started.wait(), 3)
+                # The Gateway's clock still admits this caller; it expires in transit.
+                clock[0] += 10
+                selected = await rig.auth("/api", method, subject="caller-b")
+                async with rig.session.request(
+                    method, rig.origin + "/api", headers=selected,
+                ) as response:
+                    assert response.status == 502
+                    assert await response.json() == {
+                        "error": "caller-context-expired" if method == "GET" else "outcome-unknown"}
+                assert connector.connected.is_set()
+                assert not rig.tasks[-1].done()
+                assert not stopped.is_set()
+                assert received == ["caller-a"]
+                release.set()
+                async with await valid as response:
+                    assert response.status == 200
+                    assert await response.read() == b"still-valid"
+                assert connector.connected.is_set()
+                async with await rig.request() as response:
+                    assert response.status == 200
+            finally:
+                release.set()
+                valid.cancel()
+                await asyncio.gather(valid, return_exceptions=True)
+    asyncio.run(scenario())
 
 
 def test_connector_requires_exactly_one_explicit_backend():
