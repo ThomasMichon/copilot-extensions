@@ -50,16 +50,35 @@ def owner(tmp_path, monkeypatch):
         assert options == {"max_capture": 65536}
         args = tuple(argv[5 + len(selected):])
         calls.append(args)
-        value = values[args]
-        if isinstance(value, bytes):
-            return value
-        return (value if isinstance(value, str) else json.dumps(value)).encode("utf-8")
+        assert args == ("record", "--cwd", str((worktree / "nested").resolve()), "--json")
+        return owner_response(values)
 
     monkeypatch.setattr(workspace, "run_command", read)
     return {
         "values": values, "calls": calls, "selected": selected, "anchor": anchor,
         "root": worktree, "cwd": str(worktree / "nested"),
     }
+
+
+def owner_response(values):
+    rows = values[("list", "--json", "--cache-only", "--worktree-id", "worktree-1")]
+    if isinstance(rows, bytes):
+        return rows
+    rows = copy.deepcopy(rows["worktrees"])
+    row = rows[0] if len(rows) == 1 else rows
+    if isinstance(row, dict):
+        row["head"] = values[("head-session", "--worktree-id", "worktree-1", "--json")]
+    anchor = values[("get", "repo-dir")]
+    root = values[("get", "worktree-dir")] or anchor
+    context = {
+        "schema": "agent-worktrees.workspace-context", "version": 1, "project": "sample",
+        "anchor": anchor, "root": root,
+        "identity": values[("get", "execution-identity")] if root == anchor else None,
+        "worktree": None if root == anchor else row,
+    }
+    if values[("get", "owner-ref")] != "example-space/sample/worktree-1":
+        context["project"] = "other"
+    return json.dumps({"ok": True, "version": 1, "context": context}).encode("utf-8")
 
 
 def resolve(owner, session="startup-1"):
@@ -89,7 +108,7 @@ def test_worktree_identity_survives_sessions_and_label_changes_without_adoption(
     }
     assert "actor" not in first and not first["native_listening_verified"] and not first["mutations_performed"]
     assert Path.cwd() == before
-    assert len(owner["calls"]) == 10 and not list(owner["root"].glob("*.json"))
+    assert len(owner["calls"]) == 2 and not list(owner["root"].glob("*.json"))
     assert ("get", "execution-identity") not in owner["calls"]
 
 
@@ -103,9 +122,7 @@ def test_anchor_segments_startup_session_and_never_queries_a_synthetic_head(owne
     assert first["participant"]["id"] == "startup-1"
     assert second["participant"]["id"] == "startup-2"
     assert first["head"] is None and first["owner_ref"] is None and first["display_name"] is None
-    assert owner["calls"] == [
-        ("get", key) for _ in range(2) for key in ("repo-dir", "worktree-dir", "execution-identity")
-    ]
+    assert owner["calls"] == [("record", "--cwd", str(Path(owner["cwd"]).resolve()), "--json")] * 2
     values[("get", "worktree-dir")] = str(owner["root"])
     assert resolve(owner) == first
 
@@ -224,12 +241,12 @@ def test_unresolved_or_inconsistent_owner_evidence_refuses_without_fallback(owne
 
 
 def test_workspace_reads_share_one_finite_deadline(owner, monkeypatch):
-    instants = iter([10, 11, 12, 71])
+    instants = iter([10, 11, 71])
     monkeypatch.setattr(workspace.time, "monotonic", lambda: next(instants))
     with pytest.raises(ClientError) as caught:
         resolve(owner)
     assert caught.value.code == "workspace_timeout"
-    assert owner["calls"] == [("get", "repo-dir")]
+    assert owner["calls"] == [("record", "--cwd", str(Path(owner["cwd"]).resolve()), "--json")]
 
 
 def test_late_owner_response_cannot_turn_deadline_expiry_into_success(owner, monkeypatch):
@@ -238,7 +255,7 @@ def test_late_owner_response_cannot_turn_deadline_expiry_into_success(owner, mon
     with pytest.raises(ClientError) as caught:
         resolve(owner)
     assert caught.value.code == "workspace_timeout"
-    assert owner["calls"] == [("get", "repo-dir")]
+    assert owner["calls"] == [("record", "--cwd", str(Path(owner["cwd"]).resolve()), "--json")]
 
 
 @pytest.mark.parametrize("selected", [None, [], ["agent-worktrees"], ["selected.ps1"]])
@@ -308,14 +325,13 @@ def test_installed_workspace_uses_trusted_cwd_and_selected_owner_without_source_
     monkeypatch.setenv("COPILOT_AGENT_SESSION_ID", "not-the-host-initialization")
     script = installed_chat.root / "selected_owner.py"
     fixture = installed_chat.root / "owner.json"
-    fixture.write_text(json.dumps({json.dumps(list(k)): v for k, v in owner["values"].items()}), encoding="utf-8")
+    fixture.write_bytes(owner_response(owner["values"]))
     script.write_text(
         "import json,os,sys\nfrom pathlib import Path\n"
         "assert Path.cwd()==Path(sys.argv[2])\n"
         "assert 'PYTHONPATH' not in os.environ\n"
-        "values=json.loads(Path(sys.argv[1]).read_text('utf-8'))\n"
-        "value=values[json.dumps(sys.argv[3:])]\n"
-        "print(value if isinstance(value,str) else json.dumps(value))\n",
+        "assert sys.argv[3:]==['record','--cwd',str(Path.cwd()),'--json']\n"
+        "print(Path(sys.argv[1]).read_text('utf-8'))\n",
         encoding="utf-8",
     )
     request = {

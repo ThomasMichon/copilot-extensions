@@ -140,7 +140,7 @@ def test_offline_status_and_capability_never_execute_provider_or_network(tmp_pat
 def test_actual_installed_cli_death_releases_reader_lock_before_outer_cleanup(
     rpc_endpoint, tmp_path, installed_chat, fixed_rpc_provider, caller_observer,
 ):
-    from agent_procutil import no_window_kwargs, spawn_sync_in_kill_on_close_job
+    from agent_procutil import direct_python, no_window_kwargs, spawn_sync_in_kill_on_close_job
 
     path = configuration(tmp_path, rpc_endpoint.endpoint)
     config = json.loads(path.read_text("utf-8"))
@@ -185,8 +185,11 @@ runpy.run_path(original,run_name="__main__")
     rpc_endpoint.state.mode = "hold-read"
     environment = dict(os.environ)
     environment.pop("PYTHONPATH", None)
+    executable, extra_environment = direct_python(str(installed_chat.interpreter))
+    environment.update(extra_environment)
+    # Crash the installed CLI interpreter, not a Windows venv/console redirector.
     process, job = spawn_sync_in_kill_on_close_job(
-        [*command, "read", "room"],
+        [executable, "-I", "-m", "agent_chat_service.cli", "--config", str(path), "read", "room"],
         require_job=True, allow_breakaway=False, env=environment, cwd=tmp_path,
         stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         **no_window_kwargs(),
@@ -200,7 +203,7 @@ runpy.run_path(original,run_name="__main__")
             f"provider_entered={(tmp_path / 'provider-entry').exists()}; "
             f"provider_ready={bool(caller_observer._read(tmp_path / 'provider.json'))}; "
             f"leaf_ready={bool(caller_observer._read(tmp_path / 'leaf.json'))}; "
-            f"descendant_pids={[child.pid for child in caller_observer.psutil.Process(process.pid).children(recursive=True)]}."
+            f"descendants={[(child.pid, child.name(), child.ppid(), child.cmdline()) for child in caller_observer.psutil.Process(process.pid).children(recursive=True)]}."
         )
         def ready():
             records = [

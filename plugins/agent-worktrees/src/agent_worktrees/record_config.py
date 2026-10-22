@@ -22,13 +22,13 @@ def _mapping(path: Path) -> dict:
     return value
 
 
-def metadata_project(explicit: str | None) -> str | None:
+def metadata_project(explicit: str | None, *, cwd: Path | None = None) -> str | None:
     """Resolve the metadata project from an explicit name or Git marker files."""
     if explicit:
         return explicit
     from .front_door_cli import _reverse_lookup_project, _safe_cwd
 
-    cwd = _safe_cwd()
+    cwd = cwd if cwd is not None else _safe_cwd()
     if cwd is None:
         return None
     for root in (cwd, *cwd.parents):
@@ -56,8 +56,8 @@ def metadata_project(explicit: str | None) -> str | None:
     return None
 
 
-def configured_repositories(project: str) -> frozenset[str]:
-    """Read declared membership without loading repository policy or Git."""
+def configured_repository_paths(project: str) -> dict[str, Path]:
+    """Read declared anchors without loading repository policy or Git."""
     from .config_dropins import read_operator_config_fragments
 
     root = cfg.project_dir(project)
@@ -76,7 +76,7 @@ def configured_repositories(project: str) -> frozenset[str]:
         raise ValueError("Project repositories must be a mapping")
     registry = repos.read_registry(strict=True)
     names = {project, *declared}
-    configured = set()
+    configured = {}
     for name in names:
         entry = declared.get(name, {})
         if not isinstance(name, str) or not isinstance(entry, dict):
@@ -85,8 +85,14 @@ def configured_repositories(project: str) -> frozenset[str]:
         if anchor is not None and (not isinstance(anchor, str) or not anchor):
             raise ValueError(f"Invalid repository anchor for {name!r}")
         registered = registry.repos.get(name)
-        if anchor or (registered is not None and registered.local_path(platform)):
-            configured.add(name)
+        path = anchor or (registered.local_path(platform) if registered is not None else None)
+        if path:
+            configured[name] = Path(path).resolve()
     if project not in configured:
         raise ValueError(f"No repository configured for active project {project!r}")
-    return frozenset(configured)
+    return configured
+
+
+def configured_repositories(project: str) -> frozenset[str]:
+    """Read declared membership without loading repository policy or Git."""
+    return frozenset(configured_repository_paths(project))

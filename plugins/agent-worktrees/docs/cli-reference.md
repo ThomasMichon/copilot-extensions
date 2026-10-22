@@ -124,6 +124,32 @@ underlying diagnostic, not an unstructured traceback.
 Registered bare anchors and their linked worktrees resolve the common Git
 directory itself before considering a non-bare checkout's parent.
 
+### Trusted initialization directory
+
+The mutually exclusive `record --cwd <absolute-directory> --json` form resolves
+an existing checkout in the selected project without enrolling it, contacting
+the resident, starting a service or changing its head. It checks the actual Git
+marker's registered project, finds an existing project-scoped tracking record,
+then strictly re-reads that exact record and verifies its repository and root.
+An untracked linked checkout, a foreign project, a disappeared record or a
+nested untracked checkout refuses; there is no cross-project or anchor fallback.
+
+Success is `{"version":1,"ok":true,"context":{...}}`. The context has schema
+`agent-worktrees.workspace-context`, version1, `project`, `anchor`, `root`,
+`identity` and `worktree`. For a tracked checkout, `identity` is null and
+`worktree` extends the ordinary record projection with `codename` and `head`.
+The head's session, state, monotonic revision and pending-handoff ordinals derive
+from the same parsed record, using existing asserted-head semantics, not a live
+session scan or another stored pointer. Colliding IDs in another project are
+never consulted. Consumers must still treat the observation as potentially
+stale, not a lease or mutation authority.
+
+At the configured anchor, `worktree` is null and `identity` comes from the
+existing configured execution-identity reader. An unavailable configured
+identity remains unavailable; it is not replaced with a detected hostname or
+synthetic worktree. This read performs no Chat assignment, membership or native
+admission. The exact `--worktree-id` response below remains unchanged.
+
 Success exits zero with `{"version":1,"ok":true,"worktree":{...}}`.
 The worktree contains `id`, `repo`, `path`, `branch`, `creation_nonce`, `status`,
 `session_count`, `last_session_id`, `sessions_indexed`, `execution_leg`,

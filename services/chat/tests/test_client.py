@@ -400,20 +400,22 @@ def test_new_definitive_refusal_does_not_leave_an_unknown_post(pair):
 
 
 def test_local_reader_lock_is_shared_and_crash_released(pair, tmp_path):
-    from agent_procutil import no_window_kwargs, spawn_sync_in_kill_on_close_job
+    from agent_procutil import direct_python, no_window_kwargs, spawn_sync_in_kill_on_close_job
 
     client, _, _ = pair
     lock = client.directory / "reader.lock"
     ready = tmp_path / "ready"
     code = (
         "from agent_chat_service.client import reader_lock; from pathlib import Path; "
-        "import sys,time\n"
+        "import json,os,sys,time\n"
         "with reader_lock(Path(sys.argv[1])):\n"
-        " Path(sys.argv[2]).write_text('ready'); time.sleep(30)\n"
+        " Path(sys.argv[2]).write_text(json.dumps({'pid':os.getpid(),'prefix':sys.prefix})); time.sleep(30)\n"
     )
+    executable, extra_environment = direct_python(sys.executable)
     process, job = spawn_sync_in_kill_on_close_job(
-        [sys.executable, "-c", code, str(lock), str(ready)],
+        [executable, "-c", code, str(lock), str(ready)],
         require_job=True, allow_breakaway=False,
+        env={**os.environ, **extra_environment},
         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
         **no_window_kwargs(),
     )
@@ -422,6 +424,9 @@ def test_local_reader_lock_is_shared_and_crash_released(pair, tmp_path):
         while not ready.exists():
             assert time.monotonic() < deadline and process.poll() is None
             time.sleep(.01)
+        holder = json.loads(ready.read_text())
+        assert holder["pid"] == process.pid
+        assert Path(holder["prefix"]).resolve() == Path(sys.prefix).resolve()
         with pytest.raises(ClientError) as caught:
             client.read("room", io.StringIO())
         assert caught.value.code == "reader_busy"

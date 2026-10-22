@@ -359,12 +359,17 @@ anchor/standalone fallback. No owner output or stderr is reflected in errors.
 The version-1 `agent-chat.workspace-context` reports a participant tuple
 `{machine, repo, kind, id}`. For a real tracked worktree, `id` is the worktree
 ID, stable across startup sessions; `display_name` is the separately observed
-friendly codename, or null when absent. The existing qualified `get owner-ref`
-and exact cached tracking row must agree on execution owner, repository,
-worktree ID and actual path. Versioned execution-space metadata must be complete
+friendly codename, or null when absent. The selected Worktrees command must
+support `record --cwd <absolute-directory> --json`, with the version-1
+`agent-worktrees.workspace-context` contract. This is one bounded owner read:
+the owner checks the actual registered project and existing tracking record,
+then projects identity and asserted head from the same strict record read.
+The client validates project, path, execution tuple, label and head without
+calling legacy enrolling inference, resident-backed `list`, or the global
+`head-session` lookup. Versioned execution-space metadata must be complete
 and platform-consistent; physical-host naming never replaces its execution owner.
 For an anchor checkout, `kind` is `anchor` and `id` is the startup session ID;
-the owner's versioned configured `get execution-identity` contract supplies
+the owner's included versioned configured execution-identity contract supplies
 machine/repository authority. There is no synthetic managed-worktree owner or
 head lookup. An owner without that anchor capability refuses explicitly;
 ordinary tracked worktrees do not require it.

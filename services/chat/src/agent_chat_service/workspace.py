@@ -73,23 +73,34 @@ def resolve_workspace(*, worktrees_command, session_id, cwd):
         except (ChatError, ValueError, UnicodeError):
             _refuse("workspace_response_invalid")
 
-    anchor = _directory(read("get", "repo-dir"), "workspace_unresolved")
-    worktree_text = read("get", "worktree-dir")
-    root = _directory(worktree_text, "workspace_unresolved") if worktree_text else anchor
+    response = read("record", "--cwd", str(directory), "--json", structured=True)
+    if (not isinstance(response, dict) or response.get("ok") is not True
+            or type(response.get("version")) is not int or response["version"] != 1):
+        _refuse("workspace_response_invalid")
+    context = response.get("context")
+    if (not isinstance(context, dict)
+            or context.get("schema") != "agent-worktrees.workspace-context"
+            or type(context.get("version")) is not int or context["version"] != 1
+            or not _key(context.get("project"))):
+        _refuse("workspace_response_invalid")
+    anchor = _directory(context.get("anchor"), "workspace_unresolved")
+    root = _directory(context.get("root"), "workspace_unresolved")
     if not directory.is_relative_to(root):
         _refuse()
     label = None
     head = None
     owner_ref = None
     if root == anchor:
-        identity = read("get", "execution-identity", structured=True)
+        identity = context.get("identity")
         if (not isinstance(identity, dict)
+                or context.get("worktree") is not None
                 or identity.get("schema") != "agent-worktrees.execution-identity"
                 or type(identity.get("version")) is not int or identity["version"] != 1
                 or identity.get("status") != "ready" or identity.get("configured") is not True
                 or not isinstance(identity.get("source"), str)
                 or identity["source"] not in {"project-machine-config", "global-machine-config"}
                 or not all(_key(identity.get(key)) for key in ("machine", "project"))
+                or identity["project"] != context["project"]
                 or _platform(identity.get("platform")) is None):
             _refuse()
         participant = {
@@ -97,21 +108,10 @@ def resolve_workspace(*, worktrees_command, session_id, cwd):
             "kind": "anchor", "id": session_id,
         }
     else:
-        owner_ref = read("get", "owner-ref")
-        parts = owner_ref.split("/")
-        if len(parts) != 3 or not all(_key(part) for part in parts):
-            _refuse()
-        worktree_id = parts[2]
-        participant = {"machine": parts[0], "repo": parts[1], "kind": "worktree", "id": worktree_id}
-        listing = read("list", "--json", "--cache-only", "--worktree-id", worktree_id,
-                       structured=True)
-        if (not isinstance(listing, dict) or type(listing.get("version")) is not int
-                or listing["version"] != 1 or not isinstance(listing.get("worktrees"), list)
-                or len(listing["worktrees"]) != 1):
-            _refuse("workspace_response_invalid")
-        row = listing["worktrees"][0]
+        row = context.get("worktree")
         if not isinstance(row, dict):
             _refuse("workspace_response_invalid")
+        worktree_id = row.get("id")
         row_owner = row.get("machine")
         tuple_fields = {"machine_identity_version", "environment", "execution_machine"}
         if tuple_fields & row.keys():
@@ -121,15 +121,19 @@ def resolve_workspace(*, worktrees_command, session_id, cwd):
                     or _platform(row.get("environment")) != _platform(row.get("platform"))):
                 _refuse()
             row_owner = row["execution_machine"]
-        if (row.get("id") != worktree_id or row_owner != participant["machine"]
-                or row.get("repo") != participant["repo"]
+        if (not _key(worktree_id) or not _key(row_owner)
+                or row.get("repo") != context["project"]
                 or _platform(row.get("platform")) is None
                 or _directory(row.get("path"), "workspace_unresolved") != root):
             _refuse()
+        participant = {
+            "machine": row_owner, "repo": row["repo"], "kind": "worktree", "id": worktree_id,
+        }
+        owner_ref = "/".join((row_owner, row["repo"], worktree_id))
         label = row.get("codename")
         if label is not None and (not isinstance(label, str) or _LABEL.fullmatch(label) is None):
             _refuse("workspace_response_invalid")
-        observed = read("head-session", "--worktree-id", worktree_id, "--json", structured=True)
+        observed = row.get("head")
         if (not isinstance(observed, dict) or type(observed.get("version")) is not int
                 or not {"head_session", "state"} <= observed.keys()
                 or observed["version"] != 1 or observed.get("worktree_id") != worktree_id
