@@ -301,13 +301,18 @@ authorizes critical main-path acceptance or a bounded administrative change.
   diagnostics and bounded step/child execution (#7768). Actual source CI
   retains every scanner and completes the group in 25 seconds. Local paired
   timing is not controlled hosted whole-flow acceptance or a CPU-work reduction.
-- [ ] Land bounded, invocation-local dependency source-tree reuse, retaining
+- [x] Land bounded, invocation-local dependency source-tree reuse, retaining
   every evidence read, changed-input reparse, path/identity/closure check and
-  failure. Prove equivalent attribution and actual required CI; keep local
-  attribution timing separate from full live metadata and pipeline timing.
+  failure (#7845). Equivalent attribution and current required CI pass; the
+  actual all-ecosystem guard audits 332 declarations with zero violations.
+  Local phase timing is not full live metadata or pipeline timing.
 - [ ] Remove redundant release-shaped PR and main-push validation only where
   existing trusted gates and exact-SHA release evidence cover the removed work;
   first prove no generated-output coverage or required context is lost.
+- [ ] Land and observe bounded asyncio ancestry-map reduction, preserving
+  every file read/parse, path validation, handler classification and ordered
+  diagnostic/list output. Local paired comparisons alone do not close
+  hosted or whole-flow acceptance.
 - [x] Consolidate main-PR admission into its existing trusted reminder
   invocation: release and prove admission and generated-content identifier
   scanning first, then remove legacy CI allocation while retaining full

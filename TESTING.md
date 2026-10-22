@@ -57,6 +57,13 @@ Native subprocess regressions live in `tools/test_source_ast_guards.py`; they
 prove real three-process overlap and joined failure diagnostics rather than
 admitting process effects into the unit-only release packet.
 
+The asyncio scanner still reads and parses every selected source file. Each
+mode enumerates matching calls once in breadth-first order and builds a parent
+map only for files containing those calls. This changes no file selection,
+handler classification, diagnostic ordering or read/path-error behavior.
+`tools/test_check_asyncio_timeout_handlers.py` covers both verification and
+listing, including no-call files and invalid inputs.
+
 `tools/run-promotion-unit-tests.py` executes only the exact nodes declared by
 `tools/promotion-unit-manifest.json`, in one Python process with coverage.
 The packet lives in `tools/promotion_unit_tests/`, independent of mixed
