@@ -626,6 +626,9 @@ function Invoke-VersionedActivate {
         }
         $legacyVenv = Join-Path $InstallDir '.venv'
         if ((Test-Path $legacyVenv) -and -not (Test-VenvIsLink $legacyVenv)) {
+            if ($RequireGracefulCutover) {
+                throw 'Required graceful cutover cannot migrate a real legacy .venv without stopping residents; no process stop attempted.'
+            }
             Write-Step 'Releasing legacy .venv for versioned migration (stopping coordinator + supervisor)...'
             try { Stop-DispatchProcess -Subcommand serve | Out-Null } catch {}
             try { Retire-SupervisorProcesses | Out-Null } catch {}
@@ -4006,8 +4009,12 @@ function Invoke-CoordinatorCutover {
             ($out -split "`n" | Where-Object { $_.Trim().StartsWith('{') } | Select-Object -Last 1)
         }
         if ($jsonLine) {
-            $value = (ConvertFrom-Json $jsonLine).ok
-            $ok = if ($RequireGracefulCutover) { $value -is [bool] -and $value } else { [bool]$value }
+            $decoded = ConvertFrom-Json $jsonLine
+            $value = $decoded.ok
+            $ok = if ($RequireGracefulCutover) {
+                $jsonLine.TrimStart().StartsWith('{') -and
+                $decoded -is [PSCustomObject] -and $value -is [bool] -and $value
+            } else { [bool]$value }
         }
     } catch { $ok = $false }
     if (($RequireGracefulCutover -and $ok -and $rc -eq 0) -or

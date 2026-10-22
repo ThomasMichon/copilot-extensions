@@ -179,6 +179,8 @@ def _fake_python(tmp_path: Path, output: str, rc: int, routed: bool) -> Path:
     ("not json", 0, False),
     ('{"other":true}', 0, False),
     ('{"ok":false}\n{"ok":true}', 0, False),
+    ('[{"ok":true}]', 0, False),
+    ('[{"ok":true},{"ok":true}]', 0, False),
 ])
 def test_required_cutover_requires_explicit_boolean_success_and_zero_exit(
     tmp_path: Path, shell: str, output: str, rc: int, accepted: bool,
@@ -224,3 +226,27 @@ def test_posix_required_cutover_rejects_missing_route_without_start(tmp_path: Pa
     ])
     result = _run(tmp_path, "sh", script)
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_powershell_required_cutover_rejects_real_legacy_venv_before_stop(tmp_path: Path) -> None:
+    (tmp_path / ".venv").mkdir()
+    script = "\n".join([
+        "$ErrorActionPreference = 'Stop'",
+        "$RequireGracefulCutover = $true; $VersionedRuntime = $true; $Force = $false",
+        f"$InstallDir = '{tmp_path}'; $SrcVersion = '1.0.0'",
+        "$script:GlobalActivationLockTimeoutSeconds = 1",
+        "function Assert-SourceRuntime {}",
+        "function Get-VersionedCurrent { return '1.0.0' }",
+        "function Test-VenvIsLink { param($path) return $false }",
+        "function Test-VersionLt { param($A,$B) return $false }",
+        "function Enter-PluginSnapshotLock { return [Threading.Mutex]::new($true) }",
+        "function Write-Step { param($m) Write-Host $m }",
+        "function Stop-DispatchProcess { param($Subcommand) Write-Host 'UNSAFE-STOP' }",
+        "function Retire-SupervisorProcesses { Write-Host 'UNSAFE-RETIRE' }",
+        ps_function("Invoke-VersionedActivate"),
+        "try { Invoke-VersionedActivate; exit 99 } catch { Write-Host $_.Exception.Message; exit 1 }",
+    ])
+    result = _run(tmp_path, "ps1", script)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "no process stop attempted" in result.stdout
+    assert "UNSAFE-" not in result.stdout
