@@ -287,19 +287,30 @@ def test_enqueue_after_empty_scan_before_release_cannot_lose_wakeup(area, monkey
     assert workers[0].wait(timeout=10) == 0
 
 
-@pytest.mark.parametrize("failure", ["boot", "executor"])
+@pytest.mark.parametrize("failure", [
+    "boot", "executor",
+    pytest.param("ignored-sigchld", marks=pytest.mark.skipif(os.name == "nt", reason="POSIX signal")),
+    pytest.param("custom-sigchld", marks=pytest.mark.skipif(os.name == "nt", reason="POSIX signal")),
+    pytest.param("unreaped", marks=pytest.mark.skipif(os.name == "nt", reason="POSIX custody")),
+])
 def test_failed_worker_admission_never_acknowledges_startup(area, failure):
     root = area / "state"
     request = enqueue(RequestSpec("fixture"), runner=runner(area), root=root)
     reason = "boot_identity_unavailable" if failure == "boot" else "executor_unavailable"
-    setup = (
-        "from update_driver import boot; "
-        "boot.kernel_boot_identity=lambda: (_ for _ in ()).throw(OSError('synthetic')); "
-        if failure == "boot" else
-        "from agent_procutil import owned_process; "
-        "owned_process.require_caller_owned_support="
-        "lambda: (_ for _ in ()).throw(OSError('synthetic')); "
-    )
+    setup = {
+        "boot": (
+            "from update_driver import boot; "
+            "boot.kernel_boot_identity=lambda: (_ for _ in ()).throw(OSError('synthetic')); "
+        ),
+        "executor": (
+            "from agent_procutil import owned_process; "
+            "owned_process.require_caller_owned_support="
+            "lambda: (_ for _ in ()).throw(OSError('synthetic')); "
+        ),
+        "ignored-sigchld": "import signal; signal.signal(signal.SIGCHLD,signal.SIG_IGN); ",
+        "custom-sigchld": "import signal; signal.signal(signal.SIGCHLD,lambda *_args: None); ",
+        "unreaped": "import os; delattr(os,'WNOWAIT'); ",
+    }[failure]
     script = (
         "import sys; from pathlib import Path; from update_driver import drain; "
         + setup +
@@ -312,7 +323,8 @@ def test_failed_worker_admission_never_acknowledges_startup(area, failure):
         )
     result = status(request.id, root=root)
     assert result.state == "pending" and result.started_at is None and result.boot_id is None
-    assert result.error == f"worker admission failed: {reason}:OSError"
+    kind = "OSError" if failure in ("boot", "executor") else "RuntimeError"
+    assert result.error == f"worker admission failed: {reason}:{kind}"
     assert not list(root.glob(".worker-started-*"))
     with pytest.raises(SpawnError, match=reason):
         wait(request.id, root=root)

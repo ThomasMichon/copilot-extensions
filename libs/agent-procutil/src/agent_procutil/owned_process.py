@@ -388,16 +388,7 @@ def _run_owned(
     if inherit_process_group:
         require_contained_worker()
     if not windows:
-        if sys.platform == "darwin":
-            from agent_procutil._darwin_caller_owned import _waitid
-
-            _waitid()
-        elif not all(hasattr(os, name) for name in (
-            "waitid", "P_PID", "WEXITED", "WNOHANG", "WNOWAIT",
-        )):
-            raise RuntimeError("native child execution requires unreaped POSIX custody")
-    if not windows and signal.getsignal(signal.SIGCHLD) != signal.SIG_DFL:
-        raise RuntimeError("native child custody requires the default SIGCHLD disposition")
+        _require_posix_execution_support()
     deadline = time.monotonic() + timeout
     bounded_windows = windows and capture_limits is not None
     spawn = spawn_sync_in_kill_on_close_job
@@ -484,11 +475,25 @@ def run_owned(
     )
 
 
+def _require_posix_execution_support() -> None:
+    if sys.platform == "darwin":
+        from agent_procutil._darwin_caller_owned import _waitid
+
+        _waitid()
+    elif not all(hasattr(os, name) for name in (
+        "waitid", "P_PID", "WEXITED", "WNOHANG", "WNOWAIT",
+    )):
+        raise RuntimeError("native child execution requires unreaped POSIX custody")
+    if signal.getsignal(signal.SIGCHLD) != signal.SIG_DFL:
+        raise RuntimeError("native child custody requires the default SIGCHLD disposition")
+
+
 def require_caller_owned_support() -> None:
     """Validate native observation before accepting effects into a durable worker."""
     if os.name != "nt":
         from agent_procutil._caller_owned import _require_posix_support
 
+        _require_posix_execution_support()
         _require_posix_support()
 
 
