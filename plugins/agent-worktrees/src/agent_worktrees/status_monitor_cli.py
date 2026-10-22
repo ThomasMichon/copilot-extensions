@@ -764,7 +764,6 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                         published_lock = _start_request_surfaces()
                         if published_lock:
                             _locks.write_lock(lock, extra=_lock_extra())
-                wake_event.set()
             if self_retire_generation is None:
                 self_retire_generation = active_generation
                 if self_retire_generation is None and runtime_superseded():

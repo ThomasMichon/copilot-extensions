@@ -4161,7 +4161,7 @@ def _elect_monitor_for_one_iteration(monkeypatch):
     monkeypatch.setattr(self_retire, "is_superseded", lambda *args: next(retired))
 
 
-@pytest.mark.parametrize("first_failure", ["sqlite", "election"])
+@pytest.mark.parametrize("first_failure", ["sqlite", "election", "persistent"])
 def test_status_monitor_does_not_acknowledge_failed_authority_and_retries_before_sweep(
     tmp_path, monkeypatch, first_failure,
 ):
@@ -4189,7 +4189,7 @@ def test_status_monitor_does_not_acknowledge_failed_authority_and_retries_before
 
     def fail_once(store, **kwargs):
         attempts.append(store.generation)
-        if len(attempts) == 1 and first_failure == "sqlite":
+        if first_failure == "persistent" or (len(attempts) == 1 and first_failure == "sqlite"):
             raise sqlite3.OperationalError("fixture authority locked")
         return activate(store, **kwargs)
 
@@ -4228,7 +4228,21 @@ def test_status_monitor_does_not_acknowledge_failed_authority_and_retries_before
         return 1
 
     monkeypatch.setattr(m, "_monitor_sweep", sweep)
+    waits = []
+    if first_failure == "persistent":
+        def wait(event, interval):
+            waits.append(event.is_set())
+            event.clear()
+            if len(waits) == 2:
+                handles[0]("shutdown", {})
+
+        monkeypatch.setattr(m.status_monitor_cli, "_wake_interruptible_wait", wait)
     assert m.cmd_status_monitor(argparse.Namespace(interval=2, passive=True)) == 0
+    if first_failure == "persistent":
+        assert swept == []
+        assert len(attempts) == 3
+        assert waits == [True, False]
+        return
     assert replies == [
         {"adopted": False, "error": "current-roster authority unavailable"}, {"adopted": True},
     ]
