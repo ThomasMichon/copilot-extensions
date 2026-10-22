@@ -1,0 +1,9 @@
+{
+  "comment": "Run concurrent registration authority test children in explicit UTF-8 mode with matching output decoding.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
