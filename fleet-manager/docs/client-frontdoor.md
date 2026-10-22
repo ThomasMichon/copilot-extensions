@@ -28,6 +28,10 @@ overwrite foreign commands or adopt same-byte replacements. POSIX publishes
 `fleet-manager`; Windows publishes the PowerShell primary `fleet-manager.ps1`
 and `fleet-manager.cmd` compatibility entry point. Invoke these explicit paths;
 PATH integration is not part of this command.
+The PowerShell script carries a UTF-8 BOM for Windows PowerShell 5.1.
+The batch script is ASCII-only and resolves its sibling through `%~dp0`, so
+neither wrapper depends on a code page being able to encode installation or
+command-directory names.
 
 Each command selects the exact completed candidate's interpreter, using
 `-I -S -B` and the canonical slot-local retention bootstrap before importing site

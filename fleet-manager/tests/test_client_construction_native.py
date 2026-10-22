@@ -130,7 +130,11 @@ def test_actual_installed_console_client_state_transitions(
     signed = independently_sign([fixture["proof"]["payload"]], tmp_path)
     fixture["proof"] = {**fixture["proof"], **signed["proofs"][0]}
     fixture["policy"]["keys"][0]["public_key"] = signed["public_key"]
-    root = root_at(tmp_path)
+    client_home = tmp_path
+    if transition == "register-commands":
+        client_home = tmp_path / "client \u00e9\u4e2d"
+        client_home.mkdir(mode=0o700)
+    root = root_at(client_home)
     staging = tmp_path / "cli-stage"
     staging.mkdir(mode=0o700)
     values = {
@@ -180,7 +184,7 @@ def test_actual_installed_console_client_state_transitions(
         assert not activated["frontdoor_registered"] and not activated["live_readiness_verified"]
         assert primitive.current_version(root / construction.NAMESPACE) == reports[2]["candidate"]
         if transition == "register-commands":
-            directory = tmp_path / "registered commands"
+            directory = tmp_path / "registered commands \u00e9\u4e2d"
             directory.mkdir(mode=0o700)
             floor = database_bytes(root)
             result = subprocess.run(

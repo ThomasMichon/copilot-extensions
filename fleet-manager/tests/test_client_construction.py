@@ -121,7 +121,7 @@ def test_owned_wheel_snapshot_stability(tmp_path, signed_wheel):
 @pytest.fixture(scope="module")
 def built_client(tmp_path_factory, signed_wheel):
     fixture = signed_wheel
-    area = tmp_path_factory.mktemp("client lifecycle")
+    area = tmp_path_factory.mktemp("client lifecycle \u00e9\u4e2d")
     root = root_at(area)
     start = time.monotonic()
     with retained(fixture, area) as (staged, trusted):

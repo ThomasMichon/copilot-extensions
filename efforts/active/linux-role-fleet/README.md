@@ -891,3 +891,16 @@ These bounded Windows selections are not a new full Windows-suite claim.
   slice. The broader Phase 2 and Validation Plan remain open, and this
   implementation still needs current-head review, CI and a real merge before
   it is delivered. Release promotion and authorized rollout remain separate.
+
+### 2026-10-22 - Preserve non-ASCII Windows launcher paths
+- Current-head review of #7866 identified a real code-page dependency:
+  Windows PowerShell 5.1 can decode BOM-less script paths as ANSI, and a batch
+  wrapper containing literal UTF-8 paths depends on its active code page.
+  The PowerShell command now has a UTF-8 BOM; the batch command is ASCII-only,
+  using `%SystemRoot%` and its `%~dp0` sibling rather than embedded paths.
+- Native Windows proved independent installed owners and both entry points
+  with non-ASCII installation and command directories, the actual installed
+  lifecycle CLI with those directories, and 18 command ownership/encoding
+  controls. Linux passed all 19 frontdoor, 27 constructor and six native-process
+  cases with the Unicode fixture, plus both package-context builds. The
+  implementation and broader campaign still await their own remaining gates.

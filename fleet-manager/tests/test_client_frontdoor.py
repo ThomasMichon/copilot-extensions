@@ -1,6 +1,7 @@
 """Real created-file registration proofs and installed retained client commands."""
 
 import copy
+import codecs
 import json
 import os
 from pathlib import Path
@@ -69,6 +70,10 @@ def test_created_command_proofs_and_fresh_exact_noop(selected, primitive):
     assert result["commands"] == [str(path) for path in commands]
     assert all(str(construction._python(slot)).encode() in path.read_bytes()
                for path in commands if path.suffix != ".cmd")
+    if os.name == "nt":
+        assert (directory / "fleet-manager.ps1").read_bytes().startswith(codecs.BOM_UTF8)
+        assert (directory / "fleet-manager.cmd").read_bytes().isascii()
+        assert b"%~dp0fleet-manager.ps1" in (directory / "fleet-manager.cmd").read_bytes()
     receipt = construction._read(namespace / frontdoor.REGISTERED)
     workspace = namespace / frontdoor.HISTORY / receipt["publication"]
     publication = primitive._runtime_component("versioned_runtime_publication")
@@ -253,7 +258,7 @@ def test_higher_active_candidate_updates_only_attributed_commands(selected, prim
 @pytest.mark.timeout(90)
 def test_installed_retained_frontdoor_outside_checkout_and_exact_rerun(primitive, built_client, tmp_path):
     root, fixture, staged, trusted, user, floor, _report = built_client
-    directory = command_directory(tmp_path, "client commands")
+    directory = command_directory(tmp_path, "client commands \u00e9\u4e2d")
     activate(root, fixture, staged, trusted)
     program = """
 import json,sys

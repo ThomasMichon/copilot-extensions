@@ -36,16 +36,15 @@ def _commands(directory, slot):
         f"& {quote(python)} -I -S -B {quote(bootstrap)} -m fleet_manager @args\n"
         "exit $LASTEXITCODE\n"
     )
-    powershell = Path(os.environ["SYSTEMROOT"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"
     cmd = (
         "@echo off\r\nsetlocal DisableDelayedExpansion\r\n"
-        f'"{str(powershell).replace("%", "%%")}" -NoProfile -NonInteractive '
-        f'-File "{str(directory / "fleet-manager.ps1").replace("%", "%%")}" %*\r\n'
+        '"%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" '
+        '-NoProfile -NonInteractive -File "%~dp0fleet-manager.ps1" %*\r\n'
         "exit /b %ERRORLEVEL%\r\n"
     )
     return {
-        directory / "fleet-manager.ps1": ps1.encode("utf-8"),
-        directory / "fleet-manager.cmd": cmd.encode("utf-8"),
+        directory / "fleet-manager.ps1": ps1.encode("utf-8-sig"),
+        directory / "fleet-manager.cmd": cmd.encode("ascii"),
     }
 
 
