@@ -207,7 +207,7 @@ release or authorized-rollout gates.
   SSH ACP owner: actual target resolution, eligible controller reflection,
   target-native authority and complete directory arguments before productive
   stdio. Native cross-machine skill acceptance remains in the matrix below.
-- [ ] Close supported headed static-SSH CLI integration through its existing
+- [x] Close supported headed static-SSH CLI integration through its existing
   owner, without introducing another launcher.
 - [x] Resolve the privileged launch's real identity/filesystem context and
   prepare through its supported channel; do not assume it shares the
@@ -335,6 +335,23 @@ on malformed configuration. These are reliability details, not new authority
 or a reason to create a daemon.
 
 ## Journal
+
+### 2026-10-22 - Land headed SSH source and continue release acceptance
+
+- #7920 merged to Dev as `854229f1b7b9bffb226857361b7d73b5e3ae9973`
+  after exact-head Copilot approval and green required CI, including the
+  hosted Linux unit packet. All 15 concrete review threads are resolved.
+  The merge retains both authorship/session provenance trailers.
+- This closes the last Phase 2 source-integration row, not the parent effort
+  or its live acceptance matrix. Same-repository child authority and the HTML
+  relationship atlas remain already completed; they were not replaced by
+  controller-owned payloads during the SSH work.
+- Next: verify publication of this new source, then perform only authorized
+  rollout with effective-running evidence. Trusted-container headed/headless
+  proof, the combined target-user/staged-repository acceptance in both remote
+  venues and modes, and static/SSH/privileged live acceptance remain open.
+  No native session, second account, elevation, updater or productive rollout
+  was authorized or performed by this source milestone.
 
 ### 2026-10-22 - Retire the original pending attachment hold on verified stop
 
