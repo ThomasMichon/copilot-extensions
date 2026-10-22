@@ -47,10 +47,24 @@ The columns are additive. Existing rows receive `startup_complete=false`,
 migration does not infer historical launch completion. Historical unproven
 rows stay blocked pending explicit reconciliation.
 
+The affected residents are the coordinator (`serve`), supervisor daemon
+(`supervise serve`) and its worker-lane supervisors (`supervise`). The existing
+`scripts/install.sh` / `scripts/install.ps1` install/update/activation seams own
+the coordinator's routed graceful cutover and the supervisor's separate
+singleton handoff; neither is changed here. See
+[supervisor lifecycle](supervisor-lifecycle.md),
+[graceful daemon cutover](../../../docs/patterns/graceful-daemon-cutover.md)
+and [service lifecycle supervision](../../../docs/patterns/service-lifecycle-supervision.md).
+
 Old launch callbacks that omit completion remain unproven. A new supervisor
 against an older coordinator cannot acquire `claim-cooling`, so it does not
 perform the physical stop. This is not safe mixed-supervisor compatibility:
 an old supervisor can still stop a process without acquiring the new guard.
-Quiesce original launch/stop callers and old supervisors before an authorized
-coordinator/schema cutover, preserve unresolved reservations, then start only
-compatible supervisors. A source merge grants no migration or rollout.
+Close old admission and drain original launch/stop callers, old coordinator
+requests and old supervisors before an authorized coordinator/schema cutover.
+Preserve unresolved reservations, then start only compatible supervisors.
+Coordinator routing alone is not that drain: it intentionally retains the
+separately supervised processes. Do not roll back to guard-unaware writers
+while guarded operations remain. This applies on Windows, Linux and macOS;
+the storage guard introduces no platform-specific process or signal primitive.
+A source merge grants no migration or rollout.

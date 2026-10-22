@@ -73,7 +73,11 @@ Beginning a pending startup advances the revision atomically, so a delayed
 completion from an earlier caller cannot close that newer operation.
 Another resume or redelivery requires the predecessor's proven completion;
 recovery promotion alone never authorizes a second caller. Cooling preserves
-that completion and compares the captured revision before publishing `cold`.
+that completion and holds a coordinator-backed revision/handle-bound operation
+guard across physical stop and `cold` publication. The full
+[startup/cooling fencing contract](spawn-startup-fencing.md) covers ambiguous
+stops, stranded deferral and legacy cutover requirements; a fresh snapshot is
+not stop/resume serialization.
 An incomplete startup is neither physically cooled nor made dormant. Historical
 unproven `cold` rows retain capacity and cannot resume or pass terminal cleanup
 until the original startup has been reconciled.
