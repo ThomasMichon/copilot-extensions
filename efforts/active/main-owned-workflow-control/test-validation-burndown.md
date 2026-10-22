@@ -252,9 +252,11 @@ introducing a duplicate original function name fails without a passing proof.
 Native Windows executes the same 201 aliases successfully in 0.52 seconds;
 that is not a Windows effect-observed whole-packet result.
 
-This qualifies only the bounded library source mapping. Hosted source CI,
-qualified release, the remaining library/plugin census and accountable
-periodic/native repair remain separate parent gates.
+This qualifies only the bounded library source mapping. #7781 actually merged
+after current-head approval and complete configured required-check verification.
+Hosted source run `39727829569` executes all 646 nodes successfully in a
+13.666-second packet. Qualified release, the remaining library/plugin census
+and accountable periodic/native repair remain separate parent gates.
 
 ### Scheduled execution is real; repair initiation is not yet established
 

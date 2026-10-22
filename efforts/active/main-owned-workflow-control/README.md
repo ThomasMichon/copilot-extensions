@@ -374,15 +374,27 @@ authorizes critical main-path acceptance or a bounded administrative change.
   fixture family, preserving real disk-refusal coverage in a complementary
   non-tmpfs run. Other failure families and a subsequent complete scheduled
   execution remain open; this is not whole-portfolio acceptance.
+  The separately retained Windows framing source repair #7264 is also merged
+  and its original source worktree finalized. Current-head native framing
+  evidence and actual review/required CI passed; the old blanket native-suite
+  publication blocker was reconciled with the current unit-only PR policy.
+  This neither closes the separately tracked #7387/#7433 native repairs nor
+  establishes release, rollout or complete periodic-portfolio acceptance.
 - [x] Map the fourteen original shared lazy-dispatch unit bodies into the
   unchanged release packet without copying assertions (#7749). All 408
   previous identities remain, yielding 422 source-qualified nodes with
   actual call coverage. This bounded mapping does not close the complete
   historical census or establish a subsequent Main release's execution.
-- [ ] Map the 201 original fleet-contracts cases through exact function objects
+- [x] Map the 201 original fleet-contracts cases through exact function objects
   and unchanged parameterization, preserving all current packet identities,
-  closed source hashes and production-call evidence. Local cohort qualification
-  does not close the whole census or every-release acceptance.
+  closed source hashes and production-call evidence (#7781). Actual hosted
+  source CI executes all 646 admitted cases in 13.666 seconds. This does not
+  close the whole census or every-release acceptance.
+- [ ] Map the 72 original worktree-identity cases through exact function
+  objects and unchanged parameterization, preserving the current packet,
+  source closure and production-call evidence. Qualify the canonical packet
+  and refusal controls before publication; full-census and every-release
+  acceptance remain separate.
 - [x] Land the dev implementation of reviewed, widen-only module-size baseline
   maintenance and remove its obsolete main exception from source (#6438).
 - [x] Verify a covering promotion activates the dev-owned baseline producer on

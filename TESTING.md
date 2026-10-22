@@ -135,6 +135,15 @@ rule or collection-root restriction is rewritten. Every admitted case must
 contribute actual library call coverage under the same observer and budget.
 This qualifies that bounded library cohort, not the whole historical census.
 
+`tools/promotion_unit_tests/test_worktree_identity.py` re-exports the eight
+original codec test functions and their unchanged parameterization from
+`libs/worktree-identity/tests/test_worktree_identity.py`. Replacing only the
+original module prefix maps its 72 cases injectively to release identities.
+The original tests, canonical initializer and adapter are hash-bound; every
+case must contribute actual codec call coverage under the unchanged observer,
+root and budget. No original assertion body or production behavior is copied
+or modified. This bounded mapping does not complete the historical unit census.
+
 ## Tracking-write source guard
 
 The source tracking-write guard still parses every sibling-plugin Python file,
