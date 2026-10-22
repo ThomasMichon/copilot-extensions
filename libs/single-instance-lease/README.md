@@ -46,6 +46,18 @@ and require the relevant positive completion witness before recovery.
 Uncooperative file replacement is detected at ownership checks, not prevented
 by filesystem compare-and-swap.
 
+Windows bootstraps without Python may dot-source the packaged
+`single_instance_lease/operation.ps1` and call
+`Enter-NativeOperationLock -Path <absolute-normalized-lock-file>`. Retain its
+returned object, call `AssertOwned()` before consequential stages, and
+`Dispose()` in `finally`. It takes the same kernel byte and offset as
+`OperationLock`, not another mutex, PID file or age-based protocol. The parent
+must already exist; reparse-point traversal, non-file targets, same-process
+alias contention and cross-thread custody are refused. The open handle denies
+deletion, and final-path/file-identity checks detect redirected ownership.
+It neither discovers Python nor installs anything. Like the Python API, owner
+death releases only the lock, not a consumer's interrupted-work fence.
+
 ### `lease` -- the single-instance lease
 
 `SingleInstance` takes an OS-level, exclusive, non-blocking lock on a lock file

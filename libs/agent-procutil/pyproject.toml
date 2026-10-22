@@ -24,6 +24,9 @@ dependencies = []
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+agent_procutil = ["native_daemon.ps1", "native_owned.ps1"]
+
 [tool.ruff]
 target-version = "py310"
 line-length = 99

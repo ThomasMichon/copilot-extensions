@@ -13,6 +13,59 @@ launch envelopes. Redaction handles known credential forms and supplied known
 values after control normalization; it is best-effort, not a guarantee about
 arbitrary third-party output.
 
+## Python-free Windows bootstrap admission
+
+The packaged `native_daemon.ps1` and `native_owned.ps1` expose the native
+counterparts needed before a Python interpreter exists. These are internal
+process primitives, not an installer, a request queue, an arbitrary-command
+installation CLI or a new lifecycle owner. A bootstrap must first validate
+its fixed source/recipe, acquire the canonical operation lock, and journal
+its own durable progress and outcome. No current plugin publisher switches
+to these helpers merely because they are present.
+
+Dot-source `native_daemon.ps1` from the resolved, attributable payload and use
+`Start-NativeDaemon -Script <absolute-ps1> -Arguments <trusted-string-array>
+-WorkingDirectory <absolute-directory> -LogPath <absolute-diagnostic-file>`.
+It uses the existing Windows WMI lifetime-broker mechanism. WMI rejects
+`CREATE_NO_WINDOW`, and a detached stock PowerShell can exit before evaluating
+its command; a headless `conhost` supplies the native console without opening
+a visible window. A current-user-only, bounded named-pipe handshake checks
+both actual endpoint PIDs. The worker independently verifies that it is
+outside every Job before running its entry point, and the parent pins that
+actual worker's handle before acknowledgement, not the broker or console PID.
+There is no inherited-lifetime fallback.
+
+The result is a `System.Diagnostics.Process`; keep it for observation and
+dispose it afterward. Spawn/admission is not application readiness or
+installation completion. `LogPath` records bootstrap failures; the entry point
+owns its continuing progress/result log. A
+`NativeDaemonSpawnException.CleanupConfirmed` value of false preserves
+uncertainty, including a lost return after acknowledgement; callers must
+consult their durable operation state rather than retrying installation.
+With `COPILOT_EXTENSIONS_TEST_CONTAINED=1`, the same handshake uses an ordinary
+windowless child and deliberately retains the caller's Job.
+
+`Invoke-NativeOwnedProcess -FilePath <absolute-executable> -Arguments
+<trusted-string-array> -WorkingDirectory <absolute-directory> -LogPath
+<absolute-log> -TimeoutMilliseconds <positive-deadline>` captures stdout and
+stderr directly into the append-only log. It atomically assigns the suspended
+child to a strict kill-on-close Job using `PROC_THREAD_ATTRIBUTE_JOB_LIST`,
+inherits only its two declared stdio handles, and never permits breakaway.
+Return preserves the root's exit status only after every Job writer exits;
+root exit alone is not completion. Timeout and failure terminate and observe
+the same tree. `NativeOwnedProcessException.CleanupConfirmed` distinguishes
+attested settlement from an unresolved cleanup failure. A consumer must keep
+an interrupted fence on uncertainty or owner death, not infer settlement from
+the operation lock becoming free.
+
+The native fixtures exercise actual stock Windows PowerShell, canonical
+Python/native lock contention, caller-Job closure, contained controls,
+descendant settlement and owner death. The explicit
+`PROCUTIL_NATIVE_DAEMON_LIFETIME=1` lane runs two production and two contained
+cycles with a PATH containing neither Python nor uv and the canonical
+console/foreground observer. This is Windows admission evidence, not a
+fresh-host foundation installation or Linux/macOS qualification.
+
 ```python
 import subprocess
 import sys

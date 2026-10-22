@@ -197,7 +197,7 @@ transaction execution from the existing recurring-maintenance assignment.
 - [x] Migrate the public Manager/engine update commands, staged acquisition and hook `reconcile-plugins --apply` without replacing their canonical executors.
 - [ ] Migrate native launchers' direct validated plan-action execution and remaining suite-adopted first-use publishers while preserving standalone defaults.
 - [x] Land and qualify the native launcher phase adapters independently of remaining first-use publishers.
-- [ ] Review the standalone foundation amendment before implementing cold first-use execution.
+- [x] Review the standalone foundation amendment before implementing cold first-use execution.
 - [ ] Establish the standalone execution foundation before plugin provisioning without requiring an existing Python runtime, Manager or another plugin.
 - [ ] Migrate first-use publishers onto that foundation, retaining the canonical installer, publication admission, healthy dispatch and precise skew/recovery outcomes.
 - [ ] Qualify foundation genesis, caller loss, concurrent cold callers, failed construction, upgrade and subsequent first-use requests on native supported platforms.
@@ -827,3 +827,17 @@ onto one branch.
 - Managed pull-forward refused a deleted merged-PR branch, and the completion helper safely auto-aborted replaying the squash-merged private series. Preserved the exact published tip, verified the merged commit on fetched `dev`, excluded only that fully published series and reconciled an up-to-date worktree. No unpublished work, other contributor branch or stash was changed.
 - First-use wrappers can run before Python or any plugin runtime exists, whereas the current driver lives inside an executing Python runtime. The operator explicitly chose the standalone foundation rather than a standalone-genesis exception. The next slice reviews that cold-start boundary before implementation; it composes existing installer/runtime and process-ownership mechanisms rather than adding a second plugin installer, recurring scheduler or required Manager dependency.
 - No host runtime, deployment policy, startup enrollment or source binding changed. The merged native adapters still require release promotion and authorized rollout before they are installed.
+
+### 2026-10-22 - Standalone foundation amendment reviewed
+
+- PR #7913 merged as `4f6387f24e258c12726a9ae7cfd0349ae21c83ee` after Copilot approval `5618621858` on exact head `0304a5e3c53bf048ad33916245c5181abe5a7726`, no review findings and successful required checks. The managed completion helper reconciled its already-merged proposal onto actual `dev`.
+- Re-read the Plan and Validation Plan. Only the foundation-amendment review item closes. The next execution step inventories existing prerequisite acquisition, immutable runtime assembly, native admission and source/command provenance before selecting and qualifying the smallest standalone foundation.
+- Cold construction, first-use migration, native qualification and the parent source/maintenance/adoption gates remain open. No implementation, installed runtime, service, policy or enrollment change is claimed from this proposal merge.
+
+### 2026-10-22 - Python-free native admission foundation
+
+- Inventoried the canonical prerequisite helpers (`Ensure-Uv`/`ensure_uv`, pinned archive verification and signed/uv interpreter acquisition), Python-owned retained construction, immutable runtime completion/retention, source receipts and current launch admission. The existing Worktrees admission requires an interpreter; it cannot qualify a Python-free cold host.
+- Extended the existing process/operation libraries with packaged Windows-native admission, strict owned-child execution and the exact `OperationLock` byte protocol. No Manager dependency, plugin executor, queue, scheduler, installed runtime or publisher change is introduced.
+- The native lifetime fixture removes Python and uv from the child PATH, closes the real submitting Job and proves retained canonical lock custody through the same detached operation. Two production cycles survive; two contained controls retire with their caller. The canonical window/foreground observer detects no surfaced console or focus transition. This is not a claim that Python was absent from the host or that a fresh foundation was installed.
+- Initial native qualification exposed two real platform constraints: WMI refuses `CREATE_NO_WINDOW`, and detached stock PowerShell can exit before evaluating its body. Reused the broker with a headless console and authenticated actual-worker handshake instead of accepting a successful spawn as execution evidence. Owned prerequisite writers use atomic Job-list admission, not a suspended-spawn/assignment gap.
+- Native lock/owned-process qualification covers Python/native exclusion, native close/crash release, same-process hardlink contention, invalid paths, descendant settlement and timeout. Foundation packaging, fixed source admission, durable native interruption fencing, immutable construction, active-request upgrade, Linux/macOS execution and fresh-host clean-room proof remain open. First-use wrappers stay unchanged until those gates pass.

@@ -21,6 +21,9 @@ dependencies = []
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+single_instance_lease = ["operation.ps1"]
+
 [tool.ruff]
 target-version = "py310"
 line-length = 99

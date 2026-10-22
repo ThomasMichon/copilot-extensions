@@ -2989,6 +2989,17 @@ effort's Journal for the full git-fetch-vs-vendoring reasoning.
 
 ### Python-owned construction foundation
 
+For the earlier, Python-free Windows admission boundary, the canonical
+`agent-procutil` package also carries native daemon/owned-child helpers, and
+`single-instance-lease` carries the native counterpart of `OperationLock`.
+They reuse WMI outside-Job admission and the exact existing kernel lock
+protocol; owned writers enter their strict Job atomically at creation.
+Their API and qualification boundary are in the
+[procutil bootstrap reference](../libs/agent-procutil/README.md#python-free-windows-bootstrap-admission).
+They do not themselves construct a driver foundation or migrate any first-use
+publisher. Bootstrap source admission, durable interruption fencing and
+immutable publication remain consumer obligations.
+
 `libs/installer-engine/installer_engine.py` is the in-progress Python ownership
 seam for the mutable-dev-slot effort, not a completed installer adoption.
 Construction follows the complete transitive local `tool.uv.sources` graph.
