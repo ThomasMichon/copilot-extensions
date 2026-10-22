@@ -1,6 +1,8 @@
 """Foundation state shares execution custody and never turns interruption into success."""
 
 import json
+import os
+import sqlite3
 import sys
 from dataclasses import asdict, replace
 from types import SimpleNamespace
@@ -147,6 +149,100 @@ def test_executor_cannot_report_success_after_leaving_uncertain_native_construct
         drain(root=space, executor=executor)
     assert status(queued.id, root=space).state == "interrupted"
     assert foundation_status(root=space).state == "interrupted"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows delete-sharing publication")
+def test_status_reader_overlap_retries_terminal_publication_under_custody(space, monkeypatch):
+    with custody(space) as owned:
+        running = fs.begin(space, DIGEST, owned)
+        with fs._open_read(space / fs.FILENAME) as reader:
+            assert json.load(reader)["state"] == "running"
+            original_move = fs._move_windows
+            conflicts = []
+
+            def overlapping_move(temporary, path):
+                owned.assert_owned()
+                try:
+                    original_move(temporary, path)
+                except OSError as error:
+                    conflicts.append(error.winerror)
+                    reader.close()
+                    raise
+
+            monkeypatch.setattr(fs, "_move_windows", overlapping_move)
+            completed = fs.finish(space, running, owned, exit_code=0)
+            assert foundation_status(root=space) == completed
+            assert conflicts and set(conflicts) <= {5, 32, 33}
+        assert completed.state == "completed" and completed.exit_code == 0
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows sharing conflict deadline")
+def test_persistent_reader_conflict_remains_explicit_and_bounded(space, monkeypatch):
+    with custody(space) as owned:
+        running = fs.begin(space, DIGEST, owned)
+        with fs._open_read(space / fs.FILENAME):
+            ticks = iter([0, 3])
+            monkeypatch.setattr(fs.time, "monotonic", lambda: next(ticks))
+            with pytest.raises(fs.FoundationStateError, match="persistence"):
+                fs.finish(space, running, owned, exit_code=0)
+            assert foundation_status(root=space) == running
+
+
+@pytest.mark.parametrize("state", ["running", "interrupted", "blocked"])
+def test_foundation_admission_refuses_unsettled_queue_owner_loss(space, state):
+    queued = request(space)
+    with sqlite3.connect(space / "queue.sqlite3") as db:
+        db.execute(
+            "UPDATE requests SET state=?,started_at=1,boot_id=? WHERE id=?",
+            (state, BOOT, queued.id),
+        )
+    with custody(space) as owned:
+        with pytest.raises(fs.FoundationStateError, match="unsettled queue"):
+            fs.begin(space, DIGEST, owned)
+    assert foundation_status(root=space) is None
+    assert status(queued.id, root=space).state == state
+
+
+def test_only_executing_transaction_can_enclose_foundation_construction(space):
+    queued = request(space)
+
+    def executor(transaction):
+        running = fs.begin(space, DIGEST, transaction._lock)
+        fs.finish(space, running, transaction._lock, exit_code=0)
+        return 0
+
+    drain(root=space, executor=executor)
+    assert status(queued.id, root=space).state == "completed"
+    assert foundation_status(root=space).state == "completed"
+    with sqlite3.connect(space / "queue.sqlite3") as db:
+        db.execute(
+            "UPDATE requests SET state='running',exit_code=NULL WHERE id=?", (queued.id,),
+        )
+    with custody(space) as owned:
+        with pytest.raises(fs.FoundationStateError, match="unsettled queue"):
+            fs.begin(space, DIGEST, owned)
+
+
+def test_foundation_admission_allows_positively_settled_queue_failure(space):
+    queued = request(space)
+    with sqlite3.connect(space / "queue.sqlite3") as db:
+        db.execute(
+            """UPDATE requests SET state='interrupted',started_at=1,finished_at=2,
+            boot_id=?,settled_boot_id=?,settled_at=3 WHERE id=?""",
+            (BOOT, NEXT_BOOT, queued.id),
+        )
+    with custody(space) as owned:
+        running = fs.begin(space, DIGEST, owned)
+        assert running.state == "running"
+
+
+def test_foundation_admission_refuses_existing_unsupported_queue(space):
+    with sqlite3.connect(space / "queue.sqlite3") as db:
+        db.execute("PRAGMA user_version=999")
+    with custody(space) as owned:
+        with pytest.raises(StateError, match="unsupported"):
+            fs.begin(space, DIGEST, owned)
+    assert foundation_status(root=space) is None
 
 
 def test_explicit_recovery_requires_new_native_boot_and_never_replays(space, monkeypatch):

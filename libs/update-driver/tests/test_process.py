@@ -12,6 +12,8 @@ import pytest
 import agent_procutil
 import single_instance_lease
 import update_driver
+from single_instance_lease.operation import OperationLock
+from update_driver import foundation_state
 from update_driver import (
     InterruptedError, RequestSpec, SpawnError, TrustedRunner, drain, enqueue, ensure_worker,
     status, wait,
@@ -213,6 +215,10 @@ def test_worker_death_leaves_conservative_fence(area):
     later = enqueue(RequestSpec("fixture", argv=("later",)), runner=runner(area), root=root)
     process.kill()
     process.communicate(timeout=10)
+    with OperationLock(root / "execution.lock") as owned:
+        with pytest.raises(foundation_state.FoundationStateError, match="unsettled queue"):
+            foundation_state.begin(root, "a" * 64, owned)
+    assert foundation_state.read(root) is None
     # The waiter itself observes free kernel custody and journals interruption;
     # no second update/drain invocation is required.
     assert wait(request.id, root=root).state == "interrupted"

@@ -270,6 +270,14 @@ has no exit status and remains interrupted. A second begin cannot overwrite
 its active or interrupted operation, and completion must match the exact
 admitted record.
 
+Admission also reads any existing SQLite queue without creating one. Unsettled
+running, interrupted or blocked plugin work refuses foundation construction.
+Only the exact currently executing transaction under the same live lock may
+enclose foundation work; an abandoned running row is not that authority.
+Windows readers share deletion; write-through publication retries bounded
+reader-sharing conflicts under custody. A persistent conflict fails explicitly
+without reporting completion or discarding the prior progress.
+
 Pending plugin requests may be accepted behind a **live** foundation owner,
 but only the kernel custodian can execute. A later free-lock observation changes
 unfinished native progress to `interrupted`, never success or automatic replay.

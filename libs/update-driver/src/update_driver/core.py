@@ -14,6 +14,7 @@ import sys
 import time
 import uuid
 from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Callable, Mapping, Sequence, TextIO
@@ -24,6 +25,7 @@ from ._directory import create_queue_directory
 
 SCHEMA = 2
 STATES = frozenset({"pending", "running", "completed", "interrupted", "blocked"})
+_active_transaction = ContextVar("update_driver_active_transaction", default=None)
 
 
 class DriverError(RuntimeError):
@@ -639,6 +641,7 @@ def drain(
                 )
                 db.commit()
             transaction = Transaction(request, root, lock)
+            scope = _active_transaction.set(transaction)
             try:
                 code = (executor or _execute)(transaction)
                 transaction._close()
@@ -665,6 +668,8 @@ def drain(
                         error=f"executor interrupted: {type(error).__name__}; settlement required",
                     )
                 raise
+            finally:
+                _active_transaction.reset(scope)
     finally:
         lock.release()
 

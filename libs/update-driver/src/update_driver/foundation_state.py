@@ -118,6 +118,37 @@ def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
     return value
 
 
+def _open_read(path: Path):
+    if os.name != "nt":
+        return os.fdopen(os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)), "rb")
+    import ctypes
+    import msvcrt
+    from ctypes import wintypes
+
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.CreateFileW.argtypes = [
+        wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.LPVOID,
+        wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE,
+    ]
+    kernel.CreateFileW.restype = wintypes.HANDLE
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel.CloseHandle.restype = wintypes.BOOL
+    # Share deletion for atomic replacement; open the reparse point itself.
+    handle = kernel.CreateFileW(str(path), 0x80000000, 0x7, None, 3, 0x00200000, None)
+    if handle == ctypes.c_void_p(-1).value:
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        fd = msvcrt.open_osfhandle(handle, os.O_RDONLY | os.O_BINARY)
+    except BaseException:
+        kernel.CloseHandle(handle)
+        raise
+    try:
+        return os.fdopen(fd, "rb")
+    except BaseException:
+        os.close(fd)
+        raise
+
+
 def read(root: Path) -> FoundationOperation | None:
     """Read a bounded snapshot; absence never creates or repairs anything."""
     path = _root(root) / FILENAME
@@ -136,8 +167,7 @@ def read(root: Path) -> FoundationOperation | None:
     try:
         if not _plain(before) or before.st_size > MAX_BYTES:
             raise FoundationStateError("foundation operation must be a bounded plain file")
-        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
-        with os.fdopen(fd, "rb") as stream:
+        with _open_read(path) as stream:
             opened = os.fstat(stream.fileno())
             if not _plain(opened) or not os.path.samestat(before, opened):
                 raise FoundationStateError("foundation operation changed during observation")
@@ -157,16 +187,29 @@ def _owned(root: Path, custody: OperationLock) -> Path:
     return root
 
 
+def _move_windows(temporary: Path, path: Path) -> None:
+    import ctypes
+    from ctypes import wintypes
+
+    move = ctypes.WinDLL("kernel32", use_last_error=True).MoveFileExW
+    move.argtypes = [wintypes.LPCWSTR, wintypes.LPCWSTR, wintypes.DWORD]
+    move.restype = wintypes.BOOL
+    if not move(str(temporary), str(path), 0x1 | 0x8):  # REPLACE_EXISTING | WRITE_THROUGH
+        raise ctypes.WinError(ctypes.get_last_error())
+
+
 def _publish(temporary: Path, path: Path) -> None:
     if os.name == "nt":
-        import ctypes
-        from ctypes import wintypes
-
-        move = ctypes.WinDLL("kernel32", use_last_error=True).MoveFileExW
-        move.argtypes = [wintypes.LPCWSTR, wintypes.LPCWSTR, wintypes.DWORD]
-        move.restype = wintypes.BOOL
-        if not move(str(temporary), str(path), 0x1 | 0x8):  # REPLACE_EXISTING | WRITE_THROUGH
-            raise ctypes.WinError(ctypes.get_last_error())
+        deadline = time.monotonic() + 2
+        while True:
+            try:
+                _move_windows(temporary, path)
+                break
+            except OSError as error:
+                # MoveFileEx can refuse even a delete-sharing reader until it closes.
+                if error.winerror not in {5, 32, 33} or time.monotonic() >= deadline:
+                    raise
+                time.sleep(.01)
         return
     os.replace(temporary, path)
     directory = os.open(path.parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
@@ -200,6 +243,31 @@ def _write(root: Path, value: FoundationOperation, custody: OperationLock) -> Fo
     return value
 
 
+def _admit_queue(root: Path, custody: OperationLock) -> None:
+    from . import core
+
+    path = root / "queue.sqlite3"
+    try:
+        identity = path.lstat()
+    except FileNotFoundError:
+        return
+    current = core._active_transaction.get()
+    enclosing = (
+        current is not None and current.root == root and current._lock is custody
+    )
+    with core._database(root, expected_identity=identity) as db:
+        for row in db.execute(
+            "SELECT * FROM requests WHERE state IN ('running','interrupted','blocked')",
+        ):
+            request = core._request(row, root)
+            if request.settled_at is not None:
+                continue
+            if enclosing and request == current.request and request.state == "running":
+                current.assert_owned()
+                continue
+            raise FoundationStateError("foundation fenced by unsettled queue transaction")
+
+
 def begin(root: Path, source_hash: str, custody: OperationLock) -> FoundationOperation:
     """Admit only an explicitly owned new bootstrap, never replay an uncertain one."""
     root = _owned(root, custody)
@@ -208,6 +276,7 @@ def begin(root: Path, source_hash: str, custody: OperationLock) -> FoundationOpe
     prior = read(root)
     if prior is not None and prior.fenced:
         raise FoundationStateError("foundation fenced; explicit positive settlement required")
+    _admit_queue(root, custody)
     try:
         admission_boot = boot.kernel_boot_identity()
     except Exception as error:
