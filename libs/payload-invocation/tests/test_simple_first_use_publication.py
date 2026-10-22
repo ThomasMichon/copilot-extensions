@@ -351,13 +351,15 @@ def test_actual_restamp_failure_preserves_previous_selection(
 @pytest.mark.parametrize(("plugin", "invocation"), [
     ("agent-vault", "cold"), ("agent-codespaces", "cold"),
     ("agent-codespaces", "healthy"), ("agent-codespaces", "healthy-numeric"),
+    ("agent-codespaces", "provision"),
 ])
 @pytest.mark.parametrize("namespaced", [False, True])
 @pytest.mark.parametrize("managed", [False, True])
 def test_payload_uses_selected_publication_policy(
-    binding_fixture: dict, plugin: str, invocation: str, namespaced: bool, managed: bool,
+    binding_fixture: dict, tmp_path: Path, plugin: str, invocation: str, namespaced: bool, managed: bool,
 ) -> None:
-    environment = _adopter(binding_fixture, plugin)
+    released = _release_payload(tmp_path / "release", plugin) if invocation == "provision" else None
+    environment = _adopter(binding_fixture, plugin, released)
     root = binding_fixture["legacy"]
     arguments = binding_fixture["arguments"]
     if namespaced:
@@ -390,6 +392,11 @@ def test_payload_uses_selected_publication_policy(
         prefix + "_PAYLOAD_ROOT": str(binding_fixture["payload"]),
     })
     shell = "powershell" if os.name == "nt" else "bash"
+    if invocation == "provision":
+        _codespaces_actual_provision_preserves_global_commands(
+            binding_fixture, environment, root, managed=managed, namespaced=namespaced,
+        )
+        return
     if invocation.startswith("healthy"):
         python = _completed_slot({**binding_fixture, "legacy": root})
         site = python.parent.parent / (
@@ -451,3 +458,92 @@ def test_payload_uses_selected_publication_policy(
         assert "installer diagnostic" in result.stderr
         assert "failed rc=37" in (root / ".provision-status").read_text(encoding="utf-8-sig")
         assert (root / "logs/boot-trace.jsonl").is_file()
+
+
+def _codespaces_actual_provision_preserves_global_commands(
+    fixture: dict, environment: dict, root: Path, *, managed: bool, namespaced: bool,
+) -> None:
+    environment.pop("COPILOT_PLUGIN_INSTALL_SMOKE", None)
+    payload = fixture["payload"]
+    project = payload / "pyproject.toml"
+    project.write_text(re.sub(
+        r'(?m)^version\s*=\s*"[^"]+"', 'version = "1.0.0"',
+        project.read_text(encoding="utf-8"), count=1,
+    ), encoding="utf-8")
+    python = _completed_slot({**fixture, "legacy": root})
+    site = python.parent.parent / (
+        "Lib/site-packages" if os.name == "nt" else
+        f"lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages"
+    )
+    (site / "agent_codespaces.py").write_text(
+        'import json,sys\nprint("provisioned runtime")\nprint(json.dumps(sys.argv[1:]))\n',
+        encoding="utf-8",
+    )
+    complete = python.parent.parent / ".install-complete.json"
+    pending = complete.with_suffix(".pending")
+    complete.rename(pending)
+    environment.update(
+        TEST_PENDING_COMPLETION=str(pending), TEST_READY_COMPLETION=str(complete),
+    )
+    shell = "powershell" if os.name == "nt" else "bash"
+    installer = payload / "scripts" / ("install.ps1" if os.name == "nt" else "install.sh")
+    text = installer.read_text(encoding="utf-8")
+    # Replace construction and service effects, not the installer dispatch or publishers.
+    overrides = (
+        "function Deploy-Venv { return $true }\n"
+        "function Deploy-Package { return $true }\n"
+        "function Invoke-VersionedActivate {\n"
+        "    [IO.File]::Move($env:TEST_PENDING_COMPLETION, $env:TEST_READY_COMPLETION)\n"
+        "    return $true\n}\n"
+        "function Sync-ConnectionOwnerService {}\n"
+        if os.name == "nt" else
+        "deploy_venv() { return 0; }\n"
+        "deploy_package() { return 0; }\n"
+        '_versioned_activate() { mv "$TEST_PENDING_COMPLETION" "$TEST_READY_COMPLETION"; }\n'
+        "_sync_owner_service() { :; }\n"
+    )
+    anchor = "# -- Dispatch --------------------------------------------------------------"
+    assert text.count(anchor) == 1
+    installer.write_text(text.replace(anchor, overrides + "\n" + anchor), encoding="utf-8")
+    command_root = fixture["home"] / ".local/bin"
+    command_root.mkdir(parents=True, exist_ok=True)
+    for name in ("agent-codespaces", "agent-codespaces.ps1", "agent-codespaces.cmd"):
+        (command_root / name).write_bytes(b"previous global command\n")
+    if namespaced:
+        _policy(fixture, fixture["legacy"], fixture["arguments"], "managed")
+    commands_before = _snapshot(command_root)
+    legacy_before = _snapshot(fixture["legacy"])
+    selected_before = _snapshot(root)
+    result = _run(
+        fixture, environment, [*_command(fixture, shell, "runtime-gate"), "version"],
+    )
+    assert _snapshot(command_root) == commands_before, result.stdout + result.stderr
+    # Successful installation's legacy self-staging remains tracked separately in #7612.
+    if namespaced and managed:
+        assert _snapshot(fixture["legacy"]) == legacy_before
+    if managed:
+        assert result.returncode == 3, result.stdout + result.stderr
+        assert _snapshot(root) == selected_before
+        assert not complete.exists()
+    else:
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert complete.is_file()
+        assert json.loads(result.stdout.splitlines()[-1]) == ["version"]
+
+
+@pytest.mark.portfolio_tier("T3")
+@pytest.mark.skipif(os.name == "nt", reason="POSIX resolver return status")
+def test_codespaces_payload_resolver_failure_remains_visible(binding_fixture: dict) -> None:
+    environment = _adopter(binding_fixture, "agent-codespaces")
+    environment["AGENT_CODESPACES_PAYLOAD_ROOT"] = str(binding_fixture["payload"])
+    environment["AGENT_CODESPACES_HOME"] = str(binding_fixture["legacy"])
+    (binding_fixture["payload"] / "scripts/resolve-runtime.sh").write_text(
+        "# Trace contract: normal/read-only/ready-v1\nreturn 7\n", encoding="utf-8",
+    )
+    before = _snapshot(binding_fixture["home"])
+    result = _run(
+        binding_fixture, environment, _command(binding_fixture, "bash", "runtime-gate"),
+    )
+    assert result.returncode == 126, result.stdout + result.stderr
+    assert "runtime resolver failed" in result.stderr
+    assert _snapshot(binding_fixture["home"]) == before

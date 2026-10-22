@@ -1295,9 +1295,12 @@ function Sync-ConnectionOwnerService {
 }
 
 function Invoke-Install {
+    param([switch]$RuntimeOnly)
     Write-ServiceHeader $ServiceName
     # Create directories
-    foreach ($dir in @($InstallDir, $LocalBin)) {
+    $directories = @($InstallDir)
+    if (-not $RuntimeOnly) { $directories += $LocalBin }
+    foreach ($dir in $directories) {
         if (-not (Test-Path $dir)) {
             New-Item -ItemType Directory -Path $dir -Force | Out-Null
         }
@@ -1317,7 +1320,7 @@ function Invoke-Install {
     Deploy-VersionedRuntimeHelper
 
     # Deploy binstub
-    Deploy-SelfProvisioningBinstub
+    if (-not $RuntimeOnly) { Deploy-SelfProvisioningBinstub }
 
     # Machine-local config schema migration (idempotent + atomic; never touches
     # repo-committed .agent-codespaces/config.yaml -- that is an adopt concern). Non-fatal.
@@ -1759,7 +1762,7 @@ try {
         'status'    { Invoke-Status }
         'update'    { Invoke-Update }
         'stamp'     { Invoke-Stamp }
-        'provision' { Invoke-Install }
+        'provision' { Invoke-Install -RuntimeOnly }
         'dev'       { if (-not (Invoke-Dev)) { exit 1 } }
     }
 } catch {

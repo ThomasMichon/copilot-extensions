@@ -147,6 +147,10 @@ PowerShell's legacy native argument mode stringifies and encodes forwarded
 arguments before module execution to preserve embedded quotes and native
 argument conversion; newer native argument passing retains direct module
 invocation.
+Cold `provision` builds and activates the addressed runtime without publishing
+user-global commands; ordinary install/update/stamp retain their command
+publication responsibilities. An incomplete selected slot remains a cold
+candidate rather than a silent POSIX dispatcher exit.
 
 ## Configuration
 

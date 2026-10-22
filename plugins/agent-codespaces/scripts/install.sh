@@ -1266,7 +1266,7 @@ do_stamp() {
 # first use, so it must not touch the running shim.
 do_provision() {
     _header "$SERVICE_NAME Provision (runtime)"
-    mkdir -p "$INSTALL_DIR" "$LOCAL_BIN"
+    mkdir -p "$INSTALL_DIR"
     deploy_venv || return 1
     deploy_package || return 1
     _versioned_activate || return 1

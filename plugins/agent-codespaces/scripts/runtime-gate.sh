@@ -40,8 +40,12 @@ resolve_runtime() {
     AGENT_RT_ROOT="$RUNTIME_ROOT"
     export AGENT_RT_ROOT
     local AGENT_RT_RESOLVE_TRACE_MODE="${1:-ready}"
+    # Slot misses are resolver control flow, not this dispatcher's errexit failures.
     # shellcheck source=/dev/null
-    . "$RUNTIME_RESOLVER"
+    if ! . "$RUNTIME_RESOLVER"; then
+        printf '[agent-codespaces] runtime resolver failed. Re-enable/update the plugin, then retry.\n' >&2
+        exit 126
+    fi
 }
 
 apply_runtime_env() {
