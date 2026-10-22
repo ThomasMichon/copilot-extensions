@@ -33,6 +33,18 @@ def test_fixed_phase_has_no_external_action_protocol(monkeypatch):
     )
 
 
+def test_reconcile_phase_calls_canonical_executor_only_under_request_custody(monkeypatch):
+    seen = []
+    monkeypatch.setattr(launch.update_cli, "cmd_reconcile_plugins", lambda args: (
+        seen.append(args.apply) or 7
+    ))
+    monkeypatch.setattr(boundary, "_run_request", lambda verb, flags, args, execute: (
+        pytest.fail("unexpected recursive enqueue")
+    ))
+    assert launch._execute(_args(phase="reconcile")) == 7
+    assert seen == [True]
+
+
 @pytest.mark.parametrize("phase,options", [
     ("bootstrap", {"status": "untrusted.json"}),
     ("staged", {"defer_worktrees": True}),
@@ -180,7 +192,8 @@ def test_detach_returns_acceptance_without_waiting(tmp_path, monkeypatch, capsys
     assert json.loads(capsys.readouterr().out)["action"] == "accepted"
 
 
-def test_actual_bootstrap_request_has_durable_result_on_empty_inventory(tmp_path, monkeypatch):
+@pytest.mark.parametrize("phase", ["bootstrap", "reconcile"])
+def test_actual_fixed_request_has_durable_result_on_empty_inventory(tmp_path, monkeypatch, phase):
     from agent_procutil.owned_process import run_owned
     import update_driver as driver
 
@@ -192,11 +205,12 @@ def test_actual_bootstrap_request_has_durable_result_on_empty_inventory(tmp_path
         monkeypatch.delenv(key, raising=False)
     monkeypatch.chdir(tmp_path)
     result = run_owned(
-        [sys.executable, "-m", "agent_worktrees", "launch-update", "bootstrap"],
+        [sys.executable, "-m", "agent_worktrees", "launch-update", phase],
         timeout=20,
     )
     assert result.returncode == 0, result.stderr
-    assert json.loads(result.stdout)["executed"] == []
+    summary = json.loads(result.stdout)
+    assert summary["executed"] == []
     # The public client must expose the same durable result it observed.
     request_id = result.stderr.split("Update request ", 1)[1].split(";", 1)[0]
     request = driver.status(request_id, root=home / ".copilot-extensions" / "update-driver")

@@ -666,7 +666,7 @@ function Invoke-UpdateApply {
     if ($WithReconcile -and $env:WORKTREE_NO_RECONCILE -ne '1') {
         $reconcileArgs = @('-m', 'agent_worktrees')
         if ($script:LaunchProject) { $reconcileArgs += @('--project', $script:LaunchProject) }
-        $reconcileArgs += @('reconcile-plugins', '--apply')
+        $reconcileArgs += @('launch-update', 'reconcile')
         $null = Invoke-SetupCommand -CommandArgv (@($VenvPython) + $reconcileArgs) `
             -Scope 'launch/reconcile' -Label 'Plugin reconcile'
         $reresolvedPython = Resolve-RuntimePython

@@ -111,7 +111,7 @@ def test_bash_launcher_avoids_bash4_mapfile():
     assert "mapfile" not in text
     assert "launch-update bootstrap" in text
     assert "local _bootstrap_args=(launch-update bootstrap)" in text
-    assert "reconcile-plugins --apply" in text
+    assert "launch-update reconcile" in text
     assert "UPDATE_ARGV" not in text and "_RARGV" not in text
 
 

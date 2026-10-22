@@ -14,7 +14,7 @@ import pytest
 
 
 @pytest.mark.parametrize("shell", ["pwsh", "powershell", "bash"])
-@pytest.mark.parametrize("mode", ["detach", "wait", "no-update", "no-reconcile", "failed"])
+@pytest.mark.parametrize("mode", ["detach", "wait", "no-update", "no-reconcile", "failed", "old-engine"])
 def test_native_launch_submits_fixed_phases_and_preserves_progress(tmp_path, shell, mode):
     if shell == "bash" and os.name != "posix":
         pytest.skip("POSIX native launcher")
@@ -31,7 +31,9 @@ def test_native_launch_submits_fixed_phases_and_preserves_progress(tmp_path, she
         "with path.open('a') as stream: stream.write(json.dumps(sys.argv[1:])+'\\n')\n"
         "assert sys.argv[1:3]==['--project','fixture-project']\n"
         "args=sys.argv[3:]\n"
-        "assert args[:2] in [['launch-update','bootstrap'],['launch-update','staged'],['reconcile-plugins','--apply']]\n"
+        "assert args[:2] in [['launch-update','bootstrap'],['launch-update','staged'],['launch-update','reconcile']]\n"
+        f"if {mode!r}=='old-engine':\n"
+        " print('unrecognized command: launch-update',file=sys.stderr); sys.exit(2)\n"
         "print('native-progress',file=sys.stderr,flush=True)\n"
         f"sys.exit(7 if {mode!r}=='failed' else 0)\n",
     )
@@ -103,16 +105,21 @@ def test_native_launch_submits_fixed_phases_and_preserves_progress(tmp_path, she
     assert result.stdout == "" and result.stderr == ""
     observed = [json.loads(line)[2:] for line in calls.read_text().splitlines()]
     if mode == "no-update":
-        assert observed == [["reconcile-plugins", "--apply"]]
+        assert observed == [["launch-update", "reconcile"]]
     else:
         assert observed[0] == ["launch-update", "bootstrap", "--defer-worktrees"]
         expected_stage = ["launch-update", "staged", "--status", str(stage)]
         if mode != "wait":
             expected_stage += ["--detach"]
         assert observed[-1] == expected_stage
-        assert (["reconcile-plugins", "--apply"] in observed) is (mode != "no-reconcile")
+        assert (["launch-update", "reconcile"] in observed) is (mode != "no-reconcile")
         assert len(observed) == (2 if mode == "no-reconcile" else 3)
     report = log.read_text(encoding="utf-8-sig")
-    assert "native-progress" in report
-    assert ("failed (exit 7)" if mode == "failed" else "done (exit 0)") in report
+    if mode == "old-engine":
+        assert "unrecognized command: launch-update" in report
+        assert "failed (exit 2)" in report
+        assert all(call[0] == "launch-update" for call in observed)
+    else:
+        assert "native-progress" in report
+        assert ("failed (exit 7)" if mode == "failed" else "done (exit 0)") in report
     assert "install.ps1" not in report and "install.sh" not in report

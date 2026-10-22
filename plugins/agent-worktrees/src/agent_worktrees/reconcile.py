@@ -2027,8 +2027,9 @@ def apply_plan(
 ) -> dict[str, Any]:
     """Execute the canonical two-pass reconciliation plan under caller custody.
 
-    Native launchers and session hooks submit ``reconcile-plugins --apply``
-    through the durable execution driver. The second pass picks up a freshly
+    Native launchers submit ``launch-update reconcile`` and session hooks use
+    ``reconcile-plugins --apply`` through the durable execution driver.
+    The second pass picks up a freshly
     acquired payload's runtime without a second native command executor. The
     ``provision-check`` sessionStart shim spawns ``reconcile-plugins --apply``
     (which calls this) **detached**, so a slow first-run venv build never blocks

@@ -75,8 +75,9 @@ supervision, never a second installation writer.
 The [Manager's update reference](../../worktree-manager/README.md#durable-update-execution)
 owns the shared request/lifetime contract and its current migration boundary.
 
-Native launch maintenance submits fixed `launch-update bootstrap` and
-`launch-update staged --status <acquisition-result>` phases to that owner.
+Native launch maintenance submits fixed `launch-update bootstrap`,
+`launch-update reconcile` and `launch-update staged --status <acquisition-result>`
+phases to that owner.
 Bootstrap re-plans under custody; staged apply binds the acquisition and payload
 fingerprint and reconstructs its installer rather than executing supplied JSON
 arguments. Staged `--detach` returns acceptance, not installation success.

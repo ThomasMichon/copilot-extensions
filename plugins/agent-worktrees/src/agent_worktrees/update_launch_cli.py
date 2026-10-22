@@ -14,7 +14,7 @@ from .reconcile_deployment import execution_diagnostic
 
 def add_parsers(sub) -> None:
     parser = sub.add_parser("launch-update", help="Submit durable native launch maintenance")
-    parser.add_argument("phase", choices=("bootstrap", "staged"))
+    parser.add_argument("phase", choices=("bootstrap", "reconcile", "staged"))
     parser.add_argument("--status", help="Staged acquisition status path")
     parser.add_argument("--detach", action="store_true", help="Return after durable submission")
     parser.add_argument(
@@ -61,7 +61,7 @@ def cmd_launch_update(args: argparse.Namespace) -> int:
         args.status, args.snapshot = str(path), digest
         flags += ["--status", str(path), "--snapshot", digest]
     elif args.status or args.snapshot:
-        print("Launch update: bootstrap does not accept staged status", file=sys.stderr)
+        print("Launch update: only staged apply accepts acquisition status", file=sys.stderr)
         print(json.dumps({"ok": False, "reason": "invalid-phase-options"}))
         return 2
     if args.defer_worktrees:
@@ -99,6 +99,9 @@ def _execute(args: argparse.Namespace) -> int:
 
 
 def _execute_phase(args: argparse.Namespace) -> int:
+    if args.phase == "reconcile":
+        args.apply = True
+        return update_cli.cmd_reconcile_plugins(args)
     executed = []
     if args.phase == "bootstrap":
         plan = update_cli._core_helper("plan_pre_launch", update_cli.plan_pre_launch)()

@@ -191,8 +191,8 @@ their service labels, timed outcomes and child diagnostics without a duplicate r
 echo. Execution arguments are unchanged; this does not redact arbitrary output
 emitted by a child command.
 
-Native wrappers submit fixed `launch-update bootstrap`, `reconcile-plugins
---apply` and `launch-update staged` requests instead of executing JSON plan
+Native wrappers submit fixed `launch-update bootstrap`, `launch-update reconcile`
+and `launch-update staged` requests instead of executing JSON plan
 arguments. The execution owner re-derives the bootstrap/reconcile plans and
 revalidates each runtime's selected installation and publication permission.
 Staged requests bind both the acquisition result and discovered payload

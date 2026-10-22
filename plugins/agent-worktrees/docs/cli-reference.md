@@ -1153,7 +1153,7 @@ to the effort after release.
 | `accounts` | gh account identity catalog (`accounts.yaml`) -- list/show/set/remove logins, scopes, login flows |
 | `validate` | Validate core infrastructure files |
 | `pre-launch` | Check bootstrap staleness (JSON output, for launch wrappers) |
-| `launch-update bootstrap\|staged` | Submit a fixed native maintenance phase to the shared installation driver (JSON result) |
+| `launch-update bootstrap\|reconcile\|staged` | Submit a fixed native maintenance phase to the shared installation driver (JSON result) |
 | `reconcile-plugins` | Reconcile repo-adopted plugin payloads + gated runtimes (JSON output, for launch wrappers) |
 | `uninstall-plugins` | Sweep every deployed core plugin runtime via each plugin's own uninstall action (JSON; dry-run by default) |
 
@@ -1265,8 +1265,11 @@ action repeats the stager's owning payload discovery, preserving its supported
 deployment policy. The marker cannot select another plugin or an arbitrary
 payload path, and ordinary marketplace reconciliation is unchanged.
 An older standalone payload without policy needs no new policy helper.
-Native wrappers now submit `reconcile-plugins --apply`, `launch-update bootstrap`
+Native wrappers now submit `launch-update reconcile`, `launch-update bootstrap`
 and `launch-update staged --status <path>` rather than running cached argv.
+The fixed reconciliation phase invokes the same canonical apply executor.
+It does not reuse the older `reconcile-plugins --apply` command as a capability
+probe: an old engine can support that command without the execution driver.
 Bootstrap derives a fresh plan under custody and rechecks staleness after
 execution. `--defer-worktrees` leaves only self-installation to the staged phase;
 independent repository bootstrap actions remain eligible. Staged submission
@@ -1275,7 +1278,7 @@ selected runtime root and publication permission, and reconstructs canonical
 installer arguments/environment. A changed acquisition or source fails rather
 than executing a different result. Status-provided argv/environment is not an
 execution protocol. `--detach` returns an acceptance receipt with request/log
-identity; the default waits for the durable phase result. Both fixed phases
+identity; the default waits for the durable phase result. All fixed phases
 can run from a neutral directory; bootstrap without repository/configuration
 returns its existing empty plan. An older engine without these request surfaces
 fails visibly; launchers never fall back to raw installation.

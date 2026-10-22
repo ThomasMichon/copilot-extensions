@@ -585,7 +585,7 @@ for value in [
         local _reconcile_project=()
         [[ -n "$LAUNCH_PROJECT" ]] && _reconcile_project=(--project "$LAUNCH_PROJECT")
         _run_launch_request reconcile 'Plugin reconcile' \
-            "$PYTHON" -m agent_worktrees "${_reconcile_project[@]}" reconcile-plugins --apply
+            "$PYTHON" -m agent_worktrees "${_reconcile_project[@]}" launch-update reconcile
         if _refreshed_python="$(resolve_runtime_python)" && [[ -n "$_refreshed_python" && -x "$_refreshed_python" ]]; then
             PYTHON="$_refreshed_python"
         fi
