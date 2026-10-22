@@ -146,6 +146,13 @@ an observer on an internal network. It builds exact committed source and uses
 synthetic credentials, non-root containers and no privileged admission, host
 socket, published ports or cloud login. It is not selected through `-Scenario`.
 
+The [Authelia profile qualification](authelia-profile-qualification/README.md)
+is a separate opt-in, host-driven provider interoperability lane. It uses real
+vendor-issued tokens with throwaway credentials and verified TLS, without
+changing the shared verifier or claiming enrollment, human-login or production
+qualification. Incompatible profiles are explicit evidence, not a bearer
+fallback. It is not selected through `-Scenario` or required PR CI.
+
 The [restricted-dispatch proof](restricted-dispatch/README.md) is an opt-in,
 host-driven Tier-P lane with separate fresh central and restricted worker
 containers. It uses no privileged containers, mounted Docker socket or live
