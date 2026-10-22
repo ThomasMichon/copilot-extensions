@@ -128,12 +128,14 @@ def reconcile_pr_state(
     Heals a number-less active PR first, then reconciles all tracked PRs and
     lingering terminal PR claims. Returns True for a changed PR number/state
     or claim disposition, including a claim-only repair of a cached closure.
+    Best-effort Picker calls leave synchronous number-less healing to foreground
+    reconciliation and never enter that helper's blocking save.
     """
     if record is None:
         return False
     before = ([(p.number, p.state) for p in record.prs],
               [(c.kind, c.ref, c.state) for c in record.resources])
-    healed = heal_numberless_active_pr(record, config)
+    healed = False if best_effort else heal_numberless_active_pr(record, config)
     _reconcile_active_pr(record, config, best_effort=best_effort)
     after = ([(p.number, p.state) for p in record.prs],
              [(c.kind, c.ref, c.state) for c in record.resources])

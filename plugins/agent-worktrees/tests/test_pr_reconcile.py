@@ -130,6 +130,38 @@ class TestHealNumberlessActivePr:
 
 
 class TestReconcilePrState:
+    def test_best_effort_skips_numberless_save_but_reconciles_numbered_peer(
+        self, tmp_path, monkeypatch,
+    ):
+        from agent_worktrees.providers import PullResult
+
+        rec = _record(
+            tmp_path, monkeypatch, "wt-numberless-peer",
+            pr=tracking.PRRecord(
+                state="closed", number=7, branch="pr/older", provider="gitea", repo="o/r",
+            ),
+        )
+        rec.prs.append(tracking.PRRecord(
+            state="creating", branch="pr/newer", provider="gitea", repo="o/r",
+            opened_at="2026-06-02T10:00:00",
+        ))
+        tracking.add_resource_claim(
+            rec, tracking.ResourceClaim(kind="pr", ref="o/r#7", state="active"),
+        )
+        _patch_provider(monkeypatch, _FakeHeadSearchProvider({
+            "pr/older": PullResult(number=7, state="closed", merged=False),
+        }))
+
+        def forbidden_heal(*args, **kwargs):
+            raise AssertionError("best-effort reconciliation entered blocking numberless healing")
+
+        monkeypatch.setattr(pr_reconcile, "heal_numberless_active_pr", forbidden_heal)
+        assert pr_reconcile.reconcile_pr_state(rec, _config(), best_effort=True) is True
+        saved = tracking.load_record(rec.yaml_path)
+        assert saved.resources[0].state == "released"
+        assert saved.active_pr().number is None
+        assert saved.active_pr().state == "creating"
+
     def test_heals_and_flips_merged_on_a_finalized_worktree(self, tmp_path, monkeypatch):
         # The exact Phase-2 validation scenario: a stale-open, number-less PR
         # record on a FINALIZED worktree (the render-time reconcile, #2102,
