@@ -125,7 +125,11 @@ def test_native_producer_defers_working_linked_uv_to_canonical_physical_selectio
         command(producer_source, root), env=env, stdin=subprocess.DEVNULL,
         capture_output=True, text=True, timeout=120, **pu.no_window_kwargs(),
     )
-    assert result.returncode == 0, result.stdout + result.stderr
+    logs = "\n".join(
+        f"{path.name}:\n{path.read_text(encoding='utf-8', errors='replace')[-12000:]}"
+        for path in root.glob("*.log")
+    )
+    assert result.returncode == 0, result.stdout + result.stderr + logs
     completed = foundation_status(root=root)
     assert completed.state == "completed" and completed.exit_code == 0
     prerequisites = json.loads((

@@ -150,6 +150,7 @@ def test_real_cold_callers_converge_after_submitter_job_loss_and_source_removal(
             slot = target / "versions" / version
             assert (slot / ".install-complete.json").is_file()
             inputs.rename(area / "removed-inputs")
+            (root / "bootstrap" / admitted.operation_id / "inputs").rename(area / "removed-frozen-inputs")
             python = slot / "Scripts" / "python.exe"
             launcher = slot / ".runtime-bootstrap" / "runtime_launcher.py"
             for module, args in [
