@@ -212,3 +212,9 @@ transport, and reports descendant cleanup as unconfirmed rather than weakening
 identity checks or claiming retirement. The focused missing-custody, normal
 owner-retirement and held-pipe selection passed **5 cases**, with **3 explicit
 platform skips**.
+
+Cache-only metadata is explicitly not a live worker. A focused regression
+reproduced false liveness after foreground preparation without any queued
+request. The correction preserves actual queued ownership and an unconfirmed
+admission lock; those three controls passed. This is a liveness/reclamation
+correction, not evidence of faster full-roster CLI startup.

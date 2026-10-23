@@ -209,6 +209,10 @@ coordinate the smallest additive owner API before changing another slice.
   timeout. The regression failed before the correction; the focused selection
   passed five cases with three platform skips. Cleanup uncertainty remains
   visible rather than being called a successful retirement.
+- Corrected cache-only metadata being mistaken for active worker ownership.
+  Foreground preparation without a request is now inactive; queued workers
+  and unconfirmed admission locks remain protected. Three focused controls
+  passed. This does not claim or change the cold full-roster entry path.
 
 ### 2026-10-22 — Matched baseline and source-only continuation
 

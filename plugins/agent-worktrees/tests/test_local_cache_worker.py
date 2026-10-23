@@ -336,6 +336,14 @@ def test_queued_worker_protects_finalize_and_cleanup(tmp_path, monkeypatch):
     assert not worker.is_active(root)
 
 
+def test_unconfirmed_admission_lock_remains_active_without_request(tmp_path):
+    root = tmp_path / "checkout"
+    directory = root / ".git" / "agent-worktrees-local-guidance"
+    directory.mkdir(parents=True)
+    (directory / "local-guidance.lock").write_text("", encoding="utf-8")
+    assert worker.is_active(root)
+
+
 def test_wrong_request_cannot_claim_an_existing_worker(tmp_path, monkeypatch):
     directory = tmp_path / "worker"
     directory.mkdir()

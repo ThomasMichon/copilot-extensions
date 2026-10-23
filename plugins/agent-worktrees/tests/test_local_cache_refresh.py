@@ -138,6 +138,16 @@ def test_prepared_generation_reused_before_discovery_and_hook(copy_workspace, mo
     assert calls == ["snapshot"]
 
 
+def test_prepared_cache_without_worker_is_not_live_work(copy_workspace):
+    from agent_worktrees import local_cache_worker
+
+    root, home = copy_workspace
+    provider(root, home)
+    assert lcr.prepare_for_launch(root).status == "ready"
+    assert not (lcr._worker_directory(root) / "request.json").exists()
+    assert not local_cache_worker.is_active(root)
+
+
 @pytest.mark.parametrize("change", ["payload", "settings", "missing-output", "extra-output", "receipt"])
 def test_preparation_invalidates_actual_changes(copy_workspace, change):
     root, home = copy_workspace

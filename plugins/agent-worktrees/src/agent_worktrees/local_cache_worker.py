@@ -295,8 +295,9 @@ def is_active(root: str | Path) -> bool:
             if os.path.normcase(state["root"]) != os.path.normcase(str(root.resolve())):
                 raise ValueError("guidance worker workspace identity mismatch")
             return state["phase"] != "failed" and locks.lock_is_live(state["owner"])
-        owner = read_owner_pid(directory / "local-guidance.lock")
-        return locks.pid_alive(owner) if owner else True
+        lock_path = directory / "local-guidance.lock"
+        owner = read_owner_pid(lock_path)
+        return locks.pid_alive(owner) if owner else lock_path.exists() or lock_path.is_symlink()
     except (OSError, ValueError) as exc:
         _LOG.warning("Guidance worker liveness is unconfirmed: %s", exc)
         return True
