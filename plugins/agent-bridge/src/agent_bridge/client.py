@@ -320,6 +320,18 @@ class BridgeClient(PromptClientMixin, AnswerClientMixin, SessionStartClientMixin
         allow_retry: bool = True,
     ) -> dict[str, Any] | None:
         """Make an authenticated HTTP request. Returns parsed JSON or None for 204."""
+        from .startup_observation import current
+
+        observation = current()
+        if method == "GET" and observation is not None and not observation.clock.ready:
+            observation.check()
+            return observation.preflight(lambda: self._request(
+                method, path, body, params=params, allow_retry=allow_retry,
+                request_timeout=min(
+                    self._timeout if request_timeout is None else request_timeout,
+                    observation.clock.remaining() or .001,
+                ),
+            ))
         data = json.dumps(body).encode() if body else None
 
         def _build_request() -> urllib.request.Request:
@@ -370,10 +382,6 @@ class BridgeClient(PromptClientMixin, AnswerClientMixin, SessionStartClientMixin
             try:
                 with urllib.request.urlopen(req, timeout=sock_timeout) as resp:
                     self._mark_connected()
-                    from .startup_observation import current
-                    observation = current()
-                    if observation is not None and not observation.clock.ready:
-                        observation.received(event="bridge-response")
                     if resp.status == 204:
                         return None
                     return json.loads(resp.read().decode())

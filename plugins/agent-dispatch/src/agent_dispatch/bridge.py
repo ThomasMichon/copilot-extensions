@@ -650,11 +650,9 @@ def resume_worker(
             "Bridge continuation CLI refused its arguments; existing session "
             "absence is unproven; replacement is not authorized"
         )
-    if completed.returncode == 69 and "unsupported_protocol" in (
-        (completed.stdout or "") + "\n" + (completed.stderr or "")
-    ):
+    if completed.returncode == 69:
         raise BridgeUnavailable(
-            "Bridge continuation startup observation requires a supported protocol; "
+            "Bridge continuation refused availability or protocol support; "
             "existing session absence is unproven; replacement is not authorized"
         )
     return completed.returncode == 0

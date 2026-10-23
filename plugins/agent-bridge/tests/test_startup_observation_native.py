@@ -16,7 +16,10 @@ from agent_bridge.provider_process import run_captured
 
 
 class Backend:
-    def __init__(self, *, updates=True, disconnect=False, lost_admission=False, ack_failure=None):
+    def __init__(
+        self, *, updates=True, disconnect=False, lost_admission=False,
+        ack_failure=None, protocol=46, delayed_preflight=None,
+    ):
         self.updates = updates
         self.disconnect = disconnect
         self.lost_admission = lost_admission
@@ -30,6 +33,7 @@ class Backend:
         self.turns = []
         self.cursors = []
         self.audiences = []
+        self.preflight_requests = []
         backend = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -47,8 +51,11 @@ class Backend:
 
             def do_GET(self):
                 parsed = urllib.parse.urlparse(self.path)
+                if parsed.path == delayed_preflight:
+                    backend.preflight_requests.append(parsed.path)
+                    backend.stopping.wait(3)
                 if parsed.path == "/health":
-                    self.reply({"protocol_version": 46, "min_protocol_version": 1})
+                    self.reply({"protocol_version": protocol, "min_protocol_version": 1})
                 elif parsed.path.endswith("/live-sessions/resolve"):
                     self.reply({})
                 elif parsed.path.endswith("/original/cursor"):
@@ -306,3 +313,35 @@ def test_actual_dispatch_preserves_uncertain_admission_after_readiness(monkeypat
         assert raised.value.phase == "prompt-admission"
         assert backend.resume_calls == 1
         assert len(backend.turns) == 1
+
+
+@pytest.mark.parametrize("path", ["/health", "/api/v1/sessions/original"])
+def test_delayed_preflight_expires_before_any_resume_or_prompt(path):
+    with Backend(delayed_preflight=path) as backend:
+        result, elapsed = invoke(backend, communication=2)
+        assert result.returncode == 70, result.stderr
+        payload = json.loads(result.stdout)
+        assert payload["reason"] == "startup_communication_timeout"
+        assert 2 <= payload["elapsed_s"] < 3
+        assert elapsed < 60
+        assert backend.preflight_requests == [path]
+        assert backend.resume_calls == 0
+        assert backend.turns == []
+
+
+@pytest.mark.parametrize("as_json", [False, True])
+def test_real_protocol_refusal_never_replaces_retained_dispatch_session(monkeypatch, as_json):
+    bridge = dispatch_consumer(monkeypatch)
+    with Backend(protocol=45) as backend:
+        prefix = launch_prefix(backend)
+        if not as_json:
+            prefix = prefix[:-1]
+        monkeypatch.setattr(bridge, "_agent_bridge_launch_prefix", lambda: prefix)
+        monkeypatch.setattr(bridge, "spawn_worker", lambda *a, **kw: pytest.fail("replacement"))
+        with pytest.raises(bridge.BridgeUnavailable, match="absence is unproven"):
+            bridge.spawn_or_resume_worker(
+                "retained-task", worker_id="worker", prompt="retain original request",
+                prior_session_id="original", liveness_fn=lambda _: "gone",
+            )
+        assert backend.resume_calls == 0
+        assert backend.turns == []

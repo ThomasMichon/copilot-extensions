@@ -142,6 +142,7 @@ class StartupObservation:
         self.report()
 
     def received(self, phase: str | None = None, *, event: str = "response") -> None:
+        self.check()
         if phase is not None:
             self.phase = _safe_label(phase)
         self.clock.receive(self.phase)
@@ -160,6 +161,34 @@ class StartupObservation:
         self.clock.mark_ready()
         self.report("ready", expected_s=self.clock.policy.expected,
                     expected_exceeded=self.clock.elapsed > self.clock.policy.expected)
+
+    def preflight(self, call: Callable[[], Any]) -> Any:
+        """Bound synchronous read-only discovery before admitting any mutation."""
+        from .client import BridgeClientError
+
+        self.check()
+        result: queue.Queue[tuple[Any, BaseException | None]] = queue.Queue()
+
+        def read() -> None:
+            try:
+                result.put((call(), None))
+            except BaseException as exc:
+                result.put((None, exc))
+
+        reader = threading.Thread(target=read, name="bridge-startup-preflight", daemon=True)
+        reader.start()
+        while True:
+            self.check()
+            try:
+                value, error = result.get(timeout=min(self.clock.remaining() or .1, .1))
+            except queue.Empty:
+                continue
+            self.check()
+            if error is None or isinstance(error, BridgeClientError):
+                self.received(event="bridge-response")
+            if error is not None:
+                raise error
+            return value
 
     def request(
         self, client: Any, session_id: str, call: Callable[[], dict[str, Any]],

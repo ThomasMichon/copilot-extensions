@@ -139,6 +139,12 @@ five minutes of independent startup grace, with readiness expected within one
 minute end-to-end. Explicit flags may select smaller test or operation budgets.
 The five-minute budget does not apply to the turn after readiness.
 
+Read-only health and target-resolution requests are supervised by the remaining
+startup clocks, including response-body waits. A response arriving after expiry
+cannot renew contact or permit a later resume/prompt mutation. Dispatch also
+retains an existing session on availability/protocol exit 69, including the
+non-JSON refusal renderer; that refusal is not evidence of session absence.
+
 Progress is flushed to stderr as `@@agent-startup ` plus one JSON object per
 line; stdout remains one final `send --json` result. Every target event,
 including unfamiliar kinds and target keepalives, counts as contact. Progress

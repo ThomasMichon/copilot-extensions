@@ -139,6 +139,41 @@ def test_initial_silence_and_ready_phase_do_not_manufacture_target_contact(capsy
     assert "communication_timeout" in capsys.readouterr().err
 
 
+def test_late_preflight_response_cannot_renew_an_expired_contact_clock(monkeypatch):
+    now = [0.0]
+    item = observation.StartupObservation(StartupTimeouts())
+    item.clock = StartupClock(StartupTimeouts(), monotonic=lambda: now[0])
+    requests = []
+
+    class Response:
+        status = 200
+
+        def __enter__(self):
+            now[0] = 31
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def read(self):
+            return b'{"protocol_version":46}'
+
+    def open_response(request, **kwargs):
+        requests.append((request.method, kwargs["timeout"]))
+        return Response()
+
+    monkeypatch.setattr("urllib.request.urlopen", open_response)
+    token = observation._active.set(item)
+    try:
+        with pytest.raises(observation.StartupObservationError) as raised:
+            BridgeClient("http://fixture", "fixture")._request("GET", "/health")
+        assert raised.value.clock == "communication"
+        assert requests == [("GET", 30)]
+        assert item.clock.expired().silence == 31
+    finally:
+        observation._active.reset(token)
+
+
 def test_ready_ends_startup_budget_not_a_later_turn(capsys):
     now = [0.0]
     item = observation.StartupObservation(StartupTimeouts())
