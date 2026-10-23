@@ -20,10 +20,14 @@ with durable physical custody, interrupted-deletion recovery and reconstruction
 generation fencing merged in #7900. Withdrawal from intact unfinished pending
 producer proofs merged in #7958 for commands and selectors; acknowledged owners,
 activation and forward retry retain strict receipt handling. Attempt-local
-metadata journals and staged namespace retry merged in #8038. Initial publication
-receipt-header recovery, retained-good policy and the complete managed
+metadata journals and staged namespace retry merged in #8038. Complete producer
+headers before client pending ownership merged in #8093; existing missing or
+malformed legacy proof remains a refusal. Retained-good policy and the complete managed
 lifecycle remain serial obligations, not delivered behavior or permission for
 live activation.
+The operator selected explicit retained-good recovery with the admitted floor
+unchanged; its next review-gated proposal is
+[retained-good recovery](client-retained-good-recovery.md).
 Owned selector withdrawal merged in #7891 and is documented in
 [runtime activation](../../../fleet-manager/docs/client-runtime-activation.md#owned-selector-withdrawal).
 It requires settled command unregistration, withdraws only proved selectors,

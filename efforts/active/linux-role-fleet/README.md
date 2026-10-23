@@ -102,6 +102,15 @@ thin client. The private hosting substrate remains an adopter choice, not a
 public hard dependency. Controller-host selection is explicit and does not
 authorize acquiring or migrating a live machine.
 
+For the retained-good policy decision, the operator selected:
+
+> explicit-retained-good
+
+The selected option was presented as "Allow explicit retained-good recovery;
+keep the admission floor unchanged." This selects a source contract, not a
+live rollback or rollout. [The scoped recovery proposal](client-retained-good-recovery.md)
+separates that choice from agent-recommended implementation details.
+
 ## Plan
 
 ### Mission amendment - Setup, refresh and first useful services
@@ -179,8 +188,12 @@ Implementation sequencing below is **agent-recommended**:
   Owned pending command/selector withdrawal from intact unfinished producer
   proofs is merged in #7958; acknowledged-owner and execution proofs stay strict.
   Attempt-local metadata journals and staged namespace retry are merged in #8038.
-  Initial publication receipt-header recovery, retained-good policy,
+  Complete producer headers before client pending ownership are merged in #8093;
+  existing missing/malformed legacy proofs still refuse.
+  Retained-good policy,
   identity retirement/reinstall fencing and a managed installer remain open.
+  [Explicit retained-good recovery](client-retained-good-recovery.md) is the
+  next operator-selected policy proposal; review must precede implementation.
   None of these local prerequisites authorizes a live rollout.
   [Installation repair conductor](installation-repair-conductor.md) is the
   agent-recommended #6464 setup prerequisite proposal. Its ordinary-owner
