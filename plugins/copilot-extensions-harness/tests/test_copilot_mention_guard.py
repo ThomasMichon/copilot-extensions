@@ -1,12 +1,18 @@
 from __future__ import annotations
 
 import importlib.util
+import io
 import json
 import os
 import shlex
+import shutil
+import statistics
 import subprocess
 import sys
+import time
 from pathlib import Path
+
+import pytest
 
 PLUGIN = Path(__file__).resolve().parents[1]
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
@@ -374,8 +380,9 @@ def test_current_repo_reads_the_git_remote(tmp_path: Path) -> None:
     assert guard.current_repo_matches("someorg/other-repo", str(tmp_path)) is False
 
 
-def test_current_repo_empty_outside_any_git_repo(tmp_path: Path) -> None:
+def test_current_repo_empty_outside_any_git_repo(tmp_path: Path, monkeypatch) -> None:
     guard = _load_guard()
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path.parent))
     assert guard.current_repo_candidates(str(tmp_path)) == []
     assert guard.current_repo_matches("someorg/some-repo", str(tmp_path)) is False
 
@@ -435,3 +442,259 @@ def test_hook_denies_inside_the_target_repo() -> None:
     assert result.returncode == 0
     decision = json.loads(result.stdout)
     assert decision["permissionDecision"] == "deny"
+
+
+@pytest.mark.parametrize("command", [
+    "git status --short",
+    "python -m pytest",
+    'echo "gh pr comment --body @copilot"',
+    "gh api repos/owner/repo/issues/1/comments",
+    "gh pr view 1",
+    "env GH_TOKEN=x command gh issue list",
+])
+def test_irrelevant_hook_has_no_discovery_or_body_io(monkeypatch, capsys, command):
+    guard = _load_guard()
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps({
+        "toolName": "powershell", "toolArgs": {"command": command},
+    })))
+
+    def unexpected(*args, **kwargs):
+        pytest.fail("irrelevant command performed discovery or body IO")
+
+    monkeypatch.setattr(guard.subprocess, "run", unexpected)
+    monkeypatch.setattr(guard, "target_repo_from_manifest", unexpected)
+    monkeypatch.setattr(guard, "_extract_body_text", unexpected)
+    assert guard.main() == 0
+    assert capsys.readouterr().out == ""
+
+
+@pytest.mark.parametrize("command", [
+    "gh pr comment 1 --body-file -",
+    "env GH_TOKEN=x command gh issue create --fill",
+    "echo ready\ngh api repos/o/r/issues/1/comments --input -",
+    'gh pr review 1 --body "$BODY"',
+    "gh issue comment 1 --body-file missing.md",
+])
+@pytest.mark.parametrize("scoped", [True, False])
+def test_relevance_preserves_unknown_body_and_repository_scope(
+    monkeypatch, capsys, command, scoped,
+):
+    guard = _load_guard()
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps({
+        "toolName": "bash", "toolArgs": {"command": command},
+    })))
+    monkeypatch.setattr(guard, "target_repo_from_manifest", lambda *a: "o/r")
+    monkeypatch.setattr(guard, "current_repo_matches", lambda *a, **kw: scoped)
+    assert guard.main() == 0
+    output = capsys.readouterr().out
+    assert bool(output) == scoped
+    if scoped:
+        assert json.loads(output)["permissionDecision"] == "deny"
+
+
+def test_remote_discovery_is_one_process_with_remaining_budget(monkeypatch):
+    guard = _load_guard()
+    calls = []
+    monkeypatch.setattr(guard.time, "monotonic", lambda: 10.25)
+
+    def run(argv, **kwargs):
+        calls.append((argv, kwargs))
+        lines = [
+            f"remote{i}\thttps://github.com/o/r{i}.git (fetch)\n"
+            f"remote{i}\thttps://github.com/o/push{i}.git (push)\n"
+            for i in range(100)
+        ]
+        return subprocess.CompletedProcess(argv, 0, "".join(lines))
+
+    monkeypatch.setattr(guard.subprocess, "run", run)
+    assert len(guard.current_repo_candidates(deadline=11.0)) == 100
+    assert len(calls) == 1
+    assert calls[0][0] == ["git", "remote", "--verbose"]
+    assert calls[0][1]["timeout"] == pytest.approx(0.75)
+    assert guard.current_repo_candidates(deadline=10.0) == []
+    assert len(calls) == 1
+
+
+def test_expired_scope_budget_does_not_read_body(monkeypatch, capsys):
+    guard = _load_guard()
+    clock = [0.0]
+    monkeypatch.setattr(guard.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps({
+        "toolName": "bash",
+        "toolArgs": {"command": "gh pr comment 1 --body-file missing.md"},
+    })))
+    monkeypatch.setattr(guard, "target_repo_from_manifest", lambda *a: "o/r")
+
+    def matches(*args, deadline=None):
+        assert deadline == guard.DECISION_BUDGET_SECONDS
+        clock[0] = deadline
+        return True
+
+    monkeypatch.setattr(guard, "current_repo_matches", matches)
+    monkeypatch.setattr(
+        guard, "_extract_body_text",
+        lambda *a: pytest.fail("body read started after the decision deadline"),
+    )
+    assert guard.main() == 0
+    assert json.loads(capsys.readouterr().out)["permissionDecision"] == "deny"
+
+
+def test_git_timeout_reaps_the_actual_child(monkeypatch):
+    guard = _load_guard()
+    real_run = subprocess.run
+    real_popen = subprocess.Popen
+    children = []
+
+    def popen(*args, **kwargs):
+        child = real_popen(*args, **kwargs)
+        children.append(child)
+        return child
+
+    def slow_git(argv, **kwargs):
+        return real_run([sys.executable, "-c", "import time; time.sleep(30)"], **kwargs)
+
+    monkeypatch.setattr(guard.subprocess, "Popen", popen)
+    monkeypatch.setattr(guard.subprocess, "run", slow_git)
+    started = time.monotonic()
+    assert guard.current_repo_candidates(deadline=started + 0.15) == []
+    assert time.monotonic() - started < 2
+    assert len(children) == 1
+    assert children[0].poll() is not None
+
+
+def test_body_read_wait_consumes_only_remaining_deadline(monkeypatch):
+    import threading
+
+    guard = _load_guard()
+    release = threading.Event()
+    finished = threading.Event()
+
+    def blocked_open(*args, **kwargs):
+        try:
+            release.wait(5)
+            raise OSError("fixture read unavailable")
+        finally:
+            finished.set()
+
+    monkeypatch.setattr("builtins.open", blocked_open)
+    started = time.monotonic()
+    try:
+        assert guard._read_bounded("blocked", deadline=started + 0.05) is None
+        assert time.monotonic() - started < 1
+    finally:
+        release.set()
+        assert finished.wait(2)
+
+
+def test_repo_probe_preserves_fetch_url_rewrites_and_ignores_push_urls(tmp_path):
+    guard = _load_guard()
+
+    def git(*args):
+        subprocess.run(["git", *args], cwd=tmp_path, check=True, creationflags=NO_WINDOW)
+
+    git("init", "-q")
+    git("config", "url.https://github.com/example/.insteadOf", "fixture:")
+    git("remote", "add", "upstream", "fixture:target.git")
+    git("config", "--add", "remote.upstream.url", "https://github.com/example/second.git")
+    git("remote", "set-url", "--push", "upstream", "https://github.com/example/push.git")
+    assert guard.current_repo_candidates(str(tmp_path)) == ["example/target"]
+
+
+def test_local_relevance_preserves_file_input_without_literal_mention(tmp_path, monkeypatch, capsys):
+    guard = _load_guard()
+    body = tmp_path / "body.txt"
+    body.write_text("@copilot review", encoding="utf-8")
+    command = f"env command gh pr comment 1 --body-file {shlex.quote(str(body))}"
+    assert "@copilot" not in command
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps({
+        "toolName": "bash", "toolArgs": {"command": command},
+    })))
+    monkeypatch.setattr(guard, "target_repo_from_manifest", lambda *a: "o/r")
+    monkeypatch.setattr(guard, "current_repo_matches", lambda *a, **kw: True)
+    assert guard.main() == 0
+    assert json.loads(capsys.readouterr().out)["permissionDecision"] == "deny"
+
+
+@pytest.mark.parametrize("case", [
+    "python_startup", "python_irrelevant", "python_relevant",
+    "shell_startup", "shell_irrelevant", "shell_relevant",
+])
+def test_native_hook_process_counts_and_latency(tmp_path, capsys, case):
+    """Observe real CLI boundaries without executing the proposed gh command."""
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True, creationflags=NO_WINDOW)
+    config = tmp_path / ".git" / "config"
+    with config.open("a", encoding="utf-8") as stream:
+        for index in range(24):
+            stream.write(
+                f'\n[remote "r{index}"]\n'
+                "url = https://github.com/ThomasMichon/copilot-extensions.git\n"
+            )
+    script = PLUGIN / "scripts" / "copilot-mention-guard.py"
+    audited = (
+        "import atexit,json,runpy,sys; calls=[];"
+        "sys.addaudithook(lambda event,args: calls.append(args[1]) "
+        "if event=='subprocess.Popen' else None);"
+        "atexit.register(lambda: print(json.dumps(calls),file=sys.stderr));"
+        "runpy.run_path(sys.argv[1],run_name='__main__')"
+    )
+    env = {**os.environ, "COPILOT_PLUGIN_ROOT": str(PLUGIN)}
+    cases = {
+        "irrelevant": "git status --short",
+        "relevant": "gh pr comment 1 --body-file -",
+    }
+    boundary, name = case.split("_")
+    if boundary == "shell":
+        shell = shutil.which("pwsh") or shutil.which("powershell")
+        if os.name != "nt" or not shell:
+            pytest.skip("Windows PowerShell hook measurement")
+        hook = json.loads((PLUGIN / "hooks.json").read_text())["hooks"]["preToolUse"][0]["powershell"]
+        argv = [shell, "-NoProfile", "-NonInteractive", "-Command",
+                "exit 0" if name == "startup" else hook]
+    else:
+        argv = [sys.executable, "-c", "pass" if name == "startup" else audited, str(script)]
+    payload = json.dumps({
+        "toolName": "powershell", "toolArgs": {"command": cases.get(name, "git status --short")},
+    })
+    elapsed = []
+    for _ in range(3):
+        started = time.monotonic()
+        result = subprocess.run(
+            argv, input=payload, cwd=tmp_path, env=env, capture_output=True,
+            text=True, timeout=8, creationflags=NO_WINDOW,
+        )
+        elapsed.append(time.monotonic() - started)
+        assert result.returncode == 0, result.stderr
+        if boundary == "python" and name != "startup":
+            calls = json.loads(result.stderr)
+            expected = "git remote --verbose" if os.name == "nt" else ["git", "remote", "--verbose"]
+            assert calls == ([] if name == "irrelevant" else [expected])
+        assert bool(result.stdout) == (name == "relevant")
+    metrics = {f"{case}_median_seconds": round(statistics.median(elapsed), 4)}
+    with capsys.disabled():
+        print("\nmention-guard native measurement: " + json.dumps(metrics, sort_keys=True))
+
+
+def test_hook_exits_with_blocked_file_reader(tmp_path):
+    script = PLUGIN / "scripts" / "copilot-mention-guard.py"
+    wrapper = """
+import runpy, sys, time
+guard = runpy.run_path(sys.argv[1])
+scope = guard["main"].__globals__
+scope["target_repo_from_manifest"] = lambda *a: "o/r"
+scope["current_repo_matches"] = lambda *a, **kw: True
+def blocked_open(*a, **kw):
+    time.sleep(30)
+scope["open"] = blocked_open
+raise SystemExit(guard["main"]())
+"""
+    started = time.monotonic()
+    result = subprocess.run(
+        [sys.executable, "-c", wrapper, str(script)],
+        input=json.dumps({"toolName": "bash", "toolArgs": {
+            "command": "gh pr comment 1 --body-file blocked",
+        }}),
+        cwd=tmp_path, capture_output=True, text=True, timeout=6, creationflags=NO_WINDOW,
+    )
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)["permissionDecision"] == "deny"
+    assert time.monotonic() - started < 6

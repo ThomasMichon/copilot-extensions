@@ -1,0 +1,9 @@
+{
+  "comment": "Skip irrelevant mention-guard commands before discovery and share one deadline across scoped decisions",
+  "changes": [
+    {
+      "plugin": "copilot-extensions-harness",
+      "type": "patch"
+    }
+  ]
+}

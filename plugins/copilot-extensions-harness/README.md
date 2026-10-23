@@ -73,6 +73,36 @@ plugin purely for its instruction projections is never touched by the guard
 -- it only fires for a `gh`
 invocation whose current directory resolves to this plugin's own target repo.
 
+The guard first classifies publication syntax locally, using the same tokenizer
+and write predicates as the body scanner. Ordinary reads and unrelated shell
+commands perform no repository/manifest/body discovery and start no child
+processes. This is not a mention-substring filter: body files, stdin, implicit
+create bodies, command prefixes and compound statements still reach the scoped
+policy check.
+
+Relevant decisions share a **1.5-second monotonic budget**, including manifest
+and body-file reads and repository discovery. One `git remote --verbose` call
+uses only the remaining budget, independently of remote count; only each
+remote's first fetch URL counts, with Git's URL rewrites preserved. Git timeout
+cleanup kills and reaps that child. A slow file read cannot hold the decision:
+its daemon reader is confined to the short-lived hook process and ends when
+that process exits. Unknown repository scope remains fail-open as before;
+once the target repository is established, uninspectable or timed-out bodies
+remain fail-closed. This does not change destination policy or address the
+PowerShell/GraphQL parsing gaps tracked in #3677.
+
+The budget starts in Python's entry point, not before shell/interpreter startup;
+OS process creation and termination can also add overhead. It is **not** proof
+that all installed hooks together finish within two seconds. The focused
+`test_copilot_mention_guard.py` native consumer test measures actual Python and
+shipped PowerShell-hook wall time, reports empty-shell startup separately, and
+audits zero/one Git children for irrelevant/relevant inputs against 24 remotes.
+It never executes a proposed `gh` publication or performs a network request:
+
+```text
+python tools/run-plugin-tests.py copilot-extensions-harness --test-file tests/test_copilot_mention_guard.py
+```
+
 | Sub-agent | Covers |
 |-----------|--------|
 | [clean-room-judge](agents/clean-room-judge.agent.md) | Read-only Tier-E evaluator: scores a clean-room eval run against a scenario's stated outcome under **literal-mode** rules (credits only the literal task; a self-heal "pass" is a false pass), emitting PASS/FAIL + classified jams |

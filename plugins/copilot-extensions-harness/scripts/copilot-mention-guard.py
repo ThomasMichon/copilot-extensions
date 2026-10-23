@@ -32,7 +32,10 @@ import re
 import shlex
 import subprocess
 import sys
+import time
 from pathlib import Path
+
+DECISION_BUDGET_SECONDS = 1.5
 
 # ``@copilot-extensions`` (the marketplace/org handle) and similar
 # `@copilot-<word>` identifiers are legitimate and pervasive in this facility
@@ -88,7 +91,7 @@ def _parse_github_repo(url: str) -> str | None:
     return f"{owner}/{repo}".lower()
 
 
-def target_repo_from_manifest(plugin_root: Path) -> str | None:
+def target_repo_from_manifest(plugin_root: Path, deadline: float | None = None) -> str | None:
     """``owner/repo`` this guard applies to, read from this plugin's own
     ``plugin.json`` ``repository``/``homepage`` field rather than a second
     hardcoded string -- so editing that ONE field (a maintainer rename) is
@@ -100,8 +103,11 @@ def target_repo_from_manifest(plugin_root: Path) -> str | None:
     staying scoped to the plugin's declared home is a safe default even on
     an unrelated fork; it is not a "this fork's own repo" retarget)."""
     try:
-        manifest = json.loads((plugin_root / "plugin.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+        content = _read_bounded(
+            str(plugin_root / "plugin.json"), deadline=deadline, errors="strict",
+        )
+        manifest = json.loads(content) if content is not None else {}
+    except ValueError:
         return None
     for key in ("repository", "homepage"):
         url = manifest.get(key)
@@ -128,7 +134,9 @@ def _clean_git_env() -> dict[str, str]:
     return {k: v for k, v in os.environ.items() if k not in _GIT_ENV_VARS_TO_STRIP}
 
 
-def current_repo_candidates(cwd: str | None = None) -> list[str]:
+def current_repo_candidates(
+    cwd: str | None = None, *, deadline: float | None = None,
+) -> list[str]:
     """Every ``owner/repo`` resolvable from the git remotes configured at
     *cwd* -- not just ``origin``. This codebase's own convention allows a
     configurable remote name (``plugins/agent-worktrees/src/agent_worktrees/
@@ -136,41 +144,42 @@ def current_repo_candidates(cwd: str | None = None) -> list[str]:
     carries an ``upstream`` remote pointing at the real target repo, so
     checking only ``origin`` would silently no-op the guard for either
     shape."""
-    env = _clean_git_env()
+    if deadline is None:
+        deadline = time.monotonic() + DECISION_BUDGET_SECONDS
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        return []
     try:
         result = subprocess.run(
-            ["git", "remote"],
-            cwd=cwd, capture_output=True, text=True, timeout=5, check=False,
-            env=env, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            ["git", "remote", "--verbose"],
+            cwd=cwd, capture_output=True, text=True, timeout=remaining, check=False,
+            env=_clean_git_env(), creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
     except (OSError, subprocess.SubprocessError):
         return []
     if result.returncode != 0:
         return []
     repos: list[str] = []
-    for name in (line.strip() for line in result.stdout.splitlines()):
-        if not name:
+    seen: set[str] = set()
+    for line in result.stdout.splitlines():
+        fields = line.split()
+        if len(fields) != 3 or fields[2] != "(fetch)" or fields[0] in seen:
             continue
-        try:
-            url_result = subprocess.run(
-                ["git", "remote", "get-url", name],
-                cwd=cwd, capture_output=True, text=True, timeout=5, check=False,
-                env=env, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-            )
-        except (OSError, subprocess.SubprocessError):
-            continue
-        if url_result.returncode != 0:
-            continue
-        repo = _parse_github_repo(url_result.stdout.strip())
+        # Like `remote get-url NAME`, use the first fetch URL, including
+        # Git's insteadOf expansion, never a push-only URL.
+        seen.add(fields[0])
+        repo = _parse_github_repo(fields[1])
         if repo:
             repos.append(repo)
     return repos
 
 
-def current_repo_matches(target: str, cwd: str | None = None) -> bool:
+def current_repo_matches(
+    target: str, cwd: str | None = None, *, deadline: float | None = None,
+) -> bool:
     """True if *target* (``owner/repo``) is among the GitHub repos resolved
     from any configured remote at *cwd* (see ``current_repo_candidates``)."""
-    return target in current_repo_candidates(cwd)
+    return target in current_repo_candidates(cwd, deadline=deadline)
 
 
 def _split_unquoted_newlines(command: str) -> list[str]:
@@ -315,7 +324,10 @@ def _is_api_comment_or_review_write(tokens: list[str]) -> bool:
     )
 
 
-def _read_bounded(path: str, limit: int = 200_000) -> str | None:
+def _read_bounded(
+    path: str, limit: int = 200_000, *, deadline: float | None = None,
+    errors: str = "replace",
+) -> str | None:
     """Contents of *path*, or ``None`` if it can't be read/is too large to
     fully inspect -- NEVER an empty or truncated string on failure, either
     of which would make an uninspectable body file (unreadable, a
@@ -324,14 +336,31 @@ def _read_bounded(path: str, limit: int = 200_000) -> str | None:
     fully-scanned one and silently pass it through. Reads one byte past
     *limit* specifically to detect truncation rather than ever treating a
     cut-off prefix as the complete body."""
+    def read() -> str | None:
+        try:
+            with open(path, encoding="utf-8", errors=errors) as fh:
+                content = fh.read(limit + 1)
+        except (OSError, UnicodeError):
+            return None
+        return content if len(content) <= limit else None
+
+    if deadline is None:
+        return read()
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        return None
+    # A FIFO or stalled filesystem read must not hold the hook past its
+    # decision budget. The daemon reader is owned by this short-lived hook
+    # process; exiting the hook closes any still-blocked reader and handle.
+    import queue
+    import threading
+
+    results: queue.Queue[str | None] = queue.Queue(maxsize=1)
+    threading.Thread(target=lambda: results.put(read()), daemon=True).start()
     try:
-        with open(path, encoding="utf-8", errors="replace") as fh:
-            content = fh.read(limit + 1)
-    except OSError:
+        return results.get(timeout=max(0, deadline - time.monotonic()))
+    except queue.Empty:
         return None
-    if len(content) > limit:
-        return None
-    return content
 
 
 _UNSCANNABLE = object()  # sentinel: the body is sourced from stdin, which a
@@ -341,7 +370,7 @@ _UNSCANNABLE = object()  # sentinel: the body is sourced from stdin, which a
 # unverifiable publish through.
 
 
-def _extract_input_json_body(path: str) -> str | object:
+def _extract_input_json_body(path: str, deadline: float | None = None) -> str | object:
     """``gh api --input <file>`` (or ``--input -`` for stdin) sends a raw
     JSON request body -- read *path*, parse it, and return its ``"body"``
     field if present as a string. Any failure (stdin, unreadable file,
@@ -350,9 +379,11 @@ def _extract_input_json_body(path: str) -> str | object:
     if path == "-":
         return _UNSCANNABLE
     try:
-        with open(path, encoding="utf-8") as fh:
-            payload = json.load(fh)
-    except (OSError, ValueError):
+        content = _read_bounded(path, deadline=deadline, errors="strict")
+        if content is None:
+            return _UNSCANNABLE
+        payload = json.loads(content)
+    except ValueError:
         return _UNSCANNABLE
     if not isinstance(payload, dict):
         return _UNSCANNABLE
@@ -386,7 +417,7 @@ def _contains_unexpanded_reference(value: str) -> bool:
     return bool(_UNEXPANDED_REFERENCE_RE.search(value))
 
 
-def _extract_body_text(tokens: list[str]) -> str | object:
+def _extract_body_text(tokens: list[str], deadline: float | None = None) -> str | object:
     """Best-effort: the literal body text this invocation would publish, or
     the ``_UNSCANNABLE`` sentinel if the body is sourced from stdin
     (``--body-file -`` / ``-F body=@-``, gh's stdin convention) or is an
@@ -395,6 +426,8 @@ def _extract_body_text(tokens: list[str]) -> str | object:
     parts: list[str] = []
     index = 1
     while index < len(tokens):
+        if deadline is not None and time.monotonic() >= deadline:
+            return _UNSCANNABLE
         token = tokens[index]
         matched = False
         for flag in INLINE_BODY_FLAGS:
@@ -419,7 +452,7 @@ def _extract_body_text(tokens: list[str]) -> str | object:
             if token == flag and index + 1 < len(tokens):
                 if tokens[index + 1] == "-":
                     return _UNSCANNABLE
-                content = _read_bounded(tokens[index + 1])
+                content = _read_bounded(tokens[index + 1], deadline=deadline)
                 if content is None:
                     return _UNSCANNABLE
                 parts.append(content)
@@ -429,7 +462,7 @@ def _extract_body_text(tokens: list[str]) -> str | object:
                 value = token[len(flag) + 1 :]
                 if value == "-":
                     return _UNSCANNABLE
-                content = _read_bounded(value)
+                content = _read_bounded(value, deadline=deadline)
                 if content is None:
                     return _UNSCANNABLE
                 parts.append(content)
@@ -439,14 +472,14 @@ def _extract_body_text(tokens: list[str]) -> str | object:
             index += 2 if token in FILE_BODY_FLAGS else 1
             continue
         if token == "--input" and index + 1 < len(tokens):
-            result = _extract_input_json_body(tokens[index + 1])
+            result = _extract_input_json_body(tokens[index + 1], deadline)
             if result is _UNSCANNABLE:
                 return _UNSCANNABLE
             parts.append(result)
             index += 2
             continue
         if token.startswith("--input="):
-            result = _extract_input_json_body(token[len("--input=") :])
+            result = _extract_input_json_body(token[len("--input=") :], deadline)
             if result is _UNSCANNABLE:
                 return _UNSCANNABLE
             parts.append(result)
@@ -474,7 +507,7 @@ def _extract_body_text(tokens: list[str]) -> str | object:
                 if value == "@-":
                     return _UNSCANNABLE
                 if value.startswith("@"):
-                    content = _read_bounded(value[1:])
+                    content = _read_bounded(value[1:], deadline=deadline)
                     if content is None:
                         return _UNSCANNABLE
                     parts.append(content)
@@ -504,16 +537,28 @@ def _extract_body_text(tokens: list[str]) -> str | object:
     return "\n".join(parts)
 
 
-def command_publishes_copilot_mention(command: str) -> str | None:
+def _publication_statements(command: str) -> list[list[str]]:
+    """Local syntax only: retain every publication the body scanner handles."""
+    return [
+        tokens for tokens in _split_statements(command)
+        if _is_gh(tokens)
+        and (_has_write_subcommand(tokens) or _is_api_comment_or_review_write(tokens))
+    ]
+
+
+def command_publishes_copilot_mention(
+    command: str, *, statements: list[list[str]] | None = None,
+    deadline: float | None = None,
+) -> str | None:
     """Returns a deny-reason string if *command* should be blocked, else
     ``None``. Two distinct reasons: an actual ``@copilot`` mention, or a
     stdin-sourced body this hook cannot inspect before the command runs."""
-    for tokens in _split_statements(command):
-        if not _is_gh(tokens):
-            continue
-        if not (_has_write_subcommand(tokens) or _is_api_comment_or_review_write(tokens)):
-            continue
-        body_text = _extract_body_text(tokens)
+    for tokens in _publication_statements(command) if statements is None else statements:
+        if deadline is not None and time.monotonic() >= deadline:
+            return "unscannable"
+        body_text = _extract_body_text(tokens, deadline)
+        if deadline is not None and time.monotonic() >= deadline:
+            return "unscannable"
         if body_text is _UNSCANNABLE:
             # A stdin-sourced body (`--body-file -` / `-F body=@-`) cannot be
             # inspected before the command runs -- fail closed rather than
@@ -525,10 +570,7 @@ def command_publishes_copilot_mention(command: str) -> str | None:
 
 
 def main() -> int:
-    plugin_root = Path(
-        os.environ.get("COPILOT_PLUGIN_ROOT")
-        or Path(__file__).resolve().parent.parent
-    )
+    deadline = time.monotonic() + DECISION_BUDGET_SECONDS
     try:
         data = json.load(sys.stdin)
         tool_name = data.get("toolName")
@@ -544,14 +586,25 @@ def main() -> int:
         hook_cwd = data.get("cwd") or (args.get("cwd") if isinstance(args, dict) else None)
     except Exception:
         return 0
-    target = target_repo_from_manifest(plugin_root)
-    if target is None or not current_repo_matches(target, hook_cwd):
+    if not isinstance(command, str):
+        return 0
+    statements = _publication_statements(command)
+    if not statements:
+        return 0
+    plugin_root = Path(
+        os.environ.get("COPILOT_PLUGIN_ROOT")
+        or Path(__file__).resolve().parent.parent
+    )
+    target = target_repo_from_manifest(plugin_root, deadline)
+    if target is None or not current_repo_matches(target, hook_cwd, deadline=deadline):
         # Scoped to this plugin's own repo -- a session working elsewhere
         # (even with this plugin enabled purely for its instruction
         # projections), or one where the target repo couldn't be resolved
         # at all, is never touched by this guard (fail open, not closed).
         return 0
-    reason = command_publishes_copilot_mention(command)
+    reason = command_publishes_copilot_mention(
+        command, statements=statements, deadline=deadline,
+    )
     if reason == "mention":
         print(
             json.dumps(
@@ -579,15 +632,15 @@ def main() -> int:
                     "permissionDecision": "deny",
                     "permissionDecisionReason": (
                         "DENIED: this publishes a PR/issue comment or review "
-                        "body sourced from stdin (--body-file - / -F "
-                        "body=@-), which this guard cannot inspect before "
-                        "the command runs. Write the body to a file first "
+                        "body this guard cannot fully inspect within its "
+                        "decision budget (including stdin, unresolved "
+                        "input, or a slow file). Write the body to a local file "
                         "(--body-file <path>) or pass it inline (--body "
                         "\"...\") so it can be scanned for an @copilot "
                         "mention."
                     ),
                     "decision": "deny",
-                    "message": "DENIED: stdin-sourced PR/issue body text cannot be scanned.",
+                    "message": "DENIED: PR/issue body text cannot be fully scanned.",
                 },
                 separators=(",", ":"),
             )
