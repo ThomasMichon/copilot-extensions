@@ -2247,7 +2247,9 @@ fallback decisions, generation-fenced at-least-once completion, and recovery.
 An explicitly configured embedding can instead compose the optional
 [`service replay consumer`](docs/delegated-service-replay.md). Its finite cycles
 retain original request/deadline intent in the same waiter rows and settle
-generation-fenced effects before ACK. This does not change CLI defaults or
+generation-fenced effects before ACK. A trusted coordinator embedding can
+schedule one shared cycle through its existing waiter-maintenance cadence and
+drain gate, with bounded backoff and owned shutdown. This does not change CLI defaults or
 install/activate a fleet service.
 
 Everything after `--` is the blocking wait command (its own flags are never parsed

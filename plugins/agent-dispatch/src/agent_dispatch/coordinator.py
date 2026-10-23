@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import math
 import secrets
 import time
 from collections.abc import Callable
@@ -61,10 +62,9 @@ from .lease import FencingGuard
 from .loop_governance import LoopGovernance
 from .queue import TaskQueue
 from .run_waiter_recovery import (
-    DEFAULT_RUN_WAITER_ARM_GRACE_SECONDS,
     recover_run_waiters,
-    maintain_delegated_recovery,
 )
+from .waiter_maintenance import WaiterMaintenance
 from .satellites import FleetDirectory
 from .worktree_status_relay import WorktreeStatusRelayStore
 from .task_scope import TASK_SCOPE_HEADER
@@ -155,6 +155,7 @@ def create_app(
     wake_is_active: Callable[[], bool] | None = None,
     wake_max_attempts: int = 8,
     wake_retry_base: float = 1.0,
+    replay_consumer_factory=None,
 ) -> FastAPI:
     """Build the coordinator app over an existing :class:`TaskQueue`.
 
@@ -170,7 +171,15 @@ def create_app(
     When ``enable_mcp`` is set and the ``mcp`` extra is installed, a
     coordinator-hosted MCP endpoint is mounted at ``/mcp`` (identity via
     ``X-Agent-Machine``/``X-Agent-Worktree`` headers or explicit tool args).
+
+    An explicit ``replay_consumer_factory(queue, checkpoint)`` uses this owner's
+    existing waiter cadence and drain boundary. It requires active-owner authority
+    and enabled waiter maintenance; ordinary server/CLI construction omits it.
     """
+    if replay_consumer_factory is not None and (
+        not math.isfinite(wake_interval) or wake_interval <= 0 or not callable(wake_is_active)
+    ):
+        raise ValueError("replay consumer requires waiter maintenance and active-owner authority")
     if (
         token is not None
         and control_token is not None
@@ -234,6 +243,12 @@ def create_app(
         verification_signal: asyncio.Queue[None] = asyncio.Queue(maxsize=1)
         worktree_status_signal: asyncio.Queue[None] = asyncio.Queue(maxsize=1)
         run_waiter_prepare_signal: asyncio.Queue[None] = asyncio.Queue(maxsize=1)
+        waiter_maintenance = WaiterMaintenance(
+            queue, lambda: _recover_run_waiters_pass(), run_waiter_prepare_signal,
+            gate=_app.state.drain_gate, is_active=wake_is_active,
+            replay_factory=replay_consumer_factory,
+        )
+        _app.state.waiter_maintenance = waiter_maintenance
         if wake_interval > 0 or verification_interval > 0:
             def _signal_wake() -> None:
                 if wake_signal.empty():
@@ -341,28 +356,6 @@ def create_app(
                 )
                 bus.publish({"type": "task.run_waiter_recovered", **counts})
 
-        async def _recover_run_waiters_startup() -> None:
-            await _recover_run_waiters_pass()
-            await asyncio.sleep(DEFAULT_RUN_WAITER_ARM_GRACE_SECONDS)
-            await _recover_run_waiters_pass()
-            await maintain_delegated_recovery(queue, _recover_run_waiters_pass)
-
-        async def _recover_run_waiters_after_prepare() -> None:
-            while True:
-                await run_waiter_prepare_signal.get()
-                await asyncio.sleep(DEFAULT_RUN_WAITER_ARM_GRACE_SECONDS)
-                await _recover_run_waiters_pass()
-
-        run_waiter_recovery_task = (
-            asyncio.create_task(_recover_run_waiters_startup())
-            if wake_interval > 0
-            else None
-        )
-        run_waiter_prepare_recovery_task = (
-            asyncio.create_task(_recover_run_waiters_after_prepare())
-            if wake_interval > 0
-            else None
-        )
         sweeper_health = LoopHealth(name="liveness_gc", base_interval=sweep_interval or 0.0)
         orphan_health = LoopHealth(name="orphan_reap", base_interval=sweep_interval or 0.0)
         handoff_fallback_health = LoopHealth(
@@ -769,8 +762,11 @@ def create_app(
                 # the streamable-HTTP session manager from the host lifespan.
                 await stack.enter_async_context(coordinator_mcp.session_manager.run())
             try:
+                if wake_interval > 0:
+                    waiter_maintenance.start()
                 yield
             finally:
+                await waiter_maintenance.close()
                 queue.set_wake_notifier(None)
                 queue.set_owned_transition_notifier(None)
                 queue.set_verification_notifier(None)
@@ -847,17 +843,6 @@ def create_app(
                         await orphan_reaper
                     except asyncio.CancelledError:
                         pass
-                if run_waiter_recovery_task is not None and not run_waiter_recovery_task.done():
-                    run_waiter_recovery_task.cancel()
-                    with contextlib.suppress(asyncio.CancelledError):
-                        await run_waiter_recovery_task
-                if (
-                    run_waiter_prepare_recovery_task is not None
-                    and not run_waiter_prepare_recovery_task.done()
-                ):
-                    run_waiter_prepare_recovery_task.cancel()
-                    with contextlib.suppress(asyncio.CancelledError):
-                        await run_waiter_prepare_recovery_task
                 if handoff_fallback_reconciler is not None:
                     handoff_fallback_reconciler.cancel()
                     try:

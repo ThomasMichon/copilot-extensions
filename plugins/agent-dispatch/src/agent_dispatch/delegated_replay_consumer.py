@@ -10,7 +10,7 @@ from .queue_records import TaskError
 
 
 def create_replay_consumer(queue, caller, *, route_prefix: str, target: str,
-                           repo: str, caller_scope: str):
+                           repo: str, caller_scope: str, checkpoint=None):
     """Explicit optional composition, never imported by ordinary Dispatch startup.
 
     caller_scope is the embedding's stable authenticated principal/namespace
@@ -25,6 +25,7 @@ def create_replay_consumer(queue, caller, *, route_prefix: str, target: str,
     return ReplayConsumer(
         queue, binding=binding, client=client, request_factory=ReplayRequest,
         binding_current=lambda: caller.gateway == binding["gateway"],
+        checkpoint=checkpoint,
     )
 
 
@@ -37,7 +38,8 @@ class ReplayConsumer:
     identity. Queue effects commit before ACK, with terminal progress retained.
     """
 
-    def __init__(self, queue, *, binding: dict, client, request_factory, binding_current=lambda: True):
+    def __init__(self, queue, *, binding: dict, client, request_factory,
+                 binding_current=lambda: True, checkpoint=None):
         validated = validate_replay(
             {"binding": binding, "request_id": "validation", "issued_at": 1,
              "deadline_at": 2}, repo=binding["repo"], timeout=1,
@@ -45,6 +47,7 @@ class ReplayConsumer:
         self.queue, self.client, self.request_factory = queue, client, request_factory
         self._scope = replay_scope(validated["binding"])
         self._binding_current = binding_current
+        self._checkpoint = checkpoint
         self._after, self._running = 0, False
 
     @property
@@ -52,6 +55,8 @@ class ReplayConsumer:
         return json.loads(self._scope)
 
     def _check_binding(self):
+        if self._checkpoint is not None:
+            self._checkpoint()
         if not self._binding_current():
             raise ValueError("replay binding changed")
 
@@ -63,6 +68,7 @@ class ReplayConsumer:
         return self.request_factory(replay["request_id"], replay["issued_at"])
 
     def _current(self, waiter, **progress):
+        self._check_binding()
         return self.queue.replay_waiter_progress(waiter, **progress)
 
     async def prepare(self, task_id: str, *, delegation: dict, **options):
@@ -73,6 +79,7 @@ class ReplayConsumer:
             raise ValueError("replay binding changed")
         self._check_binding()
         await self.client.capabilities()
+        self._check_binding()
         return self.queue.prepare_run_waiter(
             task_id, kind="delegated", delegation=delegation, command=[], **options,
         )
@@ -144,6 +151,7 @@ class ReplayConsumer:
         return await self._settle(waiter, receipt)
 
     async def _complete(self, event):
+        self._check_binding()
         waiter = self.queue.find_replay_waiter(self.binding, event.registration_id)
         if waiter is None or waiter["replay_settled"]:
             return False
@@ -201,6 +209,7 @@ class ReplayConsumer:
         try:
             self._check_binding()
             await self.client.capabilities()
+            self._check_binding()
             rows = self.queue.list_replay_waiters(self.binding, after=self._after, limit=32)
             if not rows:
                 self._after = 0

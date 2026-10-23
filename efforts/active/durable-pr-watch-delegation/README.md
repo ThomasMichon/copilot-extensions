@@ -274,10 +274,15 @@ _Operator-required scope; agent-recommended implementation and validation._
   original request criteria and exact completion identities without retries,
   local persistence or a second wait owner. Source client validation does not
   close the shared Dispatch consumer or installed/fleet acceptance (#8072).
-- [ ] Land the finite shared Dispatch replay consumer over the existing
+- [x] Land the finite shared Dispatch replay consumer over the existing
   prepare/arm/finish transactions, retaining original intent and terminal
   settlement progress through disconnect and restart. This source leaf does
-  not close coordinator scheduling, service lifecycle or fleet acceptance.
+  not close coordinator scheduling, service lifecycle or fleet acceptance (#8085).
+- [ ] Land optional replay-consumer scheduling through the coordinator's existing
+  waiter-maintenance cadence, active-owner checks and drain/shutdown boundary.
+  Keep native recovery independent of remote IO and retain original identities
+  after interrupted cycles. This source seam does not configure a production
+  caller, attest its namespace, activate a backend or close service/fleet proof.
 - [ ] Define and deliver the [PR-service consumer contract](pr-service-contract.md)
   through normal reviewed source changes, including missing shared seams and
   real serving/consumer proof. Consult related campaigns without a separate
@@ -657,6 +662,81 @@ callback an implicit credential store.
   historical placeholders without changing their role or outcome. A new normal reviewed
   merge and full current readback must precede administrative source supersession. No
   behavior, test, native result, or rollout is claimed.
+
+### 2026-10-22 - Compose optional replay scheduling with existing coordinator custody
+
+- Extracted the coordinator's existing startup and coalesced preparing-waiter
+  maintenance into one cohesive module; the native recovery cadence and
+  ordinary CLI/backend selection remain unchanged.
+- An explicit trusted factory supplies one consumer for the same queue and
+  admission checkpoint. Existing maintenance ticks admit at most one remote
+  coroutine with bounded unavailable backoff; slow remote IO does not block
+  native recovery or create per-task workers. Active-owner/drain checks fence
+  later work and preparation after capability negotiation.
+- The existing drain gate counts the cycle. Coordinator shutdown first closes
+  admission, then cancels and awaits owned coroutines. An in-flight service
+  commit may still finish; a successor reconciles the original attempted
+  request rather than treating cancellation as nonacceptance.
+- Initial validation passed 106 focused maintenance/replay/fence/recovery cases
+  and nine actual TLS/PoP/Gateway/connector cases. The latter now includes actual
+  coordinator lifespans, exact completion and restart after shutdown during a
+  held service commit. The existing explicitly selected Linux/Windows manual
+  lane includes the new maintenance module; no required-CI matrix is expanded.
+- Final scheduler selection passes 15 maintenance and nine actual transport
+  cases, including finite cadence, capped/reset backoff and sanitized unexpected
+  failures. Native compatibility includes all 22 owner cases: two aggregate
+  attempts exceeded their wall budgets without assertion failures, then the
+  four unreached cases passed as an explicit bounded selection. Coordinator,
+  stop, local CLI and context groups also completed successfully.
+- The broader CI-scope audit exposed 15 obsolete expectations for retired native
+  jobs. An explicitly approved audit detour replaces those expectations with
+  the current unit-only boundary, retained native source/manual qualification
+  and unavailable periodic status. The manual Windows script now propagates
+  both setup and final pytest failures explicitly. All 57 audit cases pass;
+  `TESTING.md` no longer claims those retired jobs gate PR/promotion. This does
+  not restore native matrices to required CI or claim unavailable qualification.
+- This advances centralized reliable delivery in the PR-service vision and
+  reuses the existing coordinator lifecycle and shared cadence. Documentation
+  updates the Dispatch replay reference and README. Scheduling introduces no
+  process, credential acquisition, new timer or tree/history scan; each admitted
+  cycle keeps the existing bounded work contract. Native representative fleet
+  CPU/latency and installed lifecycle proof remain separate acceptance work.
+- Publication/review and expanded validation remain pending. No source leaf is
+  marked landed yet. The independent PR artifact/role, production provider and
+  caller/namespace mapping, authorized installed proof, placement/cutover and
+  direct-client/provider/reviewer parity remain open. No rollout is performed.
+
+### 2026-10-22 - Merge the shared replay consumer and retain lifecycle delivery
+
+- #8085 merged as `f6926bb53dbbbe58d2b1f985a028adfa383cb95a` at
+  `2026-10-23T05:02:29Z`, from published head
+  `7e02262e678b6b23f334fb21699b40b3f6319d5f`. Exact-head Copilot review
+  `5624059303` approved with no open issues. Read its complete body and the
+  complete four-thread page; every thread was resolved. All actual required
+  checks passed. Managed completion used only the documented additional
+  CODEOWNER exception, not a CI or feedback bypass.
+- Final hosted source acceptance `39902732218` passed both selected Linux and
+  Windows jobs at that exact head. The final affected replay/wire/recovery
+  selection passed 110 cases; the disjoint focused Dispatch portfolio accounts
+  for 198 cases, with the 82-call worst-case and indexed-query assertions.
+  Source tests, synthetic TLS identity and hosted accounts do not establish
+  production-provider permissions, installed service operation or fleet budgets.
+- Read this entire parent Plan and Validation after the actual merge. Close
+  only the finite shared-consumer source leaf. Preserve every retained
+  client/presentation/migration/reviewer matrix, installation, governed owner,
+  credential/provider and fleet obligation. #7188 remains open.
+- Next: compose the finite PR serving/observation and Dispatch consumption
+  boundaries through their existing lifecycle and configuration owners.
+  Deliver independently installable service/container operation and shared
+  coordinator scheduling rather than a per-task poller or another controller.
+  First inspect the reviewed fleet service plan and existing service
+  composition contracts; source contributions need no separate owner ACK,
+  while concrete overlaps, credentials and deployment authority remain bounded.
+- Managed post-merge reconciliation preserved the complete published tip in
+  `refs/pre-complete-backup` and removed only the three verified squash-merged
+  commits. The same worktree stays with this Active effort; no journal-only PR,
+  finalization, runtime update, production authentication, activation or new
+  capacity follows from this source delivery.
 
 ### 2026-10-22 - Prepare durable shared Dispatch replay consumption
 

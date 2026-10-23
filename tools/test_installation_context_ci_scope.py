@@ -104,181 +104,63 @@ def test_diff_error_is_not_reported_as_unrelated(monkeypatch, capsys) -> None:
     assert "invalid head" in output.err
 
 
-def test_native_windows_diagnostic_step_is_scoped_and_bounded() -> None:
-    workflow = yaml.safe_load((HERE.parent / ".github/workflows/ci.yml").read_text())
-    job = workflow["jobs"]["installation-context-windows"]
-    assert job["timeout-minutes"] == 5
-    assert "installation-context-windows" in workflow["jobs"]["pr-gate"]["needs"]
-    assert "installation-context-windows" in workflow["jobs"]["promotion-gate"]["needs"]
-    assert job["if"] == workflow["jobs"]["test-runner-windows"]["if"]
-    assert not any(
-        step.get("id") == "installation-context"
-        for step in workflow["jobs"]["test-runner-windows"]["steps"]
-    )
-    steps = job["steps"]
-    detection = next(step for step in steps if step.get("id") == "installation-context")
-    smoke = next(
-        step for step in steps
-        if step.get("name") == "Source provenance and read-only diagnostics (Windows)"
-    )
-    assert "installation_context_ci_scope.py" in detection["run"]
-    assert smoke["if"] == "steps.installation-context.outputs.run == 'true'"
-    assert smoke["timeout-minutes"] <= 3
-    assert smoke["env"]["INSTALLATION_CONTEXT_POWERSHELL"] == "powershell"
-    selection = next(
-        step for step in steps
-        if step.get("name") == "Installation-context CI selection contracts (Windows)"
-    )
-    assert selection["if"] == smoke["if"]
-    assert selection["timeout-minutes"] == 2
-    assert selection["run"].split() == [
-        "python", "tools/seasoned_uv.py", "--uv", "uv", "--", "--system", "pytest", "pyyaml",
-        "&&", "python", "-m", "pytest", "-q", "tools/test_installation_context_ci_scope.py",
-    ]
-    assert "test_installation_context_ci_scope.py" not in smoke["run"]
-    assert "test_installation_mode_governance.py" in smoke["run"]
-    assert "status_and_probe_cli_parity_and_read_only" in smoke["run"]
-    assert "diagnostic_api_never_enters_mutation" in smoke["run"]
-    assert "active_namespaced_cli_is_visible_and_probe_refuses" in smoke["run"]
-    assert "test_diagnostic_consumers.py" in smoke["run"]
-    assert "derived_diagnostic_api_read_only" in smoke["run"]
-    assert "peer_governance_wrapper_read_only" in smoke["run"]
-    source = next(
-        step for step in steps if step.get("name") == "Payload source attribution (Windows)"
-    )
-    assert source["if"] == smoke["if"]
-    assert source["timeout-minutes"] == 2
-    assert source["run"].split() == [
-        "python", "tools/seasoned_uv.py", "--uv", "uv", "--", "--system", "pytest", "pyyaml",
-        "&&",
-        "python", "-m", "pytest", "-q",
-        "libs/installation-context/tests/test_payload_source.py",
-    ]
-    assert "test_payload_source.py" not in smoke["run"]
-    assert '-k "status_and_probe_cli_parity_and_read_only' in smoke["run"]
-    assert "libs/payload-invocation/tests/test_command_binding.py" not in smoke["run"]
-    assert "libs/payload-invocation/tests/test_command_lifecycle.py" not in smoke["run"]
-    assert "or command_binding" not in smoke["run"]
-    manager = next(
-        step for step in steps if step.get("name") == "Manager read-only wrapper (Windows)"
-    )
-    assert manager["if"] == smoke["if"]
-    assert manager["timeout-minutes"] <= 2
-    assert "runtime_inspection_uses_real_read_only_primitive" in manager["env"]["PYTEST_ADDOPTS"]
-    assert "run-standalone-tests.py worktree-manager --prepare" in manager["run"]
-    assert "--timeout 120" in manager["run"]
-    reconciliation = next(
-        step for step in steps
-        if step.get("name") == "Reconciliation read-only wrapper (Windows)"
-    )
-    assert reconciliation["if"] == smoke["if"]
-    assert reconciliation["timeout-minutes"] <= 2
-    assert "run-plugin-tests.py agent-worktrees" in reconciliation["run"]
-    assert "--test-file tests/test_reconcile.py" in reconciliation["run"]
-    assert "--test-file tests/test_installer_command_binding.py" in reconciliation["run"]
-    assert '-k "runtime_resolution_real_helper_read_only or command_binding"' in reconciliation["run"]
-    assert "or command_binding" in reconciliation["run"]
-    assert "--timeout 120" in reconciliation["run"]
-
-
-def test_native_command_lifecycle_coverage_has_its_own_required_budget() -> None:
-    workflow = yaml.safe_load((HERE.parent / ".github/workflows/ci.yml").read_text())
-    job = workflow["jobs"]["command-lifecycle-windows"]
-    assert job["runs-on"] == "windows-latest"
-    assert job["timeout-minutes"] == 8
-    assert job["if"] == workflow["jobs"]["installation-context-windows"]["if"]
-    assert "command-lifecycle-windows" in workflow["jobs"]["pr-gate"]["needs"]
-    assert "command-lifecycle-windows" in workflow["jobs"]["promotion-gate"]["needs"]
-    assert not job.get("continue-on-error", False)
-    steps = job["steps"]
-    detection = next(step for step in steps if step.get("id") == "installation-context")
-    assert "installation_context_ci_scope.py" in detection["run"]
-    catalog = next(
-        step for step in steps
-        if step.get("name") == "Command catalog native contracts (Windows)"
-    )
-    lifecycle = next(
-        step for step in steps
-        if step.get("name") == "Command lifecycle read-only contracts (Windows)"
-    )
-    first_touch = next(
-        step for step in steps
-        if step.get("name") == "Command lifecycle native first-touch (Windows)"
-    )
-    condition = "steps.installation-context.outputs.run == 'true'"
-    for step in (catalog, lifecycle, first_touch):
-        assert step["if"] == condition
-        assert step["timeout-minutes"] == 2
-        assert step["env"]["INSTALLATION_CONTEXT_POWERSHELL"] == "powershell"
-        assert not step.get("continue-on-error", False)
-        assert step["run"].startswith(
-            "python tools/seasoned_uv.py --uv uv -- --system pytest pyyaml && "
-            "python -m pytest -q --durations=20 "
-        )
-    native = "real_installer_refuses_before_self_staging or bootstrap_preserves_off_path_spaced_interpreter_through_stage"
-    assert "libs/payload-invocation/tests/test_command_binding.py" in catalog["run"]
-    assert '-k "command_binding"' in catalog["run"]
-    for step in (lifecycle, first_touch):
-        assert "libs/payload-invocation/tests/test_command_lifecycle.py" in step["run"]
-    assert "libs/payload-invocation/tests/test_command_lifecycle_stdio.py" in lifecycle["run"]
-    assert f'-k "command_binding and not ({native})"' in lifecycle["run"]
-    assert f'-k "command_binding and ({native})"' in first_touch["run"]
-
-
-def test_native_vault_snapshot_lane_preserves_bounded_first_use_proof() -> None:
-    workflow = yaml.safe_load((HERE.parent / ".github/workflows/ci.yml").read_text())
-    job = workflow["jobs"]["vault-snapshot-windows"]
-    assert job["runs-on"] == "windows-latest"
-    assert job["timeout-minutes"] == 5
-    assert job["if"] == workflow["jobs"]["installation-context-windows"]["if"]
-    assert "vault-snapshot-windows" in workflow["jobs"]["pr-gate"]["needs"]
-    detection = next(step for step in job["steps"] if step.get("id") == "vault-snapshot")
-    assert "plugins/agent-vault/" in detection["run"]
-    assert "installer-engine|versioned-runtime|installation-context" in detection["run"]
-    step = job["steps"][-1]
-    assert step["if"] == "steps.vault-snapshot.outputs.run == 'true'"
-    assert step["timeout-minutes"] == 2
-    assert "run-plugin-tests.py agent-vault" in step["run"]
-    assert "--test-file tests/test_install_snapshot_ps1.py" in step["run"]
-    assert '-k "stamp_supports_first_use_provision or snapshot_compatibility_launcher"' in step["run"]
-    assert "--timeout 120" in step["run"]
-
-
-@pytest.mark.parametrize("workflow_file,job_id,step_name,fail_on", [
-    ("ci.yml", "installation-context-windows",
-     "Derived native diagnostics (Windows PowerShell 5.1)", "tools/seasoned_uv.py"),
-    ("ci.yml", "fleet-native-windows",
-     "Check fleet coverage partition", "tools/seasoned_uv.py"),
-    ("ci.yml", "fleet-native-windows",
-     "Check fleet coverage partition", "-m"),
-    ("installation-context-acceptance.yml", "derived-diagnostics-windows",
-     "All derived native copies", "tools/seasoned_uv.py"),
+@pytest.mark.parametrize("retired_job", [
+    "installation-context-windows", "command-lifecycle-windows",
+    "vault-snapshot-windows", "fleet-native-windows",
 ])
-@pytest.mark.parametrize(("event_name", "promotion_run"), [
-    ("pull_request", ""),
-    ("workflow_dispatch", ""),
-    ("workflow_dispatch", "123-1"),
-])
+def test_native_jobs_do_not_reenter_required_unit_only_ci(retired_job: str) -> None:
+    workflow = yaml.safe_load((HERE.parent / ".github/workflows/ci.yml").read_text())
+    assert retired_job not in workflow["jobs"]
+    assert set(workflow["jobs"]["pr-gate"]["needs"]) == {"checks", "unit-tests"}
+    assert workflow["env"]["PROMOTION_UNIT_PROFILE"] == "copilot-extensions.promotion-units/v1"
+    units = workflow["jobs"]["unit-tests"]
+    execution = next(step for step in units["steps"] if step.get("id") == "units")
+    assert execution["if"] == "steps.impact.outputs.run == 'true'"
+    assert "tools/run-promotion-unit-tests.py" in execution["run"]
+    assert not execution.get("continue-on-error", False)
+
+
+def test_displaced_native_sources_and_unavailable_portfolio_remain_explicit() -> None:
+    root = HERE.parent
+    for source in (
+        "libs/installation-context/tests/test_installation_mode_governance.py",
+        "libs/installation-context/tests/test_diagnostic_consumers.py",
+        "libs/payload-invocation/tests/test_command_binding.py",
+        "libs/payload-invocation/tests/test_command_lifecycle.py",
+        "plugins/agent-vault/tests/test_install_snapshot_ps1.py",
+    ):
+        assert (root / source).is_file()
+    inventory = yaml.safe_load((HERE / "periodic-integration-inventory.json").read_text())
+    assert inventory["required_pr_dependency"] is False
+    assert inventory["release_dependency"] is False
+    assert inventory["failure_owner"]["tracker"]
+    windows = inventory["existing_windows_rotation"]
+    assert windows["status"] == "unavailable"
+    assert windows["execution_enabled"] is False
+    assert windows["owner"]
+    periodic = yaml.safe_load((root / inventory["workflow"]).read_text())
+    assert periodic["jobs"][windows["job"]]["if"] == "${{ false }}"
+    trigger = periodic.get("on", periodic.get(True))
+    assert set(trigger) == {"schedule", "workflow_dispatch"}
+
+
+@pytest.mark.parametrize("fail_on", ["tools/seasoned_uv.py", "-m"])
 def test_windows_step_does_not_mask_native_admission_failure(
-    tmp_path, workflow_file, job_id, step_name, fail_on, event_name, promotion_run,
+    tmp_path, fail_on,
 ) -> None:
     shell = shutil.which("pwsh") or shutil.which("powershell")
     if not shell:
         pytest.skip("PowerShell is unavailable")
-    workflow = yaml.safe_load((HERE.parent / ".github/workflows" / workflow_file).read_text())
-    step = next(step for step in workflow["jobs"][job_id]["steps"] if step.get("name") == step_name)
+    workflow = yaml.safe_load(
+        (HERE.parent / ".github/workflows/installation-context-acceptance.yml").read_text()
+    )
+    step = next(
+        step for step in workflow["jobs"]["derived-diagnostics-windows"]["steps"]
+        if step.get("name") == "All derived native copies"
+    )
     body = step["run"].replace("${{ matrix.mode }}", "fixture").replace(
         "${{ matrix.pointer }}", "fixture",
     )
-    for ordinary in (120, 300):
-        expression = (
-            "${{ github.event_name == 'workflow_dispatch' && inputs.promotion_run == '' && 600 || "
-            f"{ordinary}" + " }}"
-        )
-        body = body.replace(
-            expression,
-            "600" if event_name == "workflow_dispatch" and not promotion_run else str(ordinary),
-        )
     assert "${{" not in body
     log = tmp_path / "commands"
     prefix = """
@@ -291,21 +173,6 @@ function python {
 }
 """
     command = [shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", prefix + body]
-    if step.get("shell") == "bash":
-        git = shutil.which("git")
-        candidates = [parent / "bin" / "bash.exe" for parent in Path(git).parents[:3]] if git else []
-        bash = (next((str(path) for path in candidates if path.is_file()), None)
-                if os.name == "nt" else shutil.which("bash"))
-        assert bash, "the selected Windows fleet shell must be available"
-        prefix = """
-set -e
-python() {
-    code=0
-    if [ "$1" = "$FIXTURE_FAIL_ON" ]; then code=23; fi
-    "$FIXTURE_PYTHON" -I -c 'import pathlib,sys; p=pathlib.Path(sys.argv[1]); p.open("a").write(sys.argv[2]+"\\n"); raise SystemExit(int(sys.argv[3]))' "$FIXTURE_COMMAND_LOG" "$1" "$code"
-}
-"""
-        command = [bash, "-c", prefix + body]
     result = subprocess.run(
         command,
         env={
@@ -321,24 +188,15 @@ python() {
     )
 
 
-@pytest.mark.parametrize("job_name,step_name", [
-    ("checks", "Derived native diagnostics (POSIX)"),
-    ("installation-context-windows", "Derived native diagnostics (Windows PowerShell 5.1)"),
-])
-def test_derived_native_diagnostics_select_focused_smoke_in_bounded_lane(
-    job_name: str, step_name: str,
-) -> None:
+def test_derived_native_diagnostics_are_not_a_required_smoke_fallback() -> None:
     workflow = yaml.safe_load((HERE.parent / ".github/workflows/ci.yml").read_text())
-    step = next(
-        step for step in workflow["jobs"][job_name]["steps"]
-        if step.get("name") == step_name
+    commands = "\n".join(
+        step.get("run", "")
+        for job in workflow["jobs"].values() for step in job.get("steps", [])
     )
-    assert step["if"] == "steps.installation-context.outputs.run == 'true'"
-    assert step["timeout-minutes"] == 2
-    assert "libs/payload-invocation/tests/test_derived_diagnostic_cli.py" in step["run"]
-    assert '-m "not derived_diagnostic_full"' in step["run"]
-    if job_name == "installation-context-windows":
-        assert step["env"]["INSTALLATION_CONTEXT_POWERSHELL"] == "powershell"
+    assert "test_derived_diagnostic_cli.py" not in commands
+    assert "tools/run-plugin-tests.py" not in commands
+    assert "tools/run-standalone-tests.py" not in commands
 
 
 def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
@@ -471,19 +329,25 @@ def test_dispatch_delegation_acceptance_is_bounded_and_independently_selected() 
             "--test-file", "tests/test_delegated_waiter_owner_contract.py",
             "--test-file", "tests/test_delegated_replay_consumer.py",
             "--test-file", "tests/test_delegated_replay_transport.py",
+            "--test-file", "tests/test_waiter_maintenance.py",
             "--max-files-per-sub-suite", "2",
         ]
 
 
-def test_foundation_lane_leaves_new_native_matrix_to_its_scoped_step() -> None:
+def test_required_foundation_checks_generation_without_running_native_test_corpus() -> None:
     workflow = yaml.safe_load((HERE.parent / ".github/workflows/ci.yml").read_text())
-    foundation = next(
+    generation = next(
         step for step in workflow["jobs"]["checks"]["steps"]
-        if step.get("name") == "Payload invocation foundation tests"
+        if step.get("name") == "Payload invocation generated files"
     )
-    assert "--ignore=libs/payload-invocation/tests/test_derived_diagnostic_cli.py" in foundation["run"]
-    assert "libs/payload-invocation/tests" in foundation["run"]
-    assert "plugins/agent-index/tests/test_command_catalog.py" in foundation["run"]
+    assert generation["run"].split() == [
+        "python", "libs/payload-invocation/generate.py", "--all", "--check",
+    ]
+    commands = "\n".join(
+        step.get("run", "") for step in workflow["jobs"]["checks"]["steps"]
+    )
+    assert "libs/payload-invocation/tests" not in commands
+    assert "plugins/agent-index/tests/test_command_catalog.py" not in commands
 
 
 @pytest.mark.parametrize("mode", ["mode_legacy", "mode_active"])

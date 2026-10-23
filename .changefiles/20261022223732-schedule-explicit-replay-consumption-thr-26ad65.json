@@ -1,0 +1,9 @@
+{
+  "comment": "Schedule explicit replay consumption through existing waiter maintenance and coordinator drain custody",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

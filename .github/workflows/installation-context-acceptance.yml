@@ -60,6 +60,7 @@ jobs:
           python tools/seasoned_uv.py --uv uv -- --system pytest
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -m pytest -q --durations=15 libs/payload-invocation/tests/test_derived_diagnostic_cli.py -k "${{ matrix.mode }} and ${{ matrix.pointer }}"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
   watch-owner-native-linux:
     if: ${{ inputs.watch_owner }}
@@ -177,6 +178,7 @@ jobs:
           --test-file tests/test_delegated_waiter_owner_contract.py
           --test-file tests/test_delegated_replay_consumer.py
           --test-file tests/test_delegated_replay_transport.py
+          --test-file tests/test_waiter_maintenance.py
           --max-files-per-sub-suite 2
 
   dispatch-delegation-windows:

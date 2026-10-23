@@ -8,10 +8,10 @@ Default Dispatch imports and installs do not require PR or Fleet packages.
 The ordinary `run --pr-watch-*` CLI still selects the existing local callback
 optimization; it does not silently select this remote backend.
 
-This is a **finite callable**, not an installed service, coordinator scheduler,
-credential provisioner or automatic fleet activation. The embedding owns its
-single shared scheduler, admission, authenticated caller, lifecycle, backoff and
-shutdown. Do not create a process, thread or long-held Gateway request per task.
+The consumer is a **finite callable**. An explicit coordinator embedding can
+schedule it through the existing waiter-maintenance owner described below.
+Neither API installs a service, provisions credentials or activates a fleet
+backend. Do not create a process, thread or long-held Gateway request per task.
 
 ## Trusted composition
 
@@ -40,6 +40,54 @@ target and repository. A new binding cannot pick up an older binding's rows.
 Changing the existing caller's Gateway origin refuses a cycle; changing a
 configuration label is not permission to retarget an original request.
 Credentials, proof keys and credential callbacks never enter waiter metadata.
+
+## Existing coordinator cadence and shutdown
+
+An embedding can pass `replay_consumer_factory` to
+`agent_dispatch.coordinator.create_app`. The factory receives that coordinator's
+queue and an admission checkpoint; construct the consumer with both:
+
+```python
+def replay_factory(queue, checkpoint):
+    return create_replay_consumer(
+        queue, caller, route_prefix="/api", target="project",
+        repo="example/project", caller_scope="caller:dispatch",
+        checkpoint=checkpoint,
+    )
+```
+
+Supply a positive `wake_interval` and the coordinator's authoritative
+`wake_is_active` callback. Missing owner authority or disabled waiter maintenance
+refuses this selection. The factory runs once per coordinator lifespan and must
+return a consumer over that exact queue and checkpoint. It does not select a
+different database or acquire credentials. The embedding still owes the actual
+authenticated scope mapping and dedicated server-side pending view above.
+The normal `server.build_app`/CLI supplies no factory and remains unchanged.
+
+The existing startup/60-second waiter-maintenance cadence admits at most one
+remote cycle. A cycle still in flight is not duplicated by another tick or
+another waiter. Network IO runs in its own coroutine, so the native recovery
+owner continues independently; there is no new timer, per-task process or
+per-task thread. After a successful cycle the next eligible tick is at least
+60 seconds later. An unavailable cycle backs off from 120 seconds to a
+900-second ceiling, checked only at the existing cadence.
+
+Every cycle is counted in the coordinator's existing `DrainGate`. Its
+checkpoint rechecks active-owner authority and known drain/closure before later
+lookups, emissions and local progress/effects. Preparation checks it again
+after capability negotiation, before suspending a task. Passive or draining
+coordinators do not emit a new cycle. Shutdown closes admission, cancels and
+awaits the owned maintenance/replay coroutines, then continues ordinary
+coordinator cleanup. This owns no additional resident process or update loop.
+
+Cancellation is not remote rollback: an already-started service commit can
+finish after the coordinator releases its local cycle. The durable attempted
+identity remains in the same waiter row; a successor reconciles it through the
+same selected scope, never a process fallback. This is local coordinator
+drain/cancellation, not PR-volume writer transfer or fleet placement authority.
+The embedding can inspect `app.state.waiter_maintenance.status` for fixed
+state/cycle/failure fields and the last bounded result. Exceptions are not
+included in diagnostics. This is not a new HTTP status or authorization API.
 
 ## Preparation and finite consumption
 
@@ -117,6 +165,15 @@ embedding. The cadence and active roster determine aggregate cost.
 generation fences, bounded scans and failure fairness.
 `test_delegated_replay_transport.py` exercises the actual TLS/PoP caller,
 Gateway/connector and disk owners, including lost responses and revocation,
-channel loss and cancellation during commit. These are isolated source tests,
+channel loss and cancellation during commit. `test_waiter_maintenance.py`
+asserts one cycle for a forty-waiter roster, backoff, native-recovery progress
+under slow remote IO, active/drain fencing and coordinator-owned shutdown.
+The transport suite also drives actual coordinator lifespans through the real
+TLS path, including shutdown during a held service commit and successor recovery.
+These are isolated source tests,
 not installed service, production credential or representative fleet latency/CPU
-qualification. No lifecycle/first-install change is made by this callable slice.
+qualification. The scheduler adds no process, network call or tree/history
+scan of its own: it reuses the finite cycle's bound above, plus the configured
+active-owner checkpoint per later effect/exchange. That callback must remain
+bounded; it cannot be replaced with cached authority after known loss.
+No installer, first-provision or PR-role activation change is made here.

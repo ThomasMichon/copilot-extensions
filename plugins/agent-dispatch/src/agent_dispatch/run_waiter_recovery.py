@@ -14,7 +14,7 @@ DEFAULT_RUN_WAITER_ARM_GRACE_SECONDS = 60.0
 
 
 async def maintain_delegated_recovery(queue: TaskQueue, recover, *, interval: float = 60.0,
-                                      sleep=None) -> None:
+                                      sleep=None, on_tick=None) -> None:
     """Continue the existing recovery owner while delegated waits can expire."""
     sleep = sleep or asyncio.sleep
     while True:
@@ -22,6 +22,8 @@ async def maintain_delegated_recovery(queue: TaskQueue, recover, *, interval: fl
         waiters = await asyncio.to_thread(queue.list_active_run_waiters, local_only=True)
         if any(waiter.get("kind") == "delegated" for waiter in waiters):
             await recover()
+        if on_tick is not None:
+            await on_tick()
 
 
 def recover_run_waiters(

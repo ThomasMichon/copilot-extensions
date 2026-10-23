@@ -2873,35 +2873,30 @@ INSTALLATION_CONTEXT_EXHAUSTIVE_ADAPTERS=1 \
   python -m pytest -q libs/installation-context/tests
 ```
 
-Pull-request CI runs the `installation_context_smoke` contract lane only when
-the installation-context foundation, its synchronization tool, or an adopter's
-vendored copy changes. The complete exhaustive portfolio runs nightly and on
-demand through the `Installation context full` workflow. This keeps unrelated
-pull requests incremental and keeps the required fast lane independent from the
-size of the long-form regression portfolio.
+Required PR CI executes the positively admitted unit packet, not
+`installation_context_smoke`, native command/diagnostic matrices or a full
+foundation suite. Generated payload checks and source guards remain separate
+from runtime qualification. The complete installation-context adapter portfolio
+runs nightly and on demand through `Installation context full`.
 
-Native Windows diagnostic evidence runs in the separate five-minute
-`Installation-context native diagnostics (Windows)` job. It runs actual `status` and
-`probe-legacy` CLI calls, existing/absent pointer checks, and mutation-entry
-guards from `test_installation_mode_governance.py`; it is not inferred from
-the job merely finishing successfully. The step has a two-minute budget,
-uses Windows PowerShell 5.1 via
-`INSTALLATION_CONTEXT_POWERSHELL=powershell`, and shares the
-`tools/installation_context_ci_scope.py` path detector with Linux. Canonical
-and derived implementation changes trigger it; unrelated docs do not.
-An explicitly requested unavailable shell fails collection rather than
-silently skipping the evidence. No exhaustive adapter matrix is added to PR CI.
-Individual diagnostic/wrapper selections retain their two-minute limits.
-The separate Windows runner, payload-CWD and Fleet job keeps its ordinary
-seven-minute budget; the Linux runner keeps its ordinary five-minute budget.
+`Installation context native acceptance` retains the explicitly dispatched
+Linux/Windows derived-diagnostic mode/pointer matrix and separately selected
+PR-owner and Dispatch-delegation portfolios. Native Windows diagnostic cases
+use `INSTALLATION_CONTEXT_POWERSHELL=powershell`; an explicitly requested
+unavailable shell fails rather than silently supplying evidence. The Windows
+derived-diagnostic step propagates both dependency-construction and pytest
+failures explicitly. None of these jobs gates ordinary PR or promotion snapshots.
 
-Native promotion readiness/retry and source-owned qualification/publication
-contracts run in separate parallel Windows jobs, each retaining its own
-five-minute budget. Both consume the governed artifact builder's changed-path
-output instead of duplicating detection, and both gate PR and promotion
-snapshots. All existing cases and selectors remain; the independent groups no
-longer compete for one cumulative deadline. Constant job identities remain
-compatible with the source-owned qualification inventory.
+`tools/test_installation_context_ci_scope.py` checks the current unit-only
+boundary, explicit manual matrix/selector bounds and real PowerShell failure
+propagation. The path detector remains a callable source contract; its presence
+does not mean required CI runs the retired native jobs. Source-preserved
+diagnostic, command-lifecycle and Vault first-use cases remain available for
+isolated integration. The existing periodic inventory records unavailable
+Windows container capacity and unenrolled portfolios; source presence, a
+disabled job or a passing schema audit is not native qualification. See the
+[portfolio boundaries](#test-portfolio-invariants) and
+`tools/periodic-integration-inventory.json`.
 
 Source-qualified catalog no-write cases invoke the unchanged PowerShell script
 twice in one real, initialized host. Host-only initialization stops CLR startup
@@ -2910,10 +2905,11 @@ Each invocation and host shutdown must preserve every file byte, directory, and
 modification time. This measures diagnostic behavior, not the separate startup
 cache writes made by fresh Windows PowerShell processes.
 
-Run the relevant suite yourself before pushing a runtime change — there is
-intentionally **no** automatic push/PR gate. Fast structural/contract checks are
-marked `@pytest.mark.guard` (marketplace + picker integrity, shipped-manifest
-contract, binding invariants) so `--guards` runs them in sub-second-per-plugin.
+Run the relevant isolated integration suite when changing a runtime boundary;
+required PR CI's unit gate is not that evidence. Fast structural/contract checks
+may carry `@pytest.mark.guard` (marketplace + picker integrity, shipped-manifest
+contract, binding invariants), but that marker alone does not admit a test into
+the unit-only release packet.
 
 ## Lint + contract gates (before a push)
 

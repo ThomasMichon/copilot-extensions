@@ -19,6 +19,7 @@ from agent_pull_requests.watch_gateway import WatchGateway, WatchScopeBinding
 from agent_pull_requests.watch_replay import ConsumerScope
 from agent_pull_requests.watch_replay_store import ReplayStore
 from agent_dispatch.delegated_replay_consumer import create_replay_consumer
+from agent_dispatch.coordinator import create_app
 from tests._delegation_helpers import identity, task
 from tests._helpers import RepoDefaultingQueue as TaskQueue
 
@@ -36,7 +37,7 @@ def service_owner(tmp_path):
     )
 
 
-def new_consumer(queue, rig):
+def new_consumer(queue, rig, checkpoint=None):
     async def access():
         return rig.access("caller-a", 3)
     caller = ServiceCaller(
@@ -46,6 +47,7 @@ def new_consumer(queue, rig):
     return create_replay_consumer(
         queue, caller, route_prefix="/api", target="project",
         repo="example/project", caller_scope="caller-a:dispatch",
+        checkpoint=checkpoint,
     ), caller
 
 
@@ -60,6 +62,12 @@ class RefuseOptional(importlib.abc.MetaPathFinder):
 sys.meta_path.insert(0, RefuseOptional())
 import agent_dispatch
 import agent_dispatch.delegated_replay_consumer
+from agent_dispatch.coordinator import create_app
+from agent_dispatch.queue import TaskQueue
+from pathlib import Path
+import tempfile
+with tempfile.TemporaryDirectory() as root:
+    create_app(TaskQueue(Path(root) / 'queue.db'), enable_mcp=False)
 """
     result = subprocess.run(
         [sys.executable, "-I", "-c", code], capture_output=True, text=True,
@@ -204,6 +212,80 @@ def test_actual_consumer_reconciles_original_after_commit_in_flight(tmp_path, mo
                 release.set()
                 pending.cancel()
                 await asyncio.gather(pending, return_exceptions=True)
+                await owner.drain(timeout=3)
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("interrupt", [False, True])
+def test_coordinator_scheduler_uses_real_transport_and_recovers_shutdown(
+    tmp_path, monkeypatch, interrupt,
+):
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[3] / "fleet-manager" / "tests"))
+    monkeypatch.setenv("AGENT_DISPATCH_SELF_RETIRE", "0")
+    monkeypatch.setenv("AGENT_DISPATCH_ABANDONED_PASSIVE_REAP", "0")
+    from gateway_service_transport_fixtures import eventually, running
+    from test_gateway_service_handler import connect_handler
+    from agent_pull_requests import watch_replay_store
+
+    async def scenario():
+        store, owner = service_owner(tmp_path)
+        queue = TaskQueue(tmp_path / "tasks.db")
+        task_id = task(queue)
+        started, release = threading.Event(), threading.Event()
+        original_write = watch_replay_store._atomic_write_json
+
+        def commit(path, state):
+            if interrupt and not started.is_set():
+                started.set()
+                assert release.wait(10)
+            original_write(path, state)
+
+        async with running(tmp_path) as rig:
+            await connect_handler(rig, owner.handle)
+            initial, _ = new_consumer(queue, rig)
+            await prepare_intent(queue, initial, task_id)
+            monkeypatch.setattr(watch_replay_store, "_atomic_write_json", commit)
+
+            def factory(queue, checkpoint):
+                return new_consumer(queue, rig, checkpoint)[0]
+
+            def app_for(queue):
+                return create_app(
+                    queue, enable_mcp=False, wake_interval=0.01, verification_interval=0,
+                    replay_consumer_factory=factory, wake_is_active=lambda: True,
+                )
+
+            app = app_for(queue)
+            try:
+                async with app.router.lifespan_context(app):
+                    maintenance = app.state.waiter_maintenance
+                    if interrupt:
+                        assert await asyncio.to_thread(started.wait, 3)
+                        assert app.state.drain_gate.claims == 1
+                    else:
+                        await eventually(lambda: maintenance.status["cycles"] == 1)
+                        assert not queue.list_replay_waiters(initial.binding)
+                        assert len(queue.list_run_waiter_wakes(task_id)) == 1
+                assert app.state.drain_gate.claims == 0
+                assert maintenance.status["state"] == "closed"
+                if interrupt:
+                    assert owner._tasks  # Cancellation cannot roll back the remote disk commit.
+                    assert queue.list_pending_run_waiters()[0]["replay_attempted"]
+                    release.set()
+                    await eventually(lambda: not owner._tasks)
+                    restored = TaskQueue(tmp_path / "tasks.db")
+                    successor = app_for(restored)
+                    async with successor.router.lifespan_context(successor):
+                        await eventually(
+                            lambda: successor.state.waiter_maintenance.status["cycles"] == 1,
+                        )
+                        assert not restored.list_replay_waiters(initial.binding)
+                        assert len(restored.list_run_waiter_wakes(task_id)) == 1
+                assert len(json.loads(store.path.read_bytes())["records"]) == 1
+                assert rig.backends[0].requests == []
+            finally:
+                release.set()
                 await owner.drain(timeout=3)
 
     asyncio.run(scenario())
