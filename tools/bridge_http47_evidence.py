@@ -81,6 +81,7 @@ PROBES = {
     "test_cold_handoff_rechecks_outage_after_awaited_resume": 1,
     "test_cold_drain_client_rejects_nonobject_outcome": 10,
     "test_cold_drain_client_requires_boolean_completion_flags": 21,
+    "test_cold_drain_client_does_not_accept_a_legacy_success_shape": 1,
     "test_ordinary_recovery_closed_cold_gate_is_503_without_effects": 2,
     "test_ordinary_recovery_entered_before_drain_is_counted": 4,
     "test_ordinary_recovery_cancellation_releases_drain_accounting": 2,

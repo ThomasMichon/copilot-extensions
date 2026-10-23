@@ -92,7 +92,9 @@ class DrainClientMixin(_Base):
             raise BridgeClientError(502, "drain outcome must be an object")
         if peer is not None:
             if any(type(result.get(name)) is not bool for name in ("drained", "clean", "forced")):
-                raise BridgeClientError(502, "negotiated drain completion flags must be booleans")
+                raise BridgeClientError(
+                    502, "negotiated drain outcome was not confirmed: completion flags must be booleans",
+                )
             receiver = result.get("drain_contract")
             prior_cold_refusal = (
                 result.get("drained") is False and result.get("clean") is False
