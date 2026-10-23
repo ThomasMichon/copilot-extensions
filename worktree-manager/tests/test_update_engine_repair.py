@@ -12,6 +12,7 @@ import tempfile
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 from agent_procutil import no_window_kwargs
@@ -265,6 +266,99 @@ def repair_case(
 def _diagnostic(case, rc: int) -> str:
     command, result = case.calls[-1]
     return f"repair rc={rc}; command={command!r}\n{result.stdout}\n{result.stderr}"
+
+
+def _legacy_publication(case: SimpleNamespace) -> bytes:
+    manifest = json.loads(case.manifest.read_text())
+    manifest.pop("commandBinding")
+    manifest["source"] = {"kind": "marketplace", "path": str(case.incumbent)}
+    case.manifest.write_text(json.dumps(manifest), encoding="utf-8")
+    return case.manifest.read_bytes()
+
+
+def test_legacy_source_owner_capture_is_readonly_before_acquisition(
+    repair_case: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from worktree_manager import engine_origin
+
+    case = repair_case
+    before = _legacy_publication(case)
+    acquire = engine_origin._native_acquisition
+
+    def unchanged_owner(*args: Any, **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        assert case.manifest.read_bytes() == before
+        return acquire(*args, **kwargs)
+
+    monkeypatch.setattr(engine_origin, "_native_acquisition", unchanged_owner)
+    refreshed = case.update._refresh_source(case.source, dict(os.environ))
+    assert refreshed.identity["installationId"] == case.receipt["installationId"]
+    assert case.manifest.read_bytes() == before
+    assert len(case.acquisitions) == 1
+    assert not case.calls and not case.effect.exists()
+
+
+def test_legacy_source_owner_reaches_canonical_repair_construction(
+    repair_case: SimpleNamespace,
+) -> None:
+    case = repair_case
+    _legacy_publication(case)
+    (case.runtime / "bin").mkdir()
+    rc = case.update.repair_engine(case.source)
+    assert case.effect.is_file(), _diagnostic(case, rc)
+    assert len(case.acquisitions) == 1
+    assert str(case.incumbent) in case.calls[-1][0]
+
+
+@pytest.mark.parametrize("fault", ["missing-source", "relative", "unregistered", "malformed-binding"])
+def test_legacy_source_capture_refuses_unsupported_evidence_before_acquisition(
+    repair_case: SimpleNamespace, fault: str,
+) -> None:
+    case = repair_case
+    _legacy_publication(case)
+    manifest = json.loads(case.manifest.read_text())
+    if fault == "missing-source":
+        manifest.pop("source")
+    elif fault == "relative":
+        manifest["source"]["path"] = "relative/payload"
+    elif fault == "unregistered":
+        (case.home / ".copilot/settings.json").write_text("{}", encoding="utf-8")
+    else:
+        manifest["commandBinding"] = []
+    case.manifest.write_text(json.dumps(manifest), encoding="utf-8")
+    before = case.manifest.read_bytes()
+    assert case.update.repair_engine(case.source) != 0
+    assert case.manifest.read_bytes() == before
+    assert not case.calls and not case.acquisitions and not case.effect.exists()
+
+
+def test_legacy_locator_owner_change_during_acquisition_refuses_effects(
+    repair_case: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from worktree_manager import engine_origin
+
+    case = repair_case
+    _legacy_publication(case)
+    other = case.home / ".copilot/installed-plugins/other/agent-worktrees"
+    shutil.copytree(case.incumbent, other)
+    settings = case.home / ".copilot/settings.json"
+    value = json.loads(settings.read_text())
+    value["extraKnownMarketplaces"]["other"] = {
+        "source": {"source": "github", "repo": "Other/Extensions"},
+    }
+    settings.write_text(json.dumps(value), encoding="utf-8")
+    acquire = engine_origin._native_acquisition
+
+    def change_owner(*args: Any, **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        result = acquire(*args, **kwargs)
+        manifest = json.loads(case.manifest.read_text())
+        manifest["source"]["path"] = str(other)
+        case.manifest.write_text(json.dumps(manifest), encoding="utf-8")
+        return result
+
+    monkeypatch.setattr(engine_origin, "_native_acquisition", change_owner)
+    assert case.update.repair_engine(case.source) != 0
+    assert len(case.acquisitions) == 1
+    assert not case.calls and not case.effect.exists()
 
 
 def test_repair_engine_marketplace_incumbent_reaches_canonical_construction(repair_case):

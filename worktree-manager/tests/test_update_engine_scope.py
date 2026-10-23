@@ -72,7 +72,7 @@ def test_valid_scoped_update_reaches_only_its_own_construction(
     assert not (case.runtime / "bin").exists()
 
 
-@pytest.mark.parametrize("source_state", ["present", "missing-payload"])
+@pytest.mark.parametrize("source_state", ["present", "missing-payload", "legacy-unbound"])
 def test_automatic_cell_selection_is_preserved_without_an_inherited_context(
     repair_case, monkeypatch, capsys, source_state,
 ):
@@ -86,6 +86,10 @@ def test_automatic_cell_selection_is_preserved_without_an_inherited_context(
     assert automatic["actualMode"] == "namespaced" and automatic["runtimeRoot"] == str(root)
     if source_state == "missing-payload":
         case.incumbent.rename(case.incumbent.with_name("retained-payload"))
+    elif source_state == "legacy-unbound":
+        from test_update_engine_repair import _legacy_publication
+
+        _legacy_publication(case)
     before = case.manifest.read_bytes()
     rc = case.update.repair_engine(case.source)
     assert case.effect.is_file(), f"rc={rc}; {capsys.readouterr().err}"

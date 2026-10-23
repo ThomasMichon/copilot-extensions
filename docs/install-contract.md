@@ -1287,6 +1287,10 @@ without importing the installed application or writing a new receipt.
 For an older schema-3 manifest without `commandBinding`, its existing
 `source.path` is a candidate locator, not ownership by itself: the same
 canonical source/mode validation and exact helper-byte comparison still apply.
+Runtime repair captures that validated legacy owner in memory before native
+source acquisition, then revalidates its current locator and owner before
+effects. Automatic namespaced activation remains authoritative when present;
+no legacy receipt is written merely to make capture succeed.
 Unrelated bytes, missing ownership, indirect files, and inconsistent ownership records
 remain refusals; helper evolution does not require a growing release-hash list.
 

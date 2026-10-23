@@ -1,0 +1,9 @@
+{
+  "comment": "Capture validated older legacy source ownership in memory before engine repair and revalidate it before effects",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

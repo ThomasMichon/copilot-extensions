@@ -32,6 +32,12 @@ class _RefreshedSource:
 
 
 @dataclass(frozen=True)
+class _LegacyOwnerSelection:
+    payload: Path
+    binding: dict[str, Any] | None
+
+
+@dataclass(frozen=True)
 class RepairResult:
     exit_code: int
     environment: dict[str, str] | None = field(default=None, repr=False)
@@ -89,23 +95,48 @@ def _scope_identity(
     }
 
 
-def _legacy_binding(helper: dict[str, Any], primitive: ModuleType, root: Path) -> dict[str, Any]:
+def _legacy_owner_selection(
+    helper: dict[str, Any], primitive: ModuleType, root: Path,
+) -> _LegacyOwnerSelection:
     path = root / "deploy-manifest.json"
     helper["_ordinary"](path)
     manifest = primitive.read_deployment_manifest(path)
     if (
         not isinstance(manifest, dict) or manifest.get("schema_version") != 3
         or manifest.get("service") != "agent-worktrees"
-        or not isinstance(manifest.get("commandBinding"), dict)
     ):
         raise RuntimeError("Engine repair has no captured incumbent ownership")
-    previous = manifest["commandBinding"]
+    previous = manifest.get("commandBinding")
+    if previous is None:
+        source = manifest.get("source")
+        locator = source.get("path") if isinstance(source, dict) else None
+        if not isinstance(locator, str) or not locator or not Path(locator).is_absolute():
+            raise RuntimeError("Engine repair has no captured incumbent ownership")
+        payload = Path(locator)
+        helper["_ordinary"](payload)
+        return _LegacyOwnerSelection(payload, None)
     if (
-        not isinstance(previous.get("sourceFingerprint"), str)
+        not isinstance(previous, dict)
+        or not isinstance(previous.get("sourceFingerprint"), str)
         or not isinstance(previous.get("payloadRoot"), str)
     ):
         raise RuntimeError("Engine repair captured source identity is incomplete")
-    return previous
+    return _LegacyOwnerSelection(Path(previous["payloadRoot"]), previous)
+
+
+def _legacy_binding(
+    helper: dict[str, Any], api: dict[str, Any], primitive: ModuleType,
+    root: Path, environment: dict[str, str],
+) -> dict[str, Any]:
+    selected = _legacy_owner_selection(helper, primitive, root)
+    if selected.binding is not None:
+        return selected.binding
+    query = dict(environment)
+    query.pop("COPILOT_PLUGIN_ROOT", None)
+    return api["publish_legacy_binding"](
+        primitive, payload_root=selected.payload, plugin_id="agent-worktrees",
+        legacy_root=root, environment=query,
+    )
 
 
 def _refresh_source(source: Path, environment: dict[str, str]) -> _RefreshedSource:
@@ -152,8 +183,9 @@ def _refresh_source(source: Path, environment: dict[str, str]) -> _RefreshedSour
         if attributable and Path(attributable).is_relative_to(installed):
             hint, fingerprint = Path(attributable), None
         else:
-            previous = _legacy_binding(helper, primitive, root)
-            fingerprint, hint = previous["sourceFingerprint"], Path(previous["payloadRoot"])
+            legacy = _legacy_owner_selection(helper, primitive, root)
+            previous, hint = legacy.binding, legacy.payload
+            fingerprint = previous["sourceFingerprint"] if previous is not None else None
     payload_hint = hint if hint.is_relative_to(installed) else None
     origin = select_registered_origin(
         primitive, copilot_home=copilot_home, plugin_id="agent-worktrees",
@@ -185,7 +217,7 @@ def _refresh_source(source: Path, environment: dict[str, str]) -> _RefreshedSour
             if activation["state"] not in {"missing", "valid"}:
                 raise RuntimeError("Engine repair automatic activation is stale, invalid or foreign")
             if previous is None:
-                previous = _legacy_binding(helper, primitive, root)
+                previous = _legacy_binding(helper, api, primitive, root, environment)
             wanted = api["_legacy_receipt"](
                 origin.provenance, {"runtimeRoot": str(root), "environment": current_environment},
             )
@@ -260,6 +292,11 @@ def _incumbent(
         primitive, payload_root=payload, plugin_id="agent-worktrees",
         legacy_root=root, environment=query,
     )
+    previous = _legacy_binding(helper, api, primitive, root, environment)
+    if {key: value for key, value in previous.items() if key != "payloadRoot"} != {
+        key: value for key, value in receipt.items() if key != "payloadRoot"
+    }:
+        raise RuntimeError("Engine repair current legacy source owner differs")
     if (
         receipt["pluginId"] != "agent-worktrees" or receipt["mode"] != "legacy"
         or Path(receipt["runtimeRoot"]) != root
