@@ -216,11 +216,12 @@ class PivotFormScreen(FieldQuestionsMixin, ModalScreen[dict]):
         if base:
             records = read_drafts(base, self._draft_binding)
             self._local_recoveries = [(path, data) for path, data in records if data.get("pending")]
-            for path, data in records:
-                if not data.get("pending"):
-                    self._draft_file = path
-                    self._draft_files.append(path)
-                    return data["values"]
+            automatic = [(path, data) for path, data in records if not data.get("pending")]
+            self._draft_files.extend(path for path, _ in automatic)
+            if automatic:
+                path, data = automatic[0]
+                self._draft_file = path
+                return data["values"]
         return self._draft_values
 
     def _draft_path(self):

@@ -460,11 +460,12 @@ def test_verified_save_then_two_resets_and_restart_never_revive_cleared_answers(
 
 
 @pytest.mark.parametrize("clear", [False, True])
-def test_delayed_acknowledgement_cannot_delete_a_newer_process_write(tmp_path, monkeypatch, clear):
+@pytest.mark.parametrize("shared", [False, True])
+def test_delayed_acknowledgement_cannot_delete_a_newer_process_write(tmp_path, monkeypatch, clear, shared):
     monkeypatch.setenv("AGENT_WORKTREES_STEER_DRAFTS", str(tmp_path))
     identity = binding()
     form = PivotFormScreen(CARD, FIELDS, "Answer", task_id="same-id", draft_binding=identity,
-                           on_clear_draft=lambda: None)
+                           on_clear_draft=(lambda: None) if shared else None)
     newer_path = []
 
     async def run():
@@ -477,7 +478,7 @@ def test_delayed_acknowledgement_cannot_delete_a_newer_process_write(tmp_path, m
                 "import json,sys;from pathlib import Path;"
                 "from worktree_manager.form_draft_storage import write_draft;"
                 "print(write_draft(Path(sys.argv[1]),json.loads(sys.argv[2]),'same-id',"
-                "{'answer':'newer process response'},pending=True))"
+                f"{{'answer':'newer process response'}},pending={shared!r}))"
             )
             child = subprocess.run(
                 [sys.executable, "-c", program, str(base), json.dumps(identity)],
@@ -489,18 +490,75 @@ def test_delayed_acknowledgement_cannot_delete_a_newer_process_write(tmp_path, m
             newer_path.append(newer)
             assert newer != acknowledged
             if clear:
-                form.draft_reset_complete(True, "absent")
+                form.draft_reset_complete(True, "absent" if shared else None)
             else:
                 assert form._delete_draft()
             assert not acknowledged.exists() and newer.exists()
         restored = PivotFormScreen(CARD, FIELDS, "Answer", task_id="same-id", draft_binding=identity,
-                                   on_clear_draft=lambda: None)
+                                   on_clear_draft=(lambda: None) if shared else None)
         async with Host(restored).run_test():
-            assert restored.query_one(Input).value == ""
-            restored.action_restore_local()
+            if shared:
+                assert restored.query_one(Input).value == ""
+                restored.action_restore_local()
             assert restored.query_one(Input).value == "newer process response"
     asyncio.run(run())
     assert newer_path[0].exists()
+
+
+@pytest.mark.parametrize("confirm", [False, True])
+def test_local_only_repeated_save_then_reset_or_confirm_retires_all_observed_copies(
+    tmp_path, monkeypatch, confirm,
+):
+    from test_config_actions import _wait
+    from test_picker_tui import _fixture_source, _wait_for_initial_setup
+    from worktree_manager.production_picker.picker_tui.configuration_form import CommandResultScreen
+    from worktree_manager.production_picker.picker_tui.engine import PickerApp, PickerScreen
+
+    monkeypatch.setenv("AGENT_WORKTREES_STEER_DRAFTS", str(tmp_path / "drafts"))
+    script = tmp_path / "submit.py"
+    script.write_text("print('provider command result')", encoding="utf-8")
+    raw = manifest()
+    raw["actions"][0].pop("draft")
+    raw["actions"][0].update(run=[sys.executable, str(script), "{fields}"], result_view="text")
+    reg = registered(raw)
+    runtime = tasks.RegisteredPivotRuntime(reg)
+    monkeypatch.setattr(runtime, "ensure", lambda scope: None)
+    rec = {"id": "same-id", "title": "Example", "card": {**CARD, "fields": FIELDS}}
+    saved_paths = []
+
+    async def open_form(app, pilot):
+        picker = app.query_one(PickerScreen)
+        await _wait_for_initial_setup(pilot, picker)
+        monkeypatch.setattr(picker, "_pivot_runtime", lambda value: runtime)
+        picker._open_pivot_form(reg, reg.actions[0], rec, rec, "Example")
+        await _wait(pilot, lambda: isinstance(app.screen, PivotFormScreen))
+        return app.screen
+
+    async def run():
+        app = PickerApp(_fixture_source(), live=False)
+        async with app.run_test() as pilot:
+            for value in ("first response", "second response"):
+                form = await open_form(app, pilot)
+                form.query_one(Input).value = value
+                form.action_save()
+                saved_paths.append(form._draft_path())
+                await _wait(pilot, lambda: app.screen is not form)
+            form = await open_form(app, pilot)
+            assert form.query_one(Input).value == "second response"
+            assert set(saved_paths) <= set(form._draft_files)
+            if confirm:
+                form._confirm()
+                saved_paths.append(form._draft_path())
+                await _wait(pilot, lambda: isinstance(app.screen, CommandResultScreen) and not app.screen.pending)
+            else:
+                form._perform_reset()
+                assert form.query_one(Input).value == ""
+            assert not any(path.exists() for path in saved_paths)
+        restarted = PickerApp(_fixture_source(), live=False)
+        async with restarted.run_test() as pilot:
+            form = await open_form(restarted, pilot)
+            assert form.query_one(Input).value == ""
+    asyncio.run(run())
 
 
 def test_native_confirm_retires_its_exact_record_without_deleting_a_newer_copy(tmp_path, monkeypatch):

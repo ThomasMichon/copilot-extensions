@@ -194,6 +194,9 @@ After a verified shared Save, its old-revision local fallback is removed so a
 later Clear cannot revive it when the owner returns to explicit absence.
 Cleanup failures are visible. Acknowledgements retire only records owned by
 that form/attempt, never a mutable path shared with another writer.
+Local-only forms include every matching automatic record observed at open in
+that cleanup set, so repeated Saves cannot expose an older response after
+Reset or Confirm. Records written after that snapshot remain untouched.
 
 Reset asks first, freezes input during Clear and retains fields/local recovery
 until a valid acknowledgement arrives. It updates only this form's observed

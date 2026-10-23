@@ -1151,3 +1151,9 @@ authorized installed proof remain distinct obligations.
   The coupled selection passed 98 tests, including real-process newer writers,
   native Confirm cleanup and fail-first-unlink Save/Reset/restart coverage. Updated-head review is
   still required; this does not complete original-request receipt recovery.
+- The next review found the analogous local-only history case: repeated Saves
+  left older automatic records after Reset/Confirm. Track every matching
+  automatic record observed when opening the form, while excluding later
+  writes from cleanup. Native repeated-Save/Reset and repeated-Save/Confirm/
+  reopen regressions plus both shared/local real-process newer writers pass;
+  the coupled selection is now 102 tests. No old finding was waived.
