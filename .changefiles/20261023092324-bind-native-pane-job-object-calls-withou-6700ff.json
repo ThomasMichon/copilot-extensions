@@ -1,0 +1,13 @@
+{
+  "comment": "Bind native pane Job Object calls without launch-time C# compilation, preserving kill-on-close ownership.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
