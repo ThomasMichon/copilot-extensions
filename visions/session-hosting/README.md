@@ -5,7 +5,7 @@
   Copilot execution.
 - **Scope:** leaf (cross-cutting capability within the agent fabric)
 - **Status:** Active
-- **Last revised:** 2026-09-24
+- **Last revised:** 2026-10-22
 - **Reality docs:** [`plugins/agent-bridge/docs/architecture.md`](../../plugins/agent-bridge/docs/architecture.md) ·
   [`plugins/agent-worktrees/docs/architecture.md`](../../plugins/agent-worktrees/docs/architecture.md)
 
@@ -183,6 +183,21 @@ A human control plane can present launch, resume, join, and handoff actions
 across available providers while preserving the user's preferred Copilot
 experience.
 
+### control-independent-terminal-attachment
+
+How a caller requests a launch is independent of how a human attaches to its
+terminal. A target-owned session created through a fleet Gateway can be
+presented over SSH or a supported lightweight terminal-only channel, including
+a JavaScript renderer in a companion or web surface. The latter carries terminal
+interaction rather than requiring a full SSH connection or another execution
+protocol.
+
+The existing provider retains process, terminal and durable reattachment
+identity. Switching or disconnecting a presentation does not relaunch the
+agent, retire the worktree or transfer execution ownership. Input, resize,
+output observation, reconnect and detach are capability-honest and bounded;
+an observer or renderer does not acquire lifecycle control implicitly.
+
 ### recoverable-across-full-restart
 
 Whatever a provider was hosting remains discoverable even after the machine it
@@ -293,6 +308,8 @@ continuation.
   a Session-host-provider's mechanics extend into a remote venue via a CLI mode
   bound through explicit worktree-keyed reservation, rather than a parallel execution
   protocol.
+- Federated reach: [machine-fleet](../machine-fleet/README.md) — target-owned
+  control and independently selected console attachment.
 
 ## Provenance
 

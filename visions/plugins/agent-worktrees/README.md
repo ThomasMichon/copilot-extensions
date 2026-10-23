@@ -5,7 +5,7 @@
   obligations, disposition, and source-control completion.
 - **Scope:** branch (worktree-lifetime authority; child of agent-fabric)
 - **Status:** Active
-- **Last revised:** 2026-10-13
+- **Last revised:** 2026-10-22
 - **Reality docs:** the agent-worktrees plugin `docs/`
 - **Supersedes / superseded by:** none
 
@@ -339,21 +339,21 @@ an equally-preferred alternative.
 The daemon's authority is scoped to **one host**, matching *Derived
 status*'s existing "exactly one [accelerator] per host" guarantee exactly —
 it is not a cross-machine authority, and this direction does not introduce
-one. A worktree checked out on a different machine is reached the same way
-any other cross-host agent-worktrees operation already is: through that
-machine's own `agent-worktrees` CLI (over whatever transport reaches it),
-which then talks to *its own* local daemon. There is no direct daemon-to-
-daemon wire protocol between hosts; cross-machine reach is CLI-to-CLI,
-recursing into the same single-authority-per-host pattern on the far side,
-never a second, wider-scoped authority layered above it.
+one. Remote operations enter that machine's own named operation boundary:
+its `agent-worktrees` CLI over SSH or an explicitly adopted Gateway route
+to the same target-owned operation service. Both use the same local authority
+and mutation implementation. A Gateway routes a request; it does not become
+a second allocator or wider-scoped agency authority. Local reads use the local
+owner; ordinary remote observation in an adopted fleet uses the Gateway's
+push-backed federation view rather than a fresh per-client host query.
 
 **A concrete instance of this pattern: claim-bundle acceptance
 (#1090/#4527).** A remote consumer's `claims handoff accept <bundle-id>`
 does not need — and must never grow — a bespoke daemon-to-daemon or
-bridge-RPC transaction surface. It reaches the source machine's own ledger
-the same way any other cross-host `agent-worktrees` operation does: SSH to
-that machine's own binstub, which runs the *exact same local mutation code*
-same-machine acceptance already uses. A prior implementation pass
+bridge-RPC transaction surface. The SSH path reaches the source machine's own
+binstub, which runs the *exact same local mutation code* same-machine acceptance
+already uses. An adopted Gateway route must enter that same named owner boundary,
+not add a second claims transaction engine. A prior implementation pass
 concluded no such reach existed because it looked for a purpose-built
 `agent-bridge` verb instead of this already-established CLI-to-CLI
 mechanism — a mistake worth naming here so a future reader doesn't

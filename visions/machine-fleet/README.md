@@ -148,11 +148,11 @@ placement and routing do not create a second PR watcher or registrar.
 
 ### Shared fleet state backing store
 
-An adopted fleet has a durable central current-state view behind its selected
-Gateway. Authorized machine and container origins push their committed
-observations into that view; Worktree Manager, other UX surfaces, CLI tools and
-API clients share its scoped query and subscription contract rather than each
-maintaining a separate remote polling view.
+An adopted fleet's Gateway is a federation service with a durable central
+current-state view. Authorized machine and container origins promptly push
+their committed observations into that view; Worktree Manager, other UX
+surfaces, CLI tools and API clients share its scoped query and subscription
+contract rather than each maintaining a separate remote polling view.
 
 The central projection retains provenance, freshness and coverage without
 becoming another writer of its sources' worktree, task, session or resource
@@ -164,6 +164,20 @@ registry remain the source of their respective reachability and location facts.
 An authorized shared view may retain those facts without per-client remote
 probes; it exposes derived observations, not another topology editor or a grant
 to act on a stale target.
+
+### Local and federated read paths
+
+A machine sources its own current information directly from its local owning
+services. In an adopted fleet, it obtains other machines' observations from the
+selected Gateway rather than querying those machines individually. An **All**
+view composes local authoritative information with the Gateway's remote
+observations without presenting the local origin twice.
+
+Committed source changes become visible across connected fleet views with
+near-immediate push delivery, not periodic client scans. Freshness and coverage
+remain explicit when an origin, channel or Gateway is delayed or unavailable;
+neither a retained observation nor a connected channel promises instantaneous
+global consistency. Standalone local use remains independent of federation.
 
 ### Role deployments and container managers
 
@@ -293,6 +307,21 @@ The minimum useful fleet exposes authorized discovery, health, task interaction,
 worktree operations, and bridge communication without a working remote shell.
 Full remote Copilot driving, a tunneled shell, and interactive applications are
 additional declared capabilities, not prerequisites for service control.
+
+### target-owned-control-and-independent-console
+
+An adopted Gateway can carry named worktree-creation and agent-launch requests
+back through an authenticated outbound channel to the target's existing
+Worktree Manager, agency and session-host authorities. Routing avoids the need
+to establish an SSH command session for each control request; it does not create
+a second allocator, launcher or arbitrary remote-command proxy.
+
+Control transport and console attachment are independent choices. After a
+target-owned launch, a caller may attach through SSH or a supported lightweight
+terminal-only channel rendered by a companion or web client. A terminal renderer
+does not become the session's execution or lifetime owner. Changing or losing
+an attachment preserves accepted work and durable identity; unsupported
+attachment capabilities remain explicit rather than silently choosing SSH.
 
 ### discoverable-service-routing
 

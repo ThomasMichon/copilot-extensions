@@ -344,6 +344,11 @@ not permission to execute, change profiles or reassign work. Standalone live
 introspection remains usable without a Gateway. This is *derive-don't-duplicate*
 applied to repo locations and the derived roster.
 
+Within an adopted fleet, ordinary remote observation comes from the Gateway's
+push-backed view while a machine reads its own owners directly. Explicit SSH
+introspection remains a separate supported operation, not a hidden per-client
+fallback when federation is unavailable.
+
 ### explore-before-adopt
 Introspecting a target is **read-only first**: exploration reports what a machine
 actually offers the fabric before anything is written. Turning a finding into a

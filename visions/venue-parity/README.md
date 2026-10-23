@@ -3,7 +3,7 @@
 - **Subject:** The dispatch **venue** layer — how the coordination layer launches, reaches, authenticates, and monitors a Copilot agent in a remote venue (a GitHub CodeSpace, a local Docker container, or a directly SSH-registered machine/local checkout), via the `agent-codespaces`, `agent-containers`, and static-registry SSH/local dispatch paths.
 - **Scope:** leaf (cross-cutting capability across the venue providers)
 - **Status:** Active
-- **Last revised:** 2026-10-18
+- **Last revised:** 2026-10-22
 - **Reality docs:** [`docs/architecture.md`](../../docs/architecture.md)
 - **Parent vision:** [agent-fabric](../agent-fabric/README.md)
 
@@ -145,6 +145,16 @@ endpoint just as a CodeSpace does, so dispatch, interactive reach, and staging
 run over the same channel with no venue-specific transport code. Explicit
 Gateway fleet adoption adds an alternative shared transport contract, not a
 separate transport implementation for every service or capability.
+
+### control-and-console-selection
+
+Gateway-connected targets may receive named creation and launch requests through
+their existing outbound channel without an SSH command hop. The target's
+existing authorities still allocate and host the work. A caller independently
+selects SSH terminal attachment or a supported lightweight terminal-only
+presentation; this does not change the shared launch, plugin, credential,
+reservation, observation or retirement guarantees. Neither successful control
+routing nor a browser renderer proves the other capabilities are supported.
 
 ### unified-auth-relay-back-channel
 Credentials are relayed over the selected **shared back-channel**, using the

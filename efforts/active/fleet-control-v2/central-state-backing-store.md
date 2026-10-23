@@ -8,9 +8,18 @@ backing-store and resumable-observation intent through existing #5862.
 ## Requested outcome
 
 Worktree Manager's fleet view, other UX surfaces, CLI tools and API clients
-consume one central current-state and subscription plane. Authorized machines
-and containers push changes; a client request does not trigger an independent
-fleet-wide SSH probe, record scrape or history walk.
+consume one central current-state and subscription plane for remote origins.
+A machine reads its own facts from its local owner; an All view composes those
+facts with the Gateway's remote observations without duplicating the local
+origin. Authorized machines and containers promptly push changes; a client
+request does not trigger an independent fleet-wide SSH probe, record scrape or
+history walk.
+
+[Federation and console choice](federation-and-console.md) captures the operator's
+local-direct/remote-federated clarification and the separately considered
+Gateway control/terminal scheme. Near-instant visibility is an implementation
+latency objective, not a claim of global simultaneity or of current delivery
+from a disconnected source.
 
 One selected Gateway deployment hosts this plane. A selected containerized
 deployment is not accompanied by a second native or prototype Gateway serving
