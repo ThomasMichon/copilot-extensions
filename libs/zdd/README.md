@@ -9,14 +9,6 @@ multiple consumers reuse one implementation instead of reinventing it.
   install it from a local path or a pinned Git ref).
 - **Import module:** `zdd`
 
-The governing [cutover pattern](../../docs/patterns/graceful-daemon-cutover.md)
-requires **best-effort** handoff: compatible graceful replacement is preferred,
-but incompatible or non-settling handoff permits bounded identity-checked cold
-takeover with durable recovery and retriable clients. The APIs and adapter
-evidence below describe their implemented behavior, not blanket adoption of
-that fallback. This documentation revision does not enable process termination
-or change the library's execution paths.
-
 ## What's inside
 
 ### `zdd.lifecycle` -- durable transition history
