@@ -405,6 +405,13 @@ class AdmissionAuthority:
         The caller must bind its exact lookup/effect/emit to this checkpoint.
         This library cannot make an external backend transaction atomic.
         """
+        return self._checkpoint(permit, request, retain=True)
+
+    def complete(self, permit: Permit, request: Request) -> None:
+        """Consume a terminal handle through the same fresh validation boundary."""
+        self._checkpoint(permit, request, retain=False)
+
+    def _checkpoint(self, permit: Permit, request: Request, *, retain: bool) -> Permit:
         with self._lock:
             issued = self._issued.get(id(permit))
             if issued is None or issued.permit is not permit:
@@ -435,5 +442,6 @@ class AdmissionAuthority:
                 expires_at=min(permit.expires_at, current.valid_until,
                                current.identity_trust_until, issued.identity.expires_at),
             )
-            self._issued[id(renewed)] = _Issued(renewed, issued.identity, request)
+            if retain:
+                self._issued[id(renewed)] = _Issued(renewed, issued.identity, request)
             return renewed

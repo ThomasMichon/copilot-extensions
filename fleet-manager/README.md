@@ -179,6 +179,12 @@ Finite internal permits revalidate current policy before lookup/effect/emit;
 they are not serialized backend credentials. The library does not authenticate
 its snapshot source, wire a resident consumer or implement provider renewal.
 
+The explicit [scoped point-reader](docs/scoped-observation-reader.md) composes
+that admission with the local observation store under a bounded shared owner
+fence. It projects immutable selected-field results and consumes terminal
+permits at a fresh completion checkpoint, without exposing global cursors or
+adding a serving route, provider, enrollment or deployment.
+
 The optional stdlib-only [reverse-listener coordinator](docs/reverse-listener-reservations.md)
 binds a finite supplied-owner admission to retained candidate custody and
 generation-checked publication, preserving unresolved effects under their

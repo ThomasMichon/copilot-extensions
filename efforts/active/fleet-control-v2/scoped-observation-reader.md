@@ -52,20 +52,20 @@ result as a substitute for current execution/emission authorization.
 
 ## Validation
 
-- [ ] Denied/empty/foreign or unsupported requests perform zero entity lookups.
-- [ ] Real verifier evidence for two principals yields isolated SQLite views,
+- [x] Denied/empty/foreign or unsupported requests perform zero entity lookups.
+- [x] Real verifier evidence for two principals yields isolated SQLite views,
   with no field/entity cross-product widening.
-- [ ] Exact field projection and immutable results omit every global cursor,
+- [x] Exact field projection and immutable results omit every global cursor,
   position, sequence and unselected field; missing fields remain distinct
   from explicit nulls.
-- [ ] Missing rows, removals and stale origin generations remain explicit.
-- [ ] Real lock contention is bounded; a participating revocation writer is
+- [x] Missing rows, removals and stale origin generations remain explicit.
+- [x] Real lock contention is bounded; a participating revocation writer is
   serialized with the read. Revocation/expiry at the completion checkpoint
   withholds results.
-- [ ] Successful and failed reads release terminal permit capacity, while
+- [x] Successful and failed reads release terminal permit capacity, while
   proof replay and fabricated/foreign permits remain refused.
-- [ ] Storage and callback failures propagate; no silent retry or cached allow.
-- [ ] A fresh-process real-identity/SQLite consumer uses production modules,
+- [x] Storage and callback failures propagate; no silent retry or cached allow.
+- [x] A fresh-process real-identity/SQLite consumer uses production modules,
   and importing the adapter preserves the dependency-free client boundary.
 - [ ] Existing admission/store tests and unchanged required partition budgets
   pass; current-head review and required CI pass before implementation merge.
@@ -73,3 +73,19 @@ result as a substitute for current execution/emission authorization.
 No first-machine installer behavior changes. Clean-room role installation and
 live external provider/serving proof are not supplied by this isolated library;
 those larger Plan and Validation Plan gates remain open.
+
+## Local execution record
+
+The contract was reviewed and merged in #8041 before implementation. The
+owned reader/admission/store selection passes 121 tests in 62.59 seconds under
+the unchanged 120-second containment limit, including the real independent
+consumer and lock cases. An initial new-test collection error used pytest's
+reserved `request` parameter name; renaming that parameter fixed collection
+without changing assertions. Existing unselected upstream tests report 21
+unknown timeout-marker warnings in this environment; no such fixture or
+deadline was changed here.
+
+The [implemented API](../../../fleet-manager/docs/scoped-observation-reader.md)
+keeps the trusted full-row parser distinct from selected result projection.
+Current-head hosted review and required CI remain the independent merge gate
+above, not a result inferred from this local run.

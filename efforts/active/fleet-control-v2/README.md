@@ -330,7 +330,9 @@ All detailed slices are **agent-recommended** and remain subject to review.
 ### Phase 2b - Central push-backed current state
 - [x] Review the [backing-store amendment](central-state-backing-store.md) under
   existing #5862, preserving #3761 origin authority and #352 client/mux ownership.
-- [ ] Review and implement the explicitly assigned
+- [x] Review the explicitly assigned
+  [isolated scoped point-reader contract](scoped-observation-reader.md) (#8041).
+- [ ] Land and validate the explicitly assigned
   [isolated scoped point-reader](scoped-observation-reader.md), composing only
   owned admission/storage libraries without wiring a resident consumer.
 - [ ] Agree authenticated origin/push, current-projection, persistence and
@@ -414,6 +416,38 @@ All entries are **agent-recommended implementation gates**, not completed tests.
 [Architecture and migration contract](architecture.md).
 
 ## Journal
+
+### 2026-10-22 - Explicitly assigned local scoped-reader implementation
+
+- Resumed the original clean worktree and synchronized current reviewed source.
+  The operator explicitly assigned `isolated-scoped-reader` and prohibited
+  other-agent coordination. No agent was contacted or delegated implementation.
+  Existing resident/provider/lifecycle ownership and live approval gates remain.
+- Reviewed contract #8041 actually merged at
+  `748f12a2dd1844517dc68f1ae0eb889f52283dd4`,
+  `2026-10-23T01:55:22Z`, before runtime edits. A first publication attempt
+  timed out behind the installation-wide publication lock; normal guarded
+  retry succeeded without changing or stealing that lock.
+- Implemented one explicit point-read composition with a mandatory bounded
+  shared owner fence, authorization before lookup, exact store-authority binding,
+  immutable selected-field results and terminal fresh permit completion.
+  The trusted store still validates complete rows internally; no selected-field
+  SQL hydration, wire-emission fence or authenticated provider is claimed.
+- The complete owned reader/admission/store selection passes 121 cases in
+  62.59 seconds under its unchanged 120-second containment limit. This includes
+  real JOSE evidence, SQLite, native lock contention/revocation and a fresh
+  independent consumer using production modules only. Corrected an initial
+  reserved pytest parameter collection error without weakening any assertion.
+  Touched F/E9 lint, the 13-plugin install contract and whitespace checks pass.
+- Documentation explains point-only capability, explicit entity-local metadata,
+  no global cursor or grant output, final-check withholding, participating-writer
+  requirements and terminal capacity release. Added the canonical standalone
+  consumer changefile without editing a version or dependency declaration.
+- Unit and simple real-process integration tiers were exercised. No installer
+  or first-machine behavior changed, so no new installer clean-room is claimed.
+  Live provider/serving validation remains outside this explicitly isolated
+  assignment. Current-head platform review and required hosted CI are still
+  required before implementation merge; the full parent remains Active.
 
 ### 2026-10-16 - Immutable-release index fixture repair prepared
 - Normal promotion #6938 merged `6b2fa0ac2887a8fda669dfb8356e5c6083f6729d`

@@ -33,6 +33,11 @@ Its cursors are typed correlation values, not signed/opaque access tokens;
 the eventual wire cursor must bind authorized scope without disclosing other
 scopes' activity or counts.
 
+The explicit [scoped point-reader](scoped-observation-reader.md) composes local
+admission and this store under a mandatory participating owner fence. It returns
+only selected state and defined entity-local metadata, never these internal
+cursors. It does not change the trusted raw API below or wire a resident consumer.
+
 ## Origin and sequence boundaries
 
 `OriginBinding(origin, installation, generation, producer)` is an explicitly
