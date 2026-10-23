@@ -35,6 +35,18 @@ Pull baselines persist the head and all supported observation fingerprints;
 staging or restart cannot silently adopt a new votes/approval/thread/policy/gate
 or readiness baseline in place of the previous observation.
 
+The disk adapter optionally accepts
+`ReplayServiceIdentity(fleet, gateway, slot)`. A bound `ReplayStore` wraps the
+unchanged core envelope in `agent-pull-requests.watch-service-store/v1` and
+checks the exact service identity and inner namespace on every transaction
+under the existing operation lock. Commits atomically retain both together.
+Bound and unbound readers refuse one another's formats rather than silently
+adopting, migrating or downgrading them. The ordinary unbound core/disk API
+retains its existing bytes and behavior; the standalone host always selects
+the bound format. These trusted local labels prevent accidental wrong-volume
+adoption, not filesystem tampering, cross-host concurrent writers or unauthorized
+Gateway access. They are not credentials, a release ledger or activation grants.
+
 The core accepts no callback argv, delivery URL, shell expression or credential.
 This library neither advertises health capabilities nor extends the existing
 watch daemon's register/unregister wire contract. The optional

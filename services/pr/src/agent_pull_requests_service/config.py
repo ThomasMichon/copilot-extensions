@@ -8,7 +8,7 @@ from pathlib import Path
 from agent_pull_requests.watch_gateway import WatchScopeBinding
 from agent_pull_requests.watch_observer import NativeObservationBinding
 from agent_pull_requests.watch_replay import ConsumerScope
-from agent_pull_requests.watch_replay_store import ReplayStore, json_object
+from agent_pull_requests.watch_replay_store import ReplayServiceIdentity, ReplayStore, json_object
 from fleet_manager.gateway_service_channel import origin
 from fleet_manager.gateway_service_context import identifier
 
@@ -74,7 +74,10 @@ class HostConfig:
         return self.root / "service-status.json"
 
     def store(self) -> ReplayStore:
-        return ReplayStore(self.root, self.namespace)
+        return ReplayStore(
+            self.root, self.namespace,
+            service_identity=ReplayServiceIdentity(self.fleet, self.gateway, self.slot),
+        )
 
 
 def load_config(path: Path) -> HostConfig:

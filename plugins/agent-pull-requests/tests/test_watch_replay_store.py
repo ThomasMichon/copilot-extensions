@@ -6,6 +6,7 @@ import json
 import subprocess
 import sys
 import time
+from dataclasses import replace
 
 import pytest
 from agent_procutil import no_window_kwargs
@@ -14,7 +15,7 @@ from single_instance_lease import OperationLock, OperationLockedError
 import agent_pull_requests.watch_replay_store as storage
 from agent_pull_requests.watch_replay import ConsumerScope
 from agent_pull_requests.watch_replay_store import (
-    ReplayCallerExpired, ReplayStore, ReplayStoreInvalid, json_object,
+    ReplayCallerExpired, ReplayServiceIdentity, ReplayStore, ReplayStoreInvalid, json_object,
 )
 from agent_pull_requests.watch_storage import StateCommitUncertain
 
@@ -35,6 +36,25 @@ def payload(**kwargs):
 
 def execute(store, operation, value=None, scope=SCOPE):
     return store.execute(scope, operation, value or {}, expires_at=int(time.time()) + 60)
+
+
+@pytest.mark.parametrize("value", [None, True, "", "x" * 257, "line\nbreak"])
+@pytest.mark.parametrize("field", ["fleet", "gateway", "slot"])
+def test_service_identity_requires_bounded_nonempty_text(field, value):
+    identity = dict(fleet="fleet-a", gateway="gateway-a", slot="service-a")
+    identity[field] = value
+    with pytest.raises(ValueError, match="service identity"):
+        ReplayServiceIdentity(**identity)
+
+
+def test_service_identity_document_does_not_mutate_the_frozen_binding():
+    identity = ReplayServiceIdentity("fleet-a", "gateway-a", "service-a")
+    identity.document()["slot"] = "other"
+    assert identity.document() == {
+        "fleet": "fleet-a", "gateway": "gateway-a", "slot": "service-a",
+    }
+    with pytest.raises(ValueError, match="typed replay service"):
+        ReplayStore(None, "namespace", service_identity=identity.document())
 
 
 def test_first_provision_is_explicit_and_never_replaces_existing_state(store):
@@ -63,6 +83,118 @@ def test_namespace_is_bound_on_every_transaction(store):
     with pytest.raises(ReplayStoreInvalid):
         execute(other, "pending")
     assert execute(store, "pending") == {"events": [], "more": False}
+
+
+@pytest.mark.parametrize("field", ["fleet", "gateway", "slot"])
+def test_service_identity_is_bound_on_every_transaction_and_foreign_bytes_are_preserved(
+    tmp_path, field,
+):
+    identity = ReplayServiceIdentity("fleet-a", "gateway-a", "service-a")
+    store = ReplayStore(tmp_path.resolve(), "installation-a", service_identity=identity)
+    store.provision()
+    original = payload()
+    receipt = execute(store, "register", original)
+    before = store.path.read_bytes()
+    other = ReplayStore(
+        store.root, store.namespace, service_identity=replace(identity, **{field: "other"}),
+    )
+    with pytest.raises(ReplayStoreInvalid):
+        execute(other, "pending")
+    with pytest.raises(ReplayStoreInvalid):
+        execute(other, "register", payload())
+    with pytest.raises(FileExistsError):
+        other.provision()
+    assert store.path.read_bytes() == before
+    assert execute(store, "inspect", {
+        key: original[key] for key in ("request_id", "issued_at")
+    }) == receipt
+
+
+@pytest.mark.parametrize("bound", [False, True])
+def test_bound_and_unbound_stores_never_implicitly_adopt_each_other(tmp_path, bound):
+    identity = ReplayServiceIdentity("fleet-a", "gateway-a", "service-a")
+    store = ReplayStore(
+        tmp_path.resolve(), "installation-a", service_identity=identity if bound else None,
+    )
+    store.provision()
+    original = payload(deadline_at=time.time() - 1)
+    execute(store, "register", original)
+    before = store.path.read_bytes()
+    other = ReplayStore(
+        store.root, store.namespace, service_identity=None if bound else identity,
+    )
+    with pytest.raises(ReplayStoreInvalid):
+        execute(other, "pending")
+    assert store.path.read_bytes() == before
+    assert execute(store, "pending")["events"][0]["timed_out"]
+
+
+@pytest.mark.parametrize("change", [
+    lambda value: value.update(schema="unknown"),
+    lambda value: value.update(extra=True),
+    lambda value: value.pop("service"),
+    lambda value: value["service"].update(extra=True),
+    lambda value: value.update(replay=None),
+    lambda value: value.update(replay=[]),
+    lambda value: value.update(replay="invalid"),
+    lambda value: value.update(replay=1),
+    lambda value: value["replay"].update(namespace="foreign"),
+    lambda value: value["replay"].update(records=[{}]),
+])
+def test_bound_store_refuses_invalid_outer_and_inner_envelopes(tmp_path, change):
+    store = ReplayStore(
+        tmp_path.resolve(), "installation-a",
+        service_identity=ReplayServiceIdentity("fleet-a", "gateway-a", "service-a"),
+    )
+    store.provision()
+    value = json.loads(store.path.read_bytes())
+    change(value)
+    store.path.write_text(json.dumps(value))
+    before = store.path.read_bytes()
+    with pytest.raises(ReplayStoreInvalid):
+        execute(store, "pending")
+    assert store.path.read_bytes() == before
+
+
+@pytest.mark.parametrize("uncertain", [False, True])
+def test_bound_store_restart_and_uncertain_commit_reconcile_original_identity(
+    tmp_path, monkeypatch, uncertain,
+):
+    identity = ReplayServiceIdentity("fleet-a", "gateway-a", "service-a")
+    store = ReplayStore(tmp_path.resolve(), "installation-a", service_identity=identity)
+    store.provision()
+    original = payload(deadline_at=time.time() - 1)
+    write = storage._atomic_write_json
+
+    def fail(path, state):
+        if uncertain:
+            write(path, state)
+            raise StateCommitUncertain("synthetic")
+        raise OSError("synthetic")
+
+    monkeypatch.setattr(storage, "_atomic_write_json", fail)
+    if uncertain:
+        assert execute(store, "register", original)["status"] == "uncertain"
+    else:
+        with pytest.raises(OSError):
+            execute(store, "register", original)
+    monkeypatch.setattr(storage, "_atomic_write_json", write)
+    restarted = ReplayStore(store.root, store.namespace, service_identity=identity)
+    receipt = execute(restarted, "register", original)
+    assert execute(store, "register", original) == receipt
+    event = execute(store, "pending")["events"][0]
+    assert execute(restarted, "pending")["events"][0] == event
+    completion = {
+        **{key: original[key] for key in ("request_id", "issued_at")},
+        "registration_id": receipt["registration_id"], "event_id": event["event_id"],
+    }
+    ack = execute(restarted, "acknowledge", completion)
+    assert ack["status"] == "acknowledged"
+    assert execute(store, "acknowledge", completion) == ack
+    persisted = json.loads(store.path.read_bytes())
+    assert persisted["service"] == identity.document()
+    assert len(persisted["replay"]["records"]) == 1
+    assert execute(restarted, "pending") == {"events": [], "more": False}
 
 
 def test_separate_instances_reload_exact_receipt_and_pending_timeout(store):

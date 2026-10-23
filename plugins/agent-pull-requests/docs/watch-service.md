@@ -19,6 +19,12 @@ bindings, Gateway origin/TLS trust, current async access-token callback and
 externally provisioned proof key. Every serving account/repository must have
 a native observation binding. Remote registrations never supply commands,
 provider endpoints, credential references or an alternative scope.
+If the store selects `ReplayServiceIdentity`, construction also requires its
+fleet/Gateway/slot to match this service. The standalone distribution always
+selects that disk binding; each adoption and transaction verifies the complete
+bound envelope, and legacy unbound volumes require a separate migration.
+The optional unbound embedding API remains compatible, but does not claim a
+persisted fleet/service binding.
 
 The embedding owner also supplies two synchronous, bounded, thread-safe
 callbacks: `authority()` returns the current integer expiry, and
