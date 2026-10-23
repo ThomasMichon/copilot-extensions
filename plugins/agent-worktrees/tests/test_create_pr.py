@@ -89,13 +89,22 @@ class TestCreatePR:
         assert "not enabled" in res["error"]
 
     def test_freezes_attribution_and_stamps_pr_id_at_fresh_construction(
-        self, pr_repo,
+        self, pr_repo, monkeypatch,
     ):
         # codename-attribution-by-default (rounds 26-39): create_pr's own
         # fresh-construction site must stamp the frozen pair + pr_id.
         config, wid, _wt_path, _ = pr_repo
+        remote_probes = []
+        has_remote = git_ops.has_remote
+
+        def observe_remote(remote, *, cwd):
+            remote_probes.append((remote, cwd))
+            return has_remote(remote, cwd=cwd)
+
+        monkeypatch.setattr(git_ops, "has_remote", observe_remote)
         res = pr_ops.create_pr(wid, config, title="Add feature")
         assert res["success"] is True
+        assert remote_probes == [("origin", str(_wt_path))]  # pre-fetch only
         rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
         pr = rec.active_pr()
         assert pr is not None
@@ -120,6 +129,35 @@ class TestCreatePR:
         assert pr is not None
         assert pr.attribution_mode == "codename"
         assert pr.attribution_explicit is True
+
+    @pytest.mark.parametrize("association", ["absent", "terminal", "branchless", "unpublished"])
+    def test_missing_body_does_not_probe_ineligible_pr_remote(
+        self, record_repo, monkeypatch, association,
+    ):
+        from dataclasses import replace
+
+        config, wid, _, _ = record_repo
+        repo = config.repos["ext"]
+        config = replace(config, repos={"ext": replace(
+            repo, pr=replace(repo.pr, required_body_sections=("Intent",)),
+        )})
+        record = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        if association != "absent":
+            record.pr = tracking.PRRecord(
+                state="merged" if association == "terminal" else (
+                    "creating" if association == "unpublished" else "open"
+                ),
+                branch="" if association == "branchless" else "feature/previous",
+            )
+            tracking.save_record(record)
+
+        def unexpected_git(*args, **kwargs):
+            pytest.fail(f"ineligible PR reached Git before body refusal: {args}")
+
+        monkeypatch.setattr(git_ops, "git", unexpected_git)
+        result = pr_ops.create_pr(wid, config, title="Add feature")
+        assert result["success"] is False
+        assert "missing required non-empty section(s): Intent" in result["error"]
 
     def test_required_body_sections_fail_before_branch_publication(self, pr_repo):
         import dataclasses
