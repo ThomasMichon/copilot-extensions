@@ -1,0 +1,13 @@
+{
+  "comment": "Add a fixed native first-use handoff into durable owning-plugin provision requests without enabling publishers.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
