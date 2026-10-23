@@ -55,6 +55,11 @@ it does not implement fixes, change product behavior, or declare deployment.
   CI-installer repair #7746 while journal publication was blocked. It merged
   and reached normal Main release; research/tracker-only authority is restored.
   This grants no further implementation, runtime update or deployment authority.
+- **Source-complete exception:** The operator separately authorized the bounded
+  worktree folder-trust correction #8267, merged into Dev through #8274.
+  Source completion does not assert Main promotion or local rollout and grants
+  no automatic-reclamation, broader implementation or deployment authority.
+  All other work remains research/tracker-only under this charter.
 - **Protected lanes:** An active owner, hold, contested requirement or incomplete
   rollout obligation is not stale merely because its issue is old. Preserve its
   responsibility and route any proposed consolidation through the existing

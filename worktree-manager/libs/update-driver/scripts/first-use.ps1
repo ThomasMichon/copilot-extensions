@@ -6,7 +6,8 @@ param(
     [ValidateSet('launch', 'owner')][string]$Mode = 'launch',
     [string]$ExpectedSource,
     [string]$ReceiptLog,
-    [ValidateSet('default', 'client-only')][string]$ServiceMode = 'default'
+    [ValidateSet('default', 'client-only')][string]$ServiceMode = 'default',
+    [switch]$Wait
 )
 $ErrorActionPreference = 'Stop'
 $OutputEncoding = [Console]::OutputEncoding = New-Object Text.UTF8Encoding($false)
@@ -103,10 +104,17 @@ if ($Mode -ceq 'launch') {
     . (Join-Path ([IO.Path]::GetDirectoryName($foundation)) 'agent-procutil\src\agent_procutil\native_daemon.ps1')
     New-NativeExecutionDirectory -Root $Root
     $log = Join-Path $Root ('first-use-' + [Guid]::NewGuid().ToString('N') + '.log')
+    [IO.File]::Open($log, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::Read).Dispose()
     $worker = Start-NativeDaemon -Script $PSCommandPath -Arguments @(
         $Root, $Payload, $RuntimeRoot, $Project, 'owner', $source, $log, $ServiceMode
     ) -WorkingDirectory $Project -LogPath $log
     try {
+        if ($Wait) {
+            $worker.WaitForExit()
+            $code = $worker.ExitCode
+            Get-Content -LiteralPath $log -Encoding UTF8 | ForEach-Object { [Console]::Error.WriteLine($_) }
+            exit $code
+        }
         # This is launch acknowledgement, never a durable ordinary-request receipt.
         [Console]::Out.WriteLine((@{
             launched = $true; log = $log; pid = $worker.Id

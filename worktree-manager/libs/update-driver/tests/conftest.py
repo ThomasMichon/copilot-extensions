@@ -92,6 +92,7 @@ def owning_context(area, monkeypatch):
         monkeypatch.delenv(key, raising=False)
     monkeypatch.setenv("HOME", str(profile))
     monkeypatch.setenv("USERPROFILE", str(profile))
+    monkeypatch.setenv("PSModuleAnalysisCachePath", str(profile / "module-analysis.cache"))
     return payload, profile / ".agent-vault", project
 
 

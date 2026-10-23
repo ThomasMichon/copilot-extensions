@@ -593,14 +593,17 @@ stay explicit, separate boundaries. The single foundation progress snapshot
 is not durable ordinary-request history; ordinary publication adapters need
 canonical queued request receipts.
 
-### Fixed first-use handoff (not yet adopted by ordinary publishers)
+### Fixed first-use handoff and Vault command adoption
 
 The additive `scripts/first-use.ps1` and `scripts/first-use.sh` front doors
 qualify one fixed recipe: the owning Agent Vault payload's existing legacy
 **direct `provision`** action. Namespaced installation recipes refuse before
-queue or plugin mutation until separately qualified. These front doors do not
-enable the recipe in its generated shim,
-runtime gate, hook or installer. Snapshot-based `stamp`/`provision` recipes
+queue or plugin mutation until separately qualified. Vault's cold payload command
+and generated primary command use this recipe; the latter delegates to its
+selected owning source's runtime gate before taking a provisioning lock
+(the existing snapshot pointer for installed payloads).
+Other publishers, including Vault's bootstrap reconciliation hook and explicit
+installer entry points, have not adopted it. Snapshot-based `stamp`/`provision` recipes
 and other plugin identities remain unsupported rather than being inferred
 from an arbitrary command line.
 
@@ -622,6 +625,19 @@ Python `client_only=True` select only the canonical installer's existing
 `-NoService`/`--no-service` option. This boolean participates in durable request
 and runner identity; ordinary service-enabled behavior is still the default.
 No arbitrary installer options are accepted.
+The optional Windows `-Wait` and Linux `--wait` keep the launching client as an
+observer of its independently launched finite supervisor and relay its diagnostics
+and exit status. They do not move installation into the caller. Launch-only
+acknowledgement remains the default for existing native clients.
+
+Vault declares this library through the existing canonical `uv` source and
+release materializer. Its self-contained payload carries the fixed three-sibling
+foundation closure under `libs/`, including the canonical acquisition helpers.
+No installed sibling plugin, Manager, PATH Python or alternate downloader is
+required. Commands use the default per-user execution root, not a plugin-specific
+queue. Healthy runtime dispatch bypasses foundation work. Missing packaged
+support, pinned/no-self-provision calls, nested ownership and unsupported cold
+namespaced/platform paths never fall back to foreground installation.
 
 The canonical native daemon helper launches one finite, caller-independent
 supervisor. **Its launch acknowledgement and diagnostic log are not request

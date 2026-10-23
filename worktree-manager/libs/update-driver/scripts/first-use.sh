@@ -5,13 +5,24 @@ if [[ -v UPDATE_DRIVER_WITNESS ]]; then
     printf 'Nested first-use submission is unsupported; retain the current installation owner.\n' >&2
     exit 1
 fi
-[[ "$(uname -s)" == Linux && ( "$#" == 4 || "$#" == 5 || "$#" == 6 || "$#" == 7 ) ]] || exit 2
+[[ "$(uname -s)" == Linux && "$#" -ge 4 ]] || exit 2
 root="$1" payload="$2" runtime="$3" project="$4"
+shift 4
 service_mode=()
-if [[ "$#" == 5 || "$#" == 7 ]]; then
-    [[ "${!#}" == --client-only ]] || exit 2
-    service_mode=(--client-only)
-fi
+wait_for_owner=0
+run_owner=0
+expected_source=""
+while [[ "$#" -gt 0 ]]; do
+    case "$1" in
+        --client-only) service_mode=(--client-only); shift ;;
+        --wait) wait_for_owner=1; shift ;;
+        --run-owner)
+            [[ "$#" -ge 2 && "$run_owner" == 0 ]] || exit 2
+            run_owner=1; expected_source="$2"; shift 2 ;;
+        *) exit 2 ;;
+    esac
+done
+[[ "$run_owner" == 0 || "$wait_for_owner" == 0 ]] || exit 2
 foundation="$(CDPATH= cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$foundation/src/update_driver/foundation.sh"
 for path in "$root" "$payload" "$runtime" "$project"; do
@@ -72,7 +83,7 @@ source_id="$(query "$provenance" sourceFingerprint)"
     "$(query "$provenance" marketplaceId)" == "$(query "$admission" marketplaceId)" ]] || {
     printf 'Owning first-use publication admission is incomplete or names another installation.\n' >&2; exit 1;
 }
-if [[ "$#" == 4 || "$#" == 5 ]]; then
+if [[ "$run_owner" == 0 ]]; then
     source "${foundation%/*}/agent-procutil/src/agent_procutil/native_daemon.sh"
     _native_foundation_outside_sources "$root" "$foundation"
     mkdir -p -m 700 -- "$root"
@@ -80,11 +91,17 @@ if [[ "$#" == 4 || "$#" == 5 ]]; then
     log="$root/first-use-$(cat /proc/sys/kernel/random/uuid).log"
     start_native_daemon "$foundation/scripts/first-use.sh" "$root" "$log" \
         "$root" "$payload" "$runtime" "$project" --run-owner "$source_id" "${service_mode[@]}"
+    if [[ "$wait_for_owner" == 1 ]]; then
+        code=0
+        wait "$__native_daemon_pid" || code=$?
+        cat -- "$log" >&2
+        exit "$code"
+    fi
     # This line acknowledges only the positively launched finite supervisor.
     printf 'launched:%s log:%s\n' "$__native_daemon_pid" "$log"
     exit 0
 fi
-[[ "$5" == --run-owner && "$6" == "$source_id" ]] || {
+[[ "$expected_source" == "$source_id" ]] || {
     printf 'Owning source changed after native first-use admission.\n' >&2; exit 1;
 }
 digest="$(native_foundation_source_digest "$foundation")"
