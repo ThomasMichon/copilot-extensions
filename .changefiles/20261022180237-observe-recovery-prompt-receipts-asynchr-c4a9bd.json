@@ -1,0 +1,9 @@
+{
+  "comment": "Observe recovery prompt receipts asynchronously without runtime provisioning; coalesce retries and bound child cleanup.",
+  "changes": [
+    {
+      "plugin": "context-handoff",
+      "type": "patch"
+    }
+  ]
+}

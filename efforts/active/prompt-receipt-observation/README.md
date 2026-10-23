@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** managed proposal and implementation PRs
 - **Created:** 2026-10-22
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** `visions/plugins/context-handoff/README.md`: continuous work,
   durable recovery locator, objective and authority boundary
 - **Umbrella issue:** #7942
@@ -68,35 +68,35 @@ Manager, telemetry, mention guard, installed payload and shared services.
 ## Plan
 
 ### Phase 1 — Reviewed proposal
-- [ ] Land this bounded plan through repository review and required CI.
+- [x] Land this bounded plan through repository review and required CI.
 
 ### Phase 2 — Observation implementation
-- [ ] Capture only the first prompt's canonical locator without synchronous CLI
+- [x] Capture only the first prompt's canonical locator without synchronous CLI
   calls; prefer existing launch identity without inventing authority.
-- [ ] Use one bounded async observation, with coalesced duplicates, explicit
+- [x] Use one bounded async observation, with coalesced duplicates, explicit
   pending/unavailable/logged outcomes and later reconciliation.
-- [ ] Prevent provisioning and bound the complete child lifecycle, including
+- [x] Prevent provisioning and bound the complete child lifecycle, including
   cancellation/cleanup, rather than only promise scheduling.
-- [ ] Preserve receipt format, replay behavior and all consumption/ownership checks.
+- [x] Preserve receipt format, replay behavior and all consumption/ownership checks.
 - [ ] Update consumer documentation, add changefile, review and merge source.
 
 ## Validation Plan
 
-- [ ] Unit coverage: launch identity, missing runtime, blocked identity, absent
+- [x] Unit coverage: launch identity, missing runtime, blocked identity, absent
   service, concurrent duplicates/replay and deferred availability.
-- [ ] Native consumer integration: exercise the actual registered callback with
+- [x] Native consumer integration: exercise the actual registered callback with
   blocked child processes and verify return latency, event-loop responsiveness,
   process cleanup and no installer descendants.
-- [ ] Isolated first-touch execution with no provisioned runtime.
-- [ ] Measure callback and lifecycle durations; target normally instant callback,
+- [x] Isolated first-touch execution with no provisioned runtime.
+- [x] Measure callback and lifecycle durations; target normally instant callback,
   at most 1-2 seconds worst case. Do not call configured deadlines evidence.
 - [ ] Run applicable source checks and required CI; assess independent review.
-- [ ] Record genuinely available safe external qualification, or explain skipped
+- [x] Record genuinely available safe external qualification, or explain skipped
   tiers without implying installed/released/live proof.
 
 ## Proposal
 
-Pending review. Implementation may refine internal seams after the plan clears;
+Approved in #8014. Implementation may refine internal seams after the plan clears;
 new authority or ownership behavior requires a separate proposal.
 
 ## Journal
@@ -108,3 +108,45 @@ new authority or ownership behavior requires a separate proposal.
 - Traced the synchronous prompt callback, identity helper and receipt logger.
 - Captured the authorized scope and latest coordination restrictions. No existing
   agent session was contacted and no shared runtime was changed.
+
+### 2026-10-22 — Proposal reviewed and merged
+
+- #8014 received Copilot approval and green required CI; merged as
+  `b2ed7bf3b24e47e82197f36db2ccd7a2292902fb`.
+- Re-read the plan after merge. Implementation and all runtime validation remain
+  open. The managed sync refused the deleted merged PR ref; a clean, backed-up
+  local rebase onto fetched `origin/dev` dropped the already-applied proposal.
+
+### 2026-10-22 — Source implementation and local qualification
+
+- Registered callback now captures the locator and schedules one coalesced
+  observer. It has no synchronous CLI or runtime resolution. Qualified launch
+  identity avoids a lookup; other sessions retain binding-first async discovery.
+- One-second shared subprocess budget plus bounded tree termination replaced an
+  initial 1.5-second design: the initial tree-cleanup measurement was 2.13 seconds,
+  exceeding the requested ceiling. The revised runs stayed below two seconds.
+- `node --test` over `prompt-receipt.test.mjs`, `cli-timeouts.test.mjs` and
+  `handoff-core.test.mjs`: 117 passing tests. Largest observed final callback:
+  0.10 ms; first-touch lifecycle 1,689.82 ms; blocked identity and tree cleanup
+  1,827.39 ms; cancellation and cleanup 1,711.35 ms; deferred successful native
+  receipt 838.43 ms. These are measurements, not universal latency guarantees.
+- A second native Windows run from `pythonw.exe`, monitoring only its own
+  descendant windows across timeout and cancellation cycles: ten passing receipt
+  tests, 93 samples / 24 owned processes, zero visible owned windows and zero
+  owned foreground transitions. Callback maximum 0.10 ms; first touch 1,692.08 ms,
+  timeout cleanup 1,677.05 ms, cancellation cleanup 1,225.78 ms, deferred success
+  745.76 ms. Fixtures and captured output were removed.
+- First-touch uses the real source runtime resolver under an isolated empty home,
+  not an installed runtime or provisioner. Deadline expiry remains honestly
+  unavailable. Native success uses a controlled CLI child, not a live service.
+- `python tools/check-install-contract.py`: all 13 runtime plugins conform.
+  The Python plugin runner rejects `.mjs` selectors by contract; these tests use
+  the existing Node test runner directly. Python 3.9 cannot run repository tooling;
+  the already-installed Python 3.11 ran the contract and changefile tools.
+- External/installed SDK-host qualification and Linux execution were not run:
+  this bounded source lane has no authorized external deployment, remote worker
+  dispatch is prohibited, and no shared runtime was changed. The tested production
+  registration helper is wired by an extension-source contract assertion.
+  Release promotion and installed adoption remain separately owned, not claimed.
+- Documentation impact: the plugin README now explains observation scheduling,
+  failure/retry and cleanup. No configuration, consumption or ownership change.

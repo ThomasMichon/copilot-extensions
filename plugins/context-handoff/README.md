@@ -82,6 +82,22 @@ If a control plane is present, it can watch the pending handoff state this
 plugin leaves behind and perform the actual cutover. If not, the plugin still
 returns a short handoff seed a human can use manually.
 
+## Recovery prompt receipts
+
+The first root user message captures its recovery locator without invoking a
+CLI. One coalesced asynchronous observer then resolves only an already-installed
+worktrees runtime, preferring a qualified launch identity for this worktree or
+session. Observation never invokes an installer or consumes a handoff.
+
+Each attempt has a shared one-second subprocess budget, plus bounded termination
+cleanup. Missing runtime, identity or service leaves the receipt unavailable,
+logs a bounded warning and retains the exact locator. A later user, idle or tool
+completion event may retry after a 30-second cooldown; there is no periodic poll
+or per-event queue. A successful receipt suppresses further attempts. Existing
+matching session/locator activity is reconciled before append on replay.
+Session shutdown cancels and joins an in-flight observation. These receipts are
+observational evidence, not ownership or consumption authorization.
+
 ## Why the monitor is an extension
 
 The live monitor is **only** possible as a session extension. The Copilot CLI
