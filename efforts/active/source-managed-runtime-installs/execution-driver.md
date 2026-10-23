@@ -118,6 +118,48 @@ Native macOS/stock-shell compatibility remains explicit rather than inferred.
 
 This amendment clears its own review gate before foundation implementation.
 
+## Live-cutover recovery correction
+
+**Operator requirement:** “It is inapproriate that the installer would require
+evidence of a kernel restart. That would break expectations of live-cutover
+support.”
+
+The installer vision's
+[single execution owner](../../../visions/installer/README.md#single-installation-execution-owner)
+therefore requires a supported recovery path on the running host. A changed
+boot can remain useful evidence after a restart that actually occurred; it
+cannot be the only way to settle an interrupted installation. This correction
+does not authorize a reboot, manual queue reset, alternate execution root,
+parallel installer or bypass of a live owner's authority.
+
+**Agent-recommended implementation sequence**, retained under #7758 and the
+existing installation execution implementer:
+
+1. Distinguish capability/admission failures proven to precede process creation
+   from uncertain execution after effects may have started. Preserve an
+   attributable failed outcome and diagnostics for pre-launch refusal rather
+   than imposing an indefinite global interruption fence. Missing logs or an
+   exception type alone do not establish that boundary.
+2. Extend the existing native process-custody and transaction owner to recover
+   interrupted work on the same boot. A live owner may yield through its
+   supported handoff; a lost owner requires positive, identity-bound settlement
+   of its installation descendants before a new writer enters. Reuse the
+   current authority, request journal and native cleanup primitives.
+3. Provide an explicit supported path for existing interrupted records,
+   including records whose older producer lacks the new admission evidence.
+   The validation must establish how those records can be safely reconciled
+   without assuming a free lock, process-name/PID absence, elapsed time or a
+   reboot. Refuse insufficient evidence with an actionable outcome; do not
+   fabricate a successful result or erase the original failure.
+4. Preserve healthy serving generations, pending requests and unrelated
+   services across recovery and subsequent normal update. A newly requested
+   installation is distinct from replaying an ambiguous prior transaction.
+   Keep foundation/native bootstrap and Python-runtime recovery consistent.
+
+The plan amendment clears review before this recovery implementation. Existing
+foundation packaging, first-use publishers and publication owners retain their
+current scope; this is not a competing driver or proof of a live repair.
+
 ## Validation plan
 
 - Exercise the actual CLI and worker in separate processes with isolated homes
@@ -133,6 +175,13 @@ This amendment clears its own review gate before foundation implementation.
 - Crash before execution, during the transaction and after outcome persistence;
   prove precise pending/interrupted/completed behavior and no unsafe replay or
   concurrent orphaned updater.
+- Qualify same-boot recovery with real Windows and Linux process boundaries:
+  proven pre-launch refusal, live-owner handoff, owner loss with descendants,
+  conflicting recovery callers, unavailable observation and older interrupted
+  records. Keep the kernel boot identity unchanged through recovery and a later
+  successful normal update, preserve original failure/pending history, and prove
+  no overlapping installer or unrelated service interruption. No reboot,
+  timestamp/PID shortcut, arbitrary queue edit or success-shaped reset qualifies.
 - Verify read-only status, malformed state, unavailable launch/runtime,
   authentication failure, held authority and supervised-debug contention.
   Failures preserve the previous healthy selection and remain visible.

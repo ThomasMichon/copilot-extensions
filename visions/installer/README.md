@@ -9,7 +9,7 @@
   all three of its roles.
 - **Scope:** branch (application intent; configuration detail lives in its child)
 - **Status:** Active
-- **Last revised:** 2026-10-22
+- **Last revised:** 2026-10-23
 - **Reality docs:** [`docs/install-contract.md`](../../docs/install-contract.md) ·
   [`docs/architecture.md`](../../docs/architecture.md)
 
@@ -295,6 +295,14 @@ blocked and completed outcomes remain attributable and observable. Recovery
 does not mistake an uncertain prior execution for success or silently replay it.
 Existing per-slot construction and publication custody remains in force beneath
 the transaction owner.
+
+Installation recovery preserves live-cutover expectations. An interrupted
+update does not make a host, operating-system or kernel restart a prerequisite
+for further installation. The same installation authority can establish safe
+process and transaction settlement on the running host, retain the actual
+failure and continue through an explicit recovery path without disrupting
+unrelated services. Uncertain execution is never relabeled success or replayed
+merely to avoid a reboot.
 
 Explicitly supervised debugging can execute directly only while holding the
 same exclusive authority. Recurring scheduling is a separate, consented

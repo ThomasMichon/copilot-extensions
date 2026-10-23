@@ -236,6 +236,7 @@ The [execution-driver slice](execution-driver.md), tracked by #7758, separates
 transaction execution from the existing recurring-maintenance assignment.
 
 - [x] Review the execution-owner clarification and bounded implementation plan.
+- [ ] Review and implement the [live-cutover recovery correction](execution-driver.md#live-cutover-recovery-correction): positive same-boot settlement and an explicit older-record recovery path, without requiring a host/kernel restart or bypassing an active installation owner.
 - [x] Implement durable requests, compatible pending-request coalescing and attributable read-only status/results.
 - [ ] Route ordinary supported suite-update entry points through one caller-independent execution owner over the complete canonical transaction.
 - [x] Migrate the public Manager/engine update commands, staged acquisition and hook `reconcile-plugins --apply` without replacing their canonical executors.
