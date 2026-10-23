@@ -28,6 +28,7 @@ The single-owner, bounded IPC and installation-source patterns in
 | Integration owner | Selects the exact shared contract and implementation boundaries | Planning PR and implementation admission |
 | Receipt owner | Existing receipt primitive, bounded storage and context-handoff consumer | #7942; [Prompt Receipt Observation](../prompt-receipt-observation/README.md) |
 | Roster owner | Existing control/storage/entry reservations; interface coordination only | Existing roster work and its source review |
+| Subject producer owner | Existing registration-to-session binding stamp only | This effort's separately reviewed producer amendment |
 
 ## Coordination
 
@@ -102,9 +103,9 @@ The concrete names, byte ceilings and decomposition in `contract.md` are
 
 - [ ] Receipt owner supplies incarnation-qualified idempotency, bounded lock/
   scan admission and honest commit-unknown reconciliation.
-- [ ] Assigned control owner supplies the closed action, active-election/
+- [x] Assigned control owner supplies the closed action, active-election/
   installation checks and drain accounting on the existing server.
-- [ ] Assigned delivery owner supplies the optional existing-catalog projection;
+- [x] Assigned delivery owner supplies the optional existing-catalog projection;
   no new registry, credential cache or lifecycle path.
 - [ ] Receipt owner supplies the asynchronous Node reader/client and switches
   only its observation path. Missing prerequisites remain pending.
@@ -117,6 +118,17 @@ The concrete names, byte ceilings and decomposition in `contract.md` are
   integration evidence to #7942 without closing the parent goal prematurely.
 - [ ] Leave live host qualification, release and rollout with explicitly
   assigned owners; this proposal does not authorize those operations.
+
+### Subject producer amendment — bounded existing binding stamp
+
+- [ ] Review and merge the narrow producer contract in
+  [contract.md](contract.md#trusted-subject-producer-amendment) before code.
+- [ ] Add optional actual-record qualification to the existing writer and only
+  its existing post-registration caller; preserve the registration transaction.
+- [ ] Validate the real caller plus writer against the focused matrix in the
+  contract, then clear source review, required CI and verified merge.
+- [ ] Return the exact field/identity contract to the receipt integration owner;
+  retain backend, native/live, macOS and installed acceptance as separate gates.
 
 ## Validation Plan
 
@@ -256,3 +268,35 @@ All functional phases remain gated even if this proposal merges.
 - Fresh review and CI on this documentation clarification still precede source
   merge. Backend/Node qualification, trusted subject production, native/live
   validation, release and installed rollout remain separately owned and open.
+
+### 2026-10-23 — Delivery/control source slice merged
+
+- #8224 merged into `dev` at `2026-10-23T21:18:00Z` as
+  `eab0a4909575caf9cbd3f09ba7e56831d55c5b92`, from reviewed source head
+  `78c2780a6d95eeef3754a1ffef34d751d4c9d4aa`. Copilot review `5634450669`
+  approved that exact head; all three existing discussion threads are resolved.
+- Required PR gate, source-attribution and workflow-lockdown checks passed.
+  Eligible unit coverage, guards/lint and identifier checks also passed.
+  A description update lost its stdin at the wrapper boundary; file-based
+  restoration of the authored text and actual source marker corrected the
+  attribution failure before merge. No CI exception was used.
+- The source control/delivery Plan items above are complete. #7942 remains
+  open, and this effort remains Active: receipt backend/Node integration,
+  trusted subject producer admission, macOS publisher qualification (#7659),
+  native/live measurements, release and authorized installed rollout are not
+  completed by the source merge.
+- The exact next gate is integration-owner admission of the existing trusted
+  subject producer proposal. Its two producer files remain unchanged. Retain
+  the workspace and evidence for that decision; do not finalize it.
+- This post-merge journal is a retained local checkpoint for the next admitted
+  documentation integration, not a claim that the checkpoint itself shipped.
+
+### 2026-10-23 — Trusted subject producer admitted for source planning
+
+- The integration owner admitted only the existing binding writer, its
+  post-registration stamp caller, focused tests and related documentation/
+  changefile. The exact contract below preserves optionality, nonblocking
+  acquired-sidecar admission, uncached freshness and existing subject rules.
+- This amendment and the retained source-completion journal clear automated
+  source-plan review before implementation. There is no edit authority over
+  backend/Node, lock/cache internals, other registration transactions or services.
