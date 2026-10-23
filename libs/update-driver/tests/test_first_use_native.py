@@ -68,8 +68,16 @@ def test_native_refusal_is_before_foundation_or_plugin_mutation(
             for p in installation.rglob("*") if p.is_file()} == before
 
 
-def test_native_preflight_reaches_exact_source_check_without_writes(owning_payload, area):
+@pytest.mark.parametrize("omit_installer", [False, True])
+def test_native_preflight_reaches_exact_source_check_without_writes(
+    owning_payload, area, omit_installer,
+):
     payload, installation, project = owning_payload
+    if omit_installer:
+        path = payload / "payload-invocation.json"
+        manifest = json.loads(path.read_text())
+        del manifest["installer"]
+        path.write_text(json.dumps(manifest), encoding="utf-8")
     root = area / "cold"
     command = native_command(root, payload, installation, project)
     if os.name == "nt":
@@ -85,6 +93,65 @@ def test_native_preflight_reaches_exact_source_check_without_writes(owning_paylo
         result.stdout, result.stderr,
     )
     assert not root.exists() and not installation.exists()
+
+
+@pytest.mark.parametrize("field,value", [
+    ("schema", "unsupported"), ("schema", True),
+    ("version", 3), ("version", True), ("version", "2"), ("version", 2.0),
+    ("installer", "other"), ("installer", None),
+    ("noSelfProvisionEnv", "OTHER_NO_SELFPROVISION"), ("noSelfProvisionEnv", True),
+    ("command", "other"), ("installationContext", "optional"), ("provisionMode", "snapshot"),
+])
+def test_unsupported_native_recipe_refuses_before_driver_state(
+    owning_payload, area, field, value,
+):
+    payload, installation, project = owning_payload
+    path = payload / "payload-invocation.json"
+    manifest = json.loads(path.read_text())
+    manifest[field] = value
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    root = area / "cold"
+    result = subprocess.run(
+        native_command(root, payload, installation, project),
+        env=dict(os.environ), capture_output=True, text=True, timeout=60,
+        **no_window_kwargs(),
+    )
+    assert result.returncode != 0, result.stdout + result.stderr
+    assert "does not declare the fixed first-use provision recipe" in result.stderr
+    assert not root.exists() and not installation.exists()
+
+
+@pytest.mark.parametrize("kind", ["relative", "dot-dot", "linked-payload", "linked-runtime"])
+def test_invalid_native_execution_root_never_creates_directories(
+    owning_payload, area, kind,
+):
+    payload, installation, project = owning_payload
+    if kind == "relative":
+        root = Path("relative-root")
+        targets = [project / root]
+    elif kind == "dot-dot":
+        root = area / "unused" / ".." / "cold"
+        targets = [area / "unused", area / "cold"]
+    else:
+        if os.name == "nt":
+            pytest.skip("Linux symlink-root admission regression; Windows reparse refusal is qualified separately")
+        target = payload if kind == "linked-payload" else installation
+        target.mkdir(exist_ok=True)
+        link = area / "linked-root"
+        link.symlink_to(target, target_is_directory=True)
+        root = link / "cold"
+        targets = [target / "cold"]
+    before_payload = sorted(str(path.relative_to(payload)) for path in payload.rglob("*"))
+    before_runtime = sorted(str(path.relative_to(installation)) for path in installation.rglob("*"))
+    result = subprocess.run(
+        native_command(root, payload, installation, project), cwd=project,
+        env=dict(os.environ), capture_output=True, text=True, timeout=60,
+        **no_window_kwargs(),
+    )
+    assert result.returncode != 0, result.stdout + result.stderr
+    assert all(not path.exists() for path in targets), result.stdout + result.stderr
+    assert sorted(str(path.relative_to(payload)) for path in payload.rglob("*")) == before_payload
+    assert sorted(str(path.relative_to(installation)) for path in installation.rglob("*")) == before_runtime
 
 
 def test_actual_native_supervisor_forwards_fixed_fields_and_keeps_root_owned_diagnostics(

@@ -171,3 +171,20 @@ def test_actual_submit_wait_worker_uses_the_addressed_execution_root(owning_payl
     assert request.state == "completed" and request.exit_code == 7
     assert (installation / "executed").read_text() == "provision"
     assert not (installation.parent / ".copilot-extensions" / "update-driver").exists()
+
+
+def test_downgrade_permission_belongs_to_each_request_not_the_worker(
+    owning_payload, area, monkeypatch,
+):
+    payload, installation, project = owning_payload
+    root = area / "queue"
+    ordinary = provision.enqueue(payload, installation, project, root=root)
+    monkeypatch.setenv("AGENT_VAULT_ALLOW_DOWNGRADE", "1")
+    permitted = provision.enqueue(payload, installation, project, root=root)
+    assert ordinary.id != permitted.id
+    assert "AGENT_VAULT_ALLOW_DOWNGRADE" not in dict(ordinary.spec.context)
+    assert dict(permitted.spec.context)["AGENT_VAULT_ALLOW_DOWNGRADE"] == "1"
+    # The shared worker carries permission, but the ordinary request must not.
+    drain(root=root)
+    assert (installation / "downgrade-history").read_text().splitlines() == ["[]", "[1]"]
+    assert all(status(item.id, root=root).exit_code == 7 for item in (ordinary, permitted))

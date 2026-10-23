@@ -31,8 +31,25 @@ if ($env:AGENT_VAULT_NO_SELFPROVISION -or (Test-Path Env:AGENT_VAULT_PINNED_CONT
 }
 $invocation = [IO.File]::ReadAllText((Join-Path $Payload 'payload-invocation.json')) | ConvertFrom-Json
 $identity = [IO.File]::ReadAllText((Join-Path $Payload 'plugin.json')) | ConvertFrom-Json
-if ($identity.name -cne 'agent-vault' -or $invocation.command -cne 'agent-vault' -or
-    $invocation.provisionMode -cne 'direct' -or $invocation.installationContext -cne 'required') {
+$installer = if ($null -eq $invocation.PSObject.Properties['installer']) {
+    'install'
+} else { $invocation.installer }
+$recipe = @{
+    schema = 'copilot-extensions.payload-invocation'
+    command = 'agent-vault'
+    noSelfProvisionEnv = 'AGENT_VAULT_NO_SELFPROVISION'
+    provisionMode = 'direct'
+    installationContext = 'required'
+}
+foreach ($field in $recipe.GetEnumerator()) {
+    $value = $invocation.PSObject.Properties[$field.Key]
+    if ($null -eq $value -or $value.Value -isnot [string] -or $value.Value -cne $field.Value) {
+        throw 'Owning payload does not declare the fixed first-use provision recipe.'
+    }
+}
+if ($identity.name -isnot [string] -or $identity.name -cne 'agent-vault' -or
+    ($invocation.version -isnot [int] -and $invocation.version -isnot [long]) -or
+    $invocation.version -ne 2 -or $installer -isnot [string] -or $installer -cne 'install') {
     throw 'Owning payload does not declare the fixed first-use provision recipe.'
 }
 $probe = @(

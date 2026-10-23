@@ -5,8 +5,10 @@ set -euo pipefail
 root="$1" payload="$2" runtime="$3" project="$4"
 foundation="$(CDPATH= cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$foundation/src/update_driver/foundation.sh"
-for path in "$payload" "$runtime" "$project"; do
-    [[ "$path" == /* && "$(readlink -m -- "$path")" == "$path" ]] || exit 2
+for path in "$root" "$payload" "$runtime" "$project"; do
+    [[ "$path" == /* && "$(readlink -m -- "$path")" == "$path" ]] || {
+        printf 'Native first-use paths must be absolute, normalized and unlinked.\n' >&2; exit 2;
+    }
 done
 for path in "$payload" "$runtime"; do
     [[ "$root" != "$path" && "$root" != "$path/"* && "$path" != "$root/"* ]] || {
@@ -20,9 +22,26 @@ done
 query() {
     printf '%s' "$1" | LC_ALL=C awk -f "$__foundation_assets/json-query.awk" -v mode=get -v "query_path=$2"
 }
+query_type() {
+    printf '%s' "$1" | LC_ALL=C awk -f "$__foundation_assets/json-query.awk" -v mode=type -v "query_path=$2"
+}
 manifest="$(cat -- "$payload/payload-invocation.json")"
 identity="$(cat -- "$payload/plugin.json")"
+if installer_type="$(query_type "$manifest" installer)"; then
+    [[ "$installer_type" == string ]] || {
+        printf 'Owning payload does not declare the fixed first-use provision recipe.\n' >&2; exit 1;
+    }
+    installer="$(query "$manifest" installer)"
+else
+    code=$?
+    [[ "$code" == 3 ]] || exit "$code"
+    installer=install
+fi
 [[ "$(query "$identity" name)" == agent-vault &&
+    "$(query "$manifest" schema)" == copilot-extensions.payload-invocation &&
+    "$(query_type "$manifest" version)" == number &&
+    "$(query "$manifest" version)" == 2 && "$installer" == install &&
+    "$(query "$manifest" noSelfProvisionEnv)" == AGENT_VAULT_NO_SELFPROVISION &&
     "$(query "$manifest" command)" == agent-vault &&
     "$(query "$manifest" provisionMode)" == direct &&
     "$(query "$manifest" installationContext)" == required ]] || {

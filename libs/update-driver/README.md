@@ -606,7 +606,9 @@ from an arbitrary command line.
 
 Both native clients take the execution root, owning payload, addressed runtime
 root and originating project. Before creating driver state, they honor the
-plugin's no-self-provision/pinned-read controls, check the owning manifest,
+plugin's no-self-provision/pinned-read controls, validate normalized absolute
+unlinked paths including the execution root, check the complete fixed recipe
+(with `install` retained as the omitted-installer default),
 and ask its existing native installation helper for publication permission
 and source provenance. They neither create an installation cell nor adopt
 management purpose. Managed, malformed, mismatched and unsupported evidence
@@ -655,6 +657,8 @@ staging, dependency policy, per-generation ownership and publication safeguards
 are not replaced. Native descendants do not inherit the queue witness or a
 foreign lifecycle ticket. Saved credential-free routing context is restored
 before product startup, including clearing keys absent on acceptance.
+Downgrade permission (`AGENT_VAULT_ALLOW_DOWNGRADE`) belongs to that saved
+request context, never to whichever caller happens to launch the shared worker.
 Source or policy changes during queue delay refuse before installer entry and
 leave the existing conservative interrupted fence, not a success-shaped result.
 

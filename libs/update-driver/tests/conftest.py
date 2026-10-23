@@ -87,13 +87,17 @@ def owning_payload(area, monkeypatch):
         "[IO.Directory]::CreateDirectory($InstallDir) | Out-Null\n"
         "[IO.File]::AppendAllText((Join-Path $InstallDir 'executed'), 'provision')\n"
         "[IO.File]::WriteAllText((Join-Path $InstallDir 'source-path'), $PSScriptRoot)\n"
+        "[IO.File]::AppendAllText((Join-Path $InstallDir 'downgrade-history'), "
+        "('[' + [string]$env:AGENT_VAULT_ALLOW_DOWNGRADE + ']' + [Environment]::NewLine))\n"
         "exit 7\n", encoding="utf-8",
     )
     (scripts / "install.sh").write_text(
         '#!/usr/bin/env bash\nset -eu\n[[ "$1" == provision && "$2" == --install-dir ]]\n'
         '[[ -z "${UPDATE_DRIVER_WITNESS:-}" && -z "${COPILOT_EXTENSIONS_COMMAND_LIFECYCLE:-}" ]]\n'
         'mkdir -p -- "$3"\nprintf provision >>"$3/executed"\n'
-        'dirname -- "${BASH_SOURCE[0]}" >"$3/source-path"\nexit 7\n',
+        'dirname -- "${BASH_SOURCE[0]}" >"$3/source-path"\n'
+        'printf "[%s]\\n" "${AGENT_VAULT_ALLOW_DOWNGRADE:-}" >>"$3/downgrade-history"\n'
+        'exit 7\n',
         encoding="utf-8",
     )
     for key in (*provision.CONTEXT_KEYS, "AGENT_VAULT_VALIDATED_CONTEXT"):
