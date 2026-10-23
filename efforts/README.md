@@ -10,6 +10,7 @@ that pattern to this repository.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
+| [Prompt Receipt Observation](active/prompt-receipt-observation/README.md) | Draft; bounded async non-provisioning first-prompt receipt plan before implementation | #7942; unchanged consumption authority; no installed rollout |
 | [Performance Telemetry](active/performance-telemetry/README.md) | Draft; existing-seam interface review before bounded producers, optional OpenTelemetry and native qualification | #7935 / #5900; preserves #7938/#7943 production owners and #5215 readiness |
 | [Picker Pending Binding](active/picker-pending-binding/README.md) | Draft; responsive consumer startup and current-feed plan before implementation | #7938; preserves #7974 engine and #7788 native launch owners |
 | [Generation-Bound Guidance](active/generation-bound-guidance/README.md) | Draft; reviewed preparation/reuse and late-refresh contract before implementation | #7943; preserves #7694/#7788 and #7974 owners; no installed rollout |
